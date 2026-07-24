@@ -2,6 +2,7 @@
 set -euo pipefail
 
 : "${ONECOMPUTER_ENABLED_AGENTS:=claude-desktop}"
+: "${ONECOMPUTER_ENABLED_APPLICATIONS:=firefox}"
 : "${ONECOMPUTER_CLIPBOARD_ENABLED:=true}"
 : "${ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE:=true}"
 : "${ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL:=true}"
@@ -15,18 +16,22 @@ claude_code_source="/opt/onecomputer/claude-code/${claude_code_version}/claude"
 claude_code_dir="/home/kasm-user/.config/Claude-3p/claude-code/${claude_code_version}"
 claude_code_binary="${claude_code_dir}/claude"
 claude_code_marker="${claude_code_dir}/.verified"
+launcher_dir="/usr/local/share/onecomputer/applications"
 
 agent_enabled() {
   [[ ",${ONECOMPUTER_ENABLED_AGENTS}," == *",$1,"* ]]
 }
 
 IFS=',' read -r -a enabled_agents <<< "$ONECOMPUTER_ENABLED_AGENTS"
-(( ${#enabled_agents[@]} >= 1 && ${#enabled_agents[@]} <= 2 )) || {
+(( ${#enabled_agents[@]} >= 1 && ${#enabled_agents[@]} <= 4 )) || {
   echo "invalid agent selection" >&2
   exit 78
 }
 for enabled_agent in "${enabled_agents[@]}"; do
-  [[ "$enabled_agent" == "claude-desktop" || "$enabled_agent" == "hermes-claw" ]] || {
+  [[ "$enabled_agent" == "claude-desktop" \
+    || "$enabled_agent" == "claude-cli" \
+    || "$enabled_agent" == "hermes-desktop" \
+    || "$enabled_agent" == "hermes-claw" ]] || {
     echo "unrecognized agent selection" >&2
     exit 78
   }
@@ -36,21 +41,52 @@ done
   exit 78
 }
 
-if agent_enabled claude-desktop; then
-  : "${ONECOMPUTER_GATEWAY_UPSTREAM:?Claude gateway upstream is required}"
-  : "${ONECOMPUTER_GATEWAY_CREDENTIAL:?Claude gateway credential is required}"
-  : "${ONECOMPUTER_MODEL_ALIAS:?Claude model alias is required}"
-  : "${ONECOMPUTER_CONTROL_UPSTREAM:?Claude control bridge upstream is required}"
-  : "${ONECOMPUTER_AGENT_BRIDGE_TOKEN:?Claude control bridge token is required}"
-  : "${ONECOMPUTER_ALLOWED_TOOLS:?Claude Microsoft 365 tools are required}"
-fi
+IFS=',' read -r -a enabled_applications <<< "$ONECOMPUTER_ENABLED_APPLICATIONS"
+(( ${#enabled_applications[@]} >= 1 && ${#enabled_applications[@]} <= 2 )) || {
+  echo "invalid application selection" >&2
+  exit 78
+}
+for enabled_application in "${enabled_applications[@]}"; do
+  [[ "$enabled_application" == "firefox" || "$enabled_application" == "google-chrome" ]] || {
+    echo "unrecognized application selection" >&2
+    exit 78
+  }
+done
+[[ "$(printf '%s\n' "${enabled_applications[@]}" | sort -u | wc -l)" -eq "${#enabled_applications[@]}" ]] || {
+  echo "duplicate application selection" >&2
+  exit 78
+}
+
+application_enabled() {
+  [[ ",${ONECOMPUTER_ENABLED_APPLICATIONS}," == *",$1,"* ]]
+}
+
+require_agent_environment() {
+  local prefix="$1"
+  local label="$2"
+  local suffix variable
+  for suffix in GATEWAY_UPSTREAM GATEWAY_CREDENTIAL MODEL_ALIAS CONTROL_UPSTREAM AGENT_BRIDGE_TOKEN ALLOWED_TOOLS; do
+    variable="${prefix}_${suffix}"
+    [[ -n "${!variable:-}" ]] || {
+      echo "${label} ${suffix} is required" >&2
+      exit 78
+    }
+  done
+}
+
+agent_enabled claude-desktop && require_agent_environment ONECOMPUTER "Claude Desktop"
+agent_enabled claude-cli && require_agent_environment ONECOMPUTER_CLAUDE_CLI "Claude CLI"
+agent_enabled hermes-claw && require_agent_environment ONECOMPUTER_HERMES "Hermes Agent CLI"
+agent_enabled hermes-desktop && require_agent_environment ONECOMPUTER_HERMES_DESKTOP "Hermes Agent Desktop"
 if agent_enabled hermes-claw; then
-  : "${ONECOMPUTER_HERMES_GATEWAY_UPSTREAM:?Hermes gateway upstream is required}"
-  : "${ONECOMPUTER_HERMES_GATEWAY_CREDENTIAL:?Hermes gateway credential is required}"
-  : "${ONECOMPUTER_HERMES_MODEL_ALIAS:?Hermes model alias is required}"
-  : "${ONECOMPUTER_HERMES_CONTROL_UPSTREAM:?Hermes control bridge upstream is required}"
-  : "${ONECOMPUTER_HERMES_AGENT_BRIDGE_TOKEN:?Hermes control bridge token is required}"
-  : "${ONECOMPUTER_HERMES_ALLOWED_TOOLS:?Hermes Microsoft 365 tools are required}"
+  hermes_api_key="${API_SERVER_KEY:-}"
+  [[ "${API_SERVER_ENABLED:-}" == "true" \
+    && "${API_SERVER_HOST:-}" == "0.0.0.0" \
+    && "${API_SERVER_PORT:-}" == "8642" \
+    && "${#hermes_api_key}" -ge 32 ]] || {
+    echo "Hermes sandbox API configuration is required" >&2
+    exit 78
+  }
 fi
 
 for clipboard_boolean in \
@@ -219,59 +255,137 @@ os.chown(path, 0, 0)
 PY
 fi
 
-install -d -o 1000 -g 1000 -m 0755 /home/kasm-user/.config/autostart /home/kasm-user/Desktop
-rm -f /home/kasm-user/.config/autostart/claude-desktop.desktop \
-  /home/kasm-user/Desktop/Claude-Desktop.desktop \
-  /home/kasm-user/Desktop/Hermes-Claw.desktop
-if agent_enabled claude-desktop; then
-  chmod 0755 "$(command -v claude-desktop)"
-  install -o 1000 -g 1000 -m 0755 /usr/share/applications/onecomputer-claude-desktop.desktop /home/kasm-user/.config/autostart/claude-desktop.desktop
-  install -o 1000 -g 1000 -m 0755 /usr/share/applications/onecomputer-claude-desktop.desktop /home/kasm-user/Desktop/Claude-Desktop.desktop
-else
-  chmod 0700 "$(command -v claude-desktop)"
+if agent_enabled claude-cli; then
+  install -d -o 1000 -g 1000 -m 0700 /home/kasm-user/.claude-cli
+  python3 - "$ONECOMPUTER_CLAUDE_CLI_MODEL_ALIAS" "$ONECOMPUTER_CLAUDE_CLI_ALLOWED_TOOLS" <<'PY'
+import json
+import os
+import sys
+
+model, allowed_tools = sys.argv[1:]
+tools = [item for item in allowed_tools.split(",") if item]
+with open("/home/kasm-user/.claude-cli/onecomputer.env", "w", encoding="utf-8") as output:
+    output.write(f"ONECOMPUTER_MODEL_ALIAS={model}\n")
+with open("/home/kasm-user/.claude-cli/mcp.json", "w", encoding="utf-8") as output:
+    json.dump({
+        "mcpServers": {
+            "onecomputer_ms365": {
+                "type": "stdio",
+                "command": "/usr/local/libexec/onecomputer-mcp-stdio",
+                "args": [],
+                "env": {"ONECOMPUTER_MCP_BROKER": "http://127.0.0.1:4315"},
+                "tools": tools + ["wait-for-governed-operation"],
+            },
+        },
+    }, output, separators=(",", ":"))
+    output.write("\n")
+for path in ["/home/kasm-user/.claude-cli/onecomputer.env", "/home/kasm-user/.claude-cli/mcp.json"]:
+    os.chmod(path, 0o600)
+    os.chown(path, 1000, 1000)
+PY
 fi
-if agent_enabled hermes-claw; then
-  chmod 0755 /usr/local/bin/onecomputer-hermes /opt/onecomputer/hermes-venv/bin/hermes
-  install -o 1000 -g 1000 -m 0755 /usr/share/applications/onecomputer-hermes-claw.desktop /home/kasm-user/Desktop/Hermes-Claw.desktop
-  install -d -o 1000 -g 1000 -m 0700 /home/kasm-user/.hermes
-  /opt/onecomputer/hermes-venv/bin/python - "$ONECOMPUTER_HERMES_MODEL_ALIAS" "$ONECOMPUTER_HERMES_ALLOWED_TOOLS" <<'PY'
+
+configure_hermes() {
+  local home="$1"
+  local model="$2"
+  local allowed_tools="$3"
+  local broker_port="$4"
+  install -d -o 1000 -g 1000 -m 0700 "$home"
+  /opt/onecomputer/hermes-venv/bin/python - "$home" "$model" "$allowed_tools" "$broker_port" <<'PY'
 import json
 import os
 import sys
 from toolsets import TOOLSETS
 
-model, allowed_tools = sys.argv[1:]
+home, model, allowed_tools, broker_port = sys.argv[1:]
 tools = [item for item in allowed_tools.split(",") if item]
 document = {
     "model": {
         "default": model,
         "provider": "custom",
-        "base_url": "http://127.0.0.1:4314/v1",
+        "base_url": f"http://127.0.0.1:{broker_port}/v1",
         "api_key": "onecomputer-loopback-broker",
     },
-    "platform_toolsets": {"cli": []},
+    "platform_toolsets": {"cli": [], "api_server": [], "telegram": []},
     "agent": {"disabled_toolsets": sorted(TOOLSETS)},
     "mcp_servers": {
         "onecomputer_ms365": {
             "command": "/usr/local/libexec/onecomputer-mcp-stdio",
             "args": [],
-            "env": {"ONECOMPUTER_MCP_BROKER": "http://127.0.0.1:4314"},
+            "env": {"ONECOMPUTER_MCP_BROKER": f"http://127.0.0.1:{broker_port}"},
             "tools": {"include": tools + ["wait-for-governed-operation"]},
         },
     },
     "stt": {"enabled": False},
 }
-path = "/home/kasm-user/.hermes/config.yaml"
+path = os.path.join(home, "config.yaml")
 with open(path, "w", encoding="utf-8") as output:
     json.dump(document, output, separators=(",", ":"))
     output.write("\n")
 os.chmod(path, 0o600)
 os.chown(path, 1000, 1000)
 PY
+}
+
+agent_enabled hermes-claw \
+  && configure_hermes /home/kasm-user/.hermes "$ONECOMPUTER_HERMES_MODEL_ALIAS" "$ONECOMPUTER_HERMES_ALLOWED_TOOLS" 4314
+agent_enabled hermes-desktop \
+  && configure_hermes /home/kasm-user/.hermes-desktop "$ONECOMPUTER_HERMES_DESKTOP_MODEL_ALIAS" "$ONECOMPUTER_HERMES_DESKTOP_ALLOWED_TOOLS" 4316
+
+install -d -o 1000 -g 1000 -m 0755 /home/kasm-user/.config/autostart /home/kasm-user/Desktop
+rm -f /home/kasm-user/.config/autostart/claude-desktop.desktop \
+  /home/kasm-user/Desktop/Claude-Desktop.desktop \
+  /home/kasm-user/Desktop/Claude-CLI.desktop \
+  /home/kasm-user/Desktop/ONEComputer-Agent.desktop \
+  /home/kasm-user/Desktop/Hermes-Claw.desktop \
+  /home/kasm-user/Desktop/Hermes-CLI.desktop \
+  /home/kasm-user/Desktop/Hermes-Agent-CLI.desktop \
+  /home/kasm-user/Desktop/Hermes-Desktop.desktop \
+  /home/kasm-user/Desktop/Hermes-Agent-Desktop.desktop \
+  /home/kasm-user/Desktop/Firefox.desktop \
+  /home/kasm-user/Desktop/Google-Chrome.desktop
+if agent_enabled claude-desktop; then
+  chmod 0755 "$(command -v claude-desktop)"
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-claude-desktop.desktop" /home/kasm-user/.config/autostart/claude-desktop.desktop
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-claude-desktop.desktop" /home/kasm-user/Desktop/Claude-Desktop.desktop
 else
-  chmod 0700 /usr/local/bin/onecomputer-hermes /opt/onecomputer/hermes-venv/bin/hermes
+  chmod 0700 "$(command -v claude-desktop)"
 fi
-install -o 1000 -g 1000 -m 0755 /usr/share/applications/onecomputer-firefox.desktop /home/kasm-user/Desktop/Firefox.desktop
+if agent_enabled claude-cli; then
+  chmod 0755 /usr/local/bin/onecomputer-claude
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-claude-cli.desktop" /home/kasm-user/Desktop/Claude-CLI.desktop
+else
+  chmod 0700 /usr/local/bin/onecomputer-claude
+fi
+if agent_enabled hermes-claw; then
+  chmod 0755 /usr/local/bin/onecomputer-hermes
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-hermes-agent-cli.desktop" /home/kasm-user/Desktop/Hermes-Agent-CLI.desktop
+else
+  chmod 0700 /usr/local/bin/onecomputer-hermes
+fi
+if agent_enabled hermes-desktop; then
+  chmod 0755 /usr/local/bin/onecomputer-hermes-desktop /opt/onecomputer/hermes-desktop/Hermes
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-hermes-desktop.desktop" /home/kasm-user/Desktop/Hermes-Agent-Desktop.desktop
+else
+  chmod 0700 /usr/local/bin/onecomputer-hermes-desktop /opt/onecomputer/hermes-desktop/Hermes
+fi
+if agent_enabled hermes-claw || agent_enabled hermes-desktop; then
+  chmod 0755 /opt/onecomputer/hermes-venv/bin/hermes
+else
+  chmod 0700 /opt/onecomputer/hermes-venv/bin/hermes
+fi
+if application_enabled firefox; then
+  chmod 0755 /opt/firefox/firefox
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-firefox.desktop" /home/kasm-user/Desktop/Firefox.desktop
+else
+  chmod 0700 /opt/firefox/firefox
+fi
+if application_enabled google-chrome; then
+  chmod 0755 /opt/google/chrome/google-chrome
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-google-chrome.desktop" /home/kasm-user/Desktop/Google-Chrome.desktop
+else
+  chmod 0700 /opt/google/chrome/google-chrome
+fi
 
 # Claude Desktop's Chat runtime uses the exact Claude Code engine embedded in
 # its signed build manifest. Seed that generated cache from the immutable image
@@ -286,41 +400,47 @@ if agent_enabled claude-desktop && { [[ ! -x "$claude_code_binary" ]] \
   chmod 0600 "$claude_code_marker"
 fi
 
-if agent_enabled hermes-claw; then
+for hermes_home in /home/kasm-user/.hermes /home/kasm-user/.hermes-desktop; do
+  [[ -d "$hermes_home" ]] || continue
   # Hermes creates runtime logs, sessions, and curator state beneath its home.
   # Some imports initialize those paths while this management entrypoint is
   # still root, so reconcile the complete tree before handing it to the user.
-  chown -R 1000:1000 /home/kasm-user/.hermes
-  find /home/kasm-user/.hermes -type d -exec chmod 0700 {} +
-fi
+  chown -R 1000:1000 "$hermes_home"
+  find "$hermes_home" -type d -exec chmod 0700 {} +
+done
 chown -R 1000:1000 /home/kasm-user/.config /home/kasm-user/Desktop
 
-if agent_enabled claude-desktop; then
+start_agent_broker() {
+  local prefix="$1"
+  local port="$2"
+  local pid_name="$3"
+  local upstream_variable="${prefix}_GATEWAY_UPSTREAM"
+  local credential_variable="${prefix}_GATEWAY_CREDENTIAL"
+  local control_variable="${prefix}_CONTROL_UPSTREAM"
+  local bridge_variable="${prefix}_AGENT_BRIDGE_TOKEN"
   env -i \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    ONECOMPUTER_GATEWAY_UPSTREAM="$ONECOMPUTER_GATEWAY_UPSTREAM" \
-    ONECOMPUTER_GATEWAY_CREDENTIAL="$ONECOMPUTER_GATEWAY_CREDENTIAL" \
-    ONECOMPUTER_CONTROL_UPSTREAM="$ONECOMPUTER_CONTROL_UPSTREAM" \
-    ONECOMPUTER_AGENT_BRIDGE_TOKEN="$ONECOMPUTER_AGENT_BRIDGE_TOKEN" \
-    ONECOMPUTER_GATEWAY_LISTEN_PORT=4312 \
+    ONECOMPUTER_GATEWAY_UPSTREAM="${!upstream_variable}" \
+    ONECOMPUTER_GATEWAY_CREDENTIAL="${!credential_variable}" \
+    ONECOMPUTER_CONTROL_UPSTREAM="${!control_variable}" \
+    ONECOMPUTER_AGENT_BRIDGE_TOKEN="${!bridge_variable}" \
+    ONECOMPUTER_GATEWAY_LISTEN_PORT="$port" \
     /usr/local/libexec/onecomputer-gateway-proxy &
-  printf '%s\n' "$!" > /run/onecomputer/gateway-proxy.pid
-fi
-if agent_enabled hermes-claw; then
-  env -i \
-    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    ONECOMPUTER_GATEWAY_UPSTREAM="$ONECOMPUTER_HERMES_GATEWAY_UPSTREAM" \
-    ONECOMPUTER_GATEWAY_CREDENTIAL="$ONECOMPUTER_HERMES_GATEWAY_CREDENTIAL" \
-    ONECOMPUTER_CONTROL_UPSTREAM="$ONECOMPUTER_HERMES_CONTROL_UPSTREAM" \
-    ONECOMPUTER_AGENT_BRIDGE_TOKEN="$ONECOMPUTER_HERMES_AGENT_BRIDGE_TOKEN" \
-    ONECOMPUTER_GATEWAY_LISTEN_PORT=4314 \
-    /usr/local/libexec/onecomputer-gateway-proxy &
-  printf '%s\n' "$!" > /run/onecomputer/hermes-gateway-proxy.pid
-fi
-unset ONECOMPUTER_GATEWAY_CREDENTIAL ONECOMPUTER_GATEWAY_UPSTREAM \
-  ONECOMPUTER_AGENT_BRIDGE_TOKEN ONECOMPUTER_CONTROL_UPSTREAM \
-  ONECOMPUTER_HERMES_GATEWAY_CREDENTIAL ONECOMPUTER_HERMES_GATEWAY_UPSTREAM \
-  ONECOMPUTER_HERMES_AGENT_BRIDGE_TOKEN ONECOMPUTER_HERMES_CONTROL_UPSTREAM
+  printf '%s\n' "$!" > "/run/onecomputer/${pid_name}.pid"
+}
+
+agent_enabled claude-desktop && start_agent_broker ONECOMPUTER 4312 gateway-proxy
+agent_enabled hermes-claw && start_agent_broker ONECOMPUTER_HERMES 4314 hermes-gateway-proxy
+agent_enabled claude-cli && start_agent_broker ONECOMPUTER_CLAUDE_CLI 4315 claude-cli-gateway-proxy
+agent_enabled hermes-desktop && start_agent_broker ONECOMPUTER_HERMES_DESKTOP 4316 hermes-desktop-gateway-proxy
+
+for credential_variable in \
+  ONECOMPUTER_GATEWAY_CREDENTIAL ONECOMPUTER_GATEWAY_UPSTREAM ONECOMPUTER_AGENT_BRIDGE_TOKEN ONECOMPUTER_CONTROL_UPSTREAM \
+  ONECOMPUTER_HERMES_GATEWAY_CREDENTIAL ONECOMPUTER_HERMES_GATEWAY_UPSTREAM ONECOMPUTER_HERMES_AGENT_BRIDGE_TOKEN ONECOMPUTER_HERMES_CONTROL_UPSTREAM \
+  ONECOMPUTER_CLAUDE_CLI_GATEWAY_CREDENTIAL ONECOMPUTER_CLAUDE_CLI_GATEWAY_UPSTREAM ONECOMPUTER_CLAUDE_CLI_AGENT_BRIDGE_TOKEN ONECOMPUTER_CLAUDE_CLI_CONTROL_UPSTREAM \
+  ONECOMPUTER_HERMES_DESKTOP_GATEWAY_CREDENTIAL ONECOMPUTER_HERMES_DESKTOP_GATEWAY_UPSTREAM ONECOMPUTER_HERMES_DESKTOP_AGENT_BRIDGE_TOKEN ONECOMPUTER_HERMES_DESKTOP_CONTROL_UPSTREAM; do
+  unset "$credential_variable"
+done
 
 if [[ -n "${HTTPS_PROXY:-}" ]]; then
   env -i \
@@ -332,13 +452,49 @@ if [[ -n "${HTTPS_PROXY:-}" ]]; then
 fi
 
 for enabled_agent in "${enabled_agents[@]}"; do
-  [[ "$enabled_agent" == "claude-desktop" ]] && broker_port=4312 || broker_port=4314
+  case "$enabled_agent" in
+    claude-desktop) broker_port=4312 ;;
+    hermes-claw) broker_port=4314 ;;
+    claude-cli) broker_port=4315 ;;
+    hermes-desktop) broker_port=4316 ;;
+  esac
   for _ in $(seq 1 50); do
     if curl -fsS "http://127.0.0.1:${broker_port}/healthz" >/dev/null; then break; fi
     sleep 0.1
   done
   curl -fsS "http://127.0.0.1:${broker_port}/healthz" >/dev/null
 done
+
+if agent_enabled hermes-claw; then
+  install -d -o 1000 -g 1000 -m 0700 /home/kasm-user/.hermes/logs
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    env -i \
+      PATH=/opt/onecomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin \
+      HOME=/home/kasm-user \
+      USER=kasm-user \
+      HERMES_HOME=/home/kasm-user/.hermes \
+      OPENAI_API_KEY=onecomputer-loopback-broker \
+      ONECOMPUTER_MCP_BROKER=http://127.0.0.1:4314 \
+      API_SERVER_ENABLED=true \
+      API_SERVER_HOST=0.0.0.0 \
+      API_SERVER_PORT=8642 \
+      API_SERVER_KEY="$hermes_api_key" \
+      HTTP_PROXY="${HTTP_PROXY:-}" \
+      HTTPS_PROXY="${HTTPS_PROXY:-}" \
+      http_proxy="${http_proxy:-}" \
+      https_proxy="${https_proxy:-}" \
+      NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,onecomputer-control,litellm}" \
+      no_proxy="${no_proxy:-localhost,127.0.0.1,onecomputer-control,litellm}" \
+      /opt/onecomputer/hermes-venv/bin/hermes gateway run \
+      >>/run/onecomputer/hermes-gateway-bootstrap.log 2>&1 &
+  printf '%s\n' "$!" > /run/onecomputer/hermes-gateway.pid
+  unset API_SERVER_KEY hermes_api_key
+  for _ in $(seq 1 200); do
+    if curl -fsS "http://127.0.0.1:8642/health" >/dev/null; then break; fi
+    sleep 0.1
+  done
+  curl -fsS "http://127.0.0.1:8642/health" >/dev/null
+fi
 touch /run/onecomputer/workspace-ready
 
 exec setpriv --reuid=1000 --regid=1000 --init-groups \

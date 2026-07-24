@@ -23,7 +23,7 @@ const workspace = {
   readiness: { identity: "ready", network: "ready", models: "ready", tools: "ready" },
   agents: [
     { id: "claude-desktop", displayName: "Claude Desktop", clientVersion: "1.22209.3", agentId: "agent-alex:claude", state: "ready" },
-    { id: "hermes-claw", displayName: "Hermes Claw", clientVersion: "0.19.0", agentId: "agent-alex:hermes", state: "ready" },
+    { id: "hermes-claw", displayName: "Hermes Agent CLI", clientVersion: "0.19.0", agentId: "agent-alex:hermes", state: "ready" },
   ],
   modelRoute: {
     alias: "onecomputer-glm",
@@ -39,6 +39,107 @@ const workspace = {
     projected: { version: 7, digest, bundleDigest, keyId: "psk_policy_fixture", expiresAt: new Date(Date.now() + 86_400_000).toISOString() },
     enforced: { version: 7, digest, bundleDigest, keyId: "psk_policy_fixture", verifiedAt: now },
   },
+};
+
+const sandboxWorkspace = {
+  ...workspace,
+  id: "3c536c1f-6a31-427d-af8f-dbb0c63f8d70",
+  state: "stopped",
+  readiness: { identity: "checking", network: "checking", models: "checking", tools: "checking" },
+};
+
+const profile = {
+  id: "claude-desktop-standard-v1",
+  version: 1,
+  displayName: "Claude Desktop",
+  description: "A managed Claude Desktop chat workspace routed only through the ONEComputer AI gateway.",
+  client: "Claude Desktop",
+  clientVersion: "1.22209.3",
+  persistence: "persistent-home",
+  network: "gateway-only",
+  resources: { cpus: 2, memoryGiB: 3 },
+};
+
+const availableApplications = [
+  {
+    id: "firefox",
+    displayName: "Firefox ESR",
+    category: "Browser",
+    version: "140.12.0esr",
+    description: "Managed browser locked to the governed egress proxy.",
+  },
+  {
+    id: "google-chrome",
+    displayName: "Google Chrome",
+    category: "Browser",
+    version: "150.0.7871.186",
+    description: "Pinned Chrome browser locked to the governed egress proxy.",
+  },
+];
+
+const availableAgents = [
+  {
+    id: "claude-desktop",
+    displayName: "Claude Desktop",
+    clientVersion: "1.22209.3",
+    description: "Managed desktop client routed through ONEComputer.",
+    license: "Anthropic commercial distribution",
+    source: "https://downloads.claude.ai/claude-desktop/apt/stable/",
+    artifactSha256: "d427f46ac9233dbc4d8a441a602f09f750b8a5f05d1fc7a00285d7a6ce07655c",
+    resources: { memoryMiB: 1536 },
+  },
+  {
+    id: "claude-cli",
+    displayName: "Claude CLI",
+    clientVersion: "2.1.215",
+    description: "Pinned Claude CLI routed through its own governed ONEComputer identity.",
+    license: "Anthropic commercial distribution",
+    source: "https://downloads.claude.ai/claude-code-releases/2.1.215/linux-x64/claude.zst",
+    artifactSha256: "7ff9594e53cd89d1af9ceb3c18d3d70be1a5c6d27475e31ee2bed65d748f18c0",
+    resources: { memoryMiB: 1024 },
+  },
+  {
+    id: "hermes-desktop",
+    displayName: "Hermes Agent Desktop",
+    clientVersion: "0.17.0",
+    description: "Native Hermes Agent desktop client with a separately governed backend.",
+    license: "MIT",
+    source: "https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20",
+    artifactSha256: "285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990",
+    resources: { memoryMiB: 1536 },
+  },
+  {
+    id: "hermes-claw",
+    displayName: "Hermes Agent CLI",
+    clientVersion: "0.19.0",
+    description: "Pinned Hermes Agent CLI configured as a governed ONEComputer client.",
+    license: "MIT",
+    source: "https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20",
+    artifactSha256: "285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990",
+    resources: { memoryMiB: 1024 },
+  },
+];
+
+let sandboxSettings = {
+  grantId: "personal",
+  profileId: profile.id,
+  applicationIds: ["firefox"],
+  modelAlias: "onecomputer-glm",
+  profile,
+  availableProfiles: [profile],
+  availableApplications,
+  availableModels: [{ alias: "onecomputer-glm", displayName: "GLM", provider: "Z.ai" }],
+  agentIds: ["claude-desktop", "hermes-claw"],
+  availableAgents,
+  configuration: {
+    schemaVersion: 1,
+    profileId: profile.id,
+    applicationIds: ["firefox"],
+    agentIds: ["claude-desktop", "hermes-claw"],
+    modelAlias: "onecomputer-glm",
+    egress: null,
+  },
+  updatedAt: null,
 };
 
 const operation = {
@@ -59,9 +160,22 @@ const operation = {
   receipt: { resultSummary: "The approved file deletion completed." },
 };
 
+const chatSession = {
+  id: "fixture-session-1",
+  title: "Quarterly planning",
+  createdAt: now,
+  updatedAt: now,
+};
+let chatMessages = [
+  { role: "user", content: "Help me prepare the priorities for our quarterly planning meeting.", createdAt: now },
+  { role: "assistant", content: "I can help with that. I’ll work from the files and approved connections available in this sandbox. Which team’s priorities should we start with?", createdAt: now },
+];
+
 const responses = new Map([
   ["GET /v1/auth/session", session],
   ["GET /v1/workspaces/current", workspace],
+  ["GET /v1/workspaces", { workspaces: [sandboxWorkspace] }],
+  ["GET /v1/sandbox-settings", sandboxSettings],
   ["GET /v1/operations/recent", operation],
   ["GET /v1/operations", { operations: [operation] }],
   [`GET /v1/operations/${operation.id}/audit`, {
@@ -73,6 +187,9 @@ const responses = new Map([
     }],
   }],
   ["GET /v1/connections/microsoft-365", { state: "connected", connectedAt: now, expiresAt: null }],
+  [`GET /v1/workspaces/${workspaceId}/chat/status`, { workspaceId, state: "ready", reasonCode: "HERMES_CHAT_READY" }],
+  [`GET /v1/workspaces/${workspaceId}/chat/sessions`, { sessions: [chatSession] }],
+  [`GET /v1/workspaces/${workspaceId}/chat/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
   ["GET /v1/openvtc/approvers/current", { connected: false, executorDid: "did:key:z6MkFixture", approver: null }],
   ["GET /v1/openvtc/companion/config", { enabled: false, vapidPublicKey: null }],
   ["GET /v1/openvtc/companions", { companions: [] }],
@@ -81,9 +198,47 @@ const responses = new Map([
 const server = http.createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
   const key = `${request.method} ${url.pathname}`;
-  const payload = responses.get(key);
   response.setHeader("content-type", "application/json");
   response.setHeader("cache-control", "no-store");
+  if (key === "PUT /v1/sandbox-settings") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      sandboxSettings = {
+        ...sandboxSettings,
+        ...input,
+        configuration: {
+          ...sandboxSettings.configuration,
+          profileId: input.profileId,
+          applicationIds: input.applicationIds,
+          agentIds: input.agentIds,
+          modelAlias: input.modelAlias,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+      responses.set("GET /v1/sandbox-settings", sandboxSettings);
+      response.end(JSON.stringify(sandboxSettings));
+    });
+    return;
+  }
+  if (key === `POST /v1/workspaces/${workspaceId}/chat/sessions`) {
+    response.statusCode = 201;
+    response.end(JSON.stringify({ ...chatSession, id: `fixture-session-${Date.now()}`, title: null }));
+    return;
+  }
+  if (key.startsWith(`POST /v1/workspaces/${workspaceId}/chat/sessions/`) && key.endsWith("/messages")) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const assistant = { role: "assistant", content: "I’m working inside your sandbox and can use only the tools and destinations your organization approved." };
+      chatMessages = [...chatMessages, { role: "user", content: input.message }, assistant];
+      response.end(JSON.stringify({ message: assistant }));
+    });
+    return;
+  }
+  const payload = responses.get(key);
   if (payload === undefined) {
     response.statusCode = 404;
     response.end(JSON.stringify({ error: { code: "FIXTURE_ROUTE_NOT_FOUND", message: key, retryable: false } }));

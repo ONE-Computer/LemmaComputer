@@ -27,7 +27,7 @@ const policy: RuntimePolicy = {
     catalogId: "hermes-claw",
     agentId: "agent-alex:hermes-claw",
     agentProfile: "hermes-claw-managed-v1",
-    displayName: "Hermes Claw",
+    displayName: "Hermes Agent CLI",
     clientVersion: "0.19.0",
     modelAlias: "onecomputer-glm",
     mcpServer: "onecomputer_ms365",

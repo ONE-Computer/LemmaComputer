@@ -545,7 +545,7 @@ export function CompanionApp() {
               refreshPending();
             }}
           />
-        ) : <div className="companion-layout">
+        ) : <div className={`companion-layout${request ? " has-live-approval" : ""}`}>
           <div className="companion-primary-column">
             {request ? (
               <ApprovalCard request={request} busy={busy === "decision"} message={decisionMessage} onDecision={decide} />

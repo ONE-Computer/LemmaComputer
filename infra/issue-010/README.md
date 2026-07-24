@@ -5,7 +5,7 @@ with Anthropic's supported Claude Desktop Linux client. ONEComputer owns the
 sandbox selection and lifecycle; Claude Desktop is a managed client of the
 workspace-scoped LiteLLM gateway.
 
-## Selected client
+## Packaged software catalog
 
 - Claude Desktop Linux `1.22209.3` (`amd64` Debian package)
 - package SHA-256:
@@ -16,10 +16,23 @@ workspace-scoped LiteLLM gateway.
 - Firefox ESR `140.12.0esr` (`linux-x86_64`, English US)
 - Firefox archive SHA-256:
   `3323ee13ac6fe4877fa2e1f4a3aa6b8009f65a620c7bbca96fe86f1a6f433d92`
+- Google Chrome Stable `150.0.7871.186-1` (`amd64` Debian package)
+- Chrome package SHA-256:
+  `4193e00b6d5d5969ee63f7a69596868f546aa0e8cb077b3e0bf9cc1e2c719d00`
+- Hermes Agent `v2026.7.20`, providing Hermes Agent CLI `0.19.0` and Hermes Agent
+  Desktop `0.17.0`
+- Hermes source archive SHA-256:
+  `285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990`
 - Kasm Ubuntu Jammy base:
   `sha256:58b0710b320b99ab7e352342d7ec3a25b09740c523b75d794c5f7476910da580`
 - resulting local workspace image is printed by `build-workspace.sh` and pinned
   in the ignored local `.env`.
+
+The reviewed image contains the complete catalog so a saved sandbox can change
+its selection without rebuilding. Launchers, executable permissions, loopback
+brokers, and agent grants are exposed only for the selected entries. Firefox,
+Claude Desktop, and Hermes Agent CLI remain the initial defaults; Chrome, Claude
+CLI, and Hermes Agent Desktop are opt-in.
 
 This follows Anthropic's supported Linux and gateway paths:
 
@@ -85,16 +98,20 @@ OpenVTC decision without exposing gateway or provider credentials.
   bundled skills disabled.
 - Persistent `/home/kasm-user` volume retained across UI stop/start and service
   restart.
-- Claude Desktop auto-starts as the primary application.
-- Firefox ESR is available from the desktop and application menu. Enterprise
-  policy locks it to a loopback-only credential broker, which authenticates to
-  the external egress proxy sidecar. The sidecar remains the enforcement point
-  for default-deny domain, protocol, and port policy. In-place updates, studies,
-  telemetry, and saved logins are disabled.
+- Claude Desktop auto-starts when it is selected.
+- Firefox ESR and Google Chrome appear on the desktop only when selected.
+  Enterprise policy locks both browsers to a loopback-only credential broker,
+  which authenticates to the external egress proxy sidecar. The sidecar remains
+  the enforcement point for default-deny domain, protocol, and port policy.
+  In-place updates, telemetry, sync, and saved logins are disabled.
+- Claude CLI, Hermes Agent CLI, and Hermes Agent Desktop each receive a distinct
+  workspace-scoped identity and root-owned loopback broker when selected.
 
-The Sandbox page persists the approved profile/model choice per user and grant.
-Changes are rejected while the workspace is running and any choice outside the
-user's immutable policy assignment fails closed.
+The Sandbox page persists the approved profile, application, agent, and model
+choices per user and grant. Changes are rejected while the workspace is running
+and any choice outside the user's immutable policy assignment fails closed.
+After a successful save, the UI explains that a restart is required. The saved
+configuration is used when that sandbox next launches.
 
 ## Build and start
 
@@ -110,6 +127,11 @@ docker compose \
 
 Set `ONECOMPUTER_WORKSPACE_IMAGE` in the ignored `.env` to the image digest
 printed by the build script. Never commit provider keys or workspace grants.
+Generate the dedicated workspace-bound Hermes API derivation secret once with:
+
+```bash
+npm run key:hermes -- --write-env .env
+```
 
 The live qualification record is
 `qualification-2026-07-21.md`.

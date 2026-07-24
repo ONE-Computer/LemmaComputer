@@ -5,6 +5,7 @@ import {
   defaultClipboardPolicy,
   OneComputerError,
   signedPolicyBundleSchema,
+  type AgentCatalogId,
   type ClipboardPolicy,
   type Launch,
   type PolicyVerificationKeySet,
@@ -36,8 +37,11 @@ export type SandboxCreateInput = {
     baseUrl: string;
     token: string;
   };
+  hermesApi?: {
+    key: string;
+  };
   agentGrants?: Array<{
-    catalogId: "claude-desktop" | "hermes-claw";
+    catalogId: AgentCatalogId;
     agentId: string;
     gateway: {
       baseUrl: string;
@@ -83,6 +87,29 @@ const textValue = (object: JsonObject, ...keys: string[]) => {
 };
 
 const clipboardPolicyFor = (policy?: RuntimePolicy): ClipboardPolicy => policy?.clipboard ?? defaultClipboardPolicy;
+
+const agentEnvironment = (
+  grant: NonNullable<SandboxCreateInput["agentGrants"]>[number],
+  policy: RuntimePolicy,
+) => {
+  const prefix = ({
+    "claude-desktop": "ONECOMPUTER",
+    "claude-cli": "ONECOMPUTER_CLAUDE_CLI",
+    "hermes-desktop": "ONECOMPUTER_HERMES_DESKTOP",
+    "hermes-claw": "ONECOMPUTER_HERMES",
+  } as const)[grant.catalogId];
+  return [
+    `${prefix}_GATEWAY_UPSTREAM=${grant.gateway.baseUrl}`,
+    `${prefix}_GATEWAY_CREDENTIAL=${grant.gateway.credential}`,
+    `${prefix}_MODEL_ALIAS=${grant.gateway.modelAlias}`,
+    `${prefix}_AGENT_ID=${grant.agentId}`,
+    `${prefix}_CONTROL_UPSTREAM=${grant.agentBridge.baseUrl}`,
+    `${prefix}_AGENT_BRIDGE_TOKEN=${grant.agentBridge.token}`,
+    `${prefix}_MCP_SERVER=${policy.mcpServer}`,
+    `${prefix}_ALLOWED_TOOLS=${policy.allowedTools.join(",")}`,
+    `${prefix}_TOOL_POLICIES=${JSON.stringify(policy.toolPolicies)}`,
+  ];
+};
 
 export function buildKasmClipboardLaunch(launchUrl: string, policy: ClipboardPolicy, now = new Date()): Launch {
   const enabled = policy.enabled;
@@ -230,7 +257,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       await this.ensureEgressProxy(input, workspaceNetwork);
     }
     if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
-    if (input.agentBridge && this.config.controlContainer) await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
+    if ((input.agentBridge || input.hermesApi) && this.config.controlContainer) await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
     const name = `onecomputer-sandbox-${input.workspaceId}`;
     const existing = await this.inspectByName(name);
     if (existing?.running) {
@@ -239,10 +266,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
     }
     if (existing) await this.destroy(existing.id);
     const port = await this.allocatePort();
-    const claudeGrant = input.agentGrants?.find((grant) => grant.catalogId === "claude-desktop");
-    const hermesGrant = input.agentGrants?.find((grant) => grant.catalogId === "hermes-claw");
-    const enabledAgents = input.agentGrants?.map((grant) => grant.catalogId)
-      ?? (input.policy.agentProfile === "hermes-claw-managed-v1" ? ["hermes-claw"] : ["claude-desktop"]);
+    const fallbackAgent = ({
+      "claude-desktop-managed-v1": "claude-desktop",
+      "claude-cli-managed-v1": "claude-cli",
+      "hermes-desktop-managed-v1": "hermes-desktop",
+      "hermes-claw-managed-v1": "hermes-claw",
+    } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";
+    const enabledAgents = input.agentGrants?.map((grant) => grant.catalogId) ?? [fallbackAgent];
+    const enabledApplications = input.policy.applications ?? ["firefox"];
     const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(name)}`, {
       Image: this.config.image,
       Labels: {
@@ -251,7 +282,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         "com.onecomputer.workspace-network": workspaceNetwork,
         "com.onecomputer.workspace-volume": workspaceVolume,
         "com.onecomputer.gateway-attached": String(Boolean(input.gateway)),
-        "com.onecomputer.control-attached": String(Boolean(input.agentBridge)),
+        "com.onecomputer.control-attached": String(Boolean(input.agentBridge || input.hermesApi)),
         "com.onecomputer.policy-version-id": input.policy.policyVersionId,
         "com.onecomputer.policy-hash": input.policy.policyHash,
         "com.onecomputer.policy-signing-key-id": input.policyBundle.keyId,
@@ -260,6 +291,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
         "com.onecomputer.sandbox-profile": input.policy.workspaceProfile,
         "com.onecomputer.model-alias": input.policy.modelAlias,
         "com.onecomputer.enabled-agents": enabledAgents.join(","),
+        "com.onecomputer.enabled-applications": enabledApplications.join(","),
+        "com.onecomputer.hermes-api-enabled": String(Boolean(input.hermesApi)),
         "com.onecomputer.desktop-port": String(port),
         "com.onecomputer.clipboard-enabled": String(clipboard.enabled),
         "com.onecomputer.clipboard-local-to-workspace": String(clipboard.localToWorkspace),
@@ -280,8 +313,15 @@ export class KasmLocalAdapter implements SandboxAdapter {
         `ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL=${clipboard.workspaceToLocal}`,
         `ONECOMPUTER_CLIPBOARD_MAX_BYTES=${clipboard.maxBytes}`,
         `ONECOMPUTER_ENABLED_AGENTS=${enabledAgents.join(",")}`,
+        `ONECOMPUTER_ENABLED_APPLICATIONS=${enabledApplications.join(",")}`,
         `ONECOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
         `ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(canonicalJson(input.policyVerificationKeys), "utf8").toString("base64url")}`,
+        ...(input.hermesApi ? [
+          "API_SERVER_ENABLED=true",
+          "API_SERVER_HOST=0.0.0.0",
+          "API_SERVER_PORT=8642",
+          `API_SERVER_KEY=${input.hermesApi.key}`,
+        ] : []),
         ...(!input.agentGrants && input.gateway ? [
           `ONECOMPUTER_GATEWAY_UPSTREAM=${input.gateway.baseUrl}`,
           `ONECOMPUTER_GATEWAY_CREDENTIAL=${input.gateway.credential}`,
@@ -297,29 +337,10 @@ export class KasmLocalAdapter implements SandboxAdapter {
           `ONECOMPUTER_CONTROL_UPSTREAM=${input.agentBridge.baseUrl}`,
           `ONECOMPUTER_AGENT_BRIDGE_TOKEN=${input.agentBridge.token}`,
         ] : []),
-        ...(claudeGrant ? [
-          `ONECOMPUTER_GATEWAY_UPSTREAM=${claudeGrant.gateway.baseUrl}`,
-          `ONECOMPUTER_GATEWAY_CREDENTIAL=${claudeGrant.gateway.credential}`,
-          `ONECOMPUTER_MODEL_ALIAS=${claudeGrant.gateway.modelAlias}`,
-          `ONECOMPUTER_AGENT_ID=${claudeGrant.agentId}`,
-          `ONECOMPUTER_CONTROL_UPSTREAM=${claudeGrant.agentBridge.baseUrl}`,
-          `ONECOMPUTER_AGENT_BRIDGE_TOKEN=${claudeGrant.agentBridge.token}`,
+        ...(input.agentGrants?.flatMap((grant) => agentEnvironment(grant, input.policy)) ?? []),
+        ...(input.agentGrants?.length ? [
           `ONECOMPUTER_POLICY_VERSION=${input.policy.policyVersion}`,
           `ONECOMPUTER_POLICY_HASH=${input.policy.policyHash}`,
-          `ONECOMPUTER_MCP_SERVER=${input.policy.mcpServer}`,
-          `ONECOMPUTER_ALLOWED_TOOLS=${input.policy.allowedTools.join(",")}`,
-          `ONECOMPUTER_TOOL_POLICIES=${JSON.stringify(input.policy.toolPolicies)}`,
-        ] : []),
-        ...(hermesGrant ? [
-          `ONECOMPUTER_HERMES_GATEWAY_UPSTREAM=${hermesGrant.gateway.baseUrl}`,
-          `ONECOMPUTER_HERMES_GATEWAY_CREDENTIAL=${hermesGrant.gateway.credential}`,
-          `ONECOMPUTER_HERMES_MODEL_ALIAS=${hermesGrant.gateway.modelAlias}`,
-          `ONECOMPUTER_HERMES_AGENT_ID=${hermesGrant.agentId}`,
-          `ONECOMPUTER_HERMES_CONTROL_UPSTREAM=${hermesGrant.agentBridge.baseUrl}`,
-          `ONECOMPUTER_HERMES_AGENT_BRIDGE_TOKEN=${hermesGrant.agentBridge.token}`,
-          `ONECOMPUTER_HERMES_MCP_SERVER=${input.policy.mcpServer}`,
-          `ONECOMPUTER_HERMES_ALLOWED_TOOLS=${input.policy.allowedTools.join(",")}`,
-          `ONECOMPUTER_HERMES_TOOL_POLICIES=${JSON.stringify(input.policy.toolPolicies)}`,
         ] : []),
         ...(input.policy.egress && input.egressProxy ? [
           `HTTP_PROXY=http://onecomputer:${encodeURIComponent(input.egressProxy.token)}@onecomputer-egress-proxy:3128`,

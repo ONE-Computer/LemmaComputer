@@ -1,10 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { LogController } from "fastify";
-import { assignEgressSecurityGroupSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, type AgentCatalogId, type RuntimePolicy, type SandboxModelAlias, type SandboxProfileId } from "@onecomputer/contracts";
+import { assignEgressSecurityGroupSchema, OneComputerError, createDeleteFileOperationSchema, createHermesChatSessionSchema, createWorkspaceSchema, fixtureApprovalSchema, hermesChatSessionIdSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, sandboxApplicationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendHermesChatMessageSchema, type AgentCatalogId, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { Ed25519DidKeySigner } from "@onecomputer/openvtc-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { Microsoft365ConnectionService } from "./connections.js";
@@ -14,6 +14,7 @@ import { McpPolicyService, m365CapabilityDefinitions } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
 import { AgentBridgeAuthority, type AgentBridgeIdentity } from "./agent-bridge.js";
 import { COMPANION_PUSH_PROTOCOL, WebPushProvider } from "./web-push.js";
+import { HermesApiAuthority, HttpHermesChatClient, type HermesChatClient } from "./hermes-chat.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -49,6 +50,53 @@ const sandboxModels = [
   { alias: "onecomputer-assistant", displayName: "Standard route (legacy)", provider: "OpenAI" },
 ] as const;
 
+const sandboxApplications = [
+  sandboxApplicationSchema.parse({
+    id: "firefox",
+    displayName: "Firefox ESR",
+    category: "Browser",
+    version: "140.12.0esr",
+    description: "Managed browser locked to the governed egress proxy.",
+  }),
+  sandboxApplicationSchema.parse({
+    id: "google-chrome",
+    displayName: "Google Chrome",
+    category: "Browser",
+    version: "150.0.7871.186",
+    description: "Pinned Chrome browser locked to the governed egress proxy.",
+  }),
+] as const;
+
+const assignedApplicationIds = (document: Record<string, unknown>): SandboxApplicationId[] => {
+  const configured = Array.isArray(document.applications)
+    ? document.applications.filter((item): item is SandboxApplicationId => sandboxApplications.some((application) => application.id === item))
+    : ["firefox"] as SandboxApplicationId[];
+  return configured.length ? configured : ["firefox"];
+};
+
+const defaultApplicationIds = (document: Record<string, unknown>, assigned = assignedApplicationIds(document)): SandboxApplicationId[] => {
+  const configured = Array.isArray(document.defaultApplications)
+    ? document.defaultApplications.filter((item): item is SandboxApplicationId => assigned.includes(item as SandboxApplicationId))
+    : assigned;
+  return configured.length ? configured : [assigned[0]!];
+};
+
+const assignedAgentIds = (document: Record<string, unknown>): AgentCatalogId[] => {
+  const configured = Array.isArray(document.agents)
+    ? document.agents.filter((item): item is AgentCatalogId => ownedAgentCatalog.some((agent) => agent.id === item))
+    : document.agentProfile === "hermes-claw-managed-v1"
+      ? ["hermes-claw"] as AgentCatalogId[]
+      : ["claude-desktop"] as AgentCatalogId[];
+  return configured.length ? configured : ["claude-desktop"];
+};
+
+const defaultAgentIds = (document: Record<string, unknown>, assigned = assignedAgentIds(document)): AgentCatalogId[] => {
+  const configured = Array.isArray(document.defaultAgents)
+    ? document.defaultAgents.filter((item): item is AgentCatalogId => assigned.includes(item as AgentCatalogId))
+    : assigned;
+  return configured.length ? configured : [assigned[0]!];
+};
+
 const optionalEnvString = (minimum = 1) => z.preprocess(
   (value) => value === "" ? undefined : value,
   z.string().min(minimum).optional(),
@@ -79,6 +127,7 @@ const envSchema = z.object({
   ENTRA_CLIENT_SECRET: z.string().min(1),
   SESSION_SECRET: z.string().min(32),
   EGRESS_GRANT_SECRET: z.string().min(32).optional(),
+  HERMES_API_SECRET: z.string().min(32),
   POLICY_SIGNING_KEY_ID: z.string().regex(/^psk_[a-z0-9][a-z0-9_-]{2,63}$/),
   POLICY_SIGNING_PRIVATE_KEY_B64: z.string().min(40),
   POLICY_VERIFICATION_KEYS_B64: z.string().min(32),
@@ -111,6 +160,8 @@ export function createControlServer(
     openVtc?: OpenVtcApprovalCoordinator;
     egressGrantSecret?: string;
     policyBundleAuthority?: PolicyBundleAuthority;
+    hermesApiSecret?: string;
+    hermesChatClient?: HermesChatClient;
   } = {},
 ) {
   const testRuntimePolicy: RuntimePolicy = {
@@ -121,6 +172,7 @@ export function createControlServer(
     workspaceProfile: "kasm-persistent-standard",
     agentId: "test-default-agent",
     agentProfile: "onecomputer-default-agent",
+    applications: ["firefox"],
     networkProfile: "controlled-egress-v1",
     modelAlias: "onecomputer-assistant",
     mcpServer: "onecomputer_fixture",
@@ -135,10 +187,12 @@ export function createControlServer(
     bodyLimit: 32 * 1024,
   });
   const agentBridgeAuthority = new AgentBridgeAuthority(security.mcpPolicyToken ?? proxyToken);
+  const hermesApiAuthority = security.hermesApiSecret ? new HermesApiAuthority(security.hermesApiSecret) : undefined;
+  const hermesChat = security.hermesChatClient ?? new HttpHermesChatClient();
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
     issue: (identity, workspaceId, policy) => agentBridgeAuthority.issue(identity, workspaceId, policy),
-  }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority);
+  }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority, hermesApiAuthority);
   const executor: GovernedToolExecutor = gateway?.executeGovernedTool
     ? { executeGovernedTool: (input) => gateway.executeGovernedTool!(input) }
     : { executeGovernedTool: async () => { throw new OneComputerError("GATEWAY_NOT_CONFIGURED", "The governed tool gateway is not configured", 503, true); } };
@@ -212,15 +266,28 @@ export function createControlServer(
     if (security.identityPolicyStore && !effective) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
     return { principal: value, effective };
   };
+  const policyForGrant = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId = "personal") => {
+    if (!effective) return { principal: value, policy: testRuntimePolicy };
+    const saved = await store.getSandboxSettings?.(value.identity, grantId);
+    const document = effective.document as Record<string, unknown>;
+    const availableAgentIds = assignedAgentIds(document);
+    return { principal: value, policy: runtimePolicyFor(
+      effective,
+      saved?.modelAlias,
+      saved?.profileId,
+      saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
+      saved?.applicationIds ?? defaultApplicationIds(document),
+    ) };
+  };
   const requirePolicy = async (request: object) => {
     const { principal: value, effective } = await assignedPolicy(request);
-    if (!effective) return { principal: value, policy: testRuntimePolicy };
-    const saved = await store.getSandboxSettings?.(value.identity, "personal");
-    const document = effective.document as Record<string, unknown>;
-    const defaultAgentIds = Array.isArray(document.agents)
-      ? document.agents.filter((id): id is AgentCatalogId => typeof id === "string" && ownedAgentCatalog.some((agent) => agent.id === id))
-      : ownedAgentCatalog.map((agent) => agent.id);
-    return { principal: value, policy: runtimePolicyFor(effective, saved?.modelAlias, saved?.profileId, saved?.agentIds ?? defaultAgentIds) };
+    return policyForGrant(value, effective);
+  };
+  const requireWorkspacePolicy = async (request: object, workspaceId: string) => {
+    const { principal: value, effective } = await assignedPolicy(request);
+    const workspace = await store.getOwned(value.identity, workspaceId);
+    if (!workspace) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    return policyForGrant(value, effective, workspace.grantId);
   };
   const idempotency = (headers: Record<string, unknown>) => {
     const key = headers["idempotency-key"];
@@ -379,12 +446,16 @@ export function createControlServer(
       });
       const settings = await store.getSandboxSettings?.(userIdentity, "personal");
       const document = user.effectivePolicy.document as Record<string, unknown>;
-      const defaultAgentIds = Array.isArray(document.agents)
-        ? document.agents.filter((id): id is AgentCatalogId => typeof id === "string" && ownedAgentCatalog.some((agent) => agent.id === id))
-        : ownedAgentCatalog.map((agent) => agent.id);
+      const availableAgentIds = assignedAgentIds(document);
       return service.refreshPolicyGrant(
         userIdentity,
-        runtimePolicyFor(user.effectivePolicy, settings?.modelAlias, settings?.profileId, settings?.agentIds ?? defaultAgentIds),
+        runtimePolicyFor(
+          user.effectivePolicy,
+          settings?.modelAlias,
+          settings?.profileId,
+          settings?.agentIds ?? defaultAgentIds(document, availableAgentIds),
+          settings?.applicationIds ?? defaultApplicationIds(document),
+        ),
       );
     }));
     return {
@@ -416,8 +487,9 @@ export function createControlServer(
     }
   });
   app.delete("/v1/connections/microsoft-365", async (request) => requireConnections().disconnect(identity(request)));
-  app.get("/v1/sandbox-settings", async (request) => {
+  app.get<{ Querystring: { grantId?: string } }>("/v1/sandbox-settings", async (request) => {
     const { principal: actor, effective } = await assignedPolicy(request);
+    const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
     const document = (effective?.document ?? {}) as Record<string, unknown>;
     const assignedProfiles = Array.isArray(document.workspaceProfiles)
       ? document.workspaceProfiles.filter((item): item is string => typeof item === "string")
@@ -425,27 +497,44 @@ export function createControlServer(
     const assignedModels = Array.isArray(document.modelAliases)
       ? document.modelAliases.filter((item): item is string => typeof item === "string")
       : [testRuntimePolicy.modelAlias];
-    const assignedAgentIds = Array.isArray(document.agents)
-      ? document.agents.filter((item): item is AgentCatalogId => typeof item === "string" && ownedAgentCatalog.some((agent) => agent.id === item))
-      : ownedAgentCatalog.map((agent) => agent.id);
+    const availableAgentIds = assignedAgentIds(document);
     const availableProfiles = sandboxProfiles.filter((profile) => assignedProfiles.includes(profile.id));
+    const assignedApplications = assignedApplicationIds(document);
+    const availableApplications = sandboxApplications.filter((application) => assignedApplications.includes(application.id));
     const availableModels = sandboxModels.filter((model) => assignedModels.includes(model.alias));
-    const availableAgents = ownedAgentCatalog.filter((agent) => assignedAgentIds.includes(agent.id));
+    const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
     if (!availableProfiles.length || !availableModels.length || !availableAgents.length) throw new OneComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, or agent", 500);
-    const saved = await store.getSandboxSettings?.(actor.identity, "personal");
+    if (!availableApplications.length) throw new OneComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
+    const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const profileId = saved && availableProfiles.some((profile) => profile.id === saved.profileId) ? saved.profileId : availableProfiles[0]!.id;
+    const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
     const modelAlias = saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
+    const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
+    const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
+    const egress = effective?.egressSecurityGroup
+      ? runtimePolicyFor(effective, modelAlias, profileId, selectedAgentIds, selectedApplicationIds).egress
+      : undefined;
     return sandboxSettingsSchema.parse({
-      grantId: "personal",
+      grantId,
       profileId,
+      applicationIds: selectedApplicationIds,
       modelAlias,
       profile: availableProfiles.find((profile) => profile.id === profileId),
       availableProfiles,
+      availableApplications,
       availableModels,
-      agentIds: agentIds?.length ? agentIds : assignedAgentIds,
+      agentIds: selectedAgentIds,
       availableAgents,
-      ...(effective?.egressSecurityGroup ? { egress: runtimePolicyFor(effective, modelAlias, profileId, agentIds?.length ? agentIds : assignedAgentIds).egress } : {}),
+      ...(egress ? { egress } : {}),
+      configuration: {
+        schemaVersion: 1,
+        profileId,
+        applicationIds: selectedApplicationIds,
+        agentIds: selectedAgentIds,
+        modelAlias,
+        egress: egress ?? null,
+      },
       updatedAt: saved?.updatedAt.toISOString() ?? null,
     });
   });
@@ -455,9 +544,11 @@ export function createControlServer(
     const { principal: actor, effective } = await assignedPolicy(request);
     const document = (effective?.document ?? {}) as Record<string, unknown>;
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
+    const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
     const agents = Array.isArray(document.agents) ? document.agents : ownedAgentCatalog.map((agent) => agent.id);
     if (!profiles.includes(input.profileId)) throw new OneComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
+    if (input.applicationIds.some((id) => !applications.includes(id))) throw new OneComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
     if (!models.includes(input.modelAlias)) throw new OneComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
     if (input.agentIds.some((id) => !agents.includes(id))) throw new OneComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
     const current = await store.getCurrent(actor.identity, input.grantId);
@@ -465,6 +556,7 @@ export function createControlServer(
     await store.saveSandboxSettings(actor.identity, {
       grantId: input.grantId,
       profileId: input.profileId as SandboxProfileId,
+      applicationIds: input.applicationIds,
       modelAlias: input.modelAlias as SandboxModelAlias,
       agentIds: input.agentIds,
     });
@@ -473,10 +565,19 @@ export function createControlServer(
       ...input,
       profile,
       availableProfiles: sandboxProfiles.filter((item) => profiles.includes(item.id)),
+      availableApplications: sandboxApplications.filter((item) => applications.includes(item.id)),
       availableModels: sandboxModels.filter((item) => models.includes(item.alias)),
       agentIds: input.agentIds,
       availableAgents: ownedAgentCatalog.filter((item) => agents.includes(item.id)),
-      ...(effective?.egressSecurityGroup ? { egress: runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds).egress } : {}),
+      ...(effective?.egressSecurityGroup ? { egress: runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds).egress } : {}),
+      configuration: {
+        schemaVersion: 1,
+        profileId: input.profileId,
+        applicationIds: input.applicationIds,
+        agentIds: input.agentIds,
+        modelAlias: input.modelAlias,
+        egress: effective?.egressSecurityGroup ? runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds).egress ?? null : null,
+      },
       updatedAt: new Date().toISOString(),
     });
   });
@@ -567,19 +668,77 @@ export function createControlServer(
     const current = await service.current(identity(request), policy, "personal");
     return current ? reply.send(current) : reply.code(404).send({ error: { code: "WORKSPACE_NOT_FOUND", message: "Workspace not found", correlationId: request.id, retryable: false } });
   });
+  app.get("/v1/workspaces", async (request) => {
+    const { principal: actor, effective } = await assignedPolicy(request);
+    return { workspaces: await service.list(actor.identity, async (grantId) => (await policyForGrant(actor, effective, grantId)).policy) };
+  });
   app.post("/v1/workspaces", async (request, reply) => {
     const input = createWorkspaceSchema.parse(request.body ?? {});
-    const { principal: actor, policy } = await requirePolicy(request);
+    const { principal: actor, effective } = await assignedPolicy(request);
+    const { policy } = await policyForGrant(actor, effective, input.grantId);
     const workspace = await service.create(identity(request), policy, input.grantId, idempotency(request.headers), request.id);
     await security.identityPolicyStore?.bindWorkspaceIdentity(actor.userId, workspace.id);
     return reply.code(201).send(workspace);
   });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/open", async (request) => { const { policy } = await requirePolicy(request); return service.open(identity(request), policy, request.params.workspaceId); });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/restart", async (request) => { const { policy } = await requirePolicy(request); return service.restart(identity(request), policy, request.params.workspaceId, request.id); });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/stop", async (request) => { const { policy } = await requirePolicy(request); return service.stop(identity(request), policy, request.params.workspaceId); });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/gateway/test", async (request) => { const { policy } = await requirePolicy(request); return service.testGateway(identity(request), policy, request.params.workspaceId); });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/open", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.open(identity(request), policy, request.params.workspaceId); });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/restart", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.restart(identity(request), policy, request.params.workspaceId, request.id); });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/stop", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.stop(identity(request), policy, request.params.workspaceId); });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/gateway/test", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.testGateway(identity(request), policy, request.params.workspaceId); });
+  app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/status", async (request, reply) => {
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    try {
+      const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
+      await hermesChat.health(access);
+      return reply.header("cache-control", "no-store").send({
+        workspaceId: request.params.workspaceId,
+        state: "ready",
+        reasonCode: "HERMES_CHAT_READY",
+      });
+    } catch (error) {
+      if (!(error instanceof OneComputerError)) throw error;
+      if (error.code === "HERMES_NOT_SELECTED") {
+        return reply.header("cache-control", "no-store").send({
+          workspaceId: request.params.workspaceId,
+          state: "unavailable",
+          reasonCode: error.code,
+        });
+      }
+      if (error.code === "WORKSPACE_NOT_READY" || error.code === "HERMES_UNAVAILABLE") {
+        return reply.header("cache-control", "no-store").send({
+          workspaceId: request.params.workspaceId,
+          state: "offline",
+          reasonCode: error.code,
+        });
+      }
+      throw error;
+    }
+  });
+  app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/sessions", async (request, reply) => {
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
+    return reply.header("cache-control", "no-store").send({ sessions: await hermesChat.listSessions(access) });
+  });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/sessions", async (request, reply) => {
+    const input = createHermesChatSessionSchema.parse(request.body ?? {});
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
+    return reply.code(201).header("cache-control", "no-store").send(await hermesChat.createSession(access, input.title));
+  });
+  app.get<{ Params: { workspaceId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/sessions/:sessionId/messages", async (request, reply) => {
+    const sessionId = hermesChatSessionIdSchema.parse(request.params.sessionId);
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
+    return reply.header("cache-control", "no-store").send({ messages: await hermesChat.listMessages(access, sessionId) });
+  });
+  app.post<{ Params: { workspaceId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/sessions/:sessionId/messages", async (request, reply) => {
+    const sessionId = hermesChatSessionIdSchema.parse(request.params.sessionId);
+    const input = sendHermesChatMessageSchema.parse(request.body ?? {});
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
+    return reply.header("cache-control", "no-store").send({ message: await hermesChat.sendMessage(access, sessionId, input.message) });
+  });
   app.delete<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId", async (request, reply) => {
-    const { policy } = await requirePolicy(request);
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     await service.delete(identity(request), policy, request.params.workspaceId);
     return reply.code(204).send();
   });
@@ -687,6 +846,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       openVtc,
       egressGrantSecret: env.EGRESS_GRANT_SECRET,
       policyBundleAuthority,
+      hermesApiSecret: env.HERMES_API_SECRET,
     },
   );
   const pushRetryTimer = pushProvider && openVtc

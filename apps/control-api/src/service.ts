@@ -15,6 +15,7 @@ import { deriveEgressProxySecret, issueEgressProxyGrant } from "@onecomputer/egr
 import type { GatewayClient, GatewayGrant, GatewayReadiness } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner, PolicyVerificationError, verifySignedPolicyBundle, type VerifiedPolicyBundle } from "@onecomputer/policy-integrity";
 import type { WorkspaceRecord, WorkspaceStore } from "@onecomputer/workspace-store";
+import { HermesApiAuthority, type HermesApiAccess } from "./hermes-chat.js";
 
 export interface ControllerClient {
   create(input: {
@@ -25,6 +26,7 @@ export interface ControllerClient {
     gateway?: GatewayGrant;
     agentBridge?: { baseUrl: string; token: string };
     agentGrants?: Array<{ catalogId: RuntimeAgentPolicy["catalogId"]; agentId: string; gateway: GatewayGrant; agentBridge: { baseUrl: string; token: string } }>;
+    hermesApi?: { key: string };
     egressProxy?: EgressProxyGrant;
   }): Promise<Sandbox>;
   status(providerId: string): Promise<Sandbox>;
@@ -180,6 +182,7 @@ export class WorkspaceService {
     private readonly agentBridge?: { baseUrl: string; issue: (identity: IdentityContext, workspaceId: string, policy: RuntimePolicy) => string },
     private readonly egressProxyAuthority?: EgressProxyGrantAuthority,
     private readonly policyBundleAuthority?: PolicyBundleAuthority,
+    private readonly hermesApiAuthority?: HermesApiAuthority,
   ) {}
 
   private authorizePolicy(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy) {
@@ -293,6 +296,12 @@ export class WorkspaceService {
     return this.view(record, policy, authorized, projectedIntegrity);
   }
 
+  async list(identity: IdentityContext, policyForGrant: (grantId: string) => Promise<RuntimePolicy>) {
+    const records = await this.store.listCurrent(identity);
+    const views = await Promise.all(records.map(async (record) => this.current(identity, await policyForGrant(record.grantId), record.grantId)));
+    return views.filter((view): view is NonNullable<typeof view> => Boolean(view));
+  }
+
   async refreshPolicyGrant(identity: IdentityContext, policy: RuntimePolicy, grantId = "personal") {
     const record = await this.store.getCurrent(identity, grantId);
     if (!record || !this.gateway || !["ready", "open"].includes(record.state)) return false;
@@ -311,6 +320,7 @@ export class WorkspaceService {
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, claimed.id, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
+      const hermesApi = this.hermesApiAuthority?.issue(identity, claimed.id, verifiedPolicy);
       if (verifiedPolicy.egress && !egressProxy) throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
         workspaceId: claimed.id,
@@ -318,6 +328,7 @@ export class WorkspaceService {
         policy: verifiedPolicy,
         ...(authorized ? { policyBundle: authorized.bundle } : {}),
         ...grants,
+        ...(hermesApi ? { hermesApi: { key: hermesApi.key } } : {}),
         egressProxy,
       });
       record = await this.store.finish(claimed.id, claimed.operationToken!, { state: sandbox.state === "ready" ? "ready" : "provisioning", providerId: sandbox.providerId, failureCode: sandbox.failureCode });
@@ -349,6 +360,7 @@ export class WorkspaceService {
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, claimed.id, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
+      const hermesApi = this.hermesApiAuthority?.issue(identity, claimed.id, verifiedPolicy);
       if (verifiedPolicy.egress && !egressProxy) throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
         workspaceId: claimed.id,
@@ -356,6 +368,7 @@ export class WorkspaceService {
         policy: verifiedPolicy,
         ...(authorized ? { policyBundle: authorized.bundle } : {}),
         ...grants,
+        ...(hermesApi ? { hermesApi: { key: hermesApi.key } } : {}),
         egressProxy,
       });
       return this.view(
@@ -397,6 +410,19 @@ export class WorkspaceService {
     const verifiedPolicy = authorized?.payload.policy ?? policy;
     await this.ensureAgentGrants(identity, record.id, verifiedPolicy);
     return this.gateway.test(record.id, verifiedPolicy.agentId, verifiedPolicy);
+  }
+
+  async hermesChatAccess(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string): Promise<HermesApiAccess> {
+    const record = await this.owned(identity, workspaceId);
+    if (!this.hermesApiAuthority) {
+      throw new OneComputerError("HERMES_CHAT_NOT_CONFIGURED", "Sandbox Chat is not configured", 503, true);
+    }
+    const access = this.hermesApiAuthority.issue(identity, record.id, policy);
+    if (!access) throw new OneComputerError("HERMES_NOT_SELECTED", "Hermes is not selected for this sandbox", 409);
+    if (!record.providerId || !["ready", "open"].includes(record.state)) {
+      throw new OneComputerError("WORKSPACE_NOT_READY", "Start this sandbox to use Chat", 409, true);
+    }
+    return access;
   }
 
   private async owned(identity: IdentityContext, workspaceId: string) {

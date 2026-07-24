@@ -18,6 +18,7 @@
     "key:web-push": "node scripts/generate-web-push-keys.mjs",
     "key:policy": "node scripts/generate-policy-signing-key.mjs",
     "key:egress": "node scripts/generate-egress-grant-secret.mjs",
+    "key:hermes": "node scripts/generate-hermes-api-secret.mjs",
     "dev:ui-fixture": "node scripts/ui-fixture-server.mjs"
   },
   "devDependencies": {

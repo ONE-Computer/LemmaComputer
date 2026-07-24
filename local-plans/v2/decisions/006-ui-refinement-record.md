@@ -12,7 +12,10 @@ or hiding security states.
   controlled connectivity, signed policy integrity, capabilities, governed
   operation, and model/tool availability.
 - Activity: safe operation history and governed-operation detail.
-- Sandbox: immutable policy-bounded profile, model, and agent selection.
+- Sandbox: scalable, accessible sandbox inventory with explicit creation, then
+  a per-sandbox configuration view for applications, agents, model route, and
+  security. The configuration is a schema-versioned JSON document so the same
+  state can be created programmatically later.
 - Firewall: reusable domain/protocol/port egress groups and stopped-workspace
   assignment.
 - Connections: Microsoft 365 status, approval device, and administrator tool
@@ -67,6 +70,15 @@ enforced by the external firewall.
   primary action, or off-screen policy detail.
 - The production web container was rebuilt and `http://127.0.0.1:4174`
   returned successfully.
+- Sandbox management was reviewed with one accessible sandbox at desktop and
+  390px mobile widths. The inventory table, Manage path, Application, AI
+  agent, AI model, Security sections, configuration JSON disclosure, Firewall
+  navigation, and non-submitting Create Sandbox dialog all worked with no
+  console errors. Save is correctly disabled until a running sandbox stops.
+- The deployed image currently supplies Firefox ESR only. Chrome, Obsidian,
+  VS Code, ChatGPT clients, and Hermes Desktop are visibly marked coming soon,
+  rather than being represented as selectable configuration that the runtime
+  cannot honor.
 
 ## Residual human checks
 

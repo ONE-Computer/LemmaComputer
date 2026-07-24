@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Hermes Claw
-Comment=Governed Hermes Agent through ONEComputer
-Exec=xfce4-terminal --title="Hermes Claw" --command=/usr/local/bin/onecomputer-hermes
-Icon=utilities-terminal
-Terminal=false
-Categories=Development;Utility;
-StartupNotify=true

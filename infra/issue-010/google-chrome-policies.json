@@ -1,0 +1,12 @@
+{
+  "BackgroundModeEnabled": false,
+  "BrowserSignin": 0,
+  "DefaultBrowserSettingEnabled": false,
+  "ExtensionInstallBlocklist": ["*"],
+  "MetricsReportingEnabled": false,
+  "PasswordManagerEnabled": false,
+  "ProxyMode": "fixed_servers",
+  "ProxyServer": "http://127.0.0.1:4313",
+  "ProxyBypassList": "localhost;127.0.0.1",
+  "SyncDisabled": true
+}

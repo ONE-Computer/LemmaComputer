@@ -195,12 +195,11 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     assert.equal(savedPolicy.json().version, 2);
     assert.deepEqual(savedPolicy.json().workspaceGrants, { refreshed: 1, failed: 0 });
     assert.equal(savedToolPolicy?.["list-calendars"], "deny");
-    assert.equal(refreshedPolicies.length, 2);
+    assert.equal(refreshedPolicies.length, 1);
     assert.deepEqual(refreshedPolicies.map((runtime) => runtime.agentProfile).sort(), [
       "claude-desktop-managed-v1",
-      "hermes-claw-managed-v1",
     ]);
-    assert.equal(new Set(refreshedPolicies.map((runtime) => runtime.agentId)).size, 2);
+    assert.equal(new Set(refreshedPolicies.map((runtime) => runtime.agentId)).size, 1);
     assert.ok(refreshedPolicies.every((runtime) => runtime.policyVersionId === "version-2"));
     assert.ok(refreshedPolicies.every((runtime) => runtime.toolPolicies["list-calendars"] === "deny"));
 

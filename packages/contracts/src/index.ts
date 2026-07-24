@@ -47,6 +47,22 @@ export const sandboxProfileIds = ["claude-desktop-standard-v1", "kasm-persistent
 export const sandboxProfileIdSchema = z.enum(sandboxProfileIds);
 export type SandboxProfileId = z.infer<typeof sandboxProfileIdSchema>;
 
+// Applications are an owned, policy-bounded catalog. The reviewed workspace
+// image contains both browsers, while each sandbox configuration decides which
+// launchers are exposed on its next start.
+export const sandboxApplicationIds = ["firefox", "google-chrome"] as const;
+export const sandboxApplicationIdSchema = z.enum(sandboxApplicationIds);
+export type SandboxApplicationId = z.infer<typeof sandboxApplicationIdSchema>;
+
+export const sandboxApplicationSchema = z.object({
+  id: sandboxApplicationIdSchema,
+  displayName: z.string().min(1),
+  category: z.string().min(1),
+  version: z.string().min(1),
+  description: z.string().min(1),
+}).strict();
+export type SandboxApplication = z.infer<typeof sandboxApplicationSchema>;
+
 export const sandboxModelAliases = ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm", "onecomputer-assistant"] as const;
 export const sandboxModelAliasSchema = z.enum(sandboxModelAliases);
 export type SandboxModelAlias = z.infer<typeof sandboxModelAliasSchema>;
@@ -64,13 +80,15 @@ export const sandboxProfileSchema = z.object({
 });
 export type SandboxProfile = z.infer<typeof sandboxProfileSchema>;
 
-export const agentCatalogIds = ["claude-desktop", "hermes-claw"] as const;
+export const agentCatalogIds = ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"] as const;
 export const agentCatalogIdSchema = z.enum(agentCatalogIds);
 export type AgentCatalogId = z.infer<typeof agentCatalogIdSchema>;
 
 export const agentProfileSchema = z.enum([
   "onecomputer-default-agent",
   "claude-desktop-managed-v1",
+  "claude-cli-managed-v1",
+  "hermes-desktop-managed-v1",
   "hermes-claw-managed-v1",
 ]);
 export type AgentProfile = z.infer<typeof agentProfileSchema>;
@@ -99,8 +117,28 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
     resources: { memoryMiB: 1536 },
   }),
   agentCatalogEntrySchema.parse({
+    id: "claude-cli",
+    displayName: "Claude CLI",
+    clientVersion: "2.1.215",
+    description: "Pinned Claude CLI routed through its own governed ONEComputer identity.",
+    license: "Anthropic commercial distribution",
+    source: "https://downloads.claude.ai/claude-code-releases/2.1.215/linux-x64/claude.zst",
+    artifactSha256: "7ff9594e53cd89d1af9ceb3c18d3d70be1a5c6d27475e31ee2bed65d748f18c0",
+    resources: { memoryMiB: 1024 },
+  }),
+  agentCatalogEntrySchema.parse({
+    id: "hermes-desktop",
+    displayName: "Hermes Agent Desktop",
+    clientVersion: "0.17.0",
+    description: "Native Hermes Agent desktop client with a separately governed backend.",
+    license: "MIT",
+    source: "https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20",
+    artifactSha256: "285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990",
+    resources: { memoryMiB: 1536 },
+  }),
+  agentCatalogEntrySchema.parse({
     id: "hermes-claw",
-    displayName: "Hermes Claw",
+    displayName: "Hermes Agent CLI",
     clientVersion: "0.19.0",
     description: "Pinned Hermes Agent CLI configured as a governed ONEComputer client.",
     license: "MIT",
@@ -179,6 +217,16 @@ export const runtimeEgressPolicySchema = egressSecurityGroupVersionSchema.pick({
 });
 export type RuntimeEgressPolicy = z.infer<typeof runtimeEgressPolicySchema>;
 
+export const sandboxConfigurationSchema = z.object({
+  schemaVersion: z.literal(1),
+  profileId: sandboxProfileIdSchema,
+  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
+  agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length),
+  modelAlias: sandboxModelAliasSchema,
+  egress: runtimeEgressPolicySchema.nullable(),
+}).strict();
+export type SandboxConfiguration = z.infer<typeof sandboxConfigurationSchema>;
+
 export const egressDecisionReasonSchema = z.enum([
   "EGRESS_ALLOWED",
   "EGRESS_DEFAULT_DENY",
@@ -201,13 +249,16 @@ export type EgressDecision = z.infer<typeof egressDecisionSchema>;
 export const sandboxSettingsSchema = z.object({
   grantId: z.string().min(1).max(128),
   profileId: sandboxProfileIdSchema,
+  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
   modelAlias: sandboxModelAliasSchema,
   profile: sandboxProfileSchema,
   availableProfiles: z.array(sandboxProfileSchema).min(1),
+  availableApplications: z.array(sandboxApplicationSchema).min(1),
   availableModels: z.array(z.object({ alias: sandboxModelAliasSchema, displayName: z.string().min(1), provider: z.string().min(1) })).min(1),
   agentIds: z.array(agentCatalogIdSchema).min(1),
   availableAgents: z.array(agentCatalogEntrySchema).min(1),
   egress: runtimeEgressPolicySchema.optional(),
+  configuration: sandboxConfigurationSchema,
   updatedAt: z.iso.datetime().nullable(),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
@@ -215,6 +266,7 @@ export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
 export const saveSandboxSettingsSchema = z.object({
   grantId: z.string().min(1).max(128).default("personal"),
   profileId: sandboxProfileIdSchema,
+  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).default(["firefox"]),
   modelAlias: sandboxModelAliasSchema,
   agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length).refine(
     (ids) => new Set(ids).size === ids.length,
@@ -286,6 +338,7 @@ export const runtimePolicySchema = z.object({
   agentId: z.string().min(1),
   agentProfile: agentProfileSchema,
   agents: z.array(runtimeAgentPolicySchema).min(1).max(agentCatalogIds.length).optional(),
+  applications: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).optional(),
   networkProfile: z.literal("controlled-egress-v1"),
   egress: runtimeEgressPolicySchema.optional(),
   clipboard: clipboardPolicySchema.optional(),
@@ -394,6 +447,9 @@ export const controllerCreateSchema = z.object({
     baseUrl: z.url(),
     token: z.string().min(24),
   }).optional(),
+  hermesApi: z.object({
+    key: z.string().min(32).max(128),
+  }).strict().optional(),
   agentGrants: z.array(z.object({
     catalogId: agentCatalogIdSchema,
     agentId: z.string().min(1).max(128),
@@ -422,6 +478,17 @@ export const controllerCreateSchema = z.object({
     }).strict(),
   }).optional(),
 });
+
+export const hermesChatSessionIdSchema = z.string().regex(
+  /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
+  "Invalid Hermes chat session identifier",
+);
+export const createHermesChatSessionSchema = z.object({
+  title: z.string().trim().min(1).max(120).optional(),
+}).strict();
+export const sendHermesChatMessageSchema = z.object({
+  message: z.string().trim().min(1).max(16_000),
+}).strict();
 
 export const sandboxSchema = z.object({
   providerId: z.string().min(1),

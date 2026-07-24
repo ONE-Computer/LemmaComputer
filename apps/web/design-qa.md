@@ -83,3 +83,85 @@ No actionable P0, P1, or P2 differences remain.
   browser checks for the revised pending state.
 
 final result: passed
+
+## Sandbox management refinement — 2026-07-23
+
+- Source visual truth: `/home/mike/.codex/attachments/2a46dd26-2fd1-4dc1-8a31-a5b252c0f308/codex-clipboard-8ef18bc4-463f-499c-b073-404c8bddef2a.png`
+- Implementation screenshots: `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-inventory.png`, `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-detail.png`, and `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-detail-mobile.png`
+- Viewport and density normalization: 1440px desktop at device scale 1; 390px mobile-width check at device scale 1. The implementation uses the established ONEComputer navigation, type scale, borders, buttons, and status treatment from the source.
+- State: one running, accessible sandbox; the configuration remains intentionally read-only until it is stopped.
+- Full-view comparison evidence: `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-design-comparison.png`
+- Focused comparison evidence: the Application, AI agents, AI model, Security, configuration-document, and attached-firewall controls are visible at native detail capture scale in `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-detail.png`.
+
+### Findings
+
+The requested information architecture intentionally replaces the source's stacked workspace cards with an inventory-first management console. Visual comparison confirms the same product language is retained while giving a future multi-sandbox fleet a clear default table view and a focused detail view.
+
+- No P0, P1, or P2 visual issues remain at desktop or mobile width.
+- The table preserves scanability for sandbox name, configuration summary, external network boundary, lifecycle state, and Manage action.
+- Detail sections use clear headings and grouped selection controls: Applications; AI agents grouped by Claude, ChatGPT, and Hermes; AI model; and Security with an explicit firewall handoff.
+- Firefox ESR, Google Chrome, Claude Desktop, Claude CLI, Hermes Agent Desktop, and Hermes Agent CLI are selectable runtime-backed options. Obsidian, Visual Studio Code, and ChatGPT clients remain explicitly unavailable, avoiding a configuration UI that promises unsupported image contents.
+- The mobile layout has no horizontal overflow or clipped controls; all sections stack in a single readable column.
+
+### Interaction verification
+
+- Authenticated Chrome check: Sandbox opened an inventory with one row and a visible Create Sandbox control.
+- Manage opened Acme Workspace with Applications, AI agents, AI model, Security, and the JSON disclosure present.
+- Open Firewall navigated to the Egress firewall screen.
+- Create Sandbox opened the labelled name dialog; it was cancelled without creating a sandbox.
+- The running sandbox's Save configuration control was disabled and its stop-first rule remained visible.
+- Browser console completed without errors.
+
+### Follow-up polish
+
+- P3: add the remaining catalog entries only when the hardened sandbox image actually ships Obsidian, Visual Studio Code, or ChatGPT clients.
+
+final result: passed
+
+## Optional sandbox software and restart notice — 2026-07-24
+
+- Source visual truth: `/home/mike/.codex/attachments/1958796b-29f0-43f1-8df9-b3541aa664b4/codex-clipboard-9e5ec180-ecc1-47a8-94a0-88c15b4a7504.png`
+- Implementation screenshots: `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-optional-selections.png` and `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-restart-required.png`
+- Viewport: `2280 × 1248` CSS pixels at device scale factor 1.
+- Density normalization: the source is `2280 × 1248`; the selected-state implementation is a full-page `2265 × 1986` capture, where the 15px width difference is the browser scrollbar, and the restart-dialog implementation is `2280 × 1248`. Both were inspected at native density.
+- State: stopped sandbox; Chrome, Claude CLI, and Hermes Agent Desktop opted in alongside the existing Firefox, Claude Desktop, and Hermes Agent CLI selections; restart notice open after save.
+- Full-view comparison evidence: the source and `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-optional-selections.png` were opened together at native detail in the same comparison pass.
+- Focused comparison evidence: `/home/mike/Documents/onecomputer/apps/web/.artifacts/sandbox-restart-required.png` shows the saved-state confirmation, modal hierarchy, background selection state, and success toast at the source viewport.
+
+### Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- Fonts and typography: the existing Inter-based ONEComputer type system preserves the source hierarchy, optical weights, wrapping, and compact catalog metadata. The new option names and versions fit without truncation or cramped line height.
+- Spacing and layout rhythm: application cards remain a balanced two-column grid; the AI agent groups retain the source three-column anatomy. The extra full-page height is expected because the implementation also includes model, security, and save sections below the source crop.
+- Colors and visual tokens: selected options reuse the source navy outline, pale-blue fill, and checked control. Unavailable options retain the quieter neutral treatment, and the restart overlay uses the established modal and success colors.
+- Image quality and asset fidelity: the source contains no photographic or illustrative assets. The implementation continues to use the established Fluent icon set; no placeholder imagery, handcrafted SVG, CSS art, or text-glyph substitute was introduced.
+- Copy and content: Chrome, Claude CLI, and Hermes Agent Desktop now show pinned runtime names, versions, and governed-routing descriptions. The confirmation explicitly says a restart is required and that the saved configuration becomes the source of truth for the next launch.
+- Accessibility and behavior: all six runtime-backed choices are semantic checkboxes with complete accessible names. The restart notice is a labelled modal dialog, moves focus to its close control, provides a clear primary dismissal action, and leaves the rest of the app inert.
+- Responsiveness and viewport resilience: the source desktop composition remains intact at `2280 × 1248`; no control overlaps, clipping, horizontal overflow, or unusable wrapping was observed.
+
+### Interaction verification
+
+- Opened Sandbox, opened the stopped sandbox detail, and selected Google Chrome, Claude CLI, and Hermes Agent Desktop.
+- Saved the configuration and verified the `Restart required` modal and `Sandbox configuration saved` live status.
+- Read the settings API again after save and confirmed all selected application and agent IDs were persisted for the next launch.
+- Browser console inspection found no errors, warnings, or issues.
+
+### Comparison history
+
+#### Pass 1
+
+- Direct source/implementation comparison found no P0, P1, or P2 visual mismatch.
+- The differences from the source are intentional product changes: Chrome, Claude CLI, and Hermes Agent Desktop are selectable and show pinned runtime metadata; Obsidian, Visual Studio Code, and ChatGPT remain unavailable.
+- No visual fix iteration was required.
+
+### Implementation checklist
+
+- [x] Preserve the source layout and selection styling.
+- [x] Make Chrome, Claude CLI, and Hermes Agent Desktop real opt-in controls.
+- [x] Keep the existing default selection unchanged.
+- [x] Persist the saved configuration for the next sandbox launch.
+- [x] Show an accessible restart-required confirmation after save.
+- [x] Verify the interaction path and console at the source viewport.
+
+final result: passed

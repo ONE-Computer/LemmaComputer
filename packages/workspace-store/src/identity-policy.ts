@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
-import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, OneComputerError, m365ToolCatalog, ownedAgentCatalog, runtimePolicySchema, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy } from "@onecomputer/contracts";
+import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, OneComputerError, m365ToolCatalog, ownedAgentCatalog, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId } from "@onecomputer/contracts";
 import { compileEgressSecurityGroup } from "@onecomputer/egress-policy";
 
 export type OneComputerRole = "employee" | "administrator";
@@ -37,15 +37,19 @@ export type EffectivePolicy = {
   egressSecurityGroup?: EgressSecurityGroupVersion | null;
 };
 
-const agentProfileFor = (catalogId: AgentCatalogId): AgentProfile => catalogId === "hermes-claw"
-  ? "hermes-claw-managed-v1"
-  : "claude-desktop-managed-v1";
+const agentProfileFor = (catalogId: AgentCatalogId): AgentProfile => ({
+  "claude-desktop": "claude-desktop-managed-v1",
+  "claude-cli": "claude-cli-managed-v1",
+  "hermes-desktop": "hermes-desktop-managed-v1",
+  "hermes-claw": "hermes-claw-managed-v1",
+})[catalogId] as AgentProfile;
 
 export const runtimePolicyFor = (
   policy: EffectivePolicy,
   selectedModelAlias?: string,
   selectedWorkspaceProfile?: string,
   selectedAgentIds?: AgentCatalogId[],
+  selectedApplicationIds?: SandboxApplicationId[],
 ): RuntimePolicy => {
   const document = policy.document as Record<string, unknown>;
   const mcp = document.mcp as Record<string, unknown> | undefined;
@@ -77,12 +81,28 @@ export const runtimePolicyFor = (
     : hasAgentCatalog
       ? ownedAgentCatalog.map((agent) => agent.id)
       : [document.agentProfile === "hermes-claw-managed-v1" ? "hermes-claw" : "claude-desktop"] as AgentCatalogId[];
-  const agentIds = hasAgentCatalog ? selectedAgentIds ?? configuredAgentIds : configuredAgentIds;
+  const defaultAgentIds = Array.isArray(document.defaultAgents)
+    ? document.defaultAgents.filter((value): value is AgentCatalogId => typeof value === "string" && configuredAgentIds.includes(value as AgentCatalogId))
+    : configuredAgentIds;
+  const agentIds = hasAgentCatalog ? selectedAgentIds ?? defaultAgentIds : configuredAgentIds;
   if (!agentIds.length || new Set(agentIds).size !== agentIds.length) {
     throw new OneComputerError("AGENT_SELECTION_INVALID", "At least one unique workspace agent must be selected", 400);
   }
   if (agentIds.some((id) => !configuredAgentIds.includes(id))) {
     throw new OneComputerError("AGENT_NOT_ASSIGNED", "A selected agent is not assigned by the active policy", 403);
+  }
+  const configuredApplicationIds = Array.isArray(document.applications)
+    ? document.applications.filter((value): value is SandboxApplicationId => typeof value === "string" && sandboxApplicationIds.includes(value as SandboxApplicationId))
+    : ["firefox"] as SandboxApplicationId[];
+  const defaultApplicationIds = Array.isArray(document.defaultApplications)
+    ? document.defaultApplications.filter((value): value is SandboxApplicationId => typeof value === "string" && configuredApplicationIds.includes(value as SandboxApplicationId))
+    : configuredApplicationIds;
+  const applicationIds = selectedApplicationIds ?? defaultApplicationIds;
+  if (!applicationIds.length || new Set(applicationIds).size !== applicationIds.length) {
+    throw new OneComputerError("APPLICATION_SELECTION_INVALID", "At least one unique sandbox application must be selected", 400);
+  }
+  if (applicationIds.some((id) => !configuredApplicationIds.includes(id))) {
+    throw new OneComputerError("APPLICATION_NOT_ASSIGNED", "A selected application is not assigned by the active policy", 403);
   }
   const agents = hasAgentCatalog ? agentIds.map((catalogId) => {
     const catalog = ownedAgentCatalog.find((entry) => entry.id === catalogId);
@@ -119,6 +139,7 @@ export const runtimePolicyFor = (
     agentId: primaryAgent?.agentId ?? policy.agentId,
     agentProfile: primaryAgent?.agentProfile ?? document.agentProfile,
     ...(agents ? { agents } : {}),
+    applications: applicationIds,
     networkProfile: document.networkProfile,
     ...(egress ? { egress } : {}),
     clipboard: {
@@ -173,13 +194,29 @@ export interface IdentityPolicyStore {
   bindWorkspaceIdentity(userId: string, workspaceId: string): Promise<void>;
 }
 
+const mvpAgentIds = ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"] as const;
+const mvpDefaultAgentIds = ["claude-desktop", "hermes-claw"] as const;
+const mvpApplicationIds = ["firefox", "google-chrome"] as const;
+const mvpDefaultApplicationIds = ["firefox"] as const;
+
+const applyMvpSandboxCatalog = (document: Record<string, OwnedJson>) => {
+  document.agents = [...mvpAgentIds];
+  document.defaultAgents = [...mvpDefaultAgentIds];
+  document.applications = [...mvpApplicationIds];
+  document.defaultApplications = [...mvpDefaultApplicationIds];
+  return document;
+};
+
 const mvpPolicyDocument = (revisionNote = "Initial MVP policy") => ({
   schemaVersion: 1,
   revisionNote,
   workspaceProfile: "claude-desktop-standard-v1",
   workspaceProfiles: ["claude-desktop-standard-v1"],
   agentProfile: "claude-desktop-managed-v1",
-  agents: ["claude-desktop", "hermes-claw"],
+  agents: [...mvpAgentIds],
+  defaultAgents: [...mvpDefaultAgentIds],
+  applications: [...mvpApplicationIds],
+  defaultApplications: [...mvpDefaultApplicationIds],
   modelAliases: ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm"],
   networkProfile: "controlled-egress-v1",
   clipboard: defaultClipboardPolicy,
@@ -509,6 +546,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         [bundleId],
       );
       const document = structuredClone((latest.rows[0]?.document ?? mvpPolicyDocument()) as OwnedJson) as Record<string, OwnedJson>;
+      applyMvpSandboxCatalog(document);
       document.revisionNote = "Updated Microsoft 365 tool approval rules";
       const mcp = document.mcp as Record<string, OwnedJson>;
       const servers = mcp.servers as Record<string, OwnedJson>;

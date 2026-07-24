@@ -21,7 +21,8 @@ const mutation = (method = "POST", body) => ({
 
 export const workspaceApi = {
   current: () => request("/api/v1/workspaces/current"),
-  create: () => request("/api/v1/workspaces", mutation("POST", { grantId: "personal" })),
+  list: () => request("/api/v1/workspaces"),
+  create: (grantId = "personal") => request("/api/v1/workspaces", mutation("POST", { grantId })),
   open: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/open`, mutation()),
   restart: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/restart`, mutation()),
   stop: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/stop`, mutation()),
@@ -29,12 +30,28 @@ export const workspaceApi = {
   delete: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}`, mutation("DELETE")),
 };
 
+export const chatApi = {
+  status: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/status`),
+  sessions: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions`),
+  createSession: (workspaceId, title) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions`,
+    mutation("POST", title ? { title } : {}),
+  ),
+  messages: (workspaceId, sessionId) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+  ),
+  send: (workspaceId, sessionId, message) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+    mutation("POST", { message }),
+  ),
+};
+
 export const sandboxApi = {
-  settings: () => request("/api/v1/sandbox-settings"),
-  save: (profileId, modelAlias, agentIds) => request("/api/v1/sandbox-settings", {
+  settings: (grantId = "personal") => request(`/api/v1/sandbox-settings?${new URLSearchParams({ grantId })}`),
+  save: (configuration) => request("/api/v1/sandbox-settings", {
     method: "PUT",
     headers: jsonHeaders,
-    body: JSON.stringify({ grantId: "personal", profileId, modelAlias, agentIds }),
+    body: JSON.stringify(configuration),
   }),
 };
 

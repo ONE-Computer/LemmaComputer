@@ -19,7 +19,7 @@ HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authoriza
 
 if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CREDENTIAL) < 24
         or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or len(AGENT_BRIDGE_TOKEN) < 24
-        or LISTEN_PORT not in {4312, 4314}):
+        or LISTEN_PORT not in {4312, 4314, 4315, 4316}):
     raise SystemExit("invalid gateway broker configuration")
 
 

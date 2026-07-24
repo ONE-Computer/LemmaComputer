@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Hermes Agent CLI
+Comment=Governed Hermes Agent CLI through ONEComputer
+Exec=xfce4-terminal --title="Hermes Agent CLI" --command=/usr/local/bin/onecomputer-hermes
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true

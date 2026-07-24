@@ -12,7 +12,9 @@ import { Delete24Regular } from "@fluentui/react-icons/svg/delete";
 import { Person24Regular } from "@fluentui/react-icons/svg/person";
 import { ChevronDown16Regular } from "@fluentui/react-icons/svg/chevron-down";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
+import { Checkmark16Filled } from "@fluentui/react-icons/svg/checkmark";
 import { ArrowLeft24Regular } from "@fluentui/react-icons/svg/arrow-left";
+import { Add24Regular } from "@fluentui/react-icons/svg/add";
 import { Dismiss24Regular } from "@fluentui/react-icons/svg/dismiss";
 import { Navigation24Regular } from "@fluentui/react-icons/svg/navigation";
 import { ShieldCheckmark24Regular } from "@fluentui/react-icons/svg/shield-checkmark";
@@ -21,7 +23,7 @@ import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { PlugConnected24Regular } from "@fluentui/react-icons/svg/plug-connected";
 import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
-import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi } from "./workspace-api.js";
+import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi } from "./workspace-api.js";
 import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
@@ -31,7 +33,7 @@ import {
   loadPendingApproval,
   signApprovalDecision,
 } from "./openvtc-browser-agent.js";
-import { ConfirmDialog, PolicyIntegrityCard, TextPromptDialog } from "./ui.jsx";
+import { ConfirmDialog, NoticeDialog, PolicyIntegrityCard, TextPromptDialog } from "./ui.jsx";
 
 const capabilities = [
   {
@@ -73,6 +75,20 @@ const operationStateLabels = {
   failed: "failed",
   expired: "expired",
 };
+const navByView = Object.freeze({
+  home: "Home",
+  chat: "Chat",
+  activity: "Activity",
+  sandbox: "Sandbox",
+  firewall: "Firewall",
+  connections: "Connections",
+  admin: "Admin",
+  help: "Help",
+});
+const viewByNav = Object.freeze(Object.fromEntries(
+  Object.entries(navByView).map(([view, name]) => [name, view]),
+));
+const navFromLocation = () => navByView[new URLSearchParams(window.location.search).get("view") ?? "home"] ?? "Home";
 
 const operationTime = (value) => new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(new Date(value));
 
@@ -601,114 +617,132 @@ function HelpScreen() {
   );
 }
 
-function SandboxScreen({ settings, loading, saving, error, workspaceState, onSave }) {
-  const [profileId, setProfileId] = useState("");
+const pendingApplications = [
+  { name: "Obsidian", type: "Knowledge workspace", detail: "Available when the approved application package is published." },
+  { name: "Visual Studio Code", type: "Code editor", detail: "Available when the approved application package is published." },
+];
+
+const agentChoices = [
+  { family: "Claude", choices: [{ catalogId: "claude-desktop", name: "Desktop", status: "available" }, { catalogId: "claude-cli", name: "CLI", status: "available" }] },
+  { family: "ChatGPT", choices: [{ name: "Desktop", status: "coming soon" }, { name: "CLI", status: "coming soon" }] },
+  { family: "Hermes Agent", choices: [{ catalogId: "hermes-desktop", name: "Desktop", status: "available" }, { catalogId: "hermes-claw", name: "CLI", status: "available" }] },
+];
+
+const sandboxName = (sandbox) => sandbox?.grantId === "personal"
+  ? "Acme Workspace"
+  : sandbox?.grantId?.replace(/^sandbox-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Managed sandbox";
+
+const sandboxStatus = (state) => ({
+  not_created: "Not started",
+  provisioning: "Preparing",
+  ready: "Ready",
+  open: "Open",
+  restarting: "Restarting",
+  stopping: "Stopping",
+  stopped: "Stopped",
+  failed: "Needs attention",
+}[state] ?? "Unknown");
+
+function SandboxScreen({ settings, sandboxes, listLoading, loading, saving, creating, error, selectedGrantId, onSelect, onBack, onCreate, onSave, onNavigateFirewall, canManageFirewall }) {
+  const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState("");
   const [agentIds, setAgentIds] = useState([]);
 
   useEffect(() => {
     if (!settings) return;
-    setProfileId(settings.profileId);
+    setApplicationIds(settings.applicationIds);
     setModelAlias(settings.modelAlias);
     setAgentIds(settings.agentIds);
-  }, [settings?.profileId, settings?.modelAlias, settings?.agentIds]);
+  }, [settings?.applicationIds, settings?.modelAlias, settings?.agentIds]);
 
-  const workspaceStopped = !["provisioning", "ready", "open", "restarting", "stopping"].includes(workspaceState);
+  const selectedSandbox = sandboxes.find((sandbox) => sandbox.grantId === selectedGrantId);
+  const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedSandbox?.state);
   const dirty = settings && (
-    profileId !== settings.profileId
+    applicationIds.join(",") !== settings.applicationIds.join(",")
     || modelAlias !== settings.modelAlias
     || agentIds.join(",") !== settings.agentIds.join(",")
   );
+  const toggleApplication = (applicationId) => setApplicationIds((current) => (
+    current.includes(applicationId) ? current.filter((id) => id !== applicationId) : [...current, applicationId]
+  ));
   const toggleAgent = (agentId) => setAgentIds((current) => (
     current.includes(agentId) ? current.filter((id) => id !== agentId) : [...current, agentId]
   ));
 
+  if (!selectedGrantId) {
+    return (
+      <div className="secondary-screen sandbox-screen sandbox-list-screen">
+        <header className="sandbox-list-heading">
+          <div className="page-heading compact">
+            <p>Sandbox management</p>
+            <h1>Sandboxes</h1>
+            <span>Manage the secure environments you can access. Each sandbox has its own application, agent, model, and firewall configuration.</span>
+          </div>
+          <button className="primary-button create-sandbox-button" type="button" onClick={onCreate} disabled={creating}><Add24Regular aria-hidden="true" />{creating ? "Creating sandbox" : "Create sandbox"}</button>
+        </header>
+        {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sandbox inventory unavailable</strong>{error}</span></div>}
+        <section className="sandbox-table-card" aria-labelledby="sandbox-table-heading">
+          <div className="sandbox-table-card-heading"><div><p>Available sandboxes</p><h2 id="sandbox-table-heading">Environment inventory</h2></div><span>{sandboxes.length} {sandboxes.length === 1 ? "sandbox" : "sandboxes"}</span></div>
+          {listLoading ? <p className="sandbox-loading">Loading accessible sandboxes…</p> : sandboxes.length ? (
+            <div className="sandbox-table-wrap"><table className="sandbox-table"><thead><tr><th scope="col">Sandbox</th><th scope="col">Configuration</th><th scope="col">Network</th><th scope="col">Status</th><th scope="col"><span className="sr-only">Manage</span></th></tr></thead><tbody>
+              {sandboxes.map((sandbox) => (
+                <tr key={sandbox.id}>
+                  <td><strong>{sandboxName(sandbox)}</strong><small>{sandbox.grantId === "personal" ? "Personal sandbox" : `Grant · ${sandbox.grantId}`}</small></td>
+                  <td><span className="sandbox-table-detail">{sandbox.profile?.client ?? "Policy configuration"}</span><small>{sandbox.agents?.length ? `${sandbox.agents.map((agent) => agent.displayName).join(", ")} · ${sandbox.profile?.modelAlias ?? "model pending"}` : "Configuration loads on open"}</small></td>
+                  <td><span className="sandbox-table-detail">Controlled egress</span><small>Firewall enforced outside the sandbox</small></td>
+                  <td><span className={`sandbox-state ${sandbox.state}`}>{sandboxStatus(sandbox.state)}</span></td>
+                  <td><button className="text-button sandbox-manage-button" type="button" onClick={() => onSelect(sandbox.grantId)}>Manage <ChevronRight16Regular aria-hidden="true" /></button></td>
+                </tr>
+              ))}
+            </tbody></table></div>
+          ) : <div className="sandbox-empty"><Laptop48Regular aria-hidden="true" /><h3>No sandbox has been created yet</h3><p>Create a sandbox to choose its managed applications, AI agents, model route, and firewall attachment.</p><button className="secondary-button" type="button" onClick={onCreate}>Create your first sandbox</button></div>}
+        </section>
+      </div>
+    );
+  }
+
   return (
-    <div className="secondary-screen sandbox-screen">
-      <header className="page-heading compact">
-        <p>Your managed environment</p>
-        <h1>Sandbox</h1>
-        <span>Choose from the workspace and AI routes your organization has approved. Changes apply the next time the workspace starts.</span>
+    <div className="secondary-screen sandbox-screen sandbox-detail-screen">
+      <button className="text-button sandbox-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />All sandboxes</button>
+      <header className="sandbox-detail-heading">
+        <div><p>Sandbox configuration</p><h1>{sandboxName(selectedSandbox)}</h1><span>Changes are recorded as a policy-bounded configuration document and apply the next time this sandbox starts.</span></div>
+        <span className={`sandbox-state ${selectedSandbox?.state}`}>{sandboxStatus(selectedSandbox?.state)}</span>
       </header>
       {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sandbox settings unavailable</strong>{error}</span></div>}
-      {loading || !settings ? <p className="sandbox-loading">Loading your assigned sandbox…</p> : (
-        <form className="sandbox-form" onSubmit={(event) => { event.preventDefault(); onSave(profileId, modelAlias, agentIds); }}>
-          <section className="sandbox-section" aria-labelledby="sandbox-profile-heading">
-            <div className="sandbox-section-heading">
-              <span className="sandbox-section-icon"><Laptop24Regular aria-hidden="true" /></span>
-              <span><h2 id="sandbox-profile-heading">Workspace profile</h2><p>The application, resources, persistence, and network boundary are managed as one versioned profile.</p></span>
-            </div>
-            <fieldset className="profile-options">
-              <legend className="sr-only">Workspace profile</legend>
-              {settings.availableProfiles.map((profile) => (
-                <label className={`profile-option${profileId === profile.id ? " selected" : ""}`} key={profile.id}>
-                  <input type="radio" name="profile" value={profile.id} checked={profileId === profile.id} onChange={() => setProfileId(profile.id)} />
-                  <span className="profile-radio" aria-hidden="true" />
-                  <span className="profile-copy">
-                    <strong>{profile.displayName}</strong>
-                    <small>{profile.description}</small>
-                    <span>{profile.client} {profile.clientVersion} · {profile.resources.cpus} CPUs · {profile.resources.memoryGiB} GB · Persistent home</span>
-                  </span>
-                  <span className="profile-version">v{profile.version}</span>
-                </label>
-              ))}
-            </fieldset>
+      {loading || !settings ? <p className="sandbox-loading">Loading sandbox configuration…</p> : (
+        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId: settings.profileId, applicationIds, modelAlias, agentIds }); }}>
+          <section className="sandbox-management-section" aria-labelledby="sandbox-applications-heading">
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Laptop24Regular aria-hidden="true" /></span><span><h2 id="sandbox-applications-heading">Applications</h2><p>Choose approved applications that need a desktop interface. The image only exposes applications that are included and policy-approved.</p></span></div>
+            <fieldset className="application-grid"><legend className="sr-only">Approved applications</legend>{settings.availableApplications.map((application) => (
+              <label className={`application-option${applicationIds.includes(application.id) ? " selected" : ""}`} key={application.id}><input type="checkbox" checked={applicationIds.includes(application.id)} onChange={() => toggleApplication(application.id)} /><span className="agent-check" aria-hidden="true">{applicationIds.includes(application.id) && <Checkmark16Filled />}</span><span><strong>{application.displayName}</strong><small>{application.category} · {application.version}</small><em>{application.description}</em></span></label>
+            ))}</fieldset>
+            {!applicationIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved application.</p>}
+            <div className="application-roadmap two-column" aria-label="Planned application catalog">{pendingApplications.map((application) => <div key={application.name}><span><strong>{application.name}</strong><small>{application.type}</small></span><span className="coming-soon">Coming soon</span><p>{application.detail}</p></div>)}</div>
           </section>
 
-          <section className="sandbox-section" aria-labelledby="sandbox-agents-heading">
-            <div className="sandbox-section-heading">
-              <span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span>
-              <span><h2 id="sandbox-agents-heading">Workspace agents</h2><p>Enable one or both approved clients. Each client receives its own revocable model and tool identity.</p></span>
-            </div>
-            <fieldset className="agent-options">
-              <legend className="sr-only">Workspace agents</legend>
-              {settings.availableAgents.map((agent) => (
-                <label className={`agent-option${agentIds.includes(agent.id) ? " selected" : ""}`} key={agent.id}>
-                  <input type="checkbox" value={agent.id} checked={agentIds.includes(agent.id)} onChange={() => toggleAgent(agent.id)} />
-                  <span className="agent-check" aria-hidden="true">{agentIds.includes(agent.id) ? "✓" : ""}</span>
-                  <span className="profile-copy">
-                    <strong>{agent.displayName}</strong>
-                    <small>{agent.description}</small>
-                    <span>Version {agent.clientVersion} · {agent.license} · {agent.resources.memoryMiB} MB declared memory</span>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-            {!agentIds.length && <p className="sandbox-selection-error" role="alert">Select at least one workspace agent.</p>}
+          <section className="sandbox-management-section" aria-labelledby="sandbox-agents-heading">
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-agents-heading">AI agents</h2><p>Each enabled agent receives a separate governed identity, model grant, and tool scope. Unavailable clients cannot be selected.</p></span></div>
+            <div className="agent-family-grid">{agentChoices.map((family) => <section className="agent-family" key={family.family}><h3>{family.family}</h3>{family.choices.map((choice) => {
+              const agent = choice.catalogId ? settings.availableAgents.find((item) => item.id === choice.catalogId) : null;
+              const selected = agent && agentIds.includes(agent.id);
+              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>Coming soon</small><em>This client is not in the approved sandbox image yet.</em></span></div>;
+            })}</section>)}</div>
+            {!agentIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved AI agent.</p>}
           </section>
 
-          <section className="sandbox-section" aria-labelledby="sandbox-model-heading">
-            <div className="sandbox-section-heading">
-              <span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span>
-              <span><h2 id="sandbox-model-heading">AI route</h2><p>Each selected agent receives this alias through its own LiteLLM grant. Provider credentials remain outside the sandbox.</p></span>
-            </div>
-            <div className="model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">
-              {settings.availableModels.map((model) => (
-                <label className={modelAlias === model.alias ? "selected" : ""} key={model.alias}>
-                  <input type="radio" name="model" value={model.alias} checked={modelAlias === model.alias} onChange={() => setModelAlias(model.alias)} />
-                  <span><strong>{model.displayName}</strong><small>{model.provider} through ONEComputer</small></span>
-                  {modelAlias === model.alias && <CheckmarkCircle24Regular aria-hidden="true" />}
-                </label>
-              ))}
-            </div>
+          <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">AI model</h2><p>The selected model route is delivered through each agent’s own LiteLLM grant. Provider credentials remain outside the sandbox.</p></span></div>
+            <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{settings.availableModels.map((model) => <label className={modelAlias === model.alias ? "selected" : ""} key={model.alias}><input type="radio" name="model" value={model.alias} checked={modelAlias === model.alias} onChange={() => setModelAlias(model.alias)} /><span><strong>{model.displayName}</strong><small>{model.provider} through ONEComputer</small></span>{modelAlias === model.alias && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
           </section>
 
-          <div className="sandbox-summary">
-            <ShieldCheckmark24Regular aria-hidden="true" />
-            <span><strong>Effective boundary</strong><small>Persistent home · gateway-only network · {agentIds.length} distinct agent {agentIds.length === 1 ? "identity" : "identities"} · no direct provider login</small></span>
-          </div>
-          <div className="sandbox-summary">
-            <ShieldCheckmark24Regular aria-hidden="true" />
-            <span>
-              <strong>Egress firewall</strong>
-              <small>{settings.egress ? `${settings.egress.name} · version ${settings.egress.version} · ${settings.egress.rules.length} approved ${settings.egress.rules.length === 1 ? "destination" : "destinations"} · all other public access denied` : "No public internet destinations are assigned."}</small>
-            </span>
-          </div>
-          {!workspaceStopped && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop the workspace before changing its profile, model route, or agents.</p>}
-          <div className="sandbox-actions">
-            <button className="primary-button" type="submit" disabled={!dirty || saving || !workspaceStopped || !agentIds.length}>{saving ? "Saving settings" : "Save sandbox settings"}</button>
-            <small>{settings.updatedAt ? `Last saved ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(settings.updatedAt))}` : "Using the policy default until you save."}</small>
-          </div>
+          <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Security</h2><p>Network policy is enforced by the external proxy, not by mutable settings inside the sandbox.</p></span></div>
+            <div className="sandbox-security-card"><div><strong>Attached firewall</strong><span>{settings.egress ? `${settings.egress.name} · version ${settings.egress.version}` : "No firewall attached"}</span><small>{settings.egress ? `${settings.egress.rules.length} approved ${settings.egress.rules.length === 1 ? "destination" : "destinations"}; every other public destination is denied.` : "An administrator must attach a firewall before public egress is available."}</small></div>{canManageFirewall && <button className="secondary-button" type="button" onClick={onNavigateFirewall}>Open firewall <ChevronRight16Regular aria-hidden="true" /></button>}</div>
+          </section>
+
+          <div className="sandbox-management-footer"><div><strong>Configuration document</strong><small>Schema v1 · {settings.profile.displayName} · persistent home · gateway-only network</small></div><button className="primary-button" type="submit" disabled={!dirty || saving || !canChange || !applicationIds.length || !agentIds.length}>{saving ? "Saving configuration" : "Save configuration"}</button></div>
+          {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this sandbox before changing its applications, agents, or AI model.</p>}
+          <details className="sandbox-json"><summary>View configuration JSON</summary><pre>{JSON.stringify(settings.configuration, null, 2)}</pre></details>
         </form>
       )}
     </div>
@@ -936,11 +970,242 @@ function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisc
   );
 }
 
+function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWorkspace }) {
+  const [status, setStatus] = useState("loading");
+  const [reasonCode, setReasonCode] = useState("");
+  const [sessions, setSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+  const transcriptRef = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+    setError("");
+    setSessions([]);
+    setActiveSessionId("");
+    setMessages([]);
+    if (!workspace || !["ready", "open"].includes(workspaceState)) {
+      setStatus("offline");
+      setReasonCode("WORKSPACE_NOT_READY");
+      return () => { active = false; };
+    }
+    setStatus("loading");
+    chatApi.status(workspace.id)
+      .then(async (nextStatus) => {
+        if (!active) return;
+        setStatus(nextStatus.state);
+        setReasonCode(nextStatus.reasonCode);
+        if (nextStatus.state === "ready") {
+          const sessionList = await chatApi.sessions(workspace.id);
+          if (!active) return;
+          setSessions(sessionList.sessions);
+          setActiveSessionId(sessionList.sessions[0]?.id ?? "");
+        }
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setStatus("error");
+        setError(requestError.message);
+      });
+    return () => { active = false; };
+  }, [workspace?.id, workspaceState, reload]);
+
+  useEffect(() => {
+    if (
+      status !== "offline"
+      || reasonCode !== "HERMES_UNAVAILABLE"
+      || !workspace
+      || !["ready", "open"].includes(workspaceState)
+    ) return undefined;
+    const timeout = window.setTimeout(() => setReload((value) => value + 1), 2000);
+    return () => window.clearTimeout(timeout);
+  }, [status, reasonCode, workspace?.id, workspaceState]);
+
+  useEffect(() => {
+    if (!workspace || !activeSessionId) {
+      setMessages([]);
+      return undefined;
+    }
+    let active = true;
+    setBusy(true);
+    setError("");
+    chatApi.messages(workspace.id, activeSessionId)
+      .then((result) => { if (active) setMessages(result.messages); })
+      .catch((requestError) => { if (active) setError(requestError.message); })
+      .finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, [workspace?.id, activeSessionId]);
+
+  useEffect(() => {
+    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.length, busy]);
+
+  const createConversation = async () => {
+    if (!workspace) return null;
+    setBusy(true);
+    setError("");
+    try {
+      const created = await chatApi.createSession(workspace.id);
+      setSessions((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+      setActiveSessionId(created.id);
+      setMessages([]);
+      return created;
+    } catch (requestError) {
+      setError(requestError.message);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendMessage = async (event) => {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || !workspace || busy) return;
+    setBusy(true);
+    setError("");
+    let sessionId = activeSessionId;
+    try {
+      if (!sessionId) {
+        const created = await chatApi.createSession(workspace.id);
+        sessionId = created.id;
+        setSessions((current) => [created, ...current]);
+        setActiveSessionId(created.id);
+      }
+      setInput("");
+      setMessages((current) => [...current, { role: "user", content: text }]);
+      const result = await chatApi.send(workspace.id, sessionId, text);
+      setMessages((current) => [...current, result.message]);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const offline = status === "offline";
+  const unavailable = status === "unavailable";
+  if (status !== "ready") {
+    const workspaceCanRetry = workspace && ["ready", "open"].includes(workspaceState);
+    const workspaceBusy = ["loading", "provisioning", "restarting", "stopping"].includes(workspaceState);
+    const restartRequired = offline && reasonCode === "HERMES_UNAVAILABLE" && workspaceCanRetry;
+    return (
+      <div className="secondary-screen chat-screen">
+        <header className="page-heading">
+          <p>Sandbox agent</p>
+          <h1>Chat</h1>
+          <span>Work with Hermes in your managed sandbox. Its files, tools, and app connections stay with that sandbox.</span>
+        </header>
+        <section className="chat-unavailable" aria-live="polite">
+          <span className={`chat-agent-mark${status === "loading" ? " loading" : ""}`}><Bot24Regular aria-hidden="true" /></span>
+          <div>
+            <h2>{status === "loading" ? "Connecting to Hermes" : unavailable ? "Hermes is not selected" : offline ? "Your agent is offline" : "Chat could not connect"}</h2>
+            <p>{status === "loading"
+              ? "We’re checking the agent inside your sandbox."
+              : unavailable
+                ? "Select Hermes Agent CLI in this sandbox’s settings, then restart the sandbox."
+                : restartRequired
+                  ? "Hermes is not responding in this sandbox. Restart it once to apply the latest managed agent runtime."
+                  : offline
+                    ? "Start the sandbox to bring Hermes, its sessions, and its connections online."
+                    : error || "Hermes is temporarily unavailable."}</p>
+            {status !== "loading" && !unavailable && (
+              <div className="chat-recovery-actions">
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={restartRequired ? onRestartWorkspace : workspaceCanRetry ? () => setReload((value) => value + 1) : onStartWorkspace}
+                  disabled={workspaceBusy}
+                >
+                  {workspaceBusy ? "Preparing sandbox" : restartRequired ? "Restart sandbox" : workspaceCanRetry ? "Try again" : "Start sandbox"}
+                </button>
+                {restartRequired && <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>Try again</button>}
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="secondary-screen chat-screen">
+      <header className="chat-heading">
+        <div>
+          <p>Sandbox agent</p>
+          <h1>Chat</h1>
+          <span><i aria-hidden="true" /> Hermes is running inside your sandbox</span>
+        </div>
+        <button className="secondary-button chat-new-button" type="button" onClick={createConversation} disabled={busy}>New conversation</button>
+      </header>
+      <div className="chat-layout">
+        <aside className="chat-sessions" aria-label="Conversations">
+          <h2>Conversations</h2>
+          {sessions.length === 0 ? <p>No saved conversations yet.</p> : sessions.map((item, index) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activeSessionId === item.id ? "active" : ""}
+              onClick={() => setActiveSessionId(item.id)}
+              aria-current={activeSessionId === item.id ? "true" : undefined}
+            >
+              <strong>{item.title || `Conversation ${sessions.length - index}`}</strong>
+              <span>{item.updatedAt ? new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(item.updatedAt)) : "Hermes"}</span>
+            </button>
+          ))}
+        </aside>
+        <section className="chat-conversation" aria-label="Current conversation">
+          <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy}>
+            {messages.length === 0 ? (
+              <div className="chat-welcome">
+                <span className="chat-agent-mark"><Bot24Regular aria-hidden="true" /></span>
+                <h2>What would you like to work on?</h2>
+                <p>Hermes can use the files, approved tools, and connections available inside this sandbox.</p>
+              </div>
+            ) : messages.filter((item) => item.role === "user" || item.role === "assistant").map((item, index) => (
+              <article className={`chat-message ${item.role}`} key={`${index}-${item.role}`}>
+                <span>{item.role === "assistant" ? "Hermes" : "You"}</span>
+                <p>{item.content}</p>
+              </article>
+            ))}
+            {busy && messages.length > 0 && <p className="chat-thinking">Hermes is working…</p>}
+          </div>
+          {error && <div className="workspace-error chat-error" role="alert"><Info24Regular aria-hidden="true" /><span>{error}</span></div>}
+          <form className="chat-composer" onSubmit={sendMessage}>
+            <label className="sr-only" htmlFor="chat-message">Message Hermes</label>
+            <textarea
+              id="chat-message"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder="Message Hermes…"
+              rows="2"
+              maxLength="16000"
+              disabled={busy}
+            />
+            <button type="submit" disabled={busy || !input.trim()}>{busy ? "Working" : "Send"}</button>
+            <small>Hermes runs only while this sandbox is online.</small>
+          </form>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
-  const [activeNav, setActiveNav] = useState("Home");
+  const [activeNav, setActiveNav] = useState(navFromLocation);
   const [workspace, setWorkspace] = useState(null);
   const [workspaceState, setWorkspaceState] = useState("loading");
   const [apiError, setApiError] = useState("");
@@ -972,8 +1237,14 @@ export function App() {
   const [mcpPolicyLoading, setMcpPolicyLoading] = useState(false);
   const [mcpPolicySaving, setMcpPolicySaving] = useState(false);
   const [sandboxSettings, setSandboxSettings] = useState(null);
+  const [sandboxes, setSandboxes] = useState([]);
+  const [sandboxListLoading, setSandboxListLoading] = useState(false);
   const [sandboxLoading, setSandboxLoading] = useState(false);
   const [sandboxSaving, setSandboxSaving] = useState(false);
+  const [sandboxCreating, setSandboxCreating] = useState(false);
+  const [sandboxCreateOpen, setSandboxCreateOpen] = useState(false);
+  const [restartNoticeOpen, setRestartNoticeOpen] = useState(false);
+  const [selectedSandboxGrantId, setSelectedSandboxGrantId] = useState(null);
   const [sandboxError, setSandboxError] = useState("");
   const [confirmation, setConfirmation] = useState(null);
   const [revisionPromptOpen, setRevisionPromptOpen] = useState(false);
@@ -1006,6 +1277,21 @@ export function App() {
     const timeout = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const name = navFromLocation();
+      setActiveNav(name);
+      if (name === "Connections") setConnectionsView("list");
+      if (name === "Sandbox") {
+        setSelectedSandboxGrantId(null);
+        setSandboxSettings(null);
+      }
+      setMobileNavOpen(false);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   useEffect(() => {
     if (!mobileNavOpen) return undefined;
@@ -1065,9 +1351,10 @@ export function App() {
     if (!session) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("view") !== "connections") return;
+    const result = params.get("m365");
+    if (!result) return;
     setActiveNav("Connections");
     setConnectionsView("microsoft365-overview");
-    const result = params.get("m365");
     if (result === "connected") {
       setToast("Microsoft 365 is connected.");
       setConnectionLoading(true);
@@ -1079,8 +1366,19 @@ export function App() {
       const reason = params.get("reason");
       setConnectionError(connectionReason[reason] ?? "Microsoft 365 could not complete the connection. Please try again.");
     }
-    window.history.replaceState({}, "", window.location.pathname);
+    params.delete("m365");
+    params.delete("reason");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
   }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session || session.roles.includes("administrator") || !["Firewall", "Admin"].includes(activeNav)) return;
+    setActiveNav("Home");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("view");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }, [activeNav, session?.user.id]);
 
   useEffect(() => {
     if (activeNav !== "Admin" || !session?.roles.includes("administrator")) return;
@@ -1118,12 +1416,21 @@ export function App() {
 
   useEffect(() => {
     if (activeNav !== "Sandbox" || !session) return;
+    setSandboxListLoading(true);
+    workspaceApi.list()
+      .then((value) => { setSandboxes(value.workspaces); setSandboxError(""); })
+      .catch((error) => setSandboxError(error.message))
+      .finally(() => setSandboxListLoading(false));
+  }, [activeNav, session?.user.id]);
+
+  useEffect(() => {
+    if (activeNav !== "Sandbox" || !session || !selectedSandboxGrantId) return;
     setSandboxLoading(true);
-    sandboxApi.settings()
+    sandboxApi.settings(selectedSandboxGrantId)
       .then((value) => { setSandboxSettings(value); setSandboxError(""); })
       .catch((error) => setSandboxError(error.message))
       .finally(() => setSandboxLoading(false));
-  }, [activeNav, session?.user.id]);
+  }, [activeNav, session?.user.id, selectedSandboxGrantId]);
 
   useEffect(() => {
     const delay = ["provisioning", "restarting", "stopping"].includes(workspaceState)
@@ -1353,13 +1660,14 @@ export function App() {
     }
   };
 
-  const saveSandboxSettings = async (profileId, modelAlias, agentIds) => {
+  const saveSandboxSettings = async (configuration) => {
     setSandboxSaving(true);
     setSandboxError("");
     try {
-      const saved = await sandboxApi.save(profileId, modelAlias, agentIds);
+      const saved = await sandboxApi.save(configuration);
       setSandboxSettings(saved);
-      setToast("Sandbox settings saved. Start the workspace to apply them.");
+      setToast("Sandbox configuration saved.");
+      setRestartNoticeOpen(true);
     } catch (error) {
       setSandboxError(error.message);
     } finally {
@@ -1367,15 +1675,56 @@ export function App() {
     }
   };
 
-  const selectNav = (name) => {
+  const selectNav = (name, historyMode = "push") => {
     setActiveNav(name);
+    const url = new URL(window.location.href);
+    if (name === "Home") url.searchParams.delete("view");
+    else url.searchParams.set("view", viewByNav[name]);
+    const nextLocation = `${url.pathname}${url.search}`;
+    if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
+    else if (nextLocation !== `${window.location.pathname}${window.location.search}`) {
+      window.history.pushState({}, "", nextLocation);
+    }
     if (name === "Connections") setConnectionsView("list");
+    if (name === "Sandbox") { setSelectedSandboxGrantId(null); setSandboxSettings(null); }
     setMobileNavOpen(false);
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
   };
 
+  const selectSandbox = (grantId) => {
+    setSelectedSandboxGrantId(grantId);
+    setSandboxSettings(null);
+    setSandboxError("");
+    window.requestAnimationFrame(() => mainContentRef.current?.focus());
+  };
+
+  const createSandbox = async (name) => {
+    const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 110);
+    const grantId = `sandbox-${slug || "managed"}`;
+    setSandboxCreating(true);
+    setSandboxError("");
+    try {
+      const created = await workspaceApi.create(grantId);
+      setSandboxes((current) => [created, ...current.filter((sandbox) => sandbox.id !== created.id)]);
+      setSandboxCreateOpen(false);
+      selectSandbox(created.grantId);
+      setToast(`${sandboxName(created)} is being prepared.`);
+    } catch (error) {
+      setSandboxError(error.message);
+    } finally {
+      setSandboxCreating(false);
+    }
+  };
+
+  const openFirewallFromSandbox = () => {
+    setSelectedSandboxGrantId(null);
+    setSandboxSettings(null);
+    selectNav("Firewall");
+    window.requestAnimationFrame(() => mainContentRef.current?.focus());
+  };
+
   const configureMicrosoft365 = () => {
-    setActiveNav("Connections");
+    selectNav("Connections");
     setConnectionsView("microsoft365-tools");
   };
 
@@ -1455,11 +1804,7 @@ export function App() {
   if (authLoading) return <main className="signin-screen"><div className="signin-loading">Checking your work account…</div></main>;
   if (!session) return <SignInScreen error={authError} />;
   const firstName = session.user.displayName.split(" ")[0] || session.user.displayName;
-  const initials = session.user.displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-  const today = new Date();
-  const todayLabel = new Intl.DateTimeFormat("en", { dateStyle: "long" }).format(today);
-  const todayValue = today.toISOString().slice(0, 10);
-  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen);
+  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen || restartNoticeOpen);
 
   return (
     <div className="app-shell">
@@ -1470,6 +1815,7 @@ export function App() {
         </div>
         <nav aria-label="Primary navigation">
           <NavButton active={activeNav === "Home"} icon={activeNav === "Home" ? Home24Filled : Home24Regular} label="Home" onClick={() => selectNav("Home")} />
+          <NavButton active={activeNav === "Chat"} icon={Bot24Regular} label="Chat" onClick={() => selectNav("Chat")} />
           <NavButton active={activeNav === "Activity"} icon={Clock24Regular} label="Activity" onClick={() => selectNav("Activity")} />
           <NavButton active={activeNav === "Sandbox"} icon={Laptop24Regular} label="Sandbox" onClick={() => selectNav("Sandbox")} />
           {session.roles.includes("administrator") && <NavButton active={activeNav === "Firewall"} icon={ShieldCheckmark24Regular} label="Firewall" onClick={() => selectNav("Firewall")} />}
@@ -1478,10 +1824,25 @@ export function App() {
           <ExternalNavLink icon={Bot24Regular} label="Gateway" href={gatewayAdminUrl} />
           <NavButton active={activeNav === "Help"} icon={QuestionCircle24Regular} label="Help" onClick={() => selectNav("Help")} />
         </nav>
-        <div className="sidebar-profile">
-          <Person24Regular aria-hidden="true" />
-          <span><strong>{session.user.displayName}</strong><small>{session.tenant.displayName}</small></span>
-          <ChevronDown16Regular aria-hidden="true" />
+        <div className="sidebar-account">
+          <button
+            className="sidebar-profile"
+            type="button"
+            onClick={() => setProfileOpen((value) => !value)}
+            aria-expanded={profileOpen}
+            aria-controls="sidebar-account-menu"
+          >
+            <Person24Regular aria-hidden="true" />
+            <span><strong>{session.user.displayName}</strong><small>{session.tenant.displayName}</small></span>
+            <ChevronDown16Regular aria-hidden="true" />
+          </button>
+          {profileOpen && (
+            <div id="sidebar-account-menu" className="sidebar-account-menu">
+              <strong>{session.user.displayName}</strong>
+              <span>{session.user.email}</span>
+              <button type="button" onClick={logout}><SignOut24Regular aria-hidden="true" />Sign out</button>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -1491,20 +1852,6 @@ export function App() {
             <Navigation24Regular aria-hidden="true" />
           </button>
           <div className="mobile-brand"><strong>ONE</strong><span>Computer</span></div>
-          <div className="topbar-spacer" />
-          <time dateTime={todayValue}>{todayLabel}</time>
-          <span className="topbar-divider" />
-          <button className="account-button" type="button" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen} aria-label={`Account menu for ${session.user.displayName}`}>
-            <span>{initials}</span>
-            <ChevronDown16Regular aria-hidden="true" />
-          </button>
-          {profileOpen && (
-            <div className="profile-menu">
-              <strong>{session.user.displayName}</strong>
-              <span>{session.user.email}</span>
-              <button type="button" onClick={logout}><SignOut24Regular aria-hidden="true" />Sign out</button>
-            </div>
-          )}
         </header>
 
         {activeNav === "Home" && (
@@ -1527,7 +1874,23 @@ export function App() {
           />
         )}
         {activeNav === "Activity" && <ActivityScreen operations={operationHistory} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
-        {activeNav === "Sandbox" && <SandboxScreen settings={sandboxSettings} loading={sandboxLoading} saving={sandboxSaving} error={sandboxError} workspaceState={workspaceState} onSave={saveSandboxSettings} />}
+        {activeNav === "Chat" && <ChatScreen workspace={workspace} workspaceState={workspaceState} onStartWorkspace={openWorkspace} onRestartWorkspace={restartWorkspace} />}
+        {activeNav === "Sandbox" && <SandboxScreen
+          settings={sandboxSettings}
+          sandboxes={sandboxes}
+          listLoading={sandboxListLoading}
+          loading={sandboxLoading}
+          saving={sandboxSaving}
+          creating={sandboxCreating}
+          error={sandboxError}
+          selectedGrantId={selectedSandboxGrantId}
+          onSelect={selectSandbox}
+          onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }}
+          onCreate={() => setSandboxCreateOpen(true)}
+          onSave={saveSandboxSettings}
+          onNavigateFirewall={openFirewallFromSandbox}
+          canManageFirewall={session.roles.includes("administrator")}
+        />}
         {activeNav === "Connections" && (
           <ConnectionsScreen
             connection={m365Connection}
@@ -1575,6 +1938,27 @@ export function App() {
           busy={revisionSaving}
           onConfirm={submitPolicyVersion}
           onCancel={() => setRevisionPromptOpen(false)}
+        />
+      )}
+
+      {sandboxCreateOpen && (
+        <TextPromptDialog
+          title="Create a managed sandbox"
+          description="ONEComputer will create and start a new policy-bounded sandbox. Choose a clear name; it becomes the sandbox identifier for future automation."
+          label="Sandbox name"
+          defaultValue="Project sandbox"
+          confirmLabel="Create sandbox"
+          busy={sandboxCreating}
+          onConfirm={createSandbox}
+          onCancel={() => setSandboxCreateOpen(false)}
+        />
+      )}
+
+      {restartNoticeOpen && (
+        <NoticeDialog
+          title="Restart required"
+          description="Your changes are saved. Restart this sandbox before using it again; its next launch will expose the selected applications and AI agent clients."
+          onClose={() => setRestartNoticeOpen(false)}
         />
       )}
 
@@ -1671,7 +2055,7 @@ export function App() {
           ) : operation.state === "approval_required" && approvalRequestState === "setup" ? (
             <div className="approval-actions approval-state-actions">
               <p className="approval-device-message" role="status">{approvalRequestMessage}</p>
-              <button className="primary-button" type="button" onClick={() => { setDrawer(null); setActiveNav("Connections"); }}>
+              <button className="primary-button" type="button" onClick={() => { setDrawer(null); selectNav("Connections"); }}>
                 <ShieldCheckmark24Regular aria-hidden="true" />Set up approval device
               </button>
               <button className="secondary-button" type="button" onClick={() => setDrawer(null)}>Close</button>

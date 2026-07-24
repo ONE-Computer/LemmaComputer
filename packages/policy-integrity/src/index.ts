@@ -147,8 +147,14 @@ export class PolicyBundleSigner {
     if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 86_400) {
       throw new Error("Policy bundle lifetime must be between 60 and 86400 seconds");
     }
+    const fallbackCatalogId = ({
+      "claude-desktop-managed-v1": "claude-desktop",
+      "claude-cli-managed-v1": "claude-cli",
+      "hermes-desktop-managed-v1": "hermes-desktop",
+      "hermes-claw-managed-v1": "hermes-claw",
+    } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";
     const selectedAgents = input.policy.agents ?? [{
-      catalogId: input.policy.agentProfile === "hermes-claw-managed-v1" ? "hermes-claw" as const : "claude-desktop" as const,
+      catalogId: fallbackCatalogId,
       agentId: input.policy.agentId,
     }];
     const payload = policyBundlePayloadSchema.parse({

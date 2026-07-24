@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import type { AgentCatalogId, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
+import type { AgentCatalogId, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
 export * from "./identity-policy.js";
 
 export type WorkspaceRecord = {
@@ -23,6 +23,7 @@ export type SandboxSettingsRecord = {
   subjectId: string;
   grantId: string;
   profileId: SandboxProfileId;
+  applicationIds: SandboxApplicationId[];
   modelAlias: SandboxModelAlias;
   agentIds: AgentCatalogId[];
   updatedAt: Date;
@@ -262,6 +263,7 @@ export interface GovernanceStore {
 
 export interface WorkspaceStore {
   getCurrent(identity: IdentityContext, grantId: string): Promise<WorkspaceRecord | null>;
+  listCurrent(identity: IdentityContext): Promise<WorkspaceRecord[]>;
   getOwned(identity: IdentityContext, workspaceId: string): Promise<WorkspaceRecord | null>;
   createOrGet(identity: IdentityContext, grantId: string, idempotencyKey: string): Promise<WorkspaceRecord>;
   claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState): Promise<WorkspaceRecord | null>;
@@ -269,7 +271,7 @@ export interface WorkspaceStore {
   update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   remove(identity: IdentityContext, workspaceId: string): Promise<boolean>;
   getSandboxSettings?(identity: IdentityContext, grantId: string): Promise<SandboxSettingsRecord | null>;
-  saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; modelAlias: SandboxModelAlias; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
+  saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
   registerPolicyVerificationKeys?(keys: PolicyVerificationKey[]): Promise<void>;
 }
 
@@ -291,6 +293,7 @@ const mapSandboxSettingsRow = (row: Record<string, unknown>): SandboxSettingsRec
   subjectId: String(row.subject_id),
   grantId: String(row.grant_id),
   profileId: String(row.profile_id) as SandboxProfileId,
+  applicationIds: (Array.isArray(row.application_ids) ? row.application_ids : ["firefox"]) as SandboxApplicationId[],
   modelAlias: String(row.model_alias) as SandboxModelAlias,
   agentIds: (Array.isArray(row.agent_ids) ? row.agent_ids : ["claude-desktop", "hermes-claw"]) as AgentCatalogId[],
   updatedAt: new Date(String(row.updated_at)),
@@ -417,7 +420,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   }
 
   async migrate() {
-    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql"]) {
+    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql", "014_sandbox_applications.sql"]) {
       const migrationPath = fileURLToPath(new URL(`../migrations/${migration}`, import.meta.url));
       await this.pool.query(await readFile(migrationPath, "utf8"));
     }
@@ -459,6 +462,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       [identity.tenantId, identity.subjectId, grantId],
     );
     return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
+  async listCurrent(identity: IdentityContext) {
+    const result = await this.pool.query(
+      "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 ORDER BY updated_at DESC, created_at DESC",
+      [identity.tenantId, identity.subjectId],
+    );
+    return result.rows.map(mapRow);
   }
 
   async getOwned(identity: IdentityContext, workspaceId: string) {
@@ -539,14 +550,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return result.rowCount ? mapSandboxSettingsRow(result.rows[0]) : null;
   }
 
-  async saveSandboxSettings(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; modelAlias: SandboxModelAlias; agentIds: AgentCatalogId[] }) {
+  async saveSandboxSettings(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; agentIds: AgentCatalogId[] }) {
     const result = await this.pool.query(
-      `INSERT INTO sandbox_settings (tenant_id,subject_id,grant_id,profile_id,model_alias,agent_ids,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,now())
+      `INSERT INTO sandbox_settings (tenant_id,subject_id,grant_id,profile_id,application_ids,model_alias,agent_ids,updated_at)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,now())
        ON CONFLICT (tenant_id,subject_id,grant_id) DO UPDATE
-       SET profile_id=EXCLUDED.profile_id,model_alias=EXCLUDED.model_alias,agent_ids=EXCLUDED.agent_ids,updated_at=now()
+       SET profile_id=EXCLUDED.profile_id,application_ids=EXCLUDED.application_ids,model_alias=EXCLUDED.model_alias,agent_ids=EXCLUDED.agent_ids,updated_at=now()
        RETURNING *`,
-      [identity.tenantId, identity.subjectId, input.grantId, input.profileId, input.modelAlias, JSON.stringify(input.agentIds)],
+      [identity.tenantId, identity.subjectId, input.grantId, input.profileId, JSON.stringify(input.applicationIds), input.modelAlias, JSON.stringify(input.agentIds)],
     );
     return mapSandboxSettingsRow(result.rows[0]);
   }
@@ -1254,6 +1265,11 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
 
   async getCurrent(identity: IdentityContext, grantId: string) {
     return [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId) ?? null;
+  }
+  async listCurrent(identity: IdentityContext) {
+    return [...this.records.values()]
+      .filter((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId)
+      .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
   }
   async getOwned(identity: IdentityContext, workspaceId: string) {
     const item = this.records.get(workspaceId);

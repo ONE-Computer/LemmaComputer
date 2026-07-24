@@ -205,6 +205,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
           policyHash: "d".repeat(64),
         },
       },
+      hermesApi: {
+        key: "workspace-specific-hermes-api-key-at-least-32-characters",
+      },
     });
     const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
     const networkCreate = requests.find((item) => item.path === "/networks/create" && item.body.Name === workspaceNetwork)!;
@@ -237,6 +240,11 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=true"));
     assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL=true"));
     assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_MAX_BYTES=65536"));
+    assert.ok(serialized.includes("API_SERVER_ENABLED=true"));
+    assert.ok(serialized.includes("API_SERVER_HOST=0.0.0.0"));
+    assert.ok(serialized.includes("API_SERVER_PORT=8642"));
+    assert.ok(serialized.includes("API_SERVER_KEY=workspace-specific-hermes-api-key-at-least-32-characters"));
+    assert.equal(host.PortBindings, undefined);
     assert.ok(serialized.includes("HTTPS_PROXY=http://onecomputer:"));
     assert.ok(serialized.includes("@onecomputer-egress-proxy:3128"));
     assert.ok(!serialized.includes("EGRESS_GRANT_SECRET"));

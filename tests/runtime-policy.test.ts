@@ -32,6 +32,7 @@ test("effective policy projects to the one approved workspace runtime", () => {
     workspaceProfile: "kasm-persistent-standard",
     agentId: "agent-1",
     agentProfile: "onecomputer-default-agent",
+    applications: ["firefox"],
     networkProfile: "controlled-egress-v1",
     clipboard: {
       enabled: true,
@@ -106,4 +107,45 @@ test("policy-selected Claude and Hermes clients receive distinct governed identi
     () => runtimePolicyFor(effective, undefined, undefined, ["hermes-claw", "hermes-claw"]),
     /unique workspace agent/,
   );
+});
+
+test("optional Chrome, Claude CLI, and Hermes Agent Desktop stay off until selected", () => {
+  const effective: EffectivePolicy = {
+    assignmentId: "assignment-4", policyBundleId: "bundle-1", policyVersionId: "version-4", version: 4,
+    documentHash: "f".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-24T00:00:00.000Z",
+    agentId: "agent-1", workspaceIdentityId: "workspace-identity-1", workspaceId: null, vendorUserId: "oc-user-1",
+    document: {
+      schemaVersion: 1,
+      workspaceProfile: "claude-desktop-standard-v1",
+      workspaceProfiles: ["claude-desktop-standard-v1"],
+      agentProfile: "claude-desktop-managed-v1",
+      agents: ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"],
+      defaultAgents: ["claude-desktop", "hermes-claw"],
+      applications: ["firefox", "google-chrome"],
+      defaultApplications: ["firefox"],
+      modelAliases: ["onecomputer-claude"],
+      networkProfile: "controlled-egress-v1",
+      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders"] } } },
+    },
+  };
+
+  const defaults = runtimePolicyFor(effective);
+  assert.deepEqual(defaults.applications, ["firefox"]);
+  assert.deepEqual(defaults.agents?.map((agent) => agent.catalogId), ["claude-desktop", "hermes-claw"]);
+
+  const selected = runtimePolicyFor(
+    effective,
+    undefined,
+    undefined,
+    ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"],
+    ["firefox", "google-chrome"],
+  );
+  assert.deepEqual(selected.applications, ["firefox", "google-chrome"]);
+  assert.deepEqual(selected.agents?.map((agent) => agent.agentProfile), [
+    "claude-desktop-managed-v1",
+    "claude-cli-managed-v1",
+    "hermes-desktop-managed-v1",
+    "hermes-claw-managed-v1",
+  ]);
+  assert.equal(new Set(selected.agents?.map((agent) => agent.agentId)).size, 4);
 });

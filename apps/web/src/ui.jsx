@@ -12,7 +12,7 @@ const focusableSelector = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
-export function ModalDialog({ title, description, children, onClose, labelledBy = "modal-title" }) {
+export function ModalDialog({ title, description, children, onClose, labelledBy = "modal-title", eyebrow = "Confirm action" }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const closeHandler = useRef(onClose);
@@ -60,7 +60,7 @@ export function ModalDialog({ title, description, children, onClose, labelledBy 
       >
         <header className="modal-header">
           <div>
-            <p>Confirm action</p>
+            <p>{eyebrow}</p>
             <h2 id={labelledBy}>{title}</h2>
           </div>
           <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close dialog">
@@ -71,6 +71,20 @@ export function ModalDialog({ title, description, children, onClose, labelledBy 
         {children}
       </section>
     </div>
+  );
+}
+
+export function NoticeDialog({ title, description, onClose }) {
+  return (
+    <ModalDialog title={title} description={description} onClose={onClose} labelledBy="notice-dialog-title" eyebrow="Configuration saved">
+      <div className="modal-notice">
+        <Info24Regular aria-hidden="true" />
+        <span>The saved configuration is now the source of truth for the next sandbox launch.</span>
+      </div>
+      <div className="modal-actions">
+        <button className="primary-button" type="button" onClick={onClose}>Got it</button>
+      </div>
+    </ModalDialog>
   );
 }
 

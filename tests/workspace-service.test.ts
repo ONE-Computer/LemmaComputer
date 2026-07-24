@@ -104,6 +104,19 @@ test("workspace identifiers do not confer cross-subject access", async () => {
   );
 });
 
+test("sandbox inventory projects each sandbox using its own configuration policy", async () => {
+  const service = new WorkspaceService(new MemoryWorkspaceStore(), new FakeController());
+  await service.create(alex, policy, "personal", "inventory-personal-1", "correlation-1");
+  await service.create(alex, policy, "research", "inventory-research-1", "correlation-2");
+  const researchPolicy = { ...policy, workspaceProfile: "claude-desktop-standard-v1" as const, modelAlias: "onecomputer-claude" as const };
+
+  const inventory = await service.list(alex, async (grantId) => grantId === "research" ? researchPolicy : policy);
+
+  assert.equal(inventory.length, 2);
+  assert.equal(inventory.find((workspace) => workspace.grantId === "research")?.profile?.modelAlias, "onecomputer-claude");
+  assert.equal(inventory.find((workspace) => workspace.grantId === "personal")?.profile?.modelAlias, "onecomputer-assistant");
+});
+
 test("workspace lifetime remains UI-managed while its gateway grant can renew", async () => {
   const controller = new FakeController();
   const store = new MemoryWorkspaceStore();

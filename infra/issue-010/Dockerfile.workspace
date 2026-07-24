@@ -1,5 +1,24 @@
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b AS uv_source
 
+FROM node:22-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS hermes_desktop_builder
+
+ARG HERMES_AGENT_TAG=v2026.7.20
+ARG HERMES_AGENT_SHA256=285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990
+
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl git python3 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN curl -fsSLo /tmp/hermes-agent.tar.gz \
+      "https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_AGENT_TAG}.tar.gz" \
+    && echo "${HERMES_AGENT_SHA256}  /tmp/hermes-agent.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/hermes-agent.tar.gz -C /src --strip-components=1 \
+    && npm ci \
+    && npm run pack --workspace apps/desktop \
+    && test -x /src/apps/desktop/release/linux-unpacked/Hermes
+
 FROM kasmweb/ubuntu-jammy-desktop@sha256:58b0710b320b99ab7e352342d7ec3a25b09740c523b75d794c5f7476910da580
 
 USER root
@@ -10,6 +29,8 @@ ARG CLAUDE_CODE_VERSION=2.1.215
 ARG CLAUDE_CODE_SHA256=7ff9594e53cd89d1af9ceb3c18d3d70be1a5c6d27475e31ee2bed65d748f18c0
 ARG FIREFOX_VERSION=140.12.0esr
 ARG FIREFOX_SHA256=3323ee13ac6fe4877fa2e1f4a3aa6b8009f65a620c7bbca96fe86f1a6f433d92
+ARG GOOGLE_CHROME_VERSION=150.0.7871.186-1
+ARG GOOGLE_CHROME_SHA256=4193e00b6d5d5969ee63f7a69596868f546aa0e8cb077b3e0bf9cc1e2c719d00
 ARG HERMES_AGENT_VERSION=0.19.0
 ARG HERMES_AGENT_TAG=v2026.7.20
 ARG HERMES_AGENT_SHA256=285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990
@@ -31,14 +52,17 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       "https://downloads.claude.ai/claude-code-releases/${CLAUDE_CODE_VERSION}/linux-x64/claude.zst" \
     && curl -fsSLo /tmp/firefox.tar.xz \
       "https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/linux-x86_64/en-US/firefox-${FIREFOX_VERSION}.tar.xz" \
+    && curl -fsSLo /tmp/google-chrome.deb \
+      "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${GOOGLE_CHROME_VERSION}_amd64.deb" \
     && curl -fsSLo /tmp/hermes-agent.tar.gz \
       "https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_AGENT_TAG}.tar.gz" \
     && echo "${CLAUDE_DESKTOP_SHA256}  /tmp/claude-desktop.deb" | sha256sum -c - \
     && echo "${CLAUDE_CODE_SHA256}  /tmp/claude-code.zst" | sha256sum -c - \
     && echo "${FIREFOX_SHA256}  /tmp/firefox.tar.xz" | sha256sum -c - \
+    && echo "${GOOGLE_CHROME_SHA256}  /tmp/google-chrome.deb" | sha256sum -c - \
     && echo "${HERMES_AGENT_SHA256}  /tmp/hermes-agent.tar.gz" | sha256sum -c - \
     && apt-get update \
-    && apt-get install -y --no-install-recommends mousepad zstd /tmp/claude-desktop.deb \
+    && apt-get install -y --no-install-recommends mousepad zstd /tmp/claude-desktop.deb /tmp/google-chrome.deb \
     && tar -xJf /tmp/firefox.tar.xz -C /opt \
     && install -d -o root -g root -m 0755 /opt/onecomputer/hermes-agent \
     && tar -xzf /tmp/hermes-agent.tar.gz -C /opt/onecomputer/hermes-agent --strip-components=1 \
@@ -46,6 +70,18 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && UV_PROJECT_ENVIRONMENT=/opt/onecomputer/hermes-venv \
       uv sync --project /opt/onecomputer/hermes-agent --frozen --no-dev --no-editable \
       --python "/opt/onecomputer/python/cpython-${HERMES_PYTHON_VERSION}-linux-x86_64-gnu/bin/python" \
+    && uv pip install \
+      --python /opt/onecomputer/hermes-venv/bin/python \
+      --no-deps \
+      aiohappyeyeballs==2.6.1 \
+      aiohttp==3.14.1 \
+      aiosignal==1.4.0 \
+      attrs==25.4.0 \
+      frozenlist==1.8.0 \
+      multidict==6.7.1 \
+      propcache==0.4.1 \
+      yarl==1.22.0 \
+    && test "$(/opt/onecomputer/hermes-venv/bin/python -c 'import aiohttp; print(aiohttp.__version__)')" = "3.14.1" \
     && test "$(/opt/onecomputer/hermes-venv/bin/python -c 'from hermes_cli import __version__; print(__version__)')" = "${HERMES_AGENT_VERSION}" \
     && ln -s /opt/firefox/firefox /usr/local/bin/firefox \
     && install -d -o root -g root -m 0755 "/opt/onecomputer/claude-code/${CLAUDE_CODE_VERSION}" \
@@ -53,33 +89,47 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && chmod 0755 "/opt/onecomputer/claude-code/${CLAUDE_CODE_VERSION}/claude" \
     && test "$(/opt/onecomputer/claude-code/${CLAUDE_CODE_VERSION}/claude --version | awk '{print $1}')" = "${CLAUDE_CODE_VERSION}" \
     && test "$(/opt/firefox/firefox --version | awk '{print $3}')" = "${FIREFOX_VERSION}" \
+    && test "$(google-chrome-stable --version | awk '{print $3}')" = "${GOOGLE_CHROME_VERSION%-1}" \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /root/.cache/uv /tmp/claude-desktop.deb /tmp/claude-code.zst /tmp/firefox.tar.xz /tmp/hermes-agent.tar.gz /opt/Telegram \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/uv /tmp/claude-desktop.deb /tmp/claude-code.zst /tmp/firefox.tar.xz /tmp/google-chrome.deb /tmp/hermes-agent.tar.gz /opt/Telegram \
       /home/kasm-default-profile/Desktop/* \
       /home/kasm-default-profile/.mozilla \
       /home/kasm-default-profile/.local/share/remmina \
     && install -d -o root -g root -m 0755 /etc/claude-desktop /run/onecomputer
 
+COPY --from=hermes_desktop_builder /src/apps/desktop/release/linux-unpacked /opt/onecomputer/hermes-desktop
+COPY --from=hermes_desktop_builder /src/apps/desktop/assets/icon.png /opt/onecomputer/hermes-desktop-icon.png
 COPY infra/issue-010/onecomputer-gateway-proxy.py /usr/local/libexec/onecomputer-gateway-proxy
 COPY infra/issue-010/onecomputer-egress-broker.py /usr/local/libexec/onecomputer-egress-broker
 COPY infra/issue-010/onecomputer-mcp-stdio.py /usr/local/libexec/onecomputer-mcp-stdio
 COPY infra/issue-010/onecomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js
 COPY infra/issue-010/onecomputer-workspace-entrypoint.sh /usr/local/sbin/onecomputer-workspace-entrypoint
-COPY infra/issue-010/claude-desktop.desktop /usr/share/applications/onecomputer-claude-desktop.desktop
-COPY infra/issue-010/firefox.desktop /usr/share/applications/onecomputer-firefox.desktop
+COPY infra/issue-010/claude-desktop.desktop /usr/local/share/onecomputer/applications/onecomputer-claude-desktop.desktop
+COPY infra/issue-010/claude-cli.desktop /usr/local/share/onecomputer/applications/onecomputer-claude-cli.desktop
+COPY infra/issue-010/onecomputer-claude /usr/local/bin/onecomputer-claude
+COPY infra/issue-010/firefox.desktop /usr/local/share/onecomputer/applications/onecomputer-firefox.desktop
 COPY infra/issue-010/firefox-policies.json /opt/firefox/distribution/policies.json
+COPY infra/issue-010/google-chrome.desktop /usr/local/share/onecomputer/applications/onecomputer-google-chrome.desktop
+COPY infra/issue-010/google-chrome-policies.json /etc/opt/chrome/policies/managed/onecomputer.json
 COPY infra/issue-010/onecomputer-hermes /usr/local/bin/onecomputer-hermes
-COPY infra/issue-010/hermes-claw.desktop /usr/share/applications/onecomputer-hermes-claw.desktop
+COPY infra/issue-010/hermes-agent-cli.desktop /usr/local/share/onecomputer/applications/onecomputer-hermes-agent-cli.desktop
+COPY infra/issue-010/onecomputer-hermes-desktop /usr/local/bin/onecomputer-hermes-desktop
+COPY infra/issue-010/hermes-desktop.desktop /usr/local/share/onecomputer/applications/onecomputer-hermes-desktop.desktop
 RUN chmod 0755 \
       /usr/local/libexec/onecomputer-egress-broker \
       /usr/local/libexec/onecomputer-gateway-proxy \
       /usr/local/libexec/onecomputer-mcp-stdio \
       /usr/local/sbin/onecomputer-workspace-entrypoint \
+      /usr/local/bin/onecomputer-claude \
       /usr/local/bin/onecomputer-hermes \
-      /usr/share/applications/onecomputer-claude-desktop.desktop \
-      /usr/share/applications/onecomputer-firefox.desktop \
-      /usr/share/applications/onecomputer-hermes-claw.desktop \
-    && chmod 0644 /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js /opt/firefox/distribution/policies.json \
+      /usr/local/bin/onecomputer-hermes-desktop \
+      /usr/local/share/onecomputer/applications/onecomputer-claude-desktop.desktop \
+      /usr/local/share/onecomputer/applications/onecomputer-claude-cli.desktop \
+      /usr/local/share/onecomputer/applications/onecomputer-firefox.desktop \
+      /usr/local/share/onecomputer/applications/onecomputer-google-chrome.desktop \
+      /usr/local/share/onecomputer/applications/onecomputer-hermes-agent-cli.desktop \
+      /usr/local/share/onecomputer/applications/onecomputer-hermes-desktop.desktop \
+    && chmod 0644 /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js /opt/firefox/distribution/policies.json /etc/opt/chrome/policies/managed/onecomputer.json \
     && grep -q 'dist/style.bundle.js' /usr/share/kasmvnc/www/index.html \
     && printf '%s\n' '<script src="/app/onecomputer-kasm-clipboard.js"></script>' >> /usr/share/kasmvnc/www/index.html \
     && chown -R 1000:1000 /home/kasm-default-profile/Desktop /home/kasm-default-profile/.config

@@ -116,6 +116,7 @@ consistent, and the completion record points to the bundle.
 | 004 | P2 | verification | Add a push-capable OpenVTC companion web app | 003 |
 | 005 | P3 | complete | Sign projected policy and verify it at enforcement points | 004 |
 | 006 | P3 | verification | Refine the complete V2 UI and accessibility | 005 |
+| 007 | P1 | verification | Chat with Hermes inside the assigned sandbox | 003 |
 
 ## Assignment template
 

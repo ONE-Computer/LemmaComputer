@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Hermes Agent Desktop
+Comment=Governed Hermes Agent desktop through ONEComputer
+Exec=/usr/local/bin/onecomputer-hermes-desktop
+Icon=/opt/onecomputer/hermes-desktop-icon.png
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true

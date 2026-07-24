@@ -122,7 +122,7 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
       ...base,
       policyBundle: {
         ...signedPolicy.bundle,
-        signature: `${signedPolicy.bundle.signature.slice(0, -1)}${signedPolicy.bundle.signature.endsWith("A") ? "B" : "A"}`,
+        signature: `${signedPolicy.bundle.signature.startsWith("A") ? "B" : "A"}${signedPolicy.bundle.signature.slice(1)}`,
       },
     },
   });
