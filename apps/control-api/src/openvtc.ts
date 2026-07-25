@@ -22,6 +22,12 @@ const ENROLLMENT_TTL_MS = 5 * 60 * 1000;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
+// trust-tasks-rs serializes whole-second RFC 3339 instants without a
+// fractional component before verifying their Data Integrity proof. Keep the
+// challenge representation aligned so a browser signs the same bytes the
+// verifier receives.
+export const openVtcTimestamp = (value: Date) => value.toISOString().replace(".000Z", "Z");
+
 type ApprovalStore = WorkspaceStore & GovernanceStore & OpenVtcApprovalStore;
 
 const publicApprover = (record: OpenVtcApproverRecord) => ({
@@ -101,8 +107,8 @@ export class OpenVtcApprovalCoordinator {
       challenge: record.challenge,
       tenantId: record.tenantId,
       subjectId: record.subjectId,
-      issuedAt: record.createdAt.toISOString(),
-      expiresAt: record.expiresAt.toISOString(),
+      issuedAt: openVtcTimestamp(record.createdAt),
+      expiresAt: openVtcTimestamp(record.expiresAt),
     };
   }
 

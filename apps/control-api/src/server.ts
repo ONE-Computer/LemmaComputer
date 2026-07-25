@@ -977,12 +977,15 @@ export function createControlServer(
       throw error;
     }
   });
-  app.get<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
+  app.get<{ Params: { workspaceId: string; catalogId: string }; Querystring: { cursor?: string; limit?: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
-    const sessions = (await agentChat.listSessions(access)).map((session) => ({ ...session, agentCatalogId: catalogId }));
-    return reply.header("cache-control", "no-store").send({ sessions });
+    const limit = z.coerce.number().int().min(1).max(50).catch(20).parse(request.query.limit);
+    const cursor = request.query.cursor ? chatSessionIdSchema.parse(request.query.cursor) : undefined;
+    const page = await agentChat.listSessions(access, { cursor, limit });
+    const sessions = page.sessions.map((session) => ({ ...session, agentCatalogId: catalogId }));
+    return reply.header("cache-control", "no-store").send({ sessions, nextCursor: page.nextCursor });
   });
   app.post<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);

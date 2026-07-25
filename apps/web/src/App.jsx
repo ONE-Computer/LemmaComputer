@@ -829,7 +829,7 @@ function ActivityScreen({ displayName, operations, onOpenOperation }) {
       </header>
       <div className="trail-device">
         <ApprovalDeviceCard displayName={displayName} />
-        <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Your approval key stays encrypted on its device. Each account has one active approval device; setting up another browser replaces the current one.</p></div>
+        <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Approval keys stay encrypted on their enrolled devices. Protected actions are sent to active approval devices and require a local confirmation.</p></div>
       </div>
       <div className="timeline">
         {operations.map((operation) => (
@@ -868,6 +868,26 @@ const agentChoices = [
 const workspaceName = (workspace) => workspace?.grantId === "personal"
   ? "Acme Workspace"
   : workspace?.grantId?.replace(/^(sandbox|workspace)-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Managed workspace";
+
+const workspacePreferenceKey = "onecomputer.active-workspace-id";
+const chatAgentPreferenceKey = (workspaceId) => `onecomputer.active-chat-agent:${workspaceId}`;
+
+const readPreference = (key) => {
+  try {
+    return window.localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+};
+
+const writePreference = (key, value) => {
+  try {
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // A blocked storage area must not prevent the workspace from being used.
+  }
+};
 
 const workspaceConfigurationStatus = (state) => ({
   not_created: "Not started",
@@ -976,16 +996,22 @@ const connectionReason = {
 
 function ApprovalDeviceCard({ displayName }) {
   const [status, setStatus] = useState(null);
+  const [localApprover, setLocalApprover] = useState(null);
   const [localReady, setLocalReady] = useState(false);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const refresh = async () => {
-    const remote = await approvalApi.status();
-    const local = await hasBrowserApprover(remote.approver?.approverDid);
+    const local = await getBrowserApproverIdentity();
+    const [remote, localStatus] = await Promise.all([
+      approvalApi.status(),
+      local ? approvalApi.status(local.did) : Promise.resolve(null),
+    ]);
+    const ready = Boolean(local && localStatus?.connected && await hasBrowserApprover(local.did));
     setStatus(remote);
-    setLocalReady(local);
+    setLocalApprover(local);
+    setLocalReady(ready);
   };
 
   useEffect(() => {
@@ -1017,8 +1043,8 @@ function ApprovalDeviceCard({ displayName }) {
     setBusy("disconnect");
     setMessage("");
     try {
-      await approvalApi.revoke(status?.approver?.approverDid);
-      await clearBrowserApprover(status?.approver?.approverDid);
+      await approvalApi.revoke(localApprover?.did);
+      await clearBrowserApprover(localApprover?.did);
       await refresh();
       setMessage("The browser approval device was removed.");
     } catch (error) {
@@ -1029,7 +1055,7 @@ function ApprovalDeviceCard({ displayName }) {
   };
 
   const connected = status?.connected;
-  const usable = connected && localReady;
+  const readyElsewhere = connected && !localReady;
   return (
     <>
       <section className="connection-card approval-device-card" aria-labelledby="approval-device-title">
@@ -1040,21 +1066,27 @@ function ApprovalDeviceCard({ displayName }) {
               <h2 id="approval-device-title">Approval device</h2>
               <p>OpenVTC browser agent</p>
             </div>
-            <span className={`connection-status ${usable ? "connected" : "disconnected"}`}>
-              {usable ? "Ready" : connected ? "Key unavailable" : "Not enrolled"}
+            <span className={`connection-status ${connected || localReady ? "connected" : "disconnected"}`}>
+              {localReady ? "Ready here" : readyElsewhere ? "Ready on another device" : "Not enrolled"}
             </span>
           </div>
-          <p className="connection-description">Each account uses one active approval device. Set up another browser to replace it. Protected actions require one deliberate biometric, PIN, or security-key confirmation.</p>
+          <p className="connection-description">{
+            localReady
+              ? "This browser can sign protected actions after one deliberate biometric, PIN, or security-key confirmation."
+              : readyElsewhere
+                ? `${status.approver.displayName} is enrolled. Protected actions will be sent there; its approval key never leaves that device.`
+                : "Set up an approval device to receive protected actions and confirm them with its biometric, PIN, or security key."
+          }</p>
           {connected && <p className="connection-metadata">{status.approver.displayName} · {status.approver.approverDid.slice(0, 26)}…</p>}
           {message && <p className="approval-device-message" role="status" aria-live="polite">{message}</p>}
         </div>
         <div className="connection-actions">
-          {usable ? (
+          {localReady ? (
             <button className="secondary-button" type="button" onClick={() => setConfirmRemove(true)} disabled={Boolean(busy)}>{busy === "disconnect" ? "Removing" : "Remove device"}</button>
           ) : (
             <button className="primary-button" type="button" onClick={enroll} disabled={Boolean(busy)}>
               <ShieldCheckmark24Regular aria-hidden="true" />
-              {busy === "enroll" ? "Waiting for device" : connected ? "Replace with this browser" : "Set up this browser"}
+              {busy === "enroll" ? "Waiting for device" : readyElsewhere ? "Set up this browser too" : "Set up this browser"}
             </button>
           )}
         </div>
@@ -1238,15 +1270,13 @@ function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisc
       <section className="connection-card" aria-labelledby="microsoft-365-title">
         <div className="connection-logo"><PlugConnected24Regular aria-hidden="true" /></div>
         <div className="connection-copy">
-          <div className="connection-title-row">
-            <div>
-              <h2 id="microsoft-365-title">Microsoft 365</h2>
-              <p>Outlook Mail, Calendar, OneDrive, and Teams</p>
-            </div>
+          <div className="connection-heading">
+            <h2 id="microsoft-365-title">Microsoft 365</h2>
             <span className={`connection-status ${connected ? "connected" : expired ? "expired" : "disconnected"}`}>
               {loading ? "Checking" : connected ? "Connected" : expired ? "Reconnect required" : "Not connected"}
             </span>
           </div>
+          <p className="connection-service-summary">Outlook Mail, Calendar, OneDrive, and Teams</p>
           <p className="connection-description">Use approved Microsoft 365 tools through the ONEComputer AI gateway. Protected actions require approval.</p>
           <div className="connection-services" aria-label="Included services">
             <span>Outlook Mail</span><span>Calendar</span><span>OneDrive</span><span>Teams</span>
@@ -1256,7 +1286,7 @@ function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisc
         <div className="connection-actions">
           {connected ? (
             <>
-              <button className="primary-button" type="button" onClick={() => onViewChange(isAdmin ? "microsoft365-tools" : "microsoft365-overview")}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
+              <button className="primary-button connection-manage-button" type="button" onClick={() => onViewChange(isAdmin ? "microsoft365-tools" : "microsoft365-overview")}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
               <button className="connection-quiet-button" type="button" onClick={onDisconnect} disabled={busy || loading}>{busy ? "Disconnecting" : "Disconnect"}</button>
             </>
           ) : (
@@ -1325,6 +1355,7 @@ function ChatConversation({
   activeSessionId,
   onSessionsChange,
   onSessionChange,
+  onRefreshSessions,
 }) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState([]);
@@ -1337,8 +1368,7 @@ function ChatConversation({
   const sessionRef = useRef(activeSessionId);
   const loadedSessionRef = useRef("");
 
-  const refreshSessions = () => chatApi.sessions(workspaceId, agentId)
-    .then((result) => onSessionsChange(result.sessions));
+  const refreshSessions = () => onRefreshSessions?.();
   const transport = useMemo(() => new DefaultChatTransport({
     prepareSendMessagesRequest: ({ messages }) => {
       const sessionId = sessionRef.current;
@@ -1632,18 +1662,64 @@ function ChatConversation({
   );
 }
 
-function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWorkspace, activeSessionId, onSessionsChange, onSessionChange }) {
+function ChatScreen({
+  workspace,
+  workspaces,
+  workspaceState,
+  onWorkspaceChange,
+  onStartWorkspace,
+  onRestartWorkspace,
+  activeSessionId,
+  onSessionsChange,
+  onSessionChange,
+  preferredAgentId,
+  onAgentChange,
+  historyLoadRequest,
+  onHistoryMetadataChange,
+}) {
   const [agents, setAgents] = useState([]);
   const [activeAgentId, setActiveAgentId] = useState("");
   const [status, setStatus] = useState("loading");
   const [reasonCode, setReasonCode] = useState("");
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [sessionNextCursor, setSessionNextCursor] = useState(null);
+  const [sessionLoadingMore, setSessionLoadingMore] = useState(false);
+  const handledHistoryLoadRequest = useRef(historyLoadRequest);
+
+  const publishHistoryMetadata = (nextCursor = sessionNextCursor, loading = sessionLoadingMore) => {
+    onHistoryMetadataChange?.({ hasMore: Boolean(nextCursor), loading });
+  };
+
+  const loadSessionPage = async (cursor, append = false) => {
+    if (!workspace || !activeAgentId) return;
+    if (append) {
+      setSessionLoadingMore(true);
+      publishHistoryMetadata(sessionNextCursor, true);
+    }
+    try {
+      const page = await chatApi.sessions(workspace.id, activeAgentId, { cursor });
+      onSessionsChange((current) => {
+        const incoming = page.sessions ?? [];
+        if (!append) return incoming;
+        return [...current, ...incoming.filter((item) => !current.some((existing) => existing.id === item.id))];
+      });
+      setSessionNextCursor(page.nextCursor ?? null);
+      publishHistoryMetadata(page.nextCursor ?? null, false);
+    } catch (requestError) {
+      setError(requestError.message);
+      publishHistoryMetadata(sessionNextCursor, false);
+    } finally {
+      if (append) setSessionLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
     setError("");
     onSessionsChange([]);
+    setSessionNextCursor(null);
+    onHistoryMetadataChange?.({ hasMore: false, loading: false });
     setAgents([]);
     setActiveAgentId("");
     if (!workspace || !["ready", "open"].includes(workspaceState)) {
@@ -1662,8 +1738,11 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
           setReasonCode("CHAT_AGENT_NOT_SELECTED");
           return;
         }
-        const preferred = nextAgents.find((agent) => agent.state === "ready") ?? nextAgents[0];
+        const preferred = nextAgents.find((agent) => agent.catalogId === preferredAgentId)
+          ?? nextAgents.find((agent) => agent.state === "ready")
+          ?? nextAgents[0];
         setActiveAgentId(preferred.catalogId);
+        onAgentChange?.(workspace.id, preferred.catalogId);
       })
       .catch((requestError) => {
         if (!active) return;
@@ -1679,15 +1758,15 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
     setStatus("loading");
     setError("");
     onSessionsChange([]);
+    setSessionNextCursor(null);
+    onHistoryMetadataChange?.({ hasMore: false, loading: false });
     chatApi.status(workspace.id, activeAgentId)
       .then(async (nextStatus) => {
         if (!active) return;
         setStatus(nextStatus.state);
         setReasonCode(nextStatus.reasonCode);
         if (nextStatus.state === "ready") {
-          const sessionList = await chatApi.sessions(workspace.id, activeAgentId);
-          if (!active) return;
-          onSessionsChange(sessionList.sessions);
+          await loadSessionPage();
         }
       })
       .catch((requestError) => {
@@ -1697,6 +1776,13 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
       });
     return () => { active = false; };
   }, [workspace?.id, workspaceState, activeAgentId, reload]);
+
+  useEffect(() => {
+    if (historyLoadRequest === handledHistoryLoadRequest.current) return;
+    handledHistoryLoadRequest.current = historyLoadRequest;
+    if (status !== "ready" || !sessionNextCursor || sessionLoadingMore) return;
+    void loadSessionPage(sessionNextCursor, true);
+  }, [historyLoadRequest, sessionNextCursor, sessionLoadingMore, status]);
 
   useEffect(() => {
     if (
@@ -1721,16 +1807,29 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
     if (catalogId === activeAgentId) return;
     onSessionChange("");
     setActiveAgentId(catalogId);
+    onAgentChange?.(workspace?.id, catalogId);
   };
-  const agentSelector = agents.length > 1 ? (
-    <div className="chat-agent-selector">
-      <span>Agent</span>
-      <SelectMenu
-        value={activeAgentId}
-        onValueChange={selectAgent}
-        ariaLabel="Choose chat agent"
-        options={agentOptions}
-      />
+  const workspaceOptions = workspaces?.length ? workspaces : workspace ? [workspace] : [];
+  const contextSelector = (workspaceOptions.length || agents.length > 1) ? (
+    <div className="chat-context-selectors">
+      {workspaceOptions.length > 0 && <div className="chat-agent-selector">
+        <span>Workspace</span>
+        <SelectMenu
+          value={workspace?.id ?? ""}
+          onValueChange={onWorkspaceChange}
+          ariaLabel="Choose workspace"
+          options={workspaceOptions.map((item) => ({ value: item.id, label: workspaceName(item) }))}
+        />
+      </div>}
+      {agents.length > 1 && <div className="chat-agent-selector">
+        <span>Agent</span>
+        <SelectMenu
+          value={activeAgentId}
+          onValueChange={selectAgent}
+          ariaLabel="Choose chat agent"
+          options={agentOptions}
+        />
+      </div>}
     </div>
   ) : null;
   if (status !== "ready") {
@@ -1744,7 +1843,7 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
           <h1>Chat</h1>
           <span>Work with any selected agent in your managed workspace. Files, tools, and app connections stay with that workspace.</span>
         </header>
-        {agentSelector}
+        {contextSelector}
         <section className="chat-unavailable" aria-live="polite">
           <span className={`chat-agent-mark${status === "loading" ? " loading" : ""}`}><Bot24Regular aria-hidden="true" /></span>
           <div>
@@ -1779,7 +1878,7 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
 
   return (
     <div className="secondary-screen chat-screen">
-      {agentSelector}
+      {contextSelector}
       <ChatConversation
         key={`${workspace.id}:${activeAgentId}`}
         workspaceId={workspace.id}
@@ -1789,6 +1888,7 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
         activeSessionId={activeSessionId}
         onSessionsChange={onSessionsChange}
         onSessionChange={onSessionChange}
+        onRefreshSessions={() => loadSessionPage()}
       />
     </div>
   );
@@ -1800,6 +1900,7 @@ export function App() {
   const [authError, setAuthError] = useState("");
   const [activeNav, setActiveNav] = useState(navFromLocation);
   const [workspace, setWorkspace] = useState(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(() => readPreference(workspacePreferenceKey));
   const [workspaceState, setWorkspaceState] = useState("loading");
   const [homeWorkspaces, setHomeWorkspaces] = useState([]);
   const [homeWorkspacesLoading, setHomeWorkspacesLoading] = useState(true);
@@ -1833,6 +1934,10 @@ export function App() {
   const [settingsView, setSettingsView] = useState("overview");
   const [chatSessions, setChatSessions] = useState([]);
   const [activeChatSessionId, setActiveChatSessionId] = useState(chatSessionFromLocation);
+  const [chatAgentPreferences, setChatAgentPreferences] = useState({});
+  const [chatHistoryHasMore, setChatHistoryHasMore] = useState(false);
+  const [chatHistoryLoadingMore, setChatHistoryLoadingMore] = useState(false);
+  const [chatHistoryLoadRequest, setChatHistoryLoadRequest] = useState(0);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyUserId, setAdminBusyUserId] = useState("");
@@ -1942,10 +2047,30 @@ export function App() {
     setApiError("");
   };
 
+  const selectActiveWorkspace = (workspaceId) => {
+    const next = homeWorkspaces.find((item) => item.id === workspaceId);
+    if (!next || next.id === workspace?.id) return;
+    applyWorkspace(next);
+    setActiveWorkspaceId(next.id);
+    writePreference(workspacePreferenceKey, next.id);
+    setChatSessions([]);
+    setChatHistoryHasMore(false);
+    setActiveChatSessionId("");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("chat");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  };
+
   const updateWorkspaceInventory = (next) => {
     if (!next) return;
     setHomeWorkspaces((current) => [next, ...current.filter((item) => item.id !== next.id)]);
-    if (next.grantId === "personal") applyWorkspace(next);
+    if (next.id === workspace?.id) applyWorkspace(next);
+  };
+
+  const saveChatAgentPreference = (workspaceId, agentId) => {
+    if (!workspaceId || !agentId) return;
+    writePreference(chatAgentPreferenceKey(workspaceId), agentId);
+    setChatAgentPreferences((current) => ({ ...current, [workspaceId]: agentId }));
   };
 
   const showApiError = (error) => {
@@ -1955,13 +2080,25 @@ export function App() {
 
   useEffect(() => {
     if (!session) return;
-    workspaceApi.current().then(applyWorkspace).catch((error) => {
-      if (error.code === "WORKSPACE_NOT_FOUND") applyWorkspace(null);
-      else { setWorkspaceState("failed"); showApiError(error); }
-    });
-    workspaceApi.list()
-      .then((value) => { setHomeWorkspaces(value.workspaces); setApiError(""); })
-      .catch(showApiError)
+    Promise.all([
+      workspaceApi.current().catch((error) => {
+        if (error.code === "WORKSPACE_NOT_FOUND") return null;
+        throw error;
+      }),
+      workspaceApi.list(),
+    ])
+      .then(([current, value]) => {
+        const workspaces = value.workspaces;
+        const selected = workspaces.find((item) => item.id === activeWorkspaceId)
+          ?? current
+          ?? workspaces[0]
+          ?? null;
+        setHomeWorkspaces(workspaces);
+        applyWorkspace(selected);
+        setActiveWorkspaceId(selected?.id ?? "");
+        writePreference(workspacePreferenceKey, selected?.id ?? "");
+      })
+      .catch((error) => { setWorkspaceState("failed"); showApiError(error); })
       .finally(() => setHomeWorkspacesLoading(false));
     operationApi.recent().then(setOperation).catch(showApiError);
     operationApi.list().then((value) => setOperationHistory(value.operations)).catch(showApiError);
@@ -1990,13 +2127,15 @@ export function App() {
       .then((value) => {
         if (!active) return;
         setHomeWorkspaces(value.workspaces);
+        const refreshed = value.workspaces.find((item) => item.id === workspace?.id);
+        if (refreshed) applyWorkspace(refreshed);
         setHomeWorkspacesLoading(false);
       })
       .catch((error) => { if (active) showApiError(error); });
     refresh();
     const interval = window.setInterval(refresh, 10_000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [activeNav, session?.user.id]);
+  }, [activeNav, session?.user.id, workspace?.id]);
 
   useEffect(() => {
     if (!session) return;
@@ -2093,9 +2232,15 @@ export function App() {
         ? 10000
         : null;
     if (!delay) return undefined;
-    const interval = window.setInterval(() => workspaceApi.current().then(applyWorkspace).catch(showApiError), delay);
+    const interval = window.setInterval(() => workspaceApi.list()
+      .then((value) => {
+        setHomeWorkspaces(value.workspaces);
+        const refreshed = value.workspaces.find((item) => item.id === workspace?.id);
+        if (refreshed) applyWorkspace(refreshed);
+      })
+      .catch(showApiError), delay);
     return () => window.clearInterval(interval);
-  }, [workspaceState]);
+  }, [workspace?.id, workspaceState]);
 
   useEffect(() => {
     if (!operation || !["approved", "executing"].includes(operation.state)) return undefined;
@@ -2148,18 +2293,21 @@ export function App() {
     setApprovalRequestMessage("");
     getBrowserApproverIdentity()
       .then(async (local) => {
-        const status = await approvalApi.status(local?.did);
-        const localReady = Boolean(local) && await hasBrowserApprover(status.approver?.approverDid);
-        if (!status.connected || !localReady) {
+        const [accountStatus, localStatus] = await Promise.all([
+          approvalApi.status(),
+          local ? approvalApi.status(local.did) : Promise.resolve(null),
+        ]);
+        const localReady = Boolean(local && localStatus?.connected && await hasBrowserApprover(local.did));
+        if (!localReady) {
           if (active) {
-            setApprovalRequestState("setup");
-            setApprovalRequestMessage(status.connected
-              ? "This browser profile no longer has the key for the enrolled approval device. Replace it once to rebind this pending request."
+            setApprovalRequestState(accountStatus.connected ? "remote" : "setup");
+            setApprovalRequestMessage(accountStatus.connected
+              ? `${accountStatus.approver.displayName} is ready on another device. Open the Approval Companion there to approve or deny this request.`
               : "Set up this browser as your approval device before deciding this operation.");
           }
           return;
         }
-        const request = await loadPendingApproval(() => approvalApi.pending(local.did), status.executorDid);
+        const request = await loadPendingApproval(() => approvalApi.pending(local.did), localStatus.executorDid);
         if (!active) return;
         setApprovalRequest(request);
         setApprovalRequestState(request ? "ready" : "empty");
@@ -2174,7 +2322,7 @@ export function App() {
   }, [drawer, operation?.id, operation?.state, operation?.requiredApprovalChannel, approvalReload]);
 
   const createWorkspace = async (grantId = "personal") => {
-    if (grantId === "personal") setWorkspaceState("provisioning");
+    if (grantId === workspace?.grantId) setWorkspaceState("provisioning");
     setApiError("");
     try {
       const created = await workspaceApi.create(grantId);
@@ -2182,7 +2330,7 @@ export function App() {
       setToast(`${workspaceName(created)} is being prepared.`);
       return created;
     } catch (error) {
-      if (grantId === "personal") setWorkspaceState("failed");
+      if (grantId === workspace?.grantId) setWorkspaceState("failed");
       showApiError(error);
       return null;
     }
@@ -2190,14 +2338,14 @@ export function App() {
 
   const restartWorkspace = async (targetWorkspace = workspace) => {
     if (!targetWorkspace) return createWorkspace();
-    if (targetWorkspace.grantId === "personal") setWorkspaceState("restarting");
+    if (targetWorkspace.id === workspace?.id) setWorkspaceState("restarting");
     setWorkspaceActionId(targetWorkspace.id);
     setApiError("");
     try {
       updateWorkspaceInventory(await workspaceApi.restart(targetWorkspace.id));
       setToast(`${workspaceName(targetWorkspace)} is restarting.`);
     } catch (error) {
-      if (targetWorkspace.grantId === "personal") setWorkspaceState(targetWorkspace.state);
+      if (targetWorkspace.id === workspace?.id) setWorkspaceState(targetWorkspace.state);
       showApiError(error);
     } finally {
       setWorkspaceActionId("");
@@ -2227,13 +2375,13 @@ export function App() {
 
   const stopWorkspace = async (targetWorkspace = workspace) => {
     if (!targetWorkspace) return;
-    if (targetWorkspace.grantId === "personal") setWorkspaceState("stopping");
+    if (targetWorkspace.id === workspace?.id) setWorkspaceState("stopping");
     setWorkspaceActionId(targetWorkspace.id);
     try {
       updateWorkspaceInventory(await workspaceApi.stop(targetWorkspace.id));
       setToast(`${workspaceName(targetWorkspace)} has stopped.`);
     } catch (error) {
-      if (targetWorkspace.grantId === "personal") setWorkspaceState(targetWorkspace.state);
+      if (targetWorkspace.id === workspace?.id) setWorkspaceState(targetWorkspace.state);
       showApiError(error);
     } finally {
       setWorkspaceActionId("");
@@ -2249,8 +2397,17 @@ export function App() {
     })) return;
     try {
       await workspaceApi.delete(targetWorkspace.id);
-      setHomeWorkspaces((current) => current.filter((item) => item.id !== targetWorkspace.id));
-      if (targetWorkspace.grantId === "personal") applyWorkspace(null);
+      const remaining = homeWorkspaces.filter((item) => item.id !== targetWorkspace.id);
+      setHomeWorkspaces(remaining);
+      if (targetWorkspace.id === workspace?.id) {
+        const fallback = remaining.find((item) => item.grantId === "personal") ?? remaining[0] ?? null;
+        applyWorkspace(fallback);
+        setActiveWorkspaceId(fallback?.id ?? "");
+        writePreference(workspacePreferenceKey, fallback?.id ?? "");
+        setChatSessions([]);
+        setChatHistoryHasMore(false);
+        setActiveChatSessionId("");
+      }
       setToast(`${workspaceName(targetWorkspace)} deleted.`);
     } catch (error) {
       showApiError(error);
@@ -2639,6 +2796,7 @@ export function App() {
             {chatSessions.length === 0
               ? <p>No recent chats</p>
               : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => { selectChatSession(item.id); setMobileNavOpen(false); }} aria-current={activeChatSessionId === item.id ? "true" : undefined}>{item.title || `Conversation ${chatSessions.length - index}`}</button>)}
+            {chatHistoryHasMore && <button className="sidebar-chat-load-more" type="button" disabled={chatHistoryLoadingMore} onClick={() => setChatHistoryLoadRequest((value) => value + 1)}>{chatHistoryLoadingMore ? "Loading chats…" : "Load older chats"}</button>}
           </div>}
         </nav>
         <div className="sidebar-account">
@@ -2694,12 +2852,21 @@ export function App() {
         {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
         {activeNav === "Chat" && <ChatScreen
           workspace={workspace}
+          workspaces={homeWorkspaces}
           workspaceState={workspaceState}
+          onWorkspaceChange={selectActiveWorkspace}
           onStartWorkspace={openWorkspace}
           onRestartWorkspace={restartWorkspace}
           activeSessionId={activeChatSessionId}
           onSessionsChange={setChatSessions}
           onSessionChange={(sessionId) => selectChatSession(sessionId, "replace")}
+          preferredAgentId={workspace ? chatAgentPreferences[workspace.id] ?? readPreference(chatAgentPreferenceKey(workspace.id)) : ""}
+          onAgentChange={saveChatAgentPreference}
+          historyLoadRequest={chatHistoryLoadRequest}
+          onHistoryMetadataChange={({ hasMore, loading }) => {
+            setChatHistoryHasMore(hasMore);
+            setChatHistoryLoadingMore(loading);
+          }}
         />}
         {activeNav === "Workspace" && selectedSandboxGrantId && <WorkspaceConfigurationScreen
           settings={sandboxSettings}

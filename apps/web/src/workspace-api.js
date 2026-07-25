@@ -33,7 +33,11 @@ export const workspaceApi = {
 export const chatApi = {
   agents: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents`),
   status: (workspaceId, catalogId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/status`),
-  sessions: (workspaceId, catalogId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`),
+  sessions: (workspaceId, catalogId, { cursor, limit = 20 } = {}) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions?${query}`);
+  },
   createSession: (workspaceId, catalogId, title) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`,
     mutation("POST", title ? { title } : {}),

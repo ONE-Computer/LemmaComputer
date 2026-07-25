@@ -4,13 +4,18 @@ import test from "node:test";
 import type { IdentityContext } from "@onecomputer/contracts";
 import type { GovernedToolExecutionInput, GovernedToolExecutionResult, GovernedToolExecutor } from "@onecomputer/litellm-adapter";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
-import { OpenVtcApprovalCoordinator } from "../apps/control-api/src/openvtc.js";
+import { OpenVtcApprovalCoordinator, openVtcTimestamp } from "../apps/control-api/src/openvtc.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "../apps/control-api/src/operations.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 import { TestOpenVtcConsentClient, type TestDidSigner } from "./helpers/openvtc-consent.js";
 
 const identity: IdentityContext = { tenantId: "tenant-browser", subjectId: "mike", audience: "onecomputer-control" };
+
+test("OpenVTC enrollment timestamps retain the verifier's whole-second RFC 3339 form", () => {
+  assert.equal(openVtcTimestamp(new Date("2026-07-25T12:35:45.000Z")), "2026-07-25T12:35:45Z");
+  assert.equal(openVtcTimestamp(new Date("2026-07-25T12:35:45.819Z")), "2026-07-25T12:35:45.819Z");
+});
 
 class FakeExecutor implements GovernedToolExecutor {
   calls: GovernedToolExecutionInput[] = [];

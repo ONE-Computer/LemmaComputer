@@ -29,6 +29,11 @@ export type AgentChatSession = {
   updatedAt: string | null;
 };
 
+export type AgentChatSessionPage = {
+  sessions: AgentChatSession[];
+  nextCursor: string | null;
+};
+
 const chatRuntimePorts: Readonly<Record<ChatAgentCatalogId, number>> = Object.freeze({
   "claude-cli": 8643,
   "codex-cli": 8644,
@@ -94,7 +99,7 @@ export class AgentChatAuthority {
 
 export interface AgentChatClient {
   health(access: AgentChatAccess): Promise<void>;
-  listSessions(access: AgentChatAccess): Promise<AgentChatSession[]>;
+  listSessions(access: AgentChatAccess, options?: { cursor?: string; limit?: number }): Promise<AgentChatSessionPage>;
   createSession(access: AgentChatAccess, title?: string): Promise<AgentChatSession>;
   listMessages(access: AgentChatAccess, sessionId: string): Promise<ChatUiMessage[]>;
   streamTurn(
@@ -193,18 +198,22 @@ const session = (value: unknown): AgentChatSession => {
 };
 
 const upstreamError = (access: AgentChatAccess, status: number) => new OneComputerError(
-  status === 404
+  status === 400
+    ? "CHAT_SESSION_REJECTED"
+    : status === 404
     ? "CHAT_SESSION_NOT_FOUND"
     : status === 409
       ? "CHAT_TURN_ACTIVE"
       : "CHAT_RUNTIME_UNAVAILABLE",
-  status === 404
+  status === 400
+    ? "The chat session could not be created"
+    : status === 404
     ? "Chat session not found"
     : status === 409
       ? "That conversation already has a turn in progress"
       : `${access.displayName} could not complete the request`,
-  status === 404 ? 404 : status === 409 ? 409 : 503,
-  status !== 404 && status !== 409,
+  status === 400 ? 400 : status === 404 ? 404 : status === 409 ? 409 : 503,
+  ![400, 404, 409].includes(status),
 );
 
 export class HttpAgentChatClient implements AgentChatClient {
@@ -246,10 +255,16 @@ export class HttpAgentChatClient implements AgentChatClient {
     await this.response(access, "/health");
   }
 
-  async listSessions(access: AgentChatAccess) {
-    const payload = object(await this.json(access, "/api/sessions"));
+  async listSessions(access: AgentChatAccess, options: { cursor?: string; limit?: number } = {}) {
+    const query = new URLSearchParams();
+    if (options.cursor) query.set("cursor", options.cursor);
+    if (options.limit) query.set("limit", String(options.limit));
+    const payload = object(await this.json(access, `/api/sessions${query.size ? `?${query}` : ""}`));
     const values = Array.isArray(payload.sessions) ? payload.sessions : [];
-    return values.map(session);
+    return {
+      sessions: values.map(session),
+      nextCursor: nullableText(payload.nextCursor ?? payload.next_cursor),
+    };
   }
 
   async createSession(access: AgentChatAccess, title?: string) {

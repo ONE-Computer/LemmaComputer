@@ -98,7 +98,20 @@ test("Trail owns approval-device management while Connections stays focused on s
   assert.match(activityScreen, /<h1>Trail<\/h1>/);
   assert.match(activityScreen, /<ApprovalDeviceCard displayName=\{displayName\}/);
   assert.doesNotMatch(connectionsScreen, /ApprovalDeviceCard/);
-  assert.match(app, /Each account uses one active approval device/);
+  assert.match(app, /Ready on another device/);
+  assert.match(app, /Open the Approval Companion there to approve or deny this request/);
+  assert.doesNotMatch(app, /Replace with this browser|Each account uses one active approval device/);
+});
+
+test("the consent-task schema is repaired additively for existing installations", async () => {
+  const [store, migration] = await Promise.all([
+    source("packages/workspace-store/src/index.ts"),
+    source("packages/workspace-store/migrations/017_openvtc_request_proof_hash.sql"),
+  ]);
+  assert.match(store, /017_openvtc_request_proof_hash\.sql/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS request_proof_hash/);
+  assert.match(migration, /request_proof_hash IS NULL OR length\(request_proof_hash\) = 64/);
+  assert.doesNotMatch(migration, /UPDATE[\s\S]+request_proof_hash/i);
 });
 
 test("desktop pages share the wider workspace content cap", async () => {
@@ -200,6 +213,29 @@ test("Chat keeps the selected conversation across a page refresh", async () => {
   assert.doesNotMatch(app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App")), /onSessionChange\(""\);\s*setAgents/);
 });
 
+test("Chat selects a workspace before an agent, preserves both choices, and pages its history", async () => {
+  const [app, api, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/workspace-api.js"),
+    source("apps/web/src/styles.css"),
+  ]);
+  const chatScreen = app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App"));
+  assert.match(chatScreen, /ariaLabel="Choose workspace"/);
+  assert.match(chatScreen, /const workspaceOptions = workspaces\?\.length \? workspaces : workspace \? \[workspace\] : \[\];/);
+  assert.doesNotMatch(chatScreen, /workspaces\?\.length > 1 && <div className="chat-agent-selector">/);
+  assert.match(chatScreen, /preferredAgentId/);
+  assert.match(chatScreen, /onAgentChange\?\.\(workspace\.id, preferred\.catalogId\)/);
+  assert.match(app, /onecomputer\.active-workspace-id/);
+  assert.match(app, /onecomputer\.active-chat-agent:/);
+  assert.match(app, /sidebar-chat-load-more/);
+  assert.match(api, /sessions: \(workspaceId, catalogId, \{ cursor, limit = 20 \} = \{\}\)/);
+  assert.match(api, /query\.set\("cursor", cursor\)/);
+  assert.match(styles, /\.sidebar-chat-history\s*\{[\s\S]*?flex: 1;/);
+  assert.match(styles, /\.sidebar-chat-history\s*\{[\s\S]*?flex-direction: column;/);
+  assert.match(styles, /\.sidebar-chat-history > button\s*\{[\s\S]*?min-height: 38px;/);
+  assert.doesNotMatch(styles, /\.sidebar-chat-history\s*\{[\s\S]*?max-height: clamp/);
+});
+
 test("Firewall presents tenant-wide effective policies in one rules table with centered change dialogs", async () => {
   const [app, styles] = await Promise.all([
     source("apps/web/src/App.jsx"),
@@ -234,7 +270,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
     source("apps/web/src/ui.css"),
   ]);
   assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog \}/);
-  assert.equal((app.match(/<SelectMenu/g) ?? []).length, 11);
+  assert.equal((app.match(/<SelectMenu/g) ?? []).length, 12);
   assert.doesNotMatch(app, /<select/);
   assert.match(ui, /export function SelectMenu/);
   assert.match(ui, /role="combobox"/);

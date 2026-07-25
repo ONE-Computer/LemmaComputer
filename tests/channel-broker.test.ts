@@ -6,6 +6,7 @@ import {
   ChannelCredentialVault,
   type ChannelControlClient,
   type TelegramBotClient,
+  type TelegramMessageOptions,
   type TelegramUpdate,
 } from "../apps/channel-broker/src/broker.js";
 import { MemoryChannelStore } from "../apps/channel-broker/src/store.js";
@@ -25,7 +26,8 @@ const secondToken = "987654321:telegram-token-for-the-second-workspace";
 
 class FakeTelegram implements TelegramBotClient {
   updates: TelegramUpdate[] = [];
-  sent: Array<{ token: string; chatId: string; text: string }> = [];
+  sent: Array<{ token: string; chatId: string; text: string; options?: TelegramMessageOptions }> = [];
+  answeredCallbacks: Array<{ token: string; callbackQueryId: string; text?: string }> = [];
 
   async validate(received: string) {
     assert.ok(received === token || received === secondToken);
@@ -39,8 +41,12 @@ class FakeTelegram implements TelegramBotClient {
     return this.updates.filter((update) => BigInt(update.updateId) >= BigInt(offset));
   }
 
-  async sendMessage(received: string, chatId: string, text: string) {
-    this.sent.push({ token: received, chatId, text });
+  async sendMessage(received: string, chatId: string, text: string, options?: TelegramMessageOptions) {
+    this.sent.push({ token: received, chatId, text, options });
+  }
+
+  async answerCallbackQuery(received: string, callbackQueryId: string, text?: string) {
+    this.answeredCallbacks.push({ token: received, callbackQueryId, text });
   }
 }
 
@@ -169,6 +175,59 @@ test("the broker allowlists senders, deduplicates updates, and isolates sessions
 
   assert.equal(control.turns[2]!.agentCatalogId, "hermes-claw");
   assert.equal(control.turns[2]!.sessionId, "session-hermes-claw");
+});
+
+test("/agent presents available agent buttons and callback selections switch the sender route", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-agent-menu-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: true,
+  });
+
+  telegram.updates = [{ updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "/agent" }];
+  await service.pollOnce();
+
+  assert.deepEqual(telegram.sent[0], {
+    token,
+    chatId: "10001",
+    text: "Tap an agent below, then wait for its confirmation before sending a message:",
+    options: {
+      inlineKeyboard: [
+        [{ text: "Hermes Agent", callbackData: "onecomputer:agent:hermes-claw" }],
+        [{ text: "Claude CLI", callbackData: "onecomputer:agent:claude-cli" }],
+        [{ text: "Codex CLI", callbackData: "onecomputer:agent:codex-cli" }],
+      ],
+    },
+  });
+
+  telegram.updates = [{
+    updateId: "2",
+    chatId: "10001",
+    senderId: "10001",
+    chatType: "private",
+    callbackData: "onecomputer:agent:codex-cli",
+    callbackQueryId: "callback-1",
+  }];
+  await service.pollOnce();
+
+  assert.deepEqual(telegram.answeredCallbacks, [{ token, callbackQueryId: "callback-1", text: undefined }]);
+  assert.equal(telegram.sent.at(-1)?.text, "Agent changed to Codex CLI.");
+  telegram.updates = [{ updateId: "3", chatId: "10001", senderId: "10001", chatType: "private", text: "hello" }];
+  await service.pollOnce();
+  assert.equal(control.turns.at(-1)?.agentCatalogId, "codex-cli");
 });
 
 test("each workspace can own one Telegram connection and credentials cannot be shared across workspaces", async () => {

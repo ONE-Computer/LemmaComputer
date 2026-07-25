@@ -33,12 +33,24 @@ export type TelegramUpdate = {
   senderId: string;
   chatType: string;
   text?: string;
+  callbackData?: string;
+  callbackQueryId?: string;
+};
+
+export type TelegramInlineButton = {
+  text: string;
+  callbackData: string;
+};
+
+export type TelegramMessageOptions = {
+  inlineKeyboard?: readonly (readonly TelegramInlineButton[])[];
 };
 
 export interface TelegramBotClient {
   validate(token: string): Promise<{ botId: string; username: string | null }>;
   getUpdates(token: string, offset: string): Promise<TelegramUpdate[]>;
-  sendMessage(token: string, chatId: string, text: string): Promise<void>;
+  sendMessage(token: string, chatId: string, text: string, options?: TelegramMessageOptions): Promise<void>;
+  answerCallbackQuery(token: string, callbackQueryId: string, text?: string): Promise<void>;
 }
 
 export interface ChannelControlClient {
@@ -183,16 +195,19 @@ export class TelegramBotApiClient implements TelegramBotClient {
     const result = await this.request(token, "getUpdates", {
       offset,
       timeout: 20,
-      allowed_updates: ["message"],
+      allowed_updates: ["message", "callback_query"],
     });
     if (!Array.isArray(result)) throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned invalid updates", 502, true);
     return result.flatMap((raw): TelegramUpdate[] => {
       const update = botResponseSchema.object(raw);
-      const message = update.message && typeof update.message === "object"
-        ? update.message as Record<string, unknown>
+      const callback = update.callback_query && typeof update.callback_query === "object"
+        ? update.callback_query as Record<string, unknown>
         : null;
-      const sender = message?.from && typeof message.from === "object"
-        ? message.from as Record<string, unknown>
+      const message = (callback?.message ?? update.message) && typeof (callback?.message ?? update.message) === "object"
+        ? (callback?.message ?? update.message) as Record<string, unknown>
+        : null;
+      const sender = (callback?.from ?? message?.from) && typeof (callback?.from ?? message?.from) === "object"
+        ? (callback?.from ?? message?.from) as Record<string, unknown>
         : null;
       const chat = message?.chat && typeof message.chat === "object"
         ? message.chat as Record<string, unknown>
@@ -209,15 +224,32 @@ export class TelegramBotApiClient implements TelegramBotClient {
         chatId: String(chat!.id),
         chatType: chat!.type as string,
         ...(typeof message?.text === "string" ? { text: message.text } : {}),
+        ...(typeof callback?.data === "string" ? { callbackData: callback.data } : {}),
+        ...(typeof callback?.id === "string" ? { callbackQueryId: callback.id } : {}),
       }];
     });
   }
 
-  async sendMessage(token: string, chatId: string, text: string) {
+  async sendMessage(token: string, chatId: string, text: string, options: TelegramMessageOptions = {}) {
     await this.request(token, "sendMessage", {
       chat_id: chatId,
       text,
       disable_web_page_preview: true,
+      ...(options.inlineKeyboard ? {
+        reply_markup: {
+          inline_keyboard: options.inlineKeyboard.map((row) => row.map((button) => ({
+            text: button.text,
+            callback_data: button.callbackData,
+          }))),
+        },
+      } : {}),
+    });
+  }
+
+  async answerCallbackQuery(token: string, callbackQueryId: string, text?: string) {
+    await this.request(token, "answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text } : {}),
     });
   }
 }
@@ -257,7 +289,15 @@ const displayNames: Readonly<Record<ChatAgentCatalogId, string>> = Object.freeze
   "codex-cli": "Codex CLI",
 });
 
-const safeFailureMessage = "ONEComputer could not complete that message. Please try again.";
+const safeFailureMessage = "ONEComputer could not complete that message. Select an available agent with /agent, or restart the workspace from ONEComputer, then try again.";
+const telegramAgentCallbackPrefix = "onecomputer:agent:";
+const switchableAgentIds = ["hermes-claw", "claude-cli", "codex-cli"] as const;
+
+const agentFromCallback = (value: string | undefined): ChatAgentCatalogId | undefined => {
+  if (!value?.startsWith(telegramAgentCallbackPrefix)) return undefined;
+  const parsed = chatAgentCatalogIdSchema.safeParse(value.slice(telegramAgentCallbackPrefix.length));
+  return parsed.success ? parsed.data : undefined;
+};
 
 export class ChannelBrokerService {
   constructor(
@@ -412,6 +452,55 @@ export class ChannelBrokerService {
     });
   }
 
+  private async chooseAgent(
+    connection: ChannelConnectionRecord,
+    identity: IdentityContext,
+    token: string,
+    update: TelegramUpdate,
+    agentCatalogId: ChatAgentCatalogId,
+  ) {
+    if (!connection.allowAgentSwitch) {
+      await this.telegram.sendMessage(token, update.chatId, "Agent switching is disabled for this workspace.");
+      return false;
+    }
+    const route = this.route(connection, identity, update.senderId, agentCatalogId);
+    await this.control.validateRoute(route);
+    await this.store.setChannelSenderAgent(connection.id, update.senderId, agentCatalogId);
+    await this.telegram.sendMessage(token, update.chatId, `Agent changed to ${displayNames[agentCatalogId]}.`);
+    return true;
+  }
+
+  private async showAgentChoices(
+    connection: ChannelConnectionRecord,
+    identity: IdentityContext,
+    token: string,
+    update: TelegramUpdate,
+  ) {
+    if (!connection.allowAgentSwitch) {
+      await this.telegram.sendMessage(token, update.chatId, "Agent switching is disabled for this workspace.");
+      return false;
+    }
+    const available = (await Promise.all(switchableAgentIds.map(async (agentCatalogId) => {
+      try {
+        await this.control.validateRoute(this.route(connection, identity, update.senderId, agentCatalogId));
+        return agentCatalogId;
+      } catch {
+        return undefined;
+      }
+    }))).filter((agentCatalogId): agentCatalogId is ChatAgentCatalogId => Boolean(agentCatalogId));
+    if (!available.length) {
+      await this.telegram.sendMessage(token, update.chatId, "No alternative agents are available for this workspace.");
+      return false;
+    }
+    await this.telegram.sendMessage(token, update.chatId, "Tap an agent below, then wait for its confirmation before sending a message:", {
+      inlineKeyboard: available.map((agentCatalogId) => [{
+        text: displayNames[agentCatalogId],
+        callbackData: `${telegramAgentCallbackPrefix}${agentCatalogId}`,
+      }]),
+    });
+    return true;
+  }
+
   private async processUpdate(
     connection: ChannelConnectionRecord,
     identity: IdentityContext,
@@ -423,24 +512,35 @@ export class ChannelBrokerService {
       update.chatType !== "private"
       || !connection.allowedUserIds.includes(update.senderId)
       || update.chatId !== update.senderId
-      || !update.text
-      || update.text.length > 4_096
+      || (!update.text && !agentFromCallback(update.callbackData))
+      || (update.text?.length ?? 0) > 4_096
     ) {
       await this.store.finishChannelUpdate(connection.id, update.updateId, "rejected", "CHANNEL_INPUT_REJECTED");
       return;
     }
 
-    const requestedAgent = /^\/agent(?:@\w+)?\s+(\S+)\s*$/.exec(update.text)?.[1];
-    if (requestedAgent) {
+    const agentCommand = update.text ? /^\/agent(?:@\w+)?(?:\s+(\S+))?\s*$/.exec(update.text) : null;
+    const selectedFromButton = agentFromCallback(update.callbackData);
+    if (agentCommand || selectedFromButton) {
       try {
-        if (!connection.allowAgentSwitch) throw new OneComputerError("CHANNEL_AGENT_SWITCH_DISABLED", "Agent switching is disabled", 403);
-        const agentCatalogId = chatAgentCatalogIdSchema.parse(requestedAgent === "hermes-agent" ? "hermes-claw" : requestedAgent);
-        const route = this.route(connection, identity, update.senderId, agentCatalogId);
-        await this.control.validateRoute(route);
-        await this.store.setChannelSenderAgent(connection.id, update.senderId, agentCatalogId);
-        await this.telegram.sendMessage(token, update.chatId, `Agent changed to ${displayNames[agentCatalogId]}.`);
-        await this.store.finishChannelUpdate(connection.id, update.updateId, "delivered");
+        if (update.callbackQueryId) {
+          await this.telegram.answerCallbackQuery(token, update.callbackQueryId).catch(() => undefined);
+        }
+        const requestedAgent = selectedFromButton ?? agentCommand?.[1];
+        const delivered = requestedAgent
+          ? await this.chooseAgent(
+            connection,
+            identity,
+            token,
+            update,
+            chatAgentCatalogIdSchema.parse(requestedAgent === "hermes-agent" ? "hermes-claw" : requestedAgent),
+          )
+          : await this.showAgentChoices(connection, identity, token, update);
+        await this.store.finishChannelUpdate(connection.id, update.updateId, delivered ? "delivered" : "rejected", delivered ? undefined : "CHANNEL_AGENT_UNAVAILABLE");
       } catch {
+        if (update.callbackQueryId) {
+          await this.telegram.answerCallbackQuery(token, update.callbackQueryId, "That agent is not available.").catch(() => undefined);
+        }
         await this.telegram.sendMessage(token, update.chatId, "That agent is not available for this workspace.");
         await this.store.finishChannelUpdate(connection.id, update.updateId, "rejected", "CHANNEL_AGENT_UNAVAILABLE");
       }

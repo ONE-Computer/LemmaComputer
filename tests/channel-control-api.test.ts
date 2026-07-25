@@ -176,7 +176,7 @@ test("credential APIs keep Telegram tokens write-only across create, rotate, lis
 class FakeAgentChat implements AgentChatClient {
   turns: ChannelTurnRequest[] = [];
   async health() {}
-  async listSessions() { return []; }
+  async listSessions() { return { sessions: [], nextCursor: null }; }
   async createSession() {
     return { id: "telegram-session-hermes", title: "Telegram", createdAt: null, updatedAt: null };
   }

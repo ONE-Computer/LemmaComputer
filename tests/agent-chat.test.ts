@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
@@ -23,6 +24,14 @@ const identity: IdentityContext = {
   subjectId: "alex",
   audience: "onecomputer-control",
 };
+
+test("Hermes session titles stay in the ONEComputer adapter so duplicate user titles cannot block a new chat", async () => {
+  const adapter = await readFile(new URL("../infra/issue-010/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  const creation = adapter.slice(adapter.indexOf('if AGENT == "hermes-claw":'), adapter.indexOf("async with state_lock:", adapter.indexOf('if AGENT == "hermes-claw":')));
+  assert.match(creation, /json=\{\}/);
+  assert.doesNotMatch(creation, /json=\{"title": item\["title"\]\}/);
+  assert.match(adapter, /nextCursor/);
+});
 
 test("chat accepts bounded inline image and document parts but rejects media mismatches", () => {
   const message = {

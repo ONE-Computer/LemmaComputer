@@ -796,9 +796,28 @@ async def sessions(request: Request) -> Response:
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if request.method == "GET":
+        raw_limit = request.query_params.get("limit", "20")
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            return JSONResponse({"error": "invalid session limit"}, status_code=400)
+        if not 1 <= limit <= 50:
+            return JSONResponse({"error": "invalid session limit"}, status_code=400)
+        cursor = request.query_params.get("cursor")
         async with state_lock:
             items = sorted(read_state()["sessions"], key=lambda item: item["updatedAt"], reverse=True)
-        return JSONResponse({"sessions": [public_session(item) for item in items]})
+        start = 0
+        if cursor:
+            cursor_index = next((index for index, item in enumerate(items) if item.get("id") == cursor), None)
+            if cursor_index is None:
+                return JSONResponse({"error": "session cursor was not found"}, status_code=400)
+            start = cursor_index + 1
+        page = items[start:start + limit]
+        next_cursor = page[-1]["id"] if start + len(page) < len(items) else None
+        return JSONResponse({
+            "sessions": [public_session(item) for item in page],
+            "nextCursor": next_cursor,
+        })
     try:
         value = await body(request)
         title = value.get("title")
@@ -818,7 +837,10 @@ async def sessions(request: Request) -> Response:
             response = await http.post(
                 f"{HERMES_URL}/api/sessions",
                 headers={"authorization": f"Bearer {HERMES_KEY}"},
-                json={"title": item["title"]} if item["title"] else {},
+                # Hermes requires titles to be globally unique. ONEComputer owns
+                # presentation titles, so passing them upstream would make a new
+                # "hi" or Telegram session fail when an older one has that title.
+                json={},
                 timeout=15,
             )
             response.raise_for_status()
