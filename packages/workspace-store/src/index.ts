@@ -90,6 +90,7 @@ export interface ChannelStore {
   setChannelSenderAgent(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId): Promise<void>;
   getChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId): Promise<string | null>;
   saveChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId, sessionId: string): Promise<void>;
+  clearChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId): Promise<void>;
 }
 
 export type GovernedOperationRecord = {
@@ -858,6 +859,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
        ON CONFLICT (connection_id,sender_id,agent_catalog_id) DO UPDATE
        SET session_id=EXCLUDED.session_id,updated_at=now()`,
       [connectionId, senderId, agentCatalogId, sessionId],
+    );
+  }
+
+  async clearChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId) {
+    await this.pool.query(
+      `DELETE FROM channel_sessions
+       WHERE connection_id=$1 AND sender_id=$2 AND agent_catalog_id=$3`,
+      [connectionId, senderId, agentCatalogId],
     );
   }
 
@@ -1771,6 +1780,10 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
 
   async saveChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId, sessionId: string) {
     this.channelSessions.set(`${connectionId}:${senderId}:${agentCatalogId}`, sessionId);
+  }
+
+  async clearChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId) {
+    this.channelSessions.delete(`${connectionId}:${senderId}:${agentCatalogId}`);
   }
 
   async createGovernedOperation(input: CreateGovernedOperationRecord) {

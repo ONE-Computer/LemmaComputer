@@ -27,6 +27,7 @@ const secondToken = "987654321:telegram-token-for-the-second-workspace";
 class FakeTelegram implements TelegramBotClient {
   updates: TelegramUpdate[] = [];
   sent: Array<{ token: string; chatId: string; text: string; options?: TelegramMessageOptions }> = [];
+  chatActions: Array<{ token: string; chatId: string; action: "typing" }> = [];
   answeredCallbacks: Array<{ token: string; callbackQueryId: string; text?: string }> = [];
 
   async validate(received: string) {
@@ -45,12 +46,17 @@ class FakeTelegram implements TelegramBotClient {
     this.sent.push({ token: received, chatId, text, options });
   }
 
+  async sendChatAction(received: string, chatId: string, action: "typing") {
+    this.chatActions.push({ token: received, chatId, action });
+  }
+
   async answerCallbackQuery(received: string, callbackQueryId: string, text?: string) {
     this.answeredCallbacks.push({ token: received, callbackQueryId, text });
   }
 }
 
 class FakeControl implements ChannelControlClient {
+  turnDelayMs = 0;
   turns: Array<{
     workspaceId: string;
     agentCatalogId: string;
@@ -73,6 +79,9 @@ class FakeControl implements ChannelControlClient {
     text: string;
   }) {
     this.turns.push(input);
+    if (this.turnDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, this.turnDelayMs));
+    }
     return {
       sessionId: input.sessionId ?? `session-${input.agentCatalogId}`,
       text: `${input.agentCatalogId}: ${input.text}`,
@@ -228,6 +237,92 @@ test("/agent presents available agent buttons and callback selections switch the
   telegram.updates = [{ updateId: "3", chatId: "10001", senderId: "10001", chatType: "private", text: "hello" }];
   await service.pollOnce();
   assert.equal(control.turns.at(-1)?.agentCatalogId, "codex-cli");
+});
+
+test("/new starts a fresh chat for the sender's current agent without resetting other agents", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-new-chat-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: true,
+  });
+
+  telegram.updates = [
+    { updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "first Hermes turn" },
+    { updateId: "2", chatId: "10001", senderId: "10001", chatType: "private", text: "/agent claude-cli" },
+    { updateId: "3", chatId: "10001", senderId: "10001", chatType: "private", text: "first Claude turn" },
+    { updateId: "4", chatId: "10001", senderId: "10001", chatType: "private", text: "/new" },
+    { updateId: "5", chatId: "10001", senderId: "10001", chatType: "private", text: "fresh Claude turn" },
+    { updateId: "6", chatId: "10001", senderId: "10001", chatType: "private", text: "/agent hermes-claw" },
+    { updateId: "7", chatId: "10001", senderId: "10001", chatType: "private", text: "continued Hermes turn" },
+  ];
+
+  await service.pollOnce();
+
+  assert.deepEqual(control.turns.map((turn) => ({
+    agent: turn.agentCatalogId,
+    session: turn.sessionId ?? null,
+    text: turn.text,
+  })), [
+    { agent: "hermes-claw", session: null, text: "first Hermes turn" },
+    { agent: "claude-cli", session: null, text: "first Claude turn" },
+    { agent: "claude-cli", session: null, text: "fresh Claude turn" },
+    { agent: "hermes-claw", session: "session-hermes-claw", text: "continued Hermes turn" },
+  ]);
+  assert.equal(
+    telegram.sent.some((message) => message.text === "New chat started with Claude CLI. Send a message when you are ready."),
+    true,
+  );
+  assert.equal(control.turns.some((turn) => turn.text === "/new"), false);
+});
+
+test("the broker shows and renews Telegram typing only while an agent turn is pending", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  control.turnDelayMs = 30;
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+    5,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-typing-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: false,
+  });
+
+  telegram.updates = [
+    { updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "take your time" },
+  ];
+  await service.pollOnce();
+
+  assert.ok(telegram.chatActions.length >= 2);
+  assert.ok(telegram.chatActions.every((action) => (
+    action.token === token && action.chatId === "10001" && action.action === "typing"
+  )));
+  const completedActionCount = telegram.chatActions.length;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(telegram.chatActions.length, completedActionCount);
+  assert.equal(telegram.sent.at(-1)?.text, "hermes-claw: take your time");
 });
 
 test("each workspace can own one Telegram connection and credentials cannot be shared across workspaces", async () => {

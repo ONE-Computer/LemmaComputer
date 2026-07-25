@@ -50,6 +50,7 @@ export interface TelegramBotClient {
   validate(token: string): Promise<{ botId: string; username: string | null }>;
   getUpdates(token: string, offset: string): Promise<TelegramUpdate[]>;
   sendMessage(token: string, chatId: string, text: string, options?: TelegramMessageOptions): Promise<void>;
+  sendChatAction(token: string, chatId: string, action: "typing"): Promise<void>;
   answerCallbackQuery(token: string, callbackQueryId: string, text?: string): Promise<void>;
 }
 
@@ -246,6 +247,13 @@ export class TelegramBotApiClient implements TelegramBotClient {
     });
   }
 
+  async sendChatAction(token: string, chatId: string, action: "typing") {
+    await this.request(token, "sendChatAction", {
+      chat_id: chatId,
+      action,
+    });
+  }
+
   async answerCallbackQuery(token: string, callbackQueryId: string, text?: string) {
     await this.request(token, "answerCallbackQuery", {
       callback_query_id: callbackQueryId,
@@ -305,7 +313,27 @@ export class ChannelBrokerService {
     private readonly vault: ChannelCredentialVault,
     private readonly telegram: TelegramBotClient,
     private readonly control: ChannelControlClient,
+    private readonly typingRefreshMs = 4_000,
   ) {}
+
+  private async withTypingIndicator<T>(token: string, chatId: string, turn: () => Promise<T>) {
+    let stopped = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = async () => {
+      await this.telegram.sendChatAction(token, chatId, "typing").catch(() => undefined);
+      if (!stopped) {
+        refreshTimer = setTimeout(() => void refresh(), this.typingRefreshMs);
+      }
+    };
+
+    void refresh();
+    try {
+      return await turn();
+    } finally {
+      stopped = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    }
+  }
 
   async listCredentials(identity: IdentityContext) {
     return telegramCredentialListSchema.parse({
@@ -549,14 +577,30 @@ export class ChannelBrokerService {
 
     const agentCatalogId = await this.store.getChannelSenderAgent(connection.id, update.senderId)
       ?? connection.defaultAgentId;
+    const newChatCommand = update.text ? /^\/new(?:@\w+)?\s*$/.test(update.text) : false;
+    if (newChatCommand) {
+      await this.store.clearChannelSession(connection.id, update.senderId, agentCatalogId);
+      await this.telegram.sendMessage(
+        token,
+        update.chatId,
+        `New chat started with ${displayNames[agentCatalogId]}. Send a message when you are ready.`,
+      );
+      await this.store.finishChannelUpdate(connection.id, update.updateId, "delivered");
+      return;
+    }
+
     const sessionId = await this.store.getChannelSession(connection.id, update.senderId, agentCatalogId);
     try {
-      const response = channelTurnResponseSchema.parse(await this.control.turn(channelTurnRequestSchema.parse({
-        ...this.route(connection, identity, update.senderId, agentCatalogId),
-        updateId: update.updateId,
-        ...(sessionId ? { sessionId } : {}),
-        text: update.text,
-      })));
+      const response = channelTurnResponseSchema.parse(await this.withTypingIndicator(
+        token,
+        update.chatId,
+        () => this.control.turn(channelTurnRequestSchema.parse({
+          ...this.route(connection, identity, update.senderId, agentCatalogId),
+          updateId: update.updateId,
+          ...(sessionId ? { sessionId } : {}),
+          text: update.text,
+        })),
+      ));
       await this.store.saveChannelSession(connection.id, update.senderId, agentCatalogId, response.sessionId);
       const rendered = [response.text, ...response.notices].filter(Boolean).join("\n\n") || "The agent completed without a text response.";
       for (let start = 0; start < rendered.length; start += 4_000) {
