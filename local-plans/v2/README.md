@@ -13,9 +13,14 @@ network boundary into an explicit egress-firewall product capability, adds
 Hermes Claw as a policy-selected default agent, makes OpenVTC approval practical
 for headless workspaces through a push-capable companion web app, makes policy
 projection tamper-evident and externally enforced, and then refines the whole
-UI. The native Hermes, Claude, and Codex adapter baseline produced by cancelled
-Issue 009 is retained, while Issue 010 replaces its final-only Chat surface
-with AI SDK structured streaming. ACP is explicitly deferred.
+UI. Issue 011 then replaces duplicated OpenVTC protocol and cryptographic code
+with the upstream consent SDK while retaining ONEComputer's exact action-digest
+and execution boundary. Issue 012 adds an agent-agnostic channel broker outside
+the workspace, with Telegram as its first official adapter and without
+projecting the bot token into any agent. The native Hermes, Claude, and Codex
+adapter baseline produced by cancelled Issue 009 is retained, while Issue 010
+replaces its final-only Chat surface with AI SDK structured streaming. ACP is
+explicitly deferred.
 
 The archived V1 plan is historical evidence, not an active issue dependency.
 Every V2 issue must inspect the real V1 implementation and carry forward only
@@ -44,9 +49,12 @@ default agent. The remaining priorities come directly from the V2 scope.
 4. Direct model-provider, Microsoft Graph, upstream MCP, metadata/link-local,
    host-control, database, Docker, cross-workspace, and alternate tunnel paths
    remain unavailable unless an issue explicitly introduces a bounded route.
-5. ONEComputer Control remains the source of truth for identity, effective
-   policy, governed operations, approval verification, execution leases, and
-   audit evidence.
+5. ONEComputer Control remains the source of truth for ONEComputer identity,
+   effective operation policy, governed operations, Microsoft execution,
+   execution leases, and receipts. A signed OpenVTC decision is consent
+   evidence only after its approver DID, proof, challenge, expiry, and exact
+   action digest have been verified; it does not transfer execution authority
+   to the browser or VTA.
 6. A push notification is only a delivery hint. It cannot approve an
    operation, carry approval authority, or replace verification of the exact
    device-signed decision.
@@ -60,6 +68,10 @@ default agent. The remaining priorities come directly from the V2 scope.
    notifications, logs, screenshots, or evidence.
 10. Security claims must be bounded to the inspected Kasm/container and proxy
     topology; V2 does not claim VM-grade hostile multi-tenant isolation.
+11. External-channel credentials stay in trusted ONEComputer middleware and
+    never enter a workspace, agent process, prompt, model context, or MCP
+    gateway. A channel is transport only and cannot grant tool or approval
+    authority.
 
 ## Execution rules
 
@@ -71,8 +83,11 @@ default agent. The remaining priorities come directly from the V2 scope.
 3. Read the V1 implementation and deployed topology before designing from the
    issue prose.
 4. Begin security-relevant changes with a failing contract or regression.
-5. Preserve owned adapters around Kasm, the egress proxy, LiteLLM, OpenVTC,
-   Web Push providers, and agent distributions.
+5. Preserve owned adapters around Kasm, the egress proxy, LiteLLM, Web Push
+   providers, and agent distributions. Issue 011 keeps only a small owned
+   OpenVTC product-mapping adapter and deletes duplicate protocol,
+   cryptographic, and passkey implementations in favor of pinned upstream SDK
+   components.
 6. Do not weaken deny-by-default behavior to make a positive journey pass.
 7. Run the issue's negative, tamper, tenant, expiry, replay, concurrency,
    reconnect, restart, and bypass cases where applicable.
@@ -122,6 +137,8 @@ consistent, and the completion record points to the bundle.
 | 008 | P1 | planned (deferred) | Extend egress firewall to FQDN and CIDR L3/L4 rules | 002 |
 | 009 | P1 | cancelled | Chat with any policy-selected agent through one owned interface | 003, 007 |
 | 010 | P1 | verification | Replace the bespoke Chat surface with AI SDK structured streaming | 003, 007 |
+| 011 | P1 | ready | Replace custom OpenVTC proof code with the upstream consent SDK | 003 |
+| 012 | P1 | planned | Add an agent-agnostic channel broker with Telegram as the first adapter | 002, 003, 010 |
 
 ## Assignment template
 
