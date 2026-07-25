@@ -31,6 +31,13 @@ const hopByHopHeaders = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
+const canonicalWebSocketHeaders = new Map([
+  ["origin", "Origin"],
+  ["sec-websocket-extensions", "Sec-WebSocket-Extensions"],
+  ["sec-websocket-key", "Sec-WebSocket-Key"],
+  ["sec-websocket-protocol", "Sec-WebSocket-Protocol"],
+  ["sec-websocket-version", "Sec-WebSocket-Version"],
+]);
 
 const parseCookies = (header: string | undefined) => Object.fromEntries(
   (header ?? "").split(";").flatMap((part) => {
@@ -53,15 +60,18 @@ const sanitizedHeaders = (
 ) => {
   const result: IncomingHttpHeaders = {};
   for (const [name, value] of Object.entries(headers)) {
-    if (hopByHopHeaders.has(name)) continue;
+    if (hopByHopHeaders.has(name) || name === "host") continue;
     if (options.workspace && ["authorization", "cookie", "x-onecomputer-proxy-token", "x-controller-token"].includes(name)) continue;
-    result[name] = value;
+    if (options.workspace && name === "origin") continue;
+    result[options.websocket ? canonicalWebSocketHeaders.get(name) ?? name : name] = value;
   }
-  result.host = target.host;
-  if (options.workspace && typeof result.origin === "string") result.origin = `${target.protocol}//${target.host}`;
+  // KasmVNC's WebSocket handshake parser requires conventional field-name
+  // casing even though HTTP field names are otherwise case-insensitive.
+  result.Host = target.host;
+  if (options.workspace && typeof headers.origin === "string") result.Origin = `${target.protocol}//${target.host}`;
   if (options.websocket) {
-    result.connection = "Upgrade";
-    result.upgrade = "websocket";
+    result.Connection = "Upgrade";
+    result.Upgrade = "websocket";
   }
   return result;
 };

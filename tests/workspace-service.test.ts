@@ -140,6 +140,7 @@ test("local controller targets become signed same-origin workspace launch URLs",
   assert.equal(launch.pathname, `/workspaces/${workspace.id}/`);
   assert.equal(launch.searchParams.get("clipboard_up"), "true");
   assert.equal(launch.searchParams.get("clipboard_down"), "true");
+  assert.equal(launch.searchParams.get("path"), `workspaces/${workspace.id}/websockify`);
   const token = launch.searchParams.get(workspaceIngressAccessParameter);
   assert.ok(token);
   const exchanged = authority.exchangeLaunch(token, workspace.id);

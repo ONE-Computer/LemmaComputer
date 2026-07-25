@@ -25,6 +25,7 @@ const close = async (server: Server) => new Promise<void>((resolve, reject) => {
 
 test("workspace ingress forwards the web app and exchanges a launch for an isolated workspace session", async () => {
   let workspaceRequest: { url?: string; authorization?: string; cookie?: string } | undefined;
+  let workspaceUpgradeRawHeaders: string[] | undefined;
   const web = http.createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/plain" });
     response.end("web");
@@ -85,7 +86,8 @@ test("workspace ingress forwards the web app and exchanges a launch for an isola
       cookie: undefined,
     });
 
-    workspace.on("upgrade", (_request, socket) => {
+    workspace.on("upgrade", (request, socket) => {
+      workspaceUpgradeRawHeaders = request.rawHeaders;
       socket.write("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
       socket.end();
     });
@@ -95,6 +97,7 @@ test("workspace ingress forwards the web app and exchanges a launch for an isola
           `GET /workspaces/${workspaceId}/websockify HTTP/1.1\r\n`
           + `Host: 127.0.0.1:${ingressPort}\r\n`
           + `Cookie: ${sessionCookie}\r\n`
+          + `Origin: http://127.0.0.1:${ingressPort}\r\n`
           + "Connection: Upgrade\r\n"
           + "Upgrade: websocket\r\n"
           + "Sec-WebSocket-Key: dGVzdC13b3Jrc3BhY2U=\r\n"
@@ -108,6 +111,12 @@ test("workspace ingress forwards the web app and exchanges a launch for an isola
       socket.on("error", reject);
     });
     assert.match(upgradeResponse, /^HTTP\/1\.1 101 Switching Protocols/);
+    const hostHeaderIndex = workspaceUpgradeRawHeaders?.indexOf("Host") ?? -1;
+    assert.ok(hostHeaderIndex >= 0);
+    assert.equal(workspaceUpgradeRawHeaders?.[hostHeaderIndex + 1], `127.0.0.1:${workspacePort}`);
+    for (const header of ["Connection", "Upgrade", "Origin", "Sec-WebSocket-Key", "Sec-WebSocket-Version"]) {
+      assert.ok(workspaceUpgradeRawHeaders?.includes(header), `expected canonical ${header} header`);
+    }
 
     const unauthorized = await fetch(`http://127.0.0.1:${ingressPort}/workspaces/${workspaceId}/`);
     assert.equal(unauthorized.status, 401);

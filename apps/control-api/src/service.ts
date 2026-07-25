@@ -385,6 +385,9 @@ export class WorkspaceService {
     const controllerUrl = new URL(launch.launchUrl);
     const ingressUrl = new URL(`/workspaces/${workspaceId}/`, this.workspaceIngress.publicUrl);
     for (const [name, value] of controllerUrl.searchParams) ingressUrl.searchParams.append(name, value);
+    // KasmVNC otherwise opens its WebSocket at the origin-level /websockify
+    // path, which would bypass the workspace-scoped ingress route.
+    ingressUrl.searchParams.set("path", `workspaces/${workspaceId}/websockify`);
     ingressUrl.searchParams.set(workspaceIngressAccessParameter, issued.token);
     return {
       ...publicLaunch,
