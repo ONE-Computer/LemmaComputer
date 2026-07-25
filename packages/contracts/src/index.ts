@@ -245,6 +245,67 @@ export const sandboxConfigurationSchema = z.object({
 }).strict();
 export type SandboxConfiguration = z.infer<typeof sandboxConfigurationSchema>;
 
+// The runtime still uses the historical `hermes-claw` catalog identifier.
+// Workspace manifests deliberately expose the product name instead, so an
+// exported workspace never leaks that implementation detail.
+export const workspaceManifestAgentCatalogIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-agent"] as const;
+export const workspaceManifestAgentCatalogIdSchema = z.enum(workspaceManifestAgentCatalogIds);
+export type WorkspaceManifestAgentCatalogId = z.infer<typeof workspaceManifestAgentCatalogIdSchema>;
+
+export const workspaceManifestChatAgentCatalogIds = ["claude-cli", "codex-cli", "hermes-agent"] as const;
+export const workspaceManifestChatAgentCatalogIdSchema = z.enum(workspaceManifestChatAgentCatalogIds);
+export type WorkspaceManifestChatAgentCatalogId = z.infer<typeof workspaceManifestChatAgentCatalogIdSchema>;
+
+export const workspaceManifestAgentIdFor = (catalogId: AgentCatalogId): WorkspaceManifestAgentCatalogId => (
+  catalogId === "hermes-claw" ? "hermes-agent" : catalogId
+);
+
+export const agentCatalogIdForWorkspaceManifest = (catalogId: WorkspaceManifestAgentCatalogId): AgentCatalogId => (
+  catalogId === "hermes-agent" ? "hermes-claw" : catalogId
+);
+
+export const workspaceManifestChatAgentIdFor = (catalogId: ChatAgentCatalogId): WorkspaceManifestChatAgentCatalogId => (
+  catalogId === "hermes-claw" ? "hermes-agent" : catalogId
+);
+
+export const chatAgentCatalogIdForWorkspaceManifest = (catalogId: WorkspaceManifestChatAgentCatalogId): ChatAgentCatalogId => (
+  catalogId === "hermes-agent" ? "hermes-claw" : catalogId
+);
+
+export const telegramUserIdSchema = z.string().regex(/^\d{1,20}$/);
+
+export const workspaceManifestSandboxSchema = z.object({
+  schemaVersion: z.literal(1),
+  profileId: sandboxProfileIdSchema,
+  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
+  agentIds: z.array(workspaceManifestAgentCatalogIdSchema).min(1).max(workspaceManifestAgentCatalogIds.length),
+  modelAlias: sandboxModelAliasSchema,
+  egress: runtimeEgressPolicySchema.nullable(),
+}).strict();
+export type WorkspaceManifestSandbox = z.infer<typeof workspaceManifestSandboxSchema>;
+
+export const workspaceManifestChannelSchema = z.object({
+  adapter: z.literal("telegram"),
+  credentialRef: z.uuid(),
+  credentialVersion: z.number().int().positive(),
+  allowedSenderIds: z.array(telegramUserIdSchema).min(1).max(20),
+  defaultAgentId: workspaceManifestChatAgentCatalogIdSchema,
+  allowAgentSwitch: z.boolean(),
+  inboundPolicy: z.literal("private-dm-only"),
+}).strict();
+export type WorkspaceManifestChannel = z.infer<typeof workspaceManifestChannelSchema>;
+
+export const workspaceManifestSchema = z.object({
+  schemaVersion: z.literal(2),
+  sandbox: workspaceManifestSandboxSchema,
+  channels: z.array(workspaceManifestChannelSchema).max(16).superRefine((channels, context) => {
+    if (new Set(channels.map((channel) => channel.adapter)).size !== channels.length) {
+      context.addIssue({ code: "custom", message: "A workspace can declare each channel adapter only once" });
+    }
+  }),
+}).strict();
+export type WorkspaceManifest = z.infer<typeof workspaceManifestSchema>;
+
 export const egressDecisionReasonSchema = z.enum([
   "EGRESS_ALLOWED",
   "EGRESS_DEFAULT_DENY",
@@ -276,7 +337,7 @@ export const sandboxSettingsSchema = z.object({
   agentIds: z.array(agentCatalogIdSchema).min(1),
   availableAgents: z.array(agentCatalogEntrySchema).min(1),
   egress: runtimeEgressPolicySchema.optional(),
-  configuration: sandboxConfigurationSchema,
+  manifest: workspaceManifestSchema,
   updatedAt: z.iso.datetime().nullable(),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
@@ -630,7 +691,6 @@ export const sendChatTurnSchema = z.object({
   }),
 }).strict();
 
-export const telegramUserIdSchema = z.string().regex(/^\d{1,20}$/);
 export const telegramConnectionStateSchema = z.enum(["connected", "not_configured"]);
 export const telegramCredentialKindSchema = z.literal("telegram_bot_token");
 export const saveTelegramCredentialSchema = z.object({

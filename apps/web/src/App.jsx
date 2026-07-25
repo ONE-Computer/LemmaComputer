@@ -957,9 +957,9 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             <div className="sandbox-security-card"><div><strong>Attached firewall</strong><span>{settings.egress ? `${settings.egress.name} · version ${settings.egress.version}` : "No firewall attached"}</span><small>{settings.egress ? `${settings.egress.rules.length} approved ${settings.egress.rules.length === 1 ? "destination" : "destinations"}; every other public destination is denied.` : "An administrator must attach a firewall before public egress is available."}</small></div>{canManageFirewall && <button className="secondary-button" type="button" onClick={onNavigateFirewall}>Open firewall <ChevronRight16Regular aria-hidden="true" /></button>}</div>
           </section>
 
-          <div className="sandbox-management-footer"><div><strong>Configuration document</strong><small>Schema v1 · {settings.profile.displayName} · persistent home · gateway-only network</small></div><button className="primary-button" type="submit" disabled={!dirty || saving || !canChange || !applicationIds.length || !agentIds.length}>{saving ? "Saving configuration" : "Save configuration"}</button></div>
+          <div className="sandbox-management-footer"><div><strong>Workspace manifest</strong><small>Schema v2 · {settings.profile.displayName} · persistent home · gateway-only network</small></div><button className="primary-button" type="submit" disabled={!dirty || saving || !canChange || !applicationIds.length || !agentIds.length}>{saving ? "Saving configuration" : "Save configuration"}</button></div>
           {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its applications, agents, or AI model.</p>}
-          <details className="sandbox-json"><summary>View configuration JSON</summary><pre>{JSON.stringify(settings.configuration, null, 2)}</pre></details>
+          <details className="sandbox-json"><summary>View workspace manifest JSON</summary><pre>{JSON.stringify(settings.manifest, null, 2)}</pre></details>
         </form>
       )}
     </div>
@@ -1203,7 +1203,7 @@ function TelegramChannelSection({ connection, credentials, agents, loading, busy
           </label>
           <label className="telegram-switch-option">
             <input name="telegram-allow-agent-switch" type="checkbox" checked={allowAgentSwitch} onChange={(event) => setAllowAgentSwitch(event.target.checked)} disabled={busy || loading} />
-            <span><strong>Allow explicit agent switching</strong><small>Approved users can use <code>/agent hermes-claw</code>, <code>/agent claude-cli</code>, or <code>/agent codex-cli</code>. Each agent keeps an independent conversation.</small></span>
+            <span><strong>Allow explicit agent switching</strong><small>Approved users can use <code>/agent hermes-agent</code>, <code>/agent claude-cli</code>, or <code>/agent codex-cli</code>. Each agent keeps an independent conversation.</small></span>
           </label>
           <div className="connection-actions telegram-connection-actions">
             <button className="primary-button" type="button" onClick={save} disabled={busy || loading || !credentialId || !defaultAgentId || parsedUserIds.length === 0}>{busy ? "Saving Telegram" : configured ? "Save channel" : "Connect Telegram"}</button>
@@ -2335,6 +2335,11 @@ export function App() {
     }
   };
 
+  const refreshWorkspaceManifest = async () => {
+    if (!selectedSandboxGrantId) return;
+    setSandboxSettings(await sandboxApi.settings(selectedSandboxGrantId));
+  };
+
   const saveTelegram = async (configuration) => {
     const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
     if (!selectedWorkspace) return null;
@@ -2345,6 +2350,7 @@ export function App() {
       setTelegramConnection(saved);
       const refreshed = await connectionApi.credentials();
       setCredentials(refreshed.credentials);
+      await refreshWorkspaceManifest();
       setToast(telegramConnection?.state === "connected" ? "Telegram routing updated." : "Telegram connected to this workspace.");
       return saved;
     } catch (error) {
@@ -2371,6 +2377,7 @@ export function App() {
       setTelegramConnection(await connectionApi.telegram(selectedWorkspace.id));
       const refreshed = await connectionApi.credentials();
       setCredentials(refreshed.credentials);
+      await refreshWorkspaceManifest();
       setToast("Telegram was disconnected.");
     } catch (error) {
       setTelegramError(error.message);
@@ -2405,7 +2412,10 @@ export function App() {
       setCredentials((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
       if (telegramConnection?.credentialId === saved.id) {
         const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
-        if (selectedWorkspace) setTelegramConnection(await connectionApi.telegram(selectedWorkspace.id));
+        if (selectedWorkspace) {
+          setTelegramConnection(await connectionApi.telegram(selectedWorkspace.id));
+          await refreshWorkspaceManifest();
+        }
       }
       setToast("Telegram credential rotated.");
       return saved;
@@ -2431,7 +2441,10 @@ export function App() {
     try {
       await connectionApi.deleteCredential(credential.id);
       setCredentials((current) => current.filter((item) => item.id !== credential.id));
-      if (telegramConnection?.credentialId === credential.id) setTelegramConnection(null);
+      if (telegramConnection?.credentialId === credential.id) {
+        setTelegramConnection(null);
+        await refreshWorkspaceManifest();
+      }
       setToast("Telegram credential deleted.");
     } catch (error) {
       setCredentialsError(error.message);

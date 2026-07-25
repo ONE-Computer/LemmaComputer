@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId } from "@onecomputer/contracts";
+import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
@@ -235,6 +235,34 @@ export function createControlServer(
     if (!channelBroker) throw new OneComputerError("CHANNEL_BROKER_NOT_CONFIGURED", "Messaging connections are not configured", 503, true);
     return channelBroker;
   };
+  const workspaceManifest = (
+    configuration: SandboxConfiguration,
+    telegram: TelegramChannelConnectionStatus | null,
+  ): WorkspaceManifest => workspaceManifestSchema.parse({
+    schemaVersion: 2,
+    sandbox: {
+      schemaVersion: 1,
+      profileId: configuration.profileId,
+      applicationIds: configuration.applicationIds,
+      agentIds: configuration.agentIds.map(workspaceManifestAgentIdFor),
+      modelAlias: configuration.modelAlias,
+      egress: configuration.egress,
+    },
+    channels: telegram?.state === "connected"
+      && telegram.credentialId
+      && telegram.tokenVersion
+      && telegram.defaultAgentId
+      ? [{
+        adapter: "telegram",
+        credentialRef: telegram.credentialId,
+        credentialVersion: telegram.tokenVersion,
+        allowedSenderIds: telegram.allowedUserIds,
+        defaultAgentId: workspaceManifestChatAgentIdFor(telegram.defaultAgentId),
+        allowAgentSwitch: telegram.allowAgentSwitch,
+        inboundPolicy: "private-dm-only",
+      }]
+      : [],
+  });
   if (!security.authentication && !security.testIdentityMode) {
     throw new Error("Control requires Entra authentication; test identity mode must be enabled explicitly in tests");
   }
@@ -701,6 +729,18 @@ export function createControlServer(
     const egress = effective?.egressSecurityGroup
       ? runtimePolicyFor(effective, modelAlias, profileId, selectedAgentIds, selectedApplicationIds).egress
       : undefined;
+    const configuration = sandboxConfigurationSchema.parse({
+      schemaVersion: 1,
+      profileId,
+      applicationIds: selectedApplicationIds,
+      agentIds: selectedAgentIds,
+      modelAlias,
+      egress: egress ?? null,
+    });
+    const current = await store.getCurrent(actor.identity, grantId);
+    const telegram = current && channelBroker
+      ? await channelBroker.status(actor.identity, current.id)
+      : null;
     return sandboxSettingsSchema.parse({
       grantId,
       profileId,
@@ -713,14 +753,7 @@ export function createControlServer(
       agentIds: selectedAgentIds,
       availableAgents,
       ...(egress ? { egress } : {}),
-      configuration: {
-        schemaVersion: 1,
-        profileId,
-        applicationIds: selectedApplicationIds,
-        agentIds: selectedAgentIds,
-        modelAlias,
-        egress: egress ?? null,
-      },
+      manifest: workspaceManifest(configuration, telegram),
       updatedAt: saved?.updatedAt.toISOString() ?? null,
     });
   });
@@ -747,6 +780,20 @@ export function createControlServer(
       agentIds: input.agentIds,
     });
     const profile = sandboxProfiles.find((item) => item.id === input.profileId)!;
+    const egress = effective?.egressSecurityGroup
+      ? runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds).egress
+      : undefined;
+    const configuration = sandboxConfigurationSchema.parse({
+      schemaVersion: 1,
+      profileId: input.profileId,
+      applicationIds: input.applicationIds,
+      agentIds: input.agentIds,
+      modelAlias: input.modelAlias,
+      egress: egress ?? null,
+    });
+    const telegram = current && channelBroker
+      ? await channelBroker.status(actor.identity, current.id)
+      : null;
     return sandboxSettingsSchema.parse({
       ...input,
       profile,
@@ -755,15 +802,8 @@ export function createControlServer(
       availableModels: sandboxModels.filter((item) => models.includes(item.alias)),
       agentIds: input.agentIds,
       availableAgents: ownedAgentCatalog.filter((item) => agents.includes(item.id)),
-      ...(effective?.egressSecurityGroup ? { egress: runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds).egress } : {}),
-      configuration: {
-        schemaVersion: 1,
-        profileId: input.profileId,
-        applicationIds: input.applicationIds,
-        agentIds: input.agentIds,
-        modelAlias: input.modelAlias,
-        egress: effective?.egressSecurityGroup ? runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds).egress ?? null : null,
-      },
+      ...(egress ? { egress } : {}),
+      manifest: workspaceManifest(configuration, telegram),
       updatedAt: new Date().toISOString(),
     });
   });

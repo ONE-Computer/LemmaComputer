@@ -434,7 +434,7 @@ export class ChannelBrokerService {
     if (requestedAgent) {
       try {
         if (!connection.allowAgentSwitch) throw new OneComputerError("CHANNEL_AGENT_SWITCH_DISABLED", "Agent switching is disabled", 403);
-        const agentCatalogId = chatAgentCatalogIdSchema.parse(requestedAgent);
+        const agentCatalogId = chatAgentCatalogIdSchema.parse(requestedAgent === "hermes-agent" ? "hermes-claw" : requestedAgent);
         const route = this.route(connection, identity, update.senderId, agentCatalogId);
         await this.control.validateRoute(route);
         await this.store.setChannelSenderAgent(connection.id, update.senderId, agentCatalogId);

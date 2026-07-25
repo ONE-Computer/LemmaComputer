@@ -162,7 +162,7 @@ test("the broker allowlists senders, deduplicates updates, and isolates sessions
   assert.equal(telegram.sent.filter((message) => message.text === "Agent changed to Claude CLI.").length, 1);
 
   telegram.updates = [
-    { updateId: "5", chatId: "10001", senderId: "10001", chatType: "private", text: "/agent hermes-claw" },
+    { updateId: "5", chatId: "10001", senderId: "10001", chatType: "private", text: "/agent hermes-agent" },
     { updateId: "6", chatId: "10001", senderId: "10001", chatType: "private", text: "back" },
   ];
   await service.pollOnce();

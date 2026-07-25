@@ -78,6 +78,7 @@ class FakeBroker implements ChannelBrokerManagementClient {
   savedCredentialId = "";
   savedToken = "";
   deletedCredentialId = "";
+  connection: Awaited<ReturnType<FakeBroker["save"]>> | null = null;
 
   async listCredentials() {
     return { credentials: [] };
@@ -103,13 +104,13 @@ class FakeBroker implements ChannelBrokerManagementClient {
   }
 
   async status() {
-    return null;
+    return this.connection;
   }
 
   async save(_identity: IdentityContext, raw: unknown) {
     const input = raw as { workspaceId: string; credentialId: string; allowedUserIds: string[]; defaultAgentId: "hermes-claw" };
     this.savedCredentialId = input.credentialId;
-    return {
+    this.connection = {
       state: "connected" as const,
       connectionId: "92b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
       workspaceId: input.workspaceId,
@@ -122,9 +123,10 @@ class FakeBroker implements ChannelBrokerManagementClient {
       tokenVersion: 1,
       updatedAt: new Date().toISOString(),
     };
+    return this.connection;
   }
 
-  async disconnect() {}
+  async disconnect() { this.connection = null; }
 }
 
 test("credential APIs keep Telegram tokens write-only across create, rotate, list, and delete", async () => {
@@ -262,6 +264,43 @@ test("workspace channel APIs bind an owned credential and policy-check the defau
       },
     });
     assert.equal(unavailable.statusCode, 400);
+  } finally {
+    await app.close();
+  }
+});
+
+test("workspace settings expose one manifest with a non-secret Telegram binding", async () => {
+  const store = new MemoryWorkspaceStore();
+  const workspace = await store.createOrGet(alpha, "personal", "workspace-manifest");
+  const broker = new FakeBroker();
+  await broker.save(alpha, {
+    workspaceId: workspace.id,
+    credentialId: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: true,
+  });
+  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    identityPolicyStore: policyStore(effectivePolicy(workspace.id)),
+    channelBrokerClient: broker,
+  });
+  try {
+    const response = await app.inject({ method: "GET", url: "/v1/sandbox-settings?grantId=personal", headers });
+    assert.equal(response.statusCode, 200);
+    const manifest = response.json().manifest;
+    assert.equal(manifest.schemaVersion, 2);
+    assert.deepEqual(manifest.sandbox.agentIds, ["hermes-agent", "claude-cli", "codex-cli"]);
+    assert.deepEqual(manifest.channels, [{
+      adapter: "telegram",
+      credentialRef: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
+      credentialVersion: 1,
+      allowedSenderIds: ["10001"],
+      defaultAgentId: "hermes-agent",
+      allowAgentSwitch: true,
+      inboundPolicy: "private-dm-only",
+    }]);
+    assert.ok(!JSON.stringify(manifest).includes("botToken"));
   } finally {
     await app.close();
   }
