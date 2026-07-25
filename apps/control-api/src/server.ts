@@ -1,11 +1,11 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { assignEgressSecurityGroupSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, sandboxApplicationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, type AgentCatalogId, type ChatUiMessage, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId } from "@onecomputer/contracts";
+import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { Ed25519DidKeySigner } from "@onecomputer/openvtc-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { Microsoft365ConnectionService } from "./connections.js";
@@ -20,9 +20,11 @@ import {
   AgentChatAuthority,
   AgentUiStreamMapper,
   HttpAgentChatClient,
+  assignedChatAgentIds,
   reconcileChatMessages,
   type AgentChatClient,
 } from "./agent-chat.js";
+import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient } from "./channel-broker.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -138,6 +140,8 @@ const envSchema = z.object({
   SESSION_SECRET: z.string().min(32),
   EGRESS_GRANT_SECRET: z.string().min(32).optional(),
   AGENT_CHAT_SECRET: z.string().min(32),
+  CHANNEL_BROKER_URL: optionalEnvString(),
+  CHANNEL_BROKER_INTERNAL_TOKEN: optionalEnvString(32),
   POLICY_SIGNING_KEY_ID: z.string().regex(/^psk_[a-z0-9][a-z0-9_-]{2,63}$/),
   POLICY_SIGNING_PRIVATE_KEY_B64: z.string().min(40),
   POLICY_VERIFICATION_KEYS_B64: z.string().min(32),
@@ -156,7 +160,7 @@ const sameSecret = (received: string | undefined, expected: string) => {
 };
 
 export function createControlServer(
-  store: WorkspaceStore & GovernanceStore,
+  store: WorkspaceStore & GovernanceStore & Partial<ChannelStore>,
   controller: ControllerClient,
   proxyToken: string,
   gateway?: GatewayClient & Partial<GovernedToolExecutor>,
@@ -172,6 +176,8 @@ export function createControlServer(
     policyBundleAuthority?: PolicyBundleAuthority;
     agentChatSecret?: string;
     agentChatClient?: AgentChatClient;
+    channelBrokerClient?: ChannelBrokerManagementClient;
+    channelBrokerInternalToken?: string;
   } = {},
 ) {
   const testRuntimePolicy: RuntimePolicy = {
@@ -199,6 +205,7 @@ export function createControlServer(
   const agentBridgeAuthority = new AgentBridgeAuthority(security.mcpPolicyToken ?? proxyToken);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
+  const channelBroker = security.channelBrokerClient;
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
     issue: (identity, workspaceId, policy) => agentBridgeAuthority.issue(identity, workspaceId, policy),
@@ -223,6 +230,10 @@ export function createControlServer(
     if (!connections) throw new OneComputerError("M365_CONNECTION_NOT_CONFIGURED", "Microsoft 365 connections are not configured", 503, true);
     return connections;
   };
+  const requireChannelBroker = () => {
+    if (!channelBroker) throw new OneComputerError("CHANNEL_BROKER_NOT_CONFIGURED", "Messaging connections are not configured", 503, true);
+    return channelBroker;
+  };
   if (!security.authentication && !security.testIdentityMode) {
     throw new Error("Control requires Entra authentication; test identity mode must be enabled explicitly in tests");
   }
@@ -232,6 +243,15 @@ export function createControlServer(
   app.addHook("onRequest", async (request, reply) => {
     if (request.url === "/healthz") return;
     if (request.url === "/v1/openvtc/inbox" || request.url === "/trust-tasks") return;
+    if (request.url.startsWith("/internal/v1/channels/")) {
+      if (!security.channelBrokerInternalToken || !sameSecret(
+        request.headers["x-onecomputer-channel-token"] as string | undefined,
+        security.channelBrokerInternalToken,
+      )) {
+        return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Channel broker authentication is required", correlationId: request.id, retryable: false } });
+      }
+      return;
+    }
     if (request.url.startsWith("/internal/v1/agent/operations/")) {
       const authorization = request.headers.authorization;
       const value = Array.isArray(authorization) ? authorization[0] : authorization;
@@ -299,6 +319,64 @@ export function createControlServer(
     if (!workspace) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
     return policyForGrant(value, effective, workspace.grantId);
   };
+  const channelPolicy = async (channelIdentity: IdentityContext, workspaceId: string) => {
+    const workspace = await store.getOwned(channelIdentity, workspaceId);
+    if (!workspace) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    let actor: SessionPrincipal;
+    let effective: EffectivePolicy | null;
+    if (security.identityPolicyStore) {
+      const resolved = await security.identityPolicyStore.getPrincipal(channelIdentity.subjectId);
+      if (!resolved || resolved.tenantId !== channelIdentity.tenantId) {
+        throw new OneComputerError("CHANNEL_IDENTITY_NOT_FOUND", "The channel owner is unavailable", 403);
+      }
+      actor = resolved;
+      effective = await security.identityPolicyStore.getEffectivePolicy(resolved.userId);
+      if (!effective) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+    } else if (security.testIdentityMode) {
+      actor = {
+        userId: channelIdentity.subjectId,
+        tenantId: channelIdentity.tenantId,
+        email: `${channelIdentity.subjectId}@example.test`,
+        displayName: channelIdentity.subjectId,
+        tenantDisplayName: channelIdentity.tenantId,
+        roles: ["employee"],
+        identity: channelIdentity,
+      };
+      effective = null;
+    } else {
+      throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503, true);
+    }
+    return policyForGrant(actor, effective, workspace.grantId);
+  };
+  const verifiedChannelRoute = async (route: ChannelRoute, enforceSelectedRoute: boolean) => {
+    if (!store.getOwnedChannelConnection) {
+      throw new OneComputerError("CHANNEL_STORE_NOT_CONFIGURED", "Channel storage is unavailable", 503, true);
+    }
+    const connection = await store.getOwnedChannelConnection(route.identity, "telegram", route.workspaceId);
+    if (
+      !connection
+      || connection.id !== route.connectionId
+      || connection.workspaceId !== route.workspaceId
+      || !connection.allowedUserIds.includes(route.externalSenderId)
+    ) {
+      throw new OneComputerError("CHANNEL_ROUTE_REJECTED", "The channel route is not authorized", 403);
+    }
+    if (enforceSelectedRoute) {
+      const selected = await store.getChannelSenderAgent?.(connection.id, route.externalSenderId)
+        ?? connection.defaultAgentId;
+      if (selected !== route.agentCatalogId) {
+        throw new OneComputerError("CHANNEL_AGENT_MISMATCH", "The channel agent route changed", 409);
+      }
+    }
+    const { policy } = await channelPolicy(route.identity, route.workspaceId);
+    if (!assignedChatAgentIds(policy).includes(route.agentCatalogId)) {
+      throw new OneComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
+    }
+    return {
+      policy,
+      access: await service.agentChatAccess(route.identity, policy, route.workspaceId, route.agentCatalogId),
+    };
+  };
   const idempotency = (headers: Record<string, unknown>) => {
     const key = headers["idempotency-key"];
     if (typeof key !== "string" || key.length < 8 || key.length > 128) throw new OneComputerError("IDEMPOTENCY_KEY_REQUIRED", "A valid Idempotency-Key header is required", 400);
@@ -315,6 +393,51 @@ export function createControlServer(
   app.post("/internal/v1/mcp/authorize", async (request) => {
     if (!mcpPolicy) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "MCP policy storage is unavailable", 503, true);
     return mcpPolicy.authorize(mcpPolicyRequestSchema.parse(request.body ?? {}), request.id);
+  });
+  app.post("/internal/v1/channels/routes/validate", async (request, reply) => {
+    const route = channelRouteSchema.parse(request.body ?? {});
+    const { access } = await verifiedChannelRoute(route, false);
+    await agentChat.health(access);
+    return reply.code(204).send();
+  });
+  app.post("/internal/v1/channels/turns", async (request) => {
+    const input = channelTurnRequestSchema.parse(request.body ?? {});
+    const { access } = await verifiedChannelRoute(input, true);
+    if (!store.claimChannelUpdate || !await store.claimChannelUpdate(
+      input.connectionId,
+      input.updateId,
+      input.externalSenderId,
+    )) {
+      throw new OneComputerError("CHANNEL_UPDATE_REPLAYED", "The channel update was already dispatched", 409);
+    }
+    const session = input.sessionId
+      ? { id: input.sessionId }
+      : await agentChat.createSession(access, `Telegram ${input.externalSenderId}`);
+    const message: ChatUiMessage = {
+      id: randomUUID(),
+      role: "user",
+      metadata: {
+        agentCatalogId: input.agentCatalogId,
+        state: "completed",
+        createdAt: new Date().toISOString(),
+      },
+      parts: [{ type: "text", text: input.text }],
+    };
+    let text = "";
+    const notices: string[] = [];
+    for await (const event of agentChat.streamTurn(access, session.id, message)) {
+      if (event.type === "text-delta") {
+        text += event.delta;
+        if (text.length > 16_000) throw new OneComputerError("CHANNEL_RESPONSE_TOO_LARGE", "The channel response exceeded its limit", 502);
+      }
+      if (event.type === "approval" && !notices.includes(event.summary)) {
+        notices.push(`${event.summary} Open ONEComputer to review this protected action.`);
+      }
+      if (event.type === "turn-finish" && event.state === "failed" && !text) {
+        throw new OneComputerError("CHANNEL_TURN_FAILED", event.message ?? "The agent could not complete the message", 502, true);
+      }
+    }
+    return channelTurnResponseSchema.parse({ sessionId: session.id, text, notices });
   });
   app.get<{ Params: { operationId: string } }>("/internal/v1/agent/operations/:operationId", async (request) => {
     const actor = agentPrincipals.get(request);
@@ -497,6 +620,58 @@ export function createControlServer(
     }
   });
   app.delete("/v1/connections/microsoft-365", async (request) => requireConnections().disconnect(identity(request)));
+  app.get("/v1/credentials", async (request) => {
+    await requirePolicy(request);
+    return requireChannelBroker().listCredentials(identity(request));
+  });
+  app.post("/v1/credentials/telegram", async (request, reply) => {
+    await requirePolicy(request);
+    const input = saveTelegramCredentialSchema.parse(request.body ?? {});
+    return reply.code(201).send(await requireChannelBroker().saveCredential(identity(request), input));
+  });
+  app.put<{ Params: { credentialId: string } }>("/v1/credentials/:credentialId/telegram", async (request) => {
+    await requirePolicy(request);
+    const credentialId = z.uuid().parse(request.params.credentialId);
+    const input = saveTelegramCredentialSchema.parse(request.body ?? {});
+    return requireChannelBroker().saveCredential(identity(request), input, credentialId);
+  });
+  app.delete<{ Params: { credentialId: string } }>("/v1/credentials/:credentialId", async (request, reply) => {
+    await requirePolicy(request);
+    await requireChannelBroker().deleteCredential(identity(request), z.uuid().parse(request.params.credentialId));
+    return reply.code(204).send();
+  });
+  app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/channels/telegram", async (request) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    await requireWorkspacePolicy(request, workspaceId);
+    return await requireChannelBroker().status(identity(request), workspaceId) ?? telegramChannelConnectionStatusSchema.parse({
+      state: "not_configured",
+      connectionId: null,
+      workspaceId,
+      credentialId: null,
+      allowedUserIds: [],
+      allowedUserCount: 0,
+      defaultAgentId: null,
+      allowAgentSwitch: false,
+      botUsername: null,
+      tokenVersion: null,
+      updatedAt: null,
+    });
+  });
+  app.put<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/channels/telegram", async (request) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    const input = saveTelegramChannelConnectionSchema.parse({ ...(request.body as object ?? {}), workspaceId });
+    const { policy } = await requireWorkspacePolicy(request, workspaceId);
+    if (!assignedChatAgentIds(policy).includes(input.defaultAgentId)) {
+      throw new OneComputerError("CHAT_AGENT_NOT_SELECTED", "The default messaging agent is not selected for this workspace", 409);
+    }
+    return requireChannelBroker().save(identity(request), input);
+  });
+  app.delete<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/channels/telegram", async (request, reply) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    await requireWorkspacePolicy(request, workspaceId);
+    await requireChannelBroker().disconnect(identity(request), workspaceId);
+    return reply.code(204).send();
+  });
   app.get<{ Querystring: { grantId?: string } }>("/v1/sandbox-settings", async (request) => {
     const { principal: actor, effective } = await assignedPolicy(request);
     const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
@@ -904,6 +1079,13 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
       })
     : undefined;
+  const channelBrokerValues = [env.CHANNEL_BROKER_URL, env.CHANNEL_BROKER_INTERNAL_TOKEN];
+  if (channelBrokerValues.some(Boolean) && !channelBrokerValues.every(Boolean)) {
+    throw new Error("All channel broker settings must be configured together");
+  }
+  const channelBrokerClient = env.CHANNEL_BROKER_URL && env.CHANNEL_BROKER_INTERNAL_TOKEN
+    ? new HttpChannelBrokerManagementClient(env.CHANNEL_BROKER_URL, env.CHANNEL_BROKER_INTERNAL_TOKEN)
+    : undefined;
   const webPushValues = [env.WEB_PUSH_VAPID_SUBJECT, env.WEB_PUSH_VAPID_PUBLIC_KEY, env.WEB_PUSH_VAPID_PRIVATE_KEY, env.WEB_PUSH_SUBSCRIPTION_SECRET];
   if (webPushValues.some(Boolean) && !webPushValues.every(Boolean)) throw new Error("All Web Push settings must be configured together");
   const pushProvider = env.WEB_PUSH_VAPID_SUBJECT && env.WEB_PUSH_VAPID_PUBLIC_KEY
@@ -960,6 +1142,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       egressGrantSecret: env.EGRESS_GRANT_SECRET,
       policyBundleAuthority,
       agentChatSecret: env.AGENT_CHAT_SECRET,
+      channelBrokerClient,
+      channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
     },
   );
   const pushRetryTimer = pushProvider && openVtc

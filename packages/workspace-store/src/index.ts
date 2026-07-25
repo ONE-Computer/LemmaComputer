@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import type { AgentCatalogId, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
+import type { AgentCatalogId, ChatAgentCatalogId, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
 export * from "./identity-policy.js";
 
 export type WorkspaceRecord = {
@@ -28,6 +28,69 @@ export type SandboxSettingsRecord = {
   agentIds: AgentCatalogId[];
   updatedAt: Date;
 };
+
+export type ChannelConnectionRecord = {
+  id: string;
+  tenantId: string;
+  subjectId: string;
+  workspaceId: string;
+  adapter: "telegram";
+  credentialId: string;
+  credentialCiphertext: string;
+  credentialKeyVersion: number;
+  tokenVersion: number;
+  allowedUserIds: string[];
+  defaultAgentId: ChatAgentCatalogId;
+  allowAgentSwitch: boolean;
+  botUsername: string | null;
+  state: "active";
+  telegramUpdateOffset: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ChannelCredentialRecord = {
+  id: string;
+  tenantId: string;
+  subjectId: string;
+  kind: "telegram_bot_token";
+  credentialCiphertext: string;
+  credentialKeyVersion: number;
+  version: number;
+  fingerprint: string;
+  displayName: string;
+  botUsername: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export interface ChannelStore {
+  listOwnedChannelCredentials(identity: IdentityContext): Promise<Array<ChannelCredentialRecord & { workspaceId: string | null; connectionId: string | null }>>;
+  getOwnedChannelCredential(identity: IdentityContext, credentialId: string): Promise<ChannelCredentialRecord | null>;
+  saveChannelCredential(identity: IdentityContext, input: Omit<ChannelCredentialRecord, "tenantId" | "subjectId" | "createdAt" | "updatedAt">): Promise<ChannelCredentialRecord>;
+  deleteChannelCredential(identity: IdentityContext, credentialId: string): Promise<boolean>;
+  getOwnedChannelConnection(identity: IdentityContext, adapter: "telegram", workspaceId: string): Promise<ChannelConnectionRecord | null>;
+  saveChannelConnection(identity: IdentityContext, input: {
+    id: string;
+    workspaceId: string;
+    adapter: "telegram";
+    credentialId: string;
+    allowedUserIds: string[];
+    defaultAgentId: ChatAgentCatalogId;
+    allowAgentSwitch: boolean;
+    telegramUpdateOffset: string;
+  }): Promise<ChannelConnectionRecord>;
+  deleteChannelConnection(identity: IdentityContext, adapter: "telegram", workspaceId: string): Promise<boolean>;
+  listActiveChannelConnections(adapter: "telegram"): Promise<ChannelConnectionRecord[]>;
+  reserveChannelUpdate(connectionId: string, updateId: string, senderId: string): Promise<boolean>;
+  claimChannelUpdate(connectionId: string, updateId: string, senderId: string): Promise<boolean>;
+  finishChannelUpdate(connectionId: string, updateId: string, state: "delivered" | "rejected" | "failed", failureCode?: string): Promise<void>;
+  advanceTelegramUpdateOffset(connectionId: string, offset: string): Promise<void>;
+  getChannelSenderAgent(connectionId: string, senderId: string): Promise<ChatAgentCatalogId | null>;
+  setChannelSenderAgent(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId): Promise<void>;
+  getChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId): Promise<string | null>;
+  saveChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId, sessionId: string): Promise<void>;
+}
 
 export type GovernedOperationRecord = {
   id: string;
@@ -299,6 +362,48 @@ const mapSandboxSettingsRow = (row: Record<string, unknown>): SandboxSettingsRec
   updatedAt: new Date(String(row.updated_at)),
 });
 
+const mapChannelConnectionRow = (row: Record<string, unknown>): ChannelConnectionRecord => ({
+  id: String(row.id),
+  tenantId: String(row.tenant_id),
+  subjectId: String(row.subject_id),
+  workspaceId: String(row.workspace_id),
+  adapter: "telegram",
+  credentialId: String(row.credential_id),
+  credentialCiphertext: String(row.credential_ciphertext),
+  credentialKeyVersion: Number(row.credential_key_version),
+  tokenVersion: Number(row.credential_version),
+  allowedUserIds: (Array.isArray(row.allowed_user_ids) ? row.allowed_user_ids : [])
+    .filter((value): value is string => typeof value === "string"),
+  defaultAgentId: String(row.default_agent_id) as ChatAgentCatalogId,
+  allowAgentSwitch: Boolean(row.allow_agent_switch),
+  botUsername: row.bot_username ? String(row.bot_username) : null,
+  state: "active",
+  telegramUpdateOffset: String(row.telegram_update_offset),
+  createdAt: new Date(String(row.created_at)),
+  updatedAt: new Date(String(row.updated_at)),
+});
+
+const mapChannelCredentialRow = (row: Record<string, unknown>): ChannelCredentialRecord => ({
+  id: String(row.id),
+  tenantId: String(row.tenant_id),
+  subjectId: String(row.subject_id),
+  kind: "telegram_bot_token",
+  credentialCiphertext: String(row.credential_ciphertext),
+  credentialKeyVersion: Number(row.credential_key_version),
+  version: Number(row.version),
+  fingerprint: String(row.fingerprint),
+  displayName: String(row.display_name),
+  botUsername: row.bot_username ? String(row.bot_username) : null,
+  createdAt: new Date(String(row.created_at)),
+  updatedAt: new Date(String(row.updated_at)),
+});
+
+const channelConnectionSelect = `
+  SELECT c.*,v.credential_ciphertext,v.credential_key_version,v.version AS credential_version,
+    v.bot_username
+  FROM channel_connections c
+  JOIN channel_credentials v ON v.id=c.credential_id`;
+
 const operationSelect = `
   SELECT o.*,
     a.decision AS approval_decision, a.channel AS approval_channel, a.decided_at AS approval_decided_at,
@@ -412,7 +517,7 @@ const mapOpenVtcCompanionSubscriptionRow = (row: Record<string, unknown>): OpenV
   lastFailureCode: row.last_failure_code ? String(row.last_failure_code) : null,
 });
 
-export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore {
+export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore {
   constructor(private readonly pool: pg.Pool) {}
 
   static fromConnectionString(connectionString: string) {
@@ -420,7 +525,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   }
 
   async migrate() {
-    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql", "014_sandbox_applications.sql", "015_agent_neutral_chat.sql"]) {
+    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql", "014_sandbox_applications.sql", "015_agent_neutral_chat.sql", "016_channel_broker.sql"]) {
       const migrationPath = fileURLToPath(new URL(`../migrations/${migration}`, import.meta.url));
       await this.pool.query(await readFile(migrationPath, "utf8"));
     }
@@ -560,6 +665,198 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       [identity.tenantId, identity.subjectId, input.grantId, input.profileId, JSON.stringify(input.applicationIds), input.modelAlias, JSON.stringify(input.agentIds)],
     );
     return mapSandboxSettingsRow(result.rows[0]);
+  }
+
+  async listOwnedChannelCredentials(identity: IdentityContext) {
+    const result = await this.pool.query(
+      `SELECT v.*,c.workspace_id,c.id AS connection_id
+       FROM channel_credentials v
+       LEFT JOIN channel_connections c ON c.credential_id=v.id AND c.state='active'
+       WHERE v.tenant_id=$1 AND v.subject_id=$2
+       ORDER BY v.updated_at DESC,v.id`,
+      [identity.tenantId, identity.subjectId],
+    );
+    return result.rows.map((row) => ({
+      ...mapChannelCredentialRow(row),
+      workspaceId: row.workspace_id ? String(row.workspace_id) : null,
+      connectionId: row.connection_id ? String(row.connection_id) : null,
+    }));
+  }
+
+  async getOwnedChannelCredential(identity: IdentityContext, credentialId: string) {
+    const result = await this.pool.query(
+      "SELECT * FROM channel_credentials WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
+      [credentialId, identity.tenantId, identity.subjectId],
+    );
+    return result.rowCount ? mapChannelCredentialRow(result.rows[0]) : null;
+  }
+
+  async saveChannelCredential(identity: IdentityContext, input: Omit<ChannelCredentialRecord, "tenantId" | "subjectId" | "createdAt" | "updatedAt">) {
+    const result = await this.pool.query(
+      `INSERT INTO channel_credentials (
+         id,tenant_id,subject_id,kind,credential_ciphertext,credential_key_version,version,
+         fingerprint,display_name,bot_username,created_at,updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),now())
+       ON CONFLICT (id) DO UPDATE SET
+         credential_ciphertext=EXCLUDED.credential_ciphertext,
+         credential_key_version=EXCLUDED.credential_key_version,
+         version=EXCLUDED.version,
+         fingerprint=EXCLUDED.fingerprint,
+         display_name=EXCLUDED.display_name,
+         bot_username=EXCLUDED.bot_username,
+         updated_at=now()
+       WHERE channel_credentials.tenant_id=EXCLUDED.tenant_id
+         AND channel_credentials.subject_id=EXCLUDED.subject_id
+         AND channel_credentials.kind=EXCLUDED.kind
+       RETURNING *`,
+      [input.id, identity.tenantId, identity.subjectId, input.kind, input.credentialCiphertext,
+        input.credentialKeyVersion, input.version, input.fingerprint, input.displayName, input.botUsername],
+    );
+    if (!result.rowCount) throw new Error("Credential is missing or belongs to another user");
+    return mapChannelCredentialRow(result.rows[0]);
+  }
+
+  async deleteChannelCredential(identity: IdentityContext, credentialId: string) {
+    const result = await this.pool.query(
+      "DELETE FROM channel_credentials WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
+      [credentialId, identity.tenantId, identity.subjectId],
+    );
+    return Boolean(result.rowCount);
+  }
+
+  async getOwnedChannelConnection(identity: IdentityContext, adapter: "telegram", workspaceId: string) {
+    const result = await this.pool.query(
+      `${channelConnectionSelect}
+       WHERE c.tenant_id=$1 AND c.subject_id=$2 AND c.adapter=$3 AND c.workspace_id=$4 AND c.state='active'`,
+      [identity.tenantId, identity.subjectId, adapter, workspaceId],
+    );
+    return result.rowCount ? mapChannelConnectionRow(result.rows[0]) : null;
+  }
+
+  async saveChannelConnection(identity: IdentityContext, input: {
+    id: string;
+    workspaceId: string;
+    adapter: "telegram";
+    credentialId: string;
+    allowedUserIds: string[];
+    defaultAgentId: ChatAgentCatalogId;
+    allowAgentSwitch: boolean;
+    telegramUpdateOffset: string;
+  }) {
+    const result = await this.pool.query(
+      `INSERT INTO channel_connections (
+         id,tenant_id,subject_id,workspace_id,adapter,credential_id,
+         allowed_user_ids,default_agent_id,allow_agent_switch,telegram_update_offset,state,created_at,updated_at
+       )
+       SELECT $1,$2,$3,w.id,$5,v.id,$7::jsonb,$8,$9,$10::bigint,'active',now(),now()
+       FROM workspaces w
+       JOIN channel_credentials v ON v.id=$6 AND v.tenant_id=$2 AND v.subject_id=$3
+       WHERE w.id=$4 AND w.tenant_id=$2 AND w.subject_id=$3
+       ON CONFLICT (workspace_id,adapter) DO UPDATE SET
+         credential_id=EXCLUDED.credential_id,
+         allowed_user_ids=EXCLUDED.allowed_user_ids,
+         default_agent_id=EXCLUDED.default_agent_id,
+         allow_agent_switch=EXCLUDED.allow_agent_switch,
+         telegram_update_offset=EXCLUDED.telegram_update_offset,
+         state='active',
+         updated_at=now()
+       RETURNING id`,
+      [input.id, identity.tenantId, identity.subjectId, input.workspaceId, input.adapter,
+        input.credentialId, JSON.stringify(input.allowedUserIds), input.defaultAgentId,
+        input.allowAgentSwitch, input.telegramUpdateOffset],
+    );
+    if (!result.rowCount) throw new Error("Channel workspace is missing or belongs to another user");
+    const saved = await this.pool.query(`${channelConnectionSelect} WHERE c.id=$1`, [result.rows[0].id]);
+    return mapChannelConnectionRow(saved.rows[0]);
+  }
+
+  async deleteChannelConnection(identity: IdentityContext, adapter: "telegram", workspaceId: string) {
+    const result = await this.pool.query(
+      "DELETE FROM channel_connections WHERE tenant_id=$1 AND subject_id=$2 AND adapter=$3 AND workspace_id=$4",
+      [identity.tenantId, identity.subjectId, adapter, workspaceId],
+    );
+    return Boolean(result.rowCount);
+  }
+
+  async listActiveChannelConnections(adapter: "telegram") {
+    const result = await this.pool.query(
+      `${channelConnectionSelect} WHERE c.adapter=$1 AND c.state='active' ORDER BY c.updated_at,c.id`,
+      [adapter],
+    );
+    return result.rows.map(mapChannelConnectionRow);
+  }
+
+  async reserveChannelUpdate(connectionId: string, updateId: string, senderId: string) {
+    const result = await this.pool.query(
+      `INSERT INTO channel_updates (connection_id,update_id,sender_id,state)
+       VALUES ($1,$2::bigint,$3,'reserved') ON CONFLICT DO NOTHING RETURNING update_id`,
+      [connectionId, updateId, senderId],
+    );
+    return Boolean(result.rowCount);
+  }
+
+  async claimChannelUpdate(connectionId: string, updateId: string, senderId: string) {
+    const result = await this.pool.query(
+      `UPDATE channel_updates SET state='dispatched',updated_at=now()
+       WHERE connection_id=$1 AND update_id=$2::bigint AND sender_id=$3 AND state='reserved'
+       RETURNING update_id`,
+      [connectionId, updateId, senderId],
+    );
+    return Boolean(result.rowCount);
+  }
+
+  async finishChannelUpdate(connectionId: string, updateId: string, state: "delivered" | "rejected" | "failed", failureCode?: string) {
+    await this.pool.query(
+      `UPDATE channel_updates SET state=$3,failure_code=$4,updated_at=now()
+       WHERE connection_id=$1 AND update_id=$2::bigint AND state IN ('reserved','dispatched')`,
+      [connectionId, updateId, state, failureCode ?? null],
+    );
+  }
+
+  async advanceTelegramUpdateOffset(connectionId: string, offset: string) {
+    await this.pool.query(
+      `UPDATE channel_connections
+       SET telegram_update_offset=GREATEST(telegram_update_offset,$2::bigint),updated_at=updated_at
+       WHERE id=$1`,
+      [connectionId, offset],
+    );
+  }
+
+  async getChannelSenderAgent(connectionId: string, senderId: string) {
+    const result = await this.pool.query(
+      "SELECT agent_catalog_id FROM channel_sender_routes WHERE connection_id=$1 AND sender_id=$2",
+      [connectionId, senderId],
+    );
+    return result.rowCount ? String(result.rows[0].agent_catalog_id) as ChatAgentCatalogId : null;
+  }
+
+  async setChannelSenderAgent(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId) {
+    await this.pool.query(
+      `INSERT INTO channel_sender_routes (connection_id,sender_id,agent_catalog_id)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (connection_id,sender_id) DO UPDATE
+       SET agent_catalog_id=EXCLUDED.agent_catalog_id,updated_at=now()`,
+      [connectionId, senderId, agentCatalogId],
+    );
+  }
+
+  async getChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId) {
+    const result = await this.pool.query(
+      `SELECT session_id FROM channel_sessions
+       WHERE connection_id=$1 AND sender_id=$2 AND agent_catalog_id=$3`,
+      [connectionId, senderId, agentCatalogId],
+    );
+    return result.rowCount ? String(result.rows[0].session_id) : null;
+  }
+
+  async saveChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId, sessionId: string) {
+    await this.pool.query(
+      `INSERT INTO channel_sessions (connection_id,sender_id,agent_catalog_id,session_id)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (connection_id,sender_id,agent_catalog_id) DO UPDATE
+       SET session_id=EXCLUDED.session_id,updated_at=now()`,
+      [connectionId, senderId, agentCatalogId, sessionId],
+    );
   }
 
   async createGovernedOperation(input: CreateGovernedOperationRecord) {
@@ -1245,8 +1542,13 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   }
 }
 
-export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore {
+export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore {
   private records = new Map<string, WorkspaceRecord>();
+  private channelConnections = new Map<string, ChannelConnectionRecord>();
+  private channelCredentials = new Map<string, ChannelCredentialRecord>();
+  private channelUpdates = new Map<string, { senderId: string; state: "reserved" | "dispatched" | "delivered" | "rejected" | "failed" }>();
+  private channelRoutes = new Map<string, ChatAgentCatalogId>();
+  private channelSessions = new Map<string, string>();
   private operations = new Map<string, GovernedOperationRecord>();
   private operationKeys = new Map<string, string>();
   private openVtcApprovers = new Map<string, { record: OpenVtcApproverRecord; transportTokenHash: string }>();
@@ -1306,6 +1608,167 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       if (operation.workspaceId === workspaceId) this.operations.delete(operationId);
     }
     return this.records.delete(workspaceId);
+  }
+
+  async listOwnedChannelCredentials(identity: IdentityContext) {
+    return [...this.channelCredentials.values()]
+      .filter((record) => record.tenantId === identity.tenantId && record.subjectId === identity.subjectId)
+      .map((record) => {
+        const connection = [...this.channelConnections.values()].find((item) => item.credentialId === record.id);
+        return { ...record, workspaceId: connection?.workspaceId ?? null, connectionId: connection?.id ?? null };
+      });
+  }
+
+  async getOwnedChannelCredential(identity: IdentityContext, credentialId: string) {
+    const record = this.channelCredentials.get(credentialId);
+    return record?.tenantId === identity.tenantId && record.subjectId === identity.subjectId ? record : null;
+  }
+
+  async saveChannelCredential(identity: IdentityContext, input: Omit<ChannelCredentialRecord, "tenantId" | "subjectId" | "createdAt" | "updatedAt">) {
+    const prior = this.channelCredentials.get(input.id);
+    if (prior && (prior.tenantId !== identity.tenantId || prior.subjectId !== identity.subjectId || prior.kind !== input.kind)) {
+      throw new Error("Credential is missing or belongs to another user");
+    }
+    const duplicate = [...this.channelCredentials.values()].find((record) => record.id !== input.id && record.fingerprint === input.fingerprint);
+    if (duplicate) throw new Error("Credential is already stored");
+    const now = new Date();
+    const record: ChannelCredentialRecord = {
+      ...input,
+      tenantId: identity.tenantId,
+      subjectId: identity.subjectId,
+      createdAt: prior?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.channelCredentials.set(input.id, record);
+    for (const [key, connection] of this.channelConnections) {
+      if (connection.credentialId === record.id) {
+        this.channelConnections.set(key, {
+          ...connection,
+          credentialCiphertext: record.credentialCiphertext,
+          credentialKeyVersion: record.credentialKeyVersion,
+          tokenVersion: record.version,
+          botUsername: record.botUsername,
+        });
+      }
+    }
+    return record;
+  }
+
+  async deleteChannelCredential(identity: IdentityContext, credentialId: string) {
+    const record = await this.getOwnedChannelCredential(identity, credentialId);
+    if (!record) return false;
+    this.channelCredentials.delete(credentialId);
+    for (const [key, connection] of this.channelConnections) {
+      if (connection.credentialId === credentialId) {
+        this.channelConnections.delete(key);
+        for (const update of this.channelUpdates.keys()) if (update.startsWith(`${connection.id}:`)) this.channelUpdates.delete(update);
+        for (const route of this.channelRoutes.keys()) if (route.startsWith(`${connection.id}:`)) this.channelRoutes.delete(route);
+        for (const session of this.channelSessions.keys()) if (session.startsWith(`${connection.id}:`)) this.channelSessions.delete(session);
+      }
+    }
+    return true;
+  }
+
+  async getOwnedChannelConnection(identity: IdentityContext, adapter: "telegram", workspaceId: string) {
+    return this.channelConnections.get(`${identity.tenantId}:${identity.subjectId}:${workspaceId}:${adapter}`) ?? null;
+  }
+
+  async saveChannelConnection(identity: IdentityContext, input: {
+    id: string;
+    workspaceId: string;
+    adapter: "telegram";
+    credentialId: string;
+    allowedUserIds: string[];
+    defaultAgentId: ChatAgentCatalogId;
+    allowAgentSwitch: boolean;
+    telegramUpdateOffset: string;
+  }) {
+    const workspace = await this.getOwned(identity, input.workspaceId);
+    if (!workspace) throw new Error("Channel workspace is missing or belongs to another user");
+    const credential = await this.getOwnedChannelCredential(identity, input.credentialId);
+    if (!credential) throw new Error("Channel credential is missing or belongs to another user");
+    const inUse = [...this.channelConnections.values()].find((record) => (
+      record.credentialId === credential.id && record.workspaceId !== input.workspaceId
+    ));
+    if (inUse) throw new Error("Channel credential is already attached");
+    const key = `${identity.tenantId}:${identity.subjectId}:${input.workspaceId}:${input.adapter}`;
+    const prior = this.channelConnections.get(key);
+    const now = new Date();
+    const record: ChannelConnectionRecord = {
+      ...input,
+      tenantId: identity.tenantId,
+      subjectId: identity.subjectId,
+      credentialCiphertext: credential.credentialCiphertext,
+      credentialKeyVersion: credential.credentialKeyVersion,
+      tokenVersion: credential.version,
+      botUsername: credential.botUsername,
+      state: "active",
+      telegramUpdateOffset: input.telegramUpdateOffset,
+      createdAt: prior?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.channelConnections.set(key, record);
+    return record;
+  }
+
+  async deleteChannelConnection(identity: IdentityContext, adapter: "telegram", workspaceId: string) {
+    const key = `${identity.tenantId}:${identity.subjectId}:${workspaceId}:${adapter}`;
+    const record = this.channelConnections.get(key);
+    if (!record) return false;
+    this.channelConnections.delete(key);
+    for (const update of this.channelUpdates.keys()) if (update.startsWith(`${record.id}:`)) this.channelUpdates.delete(update);
+    for (const route of this.channelRoutes.keys()) if (route.startsWith(`${record.id}:`)) this.channelRoutes.delete(route);
+    for (const session of this.channelSessions.keys()) if (session.startsWith(`${record.id}:`)) this.channelSessions.delete(session);
+    return true;
+  }
+
+  async listActiveChannelConnections(adapter: "telegram") {
+    return [...this.channelConnections.values()].filter((record) => record.adapter === adapter);
+  }
+
+  async reserveChannelUpdate(connectionId: string, updateId: string, _senderId: string) {
+    const key = `${connectionId}:${updateId}`;
+    if (this.channelUpdates.has(key)) return false;
+    this.channelUpdates.set(key, { senderId: _senderId, state: "reserved" });
+    return true;
+  }
+
+  async claimChannelUpdate(connectionId: string, updateId: string, senderId: string) {
+    const key = `${connectionId}:${updateId}`;
+    const update = this.channelUpdates.get(key);
+    if (!update || update.senderId !== senderId || update.state !== "reserved") return false;
+    this.channelUpdates.set(key, { ...update, state: "dispatched" });
+    return true;
+  }
+
+  async finishChannelUpdate(connectionId: string, updateId: string, state: "delivered" | "rejected" | "failed", _failureCode?: string) {
+    const key = `${connectionId}:${updateId}`;
+    const update = this.channelUpdates.get(key);
+    if (update && ["reserved", "dispatched"].includes(update.state)) this.channelUpdates.set(key, { ...update, state });
+  }
+
+  async advanceTelegramUpdateOffset(connectionId: string, offset: string) {
+    for (const [key, record] of this.channelConnections) {
+      if (record.id === connectionId && BigInt(offset) > BigInt(record.telegramUpdateOffset)) {
+        this.channelConnections.set(key, { ...record, telegramUpdateOffset: offset });
+      }
+    }
+  }
+
+  async getChannelSenderAgent(connectionId: string, senderId: string) {
+    return this.channelRoutes.get(`${connectionId}:${senderId}`) ?? null;
+  }
+
+  async setChannelSenderAgent(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId) {
+    this.channelRoutes.set(`${connectionId}:${senderId}`, agentCatalogId);
+  }
+
+  async getChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId) {
+    return this.channelSessions.get(`${connectionId}:${senderId}:${agentCatalogId}`) ?? null;
+  }
+
+  async saveChannelSession(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId, sessionId: string) {
+    this.channelSessions.set(`${connectionId}:${senderId}:${agentCatalogId}`, sessionId);
   }
 
   async createGovernedOperation(input: CreateGovernedOperationRecord) {

@@ -563,7 +563,56 @@ function AdminScreen({ users, loading, busyUserId, onAssign, onRevoke, onVersion
   );
 }
 
-function SettingsScreen({ view, isAdmin, gatewayUrl, onOpenAdmin, onBack, users, loading, busyUserId, onAssign, onRevoke, onVersion, mcpPolicy, onConfigureConnector }) {
+function CredentialsScreen({ credentials, workspaces, loading, busy, error, onCreate, onRotate, onDelete, onBack }) {
+  const [newToken, setNewToken] = useState("");
+  const [rotation, setRotation] = useState(null);
+  const workspaceLabel = (workspaceId) => workspaceName(workspaces.find((item) => item.id === workspaceId));
+  const create = async () => {
+    if (!newToken.trim()) return;
+    const created = await onCreate(newToken.trim());
+    if (created) setNewToken("");
+  };
+  const rotate = async () => {
+    if (!rotation?.token.trim()) return;
+    const saved = await onRotate(rotation.id, rotation.token.trim());
+    if (saved) setRotation(null);
+  };
+  return (
+    <div className="secondary-screen settings-screen credentials-screen">
+      <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
+      <header className="page-heading compact">
+        <p>Write-only credential storage</p>
+        <h1>Credentials</h1>
+        <span>Store credentials for reviewed integrations. Their secret values remain encrypted in the trusted broker and are never displayed again.</span>
+      </header>
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Credential operation failed</strong>{error}</span></div>}
+      <section className="credential-create-card" aria-labelledby="credential-add-heading">
+        <div><p>Supported credential</p><h2 id="credential-add-heading">Telegram bot token</h2><span>Create a dedicated bot with BotFather. After validation, attach it from a workspace’s Channels section.</span></div>
+        <label><span>New bot token</span><input name="new-telegram-credential" type="password" autoComplete="new-password" value={newToken} onChange={(event) => setNewToken(event.target.value)} placeholder="123456789:AA…" disabled={busy} /></label>
+        <button className="primary-button" type="button" onClick={create} disabled={busy || !newToken.trim()}>{busy ? "Validating credential" : "Add Telegram credential"}</button>
+      </section>
+      <section className="credential-inventory" aria-labelledby="credential-inventory-heading">
+        <div className="credential-inventory-heading"><div><p>Inventory</p><h2 id="credential-inventory-heading">Saved credentials</h2></div><span>{credentials.length}</span></div>
+        {loading ? <p className="credential-empty">Loading credentials…</p> : !credentials.length ? <p className="credential-empty">No channel credentials are stored yet.</p> : credentials.map((credential) => (
+          <article key={credential.id}>
+            <span className="connection-logo compact"><Bot24Regular aria-hidden="true" /></span>
+            <div className="credential-copy"><strong>{credential.displayName}</strong><small>Telegram bot token · version {credential.version}</small><span>{credential.workspaceId ? `Attached to ${workspaceLabel(credential.workspaceId)}` : "Not attached"}</span></div>
+            <div className="credential-actions">
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => setRotation({ id: credential.id, token: "" })}>Rotate</button>
+              <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDelete(credential)}>Delete</button>
+            </div>
+          </article>
+        ))}
+      </section>
+      {rotation && <ModalDialog title="Rotate Telegram credential" description="The new token is validated and committed as a new credential version. The old token is no longer used by the broker." eyebrow="Write-only replacement" labelledBy="credential-rotation-title" onClose={busy ? () => undefined : () => setRotation(null)}>
+        <label className="modal-field"><span>Replacement bot token</span><input name="rotated-telegram-credential" type="password" autoComplete="new-password" value={rotation.token} onChange={(event) => setRotation({ ...rotation, token: event.target.value })} placeholder="123456789:AA…" /></label>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setRotation(null)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !rotation.token.trim()} onClick={rotate}>{busy ? "Rotating" : "Rotate credential"}</button></div>
+      </ModalDialog>}
+    </div>
+  );
+}
+
+function SettingsScreen({ view, isAdmin, gatewayUrl, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, loading, busyUserId, onAssign, onRevoke, onVersion, mcpPolicy, onConfigureConnector }) {
   if (view === "admin" && isAdmin) {
     return <AdminScreen
       users={users}
@@ -577,6 +626,9 @@ function SettingsScreen({ view, isAdmin, gatewayUrl, onOpenAdmin, onBack, users,
       onBack={onBack}
     />;
   }
+  if (view === "credentials") {
+    return <CredentialsScreen credentials={credentials} workspaces={workspaces} loading={credentialsLoading} busy={credentialsBusy} error={credentialsError} onCreate={onCreateCredential} onRotate={onRotateCredential} onDelete={onDeleteCredential} onBack={onBack} />;
+  }
 
   return (
     <div className="secondary-screen settings-screen">
@@ -586,6 +638,11 @@ function SettingsScreen({ view, isAdmin, gatewayUrl, onOpenAdmin, onBack, users,
         <span>Manage the local tools and workspace controls available to you.</span>
       </header>
       <section className="settings-list" aria-label="Settings">
+        <button className="settings-item" type="button" onClick={onOpenCredentials}>
+          <span className="settings-item-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span>
+          <span className="settings-item-copy"><strong>Credentials</strong><small>Manage write-only credentials for official workspace channels.</small></span>
+          <ChevronRight16Regular aria-hidden="true" />
+        </button>
         <a className="settings-item" href={gatewayUrl} target="_blank" rel="noreferrer">
           <span className="settings-item-icon"><Bot24Regular aria-hidden="true" /></span>
           <span className="settings-item-copy"><strong>Gateway</strong><small>Open the local gateway control surface in a separate tab.</small></span>
@@ -823,7 +880,7 @@ const workspaceConfigurationStatus = (state) => ({
   failed: "Needs attention",
 }[state] ?? "Unknown");
 
-function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onNavigateFirewall, canManageFirewall }) {
+function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onNavigateFirewall, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential }) {
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState("");
   const [agentIds, setAgentIds] = useState([]);
@@ -877,6 +934,18 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             })}</section>)}</div>
             {!agentIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved AI agent.</p>}
           </section>
+
+          <TelegramChannelSection
+            connection={telegram}
+            credentials={credentials}
+            agents={settings.availableAgents.filter((agent) => agentIds.includes(agent.id))}
+            loading={channelLoading}
+            busy={channelBusy}
+            error={channelError}
+            onSave={onSaveTelegram}
+            onDisconnect={onDisconnectTelegram}
+            onCreateCredential={onCreateCredential}
+          />
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">AI model</h2><p>The selected model route is delivered through each agent’s own LiteLLM grant. Provider credentials remain outside the workspace.</p></span></div>
@@ -1057,6 +1126,96 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
   );
 }
 
+const messagingAgentIds = new Set(["hermes-claw", "claude-cli", "codex-cli"]);
+
+function TelegramChannelSection({ connection, credentials, agents, loading, busy, error, onSave, onDisconnect, onCreateCredential }) {
+  const configured = connection?.state === "connected";
+  const [credentialId, setCredentialId] = useState("");
+  const [defaultAgentId, setDefaultAgentId] = useState("");
+  const [allowedUserIds, setAllowedUserIds] = useState("");
+  const [allowAgentSwitch, setAllowAgentSwitch] = useState(true);
+  const [newBotToken, setNewBotToken] = useState("");
+  const agentOptions = agents.filter((agent) => messagingAgentIds.has(agent.id))
+    .map((agent) => ({ value: agent.id, label: agent.displayName }));
+  const availableCredentials = credentials.filter((credential) => !credential.workspaceId || credential.id === connection?.credentialId);
+
+  useEffect(() => {
+    setCredentialId(connection?.credentialId ?? availableCredentials[0]?.id ?? "");
+    setDefaultAgentId(connection?.defaultAgentId ?? "");
+    setAllowedUserIds((connection?.allowedUserIds ?? []).join(", "));
+    setAllowAgentSwitch(connection?.state === "connected" ? connection.allowAgentSwitch : true);
+  }, [connection?.updatedAt, connection?.state, availableCredentials.map((item) => item.id).join(",")]);
+
+  useEffect(() => {
+    if (!agentOptions.some((agent) => agent.value === defaultAgentId)) {
+      setDefaultAgentId(agentOptions[0]?.value ?? "");
+    }
+  }, [agentOptions.map((agent) => agent.value).join(","), defaultAgentId]);
+
+  const parsedUserIds = [...new Set(allowedUserIds.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))];
+  const save = () => {
+    if (!credentialId || !defaultAgentId || !parsedUserIds.length) return;
+    onSave({
+      credentialId,
+      allowedUserIds: parsedUserIds,
+      defaultAgentId,
+      allowAgentSwitch,
+    });
+  };
+  const createCredential = async () => {
+    if (!newBotToken.trim()) return;
+    const created = await onCreateCredential(newBotToken.trim());
+    if (created) {
+      setCredentialId(created.id);
+      setNewBotToken("");
+    }
+  };
+
+  return (
+    <section className="sandbox-management-section telegram-channel-section" aria-labelledby="workspace-channels-heading">
+      <div className="sandbox-management-heading"><span className="sandbox-section-icon"><PlugConnected24Regular aria-hidden="true" /></span><span><h2 id="workspace-channels-heading">Channels</h2><p>Attach official messaging channels to this workspace. Credentials stay in the trusted broker and are never projected into its sandbox runtime.</p></span></div>
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Telegram was not updated</strong>{error}</span></div>}
+      <div className="telegram-connection-form">
+        <div>
+          <p>Telegram</p>
+          <h2>{loading ? "Checking connection" : configured ? `Connected${connection.botUsername ? ` as @${connection.botUsername}` : ""}` : "Not connected"}</h2>
+          <span>{configured ? `${connection.allowedUserCount} approved ${connection.allowedUserCount === 1 ? "sender" : "senders"} · token version ${connection.tokenVersion}` : "One dedicated bot credential can be attached to this workspace."}</span>
+        </div>
+        {!agentOptions.length ? (
+          <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>No eligible agent</strong>Save Hermes Agent, Claude CLI, or Codex CLI in this workspace configuration first.</span></div>
+        ) : <>
+          {availableCredentials.length ? <label>
+            <span>Credential</span>
+            <SelectMenu value={credentialId} onValueChange={setCredentialId} ariaLabel="Telegram credential" options={availableCredentials.map((credential) => ({ value: credential.id, label: `${credential.displayName} · v${credential.version}` }))} disabled={busy || loading} />
+            <small>Only unattached Telegram credentials are available. Rotation and deletion live under Settings → Credentials.</small>
+          </label> : <div className="telegram-inline-credential">
+            <label><span>New Telegram bot token</span><input name="telegram-new-bot-token" type="password" autoComplete="new-password" value={newBotToken} onChange={(event) => setNewBotToken(event.target.value)} placeholder="123456789:AA…" disabled={busy || loading} /></label>
+            <button className="secondary-button" type="button" disabled={busy || loading || !newBotToken.trim()} onClick={createCredential}>Add credential</button>
+          </div>}
+          <label>
+            <span>Default agent</span>
+            <SelectMenu value={defaultAgentId} onValueChange={setDefaultAgentId} ariaLabel="Default Telegram agent" options={agentOptions} disabled={busy || loading} />
+          </label>
+          <label>
+            <span>Allowed Telegram user IDs</span>
+            <textarea name="telegram-allowed-user-ids" value={allowedUserIds} onChange={(event) => setAllowedUserIds(event.target.value)} placeholder="123456789, 987654321" required disabled={busy || loading} rows="3" />
+            <small>Numeric user IDs only, separated by commas or new lines. Usernames and group membership never authorize access.</small>
+          </label>
+          <label className="telegram-switch-option">
+            <input name="telegram-allow-agent-switch" type="checkbox" checked={allowAgentSwitch} onChange={(event) => setAllowAgentSwitch(event.target.checked)} disabled={busy || loading} />
+            <span><strong>Allow explicit agent switching</strong><small>Approved users can use <code>/agent hermes-claw</code>, <code>/agent claude-cli</code>, or <code>/agent codex-cli</code>. Each agent keeps an independent conversation.</small></span>
+          </label>
+          <div className="connection-actions telegram-connection-actions">
+            <button className="primary-button" type="button" onClick={save} disabled={busy || loading || !credentialId || !defaultAgentId || parsedUserIds.length === 0}>{busy ? "Saving Telegram" : configured ? "Save channel" : "Connect Telegram"}</button>
+            {configured && <button className="connection-quiet-button" type="button" onClick={onDisconnect} disabled={busy || loading}>Disconnect</button>}
+          </div>
+        </>}
+      </div>
+      <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Channel selection changes broker routing only. It does not install Telegram or its token inside this workspace.</p></div>
+    </section>
+  );
+}
+
 function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisconnect, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connection?.state === "connected";
   const expired = connection?.state === "expired";
@@ -1071,7 +1230,7 @@ function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisc
       <header className="page-heading compact">
         <p>Your connected services</p>
         <h1>Connections</h1>
-        <span>Connect approved work services once. Your managed workspace receives scoped access without receiving your Microsoft credentials.</span>
+        <span>Connect approved work services here. Official messaging channels are attached separately from each workspace’s configuration.</span>
       </header>
 
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Microsoft 365 was not connected</strong>{error}</span></div>}
@@ -1109,7 +1268,7 @@ function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisc
         </div>
       </section>
 
-      <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Microsoft tokens stay in the MCP gateway. Your Microsoft credentials are never sent to the workspace.</p></div>
+      <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Microsoft tokens stay in LiteLLM. Messaging channels are attached from each workspace’s configuration and remain outside its runtime.</p></div>
     </div>
   );
 }
@@ -1662,6 +1821,14 @@ export function App() {
   const [connectionLoading, setConnectionLoading] = useState(true);
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [connectionError, setConnectionError] = useState("");
+  const [telegramConnection, setTelegramConnection] = useState(null);
+  const [telegramLoading, setTelegramLoading] = useState(false);
+  const [telegramBusy, setTelegramBusy] = useState(false);
+  const [telegramError, setTelegramError] = useState("");
+  const [credentials, setCredentials] = useState([]);
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
+  const [credentialsBusy, setCredentialsBusy] = useState(false);
+  const [credentialsError, setCredentialsError] = useState("");
   const [connectionsView, setConnectionsView] = useState("list");
   const [settingsView, setSettingsView] = useState("overview");
   const [chatSessions, setChatSessions] = useState([]);
@@ -1802,7 +1969,19 @@ export function App() {
       .then(setM365Connection)
       .catch((error) => setConnectionError(error.message))
       .finally(() => setConnectionLoading(false));
+    connectionApi.credentials()
+      .then((value) => setCredentials(value.credentials))
+      .catch((error) => setCredentialsError(error.message));
   }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session || activeNav !== "Settings" || settingsView !== "credentials") return;
+    setCredentialsLoading(true);
+    connectionApi.credentials()
+      .then((value) => { setCredentials(value.credentials); setCredentialsError(""); })
+      .catch((error) => setCredentialsError(error.message))
+      .finally(() => setCredentialsLoading(false));
+  }, [activeNav, settingsView, session?.user.id]);
 
   useEffect(() => {
     if (!session || activeNav !== "Workspace") return undefined;
@@ -1888,12 +2067,24 @@ export function App() {
 
   useEffect(() => {
     if (activeNav !== "Workspace" || !session || !selectedSandboxGrantId) return;
+    const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
     setSandboxLoading(true);
     sandboxApi.settings(selectedSandboxGrantId)
       .then((value) => { setSandboxSettings(value); setSandboxError(""); })
       .catch((error) => setSandboxError(error.message))
       .finally(() => setSandboxLoading(false));
-  }, [activeNav, session?.user.id, selectedSandboxGrantId]);
+    if (selectedWorkspace) {
+      setTelegramLoading(true);
+      Promise.all([connectionApi.telegram(selectedWorkspace.id), connectionApi.credentials()])
+        .then(([channel, savedCredentials]) => {
+          setTelegramConnection(channel);
+          setCredentials(savedCredentials.credentials);
+          setTelegramError("");
+        })
+        .catch((error) => setTelegramError(error.message))
+        .finally(() => setTelegramLoading(false));
+    }
+  }, [activeNav, session?.user.id, selectedSandboxGrantId, homeWorkspaces.map((item) => `${item.id}:${item.grantId}`).join(",")]);
 
   useEffect(() => {
     const delay = ["provisioning", "restarting", "stopping"].includes(workspaceState)
@@ -2144,6 +2335,111 @@ export function App() {
     }
   };
 
+  const saveTelegram = async (configuration) => {
+    const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
+    if (!selectedWorkspace) return null;
+    setTelegramBusy(true);
+    setTelegramError("");
+    try {
+      const saved = await connectionApi.saveTelegram(selectedWorkspace.id, configuration);
+      setTelegramConnection(saved);
+      const refreshed = await connectionApi.credentials();
+      setCredentials(refreshed.credentials);
+      setToast(telegramConnection?.state === "connected" ? "Telegram routing updated." : "Telegram connected to this workspace.");
+      return saved;
+    } catch (error) {
+      setTelegramError(error.message);
+      return null;
+    } finally {
+      setTelegramBusy(false);
+    }
+  };
+
+  const disconnectTelegram = async () => {
+    const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
+    if (!selectedWorkspace) return;
+    if (!await requestConfirmation({
+      title: "Disconnect Telegram?",
+      description: "The channel broker will delete this workspace’s Telegram routing and conversation sessions. The credential remains available under Settings until you delete it.",
+      confirmLabel: "Disconnect",
+      danger: true,
+    })) return;
+    setTelegramBusy(true);
+    setTelegramError("");
+    try {
+      await connectionApi.disconnectTelegram(selectedWorkspace.id);
+      setTelegramConnection(await connectionApi.telegram(selectedWorkspace.id));
+      const refreshed = await connectionApi.credentials();
+      setCredentials(refreshed.credentials);
+      setToast("Telegram was disconnected.");
+    } catch (error) {
+      setTelegramError(error.message);
+    } finally {
+      setTelegramBusy(false);
+    }
+  };
+
+  const createTelegramCredential = async (botToken) => {
+    setCredentialsBusy(true);
+    setCredentialsError("");
+    setTelegramError("");
+    try {
+      const created = await connectionApi.createTelegramCredential(botToken);
+      setCredentials((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+      setToast("Telegram credential stored.");
+      return created;
+    } catch (error) {
+      setCredentialsError(error.message);
+      setTelegramError(error.message);
+      return null;
+    } finally {
+      setCredentialsBusy(false);
+    }
+  };
+
+  const rotateTelegramCredential = async (credentialId, botToken) => {
+    setCredentialsBusy(true);
+    setCredentialsError("");
+    try {
+      const saved = await connectionApi.rotateTelegramCredential(credentialId, botToken);
+      setCredentials((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      if (telegramConnection?.credentialId === saved.id) {
+        const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
+        if (selectedWorkspace) setTelegramConnection(await connectionApi.telegram(selectedWorkspace.id));
+      }
+      setToast("Telegram credential rotated.");
+      return saved;
+    } catch (error) {
+      setCredentialsError(error.message);
+      return null;
+    } finally {
+      setCredentialsBusy(false);
+    }
+  };
+
+  const deleteTelegramCredential = async (credential) => {
+    if (!await requestConfirmation({
+      title: "Delete Telegram credential?",
+      description: credential.workspaceId
+        ? "This also disconnects Telegram from its workspace and deletes its channel sessions. The bot itself remains in Telegram."
+        : "The encrypted credential will be permanently removed from ONEComputer.",
+      confirmLabel: "Delete credential",
+      danger: true,
+    })) return;
+    setCredentialsBusy(true);
+    setCredentialsError("");
+    try {
+      await connectionApi.deleteCredential(credential.id);
+      setCredentials((current) => current.filter((item) => item.id !== credential.id));
+      if (telegramConnection?.credentialId === credential.id) setTelegramConnection(null);
+      setToast("Telegram credential deleted.");
+    } catch (error) {
+      setCredentialsError(error.message);
+    } finally {
+      setCredentialsBusy(false);
+    }
+  };
+
   const saveWorkspaceSettings = async (configuration) => {
     setSandboxSaving(true);
     setSandboxError("");
@@ -2197,6 +2493,8 @@ export function App() {
     setSelectedSandboxGrantId(grantId);
     setSandboxSettings(null);
     setSandboxError("");
+    setTelegramConnection(null);
+    setTelegramError("");
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
   };
 
@@ -2397,10 +2695,18 @@ export function App() {
           saving={sandboxSaving}
           error={sandboxError}
           selectedGrantId={selectedSandboxGrantId}
-          onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }}
+          onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); setTelegramConnection(null); setTelegramError(""); }}
           onSave={saveWorkspaceSettings}
           onNavigateFirewall={openFirewallFromWorkspace}
           canManageFirewall={session.roles.includes("administrator")}
+          telegram={telegramConnection}
+          credentials={credentials}
+          channelLoading={telegramLoading}
+          channelBusy={telegramBusy || credentialsBusy}
+          channelError={telegramError}
+          onSaveTelegram={saveTelegram}
+          onDisconnectTelegram={disconnectTelegram}
+          onCreateCredential={createTelegramCredential}
         />}
         {activeNav === "Connections" && (
           <ConnectionsScreen
@@ -2427,7 +2733,16 @@ export function App() {
           isAdmin={session.roles.includes("administrator")}
           gatewayUrl={gatewayAdminUrl}
           onOpenAdmin={() => setSettingsView("admin")}
+          onOpenCredentials={() => setSettingsView("credentials")}
           onBack={() => setSettingsView("overview")}
+          credentials={credentials}
+          workspaces={homeWorkspaces}
+          credentialsLoading={credentialsLoading}
+          credentialsBusy={credentialsBusy}
+          credentialsError={credentialsError}
+          onCreateCredential={createTelegramCredential}
+          onRotateCredential={rotateTelegramCredential}
+          onDeleteCredential={deleteTelegramCredential}
           users={adminUsers}
           loading={adminLoading}
           busyUserId={adminBusyUserId}

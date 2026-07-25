@@ -36,6 +36,16 @@ test("Workspace configuration is reached from its overview card instead of a dup
   assert.doesNotMatch(app, /title="Create a managed sandbox"/);
 });
 
+test("Telegram is workspace-scoped while typed credentials live under Settings", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  const connections = app.slice(app.indexOf("function ConnectionsScreen"), app.indexOf("function ChatPart"));
+  assert.match(app, /function TelegramChannelSection/);
+  assert.match(app, /id="workspace-channels-heading">Channels/);
+  assert.match(app, /function CredentialsScreen/);
+  assert.match(app, /Settings → Credentials/);
+  assert.doesNotMatch(connections, /TelegramDetail|telegram-title|onSaveTelegram/);
+});
+
 test("critical UI paths use owned accessible dialogs, skip targets, live state, and current dates", async () => {
   const [app, companion, ui] = await Promise.all([
     source("apps/web/src/App.jsx"),
@@ -224,7 +234,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
     source("apps/web/src/ui.css"),
   ]);
   assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog \}/);
-  assert.equal((app.match(/<SelectMenu/g) ?? []).length, 9);
+  assert.equal((app.match(/<SelectMenu/g) ?? []).length, 11);
   assert.doesNotMatch(app, /<select/);
   assert.match(ui, /export function SelectMenu/);
   assert.match(ui, /role="combobox"/);

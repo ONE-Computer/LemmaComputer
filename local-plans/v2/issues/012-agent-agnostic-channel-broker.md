@@ -1,6 +1,6 @@
 # 012: add an agent-agnostic channel broker with Telegram as the first adapter
 
-Status: `planned`
+Status: `verification`
 
 Priority: P1
 Depends on: 002, 003, 010
@@ -8,9 +8,9 @@ Unblocks: managed external messaging channels without placing channel credential
 
 ## Outcome
 
-An employee can connect one private Telegram bot to a ONEComputer workspace and
-use it to converse with any supported, policy-selected agent through the same
-agent-neutral chat contract used by ONEComputer Web.
+An employee can connect one private Telegram bot to each ONEComputer workspace
+and use it to converse with any supported, policy-selected agent through the
+same agent-neutral chat contract used by ONEComputer Web.
 
 ONEComputer owns a small encrypted channel-credential store and a trusted
 channel broker outside the workspace. The broker, not Hermes, Claude, Codex, or
@@ -36,9 +36,12 @@ the same routing, authorization, session, audit, and delivery boundaries.
   process inside the workspace. Do not project the bot token through an
   environment variable, file, launch argument, agent configuration, tool
   result, prompt, or model context.
-- The Connections page owns setup and status for official messaging channels.
-  It accepts a write-only bot token and an explicit allowlist of Telegram user
-  IDs. It never displays the stored token.
+- Workspace configuration owns channel attachment and routing. Enforce one
+  connection per workspace and adapter, and one active workspace attachment per
+  credential. A durable workspace binding survives sandbox restart.
+- Settings owns a typed, write-only Credentials inventory for creation,
+  rotation, status, and deletion. It is not a general environment-variable or
+  arbitrary secret-injection vault and never displays a stored token.
 - A connection is bound server-side to the authenticated tenant, employee, and
   workspace. An inbound Telegram message cannot choose arbitrary tenant,
   subject, workspace, grant, agent, or session identifiers.
@@ -85,9 +88,10 @@ the same routing, authorization, session, audit, and delivery boundaries.
   embedded in source, image, or workspace configuration is not acceptable.
 - Write-only create, update, rotate, revoke, status, and connectivity-test
   APIs. Read APIs return metadata and state only.
-- Connections UI for Telegram setup, sender allowlisting, workspace binding,
-  default-agent selection, explicit agent switching policy, rotation, and
-  disconnect.
+- Workspace Channels UI for Telegram attachment, sender allowlisting,
+  default-agent selection, explicit agent switching policy, and disconnect,
+  plus a Settings Credentials UI for typed creation, rotation, status, and
+  deletion.
 - Server-side routing from a verified external sender to one authorized
   workspace, agent, and independent channel session.
 - Reuse of Issue 010's agent-neutral structured chat interface for Hermes,
@@ -282,4 +286,19 @@ Include:
 
 ## Completion record
 
-Not complete.
+An initial deployable broker, encrypted typed credential store, agent-neutral
+Control route, Telegram polling adapter, workspace Channels UI, and Settings
+Credentials inventory are implemented on
+`codex/issue-012-channel-broker`. Automated credential-boundary, owner/sender
+isolation, per-workspace cardinality, exclusive credential attachment, replay,
+routing, build, Compose, and fixture-browser checks pass locally.
+
+The issue remains in `verification`. In addition to a dedicated Telegram bot
+token and numeric test-user ID for live Bot API, restart, rotation, disconnect,
+outage, and deployed network/log/database inspection, completion still requires
+the issue's short-lived connection-bound service grant, externally enforced
+exact-destination egress, administrator channel/data-export policy, durable
+audit evidence, and the full rate-limit, queue, retry, and attachment-limit
+matrix. The current adapter rejects non-text messages and pins its Bot API
+origin in code, but those controls are not substitutes for the remaining
+requirements. No real Telegram credential was used during implementation.

@@ -119,6 +119,34 @@ services:
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
 
+  channel-broker:
+    container_name: onecomputer-channel-broker
+    build:
+      context: ../..
+      dockerfile: infra/issue-001/Dockerfile.node
+    command: ["npm", "run", "start", "-w", "@onecomputer/channel-broker"]
+    environment:
+      CHANNEL_BROKER_HOST: 0.0.0.0
+      CHANNEL_BROKER_PORT: 4102
+      CHANNEL_BROKER_INTERNAL_TOKEN: ${ONECOMPUTER_CHANNEL_BROKER_TOKEN:?set ONECOMPUTER_CHANNEL_BROKER_TOKEN}
+      CHANNEL_CREDENTIAL_SECRET: ${ONECOMPUTER_CHANNEL_CREDENTIAL_SECRET:?set ONECOMPUTER_CHANNEL_CREDENTIAL_SECRET}
+      CONTROL_URL: http://control-api:4100
+      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
+      POLL_INTERVAL_MS: 1000
+    networks: [control-private, channel-egress]
+    depends_on:
+      postgres: { condition: service_healthy }
+      control-api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4102/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
   control-api:
     container_name: onecomputer-control-api
     build:
@@ -153,6 +181,8 @@ services:
       # Retain the existing external secret name while Control treats it as
       # agent-neutral chat-runtime derivation material.
       AGENT_CHAT_SECRET: ${ONECOMPUTER_HERMES_API_SECRET:?set ONECOMPUTER_HERMES_API_SECRET}
+      CHANNEL_BROKER_URL: http://channel-broker:4102
+      CHANNEL_BROKER_INTERNAL_TOKEN: ${ONECOMPUTER_CHANNEL_BROKER_TOKEN:?set ONECOMPUTER_CHANNEL_BROKER_TOKEN}
       POLICY_SIGNING_KEY_ID: ${ONECOMPUTER_POLICY_SIGNING_KEY_ID:?run npm run key:policy and store the result in .env}
       POLICY_SIGNING_PRIVATE_KEY_B64: ${ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64:?run npm run key:policy and store the result in .env}
       POLICY_VERIFICATION_KEYS_B64: ${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?run npm run key:policy and store the result in .env}
@@ -166,6 +196,11 @@ services:
       postgres: { condition: service_healthy }
       workspace-controller: { condition: service_started }
       litellm: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -194,6 +229,7 @@ networks:
   web-edge: {}
   control-private:
     name: onecomputer-control
+  channel-egress: {}
   gateway-private:
     internal: true
 volumes:

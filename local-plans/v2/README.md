@@ -138,7 +138,7 @@ consistent, and the completion record points to the bundle.
 | 009 | P1 | cancelled | Chat with any policy-selected agent through one owned interface | 003, 007 |
 | 010 | P1 | verification | Replace the bespoke Chat surface with AI SDK structured streaming | 003, 007 |
 | 011 | P1 | ready | Replace custom OpenVTC proof code with the upstream consent SDK | 003 |
-| 012 | P1 | planned | Add an agent-agnostic channel broker with Telegram as the first adapter | 002, 003, 010 |
+| 012 | P1 | verification | Add an agent-agnostic channel broker with Telegram as the first adapter | 002, 003, 010 |
 
 ## Assignment template
 
