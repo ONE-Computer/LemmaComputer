@@ -10,7 +10,7 @@ const session = {
   user: {
     id: "alex-morgan",
     displayName: "Mike Sun",
-    email: "mike@example.test",
+    email: "mike@metech.dev",
   },
   tenant: { id: "acme", displayName: "ME TECH" },
   roles: ["employee", "administrator"],
@@ -21,6 +21,7 @@ const workspace = {
   grantId: "personal",
   state: "ready",
   readiness: { identity: "ready", network: "ready", models: "ready", tools: "ready" },
+  applications: ["firefox"],
   agents: [
     { id: "claude-desktop", displayName: "Claude Desktop", clientVersion: "1.22209.3", agentId: "agent-alex:claude", state: "ready" },
     { id: "hermes-claw", displayName: "Hermes Agent CLI", clientVersion: "0.19.0", agentId: "agent-alex:hermes", state: "ready" },
@@ -39,13 +40,37 @@ const workspace = {
     projected: { version: 7, digest, bundleDigest, keyId: "psk_policy_fixture", expiresAt: new Date(Date.now() + 86_400_000).toISOString() },
     enforced: { version: 7, digest, bundleDigest, keyId: "psk_policy_fixture", verifiedAt: now },
   },
+  policyAssignment: { version: 7, hash: digest },
+  profile: {
+    id: "claude-desktop-standard-v1",
+    client: "Claude Desktop",
+    clientVersion: "1.22209.3",
+    modelAlias: "onecomputer-glm",
+    persistence: "persistent-home",
+    network: "gateway-only",
+  },
 };
 
 const sandboxWorkspace = {
   ...workspace,
   id: "3c536c1f-6a31-427d-af8f-dbb0c63f8d70",
+  grantId: "sandbox-research",
   state: "stopped",
   readiness: { identity: "checking", network: "checking", models: "checking", tools: "checking" },
+  applications: ["google-chrome"],
+  agents: [
+    { id: "hermes-desktop", displayName: "Hermes Agent Desktop", clientVersion: "0.17.0", agentId: "agent-alex:research", state: "selected" },
+  ],
+  modelRoute: undefined,
+  policyAssignment: { version: 4, hash: digest },
+  profile: {
+    id: "kasm-persistent-standard",
+    client: "ONEComputer qualification CLI",
+    clientVersion: "issue-006",
+    modelAlias: "onecomputer-openai",
+    persistence: "persistent-home",
+    network: "gateway-only",
+  },
 };
 
 const profile = {
@@ -171,10 +196,45 @@ let chatMessages = [
   { role: "assistant", content: "I can help with that. I’ll work from the files and approved connections available in this sandbox. Which team’s priorities should we start with?", createdAt: now },
 ];
 
+let egressSecurityGroups = [{
+  schemaVersion: 1,
+  id: "egv_fixture_agent_updates_v1",
+  securityGroupId: "esg_fixture_agent_updates",
+  tenantId: session.tenant.id,
+  version: 1,
+  name: "Approved agent updates",
+  description: "Default-deny public egress for approved agent updates.",
+  defaultAction: "deny",
+  rules: [
+    { id: "claude-downloads", action: "allow", protocol: "https", host: "downloads.claude.ai", includeSubdomains: false, port: 443, purpose: "Download approved Claude Desktop updates" },
+    { id: "anthropic-api", action: "allow", protocol: "https", host: "api.anthropic.com", includeSubdomains: false, port: 443, purpose: "Connect approved Anthropic services" },
+  ],
+  documentHash: digest,
+  createdBy: session.user.id,
+  createdAt: now,
+}];
+
+let adminUsers = [
+  {
+    userId: session.user.id,
+    email: session.user.email,
+    displayName: session.user.displayName,
+    roles: session.roles,
+    effectivePolicy: { egressSecurityGroup: egressSecurityGroups[0] },
+  },
+  {
+    userId: "hello-metech",
+    email: "hello@metech.dev",
+    displayName: "METECH",
+    roles: ["employee"],
+    effectivePolicy: null,
+  },
+];
+
 const responses = new Map([
   ["GET /v1/auth/session", session],
   ["GET /v1/workspaces/current", workspace],
-  ["GET /v1/workspaces", { workspaces: [sandboxWorkspace] }],
+  ["GET /v1/workspaces", { workspaces: [workspace, sandboxWorkspace] }],
   ["GET /v1/sandbox-settings", sandboxSettings],
   ["GET /v1/operations/recent", operation],
   ["GET /v1/operations", { operations: [operation] }],
@@ -235,6 +295,47 @@ const server = http.createServer((request, response) => {
       const assistant = { role: "assistant", content: "I’m working inside your sandbox and can use only the tools and destinations your organization approved." };
       chatMessages = [...chatMessages, { role: "user", content: input.message }, assistant];
       response.end(JSON.stringify({ message: assistant }));
+    });
+    return;
+  }
+  if (key === "GET /v1/admin/users") {
+    response.end(JSON.stringify({ users: adminUsers }));
+    return;
+  }
+  if (key === "GET /v1/admin/egress-security-groups") {
+    response.end(JSON.stringify({ securityGroups: egressSecurityGroups }));
+    return;
+  }
+  if (key === "POST /v1/admin/egress-security-groups") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const prior = egressSecurityGroups.find((group) => group.securityGroupId === input.securityGroupId);
+      const securityGroupId = prior?.securityGroupId ?? `esg_fixture_${Date.now()}`;
+      const saved = {
+        ...egressSecurityGroups[0],
+        ...input,
+        id: `egv_fixture_${Date.now()}_v${(prior?.version ?? 0) + 1}`,
+        securityGroupId,
+        version: (prior?.version ?? 0) + 1,
+        createdAt: new Date().toISOString(),
+      };
+      egressSecurityGroups = [saved, ...egressSecurityGroups.filter((group) => group.securityGroupId !== securityGroupId)];
+      response.statusCode = 201;
+      response.end(JSON.stringify(saved));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/egress-security-group$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const userId = url.pathname.split("/")[4];
+      const input = JSON.parse(body);
+      const group = egressSecurityGroups.find((candidate) => candidate.id === input.securityGroupVersionId);
+      adminUsers = adminUsers.map((user) => user.userId === userId ? { ...user, effectivePolicy: { egressSecurityGroup: group } } : user);
+      response.end(JSON.stringify({ egressSecurityGroup: group }));
     });
     return;
   }

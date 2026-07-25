@@ -146,6 +146,7 @@ export const toView = (
   state: record.state,
   readiness: readinessFor(record.state, gateway),
   ...(gateway ? { modelRoute: gateway.modelRoute } : {}),
+  ...(policy ? { applications: policy.applications } : {}),
   ...(policyIntegrity ? { policyIntegrity } : {}),
   ...(policy?.agents ? {
     agents: policy.agents.map((agent) => ({
@@ -162,6 +163,10 @@ export const toView = (
             : "selected" as const,
     })),
   } : {}),
+  ...(policy ? { policyAssignment: {
+    version: policy.policyVersion,
+    hash: policy.policyHash,
+  } } : {}),
   ...(policy ? { profile: {
     id: policy.workspaceProfile,
     ...profileClient(policy.workspaceProfile),

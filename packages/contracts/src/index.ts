@@ -280,6 +280,7 @@ export const workspaceViewSchema = z.object({
   state: workspaceStateSchema,
   readiness: readinessSchema,
   modelRoute: modelRouteSchema.optional(),
+  applications: z.array(sandboxApplicationIdSchema).min(1).optional(),
   agents: z.array(z.object({
     id: agentCatalogIdSchema,
     displayName: z.string().min(1),
@@ -287,6 +288,10 @@ export const workspaceViewSchema = z.object({
     agentId: z.string().min(1),
     state: z.enum(["selected", "starting", "ready", "degraded", "unavailable"]),
   }).strict()).min(1).optional(),
+  policyAssignment: z.object({
+    version: z.number().int().positive(),
+    hash: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict().optional(),
   policyIntegrity: z.lazy(() => policyIntegrityViewSchema).optional(),
   profile: z.object({
     id: z.string().min(1),

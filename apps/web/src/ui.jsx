@@ -1,4 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Checkmark16Filled } from "@fluentui/react-icons/svg/checkmark";
+import { ChevronDown16Regular } from "@fluentui/react-icons/svg/chevron-down";
 import { Dismiss24Regular } from "@fluentui/react-icons/svg/dismiss";
 import { Info24Regular } from "@fluentui/react-icons/svg/info";
 import { ShieldCheckmark24Regular } from "@fluentui/react-icons/svg/shield-checkmark";
@@ -12,7 +15,155 @@ const focusableSelector = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
-export function ModalDialog({ title, description, children, onClose, labelledBy = "modal-title", eyebrow = "Confirm action" }) {
+export function SelectMenu({ value, options, onValueChange, disabled = false, ariaLabel, className = "" }) {
+  const triggerRef = useRef(null);
+  const popupRef = useRef(null);
+  const menuId = useId();
+  const [open, setOpen] = useState(false);
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
+  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const [position, setPosition] = useState(null);
+  const selectedOption = options[selectedIndex] ?? options[0];
+
+  const firstEnabledIndex = () => options.findIndex((option) => !option.disabled);
+  const lastEnabledIndex = () => {
+    for (let index = options.length - 1; index >= 0; index -= 1) if (!options[index].disabled) return index;
+    return -1;
+  };
+  const nextEnabledIndex = (start, direction) => {
+    if (!options.length) return -1;
+    for (let offset = 1; offset <= options.length; offset += 1) {
+      const index = (start + (offset * direction) + options.length) % options.length;
+      if (!options[index].disabled) return index;
+    }
+    return -1;
+  };
+  const openAt = (index) => {
+    const nextIndex = index >= 0 ? index : firstEnabledIndex();
+    if (nextIndex < 0) return;
+    setActiveIndex(nextIndex);
+    setOpen(true);
+  };
+  const selectIndex = (index) => {
+    const option = options[index];
+    if (!option || option.disabled) return;
+    onValueChange(option.value);
+    setOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!open) setActiveIndex(selectedIndex);
+  }, [open, selectedIndex]);
+
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const updatePosition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportPadding = 8;
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+      const spaceAbove = rect.top - viewportPadding;
+      const placeAbove = spaceBelow < 180 && spaceAbove > spaceBelow;
+      setPosition({
+        left: Math.max(viewportPadding, Math.min(rect.left, window.innerWidth - rect.width - viewportPadding)),
+        width: Math.min(rect.width, window.innerWidth - (viewportPadding * 2)),
+        maxHeight: Math.max(96, (placeAbove ? spaceAbove : spaceBelow)),
+        ...(placeAbove ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }),
+      });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointerDown = (event) => {
+      if (triggerRef.current?.contains(event.target) || popupRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  const onKeyDown = (event) => {
+    if (disabled) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!open) openAt(selectedIndex);
+      else setActiveIndex(nextEnabledIndex(activeIndex, 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) openAt(selectedIndex);
+      else setActiveIndex(nextEnabledIndex(activeIndex, -1));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      openAt(firstEnabledIndex());
+    } else if (event.key === "End") {
+      event.preventDefault();
+      openAt(lastEnabledIndex());
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (open) selectIndex(activeIndex);
+      else openAt(selectedIndex);
+    } else if (event.key === "Escape" && open) {
+      event.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  const popup = open && position && typeof document !== "undefined" && createPortal(
+    <div ref={popupRef} id={menuId} className="select-menu-popup" role="listbox" aria-label={ariaLabel} style={position}>
+      {options.map((option, index) => (
+        <div
+          key={option.value}
+          id={`${menuId}-option-${index}`}
+          className="select-menu-option"
+          role="option"
+          aria-selected={option.value === value}
+          aria-disabled={option.disabled || undefined}
+          data-active={index === activeIndex || undefined}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => selectIndex(index)}
+        >
+          <span>{option.label}</span>
+          {option.value === value && <Checkmark16Filled aria-hidden="true" />}
+        </div>
+      ))}
+    </div>,
+    document.body,
+  );
+
+  return (
+    <span className={`select-menu${className ? ` ${className}` : ""}`}>
+      <button
+        ref={triggerRef}
+        className="select-menu-trigger"
+        type="button"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-controls={open ? menuId : undefined}
+        aria-expanded={open}
+        aria-activedescendant={open ? `${menuId}-option-${activeIndex}` : undefined}
+        data-state={open ? "open" : "closed"}
+        disabled={disabled}
+        onClick={() => (open ? setOpen(false) : openAt(selectedIndex))}
+        onKeyDown={onKeyDown}
+      >
+        <span className="select-menu-value">{selectedOption?.label}</span>
+        <ChevronDown16Regular aria-hidden="true" />
+      </button>
+      {popup}
+    </span>
+  );
+}
+
+export function ModalDialog({ title, description, children, onClose, labelledBy = "modal-title", eyebrow = "Confirm action", className = "" }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const closeHandler = useRef(onClose);
@@ -51,7 +202,7 @@ export function ModalDialog({ title, description, children, onClose, labelledBy 
     <div className="modal-layer" role="presentation" onMouseDown={onClose}>
       <section
         ref={dialogRef}
-        className="modal-card"
+        className={`modal-card${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
@@ -79,7 +230,7 @@ export function NoticeDialog({ title, description, onClose }) {
     <ModalDialog title={title} description={description} onClose={onClose} labelledBy="notice-dialog-title" eyebrow="Configuration saved">
       <div className="modal-notice">
         <Info24Regular aria-hidden="true" />
-        <span>The saved configuration is now the source of truth for the next sandbox launch.</span>
+        <span>The saved configuration is now the source of truth for the next workspace launch.</span>
       </div>
       <div className="modal-actions">
         <button className="primary-button" type="button" onClick={onClose}>Got it</button>

@@ -117,6 +117,7 @@ consistent, and the completion record points to the bundle.
 | 005 | P3 | complete | Sign projected policy and verify it at enforcement points | 004 |
 | 006 | P3 | verification | Refine the complete V2 UI and accessibility | 005 |
 | 007 | P1 | verification | Chat with Hermes inside the assigned sandbox | 003 |
+| 008 | P1 | planned (deferred) | Extend egress firewall to FQDN and CIDR L3/L4 rules | 002 |
 
 ## Assignment template
 

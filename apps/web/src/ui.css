@@ -138,6 +138,108 @@
   outline-offset: 2px;
 }
 
+.select-menu {
+  display: inline-block;
+  min-width: 0;
+}
+
+.select-menu-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid #9ba6b1;
+  border-radius: 6px;
+  background: #fff;
+  color: #172334;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.select-menu-trigger:hover:not(:disabled) {
+  border-color: #6e8297;
+  background: #fbfdff;
+}
+
+.select-menu-trigger[data-state="open"] {
+  border-color: #1d5dac;
+  background: #fafdff;
+  box-shadow: 0 0 0 3px rgb(47 112 201 / 18%);
+}
+
+.select-menu-trigger:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.select-menu-trigger > svg {
+  flex: 0 0 auto;
+  color: #4e6173;
+  transition: transform 120ms ease;
+}
+
+.select-menu-trigger[data-state="open"] > svg {
+  transform: rotate(180deg);
+}
+
+.select-menu-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-menu-popup {
+  position: fixed;
+  z-index: 110;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  border: 1px solid #b7c2cd;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 14px 32px rgb(17 35 59 / 18%);
+}
+
+.select-menu-option {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  color: #27384a;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.select-menu-option:hover,
+.select-menu-option[data-active] {
+  background: #eaf2fe;
+  color: #113f83;
+}
+
+.select-menu-option[aria-selected="true"] {
+  color: #07377f;
+  font-weight: 650;
+}
+
+.select-menu-option[aria-disabled="true"] {
+  color: #85909c;
+  cursor: not-allowed;
+}
+
+.select-menu-option svg {
+  flex: 0 0 auto;
+}
+
 .destructive-button {
   background: var(--color-danger) !important;
 }

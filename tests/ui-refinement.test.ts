@@ -4,17 +4,36 @@ import test from "node:test";
 
 const source = async (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("the owned UI exposes signed policy state and workspace protections without implementation authority", async () => {
+test("Workspace is the single multi-workspace overview without redundant reassurance or activity", async () => {
   const [app, ui] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/ui.jsx"),
   ]);
-  assert.match(app, /<PolicyIntegrityCard integrity=\{workspace\?\.policyIntegrity\}/);
-  assert.match(app, /Native copy and paste/);
-  assert.match(app, /Controlled internet access/);
-  assert.match(ui, /In workspace/);
-  assert.match(ui, /Enforced/);
+  assert.match(app, /<h1>Your workspaces<\/h1>/);
+  assert.match(app, /home: "Workspace"/);
+  assert.match(app, /label="Workspace"/);
+  assert.match(app, /workspace-overview-list/);
+  assert.match(app, /WorkspaceAssignment label="Apps"/);
+  assert.match(app, /WorkspaceAssignment label="Agents"/);
+  assert.match(app, /WorkspaceAssignment label="Model"/);
+  assert.match(app, /WorkspaceAssignment label="Policy"/);
+  assert.match(app, /policyAssignment\.version/);
+  assert.doesNotMatch(app, /Native copy and paste/);
+  assert.doesNotMatch(app, /Controlled internet access/);
+  assert.doesNotMatch(app, /Recent governed operation/);
+  assert.doesNotMatch(app, /Your assigned capabilities/);
+  assert.doesNotMatch(app, /sandbox: "Sandbox"/);
+  assert.doesNotMatch(app, /label="Sandbox"/);
   assert.doesNotMatch(ui, /PRIVATE_KEY|SIGNING_PRIVATE|provider credential/i);
+});
+
+test("Workspace configuration is reached from its overview card instead of a duplicate Sandbox inventory", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  assert.match(app, /function WorkspaceConfigurationScreen/);
+  assert.doesNotMatch(app, /function SandboxScreen/);
+  assert.match(app, /onManage=\{selectWorkspaceConfiguration\}/);
+  assert.match(app, /title="Create workspace"/);
+  assert.doesNotMatch(app, /title="Create a managed sandbox"/);
 });
 
 test("critical UI paths use owned accessible dialogs, skip targets, live state, and current dates", async () => {
@@ -33,7 +52,7 @@ test("critical UI paths use owned accessible dialogs, skip targets, live state, 
   assert.doesNotMatch(app, /dateTime="2026-/);
 });
 
-test("sandbox options are editable, opt-in, and explain the required restart after save", async () => {
+test("workspace options are editable, opt-in, and explain the required restart after save", async () => {
   const [app, ui] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/ui.jsx"),
@@ -45,7 +64,7 @@ test("sandbox options are editable, opt-in, and explain the required restart aft
   assert.match(app, /title="Restart required"/);
   assert.match(app, /next launch will expose the selected applications and AI agent clients/);
   assert.match(ui, /export function NoticeDialog/);
-  assert.match(ui, /source of truth for the next sandbox launch/);
+  assert.match(ui, /source of truth for the next workspace launch/);
 });
 
 test("top-level navigation is URL-backed and follows browser history", async () => {
@@ -57,10 +76,131 @@ test("top-level navigation is URL-backed and follows browser history", async () 
   assert.match(app, /searchParams\.set\("view", viewByNav\[name\]\)/);
 });
 
+test("Trail owns approval-device management while Connections stays focused on service setup", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  const activityScreen = app.slice(app.indexOf("function ActivityScreen"), app.indexOf("const pendingApplications"));
+  const connectionsScreen = app.slice(app.indexOf("function ConnectionsScreen"), app.indexOf("function ChatScreen"));
+  assert.match(app, /trail: "Trail"/);
+  assert.match(app, /label="Trail"/);
+  assert.doesNotMatch(app, /view === "activity"/);
+  assert.match(activityScreen, /<h1>Trail<\/h1>/);
+  assert.match(activityScreen, /<ApprovalDeviceCard displayName=\{displayName\}/);
+  assert.doesNotMatch(connectionsScreen, /ApprovalDeviceCard/);
+  assert.match(app, /Each account uses one active approval device/);
+});
+
+test("desktop pages share the wider workspace content cap", async () => {
+  const styles = await source("apps/web/src/styles.css");
+  assert.match(styles, /\.home-screen,\s*\.secondary-screen\s*\{\s*width: min\(100%, 1440px\)/);
+  assert.doesNotMatch(styles, /\.secondary-screen\s*\{\s*max-width: 1000px/);
+  assert.doesNotMatch(styles, /\.connections-screen\s*\{\s*max-width: 1000px/);
+});
+
+test("desktop navigation has a wider persistent sidebar without widening the mobile drawer", async () => {
+  const styles = await source("apps/web/src/styles.css");
+  assert.match(styles, /--desktop-sidebar-width: 336px/);
+  assert.match(styles, /\.sidebar\s*\{[\s\S]*?width: var\(--desktop-sidebar-width\)/);
+  assert.match(styles, /\.main-content\s*\{[\s\S]*?margin-left: var\(--desktop-sidebar-width\)/);
+  assert.match(styles, /@media \(max-width: 880px\) \{\s*\.sidebar\s*\{\s*width: 292px/);
+});
+
+test("desktop pages begin at one shared top-bar offset without compact-page padding", async () => {
+  const styles = await source("apps/web/src/styles.css");
+  assert.match(styles, /\.topbar\s*\{\s*display: flex;\s*min-height: 48px/);
+  assert.match(styles, /\.home-screen,\s*\.secondary-screen\s*\{[\s\S]*?margin: 0 auto/);
+  assert.doesNotMatch(styles, /\.page-heading\.compact\s*\{\s*padding-top:/);
+  assert.match(styles, /@media \(max-width: 880px\) \{[\s\S]*?\.home-screen,\s*\.secondary-screen\s*\{\s*margin-top: 32px/);
+});
+
+test("the account menu owns Settings, with Gateway and Administration out of primary navigation", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  const primaryNav = app.slice(app.indexOf('<nav aria-label="Primary navigation">'), app.indexOf("</nav>", app.indexOf('<nav aria-label="Primary navigation">')));
+  const accountMenu = app.slice(app.indexOf('id="sidebar-account-menu"'), app.indexOf("</aside>", app.indexOf('id="sidebar-account-menu"')));
+  assert.match(app, /settings: "Settings"/);
+  assert.match(app, /function SettingsScreen/);
+  assert.match(app, /<strong>Gateway<\/strong>/);
+  assert.match(app, /<strong>Administration<\/strong>/);
+  assert.doesNotMatch(primaryNav, /label="Admin"|label="Gateway"/);
+  assert.match(accountMenu, /selectNav\("Settings"\)/);
+  assert.match(accountMenu, /Log out/);
+  assert.doesNotMatch(app, /admin: "Admin"/);
+});
+
+test("Help is retired from navigation and routing", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  assert.doesNotMatch(app, /help: "Help"/);
+  assert.doesNotMatch(app, /function HelpScreen/);
+  assert.doesNotMatch(app, /label="Help"/);
+});
+
+test("Chat is last in navigation, with recent threads in the sidebar and a focused composer", async () => {
+  const [app, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/styles.css"),
+  ]);
+  const primaryNav = app.slice(app.indexOf('<nav aria-label="Primary navigation">'), app.indexOf("</nav>", app.indexOf('<nav aria-label="Primary navigation">')));
+  const chatScreen = app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App"));
+  assert.ok(primaryNav.indexOf('label="Chat"') > primaryNav.indexOf('label="Connections"'));
+  assert.match(primaryNav, /sidebar-chat-history/);
+  assert.match(primaryNav, /Recent chat threads/);
+  assert.doesNotMatch(chatScreen, /chat-sessions/);
+  assert.match(chatScreen, /<h1>How can Hermes help\?<\/h1>/);
+  assert.match(chatScreen, /className="chat-send-button"/);
+  assert.match(styles, /\.chat-composer\s*\{[\s\S]*?border-radius: 26px/);
+});
+
 test("Chat automatically recovers when Hermes becomes healthy after the workspace reports ready", async () => {
   const app = await source("apps/web/src/App.jsx");
   assert.match(app, /status !== "offline"/);
   assert.match(app, /reasonCode !== "HERMES_UNAVAILABLE"/);
   assert.match(app, /setTimeout\(\(\) => setReload\(\(value\) => value \+ 1\), 2000\)/);
   assert.match(app, /clearTimeout\(timeout\)/);
+});
+
+test("Firewall presents tenant-wide effective policies in one rules table with centered change dialogs", async () => {
+  const [app, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/styles.css"),
+  ]);
+  const firewallScreen = app.slice(app.indexOf("function FirewallScreen"), app.indexOf("function ActivityScreen"));
+  assert.match(firewallScreen, /Administrator view/);
+  assert.match(firewallScreen, /You can see firewall policies for every workspace/);
+  assert.doesNotMatch(firewallScreen, /Manage security groups/);
+  assert.match(firewallScreen, />Add rule<\/button>/);
+  assert.match(firewallScreen, /<th scope="col">Workspace<\/th>/);
+  assert.match(firewallScreen, /<th scope="col">Owner<\/th>/);
+  assert.match(firewallScreen, /<th scope="col">Security group<\/th>/);
+  assert.match(app, /function FirewallAttachmentDialog/);
+  assert.match(app, /function FirewallEditorDialog/);
+  assert.match(app, /function FirewallAddRuleDialog/);
+  assert.match(app, /const \[selectedId, setSelectedId\] = useState\("__new__"\)/);
+  assert.match(app, /Create a security group and allow one reviewed destination/);
+  assert.match(firewallScreen, /setAddRuleOpen\(true\)/);
+  assert.doesNotMatch(firewallScreen, /onClick=\{\(\) => setEditor\(\{ securityGroupId: latestVersions\[0\]/);
+  assert.doesNotMatch(app.slice(app.indexOf("function FirewallAddRuleDialog"), app.indexOf("function AdminScreen")), /firewall-editor-rule-list/);
+  assert.match(app, /<ModalDialog/);
+  assert.doesNotMatch(firewallScreen, /drawer/);
+  assert.match(styles, /\.firewall-table-scroll\s*\{[^}]*overflow-x: auto;[^}]*contain: paint;/);
+  assert.match(styles, /\.modal-card\.firewall-editor-modal\s*\{\s*width: min\(100%, 880px\)/);
+});
+
+test("Select controls use the shared accessible menu instead of browser-native dropdowns", async () => {
+  const [app, ui, uiStyles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/ui.jsx"),
+    source("apps/web/src/ui.css"),
+  ]);
+  assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog \}/);
+  assert.equal((app.match(/<SelectMenu/g) ?? []).length, 8);
+  assert.doesNotMatch(app, /<select/);
+  assert.match(ui, /export function SelectMenu/);
+  assert.match(ui, /role="combobox"/);
+  assert.match(ui, /role="listbox"/);
+  assert.match(ui, /event\.key === "ArrowDown"/);
+  assert.match(ui, /createPortal/);
+  assert.match(uiStyles, /\.select-menu-popup/);
+  assert.match(uiStyles, /\.select-menu-trigger\[data-state="open"\]/);
+  assert.match(app, /id="firewall-rule-search" name="firewall-rule-search"/);
+  assert.match(app, /id="firewall-rules-only" name="firewall-rules-only"/);
+  assert.match(await source("apps/web/src/styles.css"), /@media \(max-width: 1180px\)[\s\S]*?\.firewall-page-heading[\s\S]*?flex-direction: column/);
 });

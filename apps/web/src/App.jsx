@@ -1,19 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Home24Filled, Home24Regular } from "@fluentui/react-icons/svg/home";
 import { Clock24Regular } from "@fluentui/react-icons/svg/clock";
-import { QuestionCircle24Regular } from "@fluentui/react-icons/svg/question-circle";
 import { Open24Regular } from "@fluentui/react-icons/svg/open";
 import { ArrowClockwise24Regular } from "@fluentui/react-icons/svg/arrow-clockwise";
 import { CheckmarkCircle24Regular } from "@fluentui/react-icons/svg/checkmark-circle";
 import { Laptop24Regular, Laptop48Regular } from "@fluentui/react-icons/svg/laptop";
-import { Code24Regular } from "@fluentui/react-icons/svg/code";
-import { Cloud24Regular } from "@fluentui/react-icons/svg/cloud";
 import { Delete24Regular } from "@fluentui/react-icons/svg/delete";
 import { Person24Regular } from "@fluentui/react-icons/svg/person";
 import { ChevronDown16Regular } from "@fluentui/react-icons/svg/chevron-down";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
 import { Checkmark16Filled } from "@fluentui/react-icons/svg/checkmark";
 import { ArrowLeft24Regular } from "@fluentui/react-icons/svg/arrow-left";
+import { ArrowUp24Regular } from "@fluentui/react-icons/svg/arrow-up";
 import { Add24Regular } from "@fluentui/react-icons/svg/add";
 import { Dismiss24Regular } from "@fluentui/react-icons/svg/dismiss";
 import { Navigation24Regular } from "@fluentui/react-icons/svg/navigation";
@@ -28,42 +26,12 @@ import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
   enrollBrowserApprover,
-  getBrowserApproverIdentity,
   hasBrowserApprover,
   loadPendingApproval,
   signApprovalDecision,
 } from "./openvtc-browser-agent.js";
-import { ConfirmDialog, NoticeDialog, PolicyIntegrityCard, TextPromptDialog } from "./ui.jsx";
+import { ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog } from "./ui.jsx";
 
-const capabilities = [
-  {
-    icon: Bot24Regular,
-    name: "AI assistant",
-    description: "Use your organization’s approved model route.",
-    status: "Ready",
-  },
-  {
-    icon: Code24Regular,
-    name: "Coding tools",
-    description: "Use approved code editors and runtimes.",
-    status: "Ready",
-  },
-  {
-    icon: Cloud24Regular,
-    name: "OneDrive read",
-    description: "View and download files from OneDrive.",
-    status: "Planned",
-  },
-  {
-    icon: Delete24Regular,
-    name: "OneDrive delete (with approval)",
-    description: "Delete files with manager approval.",
-    status: "Approval required",
-  },
-];
-
-const readinessLabels = { identity: "Identity", network: "Network", models: "Models", tools: "Tools" };
-const readinessStates = { ready: "Ready", checking: "Checking", unavailable: "Not configured", failed: "Failed" };
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
 const gatewayAdminUrl = import.meta.env.VITE_LITELLM_ADMIN_URL ?? "http://127.0.0.1:4000/ui";
 const operationStateLabels = {
@@ -76,19 +44,20 @@ const operationStateLabels = {
   expired: "expired",
 };
 const navByView = Object.freeze({
-  home: "Home",
+  home: "Workspace",
   chat: "Chat",
-  activity: "Activity",
-  sandbox: "Sandbox",
+  trail: "Trail",
   firewall: "Firewall",
   connections: "Connections",
-  admin: "Admin",
-  help: "Help",
+  settings: "Settings",
 });
 const viewByNav = Object.freeze(Object.fromEntries(
   Object.entries(navByView).map(([view, name]) => [name, view]),
 ));
-const navFromLocation = () => navByView[new URLSearchParams(window.location.search).get("view") ?? "home"] ?? "Home";
+const navFromLocation = () => {
+  const view = new URLSearchParams(window.location.search).get("view") ?? "home";
+  return navByView[view] ?? "Workspace";
+};
 
 const operationTime = (value) => new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(new Date(value));
 
@@ -103,16 +72,6 @@ function NavButton({ active, icon: Icon, label, onClick }) {
       <Icon aria-hidden="true" />
       <span>{label}</span>
     </button>
-  );
-}
-
-function ExternalNavLink({ icon: Icon, label, href }) {
-  return (
-    <a className="nav-button" href={href} target="_blank" rel="noreferrer">
-      <Icon aria-hidden="true" />
-      <span>{label}</span>
-      <Open24Regular className="nav-external-icon" aria-hidden="true" />
-    </a>
   );
 }
 
@@ -175,168 +134,119 @@ function Drawer({ title, children, onClose }) {
   );
 }
 
-function HomeScreen({ userName, workspace, workspaceState, apiError, operation, operationBusy, onOpen, onRestart, onStop, onDelete, onCapabilities, onOpenOperation, onCreateOperation, onTestGateway, testingGateway }) {
-  const isRestarting = workspaceState === "restarting";
-  const isOpen = workspaceState === "open";
-  const busy = busyStates.has(workspaceState);
-  const title = {
-    loading: "Checking your workspace",
-    not_created: "Your workspace is ready to set up",
-    provisioning: "Your workspace is being prepared",
-    ready: "Your workspace is ready",
-    open: "Your workspace is open",
-    restarting: "Your workspace is restarting",
-    stopping: "Your workspace is stopping",
-    stopped: "Your workspace is stopped",
-    failed: "Your workspace needs attention",
-  }[workspaceState] ?? "Your workspace";
-  const description = {
-    loading: "We’re checking the current workspace state.",
-    not_created: "Start a managed workspace when you’re ready.",
-    provisioning: "The secure sandbox is starting. You can leave this page open.",
-    ready: "Your managed workspace is ready and secure. You can open it or restart if you need a fresh start.",
-    open: "Your managed workspace is running in a separate secure window.",
-    restarting: "We’re preparing a fresh session. This usually takes less than a minute.",
-    stopping: "We’re securely closing the current sandbox.",
-    stopped: "The sandbox is no longer running. Start it again whenever you need it.",
-    failed: "The sandbox could not be prepared. Retry, or contact support if the problem continues.",
-  }[workspaceState];
-  const readiness = workspace?.readiness ?? { identity: "ready", network: "unavailable", models: "unavailable", tools: "unavailable" };
-  const primaryLabel = workspaceState === "not_created" || workspaceState === "stopped" || workspaceState === "failed"
-    ? "Start workspace"
-    : isOpen ? "Return to workspace" : busy ? "Preparing workspace" : "Open workspace";
+const applicationNames = {
+  firefox: "Firefox ESR",
+  "google-chrome": "Google Chrome",
+};
 
+const workspaceStatus = (state) => ({
+  not_created: "Not started",
+  provisioning: "Preparing",
+  ready: "Ready",
+  open: "Running",
+  restarting: "Restarting",
+  stopping: "Stopping",
+  stopped: "Stopped",
+  failed: "Needs attention",
+}[state] ?? "Unknown");
+
+const policyStatus = (workspace) => ({
+  match: "Verified",
+  drift: "Mismatch",
+  expired: "Refresh required",
+  invalid: "Invalid",
+  unavailable: "Unverified",
+}[workspace.policyIntegrity?.state] ?? (workspace.policyAssignment ? "Assigned" : "Not assigned"));
+
+function WorkspaceAssignment({ label, icon: Icon, children, detail }) {
   return (
-    <div className="home-screen">
-      <header className="page-heading">
-        <p>Good morning, {userName}</p>
-        <h1>{title}</h1>
-        <span>{description}</span>
+    <div className="workspace-assignment">
+      <span className="workspace-assignment-icon"><Icon aria-hidden="true" /></span>
+      <div>
+        <small>{label}</small>
+        {children}
+        {detail && <span className="workspace-assignment-detail">{detail}</span>}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorkspaceId, onOpen, onRestart, onStop, onDelete, onCreate, onManage }) {
+  return (
+    <div className="home-screen workspace-overview">
+      <header className="page-heading workspace-overview-heading">
+        <div>
+          <p>Good morning, {userName}</p>
+          <h1>Your workspaces</h1>
+          <span>See what is running and the apps, agents, model, and policy assigned to each workspace.</span>
+        </div>
+        <button className="primary-button create-workspace-button" type="button" onClick={onCreate}>
+          <Add24Regular aria-hidden="true" />Create workspace
+        </button>
       </header>
 
       {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong>{apiError}</span></div>}
 
-      <section className="workspace-section" aria-label="Acme Workspace">
-        <div className={`workspace-icon${isRestarting ? " restarting" : ""}`}>
+      {loading ? (
+        <div className="workspace-overview-empty" role="status">Loading your workspaces…</div>
+      ) : workspaces.length === 0 ? (
+        <section className="workspace-overview-empty">
           <Laptop48Regular aria-hidden="true" />
-        </div>
-        <div className="workspace-details">
-          <div className="workspace-name">
-            <h2>Acme Workspace</h2>
-            <p>Personal workspace</p>
-          </div>
-          <div className="readiness" aria-label="Workspace readiness">
-            {Object.entries(readiness).map(([key, state]) => (
-              <div className="readiness-item" key={key}>
-                <span className={`status-icon${state !== "ready" ? " pending" : ""}`}>
-                  {state !== "ready" ? (
-                    <span className="status-dot" aria-hidden="true" />
+          <div><h2>No workspaces yet</h2><p>Create a workspace to choose its applications, agents, model, and policy.</p></div>
+        </section>
+      ) : (
+        <section className="workspace-overview-list" aria-label="Your workspaces">
+          {workspaces.map((workspace) => {
+            const busy = actionWorkspaceId === workspace.id || busyStates.has(workspace.state);
+            const primaryLabel = ["not_created", "stopped", "failed"].includes(workspace.state)
+              ? "Start workspace"
+              : workspace.state === "open" ? "Return to workspace" : busy ? "Preparing workspace" : "Open workspace";
+            const model = workspace.modelRoute?.alias ?? workspace.profile?.modelAlias ?? "Not assigned";
+            const apps = workspace.applications?.map((application) => applicationNames[application] ?? application) ?? [];
+            const agents = workspace.agents ?? [];
+            const titleId = `workspace-${workspace.id}`;
+
+            return (
+              <article className="workspace-overview-card" key={workspace.id} aria-labelledby={titleId}>
+                <header className="workspace-card-header">
+                  <span className={`workspace-card-icon${busy ? " busy" : ""}`}><Laptop24Regular aria-hidden="true" /></span>
+                  <div className="workspace-card-title">
+                    <h2 id={titleId}>{workspaceName(workspace)}</h2>
+                    <p>{workspace.grantId === "personal" ? "Personal workspace" : "Managed workspace"}</p>
+                  </div>
+                  <span className={`workspace-state state-${workspace.state}`}>{workspaceStatus(workspace.state)}</span>
+                </header>
+
+                <div className="workspace-assignment-grid" aria-label={`Assignments for ${workspaceName(workspace)}`}>
+                  <WorkspaceAssignment label="Apps" icon={Laptop24Regular} detail={apps.length ? undefined : "No apps assigned"}>
+                    {apps.length > 0 && <div className="workspace-assignment-tags">{apps.map((app) => <span key={app}>{app}</span>)}</div>}
+                  </WorkspaceAssignment>
+                  <WorkspaceAssignment label="Agents" icon={Bot24Regular} detail={agents.length ? undefined : "No agents assigned"}>
+                    {agents.length > 0 && <div className="workspace-assignment-tags">{agents.map((agent) => <span key={agent.id}>{agent.displayName}</span>)}</div>}
+                  </WorkspaceAssignment>
+                  <WorkspaceAssignment label="Model" icon={Bot24Regular} detail={model} />
+                  <WorkspaceAssignment label="Policy" icon={ShieldCheckmark24Regular} detail={workspace.policyAssignment ? `v${workspace.policyAssignment.version} · ${policyStatus(workspace)}` : policyStatus(workspace)} />
+                </div>
+
+                <footer className="workspace-card-actions">
+                  <button className="primary-button" type="button" onClick={() => onOpen(workspace)} disabled={busy}>
+                    <Open24Regular aria-hidden="true" />{primaryLabel}
+                  </button>
+                  <button className="workspace-manage-button" type="button" onClick={() => onManage(workspace.grantId)}>Manage configuration <ChevronRight16Regular aria-hidden="true" /></button>
+                  {workspace.state === "stopped" ? (
+                    <button className="secondary-button danger-button" type="button" onClick={() => onDelete(workspace)} disabled={busy}><Delete24Regular aria-hidden="true" />Delete</button>
                   ) : (
-                    <CheckmarkCircle24Regular aria-hidden="true" />
+                    <div className="workspace-secondary-actions">
+                      <button className="secondary-button" type="button" onClick={() => onRestart(workspace)} disabled={busy}><ArrowClockwise24Regular aria-hidden="true" />Restart</button>
+                      <button className="secondary-button" type="button" onClick={() => onStop(workspace)} disabled={busy}><Dismiss24Regular aria-hidden="true" />Stop</button>
+                    </div>
                   )}
-                </span>
-                <span>
-                  <strong>{readinessLabels[key]}</strong>
-                  <small>{readinessStates[state]}</small>
-                </span>
-              </div>
-            ))}
-          </div>
-          {workspace?.agents?.length > 0 && (
-            <div className="workspace-agents" aria-label="Selected workspace agents">
-              {workspace.agents.map((agent) => (
-                <span key={agent.id}>
-                  <Bot24Regular aria-hidden="true" />
-                  <span><strong>{agent.displayName}</strong><small>{agent.state} · v{agent.clientVersion}</small></span>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="workspace-actions">
-          <button className="primary-button" type="button" onClick={onOpen} disabled={busy}>
-            <Open24Regular aria-hidden="true" />
-            {primaryLabel}
-          </button>
-          {workspaceState === "stopped" ? (
-            <button className="secondary-button danger-button" type="button" onClick={onDelete}><Delete24Regular aria-hidden="true" />Delete</button>
-          ) : (
-            <>
-              <button className="secondary-button" type="button" onClick={onRestart} disabled={busy || !workspace}><ArrowClockwise24Regular aria-hidden="true" />Restart</button>
-              <button className="secondary-button" type="button" onClick={onStop} disabled={busy || !workspace}><Dismiss24Regular aria-hidden="true" />Stop</button>
-            </>
-          )}
-        </div>
-      </section>
-
-      <div className="workspace-protection-grid" aria-label="Workspace protections">
-        <div className="workspace-protection">
-          <Laptop24Regular aria-hidden="true" />
-          <span><strong>Native copy and paste</strong><small>Use your normal keyboard shortcuts. Clipboard contents are never sent to Control.</small></span>
-        </div>
-        <div className="workspace-protection">
-          <ShieldCheckmark24Regular aria-hidden="true" />
-          <span><strong>Controlled internet access</strong><small>Only approved destinations can leave the workspace, enforced by its external firewall.</small></span>
-        </div>
-      </div>
-
-      <PolicyIntegrityCard integrity={workspace?.policyIntegrity} />
-
-      <section className="support-grid">
-        <div className="capabilities-block">
-          <h2>Your assigned capabilities</h2>
-          <div className="capability-list">
-            {capabilities.map(({ icon: Icon, name, description }) => (
-              <div className="capability-row" key={name}>
-                <span className="capability-icon">
-                  <Icon aria-hidden="true" />
-                </span>
-                <span>
-                  <strong>{name}</strong>
-                  <small>{name === "AI assistant" && workspace?.modelRoute
-                    ? `${workspace.modelRoute.alias} · $${workspace.modelRoute.budget.remainingUsd.toFixed(2)} remaining`
-                    : description}</small>
-                </span>
-              </div>
-            ))}
-          </div>
-          <button className="text-button" type="button" onClick={onCapabilities}>
-            View all capabilities <ChevronRight16Regular aria-hidden="true" />
-          </button>
-          {readiness.models === "ready" && readiness.tools === "ready" && (
-            <button className="secondary-button gateway-test-button" type="button" onClick={onTestGateway} disabled={testingGateway}>
-              <Bot24Regular aria-hidden="true" />
-              {testingGateway ? "Checking availability" : "Check AI availability"}
-            </button>
-          )}
-        </div>
-
-        <div className="operation-block">
-          <h2>Recent governed operation</h2>
-          {operation ? (
-            <button className="operation-row" type="button" onClick={onOpenOperation}>
-              <span className={`operation-icon${operation.state === "succeeded" ? " complete" : ""}`}>
-                {operation.state === "succeeded" ? <CheckmarkCircle24Regular aria-hidden="true" /> : <Clock24Regular aria-hidden="true" />}
-              </span>
-              <span className="operation-copy">
-                <strong>{operation.safeSummary} — {operationStateLabels[operation.state]}</strong>
-                <small>{operation.resourceLocation} <i /> Requested by you <i /> Today, {operationTime(operation.requestedAt)}</small>
-              </span>
-              <span className="operation-link">
-                View details <ChevronRight16Regular aria-hidden="true" />
-              </span>
-            </button>
-          ) : (
-            <div className="operation-empty">
-              <p>Try the approval flow with the protected fixture file.</p>
-              <button className="secondary-button" type="button" onClick={onCreateOperation} disabled={operationBusy || !workspace || !["ready", "open"].includes(workspaceState)}>
-                <Delete24Regular aria-hidden="true" />
-                {operationBusy ? "Creating request" : "Request file deletion"}
-              </button>
-            </div>
-          )}
-        </div>
-      </section>
+                </footer>
+              </article>
+            );
+          })}
+        </section>
+      )}
     </div>
   );
 }
@@ -375,11 +285,16 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
               {group.tools.map((tool) => (
                 <label key={tool.name}>
                   <span><strong>{tool.displayName}</strong><small>{tool.description}</small><code>{tool.name}</code></span>
-                  <select value={tool.decision} onChange={(event) => onPolicyChange(tool.name, event.target.value)} aria-label={`${tool.displayName} policy`}>
-                    <option value="allow">Allow</option>
-                    <option value="approval_required">Require approval</option>
-                    <option value="deny">Block</option>
-                  </select>
+                  <SelectMenu
+                    value={tool.decision}
+                    onValueChange={(value) => onPolicyChange(tool.name, value)}
+                    ariaLabel={`${tool.displayName} policy`}
+                    options={[
+                      { value: "allow", label: "Allow" },
+                      { value: "approval_required", label: "Require approval" },
+                      { value: "deny", label: "Block" },
+                    ]}
+                  />
                 </label>
               ))}
             </div>
@@ -393,15 +308,18 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
   );
 }
 
-function EgressFirewallCard({ versions, saving, onSave }) {
+function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecurityGroupId, createNew = false }) {
   const latest = versions.filter((item, index, all) => all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(createNew ? "__new__" : initialSecurityGroupId ?? latest[0]?.securityGroupId ?? "__new__");
   const selected = selectedId === "__new__" ? undefined : latest.find((item) => item.securityGroupId === selectedId) ?? latest[0];
   const [draft, setDraft] = useState(null);
   const [rule, setRule] = useState({ host: "", protocol: "https", port: 443, includeSubdomains: false, purpose: "" });
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selected) {
+      setDraft({ name: "Approved web access", description: "Reviewed outbound web destinations for this workspace.", rules: [] });
+      return;
+    }
     setSelectedId(selected.securityGroupId);
     setDraft({
       securityGroupId: selected.securityGroupId,
@@ -411,10 +329,6 @@ function EgressFirewallCard({ versions, saving, onSave }) {
     });
   }, [selected?.id]);
 
-  const startNew = () => {
-    setSelectedId("__new__");
-    setDraft({ name: "Approved web access", description: "Reviewed outbound web destinations for this sandbox.", rules: [] });
-  };
   const addRule = () => {
     if (!draft || !rule.host.trim() || !rule.purpose.trim()) return;
     const id = `${rule.protocol}-${rule.host.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${rule.port}`.slice(0, 64);
@@ -422,61 +336,121 @@ function EgressFirewallCard({ versions, saving, onSave }) {
     setRule({ host: "", protocol: "https", port: 443, includeSubdomains: false, purpose: "" });
   };
 
+  const save = async () => {
+    if (!draft) return;
+    const saved = await onSave(draft);
+    if (saved) onClose();
+  };
+
   return (
-    <section className="egress-firewall-card" aria-labelledby="egress-firewall-heading">
-      <div className="egress-firewall-heading">
-        <div>
-          <p>Egress firewall</p>
-          <h2 id="egress-firewall-heading">Network security groups</h2>
-          <span>Default-deny domain, protocol, and port rules enforced outside the sandbox.</span>
+    <ModalDialog
+      className="firewall-editor-modal"
+      title={draft?.securityGroupId ? `Manage ${draft.name}` : "Create security group"}
+      description="Rules are deny-by-default. Saving creates an immutable group version, then you can attach that version to a stopped workspace."
+      eyebrow="Egress firewall"
+      labelledBy="firewall-editor-title"
+      onClose={saving ? () => undefined : onClose}
+    >
+      {latest.length > 0 && <label className="firewall-editor-group">
+        <span>Security group</span>
+        <SelectMenu
+          value={selectedId}
+          disabled={saving}
+          onValueChange={setSelectedId}
+          ariaLabel="Security group"
+          options={[
+            { value: "__new__", label: "Create a new security group" },
+            ...latest.map((item) => ({ value: item.securityGroupId, label: `${item.name} · v${item.version}` })),
+          ]}
+        />
+      </label>}
+      {draft && <div className="firewall-editor">
+        <div className="firewall-editor-fields">
+          <label><span>Name</span><input name="security-group-name" value={draft.name} disabled={saving} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+          <label><span>Description</span><input name="security-group-description" value={draft.description} disabled={saving} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
         </div>
-        <button className="secondary-button" type="button" onClick={startNew}>Create group</button>
-      </div>
-      {latest.length > 0 && (
-        <label className="egress-group-picker">
-          <span>Security group</span>
-          <select value={selectedId || selected?.securityGroupId || ""} onChange={(event) => setSelectedId(event.target.value)}>
-            {selectedId === "__new__" && <option value="__new__">New security group</option>}
-            {latest.map((item) => <option key={item.securityGroupId} value={item.securityGroupId}>{item.name} · v{item.version}</option>)}
-          </select>
-        </label>
-      )}
-      {draft && (
-        <div className="egress-editor">
-          <div className="egress-fields">
-            <label><span>Name</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-            <label><span>Description</span><input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
-          </div>
-          <div className="egress-rule-list">
-            {draft.rules.map((item, index) => (
-              <article key={`${item.id}-${index}`}>
-                <div><strong>{item.host}</strong><small>{item.purpose}</small></div>
-                <code>{item.protocol.toUpperCase()} :{item.port}{item.includeSubdomains ? " · includes subdomains" : " · exact domain"}</code>
-                <button type="button" aria-label={`Remove ${item.host}`} onClick={() => setDraft({ ...draft, rules: draft.rules.filter((_, ruleIndex) => ruleIndex !== index) })}>Remove</button>
-              </article>
-            ))}
-          </div>
-          <div className="egress-rule-builder">
-            <label><span>Domain</span><input placeholder="updates.example.com" value={rule.host} onChange={(event) => setRule({ ...rule, host: event.target.value })} /></label>
-            <label><span>Protocol</span><select value={rule.protocol} onChange={(event) => setRule({ ...rule, protocol: event.target.value, port: event.target.value === "https" ? 443 : 80 })}><option value="https">HTTPS</option><option value="http">HTTP</option></select></label>
-            <label><span>Port</span><input type="number" min="1" max="65535" value={rule.port} onChange={(event) => setRule({ ...rule, port: event.target.value })} /></label>
-            <label className="egress-subdomains"><input type="checkbox" checked={rule.includeSubdomains} onChange={(event) => setRule({ ...rule, includeSubdomains: event.target.checked })} /><span>Include subdomains</span></label>
-            <label className="egress-purpose"><span>Purpose</span><input placeholder="Why this access is needed" value={rule.purpose} onChange={(event) => setRule({ ...rule, purpose: event.target.value })} /></label>
-            <button className="secondary-button" type="button" onClick={addRule}>Add destination</button>
-          </div>
-          <div className="egress-actions">
-            <span><ShieldCheckmark24Regular aria-hidden="true" />HTTPS paths are not inspected. Redirects are checked as new connections.</span>
-            <button className="primary-button compact-button" type="button" disabled={saving || !draft.name || !draft.description} onClick={() => onSave(draft)}>{saving ? "Saving version" : draft.securityGroupId ? "Save new version" : "Create security group"}</button>
+        <div className="firewall-editor-rule-list" aria-label="Firewall rules in this group">
+          {draft.rules.length === 0 ? <p>No rules yet. Add a destination below.</p> : draft.rules.map((item, index) => (
+            <article key={`${item.id}-${index}`}>
+              <div><strong>{item.host}</strong><small>{item.purpose}</small></div>
+              <code>{item.protocol.toUpperCase()} · {item.port} · {item.includeSubdomains ? "Subdomains" : "Exact domain"}</code>
+              <button type="button" disabled={saving} aria-label={`Remove ${item.host}`} onClick={() => setDraft({ ...draft, rules: draft.rules.filter((_, ruleIndex) => ruleIndex !== index) })}>Remove</button>
+            </article>
+          ))}
+        </div>
+        <div className="firewall-editor-rule-builder">
+          <label><span>Destination</span><input name="firewall-rule-destination" placeholder="updates.example.com" value={rule.host} disabled={saving} onChange={(event) => setRule({ ...rule, host: event.target.value })} /></label>
+          <label><span>Protocol</span><SelectMenu value={rule.protocol} disabled={saving} onValueChange={(value) => setRule({ ...rule, protocol: value, port: value === "https" ? 443 : 80 })} ariaLabel="Protocol" options={[{ value: "https", label: "HTTPS" }, { value: "http", label: "HTTP" }]} /></label>
+          <label><span>Port</span><input name="firewall-rule-port" type="number" min="1" max="65535" value={rule.port} disabled={saving} onChange={(event) => setRule({ ...rule, port: event.target.value })} /></label>
+          <label className="firewall-editor-subdomains"><input name="firewall-rule-subdomains" type="checkbox" checked={rule.includeSubdomains} disabled={saving} onChange={(event) => setRule({ ...rule, includeSubdomains: event.target.checked })} /><span>Include subdomains</span></label>
+          <label className="firewall-editor-purpose"><span>Purpose</span><input name="firewall-rule-purpose" placeholder="Why this access is needed" value={rule.purpose} disabled={saving} onChange={(event) => setRule({ ...rule, purpose: event.target.value })} /></label>
+          <button className="secondary-button" type="button" disabled={saving || !rule.host.trim() || !rule.purpose.trim()} onClick={addRule}>Add rule</button>
+        </div>
+        <div className="firewall-editor-actions">
+          <span><ShieldCheckmark24Regular aria-hidden="true" />HTTPS paths are not inspected. Redirects are checked as new connections.</span>
+          <div>
+            <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button>
+            <button className="primary-button compact-button" type="button" disabled={saving || !draft.name || !draft.description} onClick={save}>{saving ? "Saving version" : draft.securityGroupId ? "Save new version" : "Create security group"}</button>
           </div>
         </div>
-      )}
-    </section>
+      </div>}
+    </ModalDialog>
   );
 }
 
-function AdminScreen({ users, loading, busyUserId, onAssign, onRevoke, onVersion, mcpPolicy, onConfigureConnector }) {
+function FirewallAddRuleDialog({ versions, saving, onSave, onClose }) {
+  const latest = versions.filter((item, index, all) => all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index);
+  const [selectedId, setSelectedId] = useState("__new__");
+  const [newGroup, setNewGroup] = useState({ name: "", description: "" });
+  const [rule, setRule] = useState({ host: "", protocol: "https", port: 443, includeSubdomains: false, purpose: "" });
+  const selected = latest.find((item) => item.securityGroupId === selectedId);
+  const creatingGroup = selectedId === "__new__";
+
+  const save = async () => {
+    if (!rule.host.trim() || !rule.purpose.trim() || (creatingGroup && (!newGroup.name.trim() || !newGroup.description.trim()))) return;
+    const id = `${rule.protocol}-${rule.host.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${rule.port}`.slice(0, 64);
+    const nextRule = { ...rule, id, host: rule.host.trim(), purpose: rule.purpose.trim(), action: "allow", port: Number(rule.port) };
+    const draft = creatingGroup
+      ? { name: newGroup.name.trim(), description: newGroup.description.trim(), rules: [nextRule] }
+      : { securityGroupId: selected.securityGroupId, name: selected.name, description: selected.description, rules: [...selected.rules, nextRule] };
+    const saved = await onSave(draft);
+    if (saved) onClose();
+  };
+
+  return (
+    <ModalDialog
+      className="firewall-add-rule-modal"
+      title="Add firewall rule"
+      description="Create a security group and allow one reviewed destination. Choose an existing group only when you want to add a rule to it."
+      eyebrow="Egress firewall"
+      labelledBy="firewall-add-rule-title"
+      onClose={saving ? () => undefined : onClose}
+    >
+      <div className="firewall-add-rule-fields">
+        <label className="firewall-add-rule-group"><span>Security group</span><SelectMenu value={selectedId} disabled={saving} onValueChange={setSelectedId} ariaLabel="Security group" options={[{ value: "__new__", label: "Create a new security group" }, ...latest.map((item) => ({ value: item.securityGroupId, label: `${item.name} · v${item.version}` }))]} /></label>
+        {creatingGroup && <div className="firewall-add-rule-new-group">
+          <label><span>Name</span><input name="new-security-group-name" value={newGroup.name} disabled={saving} onChange={(event) => setNewGroup({ ...newGroup, name: event.target.value })} /></label>
+          <label><span>Description</span><input name="new-security-group-description" value={newGroup.description} disabled={saving} onChange={(event) => setNewGroup({ ...newGroup, description: event.target.value })} /></label>
+        </div>}
+        <label className="firewall-add-rule-destination"><span>Destination</span><input name="new-firewall-rule-destination" placeholder="updates.example.com" value={rule.host} disabled={saving} onChange={(event) => setRule({ ...rule, host: event.target.value })} /></label>
+        <label><span>Protocol</span><SelectMenu value={rule.protocol} disabled={saving} onValueChange={(value) => setRule({ ...rule, protocol: value, port: value === "https" ? 443 : 80 })} ariaLabel="Protocol" options={[{ value: "https", label: "HTTPS" }, { value: "http", label: "HTTP" }]} /></label>
+        <label><span>Port</span><input name="new-firewall-rule-port" type="number" min="1" max="65535" value={rule.port} disabled={saving} onChange={(event) => setRule({ ...rule, port: event.target.value })} /></label>
+        <label className="firewall-add-rule-subdomains"><input name="new-firewall-rule-subdomains" type="checkbox" checked={rule.includeSubdomains} disabled={saving} onChange={(event) => setRule({ ...rule, includeSubdomains: event.target.checked })} /><span>Include subdomains</span></label>
+        <label className="firewall-add-rule-purpose"><span>Purpose</span><input name="new-firewall-rule-purpose" placeholder="Why this access is needed" value={rule.purpose} disabled={saving} onChange={(event) => setRule({ ...rule, purpose: event.target.value })} /></label>
+      </div>
+      <div className="modal-notice firewall-add-rule-note"><ShieldCheckmark24Regular aria-hidden="true" /><span>HTTPS paths are not inspected. Redirects are checked as new connections.</span></div>
+      <div className="modal-actions">
+        <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button>
+        <button className="primary-button" type="button" disabled={saving || !rule.host.trim() || !rule.purpose.trim() || (creatingGroup && (!newGroup.name.trim() || !newGroup.description.trim()))} onClick={save}>{saving ? "Saving rule" : creatingGroup ? "Create group & rule" : "Add rule"}</button>
+      </div>
+    </ModalDialog>
+  );
+}
+
+function AdminScreen({ users, loading, busyUserId, onAssign, onRevoke, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
   return (
     <div className="secondary-screen admin-screen">
+      <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
       <header className="page-heading compact">
         <p>Organization administration</p>
         <h1>Workspace policy</h1>
@@ -518,56 +492,217 @@ function AdminScreen({ users, loading, busyUserId, onAssign, onRevoke, onVersion
   );
 }
 
-function FirewallScreen({ users, loading, busyUserId, versions, saving, onSave, onAttach }) {
+function SettingsScreen({ view, isAdmin, gatewayUrl, onOpenAdmin, onBack, users, loading, busyUserId, onAssign, onRevoke, onVersion, mcpPolicy, onConfigureConnector }) {
+  if (view === "admin" && isAdmin) {
+    return <AdminScreen
+      users={users}
+      loading={loading}
+      busyUserId={busyUserId}
+      onAssign={onAssign}
+      onRevoke={onRevoke}
+      onVersion={onVersion}
+      mcpPolicy={mcpPolicy}
+      onConfigureConnector={onConfigureConnector}
+      onBack={onBack}
+    />;
+  }
+
   return (
-    <div className="secondary-screen firewall-screen">
+    <div className="secondary-screen settings-screen">
       <header className="page-heading compact">
-        <p>Network control</p>
-        <h1>Egress firewall</h1>
-        <span>Create reusable security groups and attach one immutable version to each managed sandbox.</span>
+        <p>Account and workspace</p>
+        <h1>Settings</h1>
+        <span>Manage the local tools and workspace controls available to you.</span>
       </header>
-      <EgressFirewallCard versions={versions} saving={saving} onSave={onSave} />
-      <section className="firewall-attachments" aria-labelledby="firewall-attachments-heading">
-        <div className="firewall-attachments-heading">
-          <div>
-            <p>Assignments</p>
-            <h2 id="firewall-attachments-heading">Sandbox attachments</h2>
-          </div>
-          <span>Stop a running workspace before changing its firewall.</span>
-        </div>
-        <div className="admin-user-list">
-          {loading ? <p>Loading sandbox assignments…</p> : users.map((item) => (
-            <article key={item.userId}>
-              <div className="admin-user-copy">
-                <strong>{item.displayName}</strong><small>{item.email}</small>
-                <span>{item.roles.includes("administrator") ? "Administrator" : "Employee"}</span>
-              </div>
-              <div className="admin-policy-copy">
-                {item.effectivePolicy ? <>
-                  <strong>{item.effectivePolicy.egressSecurityGroup ? `${item.effectivePolicy.egressSecurityGroup.name} · v${item.effectivePolicy.egressSecurityGroup.version}` : "No firewall attached"}</strong>
-                  <small>One pinned security-group version per sandbox policy</small>
-                  <select aria-label={`Firewall for ${item.displayName}`} value={item.effectivePolicy.egressSecurityGroup?.id ?? ""} disabled={busyUserId === item.userId} onChange={(event) => onAttach(item.userId, event.target.value)}>
-                    <option value="" disabled>Choose firewall</option>
-                    {versions.map((version) => <option key={version.id} value={version.id}>{version.name} · v{version.version}</option>)}
-                  </select>
-                </> : <><strong>Policy required</strong><small>Assign a workspace policy in Admin before attaching a firewall.</small></>}
-              </div>
-            </article>
-          ))}
-        </div>
+      <section className="settings-list" aria-label="Settings">
+        <a className="settings-item" href={gatewayUrl} target="_blank" rel="noreferrer">
+          <span className="settings-item-icon"><Bot24Regular aria-hidden="true" /></span>
+          <span className="settings-item-copy"><strong>Gateway</strong><small>Open the local gateway control surface in a separate tab.</small></span>
+          <Open24Regular aria-hidden="true" />
+        </a>
+        {isAdmin && <button className="settings-item" type="button" onClick={onOpenAdmin}>
+          <span className="settings-item-icon"><Settings24Regular aria-hidden="true" /></span>
+          <span className="settings-item-copy"><strong>Administration</strong><small>Manage workspace policy versions, assignments, and organization controls.</small></span>
+          <ChevronRight16Regular aria-hidden="true" />
+        </button>}
       </section>
     </div>
   );
 }
 
-function ActivityScreen({ operations, onOpenOperation }) {
+function FirewallAttachmentDialog({ user, versions, busy, onAttach, onClose }) {
+  const currentVersionId = user.effectivePolicy?.egressSecurityGroup?.id ?? "";
+  const [securityGroupVersionId, setSecurityGroupVersionId] = useState(currentVersionId || versions[0]?.id || "");
+  const attach = async () => {
+    if (!securityGroupVersionId) return;
+    const attached = await onAttach(user.userId, securityGroupVersionId);
+    if (attached) onClose();
+  };
+
+  return (
+    <ModalDialog
+      title={`Attach firewall to ${user.displayName}`}
+      description="A workspace must be stopped before you can change its firewall. The selected immutable version becomes the workspace’s enforced egress policy."
+      eyebrow="Workspace attachment"
+      labelledBy="firewall-attachment-title"
+      onClose={busy ? () => undefined : onClose}
+    >
+      <label className="modal-field">
+        <span>Security group version</span>
+        <SelectMenu
+          value={securityGroupVersionId}
+          disabled={busy}
+          onValueChange={setSecurityGroupVersionId}
+          ariaLabel="Security group version"
+          options={versions.map((version) => ({ value: version.id, label: `${version.name} · v${version.version}` }))}
+        />
+      </label>
+      <div className="modal-notice firewall-attachment-note"><ShieldCheckmark24Regular aria-hidden="true" /><span>The assignment is tenant-wide administrator work. {user.email} remains the owner of this workspace.</span></div>
+      <div className="modal-actions">
+        <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        <button className="primary-button" type="button" disabled={busy || !securityGroupVersionId} onClick={attach}>{busy ? "Attaching firewall" : "Attach firewall"}</button>
+      </div>
+    </ModalDialog>
+  );
+}
+
+function FirewallScreen({ users, loading, busyUserId, versions, saving, onSave, onAttach }) {
+  const latestVersions = versions.filter((item, index, all) => all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index);
+  const [search, setSearch] = useState("");
+  const [workspaceFilter, setWorkspaceFilter] = useState("all");
+  const [securityGroupFilter, setSecurityGroupFilter] = useState("all");
+  const [rulesOnly, setRulesOnly] = useState(false);
+  const [editor, setEditor] = useState(null);
+  const [addRuleOpen, setAddRuleOpen] = useState(false);
+  const [attachmentTarget, setAttachmentTarget] = useState(null);
+  const policyRows = users.flatMap((user) => {
+    const group = user.effectivePolicy?.egressSecurityGroup;
+    if (!group) return [{
+      id: `${user.userId}-unassigned`,
+      kind: "workspace",
+      user,
+      group: null,
+      state: user.effectivePolicy ? "No firewall attached" : "Policy required",
+    }];
+    return group.rules.map((rule, index) => ({
+      id: `${user.userId}-${group.id}-${rule.id}-${index}`,
+      kind: "rule",
+      user,
+      group,
+      rule,
+      ruleNumber: index + 1,
+      state: "Active",
+    }));
+  });
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleRows = policyRows.filter((row) => {
+    if (rulesOnly && row.kind !== "rule") return false;
+    if (workspaceFilter !== "all" && row.user.userId !== workspaceFilter) return false;
+    if (securityGroupFilter !== "all" && row.group?.securityGroupId !== securityGroupFilter) return false;
+    if (!normalizedSearch) return true;
+    return [
+      row.user.displayName,
+      row.user.email,
+      row.group?.name,
+      row.rule?.host,
+      row.rule?.purpose,
+    ].filter(Boolean).join(" ").toLowerCase().includes(normalizedSearch);
+  });
+  const ruleCount = policyRows.filter((row) => row.kind === "rule").length;
+
+  return (
+    <div className="secondary-screen firewall-screen">
+      <header className="page-heading firewall-page-heading">
+        <div>
+          <p>Network control</p>
+          <h1>Egress firewall</h1>
+          <span>Default-deny outbound rules for managed workspaces. Every active rule is enforced outside its workspace.</span>
+        </div>
+        <div className="firewall-page-actions">
+          <button className="primary-button" type="button" onClick={() => setAddRuleOpen(true)}><Add24Regular aria-hidden="true" />Add rule</button>
+        </div>
+      </header>
+
+      <section className="firewall-tenant-notice" aria-label="Administrator view notice">
+        <Info24Regular aria-hidden="true" />
+        <span><strong>Administrator view</strong> You can see firewall policies for every workspace in the ME TECH tenant, including workspaces owned by other accounts.</span>
+      </section>
+
+      <section className="firewall-policy-table" aria-labelledby="firewall-policy-heading">
+        <div className="firewall-policy-heading">
+          <div>
+            <p>Effective policies</p>
+            <h2 id="firewall-policy-heading">Firewall rules</h2>
+          </div>
+          <span>{ruleCount} {ruleCount === 1 ? "rule" : "rules"}</span>
+        </div>
+
+        <div className="firewall-toolbar">
+          <label className="firewall-search"><span className="sr-only">Search firewall rules</span><input id="firewall-rule-search" name="firewall-rule-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search destination, purpose, workspace, or owner" /></label>
+          <label className="firewall-filter-control"><span className="sr-only">Filter by workspace</span><SelectMenu value={workspaceFilter} onValueChange={setWorkspaceFilter} ariaLabel="Filter by workspace" options={[{ value: "all", label: "All workspaces" }, ...users.map((user) => ({ value: user.userId, label: `${user.displayName} workspace` }))]} /></label>
+          <label className="firewall-filter-control"><span className="sr-only">Filter by security group</span><SelectMenu value={securityGroupFilter} onValueChange={setSecurityGroupFilter} ariaLabel="Filter by security group" options={[{ value: "all", label: "All security groups" }, ...latestVersions.map((version) => ({ value: version.securityGroupId, label: version.name }))]} /></label>
+          <label className="firewall-rules-toggle"><input id="firewall-rules-only" name="firewall-rules-only" type="checkbox" checked={rulesOnly} onChange={(event) => setRulesOnly(event.target.checked)} /><span>Rules only</span></label>
+        </div>
+
+        <div className="firewall-table-scroll">
+          <table>
+            <thead>
+              <tr><th scope="col">Rule</th><th scope="col">Workspace</th><th scope="col">Owner</th><th scope="col">Security group</th><th scope="col">Destination</th><th scope="col">Protocol</th><th scope="col">Port</th><th scope="col">Match</th><th scope="col">Purpose</th><th scope="col">State</th><th scope="col" aria-label="Actions" /></tr>
+            </thead>
+            <tbody>
+              {loading ? <tr><td colSpan="11" className="firewall-empty">Loading firewall policies…</td></tr> : visibleRows.length === 0 ? <tr><td colSpan="11" className="firewall-empty">No firewall rules match these filters.</td></tr> : visibleRows.map((row) => row.kind === "rule" ? (
+                <tr key={row.id}>
+                  <td className="firewall-rule-number">{row.ruleNumber}</td>
+                  <td><strong>{row.user.displayName} workspace</strong></td>
+                  <td><span className="firewall-owner"><strong>{row.user.email}</strong><small>{row.user.roles.includes("administrator") ? "Administrator" : "Employee"}</small></span></td>
+                  <td><button className="firewall-group-link" type="button" onClick={() => setEditor({ securityGroupId: row.group.securityGroupId, createNew: false })}>{row.group.name} · v{row.group.version}</button></td>
+                  <td><code>{row.rule.host}</code></td>
+                  <td>{row.rule.protocol.toUpperCase()}</td>
+                  <td>{row.rule.port}</td>
+                  <td>{row.rule.includeSubdomains ? "Subdomains" : "Exact domain"}</td>
+                  <td className="firewall-purpose">{row.rule.purpose}</td>
+                  <td><span className="firewall-state active">Active</span></td>
+                  <td><button className="firewall-row-action" type="button" onClick={() => setAttachmentTarget(row.user)}>Change attachment</button></td>
+                </tr>
+              ) : (
+                <tr key={row.id} className="firewall-workspace-row">
+                  <td>—</td>
+                  <td><strong>{row.user.displayName} workspace</strong></td>
+                  <td><span className="firewall-owner"><strong>{row.user.email}</strong><small>{row.user.roles.includes("administrator") ? "Administrator" : "Employee"}</small></span></td>
+                  <td colSpan="5">{row.state === "Policy required" ? "No workspace policy assigned" : "No security group attached"}</td>
+                  <td className="firewall-purpose">{row.state === "Policy required" ? "Assign a workspace policy before attaching a firewall." : "Attach an immutable group version to enable governed egress."}</td>
+                  <td><span className={`firewall-state ${row.state === "Policy required" ? "warning" : "neutral"}`}>{row.state}</span></td>
+                  <td>{row.state === "Policy required" ? <span className="firewall-row-muted">Policy required</span> : <button className="firewall-row-action" type="button" onClick={() => setAttachmentTarget(row.user)}>Attach firewall</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr><td>—</td><td>All workspaces</td><td>System</td><td>Default deny</td><td colSpan="5">All unmatched destinations</td><td><span className="firewall-state denied">Denied</span></td><td>—</td></tr>
+            </tfoot>
+          </table>
+        </div>
+        <footer className="firewall-table-footer"><span><ShieldCheckmark24Regular aria-hidden="true" />Only the destinations shown above are allowed to leave their attached workspaces.</span><span>Stop a workspace before changing its attachment.</span></footer>
+      </section>
+
+      {editor && <FirewallEditorDialog versions={versions} saving={saving} onSave={onSave} initialSecurityGroupId={editor.securityGroupId} createNew={editor.createNew} onClose={() => setEditor(null)} />}
+      {addRuleOpen && <FirewallAddRuleDialog versions={versions} saving={saving} onSave={onSave} onClose={() => setAddRuleOpen(false)} />}
+      {attachmentTarget && <FirewallAttachmentDialog user={attachmentTarget} versions={versions} busy={busyUserId === attachmentTarget.userId} onAttach={onAttach} onClose={() => setAttachmentTarget(null)} />}
+    </div>
+  );
+}
+
+function ActivityScreen({ displayName, operations, onOpenOperation }) {
   return (
     <div className="secondary-screen">
       <header className="page-heading compact">
-        <p>Your workspace history</p>
-        <h1>Activity</h1>
-        <span>Recent workspace and governed-operation events, shown without sensitive content.</span>
+        <p>Protected action history</p>
+        <h1>Trail</h1>
+        <span>Review protected actions and manage the device that signs your decisions.</span>
       </header>
+      <div className="trail-device">
+        <ApprovalDeviceCard displayName={displayName} />
+        <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Your approval key stays encrypted on its device. Each account has one active approval device; setting up another browser replaces the current one.</p></div>
+      </div>
       <div className="timeline">
         {operations.map((operation) => (
           <button type="button" key={operation.id} onClick={() => onOpenOperation(operation)}>
@@ -591,32 +726,6 @@ function ActivityScreen({ operations, onOpenOperation }) {
   );
 }
 
-function HelpScreen() {
-  return (
-    <div className="secondary-screen">
-      <header className="page-heading compact">
-        <p>ONEComputer support</p>
-        <h1>How can we help?</h1>
-        <span>Quick answers for opening your workspace and understanding protected actions.</span>
-      </header>
-      <div className="help-list">
-        <details open>
-          <summary>Why does my workspace show separate readiness checks?</summary>
-          <p>Each check tells you exactly what is available. You can enter only when your identity, network, models, and tools are ready.</p>
-        </details>
-        <details>
-          <summary>Where do I approve a protected action?</summary>
-          <p>Approvals happen through your organization’s trusted approval channel. ONEComputer shows the outcome but cannot approve on your behalf.</p>
-        </details>
-        <details>
-          <summary>What happens when I restart?</summary>
-          <p>Your current session closes and ONEComputer prepares a fresh managed workspace with the same assigned capabilities.</p>
-        </details>
-      </div>
-    </div>
-  );
-}
-
 const pendingApplications = [
   { name: "Obsidian", type: "Knowledge workspace", detail: "Available when the approved application package is published." },
   { name: "Visual Studio Code", type: "Code editor", detail: "Available when the approved application package is published." },
@@ -628,11 +737,11 @@ const agentChoices = [
   { family: "Hermes Agent", choices: [{ catalogId: "hermes-desktop", name: "Desktop", status: "available" }, { catalogId: "hermes-claw", name: "CLI", status: "available" }] },
 ];
 
-const sandboxName = (sandbox) => sandbox?.grantId === "personal"
+const workspaceName = (workspace) => workspace?.grantId === "personal"
   ? "Acme Workspace"
-  : sandbox?.grantId?.replace(/^sandbox-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Managed sandbox";
+  : workspace?.grantId?.replace(/^(sandbox|workspace)-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Managed workspace";
 
-const sandboxStatus = (state) => ({
+const workspaceConfigurationStatus = (state) => ({
   not_created: "Not started",
   provisioning: "Preparing",
   ready: "Ready",
@@ -643,7 +752,7 @@ const sandboxStatus = (state) => ({
   failed: "Needs attention",
 }[state] ?? "Unknown");
 
-function SandboxScreen({ settings, sandboxes, listLoading, loading, saving, creating, error, selectedGrantId, onSelect, onBack, onCreate, onSave, onNavigateFirewall, canManageFirewall }) {
+function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onNavigateFirewall, canManageFirewall }) {
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState("");
   const [agentIds, setAgentIds] = useState([]);
@@ -655,8 +764,8 @@ function SandboxScreen({ settings, sandboxes, listLoading, loading, saving, crea
     setAgentIds(settings.agentIds);
   }, [settings?.applicationIds, settings?.modelAlias, settings?.agentIds]);
 
-  const selectedSandbox = sandboxes.find((sandbox) => sandbox.grantId === selectedGrantId);
-  const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedSandbox?.state);
+  const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
+  const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedWorkspace?.state);
   const dirty = settings && (
     applicationIds.join(",") !== settings.applicationIds.join(",")
     || modelAlias !== settings.modelAlias
@@ -669,50 +778,18 @@ function SandboxScreen({ settings, sandboxes, listLoading, loading, saving, crea
     current.includes(agentId) ? current.filter((id) => id !== agentId) : [...current, agentId]
   ));
 
-  if (!selectedGrantId) {
-    return (
-      <div className="secondary-screen sandbox-screen sandbox-list-screen">
-        <header className="sandbox-list-heading">
-          <div className="page-heading compact">
-            <p>Sandbox management</p>
-            <h1>Sandboxes</h1>
-            <span>Manage the secure environments you can access. Each sandbox has its own application, agent, model, and firewall configuration.</span>
-          </div>
-          <button className="primary-button create-sandbox-button" type="button" onClick={onCreate} disabled={creating}><Add24Regular aria-hidden="true" />{creating ? "Creating sandbox" : "Create sandbox"}</button>
-        </header>
-        {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sandbox inventory unavailable</strong>{error}</span></div>}
-        <section className="sandbox-table-card" aria-labelledby="sandbox-table-heading">
-          <div className="sandbox-table-card-heading"><div><p>Available sandboxes</p><h2 id="sandbox-table-heading">Environment inventory</h2></div><span>{sandboxes.length} {sandboxes.length === 1 ? "sandbox" : "sandboxes"}</span></div>
-          {listLoading ? <p className="sandbox-loading">Loading accessible sandboxes…</p> : sandboxes.length ? (
-            <div className="sandbox-table-wrap"><table className="sandbox-table"><thead><tr><th scope="col">Sandbox</th><th scope="col">Configuration</th><th scope="col">Network</th><th scope="col">Status</th><th scope="col"><span className="sr-only">Manage</span></th></tr></thead><tbody>
-              {sandboxes.map((sandbox) => (
-                <tr key={sandbox.id}>
-                  <td><strong>{sandboxName(sandbox)}</strong><small>{sandbox.grantId === "personal" ? "Personal sandbox" : `Grant · ${sandbox.grantId}`}</small></td>
-                  <td><span className="sandbox-table-detail">{sandbox.profile?.client ?? "Policy configuration"}</span><small>{sandbox.agents?.length ? `${sandbox.agents.map((agent) => agent.displayName).join(", ")} · ${sandbox.profile?.modelAlias ?? "model pending"}` : "Configuration loads on open"}</small></td>
-                  <td><span className="sandbox-table-detail">Controlled egress</span><small>Firewall enforced outside the sandbox</small></td>
-                  <td><span className={`sandbox-state ${sandbox.state}`}>{sandboxStatus(sandbox.state)}</span></td>
-                  <td><button className="text-button sandbox-manage-button" type="button" onClick={() => onSelect(sandbox.grantId)}>Manage <ChevronRight16Regular aria-hidden="true" /></button></td>
-                </tr>
-              ))}
-            </tbody></table></div>
-          ) : <div className="sandbox-empty"><Laptop48Regular aria-hidden="true" /><h3>No sandbox has been created yet</h3><p>Create a sandbox to choose its managed applications, AI agents, model route, and firewall attachment.</p><button className="secondary-button" type="button" onClick={onCreate}>Create your first sandbox</button></div>}
-        </section>
-      </div>
-    );
-  }
-
   return (
     <div className="secondary-screen sandbox-screen sandbox-detail-screen">
-      <button className="text-button sandbox-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />All sandboxes</button>
+      <button className="text-button sandbox-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />All workspaces</button>
       <header className="sandbox-detail-heading">
-        <div><p>Sandbox configuration</p><h1>{sandboxName(selectedSandbox)}</h1><span>Changes are recorded as a policy-bounded configuration document and apply the next time this sandbox starts.</span></div>
-        <span className={`sandbox-state ${selectedSandbox?.state}`}>{sandboxStatus(selectedSandbox?.state)}</span>
+        <div><p>Workspace configuration</p><h1>{workspaceName(selectedWorkspace)}</h1><span>Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts.</span></div>
+        <span className={`sandbox-state ${selectedWorkspace?.state}`}>{workspaceConfigurationStatus(selectedWorkspace?.state)}</span>
       </header>
-      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sandbox settings unavailable</strong>{error}</span></div>}
-      {loading || !settings ? <p className="sandbox-loading">Loading sandbox configuration…</p> : (
+      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong>{error}</span></div>}
+      {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
         <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId: settings.profileId, applicationIds, modelAlias, agentIds }); }}>
           <section className="sandbox-management-section" aria-labelledby="sandbox-applications-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Laptop24Regular aria-hidden="true" /></span><span><h2 id="sandbox-applications-heading">Applications</h2><p>Choose approved applications that need a desktop interface. The image only exposes applications that are included and policy-approved.</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Laptop24Regular aria-hidden="true" /></span><span><h2 id="sandbox-applications-heading">Applications</h2><p>Choose approved applications that need a desktop interface. This workspace only exposes applications that are included and policy-approved.</p></span></div>
             <fieldset className="application-grid"><legend className="sr-only">Approved applications</legend>{settings.availableApplications.map((application) => (
               <label className={`application-option${applicationIds.includes(application.id) ? " selected" : ""}`} key={application.id}><input type="checkbox" checked={applicationIds.includes(application.id)} onChange={() => toggleApplication(application.id)} /><span className="agent-check" aria-hidden="true">{applicationIds.includes(application.id) && <Checkmark16Filled />}</span><span><strong>{application.displayName}</strong><small>{application.category} · {application.version}</small><em>{application.description}</em></span></label>
             ))}</fieldset>
@@ -725,23 +802,23 @@ function SandboxScreen({ settings, sandboxes, listLoading, loading, saving, crea
             <div className="agent-family-grid">{agentChoices.map((family) => <section className="agent-family" key={family.family}><h3>{family.family}</h3>{family.choices.map((choice) => {
               const agent = choice.catalogId ? settings.availableAgents.find((item) => item.id === choice.catalogId) : null;
               const selected = agent && agentIds.includes(agent.id);
-              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>Coming soon</small><em>This client is not in the approved sandbox image yet.</em></span></div>;
+              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>Coming soon</small><em>This client is not in the approved workspace image yet.</em></span></div>;
             })}</section>)}</div>
             {!agentIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved AI agent.</p>}
           </section>
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">AI model</h2><p>The selected model route is delivered through each agent’s own LiteLLM grant. Provider credentials remain outside the sandbox.</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">AI model</h2><p>The selected model route is delivered through each agent’s own LiteLLM grant. Provider credentials remain outside the workspace.</p></span></div>
             <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{settings.availableModels.map((model) => <label className={modelAlias === model.alias ? "selected" : ""} key={model.alias}><input type="radio" name="model" value={model.alias} checked={modelAlias === model.alias} onChange={() => setModelAlias(model.alias)} /><span><strong>{model.displayName}</strong><small>{model.provider} through ONEComputer</small></span>{modelAlias === model.alias && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
           </section>
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Security</h2><p>Network policy is enforced by the external proxy, not by mutable settings inside the sandbox.</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Security</h2><p>Network policy is enforced by the external proxy, not by mutable settings inside the workspace.</p></span></div>
             <div className="sandbox-security-card"><div><strong>Attached firewall</strong><span>{settings.egress ? `${settings.egress.name} · version ${settings.egress.version}` : "No firewall attached"}</span><small>{settings.egress ? `${settings.egress.rules.length} approved ${settings.egress.rules.length === 1 ? "destination" : "destinations"}; every other public destination is denied.` : "An administrator must attach a firewall before public egress is available."}</small></div>{canManageFirewall && <button className="secondary-button" type="button" onClick={onNavigateFirewall}>Open firewall <ChevronRight16Regular aria-hidden="true" /></button>}</div>
           </section>
 
           <div className="sandbox-management-footer"><div><strong>Configuration document</strong><small>Schema v1 · {settings.profile.displayName} · persistent home · gateway-only network</small></div><button className="primary-button" type="submit" disabled={!dirty || saving || !canChange || !applicationIds.length || !agentIds.length}>{saving ? "Saving configuration" : "Save configuration"}</button></div>
-          {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this sandbox before changing its applications, agents, or AI model.</p>}
+          {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its applications, agents, or AI model.</p>}
           <details className="sandbox-json"><summary>View configuration JSON</summary><pre>{JSON.stringify(settings.configuration, null, 2)}</pre></details>
         </form>
       )}
@@ -765,8 +842,7 @@ function ApprovalDeviceCard({ displayName }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const refresh = async () => {
-    const localIdentity = await getBrowserApproverIdentity();
-    const remote = await approvalApi.status(localIdentity?.did);
+    const remote = await approvalApi.status();
     const local = await hasBrowserApprover(remote.approver?.approverDid);
     setStatus(remote);
     setLocalReady(local);
@@ -828,7 +904,7 @@ function ApprovalDeviceCard({ displayName }) {
               {usable ? "Ready" : connected ? "Key unavailable" : "Not enrolled"}
             </span>
           </div>
-          <p className="connection-description">Set up this browser once. Protected actions appear in their governed-operation panel and require one deliberate biometric, PIN, or security-key confirmation.</p>
+          <p className="connection-description">Each account uses one active approval device. Set up another browser to replace it. Protected actions require one deliberate biometric, PIN, or security-key confirmation.</p>
           {connected && <p className="connection-metadata">{status.approver.displayName} · {status.approver.approverDid.slice(0, 26)}…</p>}
           {message && <p className="approval-device-message" role="status" aria-live="polite">{message}</p>}
         </div>
@@ -838,7 +914,7 @@ function ApprovalDeviceCard({ displayName }) {
           ) : (
             <button className="primary-button" type="button" onClick={enroll} disabled={Boolean(busy)}>
               <ShieldCheckmark24Regular aria-hidden="true" />
-              {busy === "enroll" ? "Waiting for device" : connected ? "Replace approval device" : "Set up this browser"}
+              {busy === "enroll" ? "Waiting for device" : connected ? "Replace with this browser" : "Set up this browser"}
             </button>
           )}
         </div>
@@ -846,7 +922,7 @@ function ApprovalDeviceCard({ displayName }) {
       {confirmRemove && (
         <ConfirmDialog
           title="Remove this approval device?"
-          description="Pending protected actions will remain blocked until this browser or another companion is enrolled again."
+          description="Pending protected actions will remain blocked until an approval device is set up again."
           confirmLabel="Remove device"
           danger
           onConfirm={disconnect}
@@ -903,8 +979,7 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
               )}
             </div>
           </section>
-          <ApprovalDeviceCard displayName={displayName} />
-          <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Microsoft tokens stay in the MCP gateway. The browser approval key stays encrypted on this device. Neither secret is sent to the workspace.</p></div>
+          <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Microsoft tokens stay in the MCP gateway. Your Microsoft credentials are never sent to the workspace.</p></div>
         </div>
       )}
     </div>
@@ -963,18 +1038,14 @@ function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisc
         </div>
       </section>
 
-      <ApprovalDeviceCard displayName={displayName} />
-
-      <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Microsoft tokens stay in the MCP gateway. The browser approval key stays encrypted on this device. Neither secret is sent to the workspace.</p></div>
+      <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Microsoft tokens stay in the MCP gateway. Your Microsoft credentials are never sent to the workspace.</p></div>
     </div>
   );
 }
 
-function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWorkspace }) {
+function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWorkspace, activeSessionId, onSessionsChange, onSessionChange }) {
   const [status, setStatus] = useState("loading");
   const [reasonCode, setReasonCode] = useState("");
-  const [sessions, setSessions] = useState([]);
-  const [activeSessionId, setActiveSessionId] = useState("");
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -985,8 +1056,8 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
   useEffect(() => {
     let active = true;
     setError("");
-    setSessions([]);
-    setActiveSessionId("");
+    onSessionsChange([]);
+    onSessionChange("");
     setMessages([]);
     if (!workspace || !["ready", "open"].includes(workspaceState)) {
       setStatus("offline");
@@ -1002,8 +1073,7 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
         if (nextStatus.state === "ready") {
           const sessionList = await chatApi.sessions(workspace.id);
           if (!active) return;
-          setSessions(sessionList.sessions);
-          setActiveSessionId(sessionList.sessions[0]?.id ?? "");
+          onSessionsChange(sessionList.sessions);
         }
       })
       .catch((requestError) => {
@@ -1033,6 +1103,7 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
     let active = true;
     setBusy(true);
     setError("");
+    setMessages([]);
     chatApi.messages(workspace.id, activeSessionId)
       .then((result) => { if (active) setMessages(result.messages); })
       .catch((requestError) => { if (active) setError(requestError.message); })
@@ -1043,24 +1114,6 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, busy]);
-
-  const createConversation = async () => {
-    if (!workspace) return null;
-    setBusy(true);
-    setError("");
-    try {
-      const created = await chatApi.createSession(workspace.id);
-      setSessions((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-      setActiveSessionId(created.id);
-      setMessages([]);
-      return created;
-    } catch (requestError) {
-      setError(requestError.message);
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const sendMessage = async (event) => {
     event.preventDefault();
@@ -1073,8 +1126,9 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
       if (!sessionId) {
         const created = await chatApi.createSession(workspace.id);
         sessionId = created.id;
-        setSessions((current) => [created, ...current]);
-        setActiveSessionId(created.id);
+        const title = text.replace(/\s+/g, " ").slice(0, 56);
+        onSessionsChange((current) => [{ ...created, title: created.title ?? title }, ...current.filter((item) => item.id !== created.id)]);
+        onSessionChange(created.id);
       }
       setInput("");
       setMessages((current) => [...current, { role: "user", content: text }]);
@@ -1096,22 +1150,22 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
     return (
       <div className="secondary-screen chat-screen">
         <header className="page-heading">
-          <p>Sandbox agent</p>
+          <p>Workspace agent</p>
           <h1>Chat</h1>
-          <span>Work with Hermes in your managed sandbox. Its files, tools, and app connections stay with that sandbox.</span>
+          <span>Work with Hermes in your managed workspace. Its files, tools, and app connections stay with that workspace.</span>
         </header>
         <section className="chat-unavailable" aria-live="polite">
           <span className={`chat-agent-mark${status === "loading" ? " loading" : ""}`}><Bot24Regular aria-hidden="true" /></span>
           <div>
             <h2>{status === "loading" ? "Connecting to Hermes" : unavailable ? "Hermes is not selected" : offline ? "Your agent is offline" : "Chat could not connect"}</h2>
             <p>{status === "loading"
-              ? "We’re checking the agent inside your sandbox."
+              ? "We’re checking the agent inside your workspace."
               : unavailable
-                ? "Select Hermes Agent CLI in this sandbox’s settings, then restart the sandbox."
+                ? "Select Hermes Agent CLI in this workspace’s settings, then restart the workspace."
                 : restartRequired
-                  ? "Hermes is not responding in this sandbox. Restart it once to apply the latest managed agent runtime."
+                  ? "Hermes is not responding in this workspace. Restart it once to apply the latest managed agent runtime."
                   : offline
-                    ? "Start the sandbox to bring Hermes, its sessions, and its connections online."
+                    ? "Start the workspace to bring Hermes, its sessions, and its connections online."
                     : error || "Hermes is temporarily unavailable."}</p>
             {status !== "loading" && !unavailable && (
               <div className="chat-recovery-actions">
@@ -1121,7 +1175,7 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
                   onClick={restartRequired ? onRestartWorkspace : workspaceCanRetry ? () => setReload((value) => value + 1) : onStartWorkspace}
                   disabled={workspaceBusy}
                 >
-                  {workspaceBusy ? "Preparing sandbox" : restartRequired ? "Restart sandbox" : workspaceCanRetry ? "Try again" : "Start sandbox"}
+                  {workspaceBusy ? "Preparing workspace" : restartRequired ? "Restart workspace" : workspaceCanRetry ? "Try again" : "Start workspace"}
                 </button>
                 {restartRequired && <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>Try again</button>}
               </div>
@@ -1134,69 +1188,42 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
 
   return (
     <div className="secondary-screen chat-screen">
-      <header className="chat-heading">
-        <div>
-          <p>Sandbox agent</p>
-          <h1>Chat</h1>
-          <span><i aria-hidden="true" /> Hermes is running inside your sandbox</span>
-        </div>
-        <button className="secondary-button chat-new-button" type="button" onClick={createConversation} disabled={busy}>New conversation</button>
-      </header>
-      <div className="chat-layout">
-        <aside className="chat-sessions" aria-label="Conversations">
-          <h2>Conversations</h2>
-          {sessions.length === 0 ? <p>No saved conversations yet.</p> : sessions.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              className={activeSessionId === item.id ? "active" : ""}
-              onClick={() => setActiveSessionId(item.id)}
-              aria-current={activeSessionId === item.id ? "true" : undefined}
-            >
-              <strong>{item.title || `Conversation ${sessions.length - index}`}</strong>
-              <span>{item.updatedAt ? new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(item.updatedAt)) : "Hermes"}</span>
-            </button>
+      <section className={`chat-conversation${messages.length === 0 ? " is-empty" : ""}`} aria-label="Current conversation">
+        <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy}>
+          {messages.length === 0 ? (
+            <div className="chat-welcome">
+              <h1>How can Hermes help?</h1>
+              <p>Ask about the files, approved tools, and connections in your managed workspace.</p>
+            </div>
+          ) : messages.filter((item) => item.role === "user" || item.role === "assistant").map((item, index) => (
+            <article className={`chat-message ${item.role}`} key={`${index}-${item.role}`}>
+              <span>{item.role === "assistant" ? "Hermes" : "You"}</span>
+              <p>{item.content}</p>
+            </article>
           ))}
-        </aside>
-        <section className="chat-conversation" aria-label="Current conversation">
-          <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy}>
-            {messages.length === 0 ? (
-              <div className="chat-welcome">
-                <span className="chat-agent-mark"><Bot24Regular aria-hidden="true" /></span>
-                <h2>What would you like to work on?</h2>
-                <p>Hermes can use the files, approved tools, and connections available inside this sandbox.</p>
-              </div>
-            ) : messages.filter((item) => item.role === "user" || item.role === "assistant").map((item, index) => (
-              <article className={`chat-message ${item.role}`} key={`${index}-${item.role}`}>
-                <span>{item.role === "assistant" ? "Hermes" : "You"}</span>
-                <p>{item.content}</p>
-              </article>
-            ))}
-            {busy && messages.length > 0 && <p className="chat-thinking">Hermes is working…</p>}
-          </div>
-          {error && <div className="workspace-error chat-error" role="alert"><Info24Regular aria-hidden="true" /><span>{error}</span></div>}
-          <form className="chat-composer" onSubmit={sendMessage}>
-            <label className="sr-only" htmlFor="chat-message">Message Hermes</label>
-            <textarea
-              id="chat-message"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              placeholder="Message Hermes…"
-              rows="2"
-              maxLength="16000"
-              disabled={busy}
-            />
-            <button type="submit" disabled={busy || !input.trim()}>{busy ? "Working" : "Send"}</button>
-            <small>Hermes runs only while this sandbox is online.</small>
-          </form>
-        </section>
-      </div>
+          {busy && messages.length > 0 && <p className="chat-thinking">Hermes is working…</p>}
+        </div>
+        {error && <div className="workspace-error chat-error" role="alert"><Info24Regular aria-hidden="true" /><span>{error}</span></div>}
+        <form className="chat-composer" onSubmit={sendMessage}>
+          <label className="sr-only" htmlFor="chat-message">Message Hermes</label>
+          <textarea
+            id="chat-message"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            placeholder="Message Hermes"
+            rows="1"
+            maxLength="16000"
+            disabled={busy}
+          />
+          <button className="chat-send-button" type="submit" aria-label={busy ? "Hermes is working" : "Send message"} disabled={busy || !input.trim()}><ArrowUp24Regular aria-hidden="true" /></button>
+        </form>
+      </section>
     </div>
   );
 }
@@ -1208,13 +1235,14 @@ export function App() {
   const [activeNav, setActiveNav] = useState(navFromLocation);
   const [workspace, setWorkspace] = useState(null);
   const [workspaceState, setWorkspaceState] = useState("loading");
+  const [homeWorkspaces, setHomeWorkspaces] = useState([]);
+  const [homeWorkspacesLoading, setHomeWorkspacesLoading] = useState(true);
+  const [workspaceActionId, setWorkspaceActionId] = useState("");
   const [apiError, setApiError] = useState("");
   const [drawer, setDrawer] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState("");
-  const [testingGateway, setTestingGateway] = useState(false);
-  const [gatewayResult, setGatewayResult] = useState(null);
   const [operation, setOperation] = useState(null);
   const [operationHistory, setOperationHistory] = useState([]);
   const [operationAudit, setOperationAudit] = useState(null);
@@ -1228,6 +1256,9 @@ export function App() {
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [connectionsView, setConnectionsView] = useState("list");
+  const [settingsView, setSettingsView] = useState("overview");
+  const [chatSessions, setChatSessions] = useState([]);
+  const [activeChatSessionId, setActiveChatSessionId] = useState("");
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyUserId, setAdminBusyUserId] = useState("");
@@ -1237,8 +1268,6 @@ export function App() {
   const [mcpPolicyLoading, setMcpPolicyLoading] = useState(false);
   const [mcpPolicySaving, setMcpPolicySaving] = useState(false);
   const [sandboxSettings, setSandboxSettings] = useState(null);
-  const [sandboxes, setSandboxes] = useState([]);
-  const [sandboxListLoading, setSandboxListLoading] = useState(false);
   const [sandboxLoading, setSandboxLoading] = useState(false);
   const [sandboxSaving, setSandboxSaving] = useState(false);
   const [sandboxCreating, setSandboxCreating] = useState(false);
@@ -1283,7 +1312,8 @@ export function App() {
       const name = navFromLocation();
       setActiveNav(name);
       if (name === "Connections") setConnectionsView("list");
-      if (name === "Sandbox") {
+      if (name === "Settings") setSettingsView("overview");
+      if (name === "Workspace") {
         setSelectedSandboxGrantId(null);
         setSandboxSettings(null);
       }
@@ -1328,6 +1358,12 @@ export function App() {
     setApiError("");
   };
 
+  const updateWorkspaceInventory = (next) => {
+    if (!next) return;
+    setHomeWorkspaces((current) => [next, ...current.filter((item) => item.id !== next.id)]);
+    if (next.grantId === "personal") applyWorkspace(next);
+  };
+
   const showApiError = (error) => {
     setApiError(error.message);
     setToast("");
@@ -1339,6 +1375,10 @@ export function App() {
       if (error.code === "WORKSPACE_NOT_FOUND") applyWorkspace(null);
       else { setWorkspaceState("failed"); showApiError(error); }
     });
+    workspaceApi.list()
+      .then((value) => { setHomeWorkspaces(value.workspaces); setApiError(""); })
+      .catch(showApiError)
+      .finally(() => setHomeWorkspacesLoading(false));
     operationApi.recent().then(setOperation).catch(showApiError);
     operationApi.list().then((value) => setOperationHistory(value.operations)).catch(showApiError);
     connectionApi.microsoft365()
@@ -1346,6 +1386,21 @@ export function App() {
       .catch((error) => setConnectionError(error.message))
       .finally(() => setConnectionLoading(false));
   }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session || activeNav !== "Workspace") return undefined;
+    let active = true;
+    const refresh = () => workspaceApi.list()
+      .then((value) => {
+        if (!active) return;
+        setHomeWorkspaces(value.workspaces);
+        setHomeWorkspacesLoading(false);
+      })
+      .catch((error) => { if (active) showApiError(error); });
+    refresh();
+    const interval = window.setInterval(refresh, 10_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [activeNav, session?.user.id]);
 
   useEffect(() => {
     if (!session) return;
@@ -1373,15 +1428,15 @@ export function App() {
   }, [session?.user.id]);
 
   useEffect(() => {
-    if (!session || session.roles.includes("administrator") || !["Firewall", "Admin"].includes(activeNav)) return;
-    setActiveNav("Home");
+    if (!session || session.roles.includes("administrator") || activeNav !== "Firewall") return;
+    setActiveNav("Workspace");
     const url = new URL(window.location.href);
     url.searchParams.delete("view");
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
   }, [activeNav, session?.user.id]);
 
   useEffect(() => {
-    if (activeNav !== "Admin" || !session?.roles.includes("administrator")) return;
+    if (activeNav !== "Settings" || settingsView !== "admin" || !session?.roles.includes("administrator")) return;
     setAdminLoading(true);
     Promise.all([adminApi.users(), adminApi.mcpPolicy()])
       .then(([users, policy]) => {
@@ -1390,7 +1445,7 @@ export function App() {
       })
       .catch(showApiError)
       .finally(() => setAdminLoading(false));
-  }, [activeNav, session?.user.id]);
+  }, [activeNav, settingsView, session?.user.id]);
 
   useEffect(() => {
     if (activeNav !== "Firewall" || !session?.roles.includes("administrator")) return;
@@ -1415,16 +1470,7 @@ export function App() {
   }, [activeNav, connectionsView, session?.user.id]);
 
   useEffect(() => {
-    if (activeNav !== "Sandbox" || !session) return;
-    setSandboxListLoading(true);
-    workspaceApi.list()
-      .then((value) => { setSandboxes(value.workspaces); setSandboxError(""); })
-      .catch((error) => setSandboxError(error.message))
-      .finally(() => setSandboxListLoading(false));
-  }, [activeNav, session?.user.id]);
-
-  useEffect(() => {
-    if (activeNav !== "Sandbox" || !session || !selectedSandboxGrantId) return;
+    if (activeNav !== "Workspace" || !session || !selectedSandboxGrantId) return;
     setSandboxLoading(true);
     sandboxApi.settings(selectedSandboxGrantId)
       .then((value) => { setSandboxSettings(value); setSandboxError(""); })
@@ -1519,26 +1565,46 @@ export function App() {
     return () => { active = false; };
   }, [drawer, operation?.id, operation?.state, operation?.requiredApprovalChannel, approvalReload]);
 
-  const createWorkspace = async () => {
-    setWorkspaceState("provisioning");
+  const createWorkspace = async (grantId = "personal") => {
+    if (grantId === "personal") setWorkspaceState("provisioning");
     setApiError("");
-    try { applyWorkspace(await workspaceApi.create()); setToast("Your managed workspace is being prepared."); }
-    catch (error) { setWorkspaceState("failed"); showApiError(error); }
-  };
-
-  const restartWorkspace = async () => {
-    setWorkspaceState("restarting");
-    setApiError("");
-    try { applyWorkspace(await workspaceApi.restart(workspace.id)); setToast("Restart requested. Preparing a fresh workspace…"); }
-    catch (error) { setWorkspaceState(workspace?.state ?? "failed"); showApiError(error); }
-  };
-
-  const openWorkspace = async () => {
-    if (!workspace || ["not_created", "stopped", "failed"].includes(workspaceState)) return createWorkspace();
-    const sessionWindow = window.open("about:blank", "onecomputer-workspace");
     try {
-      const result = await workspaceApi.open(workspace.id);
-      applyWorkspace(result.workspace);
+      const created = await workspaceApi.create(grantId);
+      updateWorkspaceInventory(created);
+      setToast(`${workspaceName(created)} is being prepared.`);
+      return created;
+    } catch (error) {
+      if (grantId === "personal") setWorkspaceState("failed");
+      showApiError(error);
+      return null;
+    }
+  };
+
+  const restartWorkspace = async (targetWorkspace = workspace) => {
+    if (!targetWorkspace) return createWorkspace();
+    if (targetWorkspace.grantId === "personal") setWorkspaceState("restarting");
+    setWorkspaceActionId(targetWorkspace.id);
+    setApiError("");
+    try {
+      updateWorkspaceInventory(await workspaceApi.restart(targetWorkspace.id));
+      setToast(`${workspaceName(targetWorkspace)} is restarting.`);
+    } catch (error) {
+      if (targetWorkspace.grantId === "personal") setWorkspaceState(targetWorkspace.state);
+      showApiError(error);
+    } finally {
+      setWorkspaceActionId("");
+    }
+  };
+
+  const openWorkspace = async (targetWorkspace = workspace) => {
+    if (!targetWorkspace || ["not_created", "stopped", "failed"].includes(targetWorkspace.state)) {
+      return createWorkspace(targetWorkspace?.grantId ?? "personal");
+    }
+    const sessionWindow = window.open("about:blank", "onecomputer-workspace");
+    setWorkspaceActionId(targetWorkspace.id);
+    try {
+      const result = await workspaceApi.open(targetWorkspace.id);
+      updateWorkspaceInventory(result.workspace);
       const clipboardStatus = clipboardStatusForBrowser(result.launch.clipboard);
       if (sessionWindow) sessionWindow.location.replace(result.launch.launchUrl);
       else window.location.assign(result.launch.launchUrl);
@@ -1546,39 +1612,40 @@ export function App() {
     } catch (error) {
       sessionWindow?.close();
       showApiError(error);
+    } finally {
+      setWorkspaceActionId("");
     }
   };
 
-  const stopWorkspace = async () => {
-    setWorkspaceState("stopping");
-    try { applyWorkspace(await workspaceApi.stop(workspace.id)); setToast("Your workspace has stopped."); }
-    catch (error) { setWorkspaceState(workspace?.state ?? "failed"); showApiError(error); }
+  const stopWorkspace = async (targetWorkspace = workspace) => {
+    if (!targetWorkspace) return;
+    if (targetWorkspace.grantId === "personal") setWorkspaceState("stopping");
+    setWorkspaceActionId(targetWorkspace.id);
+    try {
+      updateWorkspaceInventory(await workspaceApi.stop(targetWorkspace.id));
+      setToast(`${workspaceName(targetWorkspace)} has stopped.`);
+    } catch (error) {
+      if (targetWorkspace.grantId === "personal") setWorkspaceState(targetWorkspace.state);
+      showApiError(error);
+    } finally {
+      setWorkspaceActionId("");
+    }
   };
 
-  const deleteWorkspace = async () => {
-    if (!await requestConfirmation({
+  const deleteWorkspace = async (targetWorkspace = workspace) => {
+    if (!targetWorkspace || !await requestConfirmation({
       title: "Delete this workspace record?",
       description: "The stopped workspace record and its retained home storage will be removed. You can create a new workspace later.",
       confirmLabel: "Delete workspace",
       danger: true,
     })) return;
-    try { await workspaceApi.delete(workspace.id); applyWorkspace(null); setToast("Workspace deleted."); }
-    catch (error) { showApiError(error); }
-  };
-
-  const testGateway = async () => {
-    if (!workspace) return;
-    setTestingGateway(true);
-    setApiError("");
     try {
-      const result = await workspaceApi.testGateway(workspace.id);
-      setGatewayResult(result);
-      setDrawer("gateway");
-      setToast("The scoped model and tool routes are ready.");
+      await workspaceApi.delete(targetWorkspace.id);
+      setHomeWorkspaces((current) => current.filter((item) => item.id !== targetWorkspace.id));
+      if (targetWorkspace.grantId === "personal") applyWorkspace(null);
+      setToast(`${workspaceName(targetWorkspace)} deleted.`);
     } catch (error) {
       showApiError(error);
-    } finally {
-      setTestingGateway(false);
     }
   };
 
@@ -1660,13 +1727,14 @@ export function App() {
     }
   };
 
-  const saveSandboxSettings = async (configuration) => {
+  const saveWorkspaceSettings = async (configuration) => {
     setSandboxSaving(true);
     setSandboxError("");
     try {
       const saved = await sandboxApi.save(configuration);
       setSandboxSettings(saved);
-      setToast("Sandbox configuration saved.");
+      workspaceApi.list().then((value) => setHomeWorkspaces(value.workspaces)).catch(() => undefined);
+      setToast("Workspace configuration saved.");
       setRestartNoticeOpen(true);
     } catch (error) {
       setSandboxError(error.message);
@@ -1678,7 +1746,7 @@ export function App() {
   const selectNav = (name, historyMode = "push") => {
     setActiveNav(name);
     const url = new URL(window.location.href);
-    if (name === "Home") url.searchParams.delete("view");
+    if (name === "Workspace") url.searchParams.delete("view");
     else url.searchParams.set("view", viewByNav[name]);
     const nextLocation = `${url.pathname}${url.search}`;
     if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
@@ -1686,29 +1754,31 @@ export function App() {
       window.history.pushState({}, "", nextLocation);
     }
     if (name === "Connections") setConnectionsView("list");
-    if (name === "Sandbox") { setSelectedSandboxGrantId(null); setSandboxSettings(null); }
+    if (name === "Settings") setSettingsView("overview");
+    if (name === "Workspace") { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }
+    setProfileOpen(false);
     setMobileNavOpen(false);
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
   };
 
-  const selectSandbox = (grantId) => {
+  const selectWorkspaceConfiguration = (grantId) => {
     setSelectedSandboxGrantId(grantId);
     setSandboxSettings(null);
     setSandboxError("");
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
   };
 
-  const createSandbox = async (name) => {
+  const createAdditionalWorkspace = async (name) => {
     const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 110);
-    const grantId = `sandbox-${slug || "managed"}`;
+    const grantId = `workspace-${slug || "managed"}`;
     setSandboxCreating(true);
     setSandboxError("");
     try {
       const created = await workspaceApi.create(grantId);
-      setSandboxes((current) => [created, ...current.filter((sandbox) => sandbox.id !== created.id)]);
+      updateWorkspaceInventory(created);
       setSandboxCreateOpen(false);
-      selectSandbox(created.grantId);
-      setToast(`${sandboxName(created)} is being prepared.`);
+      selectWorkspaceConfiguration(created.grantId);
+      setToast(`${workspaceName(created)} is being prepared.`);
     } catch (error) {
       setSandboxError(error.message);
     } finally {
@@ -1716,7 +1786,7 @@ export function App() {
     }
   };
 
-  const openFirewallFromSandbox = () => {
+  const openFirewallFromWorkspace = () => {
     setSelectedSandboxGrantId(null);
     setSandboxSettings(null);
     selectNav("Firewall");
@@ -1767,6 +1837,7 @@ export function App() {
       const saved = await adminApi.saveEgressSecurityGroup(document);
       await refreshEgressGroups();
       setToast(`${saved.name} version ${saved.version} is ready to attach.`);
+      return saved;
     } catch (error) { showApiError(error); }
     finally { setEgressSaving(false); }
   };
@@ -1775,7 +1846,8 @@ export function App() {
     try {
       await adminApi.assignEgressSecurityGroup(userId, securityGroupVersionId);
       await refreshAdminUsers();
-      setToast("The sandbox firewall assignment is pinned to that version.");
+      setToast("The workspace firewall assignment is pinned to that version.");
+      return true;
     } catch (error) { showApiError(error); }
     finally { setAdminBusyUserId(""); }
   };
@@ -1814,15 +1886,17 @@ export function App() {
           <strong>ONE</strong><span>Computer</span>
         </div>
         <nav aria-label="Primary navigation">
-          <NavButton active={activeNav === "Home"} icon={activeNav === "Home" ? Home24Filled : Home24Regular} label="Home" onClick={() => selectNav("Home")} />
-          <NavButton active={activeNav === "Chat"} icon={Bot24Regular} label="Chat" onClick={() => selectNav("Chat")} />
-          <NavButton active={activeNav === "Activity"} icon={Clock24Regular} label="Activity" onClick={() => selectNav("Activity")} />
-          <NavButton active={activeNav === "Sandbox"} icon={Laptop24Regular} label="Sandbox" onClick={() => selectNav("Sandbox")} />
+          <NavButton active={activeNav === "Workspace"} icon={activeNav === "Workspace" ? Home24Filled : Home24Regular} label="Workspace" onClick={() => selectNav("Workspace")} />
+          <NavButton active={activeNav === "Trail"} icon={Clock24Regular} label="Trail" onClick={() => selectNav("Trail")} />
           {session.roles.includes("administrator") && <NavButton active={activeNav === "Firewall"} icon={ShieldCheckmark24Regular} label="Firewall" onClick={() => selectNav("Firewall")} />}
           <NavButton active={activeNav === "Connections"} icon={PlugConnected24Regular} label="Connections" onClick={() => selectNav("Connections")} />
-          {session.roles.includes("administrator") && <NavButton active={activeNav === "Admin"} icon={Settings24Regular} label="Admin" onClick={() => selectNav("Admin")} />}
-          <ExternalNavLink icon={Bot24Regular} label="Gateway" href={gatewayAdminUrl} />
-          <NavButton active={activeNav === "Help"} icon={QuestionCircle24Regular} label="Help" onClick={() => selectNav("Help")} />
+          <NavButton active={activeNav === "Chat"} icon={Bot24Regular} label="Chat" onClick={() => selectNav("Chat")} />
+          {activeNav === "Chat" && <div className="sidebar-chat-history" aria-label="Recent chat threads">
+            <div className="sidebar-chat-history-heading"><span>Recent</span><button type="button" aria-label="Start a new chat" title="Start a new chat" onClick={() => setActiveChatSessionId("")}><Add24Regular aria-hidden="true" /></button></div>
+            {chatSessions.length === 0
+              ? <p>No recent chats</p>
+              : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => setActiveChatSessionId(item.id)} aria-current={activeChatSessionId === item.id ? "true" : undefined}>{item.title || `Conversation ${chatSessions.length - index}`}</button>)}
+          </div>}
         </nav>
         <div className="sidebar-account">
           <button
@@ -1837,10 +1911,15 @@ export function App() {
             <ChevronDown16Regular aria-hidden="true" />
           </button>
           {profileOpen && (
-            <div id="sidebar-account-menu" className="sidebar-account-menu">
-              <strong>{session.user.displayName}</strong>
-              <span>{session.user.email}</span>
-              <button type="button" onClick={logout}><SignOut24Regular aria-hidden="true" />Sign out</button>
+            <div id="sidebar-account-menu" className="sidebar-account-menu" role="group" aria-label="Account menu">
+              <div className="sidebar-menu-profile">
+                <span className="sidebar-menu-avatar"><Person24Regular aria-hidden="true" /></span>
+                <span><strong>{session.user.displayName}</strong><small>{session.user.email}</small></span>
+              </div>
+              <div className="sidebar-account-menu-actions">
+                <button type="button" onClick={() => selectNav("Settings")}><Settings24Regular aria-hidden="true" /><span>Settings</span><ChevronRight16Regular aria-hidden="true" /></button>
+                <button className="sidebar-signout" type="button" onClick={logout}><SignOut24Regular aria-hidden="true" /><span>Log out</span></button>
+              </div>
             </div>
           )}
         </div>
@@ -1854,41 +1933,41 @@ export function App() {
           <div className="mobile-brand"><strong>ONE</strong><span>Computer</span></div>
         </header>
 
-        {activeNav === "Home" && (
-          <HomeScreen
+        {activeNav === "Workspace" && !selectedSandboxGrantId && (
+          <WorkspaceScreen
             userName={firstName}
-            workspaceState={workspaceState}
-            workspace={workspace}
+            workspaces={homeWorkspaces}
+            loading={homeWorkspacesLoading}
             apiError={apiError}
+            actionWorkspaceId={workspaceActionId}
             onOpen={openWorkspace}
             onRestart={restartWorkspace}
             onStop={stopWorkspace}
             onDelete={deleteWorkspace}
-            onCapabilities={() => setDrawer("capabilities")}
-            operation={operation}
-            operationBusy={operationBusy}
-            onOpenOperation={() => setDrawer("request")}
-            onCreateOperation={createGovernedOperation}
-            onTestGateway={testGateway}
-            testingGateway={testingGateway}
+            onCreate={() => setSandboxCreateOpen(true)}
+            onManage={selectWorkspaceConfiguration}
           />
         )}
-        {activeNav === "Activity" && <ActivityScreen operations={operationHistory} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
-        {activeNav === "Chat" && <ChatScreen workspace={workspace} workspaceState={workspaceState} onStartWorkspace={openWorkspace} onRestartWorkspace={restartWorkspace} />}
-        {activeNav === "Sandbox" && <SandboxScreen
+        {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
+        {activeNav === "Chat" && <ChatScreen
+          workspace={workspace}
+          workspaceState={workspaceState}
+          onStartWorkspace={openWorkspace}
+          onRestartWorkspace={restartWorkspace}
+          activeSessionId={activeChatSessionId}
+          onSessionsChange={setChatSessions}
+          onSessionChange={setActiveChatSessionId}
+        />}
+        {activeNav === "Workspace" && selectedSandboxGrantId && <WorkspaceConfigurationScreen
           settings={sandboxSettings}
-          sandboxes={sandboxes}
-          listLoading={sandboxListLoading}
+          workspaces={homeWorkspaces}
           loading={sandboxLoading}
           saving={sandboxSaving}
-          creating={sandboxCreating}
           error={sandboxError}
           selectedGrantId={selectedSandboxGrantId}
-          onSelect={selectSandbox}
           onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }}
-          onCreate={() => setSandboxCreateOpen(true)}
-          onSave={saveSandboxSettings}
-          onNavigateFirewall={openFirewallFromSandbox}
+          onSave={saveWorkspaceSettings}
+          onNavigateFirewall={openFirewallFromWorkspace}
           canManageFirewall={session.roles.includes("administrator")}
         />}
         {activeNav === "Connections" && (
@@ -1911,8 +1990,21 @@ export function App() {
           />
         )}
         {activeNav === "Firewall" && session.roles.includes("administrator") && <FirewallScreen users={adminUsers} loading={adminLoading} busyUserId={adminBusyUserId} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} onAttach={attachEgressSecurityGroup} />}
-        {activeNav === "Admin" && session.roles.includes("administrator") && <AdminScreen users={adminUsers} loading={adminLoading} busyUserId={adminBusyUserId} onAssign={assignPolicy} onRevoke={revokePolicy} onVersion={createPolicyVersion} mcpPolicy={mcpPolicy} onConfigureConnector={configureMicrosoft365} />}
-        {activeNav === "Help" && <HelpScreen />}
+        {activeNav === "Settings" && <SettingsScreen
+          view={settingsView}
+          isAdmin={session.roles.includes("administrator")}
+          gatewayUrl={gatewayAdminUrl}
+          onOpenAdmin={() => setSettingsView("admin")}
+          onBack={() => setSettingsView("overview")}
+          users={adminUsers}
+          loading={adminLoading}
+          busyUserId={adminBusyUserId}
+          onAssign={assignPolicy}
+          onRevoke={revokePolicy}
+          onVersion={createPolicyVersion}
+          mcpPolicy={mcpPolicy}
+          onConfigureConnector={configureMicrosoft365}
+        />}
       </main>
 
       {mobileNavOpen && <button className="mobile-scrim" type="button" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
@@ -1943,13 +2035,13 @@ export function App() {
 
       {sandboxCreateOpen && (
         <TextPromptDialog
-          title="Create a managed sandbox"
-          description="ONEComputer will create and start a new policy-bounded sandbox. Choose a clear name; it becomes the sandbox identifier for future automation."
-          label="Sandbox name"
-          defaultValue="Project sandbox"
-          confirmLabel="Create sandbox"
+          title="Create workspace"
+          description="ONEComputer will create and start a policy-bounded workspace. Choose a clear name for future automation."
+          label="Workspace name"
+          defaultValue="Project workspace"
+          confirmLabel="Create workspace"
           busy={sandboxCreating}
-          onConfirm={createSandbox}
+          onConfirm={createAdditionalWorkspace}
           onCancel={() => setSandboxCreateOpen(false)}
         />
       )}
@@ -1957,25 +2049,9 @@ export function App() {
       {restartNoticeOpen && (
         <NoticeDialog
           title="Restart required"
-          description="Your changes are saved. Restart this sandbox before using it again; its next launch will expose the selected applications and AI agent clients."
+          description="Your changes are saved. Restart this workspace before using it again; its next launch will expose the selected applications and AI agent clients."
           onClose={() => setRestartNoticeOpen(false)}
         />
-      )}
-
-      {drawer === "capabilities" && (
-        <Drawer title="Assigned capabilities" onClose={() => setDrawer(null)}>
-          <p className="drawer-intro">These are the tools and actions your organization has made available in this workspace.</p>
-          <div className="drawer-list">
-            {capabilities.map(({ icon: Icon, name, description, status }) => (
-              <div key={name}>
-                <span className="capability-icon"><Icon aria-hidden="true" /></span>
-                <span><strong>{name}</strong><small>{description}</small></span>
-                <span className={status === "Ready" ? "ready-label" : "approval-label"}>{status}</span>
-              </div>
-            ))}
-          </div>
-          <div className="drawer-note"><Info24Regular aria-hidden="true" /><p>Capabilities are assigned by your organization and enforced when an action runs.</p></div>
-        </Drawer>
       )}
 
       {drawer === "request" && operation && (
@@ -2071,24 +2147,6 @@ export function App() {
           ) : (
             <button className="secondary-button full-width" type="button" onClick={() => setDrawer(null)}>Close</button>
           )}
-        </Drawer>
-      )}
-
-      {drawer === "gateway" && gatewayResult && (
-        <Drawer title="AI connection" onClose={() => setDrawer(null)}>
-          <div className="gateway-result-status"><CheckmarkCircle24Regular aria-hidden="true" /><span><strong>Approved model route is available</strong><small>Scoped to this managed workspace and agent</small></span></div>
-          <dl className="request-details">
-            <div><dt>Base API URL</dt><dd><code>{gatewayResult.apiBaseUrl}</code></dd></div>
-            <div><dt>MCP gateway</dt><dd><code>{gatewayResult.mcpUrl}</code></dd></div>
-            <div><dt>Model route</dt><dd>{gatewayResult.model}</dd></div>
-            <div><dt>Budget remaining</dt><dd>${gatewayResult.modelRoute.budget.remainingUsd.toFixed(2)} of ${gatewayResult.modelRoute.budget.limitUsd.toFixed(2)}</dd></div>
-            <div><dt>Budget period</dt><dd>30 days</dd></div>
-            <div><dt>Request limit</dt><dd>{gatewayResult.modelRoute.limits.requestsPerMinute} per minute</dd></div>
-            <div><dt>Fallback</dt><dd>None — fails closed</dd></div>
-            <div><dt>Assigned tools</dt><dd>{gatewayResult.tools.map((tool) => tool.name).join(", ") || "None"}</dd></div>
-          </dl>
-          <div className="drawer-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>This check reads availability and usage metadata only. It does not send a prompt. Provider and LiteLLM administrator credentials are not shared with the workspace.</p></div>
-          <button className="secondary-button full-width" type="button" onClick={() => setDrawer(null)}>Close</button>
         </Drawer>
       )}
 

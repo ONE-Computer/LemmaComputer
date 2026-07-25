@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages
-RUN npm ci --ignore-scripts
+RUN npm ci --include=optional \
+  && test -x node_modules/vite/node_modules/@esbuild/linux-x64/bin/esbuild
 
 ENV NODE_ENV=production
