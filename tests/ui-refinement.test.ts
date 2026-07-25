@@ -91,7 +91,7 @@ test("Trail owns approval-device management while Connections stays focused on s
   const activityScreen = app.slice(app.indexOf("function ActivityScreen"), app.indexOf("const pendingApplications"));
   const connectionsScreen = app.slice(app.indexOf("function ConnectionsScreen"), app.indexOf("function ChatScreen"));
   assert.match(app, /getBrowserApproverIdentity,/);
-  assert.match(app, /getBrowserApproverIdentity\(\)\s*\.then/);
+  assert.match(app, /getApprovalDeviceContext/);
   assert.match(app, /trail: "Trail"/);
   assert.match(app, /label="Trail"/);
   assert.doesNotMatch(app, /view === "activity"/);
@@ -101,6 +101,13 @@ test("Trail owns approval-device management while Connections stays focused on s
   assert.match(app, /Ready on another device/);
   assert.match(app, /Open the Approval Companion there to approve or deny this request/);
   assert.doesNotMatch(app, /Replace with this browser|Each account uses one active approval device/);
+});
+
+test("remote-only approvals notify desktop without opening its decision drawer", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  assert.match(app, /approvalContext\.localReady \|\| !approvalContext\.accountStatus\.connected/);
+  assert.match(app, /setDrawer\("request"\)/);
+  assert.match(app, /Approval sent to \$\{approvalContext\.accountStatus\.approver\.displayName\}/);
 });
 
 test("the consent-task schema is repaired additively for existing installations", async () => {

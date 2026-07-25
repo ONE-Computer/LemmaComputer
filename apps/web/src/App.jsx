@@ -994,6 +994,16 @@ const connectionReason = {
   M365_TOKEN_EXCHANGE_FAILED: "Microsoft 365 could not complete the connection. Please try again.",
 };
 
+const getApprovalDeviceContext = async () => {
+  const local = await getBrowserApproverIdentity();
+  const [accountStatus, localStatus] = await Promise.all([
+    approvalApi.status(),
+    local ? approvalApi.status(local.did) : Promise.resolve(null),
+  ]);
+  const localReady = Boolean(local && localStatus?.connected && await hasBrowserApprover(local.did));
+  return { accountStatus, local, localStatus, localReady };
+};
+
 function ApprovalDeviceCard({ displayName }) {
   const [status, setStatus] = useState(null);
   const [localApprover, setLocalApprover] = useState(null);
@@ -1003,15 +1013,10 @@ function ApprovalDeviceCard({ displayName }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const refresh = async () => {
-    const local = await getBrowserApproverIdentity();
-    const [remote, localStatus] = await Promise.all([
-      approvalApi.status(),
-      local ? approvalApi.status(local.did) : Promise.resolve(null),
-    ]);
-    const ready = Boolean(local && localStatus?.connected && await hasBrowserApprover(local.did));
-    setStatus(remote);
-    setLocalApprover(local);
-    setLocalReady(ready);
+    const context = await getApprovalDeviceContext();
+    setStatus(context.accountStatus);
+    setLocalApprover(context.local);
+    setLocalReady(context.localReady);
   };
 
   useEffect(() => {
@@ -2257,9 +2262,17 @@ export function App() {
         if (!active || !recent) return;
         setOperation(recent);
         if (recent.state === "approval_required" && !surfacedApprovalIds.current.has(recent.id)) {
+          const approvalContext = recent.requiredApprovalChannel === "openvtc-task-consent"
+            ? await getApprovalDeviceContext()
+            : null;
+          if (!active) return;
           surfacedApprovalIds.current.add(recent.id);
-          setDrawer("request");
-          setToast("An agent action is waiting for your approval.");
+          if (!approvalContext || approvalContext.localReady || !approvalContext.accountStatus.connected) {
+            setDrawer("request");
+            setToast("An agent action is waiting for your approval.");
+          } else {
+            setToast(`Approval sent to ${approvalContext.accountStatus.approver.displayName}.`);
+          }
         }
       } catch (error) {
         if (active) showApiError(error);
@@ -2291,13 +2304,8 @@ export function App() {
     setApprovalRequest(null);
     setApprovalRequestState("loading");
     setApprovalRequestMessage("");
-    getBrowserApproverIdentity()
-      .then(async (local) => {
-        const [accountStatus, localStatus] = await Promise.all([
-          approvalApi.status(),
-          local ? approvalApi.status(local.did) : Promise.resolve(null),
-        ]);
-        const localReady = Boolean(local && localStatus?.connected && await hasBrowserApprover(local.did));
+    getApprovalDeviceContext()
+      .then(async ({ accountStatus, local, localStatus, localReady }) => {
         if (!localReady) {
           if (active) {
             setApprovalRequestState(accountStatus.connected ? "remote" : "setup");
