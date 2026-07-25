@@ -119,6 +119,23 @@ services:
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
 
+  openvtc-consent:
+    container_name: onecomputer-openvtc-consent
+    build:
+      context: ../..
+      dockerfile: infra/issue-011/Dockerfile.consent
+    environment:
+      OPENVTC_CONSENT_LISTEN: 0.0.0.0:8788
+      OPENVTC_CONSENT_TOKEN: ${ONECOMPUTER_OPENVTC_CONSENT_TOKEN:?run npm run key:openvtc and store the result in .env}
+      OPENVTC_EXECUTOR_SEED_B64: ${ONECOMPUTER_OPENVTC_EXECUTOR_SEED_B64:?run npm run key:openvtc and store the result in .env}
+      RUST_LOG: onecomputer_openvtc_consent=info
+    networks: [consent-private]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
   control-api:
     container_name: onecomputer-control-api
     build:
@@ -137,7 +154,8 @@ services:
       LITELLM_MASTER_KEY: ${ONECOMPUTER_LITELLM_MASTER_KEY:?set ONECOMPUTER_LITELLM_MASTER_KEY}
       LITELLM_CREDENTIAL_SECRET: ${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_LITELLM_CREDENTIAL_SECRET}
       FIXTURE_APPROVAL_SECRET: ${ONECOMPUTER_FIXTURE_APPROVAL_SECRET:?set ONECOMPUTER_FIXTURE_APPROVAL_SECRET}
-      OPENVTC_EXECUTOR_PRIVATE_KEY_B64: ${ONECOMPUTER_OPENVTC_EXECUTOR_PRIVATE_KEY_B64:?run npm run key:openvtc and store the result in .env}
+      OPENVTC_CONSENT_URL: http://openvtc-consent:8788
+      OPENVTC_CONSENT_TOKEN: ${ONECOMPUTER_OPENVTC_CONSENT_TOKEN:?run npm run key:openvtc and store the result in .env}
       WEB_PUSH_VAPID_SUBJECT: ${ONECOMPUTER_WEB_PUSH_VAPID_SUBJECT:-}
       WEB_PUSH_VAPID_PUBLIC_KEY: ${ONECOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY:-}
       WEB_PUSH_VAPID_PRIVATE_KEY: ${ONECOMPUTER_WEB_PUSH_VAPID_PRIVATE_KEY:-}
@@ -161,11 +179,12 @@ services:
       BOOTSTRAP_USER_ID: ${ONECOMPUTER_BOOTSTRAP_USER_ID:-alex-morgan}
       TENANT_DISPLAY_NAME: ${ONECOMPUTER_TENANT_DISPLAY_NAME:-ME TECH}
       ADMINISTRATOR_EMAILS: ${ONECOMPUTER_ADMINISTRATOR_EMAILS:-mike@metech.dev}
-    networks: [web-edge, control-private, gateway-private]
+    networks: [web-edge, control-private, consent-private, gateway-private]
     depends_on:
       postgres: { condition: service_healthy }
       workspace-controller: { condition: service_started }
       litellm: { condition: service_healthy }
+      openvtc-consent: { condition: service_started }
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -194,6 +213,8 @@ networks:
   web-edge: {}
   control-private:
     name: onecomputer-control
+  consent-private:
+    internal: true
   gateway-private:
     internal: true
 volumes:

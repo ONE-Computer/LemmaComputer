@@ -3,7 +3,6 @@ import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { assignEgressSecurityGroupSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, sandboxApplicationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, type AgentCatalogId, type ChatUiMessage, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
-import { Ed25519DidKeySigner } from "@onecomputer/openvtc-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { z } from "zod";
@@ -13,6 +12,7 @@ import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority,
 import { EntraAuthenticationService, isAdministrator, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
+import { HttpOpenVtcConsentClient } from "./openvtc-consent-client.js";
 import { AgentBridgeAuthority, type AgentBridgeIdentity } from "./agent-bridge.js";
 import { COMPANION_PUSH_PROTOCOL, WebPushProvider } from "./web-push.js";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
@@ -127,7 +127,8 @@ const envSchema = z.object({
   M365_AUTHORIZATION_ORIGIN: z.string().url().default("http://localhost:4311"),
   AGENT_BRIDGE_URL: z.string().url().default("http://onecomputer-control:4100"),
   FIXTURE_APPROVAL_SECRET: z.string().min(32).default("local-disabled-fixture-approval-secret-32-chars"),
-  OPENVTC_EXECUTOR_PRIVATE_KEY_B64: z.string().min(1).optional(),
+  OPENVTC_CONSENT_URL: z.string().url().optional(),
+  OPENVTC_CONSENT_TOKEN: z.string().min(32).optional(),
   WEB_PUSH_VAPID_SUBJECT: optionalEnvString(),
   WEB_PUSH_VAPID_PUBLIC_KEY: optionalEnvString(),
   WEB_PUSH_VAPID_PRIVATE_KEY: optionalEnvString(),
@@ -915,8 +916,15 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         subscriptionSecret: env.WEB_PUSH_SUBSCRIPTION_SECRET,
       })
     : undefined;
-  const openVtc = env.OPENVTC_EXECUTOR_PRIVATE_KEY_B64
-    ? new OpenVtcApprovalCoordinator(store, Ed25519DidKeySigner.fromPkcs8Base64(env.OPENVTC_EXECUTOR_PRIVATE_KEY_B64), pushProvider)
+  if (Boolean(env.OPENVTC_CONSENT_URL) !== Boolean(env.OPENVTC_CONSENT_TOKEN)) {
+    throw new Error("OPENVTC_CONSENT_URL and OPENVTC_CONSENT_TOKEN must be configured together");
+  }
+  const openVtc = env.OPENVTC_CONSENT_URL && env.OPENVTC_CONSENT_TOKEN
+    ? new OpenVtcApprovalCoordinator(
+        store,
+        await HttpOpenVtcConsentClient.connect(env.OPENVTC_CONSENT_URL, env.OPENVTC_CONSENT_TOKEN),
+        pushProvider,
+      )
     : undefined;
   if (!env.LITELLM_WORKSPACE_URL) throw new Error("LITELLM_WORKSPACE_URL is required for signed policy enforcement");
   const policyVerificationKeys = policyVerificationKeySetSchema.parse(JSON.parse(

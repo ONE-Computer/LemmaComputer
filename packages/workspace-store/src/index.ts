@@ -114,6 +114,7 @@ export type OpenVtcConsentTaskRecord = {
   payloadDigest: string;
   requestDocument: OwnedJson;
   requestHash: string;
+  requestProofHash: string;
   state: "queued" | "delivered" | "approved" | "denied" | "expired" | "failed";
   createdAt: Date;
   expiresAt: Date;
@@ -372,6 +373,7 @@ const mapOpenVtcConsentTaskRow = (row: Record<string, unknown>): OpenVtcConsentT
   payloadDigest: String(row.payload_digest),
   requestDocument: row.request_document as OwnedJson,
   requestHash: String(row.request_hash),
+  requestProofHash: String(row.request_proof_hash),
   state: row.state as OpenVtcConsentTaskRecord["state"],
   createdAt: new Date(String(row.created_at)),
   expiresAt: new Date(String(row.expires_at)),
@@ -952,11 +954,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       const inserted = await client.query(
         `INSERT INTO openvtc_consent_tasks (
           id,operation_id,tenant_id,subject_id,approver_id,executor_did,challenge,task_type,payload_digest,
-          request_document,request_hash,state,created_at,expires_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,'queued',$12,$13) RETURNING *`,
+          request_document,request_hash,request_proof_hash,state,created_at,expires_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,'queued',$13,$14) RETURNING *`,
         [input.id, input.operationId, input.identity.tenantId, input.identity.subjectId, input.approverId,
           input.executorDid, input.challenge, input.taskType, input.payloadDigest, JSON.stringify(input.requestDocument),
-          input.requestHash, input.createdAt, input.expiresAt],
+          input.requestHash, input.requestProofHash, input.createdAt, input.expiresAt],
       );
       await client.query(
         `INSERT INTO openvtc_delivery_outbox (
@@ -1570,6 +1572,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       payloadDigest: input.payloadDigest,
       requestDocument: input.requestDocument,
       requestHash: input.requestHash,
+      requestProofHash: input.requestProofHash,
       state: "queued",
       createdAt: input.createdAt,
       expiresAt: input.expiresAt,

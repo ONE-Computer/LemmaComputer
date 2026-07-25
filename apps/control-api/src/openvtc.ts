@@ -1,14 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { OneComputerError, type IdentityContext, type OwnedJson } from "@onecomputer/contracts";
-import {
-  Ed25519DidKeySigner,
-  ONECOMPUTER_APPROVER_ENROLLMENT_TYPE,
-  buildTaskConsentRequest,
-  jcsCanonicalize,
-  taskConsentPayloadDigest,
-  verifyApproverEnrollment,
-  verifyTaskConsentDecision,
-} from "@onecomputer/openvtc-adapter";
 import type {
   GovernanceStore,
   GovernedOperationRecord,
@@ -23,8 +14,10 @@ import {
   type CompanionPushProvider,
   type CompanionPushSubscription,
 } from "./web-push.js";
+import type { OpenVtcConsentClient } from "./openvtc-consent-client.js";
 
 const MICROSOFT365_TASK_TYPE = "https://onecomputer.dev/spec/microsoft365/tool-call/0.1";
+const ONECOMPUTER_APPROVER_ENROLLMENT_TYPE = "https://onecomputer.dev/spec/openvtc/approver-enrollment/0.1";
 const ENROLLMENT_TTL_MS = 5 * 60 * 1000;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -87,7 +80,7 @@ const effectKind = (toolName: string) => toolName.startsWith("delete-") ? "delet
 export class OpenVtcApprovalCoordinator {
   constructor(
     private readonly store: ApprovalStore,
-    readonly executor: Ed25519DidKeySigner,
+    readonly consent: OpenVtcConsentClient,
     private readonly pushProvider?: CompanionPushProvider,
   ) {}
 
@@ -96,7 +89,7 @@ export class OpenVtcApprovalCoordinator {
     const record = await this.store.createOpenVtcEnrollmentChallenge({
       id: randomUUID(),
       identity,
-      executorDid: this.executor.did,
+      executorDid: this.consent.executorDid,
       challenge: randomBytes(24).toString("base64url"),
       createdAt,
       expiresAt: new Date(createdAt.getTime() + ENROLLMENT_TTL_MS),
@@ -119,7 +112,7 @@ export class OpenVtcApprovalCoordinator {
     if (!challenge || challenge.consumedAt || challenge.expiresAt <= now) {
       throw new OneComputerError("OPENVTC_ENROLLMENT_CHALLENGE_INVALID", "The enrollment challenge is missing, expired, or already used", 409);
     }
-    const proof = verifyApproverEnrollment({
+    const proof = await this.consent.verifyEnrollment({
       document,
       expected: {
         recipientDid: challenge.executorDid,
@@ -127,9 +120,8 @@ export class OpenVtcApprovalCoordinator {
         tenantId: identity.tenantId,
         subjectId: identity.subjectId,
       },
-      now,
+      now: now.toISOString(),
     });
-    if (!proof.verified) throw new OneComputerError("OPENVTC_ENROLLMENT_PROOF_INVALID", proof.reason, 403);
     if (!await this.store.consumeOpenVtcEnrollmentChallenge(identity, challenge.id, challenge.challenge, now)) {
       throw new OneComputerError("OPENVTC_ENROLLMENT_CHALLENGE_INVALID", "The enrollment challenge is missing, expired, or already used", 409);
     }
@@ -140,7 +132,7 @@ export class OpenVtcApprovalCoordinator {
       identity,
       approverDid: proof.signerDid,
       verificationMethod: proof.verificationMethod,
-      displayName: String(payload.displayName),
+      displayName: proof.displayName,
       transportTokenHash: sha256(transportToken),
       enrolledAt: now,
     });
@@ -153,7 +145,7 @@ export class OpenVtcApprovalCoordinator {
     const approver = approverDid
       ? await this.store.getActiveOpenVtcApproverByDid(identity, approverDid)
       : await this.store.getActiveOpenVtcApprover(identity);
-    return { connected: Boolean(approver), approver: approver ? publicApprover(approver) : null, executorDid: this.executor.did };
+    return { connected: Boolean(approver), approver: approver ? publicApprover(approver) : null, executorDid: this.consent.executorDid };
   }
 
   async revoke(identity: IdentityContext, approverDid?: string) {
@@ -183,11 +175,9 @@ export class OpenVtcApprovalCoordinator {
     const challenge = randomBytes(24).toString("base64url");
     const taskPayload = taskPayloadFor(operation);
     const taskId = randomUUID();
-    const request = await buildTaskConsentRequest({
+    const signed = await this.consent.signRequest({
       id: `urn:uuid:${taskId}`,
-      issuerDid: this.executor.did,
       recipientDid: approver.approverDid,
-      verificationMethod: this.executor.verificationMethod,
       issuedAt: createdAt.toISOString(),
       expiresAt: operation.expiresAt.toISOString(),
       challenge,
@@ -206,21 +196,20 @@ export class OpenVtcApprovalCoordinator {
       subject: `urn:onecomputer:operation:${operation.id}`,
       origin: "ONEComputer Control",
       statePin: { resource: operation.resourceName, version: operation.operationDigest },
-      sign: (input) => this.executor.sign(input),
     });
-    const payloadDigest = taskConsentPayloadDigest(MICROSOFT365_TASK_TYPE, taskPayload, challenge);
     const task = await this.store.createOpenVtcConsentTask({
       id: taskId,
       outboxId: randomUUID(),
       identity,
       operationId: operation.id,
       approverId: approver.id,
-      executorDid: this.executor.did,
+      executorDid: this.consent.executorDid,
       challenge,
       taskType: MICROSOFT365_TASK_TYPE,
-      payloadDigest,
-      requestDocument: request as OwnedJson,
-      requestHash: sha256(jcsCanonicalize(request)),
+      payloadDigest: signed.payloadDigest,
+      requestDocument: signed.document,
+      requestHash: signed.documentHash,
+      requestProofHash: signed.proofHash,
       createdAt,
       expiresAt: operation.expiresAt,
     });
@@ -352,23 +341,30 @@ export class OpenVtcApprovalCoordinator {
     const identity = transportIdentity(approver);
     const operation = await this.store.getOwnedOperation(identity, task.operationId);
     if (!operation) throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
-    this.assertStoredRequest(task, approver, operation);
+    await this.assertStoredRequest(task, approver, operation);
     const request = task.requestDocument as Record<string, unknown>;
     const requestPayload = request.payload as Record<string, unknown>;
-    const verified = verifyTaskConsentDecision({
+    const verified = await this.consent.verifyDecision({
       document,
       expected: {
-        recipientDid: this.executor.did,
+        recipientDid: this.consent.executorDid,
         challenge: task.challenge,
         payloadDigest: task.payloadDigest,
-        enrolledApproverDids: [approver.approverDid],
+        enrolledApprovers: [{
+          signerDid: approver.approverDid,
+          verificationMethod: approver.verificationMethod,
+        }],
         requestIssuedAt: String(request.issuedAt),
         requestExpiresAt: task.expiresAt.toISOString(),
         requesterDid: String(requestPayload.requester),
         excludeRequester: requestPayload.excludeRequester === true,
       },
+      now: new Date().toISOString(),
     });
-    if (!verified.verified) throw new OneComputerError("OPENVTC_DECISION_INVALID", `${verified.code}: ${verified.reason}`, 403);
+    if (verified.signerDid !== approver.approverDid
+      || verified.verificationMethod !== approver.verificationMethod) {
+      throw new OneComputerError("OPENVTC_DECISION_APPROVER_INVALID", "The decision key is not the enrolled approver key", 403);
+    }
     if (["approved", "denied"].includes(task.state)) {
       if (task.decisionHash === verified.documentHash) return { identity, operation };
       throw new OneComputerError("APPROVAL_CONFLICT", "This task already has a different signed decision", 409);
@@ -379,7 +375,7 @@ export class OpenVtcApprovalCoordinator {
       approvalId: randomUUID(),
       approverId: approver.id,
       signerDid: verified.signerDid,
-      verificationMethod: approver.verificationMethod,
+      verificationMethod: verified.verificationMethod,
       challenge: verified.challenge,
       payloadDigest: verified.payloadDigest,
       decision: verified.decision,
@@ -436,12 +432,37 @@ export class OpenVtcApprovalCoordinator {
     });
   }
 
-  private assertStoredRequest(task: OpenVtcConsentTaskRecord, approver: OpenVtcApproverRecord, operation: GovernedOperationRecord) {
+  private async assertStoredRequest(task: OpenVtcConsentTaskRecord, approver: OpenVtcApproverRecord, operation: GovernedOperationRecord) {
     const request = task.requestDocument;
-    if (!isObject(request) || request.issuer !== this.executor.did || request.recipient !== approver.approverDid
-      || sha256(jcsCanonicalize(request)) !== task.requestHash
-      || task.taskType !== MICROSOFT365_TASK_TYPE
-      || task.payloadDigest !== taskConsentPayloadDigest(task.taskType, taskPayloadFor(operation), task.challenge)) {
+    if (!isObject(request) || request.issuer !== this.consent.executorDid || request.recipient !== approver.approverDid
+      || task.taskType !== MICROSOFT365_TASK_TYPE) {
+      throw new OneComputerError("OPENVTC_TASK_BINDING_INVALID", "The persisted consent request no longer matches its governed operation", 409);
+    }
+    const expected = await this.consent.signRequest({
+      id: String(request.id),
+      recipientDid: approver.approverDid,
+      issuedAt: String(request.issuedAt),
+      expiresAt: task.expiresAt.toISOString(),
+      challenge: task.challenge,
+      taskType: task.taskType,
+      taskPayload: taskPayloadFor(operation),
+      requesterDid: String((request.payload as Record<string, unknown>).requester),
+      approverSet: "onecomputer-workspace-owners",
+      minApprovals: 1,
+      excludeRequester: true,
+      sideEffects: operation.toolName.startsWith("delete-") ? "destructive" : "mutating",
+      exposure: { discloses: "none", actsAsSubject: true },
+      effects: [{ kind: effectKind(operation.toolName), summary: operation.safeSummary, path: operation.resourceLocation }],
+      consequences: [operation.toolName.startsWith("delete-")
+        ? "This operation removes the selected Microsoft 365 resource."
+        : "This operation changes Microsoft 365 data or communicates as the signed-in user."],
+      subject: `urn:onecomputer:operation:${operation.id}`,
+      origin: "ONEComputer Control",
+      statePin: { resource: operation.resourceName, version: operation.operationDigest },
+    });
+    if (expected.payloadDigest !== task.payloadDigest
+      || expected.documentHash !== task.requestHash
+      || expected.proofHash !== task.requestProofHash) {
       throw new OneComputerError("OPENVTC_TASK_BINDING_INVALID", "The persisted consent request no longer matches its governed operation", 409);
     }
   }

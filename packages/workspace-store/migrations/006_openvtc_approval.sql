@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS openvtc_consent_tasks (
   payload_digest text NOT NULL UNIQUE CHECK (length(payload_digest) = 64),
   request_document jsonb NOT NULL,
   request_hash text NOT NULL CHECK (length(request_hash) = 64),
+  request_proof_hash text NOT NULL CHECK (length(request_proof_hash) = 64),
   state text NOT NULL CHECK (state IN ('queued','delivered','approved','denied','expired','failed')),
   created_at timestamptz NOT NULL,
   expires_at timestamptz NOT NULL,

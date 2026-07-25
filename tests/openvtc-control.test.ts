@@ -1,19 +1,14 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { IdentityContext } from "@onecomputer/contracts";
 import type { GovernedToolExecutionInput, GovernedToolExecutionResult, GovernedToolExecutor } from "@onecomputer/litellm-adapter";
-import {
-  Ed25519DidKeySigner,
-  ONECOMPUTER_APPROVER_ENROLLMENT_TYPE,
-  TASK_CONSENT_DECISION_TYPE,
-  attachDidKeyDataIntegrityProof,
-} from "@onecomputer/openvtc-adapter";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import { OpenVtcApprovalCoordinator } from "../apps/control-api/src/openvtc.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "../apps/control-api/src/operations.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
+import { TestOpenVtcConsentClient, type TestDidSigner } from "./helpers/openvtc-consent.js";
 
 const identity: IdentityContext = { tenantId: "tenant-browser", subjectId: "mike", audience: "onecomputer-control" };
 
@@ -25,32 +20,16 @@ class FakeExecutor implements GovernedToolExecutor {
   }
 }
 
-const signer = () => new Ed25519DidKeySigner(generateKeyPairSync("ed25519").privateKey);
-
 const setup = async () => {
   const store = new MemoryWorkspaceStore();
   const workspace = await store.createOrGet(identity, "browser-approval", randomUUID());
   await store.update(workspace.id, { state: "ready" });
   const executor = new FakeExecutor();
-  const coordinator = new OpenVtcApprovalCoordinator(store, signer());
-  const browser = signer();
+  const consent = new TestOpenVtcConsentClient();
+  const coordinator = new OpenVtcApprovalCoordinator(store, consent);
+  const browser = consent.createApprover();
   const challenge = await coordinator.createEnrollmentChallenge(identity);
-  const issuedAt = new Date().toISOString();
-  const enrollment = attachDidKeyDataIntegrityProof({
-    id: `urn:uuid:${randomUUID()}`,
-    type: ONECOMPUTER_APPROVER_ENROLLMENT_TYPE,
-    issuer: browser.did,
-    recipient: challenge.recipientDid,
-    issuedAt,
-    expiresAt: challenge.expiresAt,
-    payload: {
-      challenge: challenge.challenge,
-      tenantId: identity.tenantId,
-      subjectId: identity.subjectId,
-      verificationMethod: browser.verificationMethod,
-      displayName: "Mike's browser",
-    },
-  }, browser, issuedAt);
+  const enrollment = consent.enrollmentDocument(browser, challenge, identity.tenantId, identity.subjectId, "Mike's browser");
   const enrolled = await coordinator.enroll(identity, challenge.id, enrollment);
   const service = new GovernedOperationService(
     store,
@@ -59,29 +38,18 @@ const setup = async () => {
     60_000,
     coordinator,
   );
-  return { store, workspace, executor, coordinator, browser, transportToken: enrolled.transportToken, service };
+  return { store, workspace, executor, coordinator, consent, browser, transportToken: enrolled.transportToken, service };
 };
 
-const signedDecision = (request: Record<string, unknown>, browser: Ed25519DidKeySigner, decision: "approve" | "deny") => {
-  const payload = request.payload as Record<string, unknown>;
-  const issuedAt = new Date().toISOString();
-  return attachDidKeyDataIntegrityProof({
-    id: `urn:uuid:${randomUUID()}`,
-    type: TASK_CONSENT_DECISION_TYPE,
-    issuer: browser.did,
-    recipient: request.issuer,
-    issuedAt,
-    payload: {
-      challenge: payload.challenge,
-      payloadDigest: payload.payloadDigest,
-      decision,
-      reason: decision === "deny" ? "The user rejected this operation." : "The user verified the signed effects.",
-    },
-  }, browser, issuedAt);
-};
+const signedDecision = (
+  consent: TestOpenVtcConsentClient,
+  request: Record<string, unknown>,
+  browser: TestDidSigner,
+  decision: "approve" | "deny",
+) => consent.decisionDocument(browser, request, decision);
 
 test("OpenVTC browser enrollment, inbox, signed approval, and exact execution form one path", async () => {
-  const { workspace, executor, coordinator, browser, transportToken, service } = await setup();
+  const { workspace, executor, coordinator, consent, browser, transportToken, service } = await setup();
   const pending = await service.createMicrosoft365Delete(
     identity,
     workspace.id,
@@ -96,7 +64,7 @@ test("OpenVTC browser enrollment, inbox, signed approval, and exact execution fo
 
   const request = await coordinator.inboxForIdentity(identity) as Record<string, unknown>;
   assert.equal(request.recipient, browser.did);
-  const decision = signedDecision(request, browser, "approve");
+  const decision = signedDecision(consent, request, browser, "approve");
   const [completed, retry] = await Promise.all([
     service.applyOpenVtcDecision(transportToken, decision, "browser-approval-decision"),
     service.applyOpenVtcDecision(transportToken, decision, "browser-approval-retry"),
@@ -116,7 +84,7 @@ test("OpenVTC browser enrollment, inbox, signed approval, and exact execution fo
 });
 
 test("a signed browser denial is durable and reaches the connector zero times", async () => {
-  const { workspace, executor, coordinator, browser, transportToken, service } = await setup();
+  const { workspace, executor, coordinator, consent, browser, transportToken, service } = await setup();
   await service.createMicrosoft365Delete(
     identity,
     workspace.id,
@@ -127,14 +95,14 @@ test("a signed browser denial is durable and reaches the connector zero times", 
     "browser-denial-create",
   );
   const request = await coordinator.inbox(transportToken) as Record<string, unknown>;
-  const denied = await service.applyOpenVtcDecision(transportToken, signedDecision(request, browser, "deny"), "browser-denial-decision");
+  const denied = await service.applyOpenVtcDecision(transportToken, signedDecision(consent, request, browser, "deny"), "browser-denial-decision");
   assert.equal(denied.state, "denied");
   assert.equal(denied.approval?.decision, "deny");
   assert.equal(executor.calls.length, 0);
 });
 
 test("a protected Calendar write uses the generic redacted OpenVTC path and executes once", async () => {
-  const { workspace, executor, coordinator, browser, transportToken, service } = await setup();
+  const { workspace, executor, coordinator, consent, browser, transportToken, service } = await setup();
   const sensitiveSubject = "private-calendar-subject-must-not-enter-approval-ui";
   const sensitiveBody = "private-calendar-body-must-not-enter-audit-projection";
   const pending = await service.createMicrosoft365Operation(
@@ -171,7 +139,7 @@ test("a protected Calendar write uses the generic redacted OpenVTC path and exec
   const request = await coordinator.inbox(transportToken) as Record<string, unknown>;
   assert.ok(!JSON.stringify(request).includes(sensitiveSubject));
   assert.ok(!JSON.stringify(request).includes(sensitiveBody));
-  const decision = signedDecision(request, browser, "approve");
+  const decision = signedDecision(consent, request, browser, "approve");
   const [completed, replay] = await Promise.all([
     service.applyOpenVtcDecision(transportToken, decision, "calendar-create-decision"),
     service.applyOpenVtcDecision(transportToken, decision, "calendar-create-replay"),
@@ -188,7 +156,7 @@ test("a protected Calendar write uses the generic redacted OpenVTC path and exec
 });
 
 test("multiple browsers receive recipient-bound requests but converge on one legal decision path", async () => {
-  const { store, workspace, executor, coordinator, browser, transportToken: oldToken, service } = await setup();
+  const { store, workspace, executor, coordinator, consent, browser, transportToken: oldToken, service } = await setup();
   const pending = await service.createMicrosoft365Delete(
     identity,
     workspace.id,
@@ -201,24 +169,15 @@ test("multiple browsers receive recipient-bound requests but converge on one leg
   const priorTask = await store.getOpenVtcConsentTask(identity, pending.id);
   assert.ok(priorTask);
 
-  const replacementBrowser = signer();
+  const replacementBrowser = consent.createApprover();
   const challenge = await coordinator.createEnrollmentChallenge(identity);
-  const issuedAt = new Date().toISOString();
-  const enrollment = attachDidKeyDataIntegrityProof({
-    id: `urn:uuid:${randomUUID()}`,
-    type: ONECOMPUTER_APPROVER_ENROLLMENT_TYPE,
-    issuer: replacementBrowser.did,
-    recipient: challenge.recipientDid,
-    issuedAt,
-    expiresAt: challenge.expiresAt,
-    payload: {
-      challenge: challenge.challenge,
-      tenantId: identity.tenantId,
-      subjectId: identity.subjectId,
-      verificationMethod: replacementBrowser.verificationMethod,
-      displayName: "Mike's replacement browser",
-    },
-  }, replacementBrowser, issuedAt);
+  const enrollment = consent.enrollmentDocument(
+    replacementBrowser,
+    challenge,
+    identity.tenantId,
+    identity.subjectId,
+    "Mike's replacement browser",
+  );
   const replacement = await coordinator.enroll(identity, challenge.id, enrollment);
 
   const oldRequest = await coordinator.inbox(oldToken) as Record<string, unknown>;
@@ -232,19 +191,19 @@ test("multiple browsers receive recipient-bound requests but converge on one leg
 
   const completed = await service.applyOpenVtcDecision(
     replacement.transportToken,
-    signedDecision(request, replacementBrowser, "approve"),
+    signedDecision(consent, request, replacementBrowser, "approve"),
     "browser-rotate-decision",
   );
   assert.equal(completed.state, "succeeded");
   await assert.rejects(
-    service.applyOpenVtcDecision(oldToken, signedDecision(oldRequest, browser, "approve"), "browser-old-late-decision"),
+    service.applyOpenVtcDecision(oldToken, signedDecision(consent, oldRequest, browser, "approve"), "browser-old-late-decision"),
     (error: unknown) => error instanceof Error && "code" in error && error.code === "APPROVAL_STATE_INVALID",
   );
   assert.equal(executor.calls.length, 1);
 });
 
 test("the bearer transport token cannot substitute for an approver signature", async () => {
-  const { workspace, coordinator, browser, transportToken, service } = await setup();
+  const { workspace, coordinator, consent, browser, transportToken, service } = await setup();
   await service.createMicrosoft365Delete(
     identity,
     workspace.id,
@@ -255,7 +214,7 @@ test("the bearer transport token cannot substitute for an approver signature", a
     "browser-tamper-create",
   );
   const request = await coordinator.inbox(transportToken) as Record<string, unknown>;
-  const decision = signedDecision(request, browser, "approve");
+  const decision = signedDecision(consent, request, browser, "approve");
   (decision.payload as Record<string, unknown>).decision = "deny";
   await assert.rejects(
     service.applyOpenVtcDecision(transportToken, decision, "browser-tamper-decision"),
@@ -284,7 +243,8 @@ test("the local fixture cannot approve a Microsoft 365 operation", async () => {
 
 test("Control exposes session-bound enrollment and bearer-scoped browser transport", async () => {
   const store = new MemoryWorkspaceStore();
-  const coordinator = new OpenVtcApprovalCoordinator(store, signer());
+  const consent = new TestOpenVtcConsentClient();
+  const coordinator = new OpenVtcApprovalCoordinator(store, consent);
   const proxyToken = "openvtc-api-proxy-token-at-least-24-characters";
   const headers = {
     "x-onecomputer-proxy-token": proxyToken,
@@ -296,23 +256,8 @@ test("Control exposes session-bound enrollment and bearer-scoped browser transpo
     const created = await app.inject({ method: "POST", url: "/v1/openvtc/enrollment-challenges", headers });
     assert.equal(created.statusCode, 201);
     const challenge = created.json();
-    const browser = signer();
-    const issuedAt = new Date().toISOString();
-    const document = attachDidKeyDataIntegrityProof({
-      id: `urn:uuid:${randomUUID()}`,
-      type: ONECOMPUTER_APPROVER_ENROLLMENT_TYPE,
-      issuer: browser.did,
-      recipient: challenge.recipientDid,
-      issuedAt,
-      expiresAt: challenge.expiresAt,
-      payload: {
-        challenge: challenge.challenge,
-        tenantId: identity.tenantId,
-        subjectId: identity.subjectId,
-        verificationMethod: browser.verificationMethod,
-        displayName: "API browser",
-      },
-    }, browser, issuedAt);
+    const browser = consent.createApprover();
+    const document = consent.enrollmentDocument(browser, challenge, identity.tenantId, identity.subjectId, "API browser");
     const enrolled = await app.inject({
       method: "POST",
       url: "/v1/openvtc/approvers",

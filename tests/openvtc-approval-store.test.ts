@@ -70,6 +70,7 @@ const createTask = async (
     payloadDigest: "b".repeat(64),
     requestDocument,
     requestHash: sha256(JSON.stringify(requestDocument)),
+    requestProofHash: "c".repeat(64),
     createdAt: NOW,
     expiresAt,
   });

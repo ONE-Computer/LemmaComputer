@@ -1,0 +1,14 @@
+FROM rust:1.95.0-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS build
+RUN apt-get update && apt-get install --yes --no-install-recommends libdbus-1-dev pkg-config && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY apps/openvtc-consent/Cargo.toml apps/openvtc-consent/Cargo.lock ./
+COPY apps/openvtc-consent/src ./src
+RUN cargo build --locked --release
+
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
+RUN apt-get update && apt-get install --yes --no-install-recommends libdbus-1-3 && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --no-create-home openvtc
+COPY --from=build /build/target/release/onecomputer-openvtc-consent /usr/local/bin/openvtc-consent
+USER 10001
+EXPOSE 8788
+ENTRYPOINT ["/usr/local/bin/openvtc-consent"]

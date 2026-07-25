@@ -12,7 +12,6 @@
     "@onecomputer/contracts": "*",
     "@onecomputer/egress-policy": "*",
     "@onecomputer/litellm-adapter": "*",
-    "@onecomputer/openvtc-adapter": "*",
     "@onecomputer/policy-integrity": "*",
     "@onecomputer/workspace-store": "*",
     "ai": "7.0.37",

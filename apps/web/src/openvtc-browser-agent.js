@@ -1,103 +1,21 @@
-// Security behavior is adapted from OpenVTC/vta-browser-plugin's Apache-2.0
-// approver identity and WebAuthn PRF wrap at commit 68b4d6c8d19203fac4b1ff401fa56bd8c564175c.
-// ONEComputer keeps the same KEK domain and one-gesture-per-decision model while
-// limiting the profile to Trust Tasks HTTPS enrollment, polling, and decisions.
+import {
+  base64urlToBytes,
+  bytesToBase64url,
+  generateSigningIdentity,
+  signTrustTask,
+  signingIdentityFromSecret,
+  unwrapSecret,
+  wrapSecret,
+} from "@openvtc/pnm-core";
+
 const STORE_NAME = "onecomputer-openvtc";
-const RECORD_KEY = "browser-approver-v1";
+const RECORD_KEY = "browser-approver-v2";
 const ENROLLMENT_TYPE = "https://onecomputer.dev/spec/openvtc/approver-enrollment/0.1";
 const REQUEST_TYPE = "https://trusttasks.org/spec/task-consent/request/0.1";
 const DECISION_TYPE = "https://trusttasks.org/spec/task-consent/decision/0.1";
-const WRAP_INFO = "pnm/approver-secret/aes-gcm/v1";
-const WRAP_AAD = new TextEncoder().encode("onecomputer/openvtc/browser-approver/v1");
-const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-const ED25519_PREFIX = Uint8Array.of(0xed, 0x01);
-
-const bytesToBase64url = (bytes) => {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-};
-
-const base64urlToBytes = (value) => {
-  const base64 = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(base64);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-};
-
-const base58Encode = (bytes) => {
-  let zeros = 0;
-  while (zeros < bytes.length && bytes[zeros] === 0) zeros += 1;
-  const digits = [];
-  for (const byte of bytes) {
-    let carry = byte;
-    for (let index = 0; index < digits.length; index += 1) {
-      carry += digits[index] << 8;
-      digits[index] = carry % 58;
-      carry = Math.floor(carry / 58);
-    }
-    while (carry > 0) {
-      digits.push(carry % 58);
-      carry = Math.floor(carry / 58);
-    }
-  }
-  return "1".repeat(zeros) + digits.reverse().map((digit) => BASE58_ALPHABET[digit]).join("");
-};
-
-const base58Decode = (value) => {
-  let zeros = 0;
-  while (zeros < value.length && value[zeros] === "1") zeros += 1;
-  const bytes = [];
-  for (const character of value) {
-    const digit = BASE58_ALPHABET.indexOf(character);
-    if (digit < 0) throw new Error("The approval request uses an invalid signing key.");
-    let carry = digit;
-    for (let index = 0; index < bytes.length; index += 1) {
-      carry += bytes[index] * 58;
-      bytes[index] = carry & 0xff;
-      carry >>= 8;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
-  }
-  const output = new Uint8Array(zeros + bytes.length);
-  for (let index = 0; index < bytes.length; index += 1) output[output.length - 1 - index] = bytes[index];
-  return output;
-};
-
-const canonicalize = (value) => {
-  if (value === null || value === true || value === false) return JSON.stringify(value);
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error("The signed document contains an invalid number.");
-    return Object.is(value, -0) ? "0" : String(value);
-  }
-  if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(",")}}`;
-  }
-  throw new Error("The signed document is not valid JSON.");
-};
-
-const sha256 = async (value) => new Uint8Array(await crypto.subtle.digest("SHA-256", typeof value === "string" ? new TextEncoder().encode(value) : value));
-
-const signingInput = async (document, proof) => {
-  const [proofHash, documentHash] = await Promise.all([sha256(canonicalize(proof)), sha256(canonicalize(document))]);
-  const output = new Uint8Array(proofHash.length + documentHash.length);
-  output.set(proofHash);
-  output.set(documentHash, proofHash.length);
-  return output;
-};
-
-const didKey = (publicKey) => {
-  const multicodec = new Uint8Array(ED25519_PREFIX.length + publicKey.length);
-  multicodec.set(ED25519_PREFIX);
-  multicodec.set(publicKey, ED25519_PREFIX.length);
-  const multikey = `z${base58Encode(multicodec)}`;
-  const did = `did:key:${multikey}`;
-  return { did, verificationMethod: `${did}#${multikey}` };
-};
+const WRAP_ALGORITHM = "onecomputer-webauthn-prf-aes-gcm-v1";
+const WRAP_INFO = new TextEncoder().encode("pnm/approver-secret/aes-gcm/v1");
+const WRAP_AAD = new TextEncoder().encode("onecomputer/openvtc/browser-approver/v2");
 
 const openDatabase = () => new Promise((resolve, reject) => {
   const request = indexedDB.open(STORE_NAME, 1);
@@ -122,23 +40,22 @@ const databaseOperation = async (mode, operation) => {
 
 const readRecord = () => databaseOperation("readonly", (store) => store.get(RECORD_KEY));
 const writeRecord = (record) => databaseOperation("readwrite", (store) => store.put(record, RECORD_KEY));
+
 export const clearBrowserApprover = async (expectedDid) => {
   const record = await readRecord();
   if (!record || (expectedDid && record.did !== expectedDid)) return false;
   await databaseOperation("readwrite", (store) => store.delete(RECORD_KEY));
   return true;
 };
+
 export const hasBrowserApprover = async (expectedDid) => {
   const record = await readRecord();
   return Boolean(record && (!expectedDid || record.did === expectedDid));
 };
+
 export const getBrowserApproverIdentity = async () => {
   const record = await readRecord();
   if (!record) return null;
-  if (!record.installationId) {
-    record.installationId = crypto.randomUUID();
-    await writeRecord(record);
-  }
   return {
     did: record.did,
     verificationMethod: record.verificationMethod,
@@ -146,47 +63,25 @@ export const getBrowserApproverIdentity = async () => {
   };
 };
 
-const deriveWrapKey = async (prfOutput) => {
-  const material = await crypto.subtle.importKey("raw", prfOutput, "HKDF", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({
-    name: "HKDF",
-    hash: "SHA-256",
-    salt: new Uint8Array(),
-    info: new TextEncoder().encode(WRAP_INFO),
-  }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-};
-
-const wrapBundle = async (bundle, key) => {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = new TextEncoder().encode(JSON.stringify(bundle));
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: WRAP_AAD }, key, plaintext);
-  return { iv: bytesToBase64url(iv), ciphertext: bytesToBase64url(new Uint8Array(ciphertext)) };
-};
-
-const unwrapBundle = async (record, key) => {
-  const plaintext = await crypto.subtle.decrypt({
-    name: "AES-GCM",
-    iv: base64urlToBytes(record.iv),
-    additionalData: WRAP_AAD,
-  }, key, base64urlToBytes(record.ciphertext));
-  return JSON.parse(new TextDecoder().decode(plaintext));
-};
-
 const prfOutput = (credential) => {
   const output = credential?.getClientExtensionResults?.()?.prf?.results?.first;
-  if (!output) throw new Error("This browser or device did not return a WebAuthn PRF. Use current Chrome with Windows Hello, Touch ID, or a compatible security key.");
+  if (!output) {
+    throw new Error("This browser or device did not return a WebAuthn PRF. Use current Chrome with Windows Hello, Touch ID, or a compatible security key.");
+  }
   return new Uint8Array(output);
 };
 
 const createPrfCredential = async () => {
-  if (!window.PublicKeyCredential) {
-    throw new Error("This browser does not support device-verified approval.");
-  }
+  if (!window.PublicKeyCredential) throw new Error("This browser does not support device-verified approval.");
   const salt = crypto.getRandomValues(new Uint8Array(32));
   const credential = await navigator.credentials.create({
     publicKey: {
       rp: { id: location.hostname, name: "ONEComputer" },
-      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: "onecomputer-approver", displayName: "ONEComputer approval device" },
+      user: {
+        id: crypto.getRandomValues(new Uint8Array(16)),
+        name: "onecomputer-approver",
+        displayName: "ONEComputer approval device",
+      },
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       pubKeyCredParams: [{ type: "public-key", alg: -8 }, { type: "public-key", alg: -7 }],
       authenticatorSelection: { residentKey: "required", userVerification: "required" },
@@ -194,100 +89,170 @@ const createPrfCredential = async () => {
     },
   });
   if (!credential) throw new Error("Device enrollment was cancelled.");
-  return { credentialId: new Uint8Array(credential.rawId), salt, output: prfOutput(credential) };
+  return {
+    credentialId: new Uint8Array(credential.rawId),
+    salt,
+    output: prfOutput(credential),
+  };
 };
 
-const unlockRecord = async (payloadDigest) => {
-  const record = await readRecord();
-  if (!record) throw new Error("This browser is not enrolled as an approval device.");
-  const challenge = payloadDigest ? await sha256(payloadDigest) : crypto.getRandomValues(new Uint8Array(32));
-  const assertion = await navigator.credentials.get({
-    publicKey: {
-      rpId: location.hostname,
-      challenge,
-      allowCredentials: [{ type: "public-key", id: base64urlToBytes(record.credentialId) }],
-      userVerification: "required",
-      extensions: { prf: { eval: { first: base64urlToBytes(record.prfSalt) } } },
-    },
-  });
-  if (!assertion) throw new Error("Device verification was cancelled.");
-  const key = await deriveWrapKey(prfOutput(assertion));
-  return { record, bundle: await unwrapBundle(record, key) };
+const deriveWrapKey = async (output) => {
+  const material = await crypto.subtle.importKey("raw", output, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({
+    name: "HKDF",
+    hash: "SHA-256",
+    salt: new Uint8Array(),
+    info: WRAP_INFO,
+  }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 };
 
-const signDocument = async (document, privateKeyPkcs8, verificationMethod) => {
-  const created = document.issuedAt;
-  const proof = { type: "DataIntegrityProof", cryptosuite: "eddsa-jcs-2022", verificationMethod, created, proofPurpose: "assertionMethod" };
-  const privateKey = await crypto.subtle.importKey("pkcs8", base64urlToBytes(privateKeyPkcs8), { name: "Ed25519" }, false, ["sign"]);
-  const signature = new Uint8Array(await crypto.subtle.sign("Ed25519", privateKey, await signingInput(document, proof)));
-  return { ...document, proof: { ...proof, proofValue: `z${base58Encode(signature)}` } };
+class WebAuthnPrfWrap {
+  algorithm = WRAP_ALGORITHM;
+
+  constructor({ credentialId, salt, output, challenge }) {
+    this.credentialId = credentialId;
+    this.salt = salt;
+    this.output = output;
+    this.challenge = challenge;
+  }
+
+  async wrap(secret) {
+    if (!this.output) return null;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveWrapKey(this.output);
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: WRAP_AAD },
+      key,
+      secret,
+    );
+    return {
+      algorithm: this.algorithm,
+      ciphertextB64u: bytesToBase64url(new Uint8Array(ciphertext)),
+      ivB64u: bytesToBase64url(iv),
+      params: {
+        credentialId: bytesToBase64url(this.credentialId),
+        prfSalt: bytesToBase64url(this.salt),
+      },
+    };
+  }
+
+  async unwrap(wrapped) {
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        rpId: location.hostname,
+        challenge: this.challenge,
+        allowCredentials: [{
+          type: "public-key",
+          id: base64urlToBytes(wrapped.params.credentialId),
+        }],
+        userVerification: "required",
+        extensions: {
+          prf: { eval: { first: base64urlToBytes(wrapped.params.prfSalt) } },
+        },
+      },
+    });
+    if (!assertion) return null;
+    const key = await deriveWrapKey(prfOutput(assertion));
+    const plaintext = await crypto.subtle.decrypt({
+      name: "AES-GCM",
+      iv: base64urlToBytes(wrapped.ivB64u),
+      additionalData: WRAP_AAD,
+    }, key, base64urlToBytes(wrapped.ciphertextB64u));
+    return new Uint8Array(plaintext);
+  }
+}
+
+const encodeBundle = (identity, transportToken, executorDid) => new TextEncoder().encode(JSON.stringify({
+  privateKey: bytesToBase64url(identity.privateKey),
+  transportToken,
+  executorDid,
+}));
+
+const decodeBundle = (bytes) => {
+  const value = JSON.parse(new TextDecoder().decode(bytes));
+  if (typeof value.privateKey !== "string" || typeof value.transportToken !== "string"
+    || typeof value.executorDid !== "string") {
+    throw new Error("The protected approval identity is invalid.");
+  }
+  return {
+    identity: signingIdentityFromSecret(base64urlToBytes(value.privateKey)),
+    transportToken: value.transportToken,
+    executorDid: value.executorDid,
+  };
+};
+
+const unlock = async (record, payloadDigest) => {
+  const challenge = new Uint8Array(await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(payloadDigest),
+  ));
+  const wrap = new WebAuthnPrfWrap({ challenge });
+  return decodeBundle(await unwrapSecret(record.wrappedSecret, wrap));
 };
 
 export async function enrollBrowserApprover(challenge, displayName, enroll, rollback) {
   const credential = await createPrfCredential();
-  const wrapKey = await deriveWrapKey(credential.output);
-  const keys = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
-  const publicKey = new Uint8Array(await crypto.subtle.exportKey("raw", keys.publicKey));
-  const privateKeyPkcs8 = bytesToBase64url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", keys.privateKey)));
-  const identifiers = didKey(publicKey);
-  const issuedAt = new Date().toISOString();
+  const identity = generateSigningIdentity();
   const unsigned = {
     id: `urn:uuid:${crypto.randomUUID()}`,
     type: ENROLLMENT_TYPE,
-    issuer: identifiers.did,
+    issuer: identity.did,
     recipient: challenge.recipientDid,
-    issuedAt,
+    issuedAt: new Date().toISOString(),
     expiresAt: challenge.expiresAt,
     payload: {
       challenge: challenge.challenge,
       tenantId: challenge.tenantId,
       subjectId: challenge.subjectId,
-      verificationMethod: identifiers.verificationMethod,
+      verificationMethod: identity.kid,
       displayName,
     },
   };
-  const document = await signDocument(unsigned, privateKeyPkcs8, identifiers.verificationMethod);
+  const document = await signTrustTask({ envelope: unsigned, signing: identity });
   const response = await enroll(document);
-  const bundle = { privateKeyPkcs8, transportToken: response.transportToken, executorDid: challenge.recipientDid };
-  const wrapped = await wrapBundle(bundle, wrapKey);
+  const wrap = new WebAuthnPrfWrap(credential);
+  const wrappedSecret = await wrapSecret(
+    encodeBundle(identity, response.transportToken, challenge.recipientDid),
+    wrap,
+  );
   try {
     await writeRecord({
-      version: 1,
+      version: 2,
       installationId: crypto.randomUUID(),
-      did: identifiers.did,
-      verificationMethod: identifiers.verificationMethod,
-      credentialId: bytesToBase64url(credential.credentialId),
-      prfSalt: bytesToBase64url(credential.salt),
-      ...wrapped,
+      did: identity.did,
+      verificationMethod: identity.kid,
+      wrappedSecret,
     });
   } catch (error) {
-    await rollback?.(identifiers.did).catch(() => undefined);
+    await rollback?.(identity.did).catch(() => undefined);
     throw new Error("The device key could not be saved in this browser profile. The incomplete enrollment was removed; check that persistent site storage is enabled and try again.", { cause: error });
   }
-  return { did: identifiers.did, displayName, ...(await getBrowserApproverIdentity()) };
+  return { did: identity.did, displayName, ...(await getBrowserApproverIdentity()) };
 }
 
-const verifyRequest = async (request, record, executorDid) => {
-  if (!request || request.type !== REQUEST_TYPE || request.issuer !== executorDid || request.recipient !== record.did) {
+export const validateRequest = (request, record, executorDid) => {
+  const payload = request?.payload;
+  const proof = request?.proof;
+  if (!request || request.type !== REQUEST_TYPE || request.issuer !== executorDid
+    || request.recipient !== record.did || !payload || typeof payload !== "object") {
     throw new Error("The approval request is not addressed by the enrolled ONEComputer executor to this browser.");
   }
-  if (Date.parse(request.payload?.expiresAt) <= Date.now()) throw new Error("This approval request has expired.");
-  const proof = request.proof;
-  const multikey = String(request.issuer).slice("did:key:".length);
-  if (!proof || proof.type !== "DataIntegrityProof" || proof.cryptosuite !== "eddsa-jcs-2022"
-    || proof.proofPurpose !== "assertionMethod" || proof.verificationMethod !== `${request.issuer}#${multikey}`
-    || typeof proof.proofValue !== "string" || !proof.proofValue.startsWith("z")) {
-    throw new Error("The approval request does not carry a supported executor proof.");
+  if (request.expiresAt !== payload.expiresAt || Date.parse(payload.expiresAt) <= Date.now()) {
+    throw new Error("This approval request has expired.");
   }
-  const decoded = base58Decode(multikey.slice(1));
-  if (decoded.length !== 34 || decoded[0] !== ED25519_PREFIX[0] || decoded[1] !== ED25519_PREFIX[1]) throw new Error("The executor proof key is invalid.");
-  const proofConfig = { ...proof };
-  delete proofConfig.proofValue;
-  const document = { ...request };
-  delete document.proof;
-  const publicKey = await crypto.subtle.importKey("raw", decoded.slice(2), { name: "Ed25519" }, false, ["verify"]);
-  const valid = await crypto.subtle.verify("Ed25519", publicKey, base58Decode(proof.proofValue.slice(1)), await signingInput(document, proofConfig));
-  if (!valid) throw new Error("The executor signature on this approval request is invalid.");
+  if (typeof payload.payloadDigest !== "string" || !/^[0-9a-f]{64}$/.test(payload.payloadDigest)
+    || typeof payload.challenge !== "string" || payload.challenge.length < 16
+    || !Array.isArray(payload.effects)
+    || payload.effects.some((effect) => !effect || typeof effect.summary !== "string" || !effect.summary)) {
+    throw new Error("The approval request does not match the Task Consent schema.");
+  }
+  const multikey = executorDid.slice("did:key:".length);
+  if (!proof || proof.type !== "DataIntegrityProof" || proof.cryptosuite !== "eddsa-jcs-2022"
+    || proof.proofPurpose !== "assertionMethod"
+    || proof.verificationMethod !== `${executorDid}#${multikey}`
+    || typeof proof.proofValue !== "string") {
+    throw new Error("The approval request does not carry the pinned executor proof profile.");
+  }
   return request;
 };
 
@@ -295,29 +260,32 @@ export async function loadPendingApproval(fetchInbox, executorDid) {
   const record = await readRecord();
   if (!record) throw new Error("This browser is not enrolled as an approval device.");
   const request = await fetchInbox();
-  return request ? verifyRequest(request, record, executorDid) : null;
+  return request ? validateRequest(request, record, executorDid) : null;
 }
 
 export async function signApprovalDecision(request, decision) {
   const payloadDigest = request?.payload?.payloadDigest;
   if (typeof payloadDigest !== "string") throw new Error("The pending request does not contain an operation digest.");
-  const { record, bundle } = await unlockRecord(payloadDigest);
-  await verifyRequest(request, record, bundle.executorDid);
-  const issuedAt = new Date().toISOString();
-  return {
-    transportToken: bundle.transportToken,
-    document: await signDocument({
-      id: `urn:uuid:${crypto.randomUUID()}`,
-      type: DECISION_TYPE,
-      issuer: record.did,
-      recipient: request.issuer,
-      issuedAt,
-      payload: {
-        challenge: request.payload.challenge,
-        payloadDigest,
-        decision,
-        reason: decision === "approve" ? "The user verified the signed effects." : "The user rejected this operation.",
-      },
-    }, bundle.privateKeyPkcs8, record.verificationMethod),
+  if (decision !== "approve" && decision !== "deny") throw new Error("The approval decision is invalid.");
+  const record = await readRecord();
+  if (!record) throw new Error("This browser is not enrolled as an approval device.");
+  const bundle = await unlock(record, payloadDigest);
+  validateRequest(request, record, bundle.executorDid);
+  const document = {
+    id: `urn:uuid:${crypto.randomUUID()}`,
+    type: DECISION_TYPE,
+    issuer: bundle.identity.did,
+    recipient: request.issuer,
+    issuedAt: new Date().toISOString(),
+    payload: {
+      challenge: request.payload.challenge,
+      payloadDigest,
+      decision,
+      reason: decision === "approve"
+        ? "The user verified the signed effects."
+        : "The user rejected this operation.",
+    },
   };
+  await signTrustTask({ envelope: document, signing: bundle.identity });
+  return { transportToken: bundle.transportToken, document };
 }

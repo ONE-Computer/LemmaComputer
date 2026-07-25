@@ -1,0 +1,28 @@
+[package]
+name = "onecomputer-openvtc-consent"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+affinidi-data-integrity = "=0.7.7"
+affinidi-secrets-resolver = "=0.5.8"
+axum = "0.8"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_json_canonicalizer = "0.3"
+sha2 = "0.11"
+subtle = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+trust-tasks-proof = { version = "=0.2.1", default-features = false, features = ["affinidi"] }
+trust-tasks-rs = { version = "=0.2.37", features = ["validate"] }
+vta-policy = "=0.1.0"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

@@ -137,7 +137,7 @@ consistent, and the completion record points to the bundle.
 | 008 | P1 | planned (deferred) | Extend egress firewall to FQDN and CIDR L3/L4 rules | 002 |
 | 009 | P1 | cancelled | Chat with any policy-selected agent through one owned interface | 003, 007 |
 | 010 | P1 | verification | Replace the bespoke Chat surface with AI SDK structured streaming | 003, 007 |
-| 011 | P1 | ready | Replace custom OpenVTC proof code with the upstream consent SDK | 003 |
+| 011 | P1 | verification | Replace custom OpenVTC consent crypto with upstream Rust and browser components | 003 |
 | 012 | P1 | planned | Add an agent-agnostic channel broker with Telegram as the first adapter | 002, 003, 010 |
 
 ## Assignment template

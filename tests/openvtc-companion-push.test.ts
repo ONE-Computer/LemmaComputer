@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { IdentityContext } from "@onecomputer/contracts";
-import { Ed25519DidKeySigner } from "@onecomputer/openvtc-adapter";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import webPush from "web-push";
 import { OpenVtcApprovalCoordinator } from "../apps/control-api/src/openvtc.js";
@@ -13,10 +12,9 @@ import {
   type CompanionPushProvider,
   type CompanionPushSubscription,
 } from "../apps/control-api/src/web-push.js";
+import { TestOpenVtcConsentClient } from "./helpers/openvtc-consent.js";
 
 const identity: IdentityContext = { tenantId: "tenant-companion", subjectId: "owner-companion", audience: "onecomputer-control" };
-const signer = () => new Ed25519DidKeySigner(generateKeyPairSync("ed25519").privateKey);
-
 class FakePushProvider implements CompanionPushProvider {
   readonly publicKey = "fake-vapid-public-key";
   sent: string[] = [];
@@ -53,7 +51,7 @@ const subscription = (name: string): CompanionPushSubscription => ({
 test("companion subscriptions are identity-bound, redacted, and receive one deduplicated hint per task", async () => {
   const store = new MemoryWorkspaceStore();
   const provider = new FakePushProvider();
-  const coordinator = new OpenVtcApprovalCoordinator(store, signer(), provider);
+  const coordinator = new OpenVtcApprovalCoordinator(store, new TestOpenVtcConsentClient(), provider);
   const first = await enroll(store, "did:key:zCompanionA");
   const second = await enroll(store, "did:key:zCompanionB");
 
