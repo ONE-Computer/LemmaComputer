@@ -539,3 +539,49 @@ test("governed execution uses one exact-tool key, resolved server id, and revoca
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+test("governed execution preserves the connector's safe failure summary", async () => {
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain request bodies so the local HTTP connection can be reused.
+    }
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [{ name: "upload-file-content", mcp_info: { server_id: "fixture-server-id" } }] }));
+    } else if (request.url === "/mcp-rest/tools/call") {
+      response.end(JSON.stringify({
+        content: [{ type: "text", text: "Microsoft Graph rejected the target path." }],
+        isError: true,
+      }));
+    } else {
+      response.end(JSON.stringify({ ok: true }));
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await assert.rejects(
+      () => liveAdapter.executeGovernedTool({
+        tenantId: "acme",
+        subjectId: "alex-morgan",
+        workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+        operationId: "15eaf54f-5f29-4b2d-9e21-890e8711720d",
+        operationDigest: "0".repeat(64),
+        leaseId: "73bc3cc4-34da-42ea-a933-0d6bf2bfd968",
+        serverName: "onecomputer_ms365",
+        toolName: "upload-file-content",
+        arguments: { driveId: "drive", driveItemId: "root:/happy.txt:", body: "aGFwcHk=" },
+      }),
+      (error: Error & { code?: string }) => error.code === "UPSTREAM_TOOL_FAILED"
+        && error.message === "Microsoft Graph rejected the target path.",
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});

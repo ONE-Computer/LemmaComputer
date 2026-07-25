@@ -22,6 +22,9 @@ const boundedListArguments = z.strictObject({
   orderby: z.string().trim().min(1).max(128).optional(),
   count: z.boolean().optional(),
 });
+const listDrivesArguments = boundedListArguments.extend({
+  top: z.number().int().min(2).max(25).optional(),
+});
 
 const calendarViewArguments = boundedListArguments.extend({
   startDateTime: z.string().datetime({ offset: true }),
@@ -39,14 +42,23 @@ const calendarViewArguments = boundedListArguments.extend({
 });
 
 const id = z.string().trim().min(1).max(512);
+const uploadDriveItemId = id.refine(
+  (value) => !/^(?:\/?items\/|\/?drives\/|https?:\/\/)/i.test(value) && !value.endsWith("/content"),
+  "driveItemId must be an item ID or drive-relative path selector without Graph endpoint wrappers",
+);
 const body = z.record(z.string().min(1).max(128), z.json());
 const noArguments = z.strictObject({});
+const teamsMessageBody = z.strictObject({
+  body: z.strictObject({
+    contentType: z.literal("html"),
+    content: z.string().trim().min(1).max(28_000),
+  }),
+});
 const withId = (key: string) => z.strictObject({ [key]: id });
 const withBody = z.strictObject({ body });
 const withIdAndBody = (key: string) => z.strictObject({ [key]: id, body });
 const withTwoIds = (first: string, second: string) => z.strictObject({ [first]: id, [second]: id });
 const withTwoIdsAndBody = (first: string, second: string) => z.strictObject({ [first]: id, [second]: id, body });
-const withThreeIdsAndBody = (first: string, second: string, third: string) => z.strictObject({ [first]: id, [second]: id, [third]: id, body });
 
 const boundedDriveSearchArguments = z.strictObject({
   driveId: z.string().trim().min(1).max(512),
@@ -122,25 +134,25 @@ const toolSchemas: Record<keyof typeof m365ToolCatalog, z.ZodType<Record<string,
   "create-calendar-event": withBody,
   "update-calendar-event": withIdAndBody("eventId"),
   "delete-calendar-event": z.strictObject({ eventId: id, "If-Match": id.optional() }),
-  "list-drives": boundedListArguments,
+  "list-drives": listDrivesArguments,
   "get-drive-root-item": withId("driveId"),
   "list-folder-files": boundedListArguments.extend({ driveId: id, driveItemId: id }),
   "search-onedrive-files": boundedDriveSearchArguments,
   "get-drive-item": driveItemMetadataArguments,
   "create-onedrive-folder": withTwoIdsAndBody("driveId", "driveItemId"),
-  "upload-file-content": z.strictObject({ driveId: id, driveItemId: id, body: z.string().max(5_600_000) }),
+  "upload-file-content": z.strictObject({ driveId: id, driveItemId: uploadDriveItemId, body: z.string().min(1).max(5_600_000) }),
   "move-rename-onedrive-item": withTwoIdsAndBody("driveId", "driveItemId"),
   "copy-drive-item": withTwoIdsAndBody("driveId", "driveItemId"),
   "delete-onedrive-file": deleteRequestArguments,
   "list-chats": boundedListArguments,
   "list-chat-messages": boundedListArguments.extend({ chatId: id }),
-  "list-joined-teams": boundedListArguments,
+  "list-joined-teams": noArguments,
   "list-team-channels": boundedListArguments.extend({ teamId: id }),
   "list-channel-messages": boundedListArguments.extend({ teamId: id, channelId: id }),
-  "send-chat-message": withIdAndBody("chatId"),
-  "reply-to-chat-message": withTwoIdsAndBody("chatId", "chatMessageId"),
-  "send-channel-message": withTwoIdsAndBody("teamId", "channelId"),
-  "reply-to-channel-message": withThreeIdsAndBody("teamId", "channelId", "chatMessageId"),
+  "send-chat-message": z.strictObject({ chatId: id, body: teamsMessageBody }),
+  "reply-to-chat-message": z.strictObject({ chatId: id, chatMessageId: id, body: teamsMessageBody }),
+  "send-channel-message": z.strictObject({ teamId: id, channelId: id, body: teamsMessageBody }),
+  "reply-to-channel-message": z.strictObject({ teamId: id, channelId: id, chatMessageId: id, body: teamsMessageBody }),
 };
 
 const displayNames: Record<keyof typeof m365ToolCatalog, string> = {

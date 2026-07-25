@@ -43,7 +43,7 @@ const setup = async () => {
       agentProfile: "onecomputer-default-agent",
       modelAliases: ["onecomputer-assistant"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "get-calendar-view", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file", "list-chats", "send-chat-message"] } } },
+      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "get-calendar-view", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file", "list-chats", "list-joined-teams", "send-chat-message"] } } },
       capabilities: ["m365-read", "onedrive-delete-protected"],
       protectedOperations: { "onedrive-delete-protected": "approval_required", defaultWrite: "deny" },
     },
@@ -81,6 +81,27 @@ test("the curated Microsoft 365 surface is complete and defaults every write to 
   assert.equal(Object.values(m365ToolCatalog).filter((tool) => tool.risk === "write" && tool.decision === "approval_required").length, 21);
 });
 
+test("upload-file-content rejects Graph endpoint wrappers before approval", () => {
+  const upload = m365CapabilityDefinitions["upload-file-content"];
+  assert.throws(
+    () => upload.parse({
+      driveId: "drive",
+      driveItemId: "/items/root:/happy.txt:/content",
+      body: "aGFwcHk=",
+    }),
+    /driveItemId must be an item ID or drive-relative path selector/,
+  );
+  assert.deepEqual(upload.parse({
+    driveId: "drive",
+    driveItemId: "root:/happy.txt:",
+    body: "aGFwcHk=",
+  }), {
+    driveId: "drive",
+    driveItemId: "root:/happy.txt:",
+    body: "aGFwcHk=",
+  });
+});
+
 test("Control permits only a bounded explicit Calendar view", async () => {
   const { policy, base } = await setup();
   const request = {
@@ -111,6 +132,16 @@ test("Control auto-allows only an exact assigned bounded Microsoft 365 read", as
 
 test("Control permits bounded OneDrive discovery but rejects broad search", async () => {
   const { policy, base } = await setup();
+  assert.equal((await policy.authorize({
+    ...base,
+    toolName: "list-drives",
+    arguments: { top: 2 },
+  }, "drive-list")).decision, "allow");
+  assert.equal((await policy.authorize({
+    ...base,
+    toolName: "list-drives",
+    arguments: { top: 1 },
+  }, "drive-list-empty-page")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
   const request = { ...base, toolName: "search-onedrive-files", arguments: { driveId: "drive-1", q: "disposable", select: "id,name,eTag,parentReference", top: 10 } };
   assert.equal((await policy.authorize(request, "drive-search")).decision, "allow");
   assert.equal((await policy.authorize({ ...request, arguments: { ...request.arguments, top: 11 } }, "drive-search-over-limit")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
@@ -139,6 +170,11 @@ test("Teams reads are bounded and Teams sends are held for approval", async () =
   const { store, policy, base } = await setup();
   assert.equal((await policy.authorize({ ...base, toolName: "list-chats", arguments: { top: 10 } }, "teams-list")).decision, "allow");
   assert.equal((await policy.authorize({ ...base, toolName: "list-chats", arguments: { fetchAllPages: true } }, "teams-list-broad")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
+  assert.equal((await policy.authorize({ ...base, toolName: "list-joined-teams", arguments: {} }, "teams-joined")).decision, "allow");
+  assert.equal(
+    (await policy.authorize({ ...base, toolName: "list-joined-teams", arguments: { top: 10 } }, "teams-joined-top")).code,
+    "MCP_ARGUMENTS_OUT_OF_POLICY",
+  );
 
   const held = await policy.authorize({
     ...base,
@@ -149,6 +185,11 @@ test("Teams reads are bounded and Teams sends are held for approval", async () =
   const operation = await store.getOwnedOperation(identity, held.operationId!);
   assert.equal(operation?.toolName, "send-chat-message");
   assert.equal((operation?.arguments as Record<string, unknown>).confirm, true);
+  assert.equal((await policy.authorize({
+    ...base,
+    toolName: "send-chat-message",
+    arguments: { chatId: "chat-1", body: { body: { contentType: "text", content: "Hello" } }, confirm: true },
+  }, "teams-send-text")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
 });
 
 test("Control treats Softeria confirmation as a connector flag, not a policy decision", async () => {

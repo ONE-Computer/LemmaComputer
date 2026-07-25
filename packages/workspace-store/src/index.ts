@@ -118,6 +118,7 @@ export type GovernedOperationRecord = {
   leaseExpiresAt: Date | null;
   dispatchStartedAt: Date | null;
   failureCode: string | null;
+  failureSummary: string | null;
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date;
@@ -126,7 +127,7 @@ export type GovernedOperationRecord = {
 };
 
 export type CreateGovernedOperationRecord = Omit<GovernedOperationRecord,
-  "tenantId" | "subjectId" | "agentId" | "policyVersionId" | "policyHash" | "state" | "policyDecision" | "leaseId" | "leaseExpiresAt" | "dispatchStartedAt" | "failureCode" | "createdAt" | "updatedAt" | "approval" | "receipt"
+  "tenantId" | "subjectId" | "agentId" | "policyVersionId" | "policyHash" | "state" | "policyDecision" | "leaseId" | "leaseExpiresAt" | "dispatchStartedAt" | "failureCode" | "failureSummary" | "createdAt" | "updatedAt" | "approval" | "receipt"
 > & {
   identity: IdentityContext;
   agentId?: string;
@@ -311,7 +312,7 @@ export interface GovernanceStore {
     correlationId: string;
   }): Promise<boolean>;
   completeExecution(identity: IdentityContext, operationId: string, leaseId: string, receipt: { id: string; upstreamReference: string; resultSummary: string; resultHash: string; executedAt: Date }, correlationId: string): Promise<GovernedOperationRecord | null>;
-  failExecution(identity: IdentityContext, operationId: string, leaseId: string, failureCode: string, correlationId: string): Promise<GovernedOperationRecord | null>;
+  failExecution(identity: IdentityContext, operationId: string, leaseId: string, failureCode: string, correlationId: string, failureSummary?: string): Promise<GovernedOperationRecord | null>;
   recoverOperation(identity: IdentityContext, operationId: string, now: Date, correlationId: string): Promise<GovernedOperationRecord | null>;
   listOwnedOperations?(identity: IdentityContext, limit: number): Promise<GovernedOperationRecord[]>;
   listOwnedOperationsPage?(identity: IdentityContext, input: {
@@ -439,6 +440,7 @@ const mapOperationRow = (row: Record<string, unknown>): GovernedOperationRecord 
   leaseExpiresAt: row.lease_expires_at ? new Date(String(row.lease_expires_at)) : null,
   dispatchStartedAt: row.dispatch_started_at ? new Date(String(row.dispatch_started_at)) : null,
   failureCode: row.failure_code ? String(row.failure_code) : null,
+  failureSummary: row.failure_summary ? String(row.failure_summary) : null,
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
   expiresAt: new Date(String(row.expires_at)),
@@ -528,7 +530,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   }
 
   async migrate() {
-    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql", "014_sandbox_applications.sql", "015_agent_neutral_chat.sql", "016_channel_broker.sql", "017_openvtc_request_proof_hash.sql"]) {
+    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql", "014_sandbox_applications.sql", "015_agent_neutral_chat.sql", "016_channel_broker.sql", "017_openvtc_request_proof_hash.sql", "018_governed_operation_failure_summary.sql"]) {
       const migrationPath = fileURLToPath(new URL(`../migrations/${migration}`, import.meta.url));
       await this.pool.query(await readFile(migrationPath, "utf8"));
     }
@@ -1102,15 +1104,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     }
   }
 
-  async failExecution(identity: IdentityContext, operationId: string, leaseId: string, failureCode: string, correlationId: string) {
+  async failExecution(identity: IdentityContext, operationId: string, leaseId: string, failureCode: string, correlationId: string, failureSummary?: string) {
     const result = await this.pool.query(
-      `UPDATE governed_operations SET state='failed',failure_code=$5,updated_at=now()
+      `UPDATE governed_operations SET state='failed',failure_code=$5,failure_summary=$6,updated_at=now()
        WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND state='executing' AND lease_id=$4 RETURNING id`,
-      [operationId, identity.tenantId, identity.subjectId, leaseId, failureCode],
+      [operationId, identity.tenantId, identity.subjectId, leaseId, failureCode, failureSummary?.slice(0, 240) ?? null],
     );
     if (result.rowCount) await this.pool.query(
       "INSERT INTO governed_operation_events (operation_id,tenant_id,event_type,correlation_id,safe_detail) VALUES ($1,$2,'failed',$3,$4::jsonb)",
-      [operationId, identity.tenantId, correlationId, JSON.stringify({ failureCode })],
+      [operationId, identity.tenantId, correlationId, JSON.stringify({ failureCode, failureSummary: failureSummary?.slice(0, 240) ?? null })],
     );
     return this.getOwnedOperation(identity, operationId);
   }
@@ -1821,6 +1823,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       leaseExpiresAt: null,
       dispatchStartedAt: null,
       failureCode: null,
+      failureSummary: null,
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
       expiresAt: input.expiresAt,
@@ -1920,11 +1923,17 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     return next;
   }
 
-  async failExecution(identity: IdentityContext, operationId: string, leaseId: string, failureCode: string, _correlationId: string) {
+  async failExecution(identity: IdentityContext, operationId: string, leaseId: string, failureCode: string, _correlationId: string, failureSummary?: string) {
     const record = this.operations.get(operationId);
     if (!record || record.tenantId !== identity.tenantId || record.subjectId !== identity.subjectId) return null;
     if (record.state !== "executing" || record.leaseId !== leaseId) return record;
-    const next: GovernedOperationRecord = { ...record, state: "failed", failureCode, updatedAt: new Date() };
+    const next: GovernedOperationRecord = {
+      ...record,
+      state: "failed",
+      failureCode,
+      failureSummary: failureSummary?.slice(0, 240) ?? null,
+      updatedAt: new Date(),
+    };
     this.operations.set(record.id, next);
     return next;
   }

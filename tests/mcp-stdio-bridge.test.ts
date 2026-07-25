@@ -360,3 +360,293 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
   assert.match(result.content[0]?.text ?? "", /Do not use Cowork or local-filesystem deletion permission/);
   assert.equal(toolCalls, 0);
 });
+
+test("Claude Desktop receives a precise upload schema and legacy Graph wrappers are normalized before governance", async (context) => {
+  let forwardedArguments: Record<string, unknown> | undefined;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [{
+        name: "upload-file-content",
+        description: "For new files use path format: /items/root:/path/to/file.txt:/content.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            driveId: { type: "string" },
+            driveItemId: { type: "string" },
+            body: { type: "string" },
+            confirm: { type: "boolean" },
+          },
+          required: ["driveId", "driveItemId", "body", "confirm"],
+        },
+        mcp_info: { server_id: "server-1" },
+      }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      forwardedArguments = JSON.parse(Buffer.concat(chunks).toString("utf8")).arguments;
+      response.end(JSON.stringify({ content: [{ type: "text", text: "held" }], isError: false }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: {
+      name: "upload-file-content",
+      arguments: {
+        driveId: "drive",
+        driveItemId: "/items/root:/happy.txt:/content",
+        body: "aGFwcHk=",
+      },
+    },
+  })}\n`);
+
+  const deadline = Date.now() + 5_000;
+  while (responses.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  const advertised = (responses.find((response) => response.id === 1)?.result as {
+    tools: Array<{
+      name: string;
+      description: string;
+      inputSchema: { properties: Record<string, { description?: string; pattern?: string }>; required: string[] };
+    }>;
+  }).tools.find((tool) => tool.name === "upload-file-content")!;
+  assert.match(advertised.description, /Never include `\/items\/`, `\/content`/);
+  assert.match(advertised.inputSchema.properties.driveItemId?.description ?? "", /root:\/happy\.txt:/);
+  assert.match(advertised.inputSchema.properties.driveItemId?.pattern ?? "", /items/);
+  assert.deepEqual(advertised.inputSchema.required, ["driveId", "driveItemId", "body"]);
+  assert.deepEqual(forwardedArguments, {
+    driveId: "drive",
+    driveItemId: "root:/happy.txt:",
+    body: "aGFwcHk=",
+    confirm: true,
+  });
+});
+
+test("managed Microsoft schemas hide unsupported OData and read-only Graph fields", async (context) => {
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [
+        {
+          name: "list-joined-teams",
+          description: "Generated generic list description",
+          inputSchema: {
+            type: "object",
+            properties: { top: { type: "number" }, filter: { type: "string" } },
+          },
+          mcp_info: { server_id: "server-1" },
+        },
+        {
+          name: "send-channel-message",
+          description: "Generated chatMessage resource description",
+          inputSchema: {
+            type: "object",
+            properties: {
+              teamId: { type: "string" },
+              channelId: { type: "string" },
+              body: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  createdDateTime: { type: "string" },
+                  body: { type: "object" },
+                  replies: { type: "array" },
+                },
+              },
+              confirm: { type: "boolean" },
+            },
+            required: ["teamId", "channelId", "body", "confirm"],
+          },
+          mcp_info: { server_id: "server-1" },
+        },
+        {
+          name: "create-draft-email",
+          description: "Create an open extension and add custom properties.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              body: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  createdDateTime: { type: "string" },
+                  subject: { type: "string" },
+                  body: { type: "object" },
+                  conversationId: { type: "string" },
+                },
+              },
+              confirm: { type: "boolean" },
+            },
+            required: ["body", "confirm"],
+          },
+          mcp_info: { server_id: "server-1" },
+        },
+        {
+          name: "create-calendar-event",
+          description: "Create event",
+          inputSchema: {
+            type: "object",
+            properties: {
+              body: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  subject: { type: "string" },
+                  start: { type: "object" },
+                  end: { type: "object" },
+                  changeKey: { type: "string" },
+                },
+              },
+              confirm: { type: "boolean" },
+            },
+            required: ["body", "confirm"],
+          },
+          mcp_info: { server_id: "server-1" },
+        },
+      ] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const deadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const tools = (responses.find((response) => response.id === 1)?.result as {
+    tools: Array<{
+      name: string;
+      description: string;
+      inputSchema: {
+        properties: Record<string, {
+          properties?: Record<string, {
+            properties?: Record<string, unknown>;
+            required?: string[];
+          }>;
+          required?: string[];
+        }>;
+        required?: string[];
+        additionalProperties?: boolean;
+      };
+    }>;
+  }).tools;
+  const joined = tools.find((tool) => tool.name === "list-joined-teams")!;
+  assert.deepEqual(joined.inputSchema.properties, {});
+  assert.equal(joined.inputSchema.additionalProperties, false);
+  assert.match(joined.description, /does not accept generic OData/);
+
+  const send = tools.find((tool) => tool.name === "send-channel-message")!;
+  assert.deepEqual(Object.keys(send.inputSchema.properties), ["teamId", "channelId", "body"]);
+  assert.deepEqual(send.inputSchema.required, ["teamId", "channelId", "body"]);
+  assert.deepEqual(Object.keys(send.inputSchema.properties.body?.properties ?? {}), ["body"]);
+  assert.deepEqual(
+    Object.keys(send.inputSchema.properties.body?.properties?.body?.properties ?? {}),
+    ["contentType", "content"],
+  );
+  assert.deepEqual(send.inputSchema.properties.body?.properties?.body?.required, ["contentType", "content"]);
+  assert.match(send.description, /Get teamId from list-joined-teams/);
+
+  const draft = tools.find((tool) => tool.name === "create-draft-email")!;
+  assert.doesNotMatch(draft.description, /open extension/);
+  assert.match(draft.description, /without sending/);
+  assert.deepEqual(
+    Object.keys(draft.inputSchema.properties.body?.properties ?? {}),
+    ["subject", "body", "toRecipients", "ccRecipients", "bccRecipients", "importance"],
+  );
+  assert.deepEqual(draft.inputSchema.properties.body?.required, ["subject", "body"]);
+
+  const event = tools.find((tool) => tool.name === "create-calendar-event")!;
+  assert.deepEqual(event.inputSchema.properties.body?.required, ["subject", "start", "end"]);
+  assert.equal("id" in (event.inputSchema.properties.body?.properties ?? {}), false);
+  assert.equal("changeKey" in (event.inputSchema.properties.body?.properties ?? {}), false);
+});
+
+test("an approved execution failure cannot be reported as an approval rejection", async (context) => {
+  const operationId = "22222222-2222-4222-8222-222222222222";
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [] }));
+      return;
+    }
+    if (request.method === "GET" && request.url === `/onecomputer/operations/${operationId}`) {
+      response.end(JSON.stringify({
+        id: operationId,
+        state: "failed",
+        approval: { decision: "approve" },
+        failureCode: "UPSTREAM_TOOL_FAILED",
+        failureSummary: "Microsoft Graph rejected the target path.",
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "wait-for-governed-operation", arguments: { operationId } },
+  })}\n`);
+  const deadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 2) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const result = responses.find((response) => response.id === 2)?.result as { isError: boolean; content: Array<{ text: string }> };
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? "", /signed approval .* succeeded/i);
+  assert.match(result.content[0]?.text ?? "", /Microsoft Graph rejected the target path/);
+  assert.match(result.content[0]?.text ?? "", /Do not describe this result as rejected, denied, or not approved/);
+});

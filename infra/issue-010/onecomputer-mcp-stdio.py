@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import sys
@@ -43,15 +45,27 @@ CALENDAR_VIEW_DESCRIPTION = """Get chronological event occurrences from the sign
 Use this tool for requests such as next, upcoming, today, this week, or events between two dates. For upcoming events, set startDateTime to the current time and endDateTime to a bounded future time in ISO 8601 format. Do not use list-calendar-events for upcoming events because that tool returns event series without an implicit from-now window."""
 LIST_DRIVES_DESCRIPTION = """List the signed-in user's available OneDrive and SharePoint drives.
 
-Use this first when a OneDrive request supplies a human-facing filename, link, or path but no driveId. Continue with search-onedrive-files or list-folder-files; do not ask the user to provide an internal drive ID before attempting this discovery."""
+Use this first when a OneDrive request supplies a human-facing filename, link, or path but no driveId. Omit top or set it to at least 2: Microsoft Graph can return an empty first page plus a next link when top is 1. Continue with search-onedrive-files or list-folder-files; do not ask the user to provide an internal drive ID before attempting this discovery."""
 SEARCH_ONEDRIVE_DESCRIPTION = """Search one OneDrive or SharePoint drive for items matching a human-facing filename.
 
-If driveId is unknown, call list-drives first. Search using the filename or other value the user supplied, including a filename visible in an attached screenshot. Use top no greater than 10 and the exact select value id,name,eTag,parentReference. Do not request all pages. Treat multiple matches as ambiguous and ask the user to choose before a mutation."""
+If driveId is unknown, call list-drives first. Search using the filename or other value the user supplied, including a filename visible in an attached screenshot. Use top no greater than 10 and the exact select value id,name,eTag,parentReference. Do not request all pages. OneDrive search is eventually consistent, so use list-folder-files on the known parent immediately after creating an item. Treat multiple matches as ambiguous and ask the user to choose before a mutation."""
+UPLOAD_ONEDRIVE_DESCRIPTION = """Create or replace one file in Microsoft OneDrive or SharePoint through ONEComputer governance.
+
+Pass driveId from list-drives. Pass only the value that belongs between `/items/` and `/content` as driveItemId: use an opaque item ID to replace an existing file, `root:/file.txt:` for a new file in the drive root, or `root:/folder/file.txt:` for a new file below the root. Never include `/items/`, `/content`, `/drives/`, or a complete Microsoft Graph URL in driveItemId. Body must be the file bytes encoded as base64. To verify a just-created file, call list-folder-files on its parent because OneDrive search indexing can lag. Call this tool directly; ONEComputer obtains any required signed approval."""
+LIST_JOINED_TEAMS_DESCRIPTION = """List every Microsoft Teams team joined by the signed-in user.
+
+This Graph endpoint does not accept generic OData paging or filtering options. Call it with no arguments, then match the returned displayName and id locally. Use the selected id with list-team-channels."""
+TEAMS_TOOL_DESCRIPTIONS = {
+    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before sending.",
+    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before sending.",
+    "send-channel-message": "Post one HTML message to a Teams channel. Get teamId from list-joined-teams and channelId from list-team-channels. Put the post in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before posting.",
+    "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Put the reply in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before posting.",
+}
 
 LIST_DRIVES_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "top": {"type": "integer", "minimum": 1, "maximum": 25},
+        "top": {"type": "integer", "minimum": 2, "maximum": 25},
         "skip": {"type": "integer", "minimum": 0, "maximum": 1000},
         "select": {"type": "string", "minLength": 1, "maxLength": 256},
         "filter": {"type": "string", "minLength": 1, "maxLength": 512},
@@ -71,6 +85,355 @@ SEARCH_ONEDRIVE_INPUT_SCHEMA = {
     },
     "required": ["driveId", "q"],
     "additionalProperties": False,
+}
+UPLOAD_ONEDRIVE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "driveId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Opaque drive ID returned by list-drives.",
+        },
+        "driveItemId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": r"^(?!/?items/)(?!/?drives/)(?!https?://).+",
+            "description": "Only the item ID or drive-relative path selector, for example root:/happy.txt:. Do not include /items/ or /content.",
+            "examples": ["root:/happy.txt:", "root:/Documents/happy.txt:"],
+        },
+        "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5_600_000,
+            "contentEncoding": "base64",
+            "description": "Base64-encoded file bytes, not plain text.",
+        },
+    },
+    "required": ["driveId", "driveItemId", "body"],
+    "additionalProperties": False,
+}
+NO_ARGUMENTS_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+TEAMS_MESSAGE_BODY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "body": {
+            "type": "object",
+            "properties": {
+                "contentType": {
+                    "type": "string",
+                    "const": "html",
+                    "description": "Use html; Microsoft Graph can mangle plain-text Teams messages.",
+                },
+                "content": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 28000,
+                    "description": "The HTML message content.",
+                },
+            },
+            "required": ["contentType", "content"],
+            "additionalProperties": False,
+        },
+    },
+    "required": ["body"],
+    "additionalProperties": False,
+}
+
+
+def teams_message_input_schema(*identifiers: str) -> dict:
+    properties = {
+        identifier: {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": f"Opaque {identifier} returned by the corresponding Teams discovery tool.",
+        }
+        for identifier in identifiers
+    }
+    properties["body"] = TEAMS_MESSAGE_BODY_SCHEMA
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": [*identifiers, "body"],
+        "additionalProperties": False,
+    }
+
+
+TEAMS_INPUT_SCHEMAS = {
+    "send-chat-message": teams_message_input_schema("chatId"),
+    "reply-to-chat-message": teams_message_input_schema("chatId", "chatMessageId"),
+    "send-channel-message": teams_message_input_schema("teamId", "channelId"),
+    "reply-to-channel-message": teams_message_input_schema("teamId", "channelId", "chatMessageId"),
+}
+EMAIL_ADDRESS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "emailAddress": {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "format": "email"},
+                "name": {"type": "string", "minLength": 1, "maxLength": 256},
+            },
+            "required": ["address"],
+            "additionalProperties": False,
+        },
+    },
+    "required": ["emailAddress"],
+    "additionalProperties": False,
+}
+ITEM_BODY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "contentType": {"type": "string", "enum": ["text", "html"]},
+        "content": {"type": "string", "minLength": 1, "maxLength": 100000},
+    },
+    "required": ["contentType", "content"],
+    "additionalProperties": False,
+}
+MAIL_MESSAGE_PROPERTIES = {
+    "subject": {"type": "string", "minLength": 1, "maxLength": 998},
+    "body": ITEM_BODY_SCHEMA,
+    "toRecipients": {"type": "array", "items": EMAIL_ADDRESS_SCHEMA, "maxItems": 100},
+    "ccRecipients": {"type": "array", "items": EMAIL_ADDRESS_SCHEMA, "maxItems": 100},
+    "bccRecipients": {"type": "array", "items": EMAIL_ADDRESS_SCHEMA, "maxItems": 100},
+    "importance": {"type": "string", "enum": ["low", "normal", "high"]},
+}
+MAIL_MESSAGE_SCHEMA = {
+    "type": "object",
+    "properties": MAIL_MESSAGE_PROPERTIES,
+    "required": ["subject", "body"],
+    "additionalProperties": False,
+}
+MAIL_PATCH_SCHEMA = {
+    "type": "object",
+    "properties": MAIL_MESSAGE_PROPERTIES,
+    "minProperties": 1,
+    "additionalProperties": False,
+}
+RECIPIENTS_SCHEMA = {"type": "array", "items": EMAIL_ADDRESS_SCHEMA, "minItems": 1, "maxItems": 100}
+DATE_TIME_ZONE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "dateTime": {"type": "string", "minLength": 1, "maxLength": 64},
+        "timeZone": {"type": "string", "minLength": 1, "maxLength": 64},
+    },
+    "required": ["dateTime", "timeZone"],
+    "additionalProperties": False,
+}
+CALENDAR_EVENT_PROPERTIES = {
+    "subject": {"type": "string", "minLength": 1, "maxLength": 998},
+    "start": DATE_TIME_ZONE_SCHEMA,
+    "end": DATE_TIME_ZONE_SCHEMA,
+    "body": ITEM_BODY_SCHEMA,
+    "location": {
+        "type": "object",
+        "properties": {"displayName": {"type": "string", "minLength": 1, "maxLength": 512}},
+        "required": ["displayName"],
+        "additionalProperties": False,
+    },
+    "attendees": {
+        "type": "array",
+        "maxItems": 100,
+        "items": {
+            "type": "object",
+            "properties": {
+                "emailAddress": EMAIL_ADDRESS_SCHEMA["properties"]["emailAddress"],
+                "type": {"type": "string", "enum": ["required", "optional", "resource"]},
+            },
+            "required": ["emailAddress", "type"],
+            "additionalProperties": False,
+        },
+    },
+    "isAllDay": {"type": "boolean"},
+    "isOnlineMeeting": {"type": "boolean"},
+    "isReminderOn": {"type": "boolean"},
+    "reminderMinutesBeforeStart": {"type": "integer", "minimum": 0, "maximum": 40320},
+    "importance": {"type": "string", "enum": ["low", "normal", "high"]},
+    "sensitivity": {"type": "string", "enum": ["normal", "personal", "private", "confidential"]},
+    "showAs": {"type": "string", "enum": ["free", "tentative", "busy", "oof", "workingElsewhere", "unknown"]},
+}
+CREATE_CALENDAR_EVENT_BODY_SCHEMA = {
+    "type": "object",
+    "properties": CALENDAR_EVENT_PROPERTIES,
+    "required": ["subject", "start", "end"],
+    "additionalProperties": False,
+}
+UPDATE_CALENDAR_EVENT_BODY_SCHEMA = {
+    "type": "object",
+    "properties": CALENDAR_EVENT_PROPERTIES,
+    "minProperties": 1,
+    "additionalProperties": False,
+}
+CURATED_WRITE_INPUT_SCHEMAS = {
+    "create-draft-email": {
+        "type": "object", "properties": {"body": MAIL_MESSAGE_SCHEMA},
+        "required": ["body"], "additionalProperties": False,
+    },
+    "update-mail-message": {
+        "type": "object", "properties": {"messageId": {"type": "string"}, "body": MAIL_PATCH_SCHEMA},
+        "required": ["messageId", "body"], "additionalProperties": False,
+    },
+    "move-mail-message": {
+        "type": "object",
+        "properties": {
+            "messageId": {"type": "string"},
+            "body": {
+                "type": "object", "properties": {"DestinationId": {"type": "string"}},
+                "required": ["DestinationId"], "additionalProperties": False,
+            },
+        },
+        "required": ["messageId", "body"], "additionalProperties": False,
+    },
+    "send-mail": {
+        "type": "object",
+        "properties": {
+            "body": {
+                "type": "object",
+                "properties": {
+                    "Message": {
+                        **MAIL_MESSAGE_SCHEMA,
+                        "required": ["subject", "body", "toRecipients"],
+                    },
+                    "SaveToSentItems": {"type": "boolean"},
+                },
+                "required": ["Message"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["body"], "additionalProperties": False,
+    },
+    "reply-mail-message": {
+        "type": "object",
+        "properties": {
+            "messageId": {"type": "string"},
+            "body": {
+                "type": "object", "properties": {"Comment": {"type": "string", "minLength": 1, "maxLength": 100000}},
+                "required": ["Comment"], "additionalProperties": False,
+            },
+        },
+        "required": ["messageId", "body"], "additionalProperties": False,
+    },
+    "reply-all-mail-message": {
+        "type": "object",
+        "properties": {
+            "messageId": {"type": "string"},
+            "body": {
+                "type": "object", "properties": {"Comment": {"type": "string", "minLength": 1, "maxLength": 100000}},
+                "required": ["Comment"], "additionalProperties": False,
+            },
+        },
+        "required": ["messageId", "body"], "additionalProperties": False,
+    },
+    "forward-mail-message": {
+        "type": "object",
+        "properties": {
+            "messageId": {"type": "string"},
+            "body": {
+                "type": "object",
+                "properties": {
+                    "ToRecipients": RECIPIENTS_SCHEMA,
+                    "Comment": {"type": "string", "maxLength": 100000},
+                },
+                "required": ["ToRecipients"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["messageId", "body"], "additionalProperties": False,
+    },
+    "create-calendar-event": {
+        "type": "object", "properties": {"body": CREATE_CALENDAR_EVENT_BODY_SCHEMA},
+        "required": ["body"], "additionalProperties": False,
+    },
+    "update-calendar-event": {
+        "type": "object",
+        "properties": {"eventId": {"type": "string"}, "body": UPDATE_CALENDAR_EVENT_BODY_SCHEMA},
+        "required": ["eventId", "body"], "additionalProperties": False,
+    },
+    "create-onedrive-folder": {
+        "type": "object",
+        "properties": {
+            "driveId": {"type": "string"},
+            "driveItemId": {"type": "string"},
+            "body": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1, "maxLength": 255},
+                    "folder": {"type": "object", "properties": {}, "additionalProperties": False},
+                    "@microsoft.graph.conflictBehavior": {"type": "string", "enum": ["fail", "replace", "rename"]},
+                },
+                "required": ["name", "folder"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["driveId", "driveItemId", "body"], "additionalProperties": False,
+    },
+    "move-rename-onedrive-item": {
+        "type": "object",
+        "properties": {
+            "driveId": {"type": "string"},
+            "driveItemId": {"type": "string"},
+            "body": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1, "maxLength": 255},
+                    "parentReference": {
+                        "type": "object", "properties": {"id": {"type": "string"}},
+                        "required": ["id"], "additionalProperties": False,
+                    },
+                },
+                "minProperties": 1,
+                "additionalProperties": False,
+            },
+        },
+        "required": ["driveId", "driveItemId", "body"], "additionalProperties": False,
+    },
+    "copy-drive-item": {
+        "type": "object",
+        "properties": {
+            "driveId": {"type": "string"},
+            "driveItemId": {"type": "string"},
+            "body": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1, "maxLength": 255},
+                    "parentReference": {
+                        "type": "object",
+                        "properties": {"driveId": {"type": "string"}, "id": {"type": "string"}},
+                        "required": ["id"],
+                        "additionalProperties": False,
+                    },
+                },
+                "required": ["parentReference"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["driveId", "driveItemId", "body"], "additionalProperties": False,
+    },
+    **TEAMS_INPUT_SCHEMAS,
+}
+CURATED_WRITE_DESCRIPTIONS = {
+    "create-draft-email": "Create an Outlook email draft without sending it. Body is a message object with subject, body, and optional recipients. ONEComputer obtains signed approval before creating the draft.",
+    "update-mail-message": "Update editable fields on an existing Outlook message or draft. Get messageId from list-mail-messages. Supply only the fields to change. ONEComputer obtains signed approval.",
+    "delete-mail-message": "Delete one Outlook message. Get messageId from list-mail-messages or get-mail-message. ONEComputer obtains signed approval before deleting.",
+    "move-mail-message": "Move one Outlook message to another mail folder. Get messageId from list-mail-messages and DestinationId from list-mail-folders. ONEComputer obtains signed approval.",
+    "send-mail": "Send a new Outlook email. Body must contain Message with subject, body, and verified toRecipients; optionally set SaveToSentItems. Never guess a recipient address. ONEComputer obtains signed approval before sending.",
+    "send-draft-message": "Send an existing Outlook draft. Get messageId from list-mail-messages and verify the draft and recipients first. ONEComputer obtains signed approval before sending.",
+    "reply-mail-message": "Reply only to the sender of an Outlook message. Get messageId from get-mail-message and put the reply text in body.Comment. ONEComputer obtains signed approval before sending.",
+    "reply-all-mail-message": "Reply to the sender and all recipients of an Outlook message. Verify the recipient set, then put the reply text in body.Comment. ONEComputer obtains signed approval before sending.",
+    "forward-mail-message": "Forward an Outlook message to explicitly verified recipients. Put them in body.ToRecipients and optional text in body.Comment. Never guess an address. ONEComputer obtains signed approval before sending.",
+    "create-calendar-event": "Create an Outlook calendar event. Supply subject plus start and end objects containing local dateTime and an explicit Windows timeZone. Add attendees only when the user requested them. ONEComputer applies the configured write policy.",
+    "update-calendar-event": "Update an existing Outlook calendar event. Get eventId from get-calendar-view or list-calendar-events and supply only the fields to change. ONEComputer obtains signed approval.",
+    "delete-calendar-event": "Delete one Outlook calendar event. Resolve the exact eventId and confirm ambiguous matches before calling. ONEComputer obtains signed approval.",
+    "create-onedrive-folder": "Create a folder below a OneDrive item. Use list-drives and list-folder-files to resolve driveId and parent driveItemId. Body requires name and folder: {}. ONEComputer obtains signed approval.",
+    "move-rename-onedrive-item": "Rename and/or move one OneDrive item. Resolve driveId and driveItemId first; body may contain name and/or parentReference.id. ONEComputer obtains signed approval.",
+    "copy-drive-item": "Copy one OneDrive item. Resolve the source driveId and driveItemId; body requires parentReference.id and may include a new name. ONEComputer obtains signed approval.",
+    **TEAMS_TOOL_DESCRIPTIONS,
 }
 
 
@@ -134,6 +497,37 @@ def normalize_graph_etag(value: str) -> str:
     return candidate
 
 
+def normalize_upload_drive_item_id(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("driveItemId is required")
+    candidate = value.strip()
+    # Softeria previously advertised its complete Graph path fragment as the
+    # value for driveItemId. That unambiguous legacy form would otherwise be
+    # inserted into the endpoint a second time as /items/<value>/content.
+    for prefix in ("/items/", "items/"):
+        if candidate.startswith(prefix) and candidate.endswith("/content"):
+            candidate = candidate[len(prefix):-len("/content")]
+            break
+    if candidate.startswith(("http://", "https://", "/drives/", "drives/", "/items/", "items/")):
+        raise ValueError("driveItemId must not contain a Graph URL or endpoint wrapper")
+    if candidate.startswith("root:/") and not candidate.endswith(":"):
+        candidate = f"{candidate}:"
+    if not candidate or candidate.endswith("/content"):
+        raise ValueError("driveItemId is not an item ID or drive-relative path selector")
+    return candidate
+
+
+def validate_upload_body(value: object) -> None:
+    if not isinstance(value, str) or not value:
+        raise ValueError("body must contain base64-encoded file bytes")
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("body must be valid base64-encoded file bytes") from error
+    if len(decoded) > 4 * 1024 * 1024:
+        raise ValueError("upload-file-content supports at most 4 MB of decoded file bytes")
+
+
 def discover_tools() -> list[dict]:
     response = request_json("/mcp-rest/tools/list")
     tools = response.get("tools", [])
@@ -150,6 +544,12 @@ def discover_tools() -> list[dict]:
             input_schema = LIST_DRIVES_INPUT_SCHEMA
         elif raw["name"] == "search-onedrive-files":
             input_schema = SEARCH_ONEDRIVE_INPUT_SCHEMA
+        elif raw["name"] == "upload-file-content":
+            input_schema = UPLOAD_ONEDRIVE_INPUT_SCHEMA
+        elif raw["name"] == "list-joined-teams":
+            input_schema = NO_ARGUMENTS_INPUT_SCHEMA
+        elif raw["name"] in CURATED_WRITE_INPUT_SCHEMAS:
+            input_schema = CURATED_WRITE_INPUT_SCHEMAS[raw["name"]]
         if raw["name"] in WRITE_TOOLS and isinstance(input_schema, dict):
             # Connector execution flags are Control-owned. Do not advertise
             # them as agent inputs; Control adds them only after approval.
@@ -173,6 +573,9 @@ def discover_tools() -> list[dict]:
                 else CALENDAR_VIEW_DESCRIPTION if raw["name"] == "get-calendar-view"
                 else LIST_DRIVES_DESCRIPTION if raw["name"] == "list-drives"
                 else SEARCH_ONEDRIVE_DESCRIPTION if raw["name"] == "search-onedrive-files"
+                else UPLOAD_ONEDRIVE_DESCRIPTION if raw["name"] == "upload-file-content"
+                else LIST_JOINED_TEAMS_DESCRIPTION if raw["name"] == "list-joined-teams"
+                else CURATED_WRITE_DESCRIPTIONS[raw["name"]] if raw["name"] in CURATED_WRITE_DESCRIPTIONS
                 else raw.get("description", "Microsoft 365 tool governed by ONEComputer policy.")
             ),
             "inputSchema": input_schema,
@@ -224,6 +627,16 @@ def operation_result(operation: dict, identifier: str) -> dict:
             "isError": False,
             "_meta": {"onecomputer": {"operationId": identifier, "state": state, "approval": "openvtc-task-consent"}},
         }
+    if state == "failed" and isinstance(operation.get("approval"), dict) and operation["approval"].get("decision") == "approve":
+        failure_code = operation.get("failureCode") or "TOOL_EXECUTION_FAILED"
+        failure_summary = operation.get("failureSummary")
+        detail = str(failure_summary) if failure_summary else f"failure code {failure_code}"
+        return error_result(
+            f"The signed approval for operation {identifier} succeeded, but the Microsoft 365 execution failed after dispatch: {detail}. "
+            "The requested change did not complete. Do not describe this result as rejected, denied, or not approved.",
+            identifier,
+            state,
+        )
     return error_result(f"The governed action was {state}. No further tool execution occurred.", identifier, state)
 
 
@@ -247,6 +660,15 @@ def call_tool(name: str, arguments: dict) -> dict:
         # approval, or denied before the connector can execute it.
         arguments = {key: value for key, value in arguments.items() if key not in {"confirm", "excludeResponse", "includeHeaders"}}
         arguments["confirm"] = True
+    if name == "upload-file-content":
+        try:
+            arguments["driveItemId"] = normalize_upload_drive_item_id(arguments.get("driveItemId"))
+            validate_upload_body(arguments.get("body"))
+        except ValueError as error:
+            return error_result(
+                f"The OneDrive upload was not submitted: {error}. "
+                "Use an opaque item ID, root:/file.txt:, or root:/folder/file.txt: as driveItemId."
+            )
     if name == "delete-onedrive-file":
         if not isinstance(arguments.get("If-Match"), str) or not arguments["If-Match"].strip():
             return error_result(DELETE_ONEDRIVE_MISSING_ETAG)

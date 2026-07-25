@@ -1007,6 +1007,7 @@ export const operationViewSchema = z.object({
     executedAt: z.iso.datetime(),
   }).nullable(),
   failureCode: z.string().nullable(),
+  failureSummary: z.string().max(240).nullable(),
 });
 export type OperationView = z.infer<typeof operationViewSchema>;
 

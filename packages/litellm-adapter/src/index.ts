@@ -645,9 +645,14 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       });
       if (!called.ok) throw this.upstreamError("GATEWAY_TOOL_EXECUTION_FAILED", called.status, called.payload);
       const payload = asObject(called.payload);
-      if (payload.isError === true) throw new OneComputerError("UPSTREAM_TOOL_FAILED", "The governed tool reported a failure", 502, true);
       const content = Array.isArray(payload.content) ? payload.content : [];
       const firstText = content.map(asObject).find((item) => item.type === "text" && typeof item.text === "string")?.text;
+      if (payload.isError === true) {
+        const failureSummary = typeof firstText === "string" && firstText.trim()
+          ? firstText.trim().slice(0, 240)
+          : "The governed Microsoft 365 tool reported a failure";
+        throw new OneComputerError("UPSTREAM_TOOL_FAILED", failureSummary, 502, true);
+      }
       const resultSummary = typeof firstText === "string" ? firstText.slice(0, 240) : "The governed tool completed successfully.";
       return {
         upstreamReference: `mcp:${input.operationId}`,

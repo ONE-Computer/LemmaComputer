@@ -82,6 +82,7 @@ const toView = (record: GovernedOperationRecord): OperationView => ({
     executedAt: record.receipt.executedAt.toISOString(),
   } : null,
   failureCode: record.failureCode,
+  failureSummary: record.failureSummary,
 });
 
 const toCompanionActivity = (record: GovernedOperationRecord) => ({
@@ -570,7 +571,14 @@ export class GovernedOperationService {
       if (!completed) throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
       return toView(completed);
     } catch (error) {
-      await this.store.failExecution(identity, claimed.id, leaseId, error instanceof OneComputerError ? error.code : "TOOL_EXECUTION_FAILED", correlationId);
+      await this.store.failExecution(
+        identity,
+        claimed.id,
+        leaseId,
+        error instanceof OneComputerError ? error.code : "TOOL_EXECUTION_FAILED",
+        correlationId,
+        error instanceof OneComputerError ? error.message : "The governed tool execution failed",
+      );
       throw error;
     }
   }
