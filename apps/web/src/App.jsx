@@ -15,7 +15,9 @@ import { Checkmark16Filled } from "@fluentui/react-icons/svg/checkmark";
 import { ArrowLeft24Regular } from "@fluentui/react-icons/svg/arrow-left";
 import { ArrowUp24Regular } from "@fluentui/react-icons/svg/arrow-up";
 import { Add24Regular } from "@fluentui/react-icons/svg/add";
-import { Dismiss24Regular } from "@fluentui/react-icons/svg/dismiss";
+import { Attach24Regular } from "@fluentui/react-icons/svg/attach";
+import { Dismiss16Regular, Dismiss24Regular } from "@fluentui/react-icons/svg/dismiss";
+import { Document24Regular } from "@fluentui/react-icons/svg/document";
 import { Navigation24Regular } from "@fluentui/react-icons/svg/navigation";
 import { ShieldCheckmark24Regular } from "@fluentui/react-icons/svg/shield-checkmark";
 import { Info24Regular } from "@fluentui/react-icons/svg/info";
@@ -57,6 +59,68 @@ const navByView = Object.freeze({
 const viewByNav = Object.freeze(Object.fromEntries(
   Object.entries(navByView).map(([view, name]) => [name, view]),
 ));
+const chatAttachmentMaxFiles = 4;
+const chatAttachmentMaxBytes = 8 * 1024 * 1024;
+const chatAttachmentMaxTotalBytes = 16 * 1024 * 1024;
+const chatAttachmentTypes = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "application/json",
+  "application/xml",
+  "application/yaml",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "text/xml",
+  "text/yaml",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
+const chatAttachmentTypeByExtension = {
+  pdf: "application/pdf",
+  json: "application/json",
+  xml: "application/xml",
+  yaml: "application/yaml",
+  yml: "application/yaml",
+  md: "text/markdown",
+  markdown: "text/markdown",
+  csv: "text/csv",
+  txt: "text/plain",
+  log: "text/plain",
+  js: "text/plain",
+  jsx: "text/plain",
+  ts: "text/plain",
+  tsx: "text/plain",
+  py: "text/plain",
+  java: "text/plain",
+  go: "text/plain",
+  rs: "text/plain",
+  sh: "text/plain",
+  sql: "text/plain",
+  css: "text/plain",
+  html: "text/plain",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+const attachmentMediaType = (file) => {
+  if (chatAttachmentTypes.has(file.type)) return file.type;
+  const extension = file.name.split(".").at(-1)?.toLowerCase();
+  return chatAttachmentTypeByExtension[extension] ?? null;
+};
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+  reader.readAsDataURL(file);
+});
+const attachmentSize = (bytes) => bytes < 1024 * 1024
+  ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+  : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 const navFromLocation = () => {
   const view = new URLSearchParams(window.location.search).get("view") ?? "home";
   return navByView[view] ?? "Workspace";
@@ -1052,6 +1116,17 @@ function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisc
 
 function ChatPart({ part }) {
   if (part.type === "text") return <p className="chat-message-text">{part.text}</p>;
+  if (part.type === "file") {
+    const image = part.mediaType.startsWith("image/");
+    return (
+      <div className={`chat-file-part${image ? " image" : ""}`}>
+        {image
+          ? <img src={part.url} alt={part.filename || "Attached image"} />
+          : <Document24Regular aria-hidden="true" />}
+        <span>{part.filename || "Attached file"}</span>
+      </div>
+    );
+  }
   if (part.type === "data-progress") {
     return (
       <div className={`chat-activity progress ${part.data.state}`}>
@@ -1087,14 +1162,19 @@ function ChatConversation({
   workspaceId,
   agentId,
   agentName,
+  supportsVision,
   activeSessionId,
   onSessionsChange,
   onSessionChange,
 }) {
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState([]);
+  const [attachmentError, setAttachmentError] = useState("");
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [historyState, setHistoryState] = useState("ready");
   const [historyError, setHistoryError] = useState("");
   const transcriptRef = useRef(null);
+  const fileInputRef = useRef(null);
   const sessionRef = useRef(activeSessionId);
   const loadedSessionRef = useRef("");
 
@@ -1140,6 +1220,8 @@ function ChatConversation({
     if (!activeSessionId) {
       loadedSessionRef.current = "";
       setMessages([]);
+      setAttachments([]);
+      setAttachmentError("");
       setHistoryState("ready");
       setHistoryError("");
       clearError();
@@ -1188,15 +1270,76 @@ function ChatConversation({
     };
   }, [activeSessionId, agentId, busy, pendingApprovalKey, setMessages, workspaceId]);
 
+  const addAttachments = async (files) => {
+    const selected = [...files];
+    if (!selected.length) return;
+    setAttachmentError("");
+    const image = selected.find((file) => attachmentMediaType(file)?.startsWith("image/"));
+    if (image && !supportsVision) {
+      setAttachmentError("The selected workspace model does not support image input. Choose another model or attach a document.");
+      return;
+    }
+    if (attachments.length + selected.length > chatAttachmentMaxFiles) {
+      setAttachmentError(`Attach up to ${chatAttachmentMaxFiles} files per message.`);
+      return;
+    }
+    const nextTotal = attachments.reduce((total, attachment) => total + attachment.size, 0)
+      + selected.reduce((total, file) => total + file.size, 0);
+    const oversized = selected.find((file) => file.size > chatAttachmentMaxBytes);
+    if (oversized) {
+      setAttachmentError(`${oversized.name} is larger than 8 MB.`);
+      return;
+    }
+    if (nextTotal > chatAttachmentMaxTotalBytes) {
+      setAttachmentError("Attachments can total up to 16 MB per message.");
+      return;
+    }
+    const unsupported = selected.find((file) => !attachmentMediaType(file));
+    if (unsupported) {
+      setAttachmentError(`${unsupported.name} is not a supported image or document.`);
+      return;
+    }
+    setAttachmentBusy(true);
+    try {
+      const prepared = await Promise.all(selected.map(async (file) => {
+        const mediaType = attachmentMediaType(file);
+        const normalized = file.type === mediaType
+          ? file
+          : new File([file], file.name, { type: mediaType, lastModified: file.lastModified });
+        return {
+          size: normalized.size,
+          part: {
+            type: "file",
+            filename: normalized.name,
+            mediaType,
+            url: await fileToDataUrl(normalized),
+          },
+        };
+      }));
+      setAttachments((current) => [...current, ...prepared]);
+    } catch (requestError) {
+      setAttachmentError(requestError.message);
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+
+  const removeAttachment = (index) => {
+    setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setAttachmentError("");
+  };
+
   const submit = async (event) => {
     event.preventDefault();
     const text = input.trim();
-    if (!text || busy) return;
+    if ((!text && !attachments.length) || busy || attachmentBusy) return;
     clearError();
     let sessionId = sessionRef.current;
     if (!sessionId) {
       try {
-        const title = text.replace(/\s+/g, " ").slice(0, 56);
+        const title = (text || attachments.map((attachment) => attachment.part.filename).join(", "))
+          .replace(/\s+/g, " ")
+          .slice(0, 56);
         const created = await chatApi.createSession(workspaceId, agentId, title);
         sessionId = created.id;
         sessionRef.current = sessionId;
@@ -1212,15 +1355,25 @@ function ChatConversation({
         return;
       }
     }
+    const outgoingAttachments = attachments;
     setInput("");
-    await sendMessage({
-      text,
-      metadata: {
-        agentCatalogId: agentId,
-        state: "completed",
-        createdAt: new Date().toISOString(),
-      },
-    });
+    setAttachments([]);
+    setAttachmentError("");
+    try {
+      await sendMessage({
+        ...(text ? { text } : {}),
+        files: outgoingAttachments.map((attachment) => attachment.part),
+        metadata: {
+          agentCatalogId: agentId,
+          state: "completed",
+          createdAt: new Date().toISOString(),
+        },
+      });
+    } catch (requestError) {
+      setInput(text);
+      setAttachments(outgoingAttachments);
+      setAttachmentError(requestError.message);
+    }
   };
 
   const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
@@ -1243,11 +1396,62 @@ function ChatConversation({
       </div>
       {(error || historyError) && <div className="workspace-error chat-error" role="alert"><Info24Regular aria-hidden="true" /><span>{error?.message || historyError}</span></div>}
       <form className="chat-composer" onSubmit={submit}>
+        {attachments.length > 0 && (
+          <div className="chat-attachment-list" aria-label="Attachments">
+            {attachments.map((attachment, index) => (
+              <div className="chat-attachment-preview" key={`${attachment.part.filename}-${index}`}>
+                {attachment.part.mediaType.startsWith("image/")
+                  ? <img src={attachment.part.url} alt="" />
+                  : <Document24Regular aria-hidden="true" />}
+                <span><strong>{attachment.part.filename}</strong><small>{attachmentSize(attachment.size)}</small></span>
+                <button type="button" onClick={() => removeAttachment(index)} aria-label={`Remove ${attachment.part.filename}`}>
+                  <Dismiss16Regular aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {attachmentError && <p className="chat-attachment-error" role="alert">{attachmentError}</p>}
+        <input
+          ref={fileInputRef}
+          className="sr-only"
+          type="file"
+          multiple
+          accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.xlsx,.pptx,.txt,.md,.markdown,.csv,.json,.xml,.yaml,.yml,.log,.js,.jsx,.ts,.tsx,.py,.java,.go,.rs,.sh,.sql,.css,.html"
+          onChange={(event) => {
+            void addAttachments(event.target.files || []);
+            event.target.value = "";
+          }}
+        />
+        <button
+          className="chat-attach-button"
+          type="button"
+          aria-label="Attach files"
+          title="Attach files"
+          disabled={busy || attachmentBusy || historyState === "loading"}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Attach24Regular aria-hidden="true" />
+        </button>
         <label className="sr-only" htmlFor="chat-message">Message {agentName}</label>
         <textarea
           id="chat-message"
           value={input}
           onChange={(event) => setInput(event.target.value)}
+          onPaste={(event) => {
+            const images = [...event.clipboardData.items]
+              .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+              .flatMap((item) => {
+                const blob = item.getAsFile();
+                if (!blob) return [];
+                const extension = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+                return [new File([blob], `pasted-image-${Date.now()}.${extension}`, { type: blob.type })];
+              });
+            if (images.length) {
+              event.preventDefault();
+              void addAttachments(images);
+            }
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -1262,7 +1466,7 @@ function ChatConversation({
         {busy ? (
           <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={() => { void stop(); }}><Dismiss24Regular aria-hidden="true" /></button>
         ) : (
-          <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!input.trim() || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
+          <button className="chat-send-button" type="submit" aria-label="Send message" disabled={(!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
         )}
       </form>
     </section>
@@ -1422,6 +1626,7 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
         workspaceId={workspace.id}
         agentId={activeAgentId}
         agentName={agentName}
+        supportsVision={workspace.modelRoute?.capabilities?.vision === true}
         activeSessionId={activeSessionId}
         onSessionsChange={onSessionsChange}
         onSessionChange={onSessionChange}

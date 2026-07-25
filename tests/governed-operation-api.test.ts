@@ -26,7 +26,7 @@ test("Control API exposes a durable approval-required operation and fixture deci
     test: async () => ({
       model: "test",
       availability: "ready",
-      modelRoute: { alias: "test", status: "ready", fallback: "none", budget: { limitUsd: 1, spentUsd: 0, remainingUsd: 1, duration: "30d", resetsAt: null }, limits: { requestsPerMinute: 30, tokensPerMinute: 50_000, maxParallelRequests: 4 } },
+      modelRoute: { alias: "test", status: "ready", fallback: "none", capabilities: { vision: true }, budget: { limitUsd: 1, spentUsd: 0, remainingUsd: 1, duration: "30d", resetsAt: null }, limits: { requestsPerMinute: 30, tokensPerMinute: 50_000, maxParallelRequests: 4 } },
       tools: [],
       apiBaseUrl: "http://gateway/v1",
       mcpUrl: "http://gateway/mcp",

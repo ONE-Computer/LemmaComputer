@@ -14,10 +14,15 @@ export type GatewayReadiness = {
   modelRoute?: GatewayModelRoute;
 };
 
+export type GatewayModelCapabilities = {
+  vision: boolean;
+};
+
 export type GatewayModelRoute = {
   alias: string;
   status: "ready" | "failed";
   fallback: "none";
+  capabilities: GatewayModelCapabilities;
   budget: {
     limitUsd: number;
     spentUsd: number;
@@ -43,6 +48,7 @@ export type GatewayTestResult = {
 
 export interface GatewayClient {
   ensureGrant(input: { workspaceId: string; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant>;
+  modelCapabilities(modelAlias: string): Promise<GatewayModelCapabilities>;
   readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayReadiness>;
   test(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayTestResult>;
   revoke(workspaceId: string, agentId?: string): Promise<void>;
@@ -150,6 +156,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   private readonly workspaceGrantRenewalMs: number;
   private readonly connectionGrantTtlMs: number;
   private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string }>();
+  private readonly modelCapabilityStates = new Map<string, { expiresAt: number; capabilities: GatewayModelCapabilities }>();
 
   constructor(private readonly config: LiteLLMConfig) {
     this.adminUrl = config.adminUrl.replace(/\/$/, "");
@@ -505,9 +512,37 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     };
   }
 
+  async modelCapabilities(modelAlias: string): Promise<GatewayModelCapabilities> {
+    const cached = this.modelCapabilityStates.get(modelAlias);
+    if (cached && cached.expiresAt > Date.now()) return cached.capabilities;
+    const result = await this.adminCall("/model/info", { method: "GET" });
+    const models = Array.isArray(asObject(result.payload).data)
+      ? asObject(result.payload).data as unknown[]
+      : [];
+    const selected = models.map(asObject).find((item) => item.model_name === modelAlias);
+    const supportsVision = asObject(selected?.model_info).supports_vision;
+    if (typeof supportsVision !== "boolean") {
+      throw new OneComputerError(
+        "MODEL_CAPABILITY_UNAVAILABLE",
+        "The selected model route does not declare whether it supports image input",
+        503,
+        true,
+      );
+    }
+    const capabilities = { vision: supportsVision };
+    this.modelCapabilityStates.set(modelAlias, {
+      expiresAt: Date.now() + 60_000,
+      capabilities,
+    });
+    return capabilities;
+  }
+
   private async modelRoute(credential: string, workspaceId: string, agentId: string | undefined, modelAlias: string): Promise<GatewayModelRoute> {
     const keyAlias = `onecomputer-agent-${this.agentIdFor(workspaceId, agentId)}`;
-    const result = await this.adminCall(`/key/list?return_full_object=true&key_alias=${encodeURIComponent(keyAlias)}`, { method: "GET" });
+    const [result, capabilities] = await Promise.all([
+      this.adminCall(`/key/list?return_full_object=true&key_alias=${encodeURIComponent(keyAlias)}`, { method: "GET" }),
+      this.modelCapabilities(modelAlias),
+    ]);
     const keys = Array.isArray(asObject(result.payload).keys) ? asObject(result.payload).keys as unknown[] : [];
     const tokenHash = createHash("sha256").update(credential).digest("hex");
     const key = keys.map(asObject).find((item) => item.token === tokenHash);
@@ -519,6 +554,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       alias: modelAlias,
       status: "ready",
       fallback: "none",
+      capabilities,
       budget: {
         limitUsd,
         spentUsd,

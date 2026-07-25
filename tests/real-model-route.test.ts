@@ -17,6 +17,8 @@ test("the approved model aliases have pinned real routes and no fallback", async
   assert.match(config, /model_name: claude-sonnet-4-6\s+litellm_params:\s+model: anthropic\/claude-sonnet-4-6/);
   assert.match(config, /model_name: claude-opus-4-6\s+litellm_params:\s+model: openai\/gpt-5\.6-luna/);
   assert.match(config, /model_name: claude-sonnet-4-5\s+litellm_params:\s+model: zai\/glm-5/);
+  assert.match(config, /model_name: onecomputer-glm[\s\S]*?supports_vision: false/);
+  assert.match(config, /model_name: onecomputer-openai[\s\S]*?supports_vision: true/);
   assert.doesNotMatch(config, /fallbacks:/);
   assert.match(config, /turn_off_message_logging: true/);
   assert.match(config, /log_raw_request_response: false/);
@@ -30,6 +32,15 @@ test("the provider credential is injected only into LiteLLM", async () => {
   assert.match(litellm, /ANTHROPIC_API_KEY: \$\{ONECOMPUTER_CLAUDE_API_KEY:/);
   assert.match(litellm, /ZAI_API_KEY: \$\{ONECOMPUTER_GLM_API_KEY:/);
   assert.doesNotMatch(everythingElse, /ONECOMPUTER_(?:OPENAI|CLAUDE|GLM)_API_KEY/);
+});
+
+test("LiteLLM rejects image input when the selected deployment does not advertise vision", async () => {
+  const callback = await source("infra/issue-008/onecomputer_policy_callback.py");
+  assert.match(callback, /async_pre_call_deployment_hook/);
+  assert.match(callback, /_contains_image_input/);
+  assert.match(callback, /litellm\.get_model_info\(model\)/);
+  assert.match(callback, /MODEL_IMAGE_INPUT_UNSUPPORTED/);
+  assert.match(callback, /status_code=422/);
 });
 
 test("Claude Desktop is pinned and receives managed gateway policy rather than provider credentials", async () => {
@@ -134,6 +145,19 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(chatAdapter, /approval\\s\+\(\?:is\\s\+\)\?required/);
   assert.match(chatAdapter, /"Waiting for governed approval"/);
   assert.match(chatAdapter, /approval_state in \{"approval_required", "approved", "executing"\}/);
+  assert.match(chatAdapter, /"type": "image"/);
+  assert.match(chatAdapter, /ImageInput\(attachment\["url"\]\)/);
+  assert.match(chatAdapter, /"type": "image_url"/);
+  assert.match(chatAdapter, /"instructions": SYSTEM_PROMPT/);
+  assert.match(chatAdapter, /human identifier such as a filename/);
+  assert.match(chatAdapter, /prompt_with_documents/);
+  assert.match(chatAdapter, /pdftotext/);
+  assert.match(mcpBridge, /filename visible in an attached screenshot is enough to begin discovery/);
+  assert.match(mcpBridge, /call list-drives to resolve driveId, then search-onedrive-files/);
+  assert.match(mcpBridge, /threading\.Thread\(/);
+  assert.match(mcpBridge, /RESPONSE_LOCK = threading\.Lock\(\)/);
+  assert.match(chatAdapter, /MAX_TURN_SECONDS = 15 \* 60/);
+  assert.match(chatAdapter, /timeout=MAX_TURN_SECONDS/);
   assert.match(hermesDesktopLauncher, /HERMES_DESKTOP_HERMES_ROOT=\/opt\/onecomputer\/hermes-agent/);
   assert.match(hermesDesktopLauncher, /Hermes --no-sandbox/);
   assert.match(entrypoint, /ONEComputer-Agent\.desktop/);

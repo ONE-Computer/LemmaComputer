@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import type { IdentityContext, Launch, RuntimePolicy, Sandbox } from "@onecomputer/contracts";
+import {
+  sendChatTurnSchema,
+  type IdentityContext,
+  type Launch,
+  type RuntimePolicy,
+  type Sandbox,
+} from "@onecomputer/contracts";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import {
   AgentChatAuthority,
@@ -17,6 +23,43 @@ const identity: IdentityContext = {
   subjectId: "alex",
   audience: "onecomputer-control",
 };
+
+test("chat accepts bounded inline image and document parts but rejects media mismatches", () => {
+  const message = {
+    id: "user-message-with-files",
+    role: "user",
+    metadata: {
+      agentCatalogId: "claude-cli",
+      state: "completed",
+      createdAt: "2026-07-25T00:00:00Z",
+    },
+    parts: [
+      {
+        type: "file",
+        filename: "pixel.png",
+        mediaType: "image/png",
+        url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+      },
+      {
+        type: "file",
+        filename: "notes.md",
+        mediaType: "text/markdown",
+        url: "data:text/markdown;base64,IyBOb3Rlcw==",
+      },
+      { type: "text", text: "Compare these attachments." },
+    ],
+  };
+  assert.equal(sendChatTurnSchema.safeParse({ message }).success, true);
+  assert.equal(sendChatTurnSchema.safeParse({
+    message: {
+      ...message,
+      parts: [{ ...message.parts[0], mediaType: "image/jpeg" }],
+    },
+  }).success, false);
+  assert.equal(sendChatTurnSchema.safeParse({
+    message: { ...message, parts: Array.from({ length: 5 }, () => message.parts[0]) },
+  }).success, false);
+});
 
 const hermesPolicy: RuntimePolicy = {
   schemaVersion: 1,

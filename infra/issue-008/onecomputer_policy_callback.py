@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 
 from fastapi import HTTPException
+import litellm
 from litellm.integrations.custom_logger import CustomLogger
 
 
@@ -37,6 +38,49 @@ def _optional_string(metadata, name):
     return value if isinstance(value, str) and value else None
 
 
+def _contains_image_input(value):
+    if isinstance(value, str):
+        return value.startswith("data:image/")
+    if isinstance(value, list):
+        return any(_contains_image_input(child) for child in value)
+    if not isinstance(value, dict):
+        return False
+    content_type = value.get("type")
+    if content_type in {"image", "image_url", "input_image"}:
+        return True
+    source = value.get("source")
+    if isinstance(source, dict) and (
+        source.get("type") == "base64"
+        and isinstance(source.get("media_type"), str)
+        and source["media_type"].startswith("image/")
+    ):
+        return True
+    return any(_contains_image_input(child) for child in value.values())
+
+
+def _supports_vision(kwargs):
+    candidates = [
+        kwargs.get("model_info"),
+        kwargs.get("litellm_model_info"),
+        kwargs.get("litellm_params", {}).get("model_info")
+        if isinstance(kwargs.get("litellm_params"), dict)
+        else None,
+        kwargs.get("metadata", {}).get("model_info")
+        if isinstance(kwargs.get("metadata"), dict)
+        else None,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict) and isinstance(candidate.get("supports_vision"), bool):
+            return candidate["supports_vision"]
+    model = kwargs.get("model")
+    if not isinstance(model, str) or not model:
+        return False
+    try:
+        return litellm.get_model_info(model).get("supports_vision") is True
+    except Exception:
+        return False
+
+
 def _request_decision(payload):
     if len(POLICY_TOKEN) < 24:
         raise RuntimeError("MCP policy callback token is not configured")
@@ -62,6 +106,18 @@ def _request_decision(payload):
 
 
 class OneComputerMcpPolicyCallback(CustomLogger):
+    async def async_pre_call_deployment_hook(self, kwargs, call_type):
+        image_input = _contains_image_input(kwargs.get("messages")) or _contains_image_input(kwargs.get("input"))
+        if image_input and not _supports_vision(kwargs):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "MODEL_IMAGE_INPUT_UNSUPPORTED",
+                    "message": "The selected model route does not support image input.",
+                },
+            )
+        return kwargs
+
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
         if call_type != "call_mcp_tool":
             return data

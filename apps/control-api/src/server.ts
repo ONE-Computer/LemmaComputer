@@ -795,7 +795,10 @@ export function createControlServer(
     );
     return reply.header("cache-control", "no-store").send({ messages });
   });
-  app.post<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages", async (request, reply) => {
+  app.post<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>(
+    "/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages",
+    { bodyLimit: 24 * 1024 * 1024 },
+    async (request, reply) => {
     idempotency(request.headers);
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
@@ -804,6 +807,27 @@ export function createControlServer(
       throw new OneComputerError("CHAT_AGENT_MISMATCH", "The submitted message does not belong to the selected agent", 409);
     }
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const includesImage = input.message.parts.some(
+      (part) => part.type === "file" && part.mediaType.startsWith("image/"),
+    );
+    if (includesImage) {
+      if (!gateway) {
+        throw new OneComputerError(
+          "MODEL_CAPABILITY_UNAVAILABLE",
+          "The selected model route's image capability could not be verified",
+          503,
+          true,
+        );
+      }
+      const capabilities = await gateway.modelCapabilities(policy.modelAlias);
+      if (!capabilities.vision) {
+        throw new OneComputerError(
+          "MODEL_IMAGE_INPUT_UNSUPPORTED",
+          "The selected workspace model does not support image input. Choose a vision-capable model or remove the image.",
+          422,
+        );
+      }
+    }
     const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
     const abort = new AbortController();
     request.raw.once("aborted", () => abort.abort("browser-disconnected"));
@@ -824,7 +848,8 @@ export function createControlServer(
     const response = createUIMessageStreamResponse({ stream });
     response.headers.forEach((value, name) => reply.header(name, value));
     return reply.send(Readable.fromWeb(response.body! as never));
-  });
+    },
+  );
   app.delete<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId", async (request, reply) => {
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     await service.delete(identity(request), policy, request.params.workspaceId);

@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createInterface } from "node:readline";
 import test from "node:test";
 
-test("Claude Desktop MCP call returns a governed handle and waits in bounded follow-up calls", async (context) => {
+test("Claude Desktop MCP call returns a governed handle while the bridge remains responsive during the wait", async (context) => {
   const operationId = "11111111-1111-4111-8111-111111111111";
   let statusReads = 0;
   const server = createServer((request, response) => {
@@ -58,16 +58,32 @@ test("Claude Desktop MCP call returns a governed handle and waits in bounded fol
   const deadline = Date.now() + 5_000;
   while (responses.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(responses.length, 2);
-  assert.match((responses[1]?.result as { content: Array<{ text: string }> }).content[0]?.text ?? "", /wait-for-governed-operation/);
+  const governedResponse = responses.find((response) => response.id === 2);
+  assert.match((governedResponse?.result as { content: Array<{ text: string }> }).content[0]?.text ?? "", /wait-for-governed-operation/);
+  const pingStartedAt = Date.now();
   child.stdin.write(`${JSON.stringify({
     jsonrpc: "2.0",
     id: 3,
     method: "tools/call",
     params: { name: "wait-for-governed-operation", arguments: { operationId } },
   })}\n`);
-  while (responses.length < 3 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal((responses[2]?.result as { isError: boolean }).isError, false);
-  assert.equal((responses[2]?.result as { content: Array<{ text: string }> }).content[0]?.text, "Deleted after signed approval");
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "ping" })}\n`);
+  const pingDeadline = pingStartedAt + 750;
+  while (!responses.some((response) => response.id === 4) && Date.now() < pingDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(
+    responses.some((response) => response.id === 4),
+    "the stdio bridge must answer keepalive pings while a governed wait is active",
+  );
+
+  const waitDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 3) && Date.now() < waitDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const waitResponse = responses.find((response) => response.id === 3);
+  assert.equal((waitResponse?.result as { isError: boolean }).isError, false);
+  assert.equal((waitResponse?.result as { content: Array<{ text: string }> }).content[0]?.text, "Deleted after signed approval");
   assert.equal(statusReads, 2);
 });
 
@@ -75,12 +91,28 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
   const server = createServer(async (request, response) => {
     response.setHeader("content-type", "application/json");
     if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
-      response.end(JSON.stringify({ tools: [{
-        name: "list-drives",
-        description: "List drives",
-        inputSchema: { type: "object" },
-        mcp_info: { server_id: "server-1" },
-      }] }));
+      response.end(JSON.stringify({ tools: [
+        {
+          name: "list-drives",
+          description: "List drives",
+          inputSchema: { type: "object" },
+          mcp_info: { server_id: "server-1" },
+        },
+        {
+          name: "search-onedrive-files",
+          description: "Search files",
+          inputSchema: {
+            type: "object",
+            properties: {
+              driveId: { type: "string" },
+              q: { type: "string" },
+              top: { type: "number" },
+              fetchAllPages: { type: "boolean" },
+            },
+          },
+          mcp_info: { server_id: "server-1" },
+        },
+      ] }));
       return;
     }
     if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
@@ -114,6 +146,18 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
   const deadline = Date.now() + 5_000;
   while (responses.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(responses.length, 2);
+  const advertised = (responses[0]?.result as {
+    tools: Array<{ name: string; description: string; inputSchema: { properties: Record<string, { maximum?: number; const?: string }>; additionalProperties?: boolean } }>;
+  }).tools;
+  const listDrives = advertised.find((tool) => tool.name === "list-drives")!;
+  const searchFiles = advertised.find((tool) => tool.name === "search-onedrive-files")!;
+  assert.equal(listDrives.inputSchema.properties.top?.maximum, 25);
+  assert.equal(listDrives.inputSchema.additionalProperties, false);
+  assert.equal(searchFiles.inputSchema.properties.top?.maximum, 10);
+  assert.equal(searchFiles.inputSchema.properties.select?.const, "id,name,eTag,parentReference");
+  assert.equal("fetchAllPages" in searchFiles.inputSchema.properties, false);
+  assert.equal(searchFiles.inputSchema.additionalProperties, false);
+  assert.match(searchFiles.description, /Do not request all pages/);
   assert.deepEqual(responses[1]?.result, {
     content: [{ type: "text", text: '{"value":[]}' }],
     isError: false,
@@ -190,6 +234,10 @@ test("Claude Desktop cannot choose connector flags and the managed bridge confir
   assert.match(
     ((responses[0]?.result as { tools: Array<{ description: string }> }).tools[0]?.description ?? ""),
     /remote Microsoft 365 action, not a local filesystem action/,
+  );
+  assert.match(
+    ((responses[0]?.result as { tools: Array<{ description: string }> }).tools[0]?.description ?? ""),
+    /list-drives to resolve driveId, then search-onedrive-files or list-folder-files/,
   );
   assert.deepEqual(forwardedArguments, {
     driveId: "drive",

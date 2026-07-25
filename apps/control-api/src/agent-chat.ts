@@ -178,6 +178,7 @@ const object = (value: unknown): Record<string, unknown> => value && typeof valu
   : {};
 
 const nullableText = (value: unknown) => typeof value === "string" && value.length ? value : null;
+const agentTurnTimeoutMs = 15 * 60_000;
 
 const session = (value: unknown): AgentChatSession => {
   const item = object(value);
@@ -285,7 +286,7 @@ export class HttpAgentChatClient implements AgentChatClient {
       method: "POST",
       body: JSON.stringify({ message }),
       signal,
-    }, 5 * 60_000);
+    }, agentTurnTimeoutMs);
     if (!response.body || !response.headers.get("content-type")?.startsWith("application/x-ndjson")) {
       await response.body?.cancel();
       throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid event stream", 502, true);

@@ -54,8 +54,20 @@ maintaining a bespoke chat state machine.
   leaves the conversation in an accurate, recoverable state.
 - Surface stream failures and agent unavailability without losing the
   employee's submitted message or falsely reporting tool completion.
+- Accept up to four bounded attachments per message through the file picker or
+  clipboard paste. Send validated images through each native agent's image
+  input and convert supported text, PDF, and Office documents to bounded,
+  explicitly delimited prompt content inside the workspace.
 - Keep Microsoft 365 access exclusively behind the existing credentialless
   `onecomputer_ms365` bridge and authoritative Control approval flow.
+- Apply one shared agent operating contract to Hermes, Claude, and Codex:
+  agents resolve human-facing names, paths, links, and screenshot values with
+  assigned read/search tools before asking the employee for provider-internal
+  identifiers. Advertise the exact bounded Control argument contract in MCP
+  tool schemas so agents are not invited to make calls policy will reject.
+- Declare model input capabilities in the LiteLLM route registry. Reject image
+  input fail-closed in Chat and in a post-routing LiteLLM callback whenever
+  the selected deployment does not explicitly advertise vision support.
 
 ## Out of scope
 
@@ -67,8 +79,9 @@ maintaining a bespoke chat state machine.
   stopped, durable task queues, multi-device presence, or the final remote
   agent-control architecture. This issue creates a suitable Chat/event
   boundary but does not claim those later capabilities.
-- Voice, arbitrary attachments, cross-agent transcript migration, agent
-  handoff, or a universal representation of every private vendor event.
+- Voice, unbounded or executable attachments, cross-agent transcript
+  migration, agent handoff, or a universal representation of every private
+  vendor event.
 - Compatibility with Issue 009's final-response endpoint, flat
   `{ role, content }` messages, disposable session JSON, or its frontend API.
 
@@ -124,7 +137,7 @@ maintaining a bespoke chat state machine.
       substitution fail safely and visibly.
 - [x] A bounded OneDrive read works through each adapter using the same
       assigned `onecomputer_ms365` MCP surface.
-- [ ] A disposable protected Microsoft 365 write/delete reaches
+- [x] A disposable protected Microsoft 365 write/delete reaches
       `approval_required`, is rendered as waiting in Chat, and executes at
       most once only after the existing signed OpenVTC approval.
 - [ ] Approval denial and expiry are rendered accurately and never appear as a
@@ -132,6 +145,10 @@ maintaining a bespoke chat state machine.
 - [x] Browser state, streams, persisted messages, errors, logs, screenshots,
       and artifacts contain no adapter keys, provider credentials, Microsoft
       tokens, raw approval secrets, or prohibited vendor payloads.
+- [x] File-picker and clipboard image attachments render previews, persist in
+      transcript history, enforce the owned count/size/type limits, and reach
+      the selected native agent. Supported documents are extracted only
+      inside the workspace and are bounded before entering the native prompt.
 - [x] Production builds, full automated tests, stream-contract tests, and
       desktop/mobile visual checks pass after the old Chat path is removed.
 
@@ -181,7 +198,7 @@ repository.
   container projection, fixtures/tests, notices, and this plan.
 - The local Docker stack and one three-agent workspace were already running.
   The workspace was rebuilt and restarted onto
-  `sha256:ecff2323ccb55dae8a801d6a8d74a6e749934e9d8efce04090a30a75f3355001`.
+  `sha256:75994beb4cbbfae8a8515c2a5e95590bef110cb705a77b49e8b95b1441a66b18`.
 - Existing provider credentials were reused from the ignored root `.env`; no
   new key was created or copied into source, browser state, or evidence.
 - Disposable live fixture:
@@ -190,12 +207,12 @@ repository.
 ## Completion record
 
 Implementation is complete and the issue remains in verification for the
-unchecked adverse-case matrix, protected delete, and live denial/expiry cases.
+unchecked adverse-case matrix and live denial/expiry cases.
 Detailed evidence and the deletion inventory are recorded in
 `../evidence/010-ai-sdk-structured-agent-chat.md`.
 
 The full workspace build, Python/shell syntax checks, `git diff --check`, and
-all 151 automated tests pass. Live browser verification passed structured
+all 154 automated tests pass. Live browser verification passed structured
 OneDrive reads for Claude, Codex, and Hermes, persisted reload, per-agent stop,
 persisted cancellation, and post-cancellation recovery without a workspace
 restart. The protected Claude upload reached the authoritative
@@ -204,4 +221,24 @@ and produced the disposable OneDrive file. Because the employee had stopped
 the model turn before deciding, Control now reconciles the later operation
 result into durable Chat history: stale activity closes as `Work stopped` and
 the governed card advances to `Approved action completed`. Protected delete
-proof remains pending; the disposable file still exists.
+also passed live: Hermes resolved and deleted `OC-MVP-DENY.txt`, Control held
+the exact action for signed approval, and the audit recorded one successful
+dispatch. The initial model turn lost continuity because the synchronous
+stdio bridge could not answer Hermes keepalive pings while its governed wait
+was active. The shared bridge now executes tool calls without blocking its
+JSON-RPC input loop, serializes concurrent responses, and allows up to
+15 minutes for the enclosing native-agent turn. A regression requires a ping
+response while a governed wait is still active. After rollout, a separate
+Hermes session called `wait-for-governed-operation` for the completed
+operation and persisted the final answer `Authoritative final result:
+success=true.` with a completed terminal state.
+
+The final shared-agent regression also passed against the live Microsoft 365
+connection: Hermes received the common operating instructions, resolved the
+OneDrive drive itself, searched `OC-MVP-DENY.txt` through the shared MCP
+bridge's bounded schema, and found exactly one item without asking for
+internal IDs or mutating it. The same prompt and bridge are projected to
+Claude and Codex. A disposable request routed to the non-vision
+`onecomputer-glm` alias was rejected by LiteLLM with
+`MODEL_IMAGE_INPUT_UNSUPPORTED` before provider execution; the active
+workspace remained on the vision-capable `onecomputer-openai` alias.

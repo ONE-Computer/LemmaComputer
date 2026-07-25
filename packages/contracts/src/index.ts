@@ -29,6 +29,9 @@ export const modelRouteSchema = z.object({
   alias: z.string().min(1).max(128),
   status: z.enum(["ready", "failed"]),
   fallback: z.literal("none"),
+  capabilities: z.object({
+    vision: z.boolean(),
+  }).strict(),
   budget: z.object({
     limitUsd: z.number().nonnegative(),
     spentUsd: z.number().nonnegative(),
@@ -553,12 +556,46 @@ export const chatTerminalDataSchema = z.object({
   message: z.string().trim().min(1).max(500).optional(),
 }).strict();
 
+export const chatAttachmentMediaTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "application/json",
+  "application/xml",
+  "application/yaml",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "text/xml",
+  "text/yaml",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+] as const;
+export const chatAttachmentMaxFiles = 4;
+export const chatAttachmentMaxBytes = 8 * 1024 * 1024;
+export const chatAttachmentMaxTotalBytes = 16 * 1024 * 1024;
+const chatAttachmentMaxDataUrlLength = Math.ceil(chatAttachmentMaxBytes / 3) * 4 + 128;
+export const chatFilePartSchema = z.object({
+  type: z.literal("file"),
+  mediaType: z.enum(chatAttachmentMediaTypes),
+  filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
+  url: z.string().min(1).max(chatAttachmentMaxDataUrlLength),
+}).strict().superRefine((part, context) => {
+  if (!part.url.startsWith(`data:${part.mediaType};base64,`)) {
+    context.addIssue({ code: "custom", path: ["url"], message: "Attachment must be an inline base64 data URL matching its media type" });
+  }
+});
+
 export const chatUiMessagePartSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("text"),
     text: z.string().max(128_000),
     state: z.enum(["streaming", "done"]).optional(),
   }).strict(),
+  chatFilePartSchema,
   z.object({ type: z.literal("data-progress"), id: chatPartIdSchema, data: chatProgressDataSchema }).strict(),
   z.object({ type: z.literal("data-tool"), id: chatPartIdSchema, data: chatToolDataSchema }).strict(),
   z.object({ type: z.literal("data-approval"), id: chatPartIdSchema, data: chatApprovalDataSchema }).strict(),
@@ -574,15 +611,21 @@ export type ChatUiMessage = z.infer<typeof chatUiMessageSchema>;
 
 export const sendChatTurnSchema = z.object({
   message: chatUiMessageSchema.superRefine((message, context) => {
+    const textParts = message.parts.filter((part) => part.type === "text");
+    const fileParts = message.parts.filter((part) => part.type === "file");
+    const invalidPart = message.parts.some((part) => part.type !== "text" && part.type !== "file");
+    const encodedSize = fileParts.reduce((total, part) => total + part.url.length, 0);
     if (
       message.role !== "user"
       || message.metadata.state !== "completed"
-      || message.parts.length !== 1
-      || message.parts[0]?.type !== "text"
-      || !message.parts[0].text.trim()
-      || message.parts[0].text.length > 16_000
+      || invalidPart
+      || textParts.length > 1
+      || fileParts.length > chatAttachmentMaxFiles
+      || (!textParts[0]?.text.trim() && fileParts.length === 0)
+      || (textParts[0]?.text.length ?? 0) > 16_000
+      || encodedSize > Math.ceil(chatAttachmentMaxTotalBytes / 3) * 4 + (fileParts.length * 128)
     ) {
-      context.addIssue({ code: "custom", message: "A single completed user text message is required" });
+      context.addIssue({ code: "custom", message: "A completed user message with optional bounded attachments is required" });
     }
   }),
 }).strict();

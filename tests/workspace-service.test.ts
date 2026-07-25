@@ -35,6 +35,7 @@ class FakeGateway implements GatewayClient {
     this.lastPolicy = input.policy;
     return { baseUrl: "http://litellm:4000", credential: `sk-${input.workspaceId}`, modelAlias: "onecomputer-assistant", expiresAt: new Date(Date.now() + 60_000).toISOString() };
   }
+  async modelCapabilities() { return { vision: true }; }
   async readiness() { return { models: "ready" as const, tools: "ready" as const, modelRoute: fakeModelRoute }; }
   async test() {
     return {
@@ -53,6 +54,7 @@ const fakeModelRoute = {
   alias: "onecomputer-assistant",
   status: "ready" as const,
   fallback: "none" as const,
+  capabilities: { vision: true },
   budget: { limitUsd: 1, spentUsd: 0.25, remainingUsd: 0.75, duration: "30d" as const, resetsAt: null },
   limits: { requestsPerMinute: 30, tokensPerMinute: 50_000, maxParallelRequests: 4 },
 };

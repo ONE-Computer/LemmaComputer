@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -22,6 +23,7 @@ if BROKER not in {
     raise SystemExit("invalid ONEComputer MCP broker")
 PROTOCOL_VERSION = "2024-11-05"
 TOOLS: dict[str, dict] = {}
+RESPONSE_LOCK = threading.Lock()
 WAIT_TOOL_NAME = "wait-for-governed-operation"
 WRITE_TOOLS = {
     "create-draft-email", "update-mail-message", "delete-mail-message", "move-mail-message",
@@ -32,11 +34,44 @@ WRITE_TOOLS = {
 }
 DELETE_ONEDRIVE_DESCRIPTION = """Delete one Microsoft OneDrive or SharePoint drive item through ONEComputer governance.
 
-This is a remote Microsoft 365 action, not a local filesystem action. Before calling it, get the item's current top-level eTag with get-drive-item (includeHeaders=true and select=id,name,eTag,parentReference). Pass that exact eTag as If-Match. Call this tool directly; do not request Cowork or local-file deletion permission. ONEComputer Control will obtain any required signed approval and this call will wait for the final result."""
+This is a remote Microsoft 365 action, not a local filesystem action. A user-facing filename, link, folder path, or filename visible in an attached screenshot is enough to begin discovery: call list-drives to resolve driveId, then search-onedrive-files or list-folder-files to resolve the exact driveItemId. Do not ask the user for internal drive or item IDs before attempting those assigned discovery tools. If multiple items match, ask the user to disambiguate before deleting anything.
+
+Before calling this tool, get the exact item's current top-level eTag with get-drive-item (includeHeaders=true and select=id,name,eTag,parentReference). Pass that exact eTag as If-Match. Call this tool directly; do not request Cowork or local-file deletion permission. ONEComputer Control will obtain any required signed approval and this call will wait for the final result."""
 DELETE_ONEDRIVE_MISSING_ETAG = """The remote OneDrive deletion was not submitted because If-Match is missing. Call get-drive-item for this driveId and driveItemId with includeHeaders=true and select=id,name,eTag,parentReference, then call delete-onedrive-file again with the exact top-level eTag as If-Match. Do not use Cowork or local-filesystem deletion permission; ONEComputer handles approval when this remote tool is called."""
 CALENDAR_VIEW_DESCRIPTION = """Get chronological event occurrences from the signed-in user's default Outlook calendar within an explicit time window.
 
 Use this tool for requests such as next, upcoming, today, this week, or events between two dates. For upcoming events, set startDateTime to the current time and endDateTime to a bounded future time in ISO 8601 format. Do not use list-calendar-events for upcoming events because that tool returns event series without an implicit from-now window."""
+LIST_DRIVES_DESCRIPTION = """List the signed-in user's available OneDrive and SharePoint drives.
+
+Use this first when a OneDrive request supplies a human-facing filename, link, or path but no driveId. Continue with search-onedrive-files or list-folder-files; do not ask the user to provide an internal drive ID before attempting this discovery."""
+SEARCH_ONEDRIVE_DESCRIPTION = """Search one OneDrive or SharePoint drive for items matching a human-facing filename.
+
+If driveId is unknown, call list-drives first. Search using the filename or other value the user supplied, including a filename visible in an attached screenshot. Use top no greater than 10 and the exact select value id,name,eTag,parentReference. Do not request all pages. Treat multiple matches as ambiguous and ask the user to choose before a mutation."""
+
+LIST_DRIVES_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "top": {"type": "integer", "minimum": 1, "maximum": 25},
+        "skip": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "select": {"type": "string", "minLength": 1, "maxLength": 256},
+        "filter": {"type": "string", "minLength": 1, "maxLength": 512},
+        "search": {"type": "string", "minLength": 1, "maxLength": 256},
+        "orderby": {"type": "string", "minLength": 1, "maxLength": 128},
+        "count": {"type": "boolean"},
+    },
+    "additionalProperties": False,
+}
+SEARCH_ONEDRIVE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "driveId": {"type": "string", "minLength": 1, "maxLength": 512},
+        "q": {"type": "string", "minLength": 1, "maxLength": 128},
+        "select": {"type": "string", "const": "id,name,eTag,parentReference"},
+        "top": {"type": "integer", "minimum": 1, "maximum": 10},
+    },
+    "required": ["driveId", "q"],
+    "additionalProperties": False,
+}
 
 
 def request_json(path: str, body: dict | None = None) -> dict:
@@ -111,6 +146,10 @@ def discover_tools() -> list[dict]:
             continue
         TOOLS[raw["name"]] = raw
         input_schema = raw.get("inputSchema", raw.get("input_schema", {"type": "object"}))
+        if raw["name"] == "list-drives":
+            input_schema = LIST_DRIVES_INPUT_SCHEMA
+        elif raw["name"] == "search-onedrive-files":
+            input_schema = SEARCH_ONEDRIVE_INPUT_SCHEMA
         if raw["name"] in WRITE_TOOLS and isinstance(input_schema, dict):
             # Connector execution flags are Control-owned. Do not advertise
             # them as agent inputs; Control adds them only after approval.
@@ -129,7 +168,13 @@ def discover_tools() -> list[dict]:
             input_schema["additionalProperties"] = False
         result.append({
             "name": raw["name"],
-            "description": DELETE_ONEDRIVE_DESCRIPTION if raw["name"] == "delete-onedrive-file" else CALENDAR_VIEW_DESCRIPTION if raw["name"] == "get-calendar-view" else raw.get("description", "Microsoft 365 tool governed by ONEComputer policy."),
+            "description": (
+                DELETE_ONEDRIVE_DESCRIPTION if raw["name"] == "delete-onedrive-file"
+                else CALENDAR_VIEW_DESCRIPTION if raw["name"] == "get-calendar-view"
+                else LIST_DRIVES_DESCRIPTION if raw["name"] == "list-drives"
+                else SEARCH_ONEDRIVE_DESCRIPTION if raw["name"] == "search-onedrive-files"
+                else raw.get("description", "Microsoft 365 tool governed by ONEComputer policy.")
+            ),
             "inputSchema": input_schema,
         })
     TOOLS[WAIT_TOOL_NAME] = {"name": WAIT_TOOL_NAME, "onecomputer_local": True}
@@ -254,7 +299,19 @@ def error_result(message: str, identifier: str | None = None, state: str | None 
 def respond(identifier: object, result: dict | None = None, error: dict | None = None) -> None:
     document = {"jsonrpc": "2.0", "id": identifier}
     document["result" if error is None else "error"] = result if error is None else error
-    print(json.dumps(document, separators=(",", ":")), flush=True)
+    with RESPONSE_LOCK:
+        print(json.dumps(document, separators=(",", ":")), flush=True)
+
+
+def execute_tool_call(identifier: object, name: str, arguments: dict) -> None:
+    try:
+        respond(identifier, call_tool(name, arguments))
+    except Exception as error:  # Tool failures must not terminate the managed connector.
+        print(f"onecomputer-mcp: {type(error).__name__}", file=sys.stderr, flush=True)
+        respond(identifier, error={
+            "code": -32603,
+            "message": "The governed Microsoft 365 connector is unavailable.",
+        })
 
 
 def handle(message: dict) -> None:
@@ -280,7 +337,16 @@ def handle(message: dict) -> None:
             arguments = params.get("arguments", {})
             if not isinstance(name, str) or not isinstance(arguments, dict):
                 raise ValueError("invalid tool call")
-            respond(identifier, call_tool(name, arguments))
+            # A governed operation may wait for a human decision. Keep the
+            # JSON-RPC input loop available for MCP pings while that call is
+            # pending; otherwise Hermes declares the healthy stdio bridge dead
+            # and orphans the operation before its approved result can return.
+            threading.Thread(
+                target=execute_tool_call,
+                args=(identifier, name, arguments),
+                daemon=True,
+                name=f"onecomputer-mcp-call-{identifier}",
+            ).start()
         else:
             respond(identifier, error={"code": -32601, "message": "Method not found"})
     except Exception as error:  # MCP must report failures without terminating the managed connector.

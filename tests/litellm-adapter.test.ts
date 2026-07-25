@@ -391,6 +391,15 @@ test("a pre-existing key with mismatched identity is replaced rather than update
       }));
       return;
     }
+    if (request.url === "/model/info") {
+      response.end(JSON.stringify({
+        data: [{
+          model_name: "onecomputer-assistant",
+          model_info: { supports_vision: true },
+        }],
+      }));
+      return;
+    }
     response.end(JSON.stringify({ ok: true }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -432,6 +441,15 @@ test("availability check exposes safe route usage without sending a prompt", asy
       response.end(JSON.stringify({ tools: [{ name: "search_files", description: "Search assigned files" }] }));
       return;
     }
+    if (request.url === "/model/info") {
+      response.end(JSON.stringify({
+        data: [{
+          model_name: "onecomputer-assistant",
+          model_info: { supports_vision: true },
+        }],
+      }));
+      return;
+    }
     if (request.url?.startsWith("/key/list?")) {
       response.end(JSON.stringify({
         keys: [{
@@ -461,6 +479,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
     assert.equal(result.availability, "ready");
     assert.equal(result.model, "onecomputer-assistant");
     assert.equal(result.modelRoute.fallback, "none");
+    assert.equal(result.modelRoute.capabilities.vision, true);
     assert.equal(result.modelRoute.budget.remainingUsd, 0.875);
     assert.equal(result.modelRoute.limits.tokensPerMinute, 500_000);
     assert.ok(!requests.includes("/v1/chat/completions"));
