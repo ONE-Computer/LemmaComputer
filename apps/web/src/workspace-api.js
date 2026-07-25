@@ -65,6 +65,13 @@ export const connectionApi = {
   microsoft365: () => request("/api/v1/connections/microsoft-365"),
   microsoft365AuthorizeUrl: "/api/v1/connections/microsoft-365/authorize",
   disconnectMicrosoft365: () => request("/api/v1/connections/microsoft-365", mutation("DELETE")),
+  credentials: () => request("/api/v1/credentials", { cache: "no-store" }),
+  createTelegramCredential: (botToken) => request("/api/v1/credentials/telegram", mutation("POST", { botToken })),
+  rotateTelegramCredential: (credentialId, botToken) => request(`/api/v1/credentials/${encodeURIComponent(credentialId)}/telegram`, mutation("PUT", { botToken })),
+  deleteCredential: (credentialId) => request(`/api/v1/credentials/${encodeURIComponent(credentialId)}`, mutation("DELETE")),
+  telegram: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/telegram`, { cache: "no-store" }),
+  saveTelegram: (workspaceId, configuration) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/telegram`, mutation("PUT", configuration)),
+  disconnectTelegram: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/telegram`, mutation("DELETE")),
 };
 
 export const approvalApi = {

@@ -2713,6 +2713,152 @@ textarea:focus-visible,
 .connection-quiet-button:hover { color: var(--navy); text-decoration: underline; }
 .connection-quiet-button:disabled { cursor: default; opacity: 0.55; }
 
+.telegram-overview-card { grid-template-columns: minmax(0, 1fr); }
+
+.telegram-connection-form {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+  padding: 24px;
+  border: 1px solid #d5dce5;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.telegram-connection-form > div:first-child p,
+.telegram-connection-form > div:first-child h2,
+.telegram-connection-form > div:first-child span { margin: 0; }
+.telegram-connection-form > div:first-child p { color: #5e6874; font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; }
+.telegram-connection-form > div:first-child h2 { margin-top: 6px; color: #142135; font-size: 20px; }
+.telegram-connection-form > div:first-child span { display: block; margin-top: 7px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+
+.telegram-connection-form > label { display: grid; gap: 7px; color: #304057; font-size: 13px; font-weight: 650; }
+.telegram-connection-form input[type="password"],
+.telegram-connection-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #bcc8d5;
+  border-radius: 7px;
+  background: #fff;
+  color: #182537;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+}
+.telegram-connection-form input[type="password"] { min-height: 40px; padding: 9px 11px; }
+.telegram-connection-form textarea { min-height: 82px; padding: 10px 11px; resize: vertical; }
+.telegram-connection-form input[type="password"]:focus,
+.telegram-connection-form textarea:focus { outline: 3px solid #d6e7f8; border-color: #537ca8; }
+.telegram-connection-form small { color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.45; }
+.telegram-connection-form .select-menu { width: 100%; }
+.telegram-connection-form .select-menu-trigger { width: 100%; justify-content: space-between; }
+.telegram-connection-actions { justify-content: start; }
+.telegram-channel-section .connection-privacy-note { margin-top: 16px; }
+.telegram-inline-credential {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+.telegram-inline-credential label { display: grid; gap: 7px; color: #304057; font-size: 13px; font-weight: 650; }
+.telegram-inline-credential .secondary-button { min-height: 40px; }
+
+.telegram-switch-option {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px !important;
+  padding: 14px;
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  background: #f9fbfd;
+}
+.telegram-switch-option input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: #245f9a; }
+.telegram-switch-option > span { display: grid; gap: 4px; }
+.telegram-switch-option strong { color: #25354a; font-size: 13px; }
+.telegram-switch-option code { font-size: 11px; }
+
+.telegram-empty-workspace {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #ead6a8;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #5e4a1f;
+}
+.telegram-empty-workspace svg { flex: 0 0 auto; width: 20px; height: 20px; }
+.telegram-empty-workspace span { display: grid !important; gap: 3px; margin: 0 !important; color: inherit !important; font-size: 13px !important; }
+
+.credentials-screen { max-width: 1040px; }
+.credential-create-card,
+.credential-inventory {
+  margin-top: 22px;
+  border: 1px solid #d5dce5;
+  border-radius: 12px;
+  background: #fff;
+}
+.credential-create-card {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(260px, 0.8fr) auto;
+  align-items: end;
+  gap: 22px;
+  padding: 24px;
+}
+.credential-create-card p,
+.credential-create-card h2,
+.credential-create-card span { margin: 0; }
+.credential-create-card p,
+.credential-inventory-heading p { color: #5e6874; font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; }
+.credential-create-card h2,
+.credential-inventory-heading h2 { margin: 5px 0 0; color: #142135; font-size: 20px; }
+.credential-create-card > div > span { display: block; margin-top: 7px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.credential-create-card label { display: grid; gap: 7px; color: #304057; font-size: 13px; font-weight: 650; }
+.credential-create-card input,
+.credentials-screen .modal-field input {
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid #bcc8d5;
+  border-radius: 7px;
+  padding: 9px 11px;
+  font: inherit;
+}
+.credential-inventory { overflow: hidden; }
+.credential-inventory-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 22px;
+  border-bottom: 1px solid #e2e7ed;
+}
+.credential-inventory-heading p,
+.credential-inventory-heading h2 { margin-left: 0; margin-right: 0; }
+.credential-inventory-heading > span {
+  min-width: 28px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #edf3f8;
+  color: #294d73;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+.credential-inventory article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 15px;
+  padding: 18px 22px;
+  border-bottom: 1px solid #edf0f4;
+}
+.credential-inventory article:last-child { border-bottom: 0; }
+.credential-copy { display: grid; gap: 3px; min-width: 0; }
+.credential-copy strong { color: #1c2c40; }
+.credential-copy small,
+.credential-copy span { color: var(--muted); font-size: 12px; }
+.credential-actions { display: flex; align-items: center; gap: 12px; }
+.credential-empty { margin: 0; padding: 26px 22px; color: var(--muted); }
+
 .connector-back-button {
   display: inline-flex;
   align-items: center;
@@ -3952,6 +4098,11 @@ textarea:focus-visible,
   .connector-detail-header > .connection-status { grid-column: 2; width: fit-content; }
   .connector-detail-header h1 { font-size: 28px; }
   .connector-overview-card { grid-template-columns: 1fr; }
+  .credential-create-card,
+  .credential-inventory article,
+  .telegram-inline-credential { grid-template-columns: 1fr; }
+  .credential-actions { align-items: stretch; flex-direction: column; }
+  .credential-actions .secondary-button { width: 100%; }
 }
 
 @media (max-width: 760px) {

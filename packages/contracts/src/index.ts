@@ -630,6 +630,90 @@ export const sendChatTurnSchema = z.object({
   }),
 }).strict();
 
+export const telegramUserIdSchema = z.string().regex(/^\d{1,20}$/);
+export const telegramConnectionStateSchema = z.enum(["connected", "not_configured"]);
+export const telegramCredentialKindSchema = z.literal("telegram_bot_token");
+export const saveTelegramCredentialSchema = z.object({
+  botToken: z.string().trim().min(20).max(256),
+}).strict();
+export const telegramCredentialStatusSchema = z.object({
+  id: z.uuid(),
+  kind: telegramCredentialKindSchema,
+  displayName: z.string().trim().min(1).max(100),
+  botUsername: z.string().regex(/^[A-Za-z0-9_]{5,32}$/).nullable(),
+  version: z.number().int().positive(),
+  workspaceId: z.uuid().nullable(),
+  connectionId: z.uuid().nullable(),
+  updatedAt: z.iso.datetime(),
+}).strict();
+export const telegramCredentialListSchema = z.object({
+  credentials: z.array(telegramCredentialStatusSchema),
+}).strict();
+export type TelegramCredentialStatus = z.infer<typeof telegramCredentialStatusSchema>;
+export const saveTelegramChannelConnectionSchema = z.object({
+  workspaceId: z.uuid(),
+  credentialId: z.uuid(),
+  allowedUserIds: z.array(telegramUserIdSchema).min(1).max(20),
+  defaultAgentId: chatAgentCatalogIdSchema,
+  allowAgentSwitch: z.boolean().default(false),
+}).strict();
+export const telegramChannelConnectionStatusSchema = z.object({
+  state: telegramConnectionStateSchema,
+  connectionId: z.uuid().nullable(),
+  workspaceId: z.uuid().nullable(),
+  credentialId: z.uuid().nullable(),
+  allowedUserIds: z.array(telegramUserIdSchema).max(20),
+  allowedUserCount: z.number().int().nonnegative(),
+  defaultAgentId: chatAgentCatalogIdSchema.nullable(),
+  allowAgentSwitch: z.boolean(),
+  botUsername: z.string().regex(/^[A-Za-z0-9_]{5,32}$/).nullable(),
+  tokenVersion: z.number().int().positive().nullable(),
+  updatedAt: z.iso.datetime().nullable(),
+}).strict();
+export type TelegramChannelConnectionStatus = z.infer<typeof telegramChannelConnectionStatusSchema>;
+
+export const channelBrokerIdentitySchema = identityContextSchema.pick({
+  tenantId: true,
+  subjectId: true,
+}).extend({
+  audience: z.literal("onecomputer-control").default("onecomputer-control"),
+});
+export const channelBrokerSaveConnectionSchema = saveTelegramChannelConnectionSchema.extend({
+  identity: channelBrokerIdentitySchema,
+}).strict();
+export const channelBrokerCredentialOwnerSchema = z.object({
+  identity: channelBrokerIdentitySchema,
+  credentialId: z.uuid(),
+}).strict();
+export const channelBrokerSaveCredentialSchema = saveTelegramCredentialSchema.extend({
+  identity: channelBrokerIdentitySchema,
+  credentialId: z.uuid().optional(),
+}).strict();
+export const channelBrokerOwnerSchema = z.object({
+  identity: channelBrokerIdentitySchema,
+  workspaceId: z.uuid().optional(),
+}).strict();
+export const channelRouteSchema = z.object({
+  connectionId: z.uuid(),
+  identity: channelBrokerIdentitySchema,
+  workspaceId: z.uuid(),
+  agentCatalogId: chatAgentCatalogIdSchema,
+  externalSenderId: telegramUserIdSchema,
+}).strict();
+export const channelTurnRequestSchema = channelRouteSchema.extend({
+  updateId: z.string().regex(/^\d{1,20}$/),
+  sessionId: chatSessionIdSchema.optional(),
+  text: z.string().trim().min(1).max(4_096),
+}).strict();
+export const channelTurnResponseSchema = z.object({
+  sessionId: chatSessionIdSchema,
+  text: z.string().max(16_000),
+  notices: z.array(z.string().trim().min(1).max(500)).max(16),
+}).strict();
+export type ChannelRoute = z.infer<typeof channelRouteSchema>;
+export type ChannelTurnRequest = z.infer<typeof channelTurnRequestSchema>;
+export type ChannelTurnResponse = z.infer<typeof channelTurnResponseSchema>;
+
 const agentChatEventBaseSchema = z.object({
   version: z.literal(1),
   sequence: z.number().int().nonnegative().max(100_000),
