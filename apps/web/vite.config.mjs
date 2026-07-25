@@ -8,7 +8,7 @@ export default defineConfig({
   },
   server: {
     host: "0.0.0.0",
-    allowedHosts: ["terminal.local", "nonidealistic-fulgurant-eneida.ngrok-free.dev"],
+    allowedHosts: ["terminal.local", "web"],
     warmup: {
       clientFiles: ["./src/main.jsx"],
     },

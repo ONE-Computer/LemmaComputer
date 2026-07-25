@@ -13,6 +13,7 @@
     "@onecomputer/egress-policy": "*",
     "@onecomputer/litellm-adapter": "*",
     "@onecomputer/policy-integrity": "*",
+    "@onecomputer/workspace-ingress-auth": "*",
     "@onecomputer/workspace-store": "*",
     "ai": "7.0.37",
     "fastify": "5.10.0",

@@ -158,7 +158,7 @@ RUN chmod 0755 \
       /usr/local/share/onecomputer/applications/onecomputer-hermes-desktop.desktop \
     && chmod 0644 /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js /opt/firefox/distribution/policies.json /etc/opt/chrome/policies/managed/onecomputer.json \
     && grep -q 'dist/style.bundle.js' /usr/share/kasmvnc/www/index.html \
-    && printf '%s\n' '<script src="/app/onecomputer-kasm-clipboard.js"></script>' >> /usr/share/kasmvnc/www/index.html \
+    && printf '%s\n' '<script src="app/onecomputer-kasm-clipboard.js"></script>' >> /usr/share/kasmvnc/www/index.html \
     && chown -R 1000:1000 /home/kasm-default-profile/Desktop /home/kasm-default-profile/.config
 
 HEALTHCHECK --interval=5s --timeout=2s --start-period=15s --retries=12 \

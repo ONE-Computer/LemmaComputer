@@ -5,6 +5,7 @@ import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequest
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { Microsoft365ConnectionService } from "./connections.js";
@@ -139,6 +140,10 @@ const envSchema = z.object({
   ENTRA_CLIENT_ID: z.string().min(1),
   ENTRA_CLIENT_SECRET: z.string().min(1),
   SESSION_SECRET: z.string().min(32),
+  WORKSPACE_INGRESS_PUBLIC_URL: optionalEnvString(),
+  WORKSPACE_INGRESS_SECRET: optionalEnvString(32),
+  WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(300),
+  WORKSPACE_INGRESS_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
   EGRESS_GRANT_SECRET: z.string().min(32).optional(),
   AGENT_CHAT_SECRET: z.string().min(32),
   CHANNEL_BROKER_URL: optionalEnvString(),
@@ -179,6 +184,10 @@ export function createControlServer(
     agentChatClient?: AgentChatClient;
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
+    workspaceIngress?: {
+      publicUrl: string;
+      authority: WorkspaceIngressAuthority;
+    };
   } = {},
 ) {
   const testRuntimePolicy: RuntimePolicy = {
@@ -210,7 +219,7 @@ export function createControlServer(
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
     issue: (identity, workspaceId, policy) => agentBridgeAuthority.issue(identity, workspaceId, policy),
-  }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority, agentChatAuthority);
+  }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority, agentChatAuthority, security.workspaceIngress);
   const executor: GovernedToolExecutor = gateway?.executeGovernedTool
     ? { executeGovernedTool: (input) => gateway.executeGovernedTool!(input) }
     : { executeGovernedTool: async () => { throw new OneComputerError("GATEWAY_NOT_CONFIGURED", "The governed tool gateway is not configured", 503, true); } };
@@ -1168,6 +1177,19 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     },
     env.POLICY_BUNDLE_TTL_SECONDS,
   );
+  if (Boolean(env.WORKSPACE_INGRESS_PUBLIC_URL) !== Boolean(env.WORKSPACE_INGRESS_SECRET)) {
+    throw new Error("WORKSPACE_INGRESS_PUBLIC_URL and WORKSPACE_INGRESS_SECRET must be configured together");
+  }
+  const workspaceIngress = env.WORKSPACE_INGRESS_PUBLIC_URL && env.WORKSPACE_INGRESS_SECRET
+    ? {
+        publicUrl: env.WORKSPACE_INGRESS_PUBLIC_URL,
+        authority: new WorkspaceIngressAuthority(
+          env.WORKSPACE_INGRESS_SECRET,
+          env.WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS,
+          env.WORKSPACE_INGRESS_SESSION_TTL_SECONDS,
+        ),
+      }
+    : undefined;
   const app = createControlServer(
     store,
     new HttpControllerClient(env.CONTROLLER_URL, env.CONTROLLER_INTERNAL_TOKEN),
@@ -1195,6 +1217,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       agentChatSecret: env.AGENT_CHAT_SECRET,
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
+      workspaceIngress,
     },
   );
   const pushRetryTimer = pushProvider && openVtc

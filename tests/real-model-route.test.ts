@@ -77,7 +77,7 @@ test("the workspace image enforces bounded native text clipboard without content
   assert.match(dockerfile, /COPY .* \/usr\/share\/kasmvnc\/www\/app\/onecomputer-kasm-clipboard\.js/);
   assert.match(dockerfile, /apt-get install -y --no-install-recommends mousepad zstd/);
   assert.match(dockerfile, /chmod 0644 \/usr\/share\/kasmvnc\/www\/app\/onecomputer-kasm-clipboard\.js/);
-  assert.match(dockerfile, /<script src="\/app\/onecomputer-kasm-clipboard\.js">/);
+  assert.match(dockerfile, /<script src="app\/onecomputer-kasm-clipboard\.js">/);
   assert.match(entrypoint, /ONECOMPUTER_CLIPBOARD_MAX_BYTES:=65536/);
   assert.match(entrypoint, /allow_mimetypes:\s+- text\/plain/);
   assert.match(entrypoint, /server_to_client:\s+enabled: \{workspace_to_local\}\s+size: \{max_bytes\}/);

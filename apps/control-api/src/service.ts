@@ -15,8 +15,20 @@ import {
 import { deriveEgressProxySecret, issueEgressProxyGrant } from "@onecomputer/egress-policy";
 import type { GatewayClient, GatewayGrant, GatewayReadiness } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner, PolicyVerificationError, verifySignedPolicyBundle, type VerifiedPolicyBundle } from "@onecomputer/policy-integrity";
+import {
+  WorkspaceIngressAuthority,
+  workspaceIngressAccessParameter,
+} from "@onecomputer/workspace-ingress-auth";
 import type { WorkspaceRecord, WorkspaceStore } from "@onecomputer/workspace-store";
 import { AgentChatAuthority, type AgentChatAccess } from "./agent-chat.js";
+
+export type ControllerLaunch = Launch & {
+  ingressTarget?: {
+    protocol: "http" | "https";
+    host: string;
+    port: number;
+  };
+};
 
 export interface ControllerClient {
   create(input: {
@@ -31,7 +43,7 @@ export interface ControllerClient {
     egressProxy?: EgressProxyGrant;
   }): Promise<Sandbox>;
   status(providerId: string): Promise<Sandbox>;
-  open(providerId: string): Promise<Launch>;
+  open(providerId: string): Promise<ControllerLaunch>;
   destroy(providerId: string): Promise<void>;
   purgeWorkspace(workspaceId: string): Promise<void>;
 }
@@ -189,6 +201,10 @@ export class WorkspaceService {
     private readonly egressProxyAuthority?: EgressProxyGrantAuthority,
     private readonly policyBundleAuthority?: PolicyBundleAuthority,
     private readonly agentChatAuthority?: AgentChatAuthority,
+    private readonly workspaceIngress?: {
+      publicUrl: string;
+      authority: WorkspaceIngressAuthority;
+    },
   ) {}
 
   private authorizePolicy(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy) {
@@ -352,9 +368,29 @@ export class WorkspaceService {
     if (!record.providerId || !["ready", "open"].includes(record.state)) throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not ready to open", 409, true);
     const authorized = this.authorizePolicy(identity, record.id, policy);
     await this.ensureAgentGrants(identity, record.id, authorized?.payload.policy ?? policy);
-    const launch = await this.controller.open(record.providerId);
+    const controllerLaunch = await this.controller.open(record.providerId);
+    const launch = this.publicLaunch(identity, record.id, controllerLaunch);
     const updated = await this.store.update(record.id, { state: "open", failureCode: null });
     return { workspace: await this.view(updated, policy, authorized), launch };
+  }
+
+  private publicLaunch(identity: IdentityContext, workspaceId: string, launch: ControllerLaunch): Launch {
+    const { ingressTarget, ...publicLaunch } = launch;
+    if (!ingressTarget || !this.workspaceIngress) return publicLaunch;
+    const issued = this.workspaceIngress.authority.issueLaunch({
+      identity,
+      workspaceId,
+      target: ingressTarget,
+    });
+    const controllerUrl = new URL(launch.launchUrl);
+    const ingressUrl = new URL(`/workspaces/${workspaceId}/`, this.workspaceIngress.publicUrl);
+    for (const [name, value] of controllerUrl.searchParams) ingressUrl.searchParams.append(name, value);
+    ingressUrl.searchParams.set(workspaceIngressAccessParameter, issued.token);
+    return {
+      ...publicLaunch,
+      launchUrl: ingressUrl.toString(),
+      expiresAt: issued.expiresAt,
+    };
   }
 
   async restart(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string, correlationId: string) {
