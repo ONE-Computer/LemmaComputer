@@ -77,11 +77,14 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
         State: { Running: true, ExitCode: 0 },
         Config: {
           Labels: {
+            "com.onecomputer.workspace-id": "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
             "com.onecomputer.workspace-network": "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
             "com.onecomputer.control-attached": "true",
+            "com.onecomputer.desktop-port": "16920",
           },
           Env: ["ONECOMPUTER_AGENT_BRIDGE_TOKEN=scoped-agent-bridge-token"],
         },
+        Name: "/onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
       }));
       return;
     }
@@ -269,6 +272,12 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     await adapter.status("sandbox-id");
     assert.equal(requests.filter((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "onecomputer-litellm").length, 1);
     assert.equal(requests.filter((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "onecomputer-control-api").length, 2);
+    const launch = await adapter.open("sandbox-id");
+    assert.deepEqual(launch.ingressTarget, {
+      protocol: "https",
+      host: "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
+      port: 16_920,
+    });
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
     assert.ok(requests.some((item) => item.method === "DELETE" && item.path === `/volumes/${workspaceVolume}?force=true`));
   } finally {

@@ -17,10 +17,18 @@ import {
 export interface SandboxAdapter {
   create(input: SandboxCreateInput): Promise<Sandbox>;
   status(providerId: string): Promise<Sandbox>;
-  open(providerId: string): Promise<Launch>;
+  open(providerId: string): Promise<SandboxLaunch>;
   destroy(providerId: string): Promise<void>;
   purgeWorkspace(workspaceId: string): Promise<void>;
 }
+
+export type SandboxLaunch = Launch & {
+  ingressTarget?: {
+    protocol: "http" | "https";
+    host: string;
+    port: number;
+  };
+};
 
 export type SandboxCreateInput = {
   workspaceId: string;
@@ -196,7 +204,7 @@ export class KasmDeveloperApiAdapter implements SandboxAdapter {
     return { providerId, state, failureCode: state === "failed" ? "KASM_SESSION_FAILED" : null };
   }
 
-  async open(providerId: string): Promise<Launch> {
+  async open(providerId: string): Promise<SandboxLaunch> {
     const response = await this.call("get_kasm_status", { kasm_id: providerId, user_id: this.config.userId });
     const kasm = asObject(response.kasm ?? response);
     if (mapKasmState(textValue(kasm, "operational_status", "status")) !== "ready") {
@@ -441,12 +449,20 @@ export class KasmLocalAdapter implements SandboxAdapter {
     }
   }
 
-  async open(providerId: string): Promise<Launch> {
+  async open(providerId: string): Promise<SandboxLaunch> {
     const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
     if (asObject(inspected.State).Running !== true) throw new OneComputerError("WORKSPACE_NOT_READY", "The Kasm desktop is not running", 409, true);
     const labels = asObject(asObject(inspected.Config).Labels);
+    const sandboxName = textValue(inspected, "Name")?.replace(/^\//, "");
+    const workspaceId = labels["com.onecomputer.workspace-id"];
     const port = Number(labels["com.onecomputer.desktop-port"]);
     if (!Number.isInteger(port) || port <= 0) throw new OneComputerError("KASM_INVALID_STATE", "The Kasm desktop has no assigned session port", 502);
+    if (
+      typeof sandboxName !== "string"
+      || !/^onecomputer-sandbox-[0-9a-f-]{36}$/i.test(sandboxName)
+      || typeof workspaceId !== "string"
+      || !/^[0-9a-f-]{36}$/i.test(workspaceId)
+    ) throw new OneComputerError("KASM_INVALID_STATE", "The Kasm desktop has no routable workspace identity", 502);
     const defaultPolicy = defaultClipboardPolicy;
     const policy = {
       enabled: labels["com.onecomputer.clipboard-enabled"] === undefined
@@ -460,7 +476,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
         : labels["com.onecomputer.clipboard-workspace-to-local"] === "true",
       maxBytes: Number(labels["com.onecomputer.clipboard-max-bytes"] ?? defaultPolicy.maxBytes),
     };
-    return buildKasmClipboardLaunch(`https://${this.config.publicHost ?? "127.0.0.1"}:${port}/`, policy);
+    return {
+      ...buildKasmClipboardLaunch(`https://${this.config.publicHost ?? "127.0.0.1"}:${port}/`, policy),
+      ingressTarget: {
+        protocol: "https",
+        host: `${sandboxName}-relay`,
+        port,
+      },
+    };
   }
 
   async destroy(providerId: string) {

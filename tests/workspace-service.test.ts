@@ -4,6 +4,7 @@ import type { IdentityContext, Launch, RuntimePolicy, Sandbox, SignedPolicyBundl
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import type { GatewayClient, GatewayGrant } from "@onecomputer/litellm-adapter";
 import { PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "../apps/control-api/src/service.js";
+import { WorkspaceIngressAuthority, workspaceIngressAccessParameter } from "@onecomputer/workspace-ingress-auth";
 import { policyFixture } from "./policy-fixture.js";
 
 class FakeController implements ControllerClient {
@@ -104,6 +105,46 @@ test("workspace identifiers do not confer cross-subject access", async () => {
     service.open({ tenantId: "acme", subjectId: "mallory", audience: "onecomputer-control" }, policy, workspace.id),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "WORKSPACE_NOT_FOUND"),
   );
+});
+
+test("local controller targets become signed same-origin workspace launch URLs", async () => {
+  const controller = new FakeController();
+  controller.open = async () => ({
+    launchUrl: "https://127.0.0.1:16920/?clipboard_up=true&clipboard_down=true",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    ingressTarget: {
+      protocol: "https",
+      host: "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
+      port: 16_920,
+    },
+  });
+  const authority = new WorkspaceIngressAuthority("workspace-service-ingress-secret-at-least-32-characters");
+  const service = new WorkspaceService(
+    new MemoryWorkspaceStore(),
+    controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      publicUrl: "https://onecomputer.example.test",
+      authority,
+    },
+  );
+  const workspace = await service.create(alex, policy, "personal", "ingress-launch-001", "correlation-ingress");
+  const result = await service.open(alex, policy, workspace.id);
+  const launch = new URL(result.launch.launchUrl);
+
+  assert.equal(launch.origin, "https://onecomputer.example.test");
+  assert.equal(launch.pathname, `/workspaces/${workspace.id}/`);
+  assert.equal(launch.searchParams.get("clipboard_up"), "true");
+  assert.equal(launch.searchParams.get("clipboard_down"), "true");
+  const token = launch.searchParams.get(workspaceIngressAccessParameter);
+  assert.ok(token);
+  const exchanged = authority.exchangeLaunch(token, workspace.id);
+  assert.equal(exchanged?.claims.host, "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay");
+  assert.equal(exchanged?.claims.port, 16_920);
 });
 
 test("sandbox inventory projects each sandbox using its own configuration policy", async () => {

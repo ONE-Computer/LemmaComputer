@@ -1,0 +1,14 @@
+{
+  "name": "@onecomputer/workspace-ingress-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "build": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@onecomputer/workspace-ingress-auth": "*",
+    "zod": "4.4.3"
+  }
+}
