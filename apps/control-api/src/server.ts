@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
+import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { assignEgressSecurityGroupSchema, OneComputerError, createDeleteFileOperationSchema, createHermesChatSessionSchema, createWorkspaceSchema, fixtureApprovalSchema, hermesChatSessionIdSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, sandboxApplicationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendHermesChatMessageSchema, type AgentCatalogId, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId } from "@onecomputer/contracts";
+import { assignEgressSecurityGroupSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, sandboxApplicationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, type AgentCatalogId, type ChatUiMessage, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { Ed25519DidKeySigner } from "@onecomputer/openvtc-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
@@ -14,7 +15,14 @@ import { McpPolicyService, m365CapabilityDefinitions } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
 import { AgentBridgeAuthority, type AgentBridgeIdentity } from "./agent-bridge.js";
 import { COMPANION_PUSH_PROTOCOL, WebPushProvider } from "./web-push.js";
-import { HermesApiAuthority, HttpHermesChatClient, type HermesChatClient } from "./hermes-chat.js";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
+import {
+  AgentChatAuthority,
+  AgentUiStreamMapper,
+  HttpAgentChatClient,
+  reconcileChatMessages,
+  type AgentChatClient,
+} from "./agent-chat.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -84,9 +92,11 @@ const defaultApplicationIds = (document: Record<string, unknown>, assigned = ass
 const assignedAgentIds = (document: Record<string, unknown>): AgentCatalogId[] => {
   const configured = Array.isArray(document.agents)
     ? document.agents.filter((item): item is AgentCatalogId => ownedAgentCatalog.some((agent) => agent.id === item))
-    : document.agentProfile === "hermes-claw-managed-v1"
-      ? ["hermes-claw"] as AgentCatalogId[]
-      : ["claude-desktop"] as AgentCatalogId[];
+    : [{
+      "claude-cli-managed-v1": "claude-cli",
+      "codex-cli-managed-v1": "codex-cli",
+      "hermes-claw-managed-v1": "hermes-claw",
+    }[String(document.agentProfile)] ?? "claude-desktop"] as AgentCatalogId[];
   return configured.length ? configured : ["claude-desktop"];
 };
 
@@ -127,7 +137,7 @@ const envSchema = z.object({
   ENTRA_CLIENT_SECRET: z.string().min(1),
   SESSION_SECRET: z.string().min(32),
   EGRESS_GRANT_SECRET: z.string().min(32).optional(),
-  HERMES_API_SECRET: z.string().min(32),
+  AGENT_CHAT_SECRET: z.string().min(32),
   POLICY_SIGNING_KEY_ID: z.string().regex(/^psk_[a-z0-9][a-z0-9_-]{2,63}$/),
   POLICY_SIGNING_PRIVATE_KEY_B64: z.string().min(40),
   POLICY_VERIFICATION_KEYS_B64: z.string().min(32),
@@ -160,8 +170,8 @@ export function createControlServer(
     openVtc?: OpenVtcApprovalCoordinator;
     egressGrantSecret?: string;
     policyBundleAuthority?: PolicyBundleAuthority;
-    hermesApiSecret?: string;
-    hermesChatClient?: HermesChatClient;
+    agentChatSecret?: string;
+    agentChatClient?: AgentChatClient;
   } = {},
 ) {
   const testRuntimePolicy: RuntimePolicy = {
@@ -187,12 +197,12 @@ export function createControlServer(
     bodyLimit: 32 * 1024,
   });
   const agentBridgeAuthority = new AgentBridgeAuthority(security.mcpPolicyToken ?? proxyToken);
-  const hermesApiAuthority = security.hermesApiSecret ? new HermesApiAuthority(security.hermesApiSecret) : undefined;
-  const hermesChat = security.hermesChatClient ?? new HttpHermesChatClient();
+  const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
+  const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
     issue: (identity, workspaceId, policy) => agentBridgeAuthority.issue(identity, workspaceId, policy),
-  }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority, hermesApiAuthority);
+  }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority, agentChatAuthority);
   const executor: GovernedToolExecutor = gateway?.executeGovernedTool
     ? { executeGovernedTool: (input) => gateway.executeGovernedTool!(input) }
     : { executeGovernedTool: async () => { throw new OneComputerError("GATEWAY_NOT_CONFIGURED", "The governed tool gateway is not configured", 503, true); } };
@@ -684,28 +694,66 @@ export function createControlServer(
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/restart", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.restart(identity(request), policy, request.params.workspaceId, request.id); });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/stop", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.stop(identity(request), policy, request.params.workspaceId); });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/gateway/test", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.testGateway(identity(request), policy, request.params.workspaceId); });
-  app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/status", async (request, reply) => {
+  app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/agents", async (request, reply) => {
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const assigned = await service.agentChatAgents(identity(request), policy, request.params.workspaceId);
+    const running = ["ready", "open"].includes(assigned.state);
+    const agents = await Promise.all(assigned.accesses.map(async (access) => {
+      if (!running) {
+        return {
+          catalogId: access.catalogId,
+          displayName: access.displayName,
+          state: "offline",
+          reasonCode: "WORKSPACE_NOT_READY",
+        };
+      }
+      try {
+        await agentChat.health(access);
+        return {
+          catalogId: access.catalogId,
+          displayName: access.displayName,
+          state: "ready",
+          reasonCode: "CHAT_AGENT_READY",
+        };
+      } catch (error) {
+        if (!(error instanceof OneComputerError) || error.code !== "CHAT_RUNTIME_UNAVAILABLE") throw error;
+        return {
+          catalogId: access.catalogId,
+          displayName: access.displayName,
+          state: "offline",
+          reasonCode: error.code,
+        };
+      }
+    }));
+    return reply.header("cache-control", "no-store").send({ workspaceId: request.params.workspaceId, agents });
+  });
+  app.get<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/status", async (request, reply) => {
+    const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     try {
-      const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
-      await hermesChat.health(access);
+      const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
+      await agentChat.health(access);
       return reply.header("cache-control", "no-store").send({
         workspaceId: request.params.workspaceId,
+        catalogId,
+        displayName: access.displayName,
         state: "ready",
-        reasonCode: "HERMES_CHAT_READY",
+        reasonCode: "CHAT_AGENT_READY",
       });
     } catch (error) {
       if (!(error instanceof OneComputerError)) throw error;
-      if (error.code === "HERMES_NOT_SELECTED") {
+      if (error.code === "CHAT_AGENT_NOT_SELECTED") {
         return reply.header("cache-control", "no-store").send({
           workspaceId: request.params.workspaceId,
+          catalogId,
           state: "unavailable",
           reasonCode: error.code,
         });
       }
-      if (error.code === "WORKSPACE_NOT_READY" || error.code === "HERMES_UNAVAILABLE") {
+      if (error.code === "WORKSPACE_NOT_READY" || error.code === "CHAT_RUNTIME_UNAVAILABLE") {
         return reply.header("cache-control", "no-store").send({
           workspaceId: request.params.workspaceId,
+          catalogId,
           state: "offline",
           reasonCode: error.code,
         });
@@ -713,29 +761,69 @@ export function createControlServer(
       throw error;
     }
   });
-  app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/sessions", async (request, reply) => {
+  app.get<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
+    const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
-    return reply.header("cache-control", "no-store").send({ sessions: await hermesChat.listSessions(access) });
+    const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
+    const sessions = (await agentChat.listSessions(access)).map((session) => ({ ...session, agentCatalogId: catalogId }));
+    return reply.header("cache-control", "no-store").send({ sessions });
   });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/sessions", async (request, reply) => {
-    const input = createHermesChatSessionSchema.parse(request.body ?? {});
+  app.post<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
+    const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
+    const input = createChatSessionSchema.parse(request.body ?? {});
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
-    return reply.code(201).header("cache-control", "no-store").send(await hermesChat.createSession(access, input.title));
+    const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
+    const session = await agentChat.createSession(access, input.title);
+    return reply.code(201).header("cache-control", "no-store").send({ ...session, agentCatalogId: catalogId });
   });
-  app.get<{ Params: { workspaceId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/sessions/:sessionId/messages", async (request, reply) => {
-    const sessionId = hermesChatSessionIdSchema.parse(request.params.sessionId);
+  app.get<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages", async (request, reply) => {
+    const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
+    const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
-    return reply.header("cache-control", "no-store").send({ messages: await hermesChat.listMessages(access, sessionId) });
+    const owner = identity(request);
+    const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
+    const messages = await reconcileChatMessages(
+      await agentChat.listMessages(access, sessionId),
+      async (operationId) => {
+        try {
+          return (await operations.get(owner, operationId)).state;
+        } catch (error) {
+          if (error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND") return undefined;
+          throw error;
+        }
+      },
+    );
+    return reply.header("cache-control", "no-store").send({ messages });
   });
-  app.post<{ Params: { workspaceId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/sessions/:sessionId/messages", async (request, reply) => {
-    const sessionId = hermesChatSessionIdSchema.parse(request.params.sessionId);
-    const input = sendHermesChatMessageSchema.parse(request.body ?? {});
+  app.post<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages", async (request, reply) => {
+    idempotency(request.headers);
+    const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
+    const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
+    const input = sendChatTurnSchema.parse(request.body ?? {});
+    if (input.message.metadata.agentCatalogId !== catalogId) {
+      throw new OneComputerError("CHAT_AGENT_MISMATCH", "The submitted message does not belong to the selected agent", 409);
+    }
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const access = await service.hermesChatAccess(identity(request), policy, request.params.workspaceId);
-    return reply.header("cache-control", "no-store").send({ message: await hermesChat.sendMessage(access, sessionId, input.message) });
+    const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
+    const abort = new AbortController();
+    request.raw.once("aborted", () => abort.abort("browser-disconnected"));
+    reply.raw.once("close", () => {
+      if (!reply.raw.writableFinished) abort.abort("browser-disconnected");
+    });
+    const mapper = new AgentUiStreamMapper(catalogId);
+    const stream = createUIMessageStream<ChatUiMessage>({
+      execute: async ({ writer }) => {
+        for await (const event of agentChat.streamTurn(access, sessionId, input.message, abort.signal)) {
+          for (const chunk of mapper.chunks(event)) writer.write(chunk);
+        }
+      },
+      onError: (error) => error instanceof OneComputerError
+        ? error.message
+        : "The selected workspace agent could not complete this turn.",
+    });
+    const response = createUIMessageStreamResponse({ stream });
+    response.headers.forEach((value, name) => reply.header(name, value));
+    return reply.send(Readable.fromWeb(response.body! as never));
   });
   app.delete<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId", async (request, reply) => {
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
@@ -846,7 +934,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       openVtc,
       egressGrantSecret: env.EGRESS_GRANT_SECRET,
       policyBundleAuthority,
-      hermesApiSecret: env.HERMES_API_SECRET,
+      agentChatSecret: env.AGENT_CHAT_SECRET,
     },
   );
   const pushRetryTimer = pushProvider && openVtc

@@ -13,7 +13,9 @@ network boundary into an explicit egress-firewall product capability, adds
 Hermes Claw as a policy-selected default agent, makes OpenVTC approval practical
 for headless workspaces through a push-capable companion web app, makes policy
 projection tamper-evident and externally enforced, and then refines the whole
-UI.
+UI. The native Hermes, Claude, and Codex adapter baseline produced by cancelled
+Issue 009 is retained, while Issue 010 replaces its final-only Chat surface
+with AI SDK structured streaming. ACP is explicitly deferred.
 
 The archived V1 plan is historical evidence, not an active issue dependency.
 Every V2 issue must inspect the real V1 implementation and carry forward only
@@ -118,6 +120,8 @@ consistent, and the completion record points to the bundle.
 | 006 | P3 | verification | Refine the complete V2 UI and accessibility | 005 |
 | 007 | P1 | verification | Chat with Hermes inside the assigned sandbox | 003 |
 | 008 | P1 | planned (deferred) | Extend egress firewall to FQDN and CIDR L3/L4 rules | 002 |
+| 009 | P1 | cancelled | Chat with any policy-selected agent through one owned interface | 003, 007 |
+| 010 | P1 | verification | Replace the bespoke Chat surface with AI SDK structured streaming | 003, 007 |
 
 ## Assignment template
 

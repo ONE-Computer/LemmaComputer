@@ -40,9 +40,18 @@ export type EffectivePolicy = {
 const agentProfileFor = (catalogId: AgentCatalogId): AgentProfile => ({
   "claude-desktop": "claude-desktop-managed-v1",
   "claude-cli": "claude-cli-managed-v1",
+  "codex-cli": "codex-cli-managed-v1",
   "hermes-desktop": "hermes-desktop-managed-v1",
   "hermes-claw": "hermes-claw-managed-v1",
 })[catalogId] as AgentProfile;
+
+const agentCatalogIdFor = (profile: unknown): AgentCatalogId => ({
+  "claude-desktop-managed-v1": "claude-desktop",
+  "claude-cli-managed-v1": "claude-cli",
+  "codex-cli-managed-v1": "codex-cli",
+  "hermes-desktop-managed-v1": "hermes-desktop",
+  "hermes-claw-managed-v1": "hermes-claw",
+})[String(profile)] as AgentCatalogId | undefined ?? "claude-desktop";
 
 export const runtimePolicyFor = (
   policy: EffectivePolicy,
@@ -80,7 +89,7 @@ export const runtimePolicyFor = (
     ? document.agents.filter((value): value is AgentCatalogId => typeof value === "string" && ownedAgentCatalog.some((agent) => agent.id === value))
     : hasAgentCatalog
       ? ownedAgentCatalog.map((agent) => agent.id)
-      : [document.agentProfile === "hermes-claw-managed-v1" ? "hermes-claw" : "claude-desktop"] as AgentCatalogId[];
+      : [agentCatalogIdFor(document.agentProfile)];
   const defaultAgentIds = Array.isArray(document.defaultAgents)
     ? document.defaultAgents.filter((value): value is AgentCatalogId => typeof value === "string" && configuredAgentIds.includes(value as AgentCatalogId))
     : configuredAgentIds;
@@ -194,7 +203,7 @@ export interface IdentityPolicyStore {
   bindWorkspaceIdentity(userId: string, workspaceId: string): Promise<void>;
 }
 
-const mvpAgentIds = ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"] as const;
+const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"] as const;
 const mvpDefaultAgentIds = ["claude-desktop", "hermes-claw"] as const;
 const mvpApplicationIds = ["firefox", "google-chrome"] as const;
 const mvpDefaultApplicationIds = ["firefox"] as const;

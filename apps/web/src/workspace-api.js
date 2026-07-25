@@ -20,8 +20,8 @@ const mutation = (method = "POST", body) => ({
 });
 
 export const workspaceApi = {
-  current: () => request("/api/v1/workspaces/current"),
-  list: () => request("/api/v1/workspaces"),
+  current: () => request("/api/v1/workspaces/current", { cache: "no-store" }),
+  list: () => request("/api/v1/workspaces", { cache: "no-store" }),
   create: (grantId = "personal") => request("/api/v1/workspaces", mutation("POST", { grantId })),
   open: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/open`, mutation()),
   restart: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/restart`, mutation()),
@@ -31,18 +31,15 @@ export const workspaceApi = {
 };
 
 export const chatApi = {
-  status: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/status`),
-  sessions: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions`),
-  createSession: (workspaceId, title) => request(
-    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions`,
+  agents: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents`),
+  status: (workspaceId, catalogId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/status`),
+  sessions: (workspaceId, catalogId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`),
+  createSession: (workspaceId, catalogId, title) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`,
     mutation("POST", title ? { title } : {}),
   ),
-  messages: (workspaceId, sessionId) => request(
-    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
-  ),
-  send: (workspaceId, sessionId, message) => request(
-    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
-    mutation("POST", { message }),
+  messages: (workspaceId, catalogId, sessionId) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
   ),
 };
 

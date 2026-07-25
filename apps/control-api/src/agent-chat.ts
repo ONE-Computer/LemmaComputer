@@ -1,0 +1,443 @@
+import { createHmac } from "node:crypto";
+import type { InferUIMessageChunk } from "ai";
+import {
+  OneComputerError,
+  agentChatEventSchema,
+  chatAgentCatalogIdSchema,
+  chatSessionIdSchema,
+  chatUiMessageSchema,
+  ownedAgentCatalog,
+  type AgentChatEvent,
+  type ChatAgentCatalogId,
+  type ChatUiMessage,
+  type IdentityContext,
+  type RuntimePolicy,
+} from "@onecomputer/contracts";
+
+export type AgentChatAccess = {
+  workspaceId: string;
+  catalogId: ChatAgentCatalogId;
+  displayName: string;
+  key: string;
+  baseUrl: string;
+};
+
+export type AgentChatSession = {
+  id: string;
+  title: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+const chatRuntimePorts: Readonly<Record<ChatAgentCatalogId, number>> = Object.freeze({
+  "claude-cli": 8643,
+  "codex-cli": 8644,
+  "hermes-claw": 8642,
+});
+
+const chatDisplayNames: Readonly<Record<ChatAgentCatalogId, string>> = Object.freeze(
+  Object.fromEntries(
+    ownedAgentCatalog
+      .filter((agent) => chatAgentCatalogIdSchema.safeParse(agent.id).success)
+      .map((agent) => [agent.id, agent.displayName]),
+  ) as Record<ChatAgentCatalogId, string>,
+);
+
+const fallbackCatalogId = (policy: RuntimePolicy): ChatAgentCatalogId | undefined => ({
+  "claude-cli-managed-v1": "claude-cli",
+  "codex-cli-managed-v1": "codex-cli",
+  "hermes-claw-managed-v1": "hermes-claw",
+} as const)[policy.agentProfile as "claude-cli-managed-v1" | "codex-cli-managed-v1" | "hermes-claw-managed-v1"];
+
+export const assignedChatAgentIds = (policy: RuntimePolicy): ChatAgentCatalogId[] => {
+  const selected = policy.agents?.map((agent) => agent.catalogId) ?? [fallbackCatalogId(policy)];
+  return selected.flatMap((catalogId) => {
+    const parsed = chatAgentCatalogIdSchema.safeParse(catalogId);
+    return parsed.success ? [parsed.data] : [];
+  });
+};
+
+export class AgentChatAuthority {
+  constructor(private readonly rootSecret: string) {}
+
+  issue(
+    identity: IdentityContext,
+    workspaceId: string,
+    policy: RuntimePolicy,
+    catalogId: ChatAgentCatalogId,
+  ): AgentChatAccess | undefined {
+    if (!assignedChatAgentIds(policy).includes(catalogId)) return undefined;
+    const key = createHmac("sha256", this.rootSecret)
+      .update("onecomputer-agent-chat/v1\0")
+      .update(identity.tenantId).update("\0")
+      .update(identity.subjectId).update("\0")
+      .update(workspaceId).update("\0")
+      .update(catalogId).update("\0")
+      .update(policy.policyHash)
+      .digest("base64url");
+    return {
+      workspaceId,
+      catalogId,
+      displayName: chatDisplayNames[catalogId],
+      key,
+      baseUrl: `http://onecomputer-sandbox-${workspaceId}:${chatRuntimePorts[catalogId]}`,
+    };
+  }
+
+  list(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy): AgentChatAccess[] {
+    return assignedChatAgentIds(policy).flatMap((catalogId) => {
+      const access = this.issue(identity, workspaceId, policy, catalogId);
+      return access ? [access] : [];
+    });
+  }
+}
+
+export interface AgentChatClient {
+  health(access: AgentChatAccess): Promise<void>;
+  listSessions(access: AgentChatAccess): Promise<AgentChatSession[]>;
+  createSession(access: AgentChatAccess, title?: string): Promise<AgentChatSession>;
+  listMessages(access: AgentChatAccess, sessionId: string): Promise<ChatUiMessage[]>;
+  streamTurn(
+    access: AgentChatAccess,
+    sessionId: string,
+    message: ChatUiMessage,
+    signal?: AbortSignal,
+  ): AsyncIterable<AgentChatEvent>;
+}
+
+type ChatApprovalState = Extract<
+  ChatUiMessage["parts"][number],
+  { type: "data-approval" }
+>["data"]["state"];
+
+const approvalSummary = (state: ChatApprovalState) => ({
+  approval_required: "Waiting for signed approval",
+  approved: "Approval received",
+  executing: "Approved action is running",
+  succeeded: "Approved action completed",
+  denied: "Approval was denied; the action did not run",
+  failed: "The governed action failed",
+  expired: "Approval expired; the action did not run",
+})[state];
+
+/**
+ * Reconcile durable agent history with Control-owned operation truth.
+ *
+ * A governed operation can finish after an employee stops the model turn.
+ * The workspace transcript is intentionally not authoritative for that later
+ * transition, so Control closes stale activity rows and projects the current
+ * owned operation state whenever history is read.
+ */
+export const reconcileChatMessages = async (
+  messages: ChatUiMessage[],
+  operationState: (operationId: string) => Promise<ChatApprovalState | undefined>,
+): Promise<ChatUiMessage[]> => Promise.all(messages.map(async (message) => {
+  if (message.role !== "assistant") return message;
+  const terminalState = message.metadata.state;
+  const parts = await Promise.all(message.parts.map(async (part) => {
+    if (part.type === "data-approval") {
+      const state = await operationState(part.data.operationId);
+      return state && state !== part.data.state
+        ? { ...part, data: { ...part.data, state, summary: approvalSummary(state) } }
+        : part;
+    }
+    if (terminalState === "streaming") return part;
+    if (part.type === "data-progress" && part.data.state === "running") {
+      return {
+        ...part,
+        data: {
+          ...part.data,
+          state: "completed" as const,
+          label: terminalState === "cancelled"
+            ? "Work stopped"
+            : terminalState === "failed"
+              ? "Work failed"
+              : "Work complete",
+        },
+      };
+    }
+    if (part.type === "data-tool" && part.data.state === "running") {
+      return {
+        ...part,
+        data: {
+          ...part.data,
+          state: "failed" as const,
+          summary: terminalState === "cancelled"
+            ? "Stopped before the tool returned"
+            : "The tool did not return a final result",
+        },
+      };
+    }
+    return part;
+  }));
+  return { ...message, parts };
+}));
+
+const object = (value: unknown): Record<string, unknown> => value && typeof value === "object"
+  ? value as Record<string, unknown>
+  : {};
+
+const nullableText = (value: unknown) => typeof value === "string" && value.length ? value : null;
+
+const session = (value: unknown): AgentChatSession => {
+  const item = object(value);
+  const id = chatSessionIdSchema.safeParse(item.id);
+  if (!id.success) throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid session", 502, true);
+  return {
+    id: id.data,
+    title: nullableText(item.title),
+    createdAt: nullableText(item.created_at ?? item.createdAt),
+    updatedAt: nullableText(item.updated_at ?? item.updatedAt),
+  };
+};
+
+const upstreamError = (access: AgentChatAccess, status: number) => new OneComputerError(
+  status === 404
+    ? "CHAT_SESSION_NOT_FOUND"
+    : status === 409
+      ? "CHAT_TURN_ACTIVE"
+      : "CHAT_RUNTIME_UNAVAILABLE",
+  status === 404
+    ? "Chat session not found"
+    : status === 409
+      ? "That conversation already has a turn in progress"
+      : `${access.displayName} could not complete the request`,
+  status === 404 ? 404 : status === 409 ? 409 : 503,
+  status !== 404 && status !== 409,
+);
+
+export class HttpAgentChatClient implements AgentChatClient {
+  private async response(access: AgentChatAccess, path: string, init?: RequestInit, timeoutMs = 15_000) {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+    try {
+      const response = await fetch(`${access.baseUrl}${path}`, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${access.key}`,
+          ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        signal,
+      });
+      if (!response.ok) throw upstreamError(access, response.status);
+      return response;
+    } catch (error) {
+      if (error instanceof OneComputerError) throw error;
+      if (init?.signal?.aborted) throw error;
+      throw new OneComputerError(
+        "CHAT_RUNTIME_UNAVAILABLE",
+        `${access.displayName} is not available in this workspace`,
+        503,
+        true,
+      );
+    }
+  }
+
+  private async json(access: AgentChatAccess, path: string, init?: RequestInit) {
+    const response = await this.response(access, path, init);
+    if (response.status === 204) return {};
+    return response.json().catch(() => {
+      throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid response", 502, true);
+    });
+  }
+
+  async health(access: AgentChatAccess) {
+    await this.response(access, "/health");
+  }
+
+  async listSessions(access: AgentChatAccess) {
+    const payload = object(await this.json(access, "/api/sessions"));
+    const values = Array.isArray(payload.sessions) ? payload.sessions : [];
+    return values.map(session);
+  }
+
+  async createSession(access: AgentChatAccess, title?: string) {
+    const payload = object(await this.json(access, "/api/sessions", {
+      method: "POST",
+      body: JSON.stringify(title ? { title } : {}),
+    }));
+    return session(payload.session ?? payload);
+  }
+
+  async listMessages(access: AgentChatAccess, sessionId: string) {
+    const id = chatSessionIdSchema.parse(sessionId);
+    const payload = object(await this.json(access, `/api/sessions/${encodeURIComponent(id)}/messages`));
+    if (!Array.isArray(payload.messages)) {
+      throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
+    }
+    return payload.messages.map((value) => {
+      const parsed = chatUiMessageSchema.safeParse(value);
+      if (!parsed.success || parsed.data.metadata.agentCatalogId !== access.catalogId) {
+        throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
+      }
+      return parsed.data;
+    });
+  }
+
+  async *streamTurn(
+    access: AgentChatAccess,
+    sessionId: string,
+    message: ChatUiMessage,
+    signal?: AbortSignal,
+  ): AsyncIterable<AgentChatEvent> {
+    const id = chatSessionIdSchema.parse(sessionId);
+    const response = await this.response(access, `/api/sessions/${encodeURIComponent(id)}/turns`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+      signal,
+    }, 5 * 60_000);
+    if (!response.body || !response.headers.get("content-type")?.startsWith("application/x-ndjson")) {
+      await response.body?.cancel();
+      throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid event stream", 502, true);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let buffer = "";
+    let expectedSequence = 0;
+    let turnId = "";
+    let terminal = false;
+    let textSize = 0;
+    try {
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+        buffer += decoder.decode(result.value, { stream: true });
+        if (buffer.length > 64 * 1024) {
+          throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent event stream exceeded its frame limit", 502, true);
+        }
+        while (buffer.includes("\n")) {
+          const index = buffer.indexOf("\n");
+          const line = buffer.slice(0, index);
+          buffer = buffer.slice(index + 1);
+          if (!line) continue;
+          let decoded: unknown;
+          try {
+            decoded = JSON.parse(line);
+          } catch {
+            throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned a malformed event", 502, true);
+          }
+          const parsed = agentChatEventSchema.safeParse(decoded);
+          if (
+            !parsed.success
+            || parsed.data.sessionId !== id
+            || parsed.data.sequence !== expectedSequence
+            || (expectedSequence === 0 && parsed.data.type !== "turn-start")
+            || (turnId && parsed.data.turnId !== turnId)
+            || terminal
+          ) {
+            throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid event sequence", 502, true);
+          }
+          const event = parsed.data;
+          turnId ||= event.turnId;
+          expectedSequence += 1;
+          if (event.type === "text-delta") {
+            textSize += event.delta.length;
+            if (textSize > 128_000) {
+              throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent response exceeded its text limit", 502, true);
+            }
+          }
+          terminal = event.type === "turn-finish";
+          yield event;
+        }
+      }
+      buffer += decoder.decode();
+      if (buffer.trim() || !terminal) {
+        throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent event stream ended unexpectedly", 502, true);
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+  }
+}
+
+export class AgentUiStreamMapper {
+  private readonly textIds = new Set<string>();
+  private createdAt = "";
+
+  constructor(private readonly catalogId: ChatAgentCatalogId) {}
+
+  chunks(event: AgentChatEvent): InferUIMessageChunk<ChatUiMessage>[] {
+    if (event.type === "turn-start") {
+      this.createdAt = event.createdAt;
+      return [{
+        type: "start",
+        messageId: event.messageId,
+        messageMetadata: {
+          agentCatalogId: this.catalogId,
+          turnId: event.turnId,
+          state: "streaming",
+          createdAt: event.createdAt,
+        },
+      }];
+    }
+    if (event.type === "progress") {
+      return [{
+        type: "data-progress",
+        id: event.activityId,
+        data: {
+          activityId: event.activityId,
+          label: event.label,
+          state: event.state,
+        },
+      }];
+    }
+    if (event.type === "text-delta") {
+      const chunks: InferUIMessageChunk<ChatUiMessage>[] = [];
+      if (!this.textIds.has(event.textId)) {
+        this.textIds.add(event.textId);
+        chunks.push({ type: "text-start", id: event.textId });
+      }
+      chunks.push({ type: "text-delta", id: event.textId, delta: event.delta });
+      return chunks;
+    }
+    if (event.type === "tool") {
+      return [{
+        type: "data-tool",
+        id: event.toolCallId,
+        data: {
+          toolCallId: event.toolCallId,
+          name: event.name,
+          state: event.state,
+          ...(event.summary ? { summary: event.summary } : {}),
+        },
+      }];
+    }
+    if (event.type === "approval") {
+      return [{
+        type: "data-approval",
+        id: event.approvalId,
+        data: {
+          approvalId: event.approvalId,
+          toolCallId: event.toolCallId,
+          operationId: event.operationId,
+          state: event.state,
+          summary: event.summary,
+        },
+      }];
+    }
+
+    return [
+      ...[...this.textIds].map((textId): InferUIMessageChunk<ChatUiMessage> => ({ type: "text-end", id: textId })),
+      {
+        type: "data-terminal",
+        id: `terminal-${event.turnId}`,
+        data: {
+          turnId: event.turnId,
+          state: event.state,
+          ...(event.message ? { message: event.message } : {}),
+        },
+      },
+      {
+        type: "finish",
+        finishReason: event.state === "completed" ? "stop" : event.state === "cancelled" ? "other" : "error",
+        messageMetadata: {
+          agentCatalogId: this.catalogId,
+          turnId: event.turnId,
+          state: event.state,
+          createdAt: this.createdAt || event.completedAt,
+        },
+      },
+    ];
+  }
+}

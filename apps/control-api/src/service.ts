@@ -5,6 +5,7 @@ import {
   type Launch,
   type PolicyIntegrityView,
   type PolicyVerificationKeySet,
+  type ChatAgentCatalogId,
   type RuntimeAgentPolicy,
   type RuntimePolicy,
   type Sandbox,
@@ -15,7 +16,7 @@ import { deriveEgressProxySecret, issueEgressProxyGrant } from "@onecomputer/egr
 import type { GatewayClient, GatewayGrant, GatewayReadiness } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner, PolicyVerificationError, verifySignedPolicyBundle, type VerifiedPolicyBundle } from "@onecomputer/policy-integrity";
 import type { WorkspaceRecord, WorkspaceStore } from "@onecomputer/workspace-store";
-import { HermesApiAuthority, type HermesApiAccess } from "./hermes-chat.js";
+import { AgentChatAuthority, type AgentChatAccess } from "./agent-chat.js";
 
 export interface ControllerClient {
   create(input: {
@@ -26,7 +27,7 @@ export interface ControllerClient {
     gateway?: GatewayGrant;
     agentBridge?: { baseUrl: string; token: string };
     agentGrants?: Array<{ catalogId: RuntimeAgentPolicy["catalogId"]; agentId: string; gateway: GatewayGrant; agentBridge: { baseUrl: string; token: string } }>;
-    hermesApi?: { key: string };
+    chatRuntimes?: Array<{ catalogId: ChatAgentCatalogId; key: string }>;
     egressProxy?: EgressProxyGrant;
   }): Promise<Sandbox>;
   status(providerId: string): Promise<Sandbox>;
@@ -187,7 +188,7 @@ export class WorkspaceService {
     private readonly agentBridge?: { baseUrl: string; issue: (identity: IdentityContext, workspaceId: string, policy: RuntimePolicy) => string },
     private readonly egressProxyAuthority?: EgressProxyGrantAuthority,
     private readonly policyBundleAuthority?: PolicyBundleAuthority,
-    private readonly hermesApiAuthority?: HermesApiAuthority,
+    private readonly agentChatAuthority?: AgentChatAuthority,
   ) {}
 
   private authorizePolicy(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy) {
@@ -325,7 +326,8 @@ export class WorkspaceService {
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, claimed.id, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
-      const hermesApi = this.hermesApiAuthority?.issue(identity, claimed.id, verifiedPolicy);
+      const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
+        .map(({ catalogId, key }) => ({ catalogId, key }));
       if (verifiedPolicy.egress && !egressProxy) throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
         workspaceId: claimed.id,
@@ -333,7 +335,7 @@ export class WorkspaceService {
         policy: verifiedPolicy,
         ...(authorized ? { policyBundle: authorized.bundle } : {}),
         ...grants,
-        ...(hermesApi ? { hermesApi: { key: hermesApi.key } } : {}),
+        ...(chatRuntimes?.length ? { chatRuntimes } : {}),
         egressProxy,
       });
       record = await this.store.finish(claimed.id, claimed.operationToken!, { state: sandbox.state === "ready" ? "ready" : "provisioning", providerId: sandbox.providerId, failureCode: sandbox.failureCode });
@@ -365,7 +367,8 @@ export class WorkspaceService {
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, claimed.id, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
-      const hermesApi = this.hermesApiAuthority?.issue(identity, claimed.id, verifiedPolicy);
+      const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
+        .map(({ catalogId, key }) => ({ catalogId, key }));
       if (verifiedPolicy.egress && !egressProxy) throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
         workspaceId: claimed.id,
@@ -373,7 +376,7 @@ export class WorkspaceService {
         policy: verifiedPolicy,
         ...(authorized ? { policyBundle: authorized.bundle } : {}),
         ...grants,
-        ...(hermesApi ? { hermesApi: { key: hermesApi.key } } : {}),
+        ...(chatRuntimes?.length ? { chatRuntimes } : {}),
         egressProxy,
       });
       return this.view(
@@ -417,14 +420,27 @@ export class WorkspaceService {
     return this.gateway.test(record.id, verifiedPolicy.agentId, verifiedPolicy);
   }
 
-  async hermesChatAccess(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string): Promise<HermesApiAccess> {
+  async agentChatAgents(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
-    if (!this.hermesApiAuthority) {
-      throw new OneComputerError("HERMES_CHAT_NOT_CONFIGURED", "Sandbox Chat is not configured", 503, true);
+    if (!this.agentChatAuthority) {
+      throw new OneComputerError("CHAT_NOT_CONFIGURED", "Sandbox Chat is not configured", 503, true);
     }
-    const access = this.hermesApiAuthority.issue(identity, record.id, policy);
-    if (!access) throw new OneComputerError("HERMES_NOT_SELECTED", "Hermes is not selected for this sandbox", 409);
-    if (!record.providerId || !["ready", "open"].includes(record.state)) {
+    return {
+      state: record.state,
+      accesses: this.agentChatAuthority.list(identity, record.id, policy),
+    };
+  }
+
+  async agentChatAccess(
+    identity: IdentityContext,
+    policy: RuntimePolicy,
+    workspaceId: string,
+    catalogId: ChatAgentCatalogId,
+  ): Promise<AgentChatAccess> {
+    const { state, accesses } = await this.agentChatAgents(identity, policy, workspaceId);
+    const access = accesses.find((candidate) => candidate.catalogId === catalogId);
+    if (!access) throw new OneComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
+    if (!["ready", "open"].includes(state)) {
       throw new OneComputerError("WORKSPACE_NOT_READY", "Start this sandbox to use Chat", 409, true);
     }
     return access;

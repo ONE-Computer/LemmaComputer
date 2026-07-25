@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
 import {
   OneComputerError,
+  chatAgentCatalogIdSchema,
   controllerCreateSchema,
   policyVerificationKeySetSchema,
   type PolicyIntegrityView,
@@ -119,17 +120,30 @@ const verifyGrantBindings = (
   )) {
     throw new PolicyVerificationError("POLICY_BINDING_MISMATCH", "The egress grant does not match the signed policy");
   }
-  const hermesSelected = verified.payload.policy.agentProfile === "hermes-claw-managed-v1"
-    || verified.payload.policy.agents?.some((agent) => agent.catalogId === "hermes-claw") === true;
-  if (Boolean(input.hermesApi) !== hermesSelected) {
-    throw new PolicyVerificationError("POLICY_BINDING_MISMATCH", "The Hermes API grant does not match the signed policy");
+  const fallback = ({
+    "claude-cli-managed-v1": "claude-cli",
+    "codex-cli-managed-v1": "codex-cli",
+    "hermes-claw-managed-v1": "hermes-claw",
+  } as const)[verified.payload.policy.agentProfile as "claude-cli-managed-v1" | "codex-cli-managed-v1" | "hermes-claw-managed-v1"];
+  const expectedChatAgents = (verified.payload.policy.agents?.map((agent) => agent.catalogId) ?? [fallback])
+    .flatMap((catalogId) => {
+      const parsed = chatAgentCatalogIdSchema.safeParse(catalogId);
+      return parsed.success ? [parsed.data] : [];
+    })
+    .sort();
+  const grantedChatAgents = (input.chatRuntimes ?? []).map((runtime) => runtime.catalogId).sort();
+  if (
+    new Set(grantedChatAgents).size !== grantedChatAgents.length
+    || JSON.stringify(grantedChatAgents) !== JSON.stringify(expectedChatAgents)
+  ) {
+    throw new PolicyVerificationError("POLICY_BINDING_MISMATCH", "The chat runtime grants do not match the signed policy");
   }
 };
 
 export function createControllerServer(adapter: SandboxAdapter, internalToken: string, verificationKeys: PolicyVerificationKeySet) {
   const keys = policyVerificationKeySetSchema.parse(verificationKeys);
   const app = Fastify({
-    logger: { redact: ["req.headers.authorization", "req.headers.x-controller-token", "req.body.gateway.credential", "req.body.agentBridge.token", "req.body.hermesApi.key", "req.body.policyBundle.signature", "*.launchUrl", "*.session_token"] },
+    logger: { redact: ["req.headers.authorization", "req.headers.x-controller-token", "req.body.gateway.credential", "req.body.agentBridge.token", "req.body.chatRuntimes.*.key", "req.body.policyBundle.signature", "*.launchUrl", "*.session_token"] },
     bodyLimit: 128 * 1024,
   });
 
@@ -168,7 +182,7 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
       gateway: input.gateway,
       agentBridge: input.agentBridge,
       agentGrants: input.agentGrants,
-      hermesApi: input.hermesApi,
+      chatRuntimes: input.chatRuntimes,
       egressProxy: input.egressProxy,
     });
     return reply.code(201).send(publicSandbox({

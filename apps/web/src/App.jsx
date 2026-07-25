@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import { Home24Filled, Home24Regular } from "@fluentui/react-icons/svg/home";
 import { Clock24Regular } from "@fluentui/react-icons/svg/clock";
 import { Open24Regular } from "@fluentui/react-icons/svg/open";
@@ -26,6 +28,7 @@ import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
   enrollBrowserApprover,
+  getBrowserApproverIdentity,
   hasBrowserApprover,
   loadPendingApproval,
   signApprovalDecision,
@@ -57,6 +60,10 @@ const viewByNav = Object.freeze(Object.fromEntries(
 const navFromLocation = () => {
   const view = new URLSearchParams(window.location.search).get("view") ?? "home";
   return navByView[view] ?? "Workspace";
+};
+const chatSessionFromLocation = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("view") === "chat" ? params.get("chat") ?? "" : "";
 };
 
 const operationTime = (value) => new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(new Date(value));
@@ -733,7 +740,7 @@ const pendingApplications = [
 
 const agentChoices = [
   { family: "Claude", choices: [{ catalogId: "claude-desktop", name: "Desktop", status: "available" }, { catalogId: "claude-cli", name: "CLI", status: "available" }] },
-  { family: "ChatGPT", choices: [{ name: "Desktop", status: "coming soon" }, { name: "CLI", status: "coming soon" }] },
+  { family: "OpenAI", choices: [{ name: "Desktop", status: "coming soon" }, { catalogId: "codex-cli", name: "Codex CLI", status: "available" }] },
   { family: "Hermes Agent", choices: [{ catalogId: "hermes-desktop", name: "Desktop", status: "available" }, { catalogId: "hermes-claw", name: "CLI", status: "available" }] },
 ];
 
@@ -1043,38 +1050,257 @@ function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisc
   );
 }
 
+function ChatPart({ part }) {
+  if (part.type === "text") return <p className="chat-message-text">{part.text}</p>;
+  if (part.type === "data-progress") {
+    return (
+      <div className={`chat-activity progress ${part.data.state}`}>
+        <span aria-hidden="true" />
+        <p>{part.data.label}</p>
+      </div>
+    );
+  }
+  if (part.type === "data-tool") {
+    const stateLabel = part.data.state === "running" ? "Running" : part.data.state === "completed" ? "Completed" : "Failed";
+    return (
+      <details className={`chat-tool ${part.data.state}`} open={part.data.state !== "completed"}>
+        <summary><span>{part.data.name}</span><small>{stateLabel}</small></summary>
+        {part.data.summary && <p>{part.data.summary}</p>}
+      </details>
+    );
+  }
+  if (part.type === "data-approval") {
+    return (
+      <div className={`chat-approval ${part.data.state}`}>
+        <ShieldCheckmark24Regular aria-hidden="true" />
+        <span><strong>{part.data.summary}</strong><small>Governed Microsoft 365 action</small></span>
+      </div>
+    );
+  }
+  if (part.type === "data-terminal" && part.data.state !== "completed") {
+    return <div className={`chat-terminal ${part.data.state}`} role="status">{part.data.message || `Turn ${part.data.state}`}</div>;
+  }
+  return null;
+}
+
+function ChatConversation({
+  workspaceId,
+  agentId,
+  agentName,
+  activeSessionId,
+  onSessionsChange,
+  onSessionChange,
+}) {
+  const [input, setInput] = useState("");
+  const [historyState, setHistoryState] = useState("ready");
+  const [historyError, setHistoryError] = useState("");
+  const transcriptRef = useRef(null);
+  const sessionRef = useRef(activeSessionId);
+  const loadedSessionRef = useRef("");
+
+  const refreshSessions = () => chatApi.sessions(workspaceId, agentId)
+    .then((result) => onSessionsChange(result.sessions));
+  const transport = useMemo(() => new DefaultChatTransport({
+    prepareSendMessagesRequest: ({ messages }) => {
+      const sessionId = sessionRef.current;
+      if (!sessionId) throw new Error("The conversation is not ready.");
+      return {
+        api: `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+        headers: {
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body: { message: messages.at(-1) },
+      };
+    },
+  }), [workspaceId, agentId]);
+  const {
+    messages,
+    sendMessage,
+    setMessages,
+    status,
+    error,
+    stop,
+    clearError,
+  } = useChat({
+    id: `${workspaceId}:${agentId}`,
+    transport,
+    onFinish: () => { void refreshSessions(); },
+  });
+  const busy = status === "submitted" || status === "streaming";
+  const pendingApprovalKey = messages
+    .flatMap((message) => message.parts)
+    .filter((part) => part.type === "data-approval"
+      && ["approval_required", "approved", "executing"].includes(part.data.state))
+    .map((part) => part.data.operationId)
+    .sort()
+    .join(":");
+
+  useEffect(() => {
+    sessionRef.current = activeSessionId;
+    if (!activeSessionId) {
+      loadedSessionRef.current = "";
+      setMessages([]);
+      setHistoryState("ready");
+      setHistoryError("");
+      clearError();
+      return undefined;
+    }
+    if (loadedSessionRef.current === activeSessionId) return undefined;
+    let active = true;
+    setHistoryState("loading");
+    setHistoryError("");
+    setMessages([]);
+    chatApi.messages(workspaceId, agentId, activeSessionId)
+      .then((result) => {
+        if (!active) return;
+        loadedSessionRef.current = activeSessionId;
+        setMessages(result.messages);
+        setHistoryState("ready");
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setHistoryError(requestError.message);
+        setHistoryState("error");
+      });
+    return () => { active = false; };
+  }, [activeSessionId, workspaceId, agentId, setMessages, clearError]);
+
+  useEffect(() => {
+    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, status]);
+
+  useEffect(() => {
+    if (busy || !activeSessionId || !pendingApprovalKey) return undefined;
+    let active = true;
+    const refresh = () => chatApi.messages(workspaceId, agentId, activeSessionId)
+      .then((result) => {
+        if (active && sessionRef.current === activeSessionId) setMessages(result.messages);
+      })
+      .catch(() => {
+        // The ordinary chat error surface handles session/runtime failures.
+        // A transient reconciliation miss must not erase the transcript.
+      });
+    refresh();
+    const interval = window.setInterval(refresh, 1500);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [activeSessionId, agentId, busy, pendingApprovalKey, setMessages, workspaceId]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || busy) return;
+    clearError();
+    let sessionId = sessionRef.current;
+    if (!sessionId) {
+      try {
+        const title = text.replace(/\s+/g, " ").slice(0, 56);
+        const created = await chatApi.createSession(workspaceId, agentId, title);
+        sessionId = created.id;
+        sessionRef.current = sessionId;
+        loadedSessionRef.current = sessionId;
+        onSessionsChange((current) => [
+          { ...created, title: created.title ?? title },
+          ...current.filter((item) => item.id !== created.id),
+        ]);
+        onSessionChange(sessionId);
+      } catch (requestError) {
+        setHistoryError(requestError.message);
+        setHistoryState("error");
+        return;
+      }
+    }
+    setInput("");
+    await sendMessage({
+      text,
+      metadata: {
+        agentCatalogId: agentId,
+        state: "completed",
+        createdAt: new Date().toISOString(),
+      },
+    });
+  };
+
+  const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
+  return (
+    <section className={`chat-conversation${visibleMessages.length === 0 ? " is-empty" : ""}`} aria-label="Current conversation">
+      <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy || historyState === "loading"}>
+        {visibleMessages.length === 0 ? (
+          <div className="chat-welcome">
+            <h1>How can {agentName} help?</h1>
+            <p>Ask about the files, approved tools, and connections in your managed workspace.</p>
+          </div>
+        ) : visibleMessages.map((message) => (
+          <article className={`chat-message ${message.role}`} key={message.id}>
+            <span>{message.role === "assistant" ? agentName : "You"}</span>
+            <div className="chat-message-parts">
+              {message.parts.map((part, index) => <ChatPart key={part.id || `${part.type}-${index}`} part={part} />)}
+            </div>
+          </article>
+        ))}
+      </div>
+      {(error || historyError) && <div className="workspace-error chat-error" role="alert"><Info24Regular aria-hidden="true" /><span>{error?.message || historyError}</span></div>}
+      <form className="chat-composer" onSubmit={submit}>
+        <label className="sr-only" htmlFor="chat-message">Message {agentName}</label>
+        <textarea
+          id="chat-message"
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
+          placeholder={`Message ${agentName}`}
+          rows="1"
+          maxLength="16000"
+          disabled={historyState === "loading"}
+        />
+        {busy ? (
+          <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={() => { void stop(); }}><Dismiss24Regular aria-hidden="true" /></button>
+        ) : (
+          <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!input.trim() || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
+        )}
+      </form>
+    </section>
+  );
+}
+
 function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWorkspace, activeSessionId, onSessionsChange, onSessionChange }) {
+  const [agents, setAgents] = useState([]);
+  const [activeAgentId, setActiveAgentId] = useState("");
   const [status, setStatus] = useState("loading");
   const [reasonCode, setReasonCode] = useState("");
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
-  const transcriptRef = useRef(null);
 
   useEffect(() => {
     let active = true;
     setError("");
     onSessionsChange([]);
-    onSessionChange("");
-    setMessages([]);
+    setAgents([]);
+    setActiveAgentId("");
     if (!workspace || !["ready", "open"].includes(workspaceState)) {
       setStatus("offline");
       setReasonCode("WORKSPACE_NOT_READY");
       return () => { active = false; };
     }
     setStatus("loading");
-    chatApi.status(workspace.id)
-      .then(async (nextStatus) => {
+    chatApi.agents(workspace.id)
+      .then((result) => {
         if (!active) return;
-        setStatus(nextStatus.state);
-        setReasonCode(nextStatus.reasonCode);
-        if (nextStatus.state === "ready") {
-          const sessionList = await chatApi.sessions(workspace.id);
-          if (!active) return;
-          onSessionsChange(sessionList.sessions);
+        const nextAgents = result.agents ?? [];
+        setAgents(nextAgents);
+        if (nextAgents.length === 0) {
+          setStatus("unavailable");
+          setReasonCode("CHAT_AGENT_NOT_SELECTED");
+          return;
         }
+        const preferred = nextAgents.find((agent) => agent.state === "ready") ?? nextAgents[0];
+        setActiveAgentId(preferred.catalogId);
       })
       .catch((requestError) => {
         if (!active) return;
@@ -1085,9 +1311,34 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
   }, [workspace?.id, workspaceState, reload]);
 
   useEffect(() => {
+    if (!workspace || !activeAgentId || !["ready", "open"].includes(workspaceState)) return undefined;
+    let active = true;
+    setStatus("loading");
+    setError("");
+    onSessionsChange([]);
+    chatApi.status(workspace.id, activeAgentId)
+      .then(async (nextStatus) => {
+        if (!active) return;
+        setStatus(nextStatus.state);
+        setReasonCode(nextStatus.reasonCode);
+        if (nextStatus.state === "ready") {
+          const sessionList = await chatApi.sessions(workspace.id, activeAgentId);
+          if (!active) return;
+          onSessionsChange(sessionList.sessions);
+        }
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setStatus("error");
+        setError(requestError.message);
+      });
+    return () => { active = false; };
+  }, [workspace?.id, workspaceState, activeAgentId, reload]);
+
+  useEffect(() => {
     if (
       status !== "offline"
-      || reasonCode !== "HERMES_UNAVAILABLE"
+      || reasonCode !== "CHAT_RUNTIME_UNAVAILABLE"
       || !workspace
       || !["ready", "open"].includes(workspaceState)
     ) return undefined;
@@ -1095,78 +1346,55 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
     return () => window.clearTimeout(timeout);
   }, [status, reasonCode, workspace?.id, workspaceState]);
 
-  useEffect(() => {
-    if (!workspace || !activeSessionId) {
-      setMessages([]);
-      return undefined;
-    }
-    let active = true;
-    setBusy(true);
-    setError("");
-    setMessages([]);
-    chatApi.messages(workspace.id, activeSessionId)
-      .then((result) => { if (active) setMessages(result.messages); })
-      .catch((requestError) => { if (active) setError(requestError.message); })
-      .finally(() => { if (active) setBusy(false); });
-    return () => { active = false; };
-  }, [workspace?.id, activeSessionId]);
-
-  useEffect(() => {
-    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, busy]);
-
-  const sendMessage = async (event) => {
-    event.preventDefault();
-    const text = input.trim();
-    if (!text || !workspace || busy) return;
-    setBusy(true);
-    setError("");
-    let sessionId = activeSessionId;
-    try {
-      if (!sessionId) {
-        const created = await chatApi.createSession(workspace.id);
-        sessionId = created.id;
-        const title = text.replace(/\s+/g, " ").slice(0, 56);
-        onSessionsChange((current) => [{ ...created, title: created.title ?? title }, ...current.filter((item) => item.id !== created.id)]);
-        onSessionChange(created.id);
-      }
-      setInput("");
-      setMessages((current) => [...current, { role: "user", content: text }]);
-      const result = await chatApi.send(workspace.id, sessionId, text);
-      setMessages((current) => [...current, result.message]);
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const offline = status === "offline";
   const unavailable = status === "unavailable";
+  const activeAgent = agents.find((agent) => agent.catalogId === activeAgentId);
+  const agentName = activeAgent?.displayName ?? "workspace agent";
+  const agentOptions = agents.map((agent) => ({
+    value: agent.catalogId,
+    label: agent.displayName,
+  }));
+  const selectAgent = (catalogId) => {
+    if (catalogId === activeAgentId) return;
+    onSessionChange("");
+    setActiveAgentId(catalogId);
+  };
+  const agentSelector = agents.length > 1 ? (
+    <div className="chat-agent-selector">
+      <span>Agent</span>
+      <SelectMenu
+        value={activeAgentId}
+        onValueChange={selectAgent}
+        ariaLabel="Choose chat agent"
+        options={agentOptions}
+      />
+    </div>
+  ) : null;
   if (status !== "ready") {
     const workspaceCanRetry = workspace && ["ready", "open"].includes(workspaceState);
     const workspaceBusy = ["loading", "provisioning", "restarting", "stopping"].includes(workspaceState);
-    const restartRequired = offline && reasonCode === "HERMES_UNAVAILABLE" && workspaceCanRetry;
+    const restartRequired = offline && reasonCode === "CHAT_RUNTIME_UNAVAILABLE" && workspaceCanRetry;
     return (
       <div className="secondary-screen chat-screen">
         <header className="page-heading">
           <p>Workspace agent</p>
           <h1>Chat</h1>
-          <span>Work with Hermes in your managed workspace. Its files, tools, and app connections stay with that workspace.</span>
+          <span>Work with any selected agent in your managed workspace. Files, tools, and app connections stay with that workspace.</span>
         </header>
+        {agentSelector}
         <section className="chat-unavailable" aria-live="polite">
           <span className={`chat-agent-mark${status === "loading" ? " loading" : ""}`}><Bot24Regular aria-hidden="true" /></span>
           <div>
-            <h2>{status === "loading" ? "Connecting to Hermes" : unavailable ? "Hermes is not selected" : offline ? "Your agent is offline" : "Chat could not connect"}</h2>
+            <h2>{status === "loading" ? `Connecting to ${agentName}` : unavailable ? "No chat agent is selected" : offline ? `${agentName} is offline` : "Chat could not connect"}</h2>
             <p>{status === "loading"
-              ? "We’re checking the agent inside your workspace."
+              ? "We’re checking the selected agent inside your workspace."
               : unavailable
-                ? "Select Hermes Agent CLI in this workspace’s settings, then restart the workspace."
+                ? "Select a supported CLI agent in this workspace’s settings, then restart the workspace."
                 : restartRequired
-                  ? "Hermes is not responding in this workspace. Restart it once to apply the latest managed agent runtime."
+                  ? `${agentName} is not responding in this workspace. Restart it once to apply the latest managed agent runtime.`
                   : offline
-                    ? "Start the workspace to bring Hermes, its sessions, and its connections online."
-                    : error || "Hermes is temporarily unavailable."}</p>
+                    ? `Start the workspace to bring ${agentName}, its sessions, and its connections online.`
+                    : error || `${agentName} is temporarily unavailable.`}</p>
             {status !== "loading" && !unavailable && (
               <div className="chat-recovery-actions">
                 <button
@@ -1188,42 +1416,16 @@ function ChatScreen({ workspace, workspaceState, onStartWorkspace, onRestartWork
 
   return (
     <div className="secondary-screen chat-screen">
-      <section className={`chat-conversation${messages.length === 0 ? " is-empty" : ""}`} aria-label="Current conversation">
-        <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy}>
-          {messages.length === 0 ? (
-            <div className="chat-welcome">
-              <h1>How can Hermes help?</h1>
-              <p>Ask about the files, approved tools, and connections in your managed workspace.</p>
-            </div>
-          ) : messages.filter((item) => item.role === "user" || item.role === "assistant").map((item, index) => (
-            <article className={`chat-message ${item.role}`} key={`${index}-${item.role}`}>
-              <span>{item.role === "assistant" ? "Hermes" : "You"}</span>
-              <p>{item.content}</p>
-            </article>
-          ))}
-          {busy && messages.length > 0 && <p className="chat-thinking">Hermes is working…</p>}
-        </div>
-        {error && <div className="workspace-error chat-error" role="alert"><Info24Regular aria-hidden="true" /><span>{error}</span></div>}
-        <form className="chat-composer" onSubmit={sendMessage}>
-          <label className="sr-only" htmlFor="chat-message">Message Hermes</label>
-          <textarea
-            id="chat-message"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
-            placeholder="Message Hermes"
-            rows="1"
-            maxLength="16000"
-            disabled={busy}
-          />
-          <button className="chat-send-button" type="submit" aria-label={busy ? "Hermes is working" : "Send message"} disabled={busy || !input.trim()}><ArrowUp24Regular aria-hidden="true" /></button>
-        </form>
-      </section>
+      {agentSelector}
+      <ChatConversation
+        key={`${workspace.id}:${activeAgentId}`}
+        workspaceId={workspace.id}
+        agentId={activeAgentId}
+        agentName={agentName}
+        activeSessionId={activeSessionId}
+        onSessionsChange={onSessionsChange}
+        onSessionChange={onSessionChange}
+      />
     </div>
   );
 }
@@ -1258,7 +1460,7 @@ export function App() {
   const [connectionsView, setConnectionsView] = useState("list");
   const [settingsView, setSettingsView] = useState("overview");
   const [chatSessions, setChatSessions] = useState([]);
-  const [activeChatSessionId, setActiveChatSessionId] = useState("");
+  const [activeChatSessionId, setActiveChatSessionId] = useState(chatSessionFromLocation);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyUserId, setAdminBusyUserId] = useState("");
@@ -1311,6 +1513,7 @@ export function App() {
     const onPopState = () => {
       const name = navFromLocation();
       setActiveNav(name);
+      setActiveChatSessionId(chatSessionFromLocation());
       if (name === "Connections") setConnectionsView("list");
       if (name === "Settings") setSettingsView("overview");
       if (name === "Workspace") {
@@ -1322,6 +1525,15 @@ export function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    if (activeNav !== "Chat" || !activeChatSessionId) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("view") === "chat" && url.searchParams.get("chat") === activeChatSessionId) return;
+    url.searchParams.set("view", "chat");
+    url.searchParams.set("chat", activeChatSessionId);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }, [activeNav, activeChatSessionId]);
 
   useEffect(() => {
     if (!mobileNavOpen) return undefined;
@@ -1748,6 +1960,8 @@ export function App() {
     const url = new URL(window.location.href);
     if (name === "Workspace") url.searchParams.delete("view");
     else url.searchParams.set("view", viewByNav[name]);
+    if (name === "Chat" && activeChatSessionId) url.searchParams.set("chat", activeChatSessionId);
+    else url.searchParams.delete("chat");
     const nextLocation = `${url.pathname}${url.search}`;
     if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
     else if (nextLocation !== `${window.location.pathname}${window.location.search}`) {
@@ -1759,6 +1973,19 @@ export function App() {
     setProfileOpen(false);
     setMobileNavOpen(false);
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
+  };
+
+  const selectChatSession = (sessionId, historyMode = "push") => {
+    setActiveChatSessionId(sessionId);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "chat");
+    if (sessionId) url.searchParams.set("chat", sessionId);
+    else url.searchParams.delete("chat");
+    const nextLocation = `${url.pathname}${url.search}`;
+    if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
+    else if (nextLocation !== `${window.location.pathname}${window.location.search}`) {
+      window.history.pushState({}, "", nextLocation);
+    }
   };
 
   const selectWorkspaceConfiguration = (grantId) => {
@@ -1892,10 +2119,10 @@ export function App() {
           <NavButton active={activeNav === "Connections"} icon={PlugConnected24Regular} label="Connections" onClick={() => selectNav("Connections")} />
           <NavButton active={activeNav === "Chat"} icon={Bot24Regular} label="Chat" onClick={() => selectNav("Chat")} />
           {activeNav === "Chat" && <div className="sidebar-chat-history" aria-label="Recent chat threads">
-            <div className="sidebar-chat-history-heading"><span>Recent</span><button type="button" aria-label="Start a new chat" title="Start a new chat" onClick={() => setActiveChatSessionId("")}><Add24Regular aria-hidden="true" /></button></div>
+            <div className="sidebar-chat-history-heading"><span>Recent</span><button type="button" aria-label="Start a new chat" title="Start a new chat" onClick={() => { selectChatSession(""); setMobileNavOpen(false); }}><Add24Regular aria-hidden="true" /></button></div>
             {chatSessions.length === 0
               ? <p>No recent chats</p>
-              : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => setActiveChatSessionId(item.id)} aria-current={activeChatSessionId === item.id ? "true" : undefined}>{item.title || `Conversation ${chatSessions.length - index}`}</button>)}
+              : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => { selectChatSession(item.id); setMobileNavOpen(false); }} aria-current={activeChatSessionId === item.id ? "true" : undefined}>{item.title || `Conversation ${chatSessions.length - index}`}</button>)}
           </div>}
         </nav>
         <div className="sidebar-account">
@@ -1956,7 +2183,7 @@ export function App() {
           onRestartWorkspace={restartWorkspace}
           activeSessionId={activeChatSessionId}
           onSessionsChange={setChatSessions}
-          onSessionChange={setActiveChatSessionId}
+          onSessionChange={(sessionId) => selectChatSession(sessionId, "replace")}
         />}
         {activeNav === "Workspace" && selectedSandboxGrantId && <WorkspaceConfigurationScreen
           settings={sandboxSettings}

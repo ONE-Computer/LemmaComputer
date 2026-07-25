@@ -1,0 +1,351 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import test from "node:test";
+import type { IdentityContext, Launch, RuntimePolicy, Sandbox } from "@onecomputer/contracts";
+import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import {
+  AgentChatAuthority,
+  AgentUiStreamMapper,
+  HttpAgentChatClient,
+  reconcileChatMessages,
+  type AgentChatAccess,
+} from "../apps/control-api/src/agent-chat.js";
+import { WorkspaceService, type ControllerClient } from "../apps/control-api/src/service.js";
+
+const identity: IdentityContext = {
+  tenantId: "acme",
+  subjectId: "alex",
+  audience: "onecomputer-control",
+};
+
+const hermesPolicy: RuntimePolicy = {
+  schemaVersion: 1,
+  policyVersionId: "policy-version-1",
+  policyVersion: 1,
+  policyHash: "a".repeat(64),
+  workspaceProfile: "kasm-persistent-standard",
+  agentId: "agent-alex:hermes-claw",
+  agentProfile: "hermes-claw-managed-v1",
+  networkProfile: "controlled-egress-v1",
+  modelAlias: "onecomputer-assistant",
+  mcpServer: "onecomputer_ms365",
+  allowedTools: ["list-mail-folders"],
+  toolPolicies: { "list-mail-folders": "allow" },
+  agents: [{
+    catalogId: "hermes-claw",
+    agentId: "agent-alex:hermes-claw",
+    agentProfile: "hermes-claw-managed-v1",
+    displayName: "Hermes",
+    clientVersion: "v2026.7.20",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-folders"],
+    toolPolicies: { "list-mail-folders": "allow" },
+  }],
+};
+
+class FakeController implements ControllerClient {
+  lastChatRuntimes: Array<{ catalogId: "claude-cli" | "codex-cli" | "hermes-claw"; key: string }> | undefined;
+  async create(input: Parameters<ControllerClient["create"]>[0]): Promise<Sandbox> {
+    this.lastChatRuntimes = input.chatRuntimes;
+    return { providerId: `sandbox-${input.workspaceId}`, state: "ready", failureCode: null };
+  }
+  async status(providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
+  async open(_providerId: string): Promise<Launch> { return { launchUrl: "https://kasm.example", expiresAt: new Date().toISOString() }; }
+  async destroy() {}
+  async purgeWorkspace() {}
+}
+
+test("agent chat grants are deterministic, workspace-and-runtime-bound, and only issued for selected runtimes", () => {
+  const authority = new AgentChatAuthority("test-agent-chat-root-secret-at-least-32-characters");
+  const first = authority.issue(identity, "11111111-1111-4111-8111-111111111111", hermesPolicy, "hermes-claw");
+  const same = authority.issue(identity, "11111111-1111-4111-8111-111111111111", hermesPolicy, "hermes-claw");
+  const other = authority.issue(identity, "22222222-2222-4222-8222-222222222222", hermesPolicy, "hermes-claw");
+  assert.deepEqual(first, same);
+  assert.notEqual(first?.key, other?.key);
+  assert.equal(first?.baseUrl, "http://onecomputer-sandbox-11111111-1111-4111-8111-111111111111:8642");
+
+  const claudePolicy = { ...hermesPolicy, agentProfile: "claude-desktop-managed-v1" as const, agents: undefined };
+  assert.equal(authority.issue(identity, "11111111-1111-4111-8111-111111111111", claudePolicy, "hermes-claw"), undefined);
+});
+
+test("workspace provisioning projects dedicated chat runtime grants and stopped workspaces cannot authorize chat", async () => {
+  const controller = new FakeController();
+  const authority = new AgentChatAuthority("test-agent-chat-root-secret-at-least-32-characters");
+  const service = new WorkspaceService(
+    new MemoryWorkspaceStore(),
+    controller,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    authority,
+  );
+  const workspace = await service.create(identity, hermesPolicy, "personal", "hermes-chat-create", "correlation-1");
+  assert.equal(controller.lastChatRuntimes?.[0]?.catalogId, "hermes-claw");
+  assert.ok(controller.lastChatRuntimes?.[0]?.key);
+  assert.equal((await service.agentChatAccess(identity, hermesPolicy, workspace.id, "hermes-claw")).workspaceId, workspace.id);
+  await service.stop(identity, hermesPolicy, workspace.id);
+  await assert.rejects(
+    service.agentChatAccess(identity, hermesPolicy, workspace.id, "hermes-claw"),
+    (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "WORKSPACE_NOT_READY"),
+  );
+});
+
+test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract", async () => {
+  const requests: Array<{ url: string; authorization: string | undefined; body: unknown }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({
+      url: request.url ?? "",
+      authorization: request.headers.authorization,
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined,
+    });
+    response.setHeader("content-type", "application/x-ndjson");
+    const turnId = "turn-11111111-1111-4111-8111-111111111111";
+    const frames = [
+      { version: 1, sequence: 0, sessionId: "session-1", turnId, type: "turn-start", messageId: "message-1", createdAt: "2026-07-25T00:00:00Z" },
+      { version: 1, sequence: 1, sessionId: "session-1", turnId, type: "tool", toolCallId: "tool-1", name: "get-drive-item", state: "running" },
+      { version: 1, sequence: 2, sessionId: "session-1", turnId, type: "tool", toolCallId: "tool-1", name: "get-drive-item", state: "completed", summary: "Tool completed" },
+      { version: 1, sequence: 3, sessionId: "session-1", turnId, type: "text-delta", textId: "text-1", delta: "The sandbox agent replied." },
+      { version: 1, sequence: 4, sessionId: "session-1", turnId, type: "turn-finish", state: "completed", completedAt: "2026-07-25T00:00:01Z" },
+    ];
+    response.end(`${frames.map((frame) => JSON.stringify(frame)).join("\n")}\n`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const message = {
+    id: "user-message-1",
+    role: "user" as const,
+    metadata: {
+      agentCatalogId: "hermes-claw" as const,
+      state: "completed" as const,
+      createdAt: "2026-07-25T00:00:00Z",
+    },
+    parts: [{ type: "text" as const, text: "Hello", state: "done" as const }],
+  };
+  try {
+    for (const catalogId of ["hermes-claw", "claude-cli", "codex-cli"] as const) {
+      const access: AgentChatAccess = {
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        catalogId,
+        displayName: catalogId,
+        key: `workspace-specific-${catalogId}-api-key`,
+        baseUrl: `http://127.0.0.1:${address.port}`,
+      };
+      const client = new HttpAgentChatClient();
+      const events = [];
+      for await (const event of client.streamTurn(access, "session-1", {
+        ...message,
+        metadata: { ...message.metadata, agentCatalogId: catalogId },
+      })) events.push(event);
+      assert.deepEqual(events.map((event) => event.type), [
+        "turn-start", "tool", "tool", "text-delta", "turn-finish",
+      ]);
+      assert.equal(JSON.stringify(events).includes("must-not-leak"), false);
+      const mapper = new AgentUiStreamMapper(catalogId);
+      const chunks = events.flatMap((event) => mapper.chunks(event));
+      assert.equal(chunks.filter((chunk) => chunk.type === "start").length, 1);
+      assert.equal(chunks.filter((chunk) => chunk.type === "text-delta").length, 1);
+      assert.equal(chunks.filter((chunk) => chunk.type === "data-tool").length, 2);
+      assert.equal(chunks.filter((chunk) => chunk.type === "finish").length, 1);
+    }
+    assert.deepEqual(requests.map(({ url, body }) => ({ url, body })), [
+      { url: "/api/sessions/session-1/turns", body: { message } },
+      { url: "/api/sessions/session-1/turns", body: { message: { ...message, metadata: { ...message.metadata, agentCatalogId: "claude-cli" } } } },
+      { url: "/api/sessions/session-1/turns", body: { message: { ...message, metadata: { ...message.metadata, agentCatalogId: "codex-cli" } } } },
+    ]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("agent streams reject malformed ordering, cross-session events, and abrupt disconnects", async () => {
+  const turnId = "turn-11111111-1111-4111-8111-111111111111";
+  const started = {
+    version: 1,
+    sequence: 0,
+    sessionId: "session-1",
+    turnId,
+    type: "turn-start",
+    messageId: "message-1",
+    createdAt: "2026-07-25T00:00:00Z",
+  };
+  const cases: Array<{ name: string; frames: unknown[] }> = [
+    {
+      name: "out-of-order",
+      frames: [
+        started,
+        { version: 1, sequence: 2, sessionId: "session-1", turnId, type: "turn-finish", state: "completed", completedAt: "2026-07-25T00:00:01Z" },
+      ],
+    },
+    {
+      name: "cross-session",
+      frames: [
+        started,
+        { version: 1, sequence: 1, sessionId: "session-2", turnId, type: "turn-finish", state: "completed", completedAt: "2026-07-25T00:00:01Z" },
+      ],
+    },
+    {
+      name: "abrupt",
+      frames: [started],
+    },
+    {
+      name: "malformed",
+      frames: [started, "not-json"],
+    },
+  ];
+  const message = {
+    id: "user-message-1",
+    role: "user" as const,
+    metadata: {
+      agentCatalogId: "claude-cli" as const,
+      state: "completed" as const,
+      createdAt: "2026-07-25T00:00:00Z",
+    },
+    parts: [{ type: "text" as const, text: "Hello", state: "done" as const }],
+  };
+
+  for (const scenario of cases) {
+    const server = createServer((_request, response) => {
+      response.setHeader("content-type", "application/x-ndjson");
+      response.end(`${scenario.frames.map((frame) => typeof frame === "string" ? frame : JSON.stringify(frame)).join("\n")}\n`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const client = new HttpAgentChatClient();
+    const access: AgentChatAccess = {
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      catalogId: "claude-cli",
+      displayName: "Claude CLI",
+      key: "workspace-specific-claude-api-key",
+      baseUrl: `http://127.0.0.1:${address.port}`,
+    };
+    try {
+      await assert.rejects(async () => {
+        for await (const _event of client.streamTurn(access, "session-1", message)) {
+          // Exhaust the stream so terminal validation runs.
+        }
+      }, (error: unknown) => Boolean(
+        error
+        && typeof error === "object"
+        && "code" in error
+        && error.code === "CHAT_INVALID_RESPONSE",
+      ), scenario.name);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  }
+});
+
+test("terminal and repeated-tool updates keep stable owned UI part identifiers for every agent", () => {
+  for (const catalogId of ["hermes-claw", "claude-cli", "codex-cli"] as const) {
+    const mapper = new AgentUiStreamMapper(catalogId);
+    const base = {
+      version: 1 as const,
+      sessionId: "session-1",
+      turnId: "turn-11111111-1111-4111-8111-111111111111",
+    };
+    mapper.chunks({
+      ...base,
+      sequence: 0,
+      type: "turn-start",
+      messageId: "message-1",
+      createdAt: "2026-07-25T00:00:00Z",
+    });
+    const running = mapper.chunks({
+      ...base,
+      sequence: 1,
+      type: "tool",
+      toolCallId: "tool-1",
+      name: "get-drive-item",
+      state: "running",
+    });
+    const completed = mapper.chunks({
+      ...base,
+      sequence: 2,
+      type: "tool",
+      toolCallId: "tool-1",
+      name: "get-drive-item",
+      state: "completed",
+      summary: "Tool completed",
+    });
+    assert.equal(running[0]?.type, "data-tool");
+    assert.equal(completed[0]?.type, "data-tool");
+    assert.equal("id" in running[0]! ? running[0].id : undefined, "tool-1");
+    assert.equal("id" in completed[0]! ? completed[0].id : undefined, "tool-1");
+
+    for (const [state, finishReason] of [["cancelled", "other"], ["failed", "error"]] as const) {
+      const terminal = mapper.chunks({
+        ...base,
+        sequence: 3,
+        type: "turn-finish",
+        state,
+        message: `Turn ${state}`,
+        completedAt: "2026-07-25T00:00:01Z",
+      });
+      assert.equal(terminal.find((chunk) => chunk.type === "data-terminal")?.data.state, state);
+      assert.equal(terminal.find((chunk) => chunk.type === "finish")?.finishReason, finishReason);
+    }
+  }
+});
+
+test("terminal history closes stale activity and reconciles approval that completed after stop", async () => {
+  const messages = [{
+    id: "message-1",
+    role: "assistant" as const,
+    metadata: {
+      agentCatalogId: "claude-cli" as const,
+      turnId: "turn-1",
+      state: "cancelled" as const,
+      createdAt: "2026-07-25T00:00:00Z",
+    },
+    parts: [
+      {
+        type: "data-progress" as const,
+        id: "progress-1",
+        data: { activityId: "progress-1", label: "Claude is working", state: "running" as const },
+      },
+      {
+        type: "data-tool" as const,
+        id: "tool-1",
+        data: { toolCallId: "tool-1", name: "wait-for-governed-operation", state: "running" as const },
+      },
+      {
+        type: "data-approval" as const,
+        id: "approval-1",
+        data: {
+          approvalId: "approval-1",
+          toolCallId: "tool-1",
+          operationId: "11111111-1111-4111-8111-111111111111",
+          state: "approval_required" as const,
+          summary: "Waiting for signed approval",
+        },
+      },
+      {
+        type: "data-terminal" as const,
+        id: "terminal-1",
+        data: { turnId: "turn-1", state: "cancelled" as const, message: "Stopped by the employee" },
+      },
+    ],
+  }];
+
+  const reconciled = await reconcileChatMessages(messages, async () => "succeeded");
+  assert.deepEqual(reconciled[0]?.parts.map((part) => (
+    part.type === "data-progress"
+      ? [part.type, part.data.state, part.data.label]
+      : part.type === "data-tool"
+        ? [part.type, part.data.state, part.data.summary]
+        : part.type === "data-approval"
+          ? [part.type, part.data.state, part.data.summary]
+          : [part.type, part.data.state, part.data.message]
+  )), [
+    ["data-progress", "completed", "Work stopped"],
+    ["data-tool", "failed", "Stopped before the tool returned"],
+    ["data-approval", "succeeded", "Approved action completed"],
+    ["data-terminal", "cancelled", "Stopped by the employee"],
+  ]);
+});

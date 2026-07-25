@@ -205,9 +205,10 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
           policyHash: "d".repeat(64),
         },
       },
-      hermesApi: {
+      chatRuntimes: [{
+        catalogId: "hermes-claw",
         key: "workspace-specific-hermes-api-key-at-least-32-characters",
-      },
+      }],
     });
     const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
     const networkCreate = requests.find((item) => item.path === "/networks/create" && item.body.Name === workspaceNetwork)!;

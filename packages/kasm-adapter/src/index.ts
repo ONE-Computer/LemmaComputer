@@ -37,9 +37,10 @@ export type SandboxCreateInput = {
     baseUrl: string;
     token: string;
   };
-  hermesApi?: {
+  chatRuntimes?: Array<{
+    catalogId: "claude-cli" | "codex-cli" | "hermes-claw";
     key: string;
-  };
+  }>;
   agentGrants?: Array<{
     catalogId: AgentCatalogId;
     agentId: string;
@@ -95,6 +96,7 @@ const agentEnvironment = (
   const prefix = ({
     "claude-desktop": "ONECOMPUTER",
     "claude-cli": "ONECOMPUTER_CLAUDE_CLI",
+    "codex-cli": "ONECOMPUTER_CODEX_CLI",
     "hermes-desktop": "ONECOMPUTER_HERMES_DESKTOP",
     "hermes-claw": "ONECOMPUTER_HERMES",
   } as const)[grant.catalogId];
@@ -109,6 +111,23 @@ const agentEnvironment = (
     `${prefix}_ALLOWED_TOOLS=${policy.allowedTools.join(",")}`,
     `${prefix}_TOOL_POLICIES=${JSON.stringify(policy.toolPolicies)}`,
   ];
+};
+
+const chatRuntimeEnvironment = (
+  runtime: NonNullable<SandboxCreateInput["chatRuntimes"]>[number],
+) => {
+  if (runtime.catalogId === "hermes-claw") {
+    return [
+      "API_SERVER_ENABLED=true",
+      "API_SERVER_HOST=0.0.0.0",
+      "API_SERVER_PORT=8642",
+      `API_SERVER_KEY=${runtime.key}`,
+    ];
+  }
+  const variable = runtime.catalogId === "claude-cli"
+    ? "ONECOMPUTER_CLAUDE_CHAT_API_KEY"
+    : "ONECOMPUTER_CODEX_CHAT_API_KEY";
+  return [`${variable}=${runtime.key}`];
 };
 
 export function buildKasmClipboardLaunch(launchUrl: string, policy: ClipboardPolicy, now = new Date()): Launch {
@@ -257,7 +276,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       await this.ensureEgressProxy(input, workspaceNetwork);
     }
     if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
-    if ((input.agentBridge || input.hermesApi) && this.config.controlContainer) await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
+    if ((input.agentBridge || input.chatRuntimes?.length) && this.config.controlContainer) await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
     const name = `onecomputer-sandbox-${input.workspaceId}`;
     const existing = await this.inspectByName(name);
     if (existing?.running) {
@@ -269,6 +288,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const fallbackAgent = ({
       "claude-desktop-managed-v1": "claude-desktop",
       "claude-cli-managed-v1": "claude-cli",
+      "codex-cli-managed-v1": "codex-cli",
       "hermes-desktop-managed-v1": "hermes-desktop",
       "hermes-claw-managed-v1": "hermes-claw",
     } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";
@@ -282,7 +302,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         "com.onecomputer.workspace-network": workspaceNetwork,
         "com.onecomputer.workspace-volume": workspaceVolume,
         "com.onecomputer.gateway-attached": String(Boolean(input.gateway)),
-        "com.onecomputer.control-attached": String(Boolean(input.agentBridge || input.hermesApi)),
+        "com.onecomputer.control-attached": String(Boolean(input.agentBridge || input.chatRuntimes?.length)),
         "com.onecomputer.policy-version-id": input.policy.policyVersionId,
         "com.onecomputer.policy-hash": input.policy.policyHash,
         "com.onecomputer.policy-signing-key-id": input.policyBundle.keyId,
@@ -292,7 +312,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         "com.onecomputer.model-alias": input.policy.modelAlias,
         "com.onecomputer.enabled-agents": enabledAgents.join(","),
         "com.onecomputer.enabled-applications": enabledApplications.join(","),
-        "com.onecomputer.hermes-api-enabled": String(Boolean(input.hermesApi)),
+        "com.onecomputer.chat-runtime-agents": input.chatRuntimes?.map((runtime) => runtime.catalogId).join(",") ?? "",
         "com.onecomputer.desktop-port": String(port),
         "com.onecomputer.clipboard-enabled": String(clipboard.enabled),
         "com.onecomputer.clipboard-local-to-workspace": String(clipboard.localToWorkspace),
@@ -316,12 +336,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         `ONECOMPUTER_ENABLED_APPLICATIONS=${enabledApplications.join(",")}`,
         `ONECOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
         `ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(canonicalJson(input.policyVerificationKeys), "utf8").toString("base64url")}`,
-        ...(input.hermesApi ? [
-          "API_SERVER_ENABLED=true",
-          "API_SERVER_HOST=0.0.0.0",
-          "API_SERVER_PORT=8642",
-          `API_SERVER_KEY=${input.hermesApi.key}`,
-        ] : []),
+        ...(input.chatRuntimes?.flatMap(chatRuntimeEnvironment) ?? []),
         ...(!input.agentGrants && input.gateway ? [
           `ONECOMPUTER_GATEWAY_UPSTREAM=${input.gateway.baseUrl}`,
           `ONECOMPUTER_GATEWAY_CREDENTIAL=${input.gateway.credential}`,

@@ -80,6 +80,8 @@ test("Trail owns approval-device management while Connections stays focused on s
   const app = await source("apps/web/src/App.jsx");
   const activityScreen = app.slice(app.indexOf("function ActivityScreen"), app.indexOf("const pendingApplications"));
   const connectionsScreen = app.slice(app.indexOf("function ConnectionsScreen"), app.indexOf("function ChatScreen"));
+  assert.match(app, /getBrowserApproverIdentity,/);
+  assert.match(app, /getBrowserApproverIdentity\(\)\s*\.then/);
   assert.match(app, /trail: "Trail"/);
   assert.match(app, /label="Trail"/);
   assert.doesNotMatch(app, /view === "activity"/);
@@ -139,22 +141,43 @@ test("Chat is last in navigation, with recent threads in the sidebar and a focus
     source("apps/web/src/styles.css"),
   ]);
   const primaryNav = app.slice(app.indexOf('<nav aria-label="Primary navigation">'), app.indexOf("</nav>", app.indexOf('<nav aria-label="Primary navigation">')));
-  const chatScreen = app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App"));
+  const chatScreen = app.slice(app.indexOf("function ChatConversation"), app.indexOf("export function App"));
   assert.ok(primaryNav.indexOf('label="Chat"') > primaryNav.indexOf('label="Connections"'));
   assert.match(primaryNav, /sidebar-chat-history/);
   assert.match(primaryNav, /Recent chat threads/);
   assert.doesNotMatch(chatScreen, /chat-sessions/);
-  assert.match(chatScreen, /<h1>How can Hermes help\?<\/h1>/);
+  assert.match(chatScreen, /<h1>How can \{agentName\} help\?<\/h1>/);
+  assert.match(chatScreen, /ariaLabel="Choose chat agent"/);
   assert.match(chatScreen, /className="chat-send-button"/);
+  assert.match(chatScreen, /useChat\(\{/);
+  assert.match(chatScreen, /DefaultChatTransport/);
+  assert.doesNotMatch(chatScreen, /"content-type": "application\/json"/);
+  assert.match(chatScreen, /className="chat-stop-button"/);
+  assert.match(app, /part\.type === "data-approval"/);
+  assert.doesNotMatch(chatScreen, /chatApi\.send/);
   assert.match(styles, /\.chat-composer\s*\{[\s\S]*?border-radius: 26px/);
+  assert.match(styles, /\.chat-message\s*\{\s*width: 100%;\s*max-width: 860px/);
+  assert.match(styles, /\.chat-send-button:not\(:disabled\)\s*\{\s*background: var\(--navy\)/);
 });
 
-test("Chat automatically recovers when Hermes becomes healthy after the workspace reports ready", async () => {
+test("Chat automatically recovers when a selected agent becomes healthy after the workspace reports ready", async () => {
   const app = await source("apps/web/src/App.jsx");
   assert.match(app, /status !== "offline"/);
-  assert.match(app, /reasonCode !== "HERMES_UNAVAILABLE"/);
+  assert.match(app, /reasonCode !== "CHAT_RUNTIME_UNAVAILABLE"/);
   assert.match(app, /setTimeout\(\(\) => setReload\(\(value\) => value \+ 1\), 2000\)/);
   assert.match(app, /clearTimeout\(timeout\)/);
+});
+
+test("Chat keeps the selected conversation across a page refresh", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  assert.match(app, /const chatSessionFromLocation/);
+  assert.match(app, /useState\(chatSessionFromLocation\)/);
+  assert.match(app, /setActiveChatSessionId\(chatSessionFromLocation\(\)\)/);
+  assert.match(app, /const selectChatSession = \(sessionId, historyMode = "push"\)/);
+  assert.match(app, /url\.searchParams\.set\("chat", sessionId\)/);
+  assert.match(app, /activeNav !== "Chat" \|\| !activeChatSessionId/);
+  assert.match(app, /onSessionChange=\{\(sessionId\) => selectChatSession\(sessionId, "replace"\)\}/);
+  assert.doesNotMatch(app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App")), /onSessionChange\(""\);\s*setAgents/);
 });
 
 test("Firewall presents tenant-wide effective policies in one rules table with centered change dialogs", async () => {
@@ -191,7 +214,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
     source("apps/web/src/ui.css"),
   ]);
   assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog \}/);
-  assert.equal((app.match(/<SelectMenu/g) ?? []).length, 8);
+  assert.equal((app.match(/<SelectMenu/g) ?? []).length, 9);
   assert.doesNotMatch(app, /<select/);
   assert.match(ui, /export function SelectMenu/);
   assert.match(ui, /role="combobox"/);

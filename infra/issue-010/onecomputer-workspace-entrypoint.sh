@@ -23,13 +23,14 @@ agent_enabled() {
 }
 
 IFS=',' read -r -a enabled_agents <<< "$ONECOMPUTER_ENABLED_AGENTS"
-(( ${#enabled_agents[@]} >= 1 && ${#enabled_agents[@]} <= 4 )) || {
+(( ${#enabled_agents[@]} >= 1 && ${#enabled_agents[@]} <= 5 )) || {
   echo "invalid agent selection" >&2
   exit 78
 }
 for enabled_agent in "${enabled_agents[@]}"; do
   [[ "$enabled_agent" == "claude-desktop" \
     || "$enabled_agent" == "claude-cli" \
+    || "$enabled_agent" == "codex-cli" \
     || "$enabled_agent" == "hermes-desktop" \
     || "$enabled_agent" == "hermes-claw" ]] || {
     echo "unrecognized agent selection" >&2
@@ -76,6 +77,7 @@ require_agent_environment() {
 
 agent_enabled claude-desktop && require_agent_environment ONECOMPUTER "Claude Desktop"
 agent_enabled claude-cli && require_agent_environment ONECOMPUTER_CLAUDE_CLI "Claude CLI"
+agent_enabled codex-cli && require_agent_environment ONECOMPUTER_CODEX_CLI "Codex CLI"
 agent_enabled hermes-claw && require_agent_environment ONECOMPUTER_HERMES "Hermes Agent CLI"
 agent_enabled hermes-desktop && require_agent_environment ONECOMPUTER_HERMES_DESKTOP "Hermes Agent Desktop"
 if agent_enabled hermes-claw; then
@@ -85,6 +87,20 @@ if agent_enabled hermes-claw; then
     && "${API_SERVER_PORT:-}" == "8642" \
     && "${#hermes_api_key}" -ge 32 ]] || {
     echo "Hermes sandbox API configuration is required" >&2
+    exit 78
+  }
+fi
+if agent_enabled claude-cli; then
+  claude_chat_api_key="${ONECOMPUTER_CLAUDE_CHAT_API_KEY:-}"
+  [[ "${#claude_chat_api_key}" -ge 32 ]] || {
+    echo "Claude Chat API configuration is required" >&2
+    exit 78
+  }
+fi
+if agent_enabled codex-cli; then
+  codex_chat_api_key="${ONECOMPUTER_CODEX_CHAT_API_KEY:-}"
+  [[ "${#codex_chat_api_key}" -ge 32 ]] || {
+    echo "Codex Chat API configuration is required" >&2
     exit 78
   }
 fi
@@ -285,6 +301,56 @@ for path in ["/home/kasm-user/.claude-cli/onecomputer.env", "/home/kasm-user/.cl
 PY
 fi
 
+configure_codex() {
+  local home="$1"
+  local model="$2"
+  local allowed_tools="$3"
+  install -d -o 1000 -g 1000 -m 0700 "$home"
+  python3 - "$home" "$model" "$allowed_tools" <<'PY'
+import json
+import os
+import sys
+
+home, model, allowed_tools = sys.argv[1:]
+tools = [item for item in allowed_tools.split(",") if item]
+document = f"""model = {json.dumps(model)}
+model_provider = "onecomputer"
+approval_policy = "never"
+sandbox_mode = "read-only"
+web_search = "disabled"
+
+[model_providers.onecomputer]
+name = "ONEComputer governed OpenAI"
+base_url = "http://127.0.0.1:4317/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+supports_websockets = false
+
+[analytics]
+enabled = false
+
+[mcp_servers.onecomputer_ms365]
+command = "/usr/local/libexec/onecomputer-mcp-stdio"
+args = []
+enabled_tools = {json.dumps(tools + ["wait-for-governed-operation"])}
+default_tools_approval_mode = "approve"
+
+[mcp_servers.onecomputer_ms365.env]
+ONECOMPUTER_MCP_BROKER = "http://127.0.0.1:4317"
+"""
+path = os.path.join(home, "config.toml")
+with open(path, "w", encoding="utf-8") as output:
+    output.write(document)
+os.chmod(path, 0o600)
+os.chown(path, 1000, 1000)
+PY
+}
+
+if agent_enabled codex-cli; then
+  configure_codex /home/kasm-user/.codex-cli "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS"
+  configure_codex /home/kasm-user/.codex-chat-sdk "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS"
+fi
+
 configure_hermes() {
   local home="$1"
   local model="$2"
@@ -306,8 +372,22 @@ document = {
         "base_url": f"http://127.0.0.1:{broker_port}/v1",
         "api_key": "onecomputer-loopback-broker",
     },
-    "platform_toolsets": {"cli": [], "api_server": [], "telegram": []},
-    "agent": {"disabled_toolsets": sorted(TOOLSETS)},
+    # Hermes does not attach globally configured MCP servers to the API
+    # platform by default. Web Chat uses api_server, so name the governed
+    # server explicitly for both the API and interactive CLI surfaces.
+    "platform_toolsets": {
+        "cli": ["onecomputer_ms365"],
+        "api_server": ["onecomputer_ms365"],
+        "telegram": [],
+    },
+    "agent": {
+        "disabled_toolsets": sorted(TOOLSETS),
+        # Hermes defaults custom GPT-5 models to medium reasoning, while its
+        # chat-completions transport cannot combine that parameter with MCP
+        # function tools. The governed model still reasons normally; this only
+        # removes the incompatible request parameter at this adapter boundary.
+        "reasoning_effort": False,
+    },
     "mcp_servers": {
         "onecomputer_ms365": {
             "command": "/usr/local/libexec/onecomputer-mcp-stdio",
@@ -336,6 +416,7 @@ install -d -o 1000 -g 1000 -m 0755 /home/kasm-user/.config/autostart /home/kasm-
 rm -f /home/kasm-user/.config/autostart/claude-desktop.desktop \
   /home/kasm-user/Desktop/Claude-Desktop.desktop \
   /home/kasm-user/Desktop/Claude-CLI.desktop \
+  /home/kasm-user/Desktop/Codex-CLI.desktop \
   /home/kasm-user/Desktop/ONEComputer-Agent.desktop \
   /home/kasm-user/Desktop/Hermes-Claw.desktop \
   /home/kasm-user/Desktop/Hermes-CLI.desktop \
@@ -356,6 +437,12 @@ if agent_enabled claude-cli; then
   install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-claude-cli.desktop" /home/kasm-user/Desktop/Claude-CLI.desktop
 else
   chmod 0700 /usr/local/bin/onecomputer-claude
+fi
+if agent_enabled codex-cli; then
+  chmod 0755 /usr/local/bin/onecomputer-codex /usr/local/libexec/onecomputer-codex-bin
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-codex-cli.desktop" /home/kasm-user/Desktop/Codex-CLI.desktop
+else
+  chmod 0700 /usr/local/bin/onecomputer-codex /usr/local/libexec/onecomputer-codex-bin
 fi
 if agent_enabled hermes-claw; then
   chmod 0755 /usr/local/bin/onecomputer-hermes
@@ -433,12 +520,14 @@ agent_enabled claude-desktop && start_agent_broker ONECOMPUTER 4312 gateway-prox
 agent_enabled hermes-claw && start_agent_broker ONECOMPUTER_HERMES 4314 hermes-gateway-proxy
 agent_enabled claude-cli && start_agent_broker ONECOMPUTER_CLAUDE_CLI 4315 claude-cli-gateway-proxy
 agent_enabled hermes-desktop && start_agent_broker ONECOMPUTER_HERMES_DESKTOP 4316 hermes-desktop-gateway-proxy
+agent_enabled codex-cli && start_agent_broker ONECOMPUTER_CODEX_CLI 4317 codex-cli-gateway-proxy
 
 for credential_variable in \
   ONECOMPUTER_GATEWAY_CREDENTIAL ONECOMPUTER_GATEWAY_UPSTREAM ONECOMPUTER_AGENT_BRIDGE_TOKEN ONECOMPUTER_CONTROL_UPSTREAM \
   ONECOMPUTER_HERMES_GATEWAY_CREDENTIAL ONECOMPUTER_HERMES_GATEWAY_UPSTREAM ONECOMPUTER_HERMES_AGENT_BRIDGE_TOKEN ONECOMPUTER_HERMES_CONTROL_UPSTREAM \
   ONECOMPUTER_CLAUDE_CLI_GATEWAY_CREDENTIAL ONECOMPUTER_CLAUDE_CLI_GATEWAY_UPSTREAM ONECOMPUTER_CLAUDE_CLI_AGENT_BRIDGE_TOKEN ONECOMPUTER_CLAUDE_CLI_CONTROL_UPSTREAM \
-  ONECOMPUTER_HERMES_DESKTOP_GATEWAY_CREDENTIAL ONECOMPUTER_HERMES_DESKTOP_GATEWAY_UPSTREAM ONECOMPUTER_HERMES_DESKTOP_AGENT_BRIDGE_TOKEN ONECOMPUTER_HERMES_DESKTOP_CONTROL_UPSTREAM; do
+  ONECOMPUTER_HERMES_DESKTOP_GATEWAY_CREDENTIAL ONECOMPUTER_HERMES_DESKTOP_GATEWAY_UPSTREAM ONECOMPUTER_HERMES_DESKTOP_AGENT_BRIDGE_TOKEN ONECOMPUTER_HERMES_DESKTOP_CONTROL_UPSTREAM \
+  ONECOMPUTER_CODEX_CLI_GATEWAY_CREDENTIAL ONECOMPUTER_CODEX_CLI_GATEWAY_UPSTREAM ONECOMPUTER_CODEX_CLI_AGENT_BRIDGE_TOKEN ONECOMPUTER_CODEX_CLI_CONTROL_UPSTREAM; do
   unset "$credential_variable"
 done
 
@@ -457,6 +546,7 @@ for enabled_agent in "${enabled_agents[@]}"; do
     hermes-claw) broker_port=4314 ;;
     claude-cli) broker_port=4315 ;;
     hermes-desktop) broker_port=4316 ;;
+    codex-cli) broker_port=4317 ;;
   esac
   for _ in $(seq 1 50); do
     if curl -fsS "http://127.0.0.1:${broker_port}/healthz" >/dev/null; then break; fi
@@ -476,8 +566,8 @@ if agent_enabled hermes-claw; then
       OPENAI_API_KEY=onecomputer-loopback-broker \
       ONECOMPUTER_MCP_BROKER=http://127.0.0.1:4314 \
       API_SERVER_ENABLED=true \
-      API_SERVER_HOST=0.0.0.0 \
-      API_SERVER_PORT=8642 \
+      API_SERVER_HOST=127.0.0.1 \
+      API_SERVER_PORT=8652 \
       API_SERVER_KEY="$hermes_api_key" \
       HTTP_PROXY="${HTTP_PROXY:-}" \
       HTTPS_PROXY="${HTTPS_PROXY:-}" \
@@ -488,12 +578,74 @@ if agent_enabled hermes-claw; then
       /opt/onecomputer/hermes-venv/bin/hermes gateway run \
       >>/run/onecomputer/hermes-gateway-bootstrap.log 2>&1 &
   printf '%s\n' "$!" > /run/onecomputer/hermes-gateway.pid
-  unset API_SERVER_KEY hermes_api_key
   for _ in $(seq 1 200); do
-    if curl -fsS "http://127.0.0.1:8642/health" >/dev/null; then break; fi
+    if curl -fsS "http://127.0.0.1:8652/health" >/dev/null; then break; fi
     sleep 0.1
   done
-  curl -fsS "http://127.0.0.1:8642/health" >/dev/null
+  curl -fsS "http://127.0.0.1:8652/health" >/dev/null
+fi
+
+start_sdk_chat_adapter() {
+  local agent="$1"
+  local port="$2"
+  local broker_port="$3"
+  local model="$4"
+  local allowed_tools="$5"
+  local api_key="$6"
+  local hermes_url="${7:-}"
+  local hermes_key="${8:-}"
+  install -d -o 1000 -g 1000 -m 0700 \
+    "/home/kasm-user/.onecomputer-chat/${agent}" \
+    /home/kasm-user/.claude-chat-sdk
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    env -i \
+      PATH=/opt/onecomputer/agent-chat-venv/bin:/usr/local/bin:/usr/bin:/bin \
+      HOME=/home/kasm-user \
+      USER=kasm-user \
+      ONECOMPUTER_CHAT_AGENT="$agent" \
+      ONECOMPUTER_CHAT_API_KEY="$api_key" \
+      ONECOMPUTER_CHAT_MODEL_ALIAS="$model" \
+      ONECOMPUTER_CHAT_ALLOWED_TOOLS="$allowed_tools" \
+      ONECOMPUTER_CHAT_BROKER="http://127.0.0.1:${broker_port}" \
+      ONECOMPUTER_CHAT_PORT="$port" \
+      ONECOMPUTER_HERMES_CHAT_URL="$hermes_url" \
+      ONECOMPUTER_HERMES_CHAT_KEY="$hermes_key" \
+      /opt/onecomputer/agent-chat-venv/bin/python \
+      /usr/local/libexec/onecomputer-agent-chat \
+      >>"/run/onecomputer/${agent}-chat.log" 2>&1 &
+  printf '%s\n' "$!" > "/run/onecomputer/${agent}-chat.pid"
+  for _ in $(seq 1 200); do
+    if curl -fsS -H "authorization: Bearer ${api_key}" "http://127.0.0.1:${port}/health" >/dev/null; then break; fi
+    sleep 0.1
+  done
+  curl -fsS -H "authorization: Bearer ${api_key}" "http://127.0.0.1:${port}/health" >/dev/null
+}
+
+if agent_enabled hermes-claw; then
+  start_sdk_chat_adapter \
+    hermes-claw 8642 4314 \
+    "$ONECOMPUTER_HERMES_MODEL_ALIAS" \
+    "$ONECOMPUTER_HERMES_ALLOWED_TOOLS" \
+    "$hermes_api_key" \
+    http://127.0.0.1:8652 \
+    "$hermes_api_key"
+  unset API_SERVER_KEY hermes_api_key
+fi
+if agent_enabled claude-cli; then
+  start_sdk_chat_adapter \
+    claude-cli 8643 4315 \
+    "$ONECOMPUTER_CLAUDE_CLI_MODEL_ALIAS" \
+    "$ONECOMPUTER_CLAUDE_CLI_ALLOWED_TOOLS" \
+    "$claude_chat_api_key"
+  unset ONECOMPUTER_CLAUDE_CHAT_API_KEY claude_chat_api_key
+fi
+if agent_enabled codex-cli; then
+  start_sdk_chat_adapter \
+    codex-cli 8644 4317 \
+    "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" \
+    "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS" \
+    "$codex_chat_api_key"
+  unset ONECOMPUTER_CODEX_CHAT_API_KEY codex_chat_api_key
 fi
 touch /run/onecomputer/workspace-ready
 

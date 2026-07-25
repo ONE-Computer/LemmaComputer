@@ -190,10 +190,27 @@ const chatSession = {
   title: "Quarterly planning",
   createdAt: now,
   updatedAt: now,
+  agentCatalogId: "hermes-claw",
 };
 let chatMessages = [
-  { role: "user", content: "Help me prepare the priorities for our quarterly planning meeting.", createdAt: now },
-  { role: "assistant", content: "I can help with that. I’ll work from the files and approved connections available in this sandbox. Which team’s priorities should we start with?", createdAt: now },
+  {
+    id: "fixture-user-message-1",
+    role: "user",
+    metadata: { agentCatalogId: "hermes-claw", state: "completed", createdAt: now },
+    parts: [{ type: "text", text: "Delete the disposable planning draft after checking it.", state: "done" }],
+  },
+  {
+    id: "fixture-assistant-message-1",
+    role: "assistant",
+    metadata: { agentCatalogId: "hermes-claw", turnId: "fixture-turn-1", state: "completed", createdAt: now },
+    parts: [
+      { type: "data-progress", id: "fixture-progress-1", data: { activityId: "fixture-progress-1", label: "Work complete", state: "completed" } },
+      { type: "data-tool", id: "fixture-tool-1", data: { toolCallId: "fixture-tool-1", name: "get-drive-item", state: "completed", summary: "File metadata checked" } },
+      { type: "data-approval", id: "fixture-approval-1", data: { approvalId: "fixture-approval-1", toolCallId: "fixture-tool-2", operationId: "00000000-0000-4000-8000-000000000001", state: "approval_required", summary: "Waiting for signed approval" } },
+      { type: "text", text: "The protected deletion is waiting for your signed approval. The file has not been deleted.", state: "done" },
+      { type: "data-terminal", id: "terminal-fixture-turn-1", data: { turnId: "fixture-turn-1", state: "completed" } },
+    ],
+  },
 ];
 
 let egressSecurityGroups = [{
@@ -247,9 +264,10 @@ const responses = new Map([
     }],
   }],
   ["GET /v1/connections/microsoft-365", { state: "connected", connectedAt: now, expiresAt: null }],
-  [`GET /v1/workspaces/${workspaceId}/chat/status`, { workspaceId, state: "ready", reasonCode: "HERMES_CHAT_READY" }],
-  [`GET /v1/workspaces/${workspaceId}/chat/sessions`, { sessions: [chatSession] }],
-  [`GET /v1/workspaces/${workspaceId}/chat/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
+  [`GET /v1/workspaces/${workspaceId}/chat/agents`, { workspaceId, agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }] }],
+  [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/status`, { workspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
+  [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [chatSession] }],
+  [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
   ["GET /v1/openvtc/approvers/current", { connected: false, executorDid: "did:key:z6MkFixture", approver: null }],
   ["GET /v1/openvtc/companion/config", { enabled: false, vapidPublicKey: null }],
   ["GET /v1/openvtc/companions", { companions: [] }],
@@ -282,19 +300,33 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
-  if (key === `POST /v1/workspaces/${workspaceId}/chat/sessions`) {
+  if (key === `POST /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`) {
     response.statusCode = 201;
     response.end(JSON.stringify({ ...chatSession, id: `fixture-session-${Date.now()}`, title: null }));
     return;
   }
-  if (key.startsWith(`POST /v1/workspaces/${workspaceId}/chat/sessions/`) && key.endsWith("/messages")) {
+  if (key.startsWith(`POST /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/`) && key.endsWith("/messages")) {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
       const input = JSON.parse(body);
-      const assistant = { role: "assistant", content: "I’m working inside your sandbox and can use only the tools and destinations your organization approved." };
-      chatMessages = [...chatMessages, { role: "user", content: input.message }, assistant];
-      response.end(JSON.stringify({ message: assistant }));
+      const turnId = `fixture-turn-${Date.now()}`;
+      const messageId = `fixture-message-${Date.now()}`;
+      const createdAt = new Date().toISOString();
+      const chunks = [
+        { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
+        { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Hermes is working", state: "running" } },
+        { type: "text-start", id: `${turnId}-text` },
+        { type: "text-delta", id: `${turnId}-text`, delta: "I’m working inside your workspace and can use only the tools and destinations your organization approved." },
+        { type: "text-end", id: `${turnId}-text` },
+        { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Work complete", state: "completed" } },
+        { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
+        { type: "finish", finishReason: "stop", messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt } },
+      ];
+      chatMessages = [...chatMessages, input.message];
+      response.setHeader("content-type", "text/event-stream");
+      response.setHeader("x-vercel-ai-ui-message-stream", "v1");
+      response.end(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
     });
     return;
   }

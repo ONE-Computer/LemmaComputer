@@ -12,7 +12,13 @@ import urllib.request
 
 
 BROKER = os.environ.get("ONECOMPUTER_MCP_BROKER", "http://127.0.0.1:4312")
-if BROKER not in {"http://127.0.0.1:4312", "http://127.0.0.1:4314"}:
+if BROKER not in {
+    "http://127.0.0.1:4312",
+    "http://127.0.0.1:4314",
+    "http://127.0.0.1:4315",
+    "http://127.0.0.1:4316",
+    "http://127.0.0.1:4317",
+}:
     raise SystemExit("invalid ONEComputer MCP broker")
 PROTOCOL_VERSION = "2024-11-05"
 TOOLS: dict[str, dict] = {}

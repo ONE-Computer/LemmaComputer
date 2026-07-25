@@ -100,12 +100,16 @@ test("the workspace image includes a pinned Firefox ESR locked to governed egres
   assert.equal(policies.policies.OfferToSaveLogins, false);
 });
 
-test("the optional Chrome, Claude CLI, and Hermes Agent Desktop artifacts are pinned and launch-gated", async () => {
+test("optional browser and agent artifacts are pinned and launch-gated", async () => {
   const dockerfile = await source("infra/issue-010/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
   const gatewayProxy = await source("infra/issue-010/onecomputer-gateway-proxy.py");
+  const mcpBridge = await source("infra/issue-010/onecomputer-mcp-stdio.py");
+  const chatAdapter = await source("infra/issue-010/onecomputer-agent-chat.py");
+  const chatRequirements = await source("infra/issue-010/agent-chat-requirements.txt");
   const chromePolicies = JSON.parse(await source("infra/issue-010/google-chrome-policies.json"));
   const claudeLauncher = await source("infra/issue-010/onecomputer-claude");
+  const codexLauncher = await source("infra/issue-010/onecomputer-codex");
   const hermesDesktopLauncher = await source("infra/issue-010/onecomputer-hermes-desktop");
 
   assert.match(dockerfile, /GOOGLE_CHROME_VERSION=150\.0\.7871\.186-1/);
@@ -118,19 +122,34 @@ test("the optional Chrome, Claude CLI, and Hermes Agent Desktop artifacts are pi
   assert.equal(chromePolicies.ProxyServer, "http://127.0.0.1:4313");
   assert.match(claudeLauncher, /ANTHROPIC_BASE_URL=http:\/\/127\.0\.0\.1:4315/);
   assert.match(claudeLauncher, /--strict-mcp-config/);
+  assert.match(codexLauncher, /OPENAI_BASE_URL=http:\/\/127\.0\.0\.1:4317\/v1/);
+  assert.match(codexLauncher, /--ask-for-approval never/);
+  assert.match(entrypoint, /model_provider = "onecomputer"/);
+  assert.match(entrypoint, /base_url = "http:\/\/127\.0\.0\.1:4317\/v1"/);
+  assert.match(entrypoint, /supports_websockets = false/);
+  assert.match(entrypoint, /default_tools_approval_mode = "approve"/);
+  assert.match(chatRequirements, /claude-agent-sdk==0\.2\.128/);
+  assert.match(chatRequirements, /openai-codex==0\.144\.4/);
+  assert.match(dockerfile, /openai-codex"\)\)'\)" = "0\.144\.4"/);
+  assert.match(chatAdapter, /approval\\s\+\(\?:is\\s\+\)\?required/);
+  assert.match(chatAdapter, /"Waiting for governed approval"/);
+  assert.match(chatAdapter, /approval_state in \{"approval_required", "approved", "executing"\}/);
   assert.match(hermesDesktopLauncher, /HERMES_DESKTOP_HERMES_ROOT=\/opt\/onecomputer\/hermes-agent/);
   assert.match(hermesDesktopLauncher, /Hermes --no-sandbox/);
   assert.match(entrypoint, /ONEComputer-Agent\.desktop/);
   assert.match(entrypoint, /Hermes-Claw\.desktop/);
   assert.match(entrypoint, /onecomputer-hermes-agent-cli\.desktop.*Hermes-Agent-CLI\.desktop/);
   assert.doesNotMatch(entrypoint, /onecomputer-hermes-claw\.desktop/);
-  for (const selection of ["google-chrome", "claude-cli", "hermes-desktop"]) {
+  for (const selection of ["google-chrome", "claude-cli", "codex-cli", "hermes-desktop"]) {
     assert.match(entrypoint, new RegExp(selection));
   }
   assert.match(entrypoint, /chmod 0700 \/opt\/google\/chrome\/google-chrome/);
   assert.match(entrypoint, /chmod 0700 \/usr\/local\/bin\/onecomputer-claude/);
   assert.match(entrypoint, /chmod 0700 \/usr\/local\/bin\/onecomputer-hermes-desktop/);
-  assert.match(gatewayProxy, /\{4312, 4314, 4315, 4316\}/);
+  assert.match(gatewayProxy, /\{4312, 4314, 4315, 4316, 4317\}/);
+  for (const port of [4312, 4314, 4315, 4316, 4317]) {
+    assert.match(mcpBridge, new RegExp(`127\\.0\\.0\\.1:${port}`));
+  }
 });
 
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
@@ -138,7 +157,12 @@ test("the Hermes sandbox gateway includes its pinned private API runtime without
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
   assert.match(dockerfile, /aiohttp==3\.14\.1/);
   assert.match(dockerfile, /import aiohttp/);
+  assert.match(dockerfile, /uv pip install[\s\S]*mcp==1\.26\.0[\s\S]*starlette==1\.0\.1/);
+  assert.match(dockerfile, /importlib\.metadata\.version\("mcp"\).*1\.26\.0/);
   assert.match(entrypoint, /hermes gateway run/);
+  assert.match(entrypoint, /"cli": \["onecomputer_ms365"\]/);
+  assert.match(entrypoint, /"api_server": \["onecomputer_ms365"\]/);
+  assert.match(entrypoint, /"reasoning_effort": False/);
   assert.match(entrypoint, /\/run\/onecomputer\/hermes-gateway-bootstrap\.log/);
   assert.doesNotMatch(entrypoint, />>\/home\/kasm-user\/\.hermes\/logs\/gateway\.log/);
 });

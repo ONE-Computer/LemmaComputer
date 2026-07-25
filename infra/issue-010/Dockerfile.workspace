@@ -97,16 +97,40 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       /home/kasm-default-profile/.local/share/remmina \
     && install -d -o root -g root -m 0755 /etc/claude-desktop /run/onecomputer
 
+RUN uv pip install \
+      --python /opt/onecomputer/hermes-venv/bin/python \
+      mcp==1.26.0 \
+      starlette==1.0.1 \
+    && test "$(/opt/onecomputer/hermes-venv/bin/python -c 'import importlib.metadata; print(importlib.metadata.version("mcp"))')" = "1.26.0"
+
+COPY infra/issue-010/agent-chat-requirements.txt /opt/onecomputer/agent-chat-requirements.txt
+RUN uv venv \
+      --python "/opt/onecomputer/python/cpython-${HERMES_PYTHON_VERSION}-linux-x86_64-gnu/bin/python" \
+      /opt/onecomputer/agent-chat-venv \
+    && uv pip install \
+      --python /opt/onecomputer/agent-chat-venv/bin/python \
+      --requirements /opt/onecomputer/agent-chat-requirements.txt \
+    && test "$(/opt/onecomputer/agent-chat-venv/bin/python -c 'import importlib.metadata; print(importlib.metadata.version("claude-agent-sdk"))')" = "0.2.128" \
+    && test "$(/opt/onecomputer/agent-chat-venv/bin/python -c 'import importlib.metadata; print(importlib.metadata.version("openai-codex"))')" = "0.144.4" \
+    && codex_bin="$(/opt/onecomputer/agent-chat-venv/bin/python -c 'from codex_cli_bin import bundled_codex_path; print(bundled_codex_path())')" \
+    && test -x "$codex_bin" \
+    && install -d -o root -g root -m 0755 /usr/local/libexec \
+    && ln -s "$codex_bin" /usr/local/libexec/onecomputer-codex-bin \
+    && rm -rf /root/.cache/uv
+
 COPY --from=hermes_desktop_builder /src/apps/desktop/release/linux-unpacked /opt/onecomputer/hermes-desktop
 COPY --from=hermes_desktop_builder /src/apps/desktop/assets/icon.png /opt/onecomputer/hermes-desktop-icon.png
 COPY infra/issue-010/onecomputer-gateway-proxy.py /usr/local/libexec/onecomputer-gateway-proxy
 COPY infra/issue-010/onecomputer-egress-broker.py /usr/local/libexec/onecomputer-egress-broker
 COPY infra/issue-010/onecomputer-mcp-stdio.py /usr/local/libexec/onecomputer-mcp-stdio
+COPY infra/issue-010/onecomputer-agent-chat.py /usr/local/libexec/onecomputer-agent-chat
 COPY infra/issue-010/onecomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js
 COPY infra/issue-010/onecomputer-workspace-entrypoint.sh /usr/local/sbin/onecomputer-workspace-entrypoint
 COPY infra/issue-010/claude-desktop.desktop /usr/local/share/onecomputer/applications/onecomputer-claude-desktop.desktop
 COPY infra/issue-010/claude-cli.desktop /usr/local/share/onecomputer/applications/onecomputer-claude-cli.desktop
 COPY infra/issue-010/onecomputer-claude /usr/local/bin/onecomputer-claude
+COPY infra/issue-010/codex-cli.desktop /usr/local/share/onecomputer/applications/onecomputer-codex-cli.desktop
+COPY infra/issue-010/onecomputer-codex /usr/local/bin/onecomputer-codex
 COPY infra/issue-010/firefox.desktop /usr/local/share/onecomputer/applications/onecomputer-firefox.desktop
 COPY infra/issue-010/firefox-policies.json /opt/firefox/distribution/policies.json
 COPY infra/issue-010/google-chrome.desktop /usr/local/share/onecomputer/applications/onecomputer-google-chrome.desktop
@@ -119,12 +143,15 @@ RUN chmod 0755 \
       /usr/local/libexec/onecomputer-egress-broker \
       /usr/local/libexec/onecomputer-gateway-proxy \
       /usr/local/libexec/onecomputer-mcp-stdio \
+      /usr/local/libexec/onecomputer-agent-chat \
       /usr/local/sbin/onecomputer-workspace-entrypoint \
       /usr/local/bin/onecomputer-claude \
+      /usr/local/bin/onecomputer-codex \
       /usr/local/bin/onecomputer-hermes \
       /usr/local/bin/onecomputer-hermes-desktop \
       /usr/local/share/onecomputer/applications/onecomputer-claude-desktop.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-claude-cli.desktop \
+      /usr/local/share/onecomputer/applications/onecomputer-codex-cli.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-firefox.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-google-chrome.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-hermes-agent-cli.desktop \

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export CODEX_HOME=/home/kasm-user/.codex-cli
+export OPENAI_BASE_URL=http://127.0.0.1:4317/v1
+export OPENAI_API_KEY=onecomputer-loopback-broker
+
+exec /usr/local/libexec/onecomputer-codex-bin \
+  --model "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" \
+  --sandbox read-only \
+  --ask-for-approval never \
+  "$@"

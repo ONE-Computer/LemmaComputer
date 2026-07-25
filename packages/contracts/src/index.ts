@@ -80,14 +80,19 @@ export const sandboxProfileSchema = z.object({
 });
 export type SandboxProfile = z.infer<typeof sandboxProfileSchema>;
 
-export const agentCatalogIds = ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"] as const;
+export const agentCatalogIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"] as const;
 export const agentCatalogIdSchema = z.enum(agentCatalogIds);
 export type AgentCatalogId = z.infer<typeof agentCatalogIdSchema>;
+
+export const chatAgentCatalogIds = ["claude-cli", "codex-cli", "hermes-claw"] as const;
+export const chatAgentCatalogIdSchema = z.enum(chatAgentCatalogIds);
+export type ChatAgentCatalogId = z.infer<typeof chatAgentCatalogIdSchema>;
 
 export const agentProfileSchema = z.enum([
   "onecomputer-default-agent",
   "claude-desktop-managed-v1",
   "claude-cli-managed-v1",
+  "codex-cli-managed-v1",
   "hermes-desktop-managed-v1",
   "hermes-claw-managed-v1",
 ]);
@@ -124,6 +129,16 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
     license: "Anthropic commercial distribution",
     source: "https://downloads.claude.ai/claude-code-releases/2.1.215/linux-x64/claude.zst",
     artifactSha256: "7ff9594e53cd89d1af9ceb3c18d3d70be1a5c6d27475e31ee2bed65d748f18c0",
+    resources: { memoryMiB: 1024 },
+  }),
+  agentCatalogEntrySchema.parse({
+    id: "codex-cli",
+    displayName: "Codex CLI",
+    clientVersion: "0.144.4",
+    description: "Pinned Codex SDK and CLI runtime routed through its own governed ONEComputer identity.",
+    license: "Apache-2.0",
+    source: "https://pypi.org/project/openai-codex/0.144.4/",
+    artifactSha256: "de1513a6e94b9a8d7728a3b74298bc1469428ade10ba0ef2d5db47dd1cb606f5",
     resources: { memoryMiB: 1024 },
   }),
   agentCatalogEntrySchema.parse({
@@ -452,9 +467,10 @@ export const controllerCreateSchema = z.object({
     baseUrl: z.url(),
     token: z.string().min(24),
   }).optional(),
-  hermesApi: z.object({
+  chatRuntimes: z.array(z.object({
+    catalogId: chatAgentCatalogIdSchema,
     key: z.string().min(32).max(128),
-  }).strict().optional(),
+  }).strict()).min(1).max(chatAgentCatalogIds.length).optional(),
   agentGrants: z.array(z.object({
     catalogId: agentCatalogIdSchema,
     agentId: z.string().min(1).max(128),
@@ -484,16 +500,139 @@ export const controllerCreateSchema = z.object({
   }).optional(),
 });
 
-export const hermesChatSessionIdSchema = z.string().regex(
+export const chatSessionIdSchema = z.string().regex(
   /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
-  "Invalid Hermes chat session identifier",
+  "Invalid chat session identifier",
 );
-export const createHermesChatSessionSchema = z.object({
+export const chatPartIdSchema = z.string().regex(
+  /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
+  "Invalid chat part identifier",
+);
+export const createChatSessionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
 }).strict();
-export const sendHermesChatMessageSchema = z.object({
-  message: z.string().trim().min(1).max(16_000),
+
+export const chatTurnStateSchema = z.enum(["streaming", "completed", "cancelled", "failed"]);
+export const chatToolStateSchema = z.enum(["running", "completed", "failed"]);
+export const chatApprovalStateSchema = z.enum([
+  "approval_required",
+  "approved",
+  "executing",
+  "succeeded",
+  "denied",
+  "failed",
+  "expired",
+]);
+export const chatMessageMetadataSchema = z.object({
+  agentCatalogId: chatAgentCatalogIdSchema,
+  turnId: chatPartIdSchema.optional(),
+  state: chatTurnStateSchema,
+  createdAt: z.iso.datetime(),
 }).strict();
+export const chatProgressDataSchema = z.object({
+  activityId: chatPartIdSchema,
+  label: z.string().trim().min(1).max(240),
+  state: z.enum(["running", "completed"]),
+}).strict();
+export const chatToolDataSchema = z.object({
+  toolCallId: chatPartIdSchema,
+  name: z.string().trim().regex(/^[A-Za-z0-9_.:-]{1,160}$/),
+  state: chatToolStateSchema,
+  summary: z.string().trim().min(1).max(500).optional(),
+}).strict();
+export const chatApprovalDataSchema = z.object({
+  approvalId: chatPartIdSchema,
+  toolCallId: chatPartIdSchema,
+  operationId: z.uuid(),
+  state: chatApprovalStateSchema,
+  summary: z.string().trim().min(1).max(500),
+}).strict();
+export const chatTerminalDataSchema = z.object({
+  turnId: chatPartIdSchema,
+  state: chatTurnStateSchema.exclude(["streaming"]),
+  message: z.string().trim().min(1).max(500).optional(),
+}).strict();
+
+export const chatUiMessagePartSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("text"),
+    text: z.string().max(128_000),
+    state: z.enum(["streaming", "done"]).optional(),
+  }).strict(),
+  z.object({ type: z.literal("data-progress"), id: chatPartIdSchema, data: chatProgressDataSchema }).strict(),
+  z.object({ type: z.literal("data-tool"), id: chatPartIdSchema, data: chatToolDataSchema }).strict(),
+  z.object({ type: z.literal("data-approval"), id: chatPartIdSchema, data: chatApprovalDataSchema }).strict(),
+  z.object({ type: z.literal("data-terminal"), id: chatPartIdSchema, data: chatTerminalDataSchema }).strict(),
+]);
+export const chatUiMessageSchema = z.object({
+  id: chatPartIdSchema,
+  role: z.enum(["user", "assistant"]),
+  metadata: chatMessageMetadataSchema,
+  parts: z.array(chatUiMessagePartSchema).min(1).max(256),
+}).strict();
+export type ChatUiMessage = z.infer<typeof chatUiMessageSchema>;
+
+export const sendChatTurnSchema = z.object({
+  message: chatUiMessageSchema.superRefine((message, context) => {
+    if (
+      message.role !== "user"
+      || message.metadata.state !== "completed"
+      || message.parts.length !== 1
+      || message.parts[0]?.type !== "text"
+      || !message.parts[0].text.trim()
+      || message.parts[0].text.length > 16_000
+    ) {
+      context.addIssue({ code: "custom", message: "A single completed user text message is required" });
+    }
+  }),
+}).strict();
+
+const agentChatEventBaseSchema = z.object({
+  version: z.literal(1),
+  sequence: z.number().int().nonnegative().max(100_000),
+  sessionId: chatSessionIdSchema,
+  turnId: chatPartIdSchema,
+});
+export const agentChatEventSchema = z.discriminatedUnion("type", [
+  agentChatEventBaseSchema.extend({
+    type: z.literal("turn-start"),
+    messageId: chatPartIdSchema,
+    createdAt: z.iso.datetime(),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("progress"),
+    activityId: chatPartIdSchema,
+    label: z.string().trim().min(1).max(240),
+    state: z.enum(["running", "completed"]),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("text-delta"),
+    textId: chatPartIdSchema,
+    delta: z.string().min(1).max(16_000),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("tool"),
+    toolCallId: chatPartIdSchema,
+    name: z.string().trim().regex(/^[A-Za-z0-9_.:-]{1,160}$/),
+    state: chatToolStateSchema,
+    summary: z.string().trim().min(1).max(500).optional(),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("approval"),
+    approvalId: chatPartIdSchema,
+    toolCallId: chatPartIdSchema,
+    operationId: z.uuid(),
+    state: chatApprovalStateSchema,
+    summary: z.string().trim().min(1).max(500),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("turn-finish"),
+    state: chatTurnStateSchema.exclude(["streaming"]),
+    message: z.string().trim().min(1).max(500).optional(),
+    completedAt: z.iso.datetime(),
+  }).strict(),
+]);
+export type AgentChatEvent = z.infer<typeof agentChatEventSchema>;
 
 export const sandboxSchema = z.object({
   providerId: z.string().min(1),
