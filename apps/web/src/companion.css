@@ -9,6 +9,10 @@
   color: #162033;
 }
 
+.companion-root {
+  padding-bottom: 94px;
+}
+
 .companion-topbar {
   display: flex;
   min-height: 76px;
@@ -82,6 +86,190 @@
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;
   padding: 64px 0 80px;
+}
+
+.companion-chat-main {
+  padding-top: 20px;
+}
+
+.companion-chat-shell {
+  position: relative;
+  display: grid;
+  min-height: calc(100dvh - 76px - 134px);
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #dde0e4;
+  border-radius: 18px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 16px 50px rgb(24 36 58 / 7%);
+}
+
+.companion-chat-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e3e5e8;
+  background: rgb(253 252 249 / 92%);
+}
+
+.companion-chat-toolbar > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.companion-chat-toolbar p {
+  margin: 0;
+  color: #5e6877;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.companion-chat-session-menu .select-menu-trigger {
+  width: min(300px, 38vw);
+  min-height: 42px;
+}
+
+.companion-chat-new-button,
+.companion-chat-history-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid #cbd0d7;
+  border-radius: 9px;
+  background: #fff;
+  color: #263247;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.companion-chat-new-button:hover,
+.companion-chat-history-button:hover:not(:disabled) {
+  border-color: #9ca5b1;
+  background: #f7f8fa;
+}
+
+.companion-chat-new-button svg {
+  width: 19px;
+  height: 19px;
+}
+
+.companion-chat-history-button:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
+.companion-chat-shell .chat-screen {
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 0 34px 20px;
+}
+
+.companion-chat-shell .chat-screen:has(.page-heading) {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.companion-chat-shell .chat-context-selectors {
+  position: static;
+  justify-content: flex-end;
+  padding: 18px 0 4px;
+}
+
+.companion-chat-shell .chat-conversation {
+  min-height: 0;
+}
+
+.companion-chat-shell .chat-transcript {
+  padding-top: clamp(28px, 6vh, 70px);
+}
+
+.companion-chat-shell .page-heading {
+  padding-top: 26px;
+}
+
+.companion-chat-error {
+  margin: 14px 18px 0;
+}
+
+.companion-destinations {
+  position: fixed;
+  z-index: 18;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: 50%;
+  display: grid;
+  width: min(360px, calc(100% - 24px));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 6px;
+  transform: translateX(-50%);
+  border: 1px solid #d8dce2;
+  border-radius: 18px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 12px 36px rgb(24 36 58 / 15%);
+  backdrop-filter: blur(18px);
+}
+
+.companion-destinations > button {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #68717d;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  touch-action: manipulation;
+}
+
+.companion-destinations > button.active {
+  background: #e8f1fb;
+  color: #07377f;
+}
+
+.companion-destinations > button > svg,
+.companion-destination-icon > svg {
+  width: 22px;
+  height: 22px;
+}
+
+.companion-destination-icon {
+  position: relative;
+  display: inline-flex;
+}
+
+.companion-destination-icon em {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  place-items: center;
+  border: 2px solid white;
+  border-radius: 999px;
+  background: #a84617;
+  color: white;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1;
 }
 
 .companion-heading {
@@ -876,6 +1064,10 @@
 }
 
 @media (max-width: 600px) {
+  .companion-root {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+
   .companion-topbar {
     position: sticky;
     top: 0;
@@ -891,7 +1083,108 @@
 
   .companion-main {
     width: min(100% - 24px, 1180px);
-    padding: 30px 0 max(36px, env(safe-area-inset-bottom));
+    padding: 30px 0 max(28px, env(safe-area-inset-bottom));
+  }
+
+  .companion-chat-main {
+    width: 100%;
+    padding: 0;
+  }
+
+  .companion-chat-shell {
+    min-height: calc(100dvh - 68px - 74px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .companion-chat-toolbar {
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .companion-chat-toolbar > div {
+    gap: 7px;
+  }
+
+  .companion-chat-toolbar > div:first-child {
+    flex: 1;
+  }
+
+  .companion-chat-toolbar p,
+  .companion-chat-new-button span {
+    display: none;
+  }
+
+  .companion-chat-session-menu,
+  .companion-chat-session-menu .select-menu-trigger {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .companion-chat-new-button,
+  .companion-chat-history-button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 11px;
+  }
+
+  .companion-chat-shell .chat-screen {
+    min-height: 0;
+    margin: 0;
+    padding: 0 14px 10px;
+  }
+
+  .companion-chat-shell .chat-context-selectors {
+    position: static;
+    justify-content: stretch;
+    padding: 10px 0 2px;
+  }
+
+  .companion-chat-shell .chat-agent-selector {
+    flex: 1;
+  }
+
+  .companion-chat-shell .chat-transcript {
+    padding: 24px 0 18px;
+  }
+
+  .companion-chat-shell .chat-conversation {
+    min-height: 0;
+  }
+
+  .companion-chat-shell .page-heading {
+    padding-top: 22px;
+  }
+
+  .companion-chat-shell .chat-unavailable {
+    min-height: 0;
+  }
+
+  .companion-chat-error {
+    margin: 10px 12px 0;
+  }
+
+  .companion-destinations {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    gap: 0;
+    padding: 6px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    transform: none;
+    border-width: 1px 0 0;
+    border-radius: 0;
+    background: rgb(255 255 255 / 97%);
+    box-shadow: 0 -8px 22px rgb(24 36 58 / 9%);
+  }
+
+  .companion-destinations > button {
+    min-height: 56px;
+    flex-direction: column;
+    gap: 3px;
+    border-radius: 10px;
+    font-size: 11px;
   }
 
   .companion-heading {

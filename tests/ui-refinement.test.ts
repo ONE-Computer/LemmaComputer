@@ -109,6 +109,31 @@ test("critical UI paths use owned accessible dialogs, skip targets, live state, 
   assert.doesNotMatch(app, /dateTime="2026-/);
 });
 
+test("Companion exposes Chat as a parallel mobile destination without replacing approval navigation", async () => {
+  const [app, companion, companionStyles, manifest] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/CompanionApp.jsx"),
+    source("apps/web/src/companion.css"),
+    source("apps/web/public/companion.webmanifest"),
+  ]);
+  assert.match(app, /export function ChatScreen/);
+  assert.match(companion, /import \{ ChatScreen \} from "\.\/App\.jsx"/);
+  assert.match(companion, /className="companion-destinations"/);
+  assert.match(companion, /aria-label="Companion navigation"/);
+  assert.match(companion, /<span>Chat<\/span>/);
+  assert.match(companion, /<span>Companion<\/span>/);
+  assert.match(companion, /activeView === "chat"/);
+  assert.match(companion, /<ChatScreen/);
+  assert.match(companion, /className="companion-tabs"/);
+  assert.match(companion, /Approvals\{request/);
+  assert.match(companion, /Activity/);
+  assert.match(companion, /ariaLabel="Choose recent chat"/);
+  assert.match(app, /ariaLabel="Choose workspace"/);
+  assert.match(companionStyles, /\.companion-destinations\s*\{[\s\S]*?position: fixed/);
+  assert.match(companionStyles, /@media \(max-width: 600px\)[\s\S]*?\.companion-destinations\s*\{[\s\S]*?bottom: 0/);
+  assert.match(manifest, /Chat with workspace agents and review protected ONEComputer actions/);
+});
+
 test("workspace options are editable, opt-in, and explain the required restart after save", async () => {
   const [app, ui] = await Promise.all([
     source("apps/web/src/App.jsx"),

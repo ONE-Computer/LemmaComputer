@@ -84,6 +84,57 @@ No actionable P0, P1, or P2 differences remain.
 
 final result: passed
 
+## Companion Chat destination — 2026-07-26
+
+- Source visual truth: `/tmp/codex-remote-attachments/019f9d79-8240-7852-baff-8b2110bd8e86/DFDC3777-01CE-400B-A080-E2037ADAEAB4/1-Pasted-Image-1.jpg`.
+- Implementation screenshot: `/home/mike/Documents/onecomputer-companion-chat/apps/web/.artifacts/companion-chat-mobile.png`.
+- Viewport: `390 × 844` CSS pixels at device scale factor 1 with mobile and touch emulation.
+- Density normalization: the `589 × 1280` source was displayed at 390px width beside the native `390 × 844` implementation. The source includes iOS browser chrome; the implementation capture begins at app-owned content.
+- State: source shows Companion ready; implementation shows the new Chat destination with a ready workspace agent. These are intentionally different destinations, so the comparison checks shared shell, visual language, density, and navigation rather than claiming exact state fidelity.
+- Full-view comparison evidence: `/home/mike/Documents/onecomputer-companion-chat/apps/web/.artifacts/companion-chat-comparison.png`.
+- Focused comparison evidence: the full-view comparison is readable at native 390px app width and contains the wordmark, selectors, empty-chat hierarchy, composer, and bottom navigation; no separate crop was needed.
+
+### Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- Fonts and typography: Inter Variable, the navy wordmark, strong display heading, restrained secondary copy, and compact control labels preserve the source hierarchy and optical weight.
+- Spacing and layout rhythm: the authenticated top bar remains compact; recent chat and workspace selection sit above a spacious conversation canvas; the composer and bottom navigation remain reachable without page overflow.
+- Colors and visual tokens: warm white, navy actions, pale-blue selected state, neutral borders, and muted supporting copy reuse the existing Companion palette.
+- Image quality and asset fidelity: the feature introduces no raster content. Existing Fluent bot, shield, add, attachment, and send icons provide the visible iconography; no placeholder or handcrafted SVG asset was introduced.
+- Copy and content: Chat is presented as direct workspace-agent access. Companion retains its existing Approvals and Activity language unchanged.
+- Accessibility and responsive behavior: both destinations are labelled buttons with text and icons, the selected destination uses `aria-current`, selectors use the owned accessible listbox, the composer has a programmatic label, touch targets are at least 44px, and the 390px viewport has zero horizontal overflow.
+
+### Interaction verification
+
+- Selected Companion from the fixed bottom navigation and confirmed `/companion`, the approval heading, and the Approvals local tab.
+- Selected Chat and confirmed `/companion?view=chat`, the Chat destination state, workspace selector, and labelled composer.
+- Entered and sent `Hello from Companion`; a new session was created, the URL gained its `chat` id, and the user message appeared in the transcript.
+- Notification deep links remain `/companion?from=notification`, so approval alerts continue to open Companion rather than Chat.
+- Browser console and network-failure capture reported no errors or failed resources.
+
+### Comparison history
+
+#### Pass 1
+
+- [P1] The shared mobile selector rule hid the `SelectMenu` wrapper as well as its text label, collapsing the workspace selector to a 12px invisible row.
+- Fix: give the visible text its own `chat-agent-selector-label` class and hide only that label on mobile, leaving the owned selector rendered.
+
+#### Pass 2
+
+- The workspace selector measured `362 × 54`, the composer measured `362 × 58`, bottom navigation measured `390 × 69`, and document horizontal overflow measured `0`.
+- Chat-to-Companion navigation, browser history URLs, new-session creation, and message submission passed with no console or network failures.
+
+### Implementation checklist
+
+- [x] Preserve the existing Companion approval screen and its Approvals / Activity tabs.
+- [x] Add persistent Chat / Companion navigation without implying approval protection is disabled.
+- [x] Reuse the production workspace-agent chat transport, attachments, sessions, agent selection, and recovery states.
+- [x] Keep recent chats and new-chat creation accessible on the phone surface.
+- [x] Verify the rendered mobile layout, core interactions, browser history, console, build, and focused UI tests.
+
+final result: passed
+
 ## Shared dropdown refinement — 2026-07-24
 
 - Source visual truth: `/home/mike/.codex/attachments/6ef42811-c726-4321-8378-1ce245dba76f/codex-clipboard-82227e26-6272-45e8-87ce-193f4211254c.png`

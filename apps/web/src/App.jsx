@@ -2005,7 +2005,7 @@ function ChatConversation({
   );
 }
 
-function ChatScreen({
+export function ChatScreen({
   workspace,
   workspaces,
   workspaceState,
@@ -2156,7 +2156,7 @@ function ChatScreen({
   const contextSelector = (workspaceOptions.length || agents.length > 1) ? (
     <div className="chat-context-selectors">
       {workspaceOptions.length > 0 && <div className="chat-agent-selector">
-        <span>Workspace</span>
+        <span className="chat-agent-selector-label">Workspace</span>
         <SelectMenu
           value={workspace?.id ?? ""}
           onValueChange={onWorkspaceChange}
@@ -2165,7 +2165,7 @@ function ChatScreen({
         />
       </div>}
       {agents.length > 1 && <div className="chat-agent-selector">
-        <span>Agent</span>
+        <span className="chat-agent-selector-label">Agent</span>
         <SelectMenu
           value={activeAgentId}
           onValueChange={selectAgent}
