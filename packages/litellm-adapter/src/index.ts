@@ -72,7 +72,8 @@ export interface OAuthConnectionGateway {
     redirectUri: string;
     state: string;
     codeChallenge: string;
-    authorizationOrigin: string;
+    authorizationOrigins?: string[];
+    authorizationOrigin?: string;
   }): Promise<{ location: string; cookies: string[] }>;
   completeUserOAuthConnection(input: {
     identity: IdentityContext;
@@ -82,6 +83,27 @@ export interface OAuthConnectionGateway {
   }): Promise<OAuthConnectionStatus>;
   userOAuthConnectionStatus(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus>;
   disconnectUserOAuthConnection(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus>;
+  userOAuthConnectionTools(identity: IdentityContext, serverName: string): Promise<string[]>;
+}
+
+export type McpConnectorRegistrationInput = {
+  serverId: string;
+  serverName: string;
+  name: string;
+  description: string;
+  url: string;
+  scopes: string[];
+  clientId?: string;
+  clientSecret?: string;
+};
+
+export interface McpConnectorAdministrationGateway {
+  discoverOAuthMcpServer(input: Omit<McpConnectorRegistrationInput, "serverId" | "serverName"> & { callbackUrl: string }): Promise<{
+    authorizationOrigin: string;
+    dynamicClientRegistration: boolean;
+  }>;
+  registerOAuthMcpServer(input: McpConnectorRegistrationInput): Promise<void>;
+  removeMcpServer(serverId: string): Promise<void>;
 }
 
 export type GovernedToolExecutionInput = {
@@ -150,7 +172,7 @@ const desktopModelAlias = (modelAlias: string, policy?: RuntimePolicy) => {
   return transportAlias;
 };
 
-export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecutor, OAuthConnectionGateway {
+export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecutor, OAuthConnectionGateway, McpConnectorAdministrationGateway {
   private readonly adminUrl: string;
   private readonly workspaceUrl: string;
   private readonly modelAlias: string;
@@ -211,7 +233,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     redirectUri: string;
     state: string;
     codeChallenge: string;
-    authorizationOrigin: string;
+    authorizationOrigins?: string[];
+    authorizationOrigin?: string;
   }) {
     const grant = await this.ensureConnectionGrant(input.identity, input.serverName);
     const query = new URLSearchParams({
@@ -230,24 +253,26 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {
-      throw new OneComputerError("GATEWAY_UNAVAILABLE", "The Microsoft 365 connection service is unavailable", 503, true);
+      throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
     }
     if (response.status < 300 || response.status >= 400) {
       await response.body?.cancel().catch(() => undefined);
-      throw new OneComputerError("M365_AUTHORIZATION_REJECTED", "Microsoft 365 authorization could not be started", 502, true);
+      throw new OneComputerError("MCP_AUTHORIZATION_REJECTED", "Connector authorization could not be started", 502, true);
     }
     const location = response.headers.get("location");
-    if (!location) throw new OneComputerError("M365_AUTHORIZATION_INVALID", "The Microsoft 365 authorization response was invalid", 502, true);
+    if (!location) throw new OneComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
     let authorizationUrl: URL;
-    let expectedOrigin: string;
+    let expectedOrigins: string[];
     try {
       authorizationUrl = new URL(location);
-      expectedOrigin = new URL(input.authorizationOrigin).origin;
+      const configuredOrigins = input.authorizationOrigins
+        ?? (input.authorizationOrigin ? [input.authorizationOrigin] : []);
+      expectedOrigins = configuredOrigins.map((origin) => new URL(origin).origin);
     } catch {
-      throw new OneComputerError("M365_AUTHORIZATION_INVALID", "The Microsoft 365 authorization response was invalid", 502, true);
+      throw new OneComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
     }
-    if (authorizationUrl.origin !== expectedOrigin) {
-      throw new OneComputerError("M365_AUTHORIZATION_ORIGIN_MISMATCH", "The Microsoft 365 authorization origin was not approved", 502);
+    if (!expectedOrigins.includes(authorizationUrl.origin)) {
+      throw new OneComputerError("MCP_AUTHORIZATION_ORIGIN_MISMATCH", "The connector authorization origin was not approved", 502);
     }
     const cookieHeaders = response.headers as Headers & { getSetCookie?: () => string[] };
     const cookies = cookieHeaders.getSetCookie?.() ?? (response.headers.get("set-cookie") ? [response.headers.get("set-cookie")!] : []);
@@ -279,13 +304,13 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           signal: AbortSignal.timeout(this.timeoutMs),
         });
       } catch {
-        throw new OneComputerError("GATEWAY_UNAVAILABLE", "The Microsoft 365 connection service is unavailable", 503, true);
+        throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
       }
       await response.body?.cancel().catch(() => undefined);
       if (!response.ok) {
-        throw new OneComputerError("M365_TOKEN_EXCHANGE_FAILED", "Microsoft 365 did not complete the connection", 502, true);
+        throw new OneComputerError("MCP_TOKEN_EXCHANGE_FAILED", "The connector did not complete the connection", 502, true);
       }
-      return await this.readConnectionStatus(grant.credential, grant.serverId);
+      return await this.readConnectionStatus(grant.credential, grant.serverId, input.serverName);
     } finally {
       await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
     }
@@ -294,7 +319,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async userOAuthConnectionStatus(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus> {
     const grant = await this.ensureConnectionGrant(identity, serverName);
     try {
-      return await this.readConnectionStatus(grant.credential, grant.serverId);
+      return await this.readConnectionStatus(grant.credential, grant.serverId, serverName);
     } finally {
       await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
     }
@@ -304,11 +329,109 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const grant = await this.ensureConnectionGrant(identity, serverName);
     try {
       const result = await this.dataCall(`/v1/mcp/server/${encodeURIComponent(grant.serverId)}/oauth-user-credential`, grant.credential, { method: "DELETE" });
-      if (!result.ok && result.status !== 404) throw this.upstreamError("M365_DISCONNECT_FAILED", result.status, result.payload);
+      if (!result.ok && result.status !== 404) throw this.upstreamError("MCP_DISCONNECT_FAILED", result.status, result.payload);
       return { state: "disconnected", connectedAt: null, expiresAt: null, account: null };
     } finally {
       await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
     }
+  }
+
+  async userOAuthConnectionTools(identity: IdentityContext, serverName: string) {
+    const grant = await this.ensureConnectionGrant(identity, serverName);
+    try {
+      const status = await this.readConnectionStatus(grant.credential, grant.serverId, serverName);
+      if (status.state !== "connected") return [];
+      const result = await this.dataCall("/mcp-rest/tools/list", grant.credential);
+      if (!result.ok) throw this.upstreamError("MCP_TOOL_DISCOVERY_FAILED", result.status, result.payload);
+      const tools = Array.isArray(asObject(result.payload).tools) ? asObject(result.payload).tools as unknown[] : [];
+      return [...new Set(tools.map(asObject)
+        .filter((tool) => {
+          const info = asObject(tool.mcp_info);
+          return !info.server_id || info.server_id === grant.serverId;
+        })
+        .map((tool) => typeof tool.name === "string" ? tool.name : "")
+        .filter(Boolean))].sort();
+    } finally {
+      await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
+    }
+  }
+
+  async discoverOAuthMcpServer(input: Omit<McpConnectorRegistrationInput, "serverId" | "serverName"> & { callbackUrl: string }) {
+    const temporaryId = `onecomputer-discovery-${createHash("sha256").update(`${input.url}:${Date.now()}`).digest("hex").slice(0, 20)}`;
+    const payload = this.mcpRegistrationPayload({
+      ...input,
+      serverId: temporaryId,
+      serverName: temporaryId,
+    });
+    const created = await this.adminCall("/v1/mcp/server/oauth/session", { method: "POST", body: payload }, true);
+    if (!created.ok) throw this.upstreamError("MCP_DISCOVERY_FAILED", created.status, created.payload);
+    const query = new URLSearchParams({
+      redirect_uri: input.callbackUrl,
+      state: "onecomputer-discovery",
+      code_challenge: createHash("sha256").update(temporaryId).digest("base64url"),
+      code_challenge_method: "S256",
+      response_type: "code",
+    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(temporaryId)}/authorize?${query}`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${this.config.masterKey}` },
+        redirect: "manual",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch {
+      throw new OneComputerError("MCP_DISCOVERY_FAILED", "The connector could not be reached", 502, true);
+    }
+    const location = response.headers.get("location");
+    await response.body?.cancel().catch(() => undefined);
+    if (response.status < 300 || response.status >= 400 || !location) {
+      throw new OneComputerError("MCP_DISCOVERY_FAILED", "The connector did not expose a compatible OAuth flow", 400);
+    }
+    let authorizationUrl: URL;
+    try {
+      authorizationUrl = new URL(location);
+    } catch {
+      throw new OneComputerError("MCP_DISCOVERY_FAILED", "The connector returned an invalid authorization address", 400);
+    }
+    return {
+      authorizationOrigin: authorizationUrl.origin,
+      dynamicClientRegistration: !input.clientId,
+    };
+  }
+
+  async registerOAuthMcpServer(input: McpConnectorRegistrationInput) {
+    const result = await this.adminCall("/v1/mcp/server", {
+      method: "POST",
+      body: this.mcpRegistrationPayload(input),
+    }, true);
+    if (!result.ok) throw this.upstreamError("MCP_REGISTRATION_FAILED", result.status, result.payload);
+  }
+
+  async removeMcpServer(serverId: string) {
+    const result = await this.adminCall(`/v1/mcp/server/${encodeURIComponent(serverId)}`, { method: "DELETE" }, true);
+    if (!result.ok && result.status !== 404) throw this.upstreamError("MCP_REMOVAL_FAILED", result.status, result.payload);
+  }
+
+  private mcpRegistrationPayload(input: McpConnectorRegistrationInput): JsonObject {
+    return {
+      server_id: input.serverId,
+      server_name: input.serverName,
+      alias: input.serverName,
+      description: input.description,
+      transport: "http",
+      auth_type: "oauth2",
+      oauth2_flow: "authorization_code",
+      url: input.url,
+      credentials: {
+        ...(input.clientId ? { client_id: input.clientId } : {}),
+        ...(input.clientSecret ? { client_secret: input.clientSecret } : {}),
+        scopes: input.scopes,
+      },
+      allow_all_keys: false,
+      available_on_public_internet: true,
+      delegate_auth_to_upstream: false,
+    };
   }
 
   private async resolveMcpServer(serverName: string) {
@@ -317,7 +440,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const server = servers.map(asObject).find((item) => item.server_name === serverName);
     const serverId = server?.server_id;
     if (typeof serverId !== "string" || !serverId) {
-      throw new OneComputerError("M365_MCP_NOT_REGISTERED", "The Microsoft 365 connector is not registered", 503, true);
+      throw new OneComputerError("MCP_CONNECTION_NOT_REGISTERED", "The connector is not registered in LiteLLM", 503, true);
     }
     return serverId;
   }
@@ -326,15 +449,17 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const serverId = await this.resolveMcpServer(serverName);
     const credential = this.connectionCredentialFor(identity, serverName);
     const userId = this.userIdFor(identity);
-    const keyAlias = `onecomputer-connection-${userId}`;
+    const serverDigest = createHash("sha256").update(serverName).digest("base64url").slice(0, 12);
+    const keyAlias = `onecomputer-connection-${userId}-${serverDigest}`;
     const credentialRoute = `/v1/mcp/server/${serverId}/oauth-user-credential`;
+    const accountLookup = serverName === "onecomputer_ms365";
     const allowedRoutes = [
       `/v1/mcp/server/oauth/${serverId}/authorize`,
       `/v1/mcp/server/oauth/${serverId}/token`,
       credentialRoute,
       `${credentialRoute}/status`,
       "/mcp-rest/tools/list",
-      "/mcp-rest/tools/call",
+      ...(accountLookup ? ["/mcp-rest/tools/call"] : []),
     ];
     const durationSeconds = Math.max(60, Math.ceil(this.connectionGrantTtlMs / 1_000));
     const grant = {
@@ -353,11 +478,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         onecomputer_gateway_user_id: userId,
         onecomputer_connection_credential: true,
         onecomputer_connection_server: serverName,
-        onecomputer_connection_account_lookup: true,
+        onecomputer_connection_account_lookup: accountLookup,
       },
       object_permission: {
         mcp_servers: [serverName],
-        mcp_tool_permissions: { [serverName]: ["get-current-user"] },
+        mcp_tool_permissions: { [serverName]: accountLookup ? ["get-current-user"] : [] },
       },
     };
     const generated = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
@@ -372,27 +497,27 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         && metadata.onecomputer_subject_id === identity.subjectId
         && metadata.onecomputer_connection_credential === true
         && metadata.onecomputer_connection_server === serverName
-        && metadata.onecomputer_connection_account_lookup === true;
+        && metadata.onecomputer_connection_account_lookup === accountLookup;
       if (!identityMatches) {
         await this.deleteConnectionGrant(credential);
         const replaced = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
-        if (!replaced.ok) throw this.upstreamError("M365_CONNECTION_IDENTITY_MISMATCH", replaced.status, replaced.payload);
+        if (!replaced.ok) throw this.upstreamError("MCP_CONNECTION_IDENTITY_MISMATCH", replaced.status, replaced.payload);
       } else {
         const updated = await this.adminCall("/key/update", { method: "POST", body: grant }, true);
-        if (!updated.ok) throw this.upstreamError("M365_CONNECTION_GRANT_FAILED", updated.status, updated.payload);
+        if (!updated.ok) throw this.upstreamError("MCP_CONNECTION_GRANT_FAILED", updated.status, updated.payload);
       }
     }
     return { credential, serverId };
   }
 
-  private async readConnectionStatus(credential: string, serverId: string): Promise<OAuthConnectionStatus> {
+  private async readConnectionStatus(credential: string, serverId: string, serverName: string): Promise<OAuthConnectionStatus> {
     const result = await this.dataCall(`/v1/mcp/server/${encodeURIComponent(serverId)}/oauth-user-credential/status`, credential);
-    if (!result.ok) throw this.upstreamError("M365_CONNECTION_STATUS_FAILED", result.status, result.payload);
+    if (!result.ok) throw this.upstreamError("MCP_CONNECTION_STATUS_FAILED", result.status, result.payload);
     const payload = asObject(result.payload);
     const hasCredential = payload.has_credential === true;
     const isExpired = payload.is_expired === true;
     const state = !hasCredential ? "disconnected" : isExpired ? "expired" : "connected";
-    const account = state === "connected"
+    const account = state === "connected" && serverName === "onecomputer_ms365"
       ? await this.readConnectionAccount(credential, serverId).catch(() => null)
       : null;
     return {
@@ -412,17 +537,17 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         arguments: { $select: "displayName,mail,userPrincipalName" },
       },
     });
-    if (!called.ok) throw this.upstreamError("M365_ACCOUNT_LOOKUP_FAILED", called.status, called.payload);
+    if (!called.ok) throw this.upstreamError("MCP_ACCOUNT_LOOKUP_FAILED", called.status, called.payload);
     const payload = asObject(called.payload);
-    if (payload.isError === true) throw new OneComputerError("M365_ACCOUNT_LOOKUP_FAILED", "Microsoft account details are unavailable", 502, true);
+    if (payload.isError === true) throw new OneComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
     const content = Array.isArray(payload.content) ? payload.content : [];
     const text = content.map(asObject).find((item) => item.type === "text" && typeof item.text === "string")?.text;
-    if (typeof text !== "string") throw new OneComputerError("M365_ACCOUNT_LOOKUP_FAILED", "Microsoft account details are unavailable", 502, true);
+    if (typeof text !== "string") throw new OneComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
     let profile: JsonObject;
     try {
       profile = asObject(JSON.parse(text));
     } catch {
-      throw new OneComputerError("M365_ACCOUNT_LOOKUP_FAILED", "Microsoft account details are unavailable", 502, true);
+      throw new OneComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
     }
     const safeString = (value: unknown) => typeof value === "string" && value.trim()
       ? value.trim().slice(0, 320)
@@ -433,14 +558,14 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       userPrincipalName: safeString(profile.userPrincipalName),
     };
     if (!account.displayName && !account.email && !account.userPrincipalName) {
-      throw new OneComputerError("M365_ACCOUNT_LOOKUP_FAILED", "Microsoft account details are unavailable", 502, true);
+      throw new OneComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
     }
     return account;
   }
 
   private async deleteConnectionGrant(credential: string) {
     const result = await this.adminCall("/key/delete", { method: "POST", body: { keys: [credential] } }, true);
-    if (!result.ok && result.status !== 404) throw this.upstreamError("M365_CONNECTION_GRANT_REVOKE_FAILED", result.status, result.payload);
+    if (!result.ok && result.status !== 404) throw this.upstreamError("MCP_CONNECTION_GRANT_REVOKE_FAILED", result.status, result.payload);
   }
 
   private executionCredential(operationId: string, leaseId: string) {
@@ -456,12 +581,17 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const gatewayModelAlias = desktopModelAlias(modelAlias, input.policy);
     const mcpServer = input.policy?.mcpServer ?? this.mcpServer;
     const allowedTools = input.policy?.allowedTools ?? this.allowedTools;
+    const mcpServers = input.policy?.mcpServers ?? [mcpServer];
+    const mcpToolPermissions = input.policy?.mcpToolPermissions ?? { [mcpServer]: allowedTools };
     const projection = JSON.stringify({
       agentId,
       modelAlias,
       gatewayModelAlias,
       mcpServer,
       allowedTools,
+      mcpServers,
+      mcpToolPermissions,
+      connectionProjectionHash: input.policy?.connectionProjectionHash ?? null,
       policyVersionId: input.policy?.policyVersionId ?? null,
       policyHash: input.policy?.policyHash ?? null,
     });
@@ -503,8 +633,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         onecomputer_gateway_agent_id: gatewayAgentId,
       },
       object_permission: {
-        mcp_servers: [mcpServer],
-        mcp_tool_permissions: { [mcpServer]: allowedTools },
+        mcp_servers: mcpServers,
+        mcp_tool_permissions: mcpToolPermissions,
       },
     };
 

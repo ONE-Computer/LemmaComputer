@@ -51,6 +51,78 @@ test("connection credentials are deterministic per user and MCP server without r
   assert.match(connection, /^sk-occ-[A-Za-z0-9_-]+$/);
 });
 
+test("connector discovery and registration keep provider credentials inside LiteLLM payloads", async () => {
+  const requests: Array<{ method: string; url: string; authorization: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    requests.push({
+      method: request.method ?? "",
+      url: request.url ?? "",
+      authorization: String(request.headers.authorization ?? ""),
+      body,
+    });
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server/oauth/session") {
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (request.url?.startsWith("/v1/mcp/server/oauth/onecomputer-discovery-") && request.url.includes("/authorize?")) {
+      response.statusCode = 302;
+      response.setHeader("location", "https://login.acme.example/oauth/authorize");
+      response.end();
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const connector = {
+    name: "Acme Projects",
+    description: "Work with Acme projects.",
+    url: "https://mcp.acme.example/mcp",
+    scopes: ["projects:read", "projects:write"],
+    clientId: "acme-client",
+    clientSecret: "acme-secret",
+  };
+  try {
+    const discovered = await liveAdapter.discoverOAuthMcpServer({
+      ...connector,
+      callbackUrl: "https://onecomputer.example/callback",
+    });
+    assert.deepEqual(discovered, {
+      authorizationOrigin: "https://login.acme.example",
+      dynamicClientRegistration: false,
+    });
+    await liveAdapter.registerOAuthMcpServer({
+      ...connector,
+      serverId: "acme-server-id",
+      serverName: "onecomputer_acme_projects",
+    });
+    const discovery = requests.find((request) => request.url === "/v1/mcp/server/oauth/session")!;
+    const registration = requests.find((request) => request.url === "/v1/mcp/server" && request.method === "POST")!;
+    assert.deepEqual(discovery.body.credentials, {
+      client_id: "acme-client",
+      client_secret: "acme-secret",
+      scopes: ["projects:read", "projects:write"],
+    });
+    assert.deepEqual(registration.body.credentials, discovery.body.credentials);
+    assert.equal(registration.body.server_id, "acme-server-id");
+    assert.equal(registration.body.server_name, "onecomputer_acme_projects");
+    assert.equal("client_secret" in registration.body, false);
+    assert.ok(requests.every((request) => request.authorization === "Bearer sk-master-test-not-used-00001"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("owned OAuth uses a narrow per-user connection key and returns only the upstream redirect", async () => {
   const requests: Array<{ url: string; authorization: string; body: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {
@@ -116,6 +188,56 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
     assert.notEqual(authorize.authorization, "Bearer sk-master-test-not-used-00001");
     assert.match(authorize.authorization, /^Bearer sk-occ-/);
     assert.ok(!JSON.stringify(started).includes("sk-occ-"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("hosted MCP status grants cannot call tools or expose provider credentials", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length && request.headers["content-type"]?.includes("application/json")
+      ? JSON.parse(Buffer.concat(chunks).toString("utf8"))
+      : {};
+    requests.push({ url: request.url ?? "", body });
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{ server_id: "linear-server-id", server_name: "onecomputer_linear" }]));
+      return;
+    }
+    if (request.url === "/v1/mcp/server/linear-server-id/oauth-user-credential/status") {
+      response.end(JSON.stringify({ server_id: "linear-server-id", has_credential: false, is_expired: false }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const status = await liveAdapter.userOAuthConnectionStatus(identity, "onecomputer_linear");
+    assert.deepEqual(status, { state: "disconnected", connectedAt: null, expiresAt: null, account: null });
+    const grant = requests.find((request) => request.url === "/key/generate")!.body;
+    assert.deepEqual(grant.object_permission, {
+      mcp_servers: ["onecomputer_linear"],
+      mcp_tool_permissions: { onecomputer_linear: [] },
+    });
+    assert.deepEqual(grant.allowed_routes, [
+      "/v1/mcp/server/oauth/linear-server-id/authorize",
+      "/v1/mcp/server/oauth/linear-server-id/token",
+      "/v1/mcp/server/linear-server-id/oauth-user-credential",
+      "/v1/mcp/server/linear-server-id/oauth-user-credential/status",
+      "/mcp-rest/tools/list",
+    ]);
+    assert.equal((grant.metadata as Record<string, unknown>).onecomputer_connection_account_lookup, false);
+    assert.ok(!requests.some((request) => request.url === "/mcp-rest/tools/call"));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -329,7 +451,12 @@ test("workspace grant materializes the exact Control policy rather than adapter 
     networkProfile: "controlled-egress-v1" as const,
     modelAlias: "onecomputer-assistant",
     mcpServer: "onecomputer_ms365",
-    allowedTools: ["list-mail-folders", "list-calendars", "list-drives"],
+    mcpServers: ["onecomputer_ms365", "onecomputer_notion"],
+    mcpToolPermissions: {
+      onecomputer_ms365: ["list-mail-folders", "list-calendars", "list-drives"],
+      onecomputer_notion: ["search", "fetch"],
+    },
+    allowedTools: ["list-mail-folders", "list-calendars", "list-drives", "search", "fetch"],
   };
   try {
     await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy });
@@ -340,9 +467,10 @@ test("workspace grant materializes the exact Control policy rather than adapter 
     assert.equal(grantBody.tpm_limit, 500_000);
     assert.equal(grantBody.max_parallel_requests, 30);
     assert.deepEqual(grantBody.object_permission, {
-      mcp_servers: ["onecomputer_ms365"],
+      mcp_servers: ["onecomputer_ms365", "onecomputer_notion"],
       mcp_tool_permissions: {
         onecomputer_ms365: ["list-mail-folders", "list-calendars", "list-drives"],
+        onecomputer_notion: ["search", "fetch"],
       },
     });
     assert.equal(grantBody.agent_id, liveAdapter.agentIdFor("workspace-a", "persisted-agent-id"));

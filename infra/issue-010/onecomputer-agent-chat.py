@@ -504,7 +504,10 @@ async def claude_vendor_events(
         ToolResultBlock, ToolUseBlock, UserMessage, query,
     )
 
-    tool_names = [f"mcp__onecomputer_ms365__{name}" for name in (*ALLOWED_TOOLS, "wait-for-governed-operation")]
+    # The LiteLLM key is the exact, live connector/tool ceiling. Keep the
+    # aggregate MCP server discoverable so a newly connected service appears
+    # without rebuilding this workspace process.
+    tool_names = ["mcp__onecomputer_ms365__*"]
     local_tools = [
         "Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Skill",
         "Task", "TodoWrite", "WebFetch", "WebSearch", "Write",

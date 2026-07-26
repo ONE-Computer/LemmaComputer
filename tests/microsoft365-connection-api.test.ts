@@ -17,6 +17,8 @@ const headersFor = (identity: IdentityContext) => ({
 test("Control exposes an owned Microsoft 365 redirect, callback, status, and disconnect surface", async () => {
   let oauthState = "";
   const completions: string[] = [];
+  const startedServers: string[] = [];
+  const completedServers: string[] = [];
   const disconnects: IdentityContext[] = [];
   const gateway: GatewayClient & OAuthConnectionGateway = {
     ensureGrant: async () => ({ baseUrl: "http://gateway", credential: "scoped-test-credential-000001", modelAlias: "test", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
@@ -32,10 +34,12 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     revoke: async () => undefined,
     beginUserOAuthConnection: async (input) => {
       oauthState = input.state;
+      startedServers.push(input.serverName);
       return { location: "http://localhost:3001/authorize?safe=start", cookies: ["mcp_oauth_state=opaque; Path=/callback; HttpOnly"] };
     },
     completeUserOAuthConnection: async (input) => {
       completions.push(input.code);
+      completedServers.push(input.serverName);
       return {
         state: "connected",
         connectedAt: "2026-07-20T01:02:03Z",
@@ -64,6 +68,16 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     { testIdentityMode: true },
   );
   try {
+    const catalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
+    assert.equal(catalog.statusCode, 200);
+    assert.deepEqual(catalog.json().connections.map((connector: { id: string; serverName: string }) => [connector.id, connector.serverName]), [
+      ["microsoft-365", "onecomputer_ms365"],
+      ["notion", "onecomputer_notion"],
+      ["linear", "onecomputer_linear"],
+      ["atlassian", "onecomputer_atlassian"],
+      ["github", "onecomputer_github"],
+    ]);
+
     const status = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(status.statusCode, 200);
     assert.deepEqual(status.json(), {
@@ -88,6 +102,8 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.equal(callback.headers.location, "http://localhost:4174/?view=connections&m365=connected");
     assert.ok(!String(callback.headers.location).includes(callbackCode));
     assert.deepEqual(completions, [callbackCode]);
+    assert.deepEqual(startedServers, ["onecomputer_ms365"]);
+    assert.deepEqual(completedServers, ["onecomputer_ms365"]);
 
     const replay = await app.inject({
       method: "GET",
@@ -97,6 +113,18 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.equal(replay.statusCode, 303);
     assert.match(String(replay.headers.location), /m365=error/);
     assert.deepEqual(completions, [callbackCode]);
+
+    const linearStart = await app.inject({ method: "GET", url: "/v1/connections/linear/authorize", headers: headersFor(alpha) });
+    assert.equal(linearStart.statusCode, 302);
+    const linearCallback = await app.inject({
+      method: "GET",
+      url: `/v1/connections/linear/callback?state=${encodeURIComponent(oauthState)}&code=linear-provider-code`,
+      headers: headersFor(alpha),
+    });
+    assert.equal(linearCallback.statusCode, 303);
+    assert.equal(linearCallback.headers.location, "http://localhost:4174/?view=connections&connector=linear&connection=connected");
+    assert.deepEqual(startedServers, ["onecomputer_ms365", "onecomputer_linear"]);
+    assert.deepEqual(completedServers, ["onecomputer_ms365", "onecomputer_linear"]);
 
     const disconnected = await app.inject({ method: "DELETE", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(disconnected.statusCode, 200);
