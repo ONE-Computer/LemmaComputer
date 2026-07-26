@@ -3127,7 +3127,7 @@ export function App() {
             aria-controls="sidebar-account-menu"
           >
             <Person24Regular aria-hidden="true" />
-            <span><strong>{session.user.displayName}</strong><small>{session.tenant.displayName}</small></span>
+            <span><strong>{session.user.displayName}</strong></span>
             <ChevronDown16Regular aria-hidden="true" />
           </button>
           {profileOpen && (
