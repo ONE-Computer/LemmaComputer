@@ -73,7 +73,10 @@ SYSTEM_PROMPT = (
     "ONEComputer Control is the authority for tool policy and signed approvals. "
     "If a protected operation is pending, use wait-for-governed-operation and "
     "report the final result accurately. Never claim an operation completed until "
-    "the tool confirms it. "
+    "the tool confirms it. Treat greetings, acknowledgements, small talk, and "
+    "underspecified messages with no concrete task as ordinary conversation. "
+    "Do not load or invoke a skill for those messages. Load a skill only when the "
+    "employee's concrete task clearly matches that skill's documented scope. "
     + (
         "Local shell, filesystem, browser, skills, and public-web tools are available "
         "inside this disposable non-sensitive workspace. For scheduled work, read "

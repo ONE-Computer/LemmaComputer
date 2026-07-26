@@ -386,67 +386,10 @@ configure_hermes() {
   local broker_port="$4"
   local execution_mode="$5"
   install -d -o 1000 -g 1000 -m 0700 "$home"
-  /opt/onecomputer/hermes-venv/bin/python - "$home" "$model" "$allowed_tools" "$broker_port" "$execution_mode" <<'PY'
-import json
-import os
-import sys
-from toolsets import TOOLSETS, resolve_toolset
-
-home, model, allowed_tools, broker_port, execution_mode = sys.argv[1:]
-tools = [item for item in allowed_tools.split(",") if item]
-managed_office_toolsets = ["file", "skills", "terminal", "vision"]
-cli_toolsets = managed_office_toolsets + ["onecomputer_ms365"]
-api_toolsets = managed_office_toolsets + ["onecomputer_ms365"]
-if execution_mode == "disposable-open":
-    cli_toolsets = ["hermes-cli", "onecomputer_ms365"]
-    api_toolsets = ["hermes-api-server", "onecomputer_ms365"]
-document = {
-    "model": {
-        "default": model,
-        "provider": "custom",
-        "base_url": f"http://127.0.0.1:{broker_port}/v1",
-        "api_key": "onecomputer-loopback-broker",
-    },
-    # Hermes does not attach globally configured MCP servers to the API
-    # platform by default. Web Chat uses api_server, so name the governed
-    # server explicitly for both the API and interactive CLI surfaces.
-    "platform_toolsets": {
-        "cli": cli_toolsets,
-        "api_server": api_toolsets,
-        "telegram": [],
-    },
-    "agent": {
-        # Hermes defaults custom GPT-5 models to medium reasoning, while its
-        # chat-completions transport cannot combine that parameter with MCP
-        # function tools. The governed model still reasons normally; this only
-        # removes the incompatible request parameter at this adapter boundary.
-        "reasoning_effort": False,
-    },
-    "mcp_servers": {
-        "onecomputer_ms365": {
-            "command": "/usr/local/libexec/onecomputer-mcp-stdio",
-            "args": [],
-            "env": {"ONECOMPUTER_MCP_BROKER": f"http://127.0.0.1:{broker_port}"},
-        },
-    },
-    "stt": {"enabled": False},
-}
-if execution_mode == "managed":
-    managed_office_tools = set()
-    for toolset in managed_office_toolsets:
-        managed_office_tools.update(resolve_toolset(toolset))
-    document["agent"]["disabled_toolsets"] = sorted(
-        name
-        for name in TOOLSETS
-        if managed_office_tools.isdisjoint(resolve_toolset(name))
-    )
-path = os.path.join(home, "config.yaml")
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(document, output, separators=(",", ":"))
-    output.write("\n")
-os.chmod(path, 0o600)
-os.chown(path, 1000, 1000)
-PY
+  /opt/onecomputer/hermes-venv/bin/python \
+    /usr/local/libexec/onecomputer-hermes-config \
+    "$home" "$model" "$allowed_tools" "$broker_port" "$execution_mode" \
+    /opt/onecomputer/hermes-agent/skills
 }
 
 sync_hermes_skills() {

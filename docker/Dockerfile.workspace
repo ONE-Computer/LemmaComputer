@@ -209,6 +209,7 @@ COPY infra/issue-010/onecomputer-gateway-proxy.py /usr/local/libexec/onecomputer
 COPY infra/issue-010/onecomputer-egress-broker.py /usr/local/libexec/onecomputer-egress-broker
 COPY infra/issue-010/onecomputer-mcp-stdio.py /usr/local/libexec/onecomputer-mcp-stdio
 COPY infra/issue-010/onecomputer-agent-chat.py /usr/local/libexec/onecomputer-agent-chat
+COPY infra/issue-010/onecomputer-hermes-config.py /usr/local/libexec/onecomputer-hermes-config
 COPY infra/issue-010/onecomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js
 COPY infra/issue-010/onecomputer-workspace-entrypoint.sh /usr/local/sbin/onecomputer-workspace-entrypoint
 COPY infra/issue-010/claude-desktop.desktop /usr/local/share/onecomputer/applications/onecomputer-claude-desktop.desktop
@@ -232,6 +233,7 @@ RUN chmod 0755 \
       /usr/local/libexec/onecomputer-gateway-proxy \
       /usr/local/libexec/onecomputer-mcp-stdio \
       /usr/local/libexec/onecomputer-agent-chat \
+      /usr/local/libexec/onecomputer-hermes-config \
       /usr/local/libexec/onecomputer-libreoffice \
       /usr/local/sbin/onecomputer-workspace-entrypoint \
       /usr/local/bin/onecomputer-claude \

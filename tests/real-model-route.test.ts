@@ -198,17 +198,18 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
+  const profileConfig = await source("infra/issue-010/onecomputer-hermes-config.py");
   assert.match(dockerfile, /aiohttp==3\.14\.1/);
   assert.match(dockerfile, /import aiohttp/);
   assert.match(dockerfile, /uv pip install[\s\S]*mcp==1\.26\.0[\s\S]*starlette==1\.0\.1/);
   assert.match(dockerfile, /importlib\.metadata\.version\("mcp"\).*1\.26\.0/);
   assert.match(entrypoint, /hermes gateway run/);
-  assert.match(entrypoint, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
-  assert.match(entrypoint, /cli_toolsets = managed_office_toolsets \+ \["onecomputer_ms365"\]/);
-  assert.match(entrypoint, /api_toolsets = managed_office_toolsets \+ \["onecomputer_ms365"\]/);
-  assert.match(entrypoint, /cli_toolsets = \["hermes-cli", "onecomputer_ms365"\]/);
-  assert.match(entrypoint, /api_toolsets = \["hermes-api-server", "onecomputer_ms365"\]/);
-  assert.match(entrypoint, /"reasoning_effort": False/);
+  assert.match(profileConfig, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
+  assert.match(profileConfig, /cli_toolsets = managed_office_toolsets \+ \["onecomputer_ms365"\]/);
+  assert.match(profileConfig, /api_toolsets = managed_office_toolsets \+ \["onecomputer_ms365"\]/);
+  assert.match(profileConfig, /cli_toolsets = \["hermes-cli", "onecomputer_ms365"\]/);
+  assert.match(profileConfig, /api_toolsets = \["hermes-api-server", "onecomputer_ms365"\]/);
+  assert.match(profileConfig, /"reasoning_effort": False/);
   assert.match(entrypoint, /\/run\/onecomputer\/hermes-gateway-bootstrap\.log/);
   assert.doesNotMatch(entrypoint, />>\/home\/kasm-user\/\.hermes\/logs\/gateway\.log/);
 });

@@ -78,9 +78,10 @@ test("the workspace image pins the Hermes Office skills and their native runtime
   assert.deepEqual(packageLock.packages[""].dependencies, packageJson.dependencies);
 });
 
-test("selected Hermes profiles seed Office skills and expose the mode-appropriate tools", async () => {
-  const [entrypoint, cliLauncher, desktopLauncher, chatAdapter] = await Promise.all([
+test("selected Hermes profiles seed only Office skills by default and expose the mode-appropriate tools", async () => {
+  const [entrypoint, profileConfig, cliLauncher, desktopLauncher, chatAdapter] = await Promise.all([
     source("infra/issue-010/onecomputer-workspace-entrypoint.sh"),
+    source("infra/issue-010/onecomputer-hermes-config.py"),
     source("infra/issue-010/onecomputer-hermes"),
     source("infra/issue-010/onecomputer-hermes-desktop"),
     source("infra/issue-010/onecomputer-agent-chat.py"),
@@ -91,10 +92,19 @@ test("selected Hermes profiles seed Office skills and expose the mode-appropriat
   assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes/);
   assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes-desktop/);
   assert.match(entrypoint, /HERMES_BUNDLED_SKILLS=\/opt\/onecomputer\/hermes-agent\/skills/);
-  assert.match(entrypoint, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
-  assert.match(entrypoint, /cli_toolsets = \["hermes-cli", "onecomputer_ms365"\]/);
-  assert.match(entrypoint, /api_toolsets = \["hermes-api-server", "onecomputer_ms365"\]/);
-  assert.match(entrypoint, /managed_office_tools\.isdisjoint\(resolve_toolset\(name\)\)/);
+  assert.match(entrypoint, /onecomputer-hermes-config/);
+  assert.match(profileConfig, /OFFICE_DEFAULT_SKILLS = frozenset/);
+  for (const skill of ["docx", "pdf", "powerpoint", "xlsx", "ocr-and-documents"]) {
+    assert.match(profileConfig, new RegExp(`"${skill}"`));
+  }
+  assert.match(profileConfig, /current_bundled - previous_bundled/);
+  assert.match(profileConfig, /disabled\.update\(skills_to_default_off - OFFICE_DEFAULT_SKILLS\)/);
+  assert.match(profileConfig, /existing\.get\("skills"\)/);
+  assert.match(profileConfig, /SKILL_STATE_FILE = "\.onecomputer-skill-defaults\.json"/);
+  assert.match(profileConfig, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
+  assert.match(profileConfig, /cli_toolsets = \["hermes-cli", "onecomputer_ms365"\]/);
+  assert.match(profileConfig, /api_toolsets = \["hermes-api-server", "onecomputer_ms365"\]/);
+  assert.match(profileConfig, /managed_office_tools\.isdisjoint\(resolve_toolset\(name\)\)/);
 
   for (const launcher of [cliLauncher, desktopLauncher]) {
     assert.match(launcher, /HERMES_BUNDLED_SKILLS=\/opt\/onecomputer\/hermes-agent\/skills/);
@@ -105,4 +115,7 @@ test("selected Hermes profiles seed Office skills and expose the mode-appropriat
 
   assert.match(chatAdapter, /Hermes has workspace-local file, terminal, skills, and vision tools/);
   assert.match(chatAdapter, /public-web and unrelated native toolsets remain restricted/);
+  assert.match(chatAdapter, /Treat greetings, acknowledgements, small talk/);
+  assert.match(chatAdapter, /Do not load or invoke a skill for those messages/);
+  assert.match(chatAdapter, /concrete task clearly matches that skill's documented scope/);
 });

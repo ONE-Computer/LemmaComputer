@@ -1070,7 +1070,7 @@ function Microsoft365AccountMetadata({ account }) {
   const accountId = account?.userPrincipalName || account?.email;
   if (!accountId) return <p className="connection-metadata">Connected account details unavailable</p>;
   return (
-    <p className="connection-metadata connection-account-metadata">
+    <p className="connection-metadata">
       Connected as <strong>{account?.displayName || accountId}</strong>
       {account?.displayName && accountId !== account.displayName ? ` · ${accountId}` : ""}
     </p>
