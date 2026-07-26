@@ -234,6 +234,34 @@ let chatMessages = [
   },
 ];
 
+let fixtureSchedules = [{
+  id: "5c536c1f-6a31-427d-af8f-dbb0c63f8d71",
+  title: "Weekday project summary",
+  workspaceId,
+  agentCatalogId: "hermes-claw",
+  prompt: "Summarize the current project status, open decisions, and the next useful action.",
+  cronExpression: "0 9 * * 1-5",
+  timeZone: "Asia/Singapore",
+  state: "enabled",
+  nextRunAt: new Date(Date.now() + 86_400_000).toISOString(),
+  lastRunAt: new Date(Date.now() - 86_400_000).toISOString(),
+  createdAt: now,
+  updatedAt: now,
+}];
+const fixtureScheduleRuns = new Map([[fixtureSchedules[0].id, [{
+  id: "6c536c1f-6a31-427d-af8f-dbb0c63f8d72",
+  scheduleId: fixtureSchedules[0].id,
+  scheduledFor: new Date(Date.now() - 86_400_000).toISOString(),
+  state: "succeeded",
+  sessionId: chatSession.id,
+  failureCode: null,
+  failureSummary: null,
+  startedAt: new Date(Date.now() - 86_400_000).toISOString(),
+  completedAt: new Date(Date.now() - 86_399_000).toISOString(),
+  createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+  updatedAt: new Date(Date.now() - 86_399_000).toISOString(),
+}]]]);
+
 let egressSecurityGroups = [{
   schemaVersion: 1,
   id: "egv_fixture_default_v1",
@@ -486,6 +514,84 @@ const server = http.createServer((request, response) => {
   response.setHeader("cache-control", "no-store");
   if (key === "GET /v1/workspaces") {
     response.end(JSON.stringify({ workspaces: fixtureWorkspaces }));
+    return;
+  }
+  if (key === "GET /v1/schedules") {
+    response.end(JSON.stringify({ schedules: fixtureSchedules }));
+    return;
+  }
+  if (key === "POST /v1/schedules") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const saved = {
+        ...input,
+        id: crypto.randomUUID(),
+        nextRunAt: input.state === "enabled" ? new Date(Date.now() + 86_400_000).toISOString() : null,
+        lastRunAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      fixtureSchedules = [saved, ...fixtureSchedules];
+      response.statusCode = 201;
+      response.end(JSON.stringify(saved));
+    });
+    return;
+  }
+  if (request.method === "PATCH" && /^\/v1\/schedules\/[0-9a-f-]+$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const id = url.pathname.split("/").at(-1);
+      const input = JSON.parse(body);
+      const current = fixtureSchedules.find((item) => item.id === id);
+      const saved = {
+        ...current,
+        ...input,
+        nextRunAt: input.state === "paused"
+          ? null
+          : input.state === "enabled"
+            ? new Date(Date.now() + 86_400_000).toISOString()
+            : current.nextRunAt,
+        updatedAt: new Date().toISOString(),
+      };
+      fixtureSchedules = fixtureSchedules.map((item) => item.id === id ? saved : item);
+      response.end(JSON.stringify(saved));
+    });
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/schedules\/[0-9a-f-]+$/.test(url.pathname)) {
+    const id = url.pathname.split("/").at(-1);
+    fixtureSchedules = fixtureSchedules.filter((item) => item.id !== id);
+    fixtureScheduleRuns.delete(id);
+    response.statusCode = 204;
+    response.end();
+    return;
+  }
+  if (request.method === "GET" && /^\/v1\/schedules\/[0-9a-f-]+\/runs$/.test(url.pathname)) {
+    const id = url.pathname.split("/").at(-2);
+    response.end(JSON.stringify({ runs: fixtureScheduleRuns.get(id) ?? [] }));
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/schedules\/[0-9a-f-]+\/run$/.test(url.pathname)) {
+    const id = url.pathname.split("/").at(-2);
+    const run = {
+      id: crypto.randomUUID(),
+      scheduleId: id,
+      scheduledFor: new Date().toISOString(),
+      state: "claimed",
+      sessionId: null,
+      failureCode: null,
+      failureSummary: null,
+      startedAt: null,
+      completedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    fixtureScheduleRuns.set(id, [run, ...(fixtureScheduleRuns.get(id) ?? [])]);
+    response.statusCode = 202;
+    response.end(JSON.stringify(run));
     return;
   }
   if (key === "GET /v1/connections") {

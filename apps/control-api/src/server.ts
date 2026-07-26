@@ -1,10 +1,10 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
@@ -26,6 +26,7 @@ import {
   type AgentChatClient,
 } from "./agent-chat.js";
 import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient } from "./channel-broker.js";
+import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -189,6 +190,8 @@ const envSchema = z.object({
   AGENT_CHAT_SECRET: z.string().min(32),
   CHANNEL_BROKER_URL: optionalEnvString(),
   CHANNEL_BROKER_INTERNAL_TOKEN: optionalEnvString(32),
+  SCHEDULER_INTERNAL_TOKEN: z.string().min(32),
+  SCHEDULE_PROMPT_SECRET: z.string().min(32),
   POLICY_SIGNING_KEY_ID: z.string().regex(/^psk_[a-z0-9][a-z0-9_-]{2,63}$/),
   POLICY_SIGNING_PRIVATE_KEY_B64: z.string().min(40),
   POLICY_VERIFICATION_KEYS_B64: z.string().min(32),
@@ -226,6 +229,9 @@ export function createControlServer(
     agentChatClient?: AgentChatClient;
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
+    scheduleStore?: ScheduleStore;
+    schedulerInternalToken?: string;
+    schedulePromptSecret?: string;
     connectorRegistryStore?: ConnectorRegistryStore;
     workspaceIngress?: {
       publicUrl: string;
@@ -345,6 +351,15 @@ export function createControlServer(
         security.channelBrokerInternalToken,
       )) {
         return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Channel broker authentication is required", correlationId: request.id, retryable: false } });
+      }
+      return;
+    }
+    if (request.url.startsWith("/internal/v1/schedules/")) {
+      if (!security.schedulerInternalToken || !sameSecret(
+        request.headers["x-onecomputer-scheduler-token"] as string | undefined,
+        security.schedulerInternalToken,
+      )) {
+        return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Scheduler authentication is required", correlationId: request.id, retryable: false } });
       }
       return;
     }
@@ -493,6 +508,27 @@ export function createControlServer(
     }
     return policyForGrant(actor, effective, workspace.grantId);
   };
+  const schedules = security.scheduleStore && security.schedulePromptSecret
+    ? new ScheduleService(
+        security.scheduleStore,
+        new SchedulePromptVault(security.schedulePromptSecret),
+        agentChat,
+        async (owner, workspaceId, catalogId) => {
+          const { policy } = await channelPolicy(owner, workspaceId);
+          if (!assignedChatAgentIds(policy).includes(catalogId)) {
+            throw new OneComputerError("CHAT_AGENT_NOT_SELECTED", "That agent is not selected for this workspace", 409);
+          }
+        },
+        async (owner, workspaceId, catalogId) => {
+          const { policy } = await channelPolicy(owner, workspaceId);
+          return service.agentChatAccess(owner, policy, workspaceId, catalogId);
+        },
+      )
+    : undefined;
+  const requireSchedules = () => {
+    if (!schedules) throw new OneComputerError("SCHEDULER_NOT_CONFIGURED", "Scheduling is unavailable", 503, true);
+    return schedules;
+  };
   const verifiedChannelRoute = async (route: ChannelRoute, enforceSelectedRoute: boolean) => {
     if (!store.getOwnedChannelConnection) {
       throw new OneComputerError("CHANNEL_STORE_NOT_CONFIGURED", "Channel storage is unavailable", 503, true);
@@ -583,6 +619,10 @@ export function createControlServer(
       }
     }
     return channelTurnResponseSchema.parse({ sessionId: session.id, text, notices });
+  });
+  app.post("/internal/v1/schedules/runs/execute", async (request) => {
+    const input = executeScheduleRunSchema.parse(request.body ?? {});
+    return requireSchedules().executeClaimed(input.runId, input.leaseToken);
   });
   app.get<{ Params: { operationId: string } }>("/internal/v1/agent/operations/:operationId", async (request) => {
     const actor = agentPrincipals.get(request);
@@ -1527,6 +1567,34 @@ export function createControlServer(
     await service.delete(identity(request), policy, request.params.workspaceId);
     return reply.code(204).send();
   });
+  app.get("/v1/schedules", async (request) => {
+    await assignedPolicy(request);
+    return requireSchedules().list(identity(request));
+  });
+  app.post("/v1/schedules", async (request, reply) => {
+    await assignedPolicy(request);
+    const created = await requireSchedules().create(identity(request), createScheduleSchema.parse(request.body ?? {}));
+    return reply.code(201).send(created);
+  });
+  app.patch<{ Params: { scheduleId: string } }>("/v1/schedules/:scheduleId", async (request) => {
+    await assignedPolicy(request);
+    return requireSchedules().update(identity(request), z.uuid().parse(request.params.scheduleId), updateScheduleSchema.parse(request.body ?? {}));
+  });
+  app.delete<{ Params: { scheduleId: string } }>("/v1/schedules/:scheduleId", async (request, reply) => {
+    await assignedPolicy(request);
+    await requireSchedules().remove(identity(request), z.uuid().parse(request.params.scheduleId));
+    return reply.code(204).send();
+  });
+  app.get<{ Params: { scheduleId: string }; Querystring: { limit?: string } }>("/v1/schedules/:scheduleId/runs", async (request) => {
+    await assignedPolicy(request);
+    const limit = z.coerce.number().int().min(1).max(100).catch(20).parse(request.query.limit);
+    return requireSchedules().runs(identity(request), z.uuid().parse(request.params.scheduleId), limit);
+  });
+  app.post<{ Params: { scheduleId: string } }>("/v1/schedules/:scheduleId/run", async (request, reply) => {
+    await assignedPolicy(request);
+    const run = await requireSchedules().runNow(identity(request), z.uuid().parse(request.params.scheduleId));
+    return reply.code(202).send(run);
+  });
   app.get("/v1/operations/recent", async (request, reply) => {
     await requirePolicy(request);
     const operation = await operations.recent(identity(request));
@@ -1606,6 +1674,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const store = PostgresWorkspaceStore.fromConnectionString(env.DATABASE_URL);
   await store.migrate();
   const connectorRegistryStore = PostgresConnectorRegistryStore.fromConnectionString(env.DATABASE_URL);
+  const scheduleStore = PostgresScheduleStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
@@ -1704,6 +1773,9 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       agentChatSecret: env.AGENT_CHAT_SECRET,
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
+      scheduleStore,
+      schedulerInternalToken: env.SCHEDULER_INTERNAL_TOKEN,
+      schedulePromptSecret: env.SCHEDULE_PROMPT_SECRET,
       workspaceIngress,
       grantRenewal: {
         tenantId: env.BOOTSTRAP_TENANT_ID,
@@ -1720,6 +1792,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     if (pushRetryTimer) clearInterval(pushRetryTimer);
     await store.close();
     await connectorRegistryStore.close();
+    await scheduleStore.close();
     await identityPolicyStore.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });

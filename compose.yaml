@@ -271,6 +271,8 @@ services:
       AGENT_CHAT_SECRET: ${ONECOMPUTER_HERMES_API_SECRET:?set ONECOMPUTER_HERMES_API_SECRET}
       CHANNEL_BROKER_URL: http://channel-broker:4102
       CHANNEL_BROKER_INTERNAL_TOKEN: ${ONECOMPUTER_CHANNEL_BROKER_TOKEN:?set ONECOMPUTER_CHANNEL_BROKER_TOKEN}
+      SCHEDULER_INTERNAL_TOKEN: ${ONECOMPUTER_SCHEDULER_TOKEN:?set ONECOMPUTER_SCHEDULER_TOKEN}
+      SCHEDULE_PROMPT_SECRET: ${ONECOMPUTER_SCHEDULE_PROMPT_SECRET:?set ONECOMPUTER_SCHEDULE_PROMPT_SECRET}
       POLICY_SIGNING_KEY_ID: ${ONECOMPUTER_POLICY_SIGNING_KEY_ID:?set ONECOMPUTER_POLICY_SIGNING_KEY_ID}
       POLICY_SIGNING_PRIVATE_KEY_B64: ${ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64:?set ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64}
       POLICY_VERIFICATION_KEYS_B64: ${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?set ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64}
@@ -331,6 +333,36 @@ services:
         - node
         - -e
         - fetch('http://127.0.0.1:4102/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  scheduler-worker:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["npm", "run", "start", "--workspace", "@onecomputer/scheduler-worker"]
+    environment:
+      SCHEDULER_HOST: 0.0.0.0
+      SCHEDULER_PORT: "4103"
+      SCHEDULER_INTERNAL_TOKEN: ${ONECOMPUTER_SCHEDULER_TOKEN:?set ONECOMPUTER_SCHEDULER_TOKEN}
+      CONTROL_URL: http://control-api:4100
+      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
+      POLL_INTERVAL_MS: ${ONECOMPUTER_SCHEDULER_POLL_INTERVAL_MS:-5000}
+      CLAIM_LIMIT: ${ONECOMPUTER_SCHEDULER_CLAIM_LIMIT:-10}
+      CLAIM_LEASE_MS: ${ONECOMPUTER_SCHEDULER_CLAIM_LEASE_MS:-120000}
+    networks:
+      - control-private
+    depends_on:
+      postgres:
+        condition: service_healthy
+      control-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4103/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 5s
       timeout: 3s
       retries: 20

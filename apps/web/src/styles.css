@@ -5163,3 +5163,297 @@ textarea:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+.schedules-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.schedules-heading > div > span {
+  display: block;
+  max-width: 720px;
+  margin-top: 22px;
+  color: #5b616b;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.schedules-heading > .primary-button {
+  min-width: 190px;
+  min-height: 50px;
+  padding-inline: 20px;
+}
+
+.schedule-list {
+  display: grid;
+  gap: 14px;
+  padding-top: 28px;
+}
+
+.schedule-card {
+  padding: 22px;
+  border: 1px solid #d9d8d4;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.schedule-card-main {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.schedule-card-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--soft-blue);
+  color: var(--navy);
+}
+
+.schedule-card-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.schedule-card-copy strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.schedule-card-copy small,
+.schedule-runs small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.schedule-state,
+.schedule-run-state {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #eeefef;
+  color: #4e555e;
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.schedule-state.enabled,
+.schedule-run-state.succeeded {
+  background: #e7f5e9;
+  color: #22672b;
+}
+
+.schedule-run-state.failed {
+  background: #fff0ee;
+  color: #8b2722;
+}
+
+.schedule-run-state.running,
+.schedule-run-state.claimed {
+  background: #e8f1fb;
+  color: var(--navy);
+}
+
+.schedule-metadata {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0 0;
+  padding: 17px 0;
+  border-block: 1px solid #e7e5e1;
+}
+
+.schedule-metadata div {
+  display: grid;
+  gap: 5px;
+}
+
+.schedule-metadata dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.schedule-metadata dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.schedule-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 16px;
+}
+
+.schedule-actions .compact-button {
+  min-width: 0;
+  min-height: 38px;
+  padding-inline: 14px;
+  font-size: 13px;
+}
+
+.schedule-actions .text-button {
+  margin: 0 0 0 auto;
+}
+
+.schedule-actions .text-button + .text-button {
+  margin-left: 4px;
+}
+
+.schedule-runs {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.schedule-runs p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.schedule-runs ol {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.schedule-runs li {
+  display: grid;
+  grid-template-columns: auto minmax(180px, .35fr) 1fr;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.schedule-modal {
+  width: min(100%, 720px);
+}
+
+.schedule-form {
+  display: grid;
+  gap: 18px;
+}
+
+.schedule-form label {
+  display: grid;
+  gap: 7px;
+  color: #343a44;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.schedule-form input,
+.schedule-form textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid #c9cdd3;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.schedule-form textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.schedule-form .select-menu,
+.schedule-form .select-menu-trigger {
+  width: 100%;
+}
+
+.schedule-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.schedule-timing-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.schedule-workspace-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 11px 13px;
+  border-radius: 7px;
+  background: #fff6df;
+  color: #6c5013;
+  font-size: 13px;
+}
+
+.schedule-workspace-note svg {
+  flex: 0 0 auto;
+  width: 19px;
+}
+
+@media (max-width: 840px) {
+  .schedules-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .schedules-heading > .primary-button {
+    width: 100%;
+  }
+
+  .schedule-timing-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .schedule-actions .text-button {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .schedule-form-grid,
+  .schedule-timing-grid,
+  .schedule-metadata {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-card-main {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .schedule-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .schedule-actions .compact-button {
+    width: 100%;
+  }
+
+  .schedule-runs li {
+    grid-template-columns: auto 1fr;
+  }
+
+  .schedule-runs small {
+    grid-column: 1 / -1;
+  }
+}

@@ -10,6 +10,7 @@
   "dependencies": {
     "@onecomputer/contracts": "*",
     "@onecomputer/egress-policy": "*",
+    "cron-parser": "5.4.0",
     "pg": "8.22.0"
   },
   "devDependencies": {

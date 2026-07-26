@@ -97,6 +97,71 @@ export const chatAgentCatalogIds = ["claude-cli", "codex-cli", "hermes-claw"] as
 export const chatAgentCatalogIdSchema = z.enum(chatAgentCatalogIds);
 export type ChatAgentCatalogId = z.infer<typeof chatAgentCatalogIdSchema>;
 
+export const scheduleStateSchema = z.enum(["enabled", "paused"]);
+export type ScheduleState = z.infer<typeof scheduleStateSchema>;
+
+export const scheduleRunStateSchema = z.enum([
+  "claimed",
+  "running",
+  "succeeded",
+  "failed",
+  "skipped",
+]);
+export type ScheduleRunState = z.infer<typeof scheduleRunStateSchema>;
+
+export const scheduleCronExpressionSchema = z.string().trim().min(9).max(120).refine(
+  (value) => value.split(/\s+/).length === 5,
+  "A five-field cron expression is required",
+);
+export const scheduleTimeZoneSchema = z.string().trim().min(1).max(100);
+
+export const createScheduleSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  workspaceId: z.uuid(),
+  agentCatalogId: chatAgentCatalogIdSchema,
+  prompt: z.string().trim().min(1).max(16_000),
+  cronExpression: scheduleCronExpressionSchema,
+  timeZone: scheduleTimeZoneSchema,
+  state: scheduleStateSchema.default("enabled"),
+}).strict();
+export type CreateSchedule = z.infer<typeof createScheduleSchema>;
+
+export const updateScheduleSchema = createScheduleSchema.partial().strict().refine(
+  (value) => Object.keys(value).length > 0,
+  "At least one schedule field is required",
+);
+export type UpdateSchedule = z.infer<typeof updateScheduleSchema>;
+
+export const scheduleSchema = createScheduleSchema.omit({ prompt: true }).extend({
+  id: z.uuid(),
+  prompt: z.string().max(16_000),
+  nextRunAt: z.iso.datetime().nullable(),
+  lastRunAt: z.iso.datetime().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+}).strict();
+export type Schedule = z.infer<typeof scheduleSchema>;
+
+export const scheduleRunSchema = z.object({
+  id: z.uuid(),
+  scheduleId: z.uuid(),
+  scheduledFor: z.iso.datetime(),
+  state: scheduleRunStateSchema,
+  sessionId: z.string().min(1).max(200).nullable(),
+  failureCode: z.string().min(1).max(100).nullable(),
+  failureSummary: z.string().min(1).max(500).nullable(),
+  startedAt: z.iso.datetime().nullable(),
+  completedAt: z.iso.datetime().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+}).strict();
+export type ScheduleRun = z.infer<typeof scheduleRunSchema>;
+
+export const executeScheduleRunSchema = z.object({
+  runId: z.uuid(),
+  leaseToken: z.uuid(),
+}).strict();
+
 export const agentProfileSchema = z.enum([
   "onecomputer-default-agent",
   "claude-desktop-managed-v1",

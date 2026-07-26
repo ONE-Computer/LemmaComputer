@@ -47,6 +47,15 @@ export const chatApi = {
   ),
 };
 
+export const scheduleApi = {
+  list: () => request("/api/v1/schedules", { cache: "no-store" }),
+  create: (input) => request("/api/v1/schedules", mutation("POST", input)),
+  update: (id, input) => request(`/api/v1/schedules/${encodeURIComponent(id)}`, mutation("PATCH", input)),
+  delete: (id) => request(`/api/v1/schedules/${encodeURIComponent(id)}`, mutation("DELETE")),
+  runNow: (id) => request(`/api/v1/schedules/${encodeURIComponent(id)}/run`, mutation()),
+  runs: (id, limit = 20) => request(`/api/v1/schedules/${encodeURIComponent(id)}/runs?${new URLSearchParams({ limit: String(limit) })}`, { cache: "no-store" }),
+};
+
 export const sandboxApi = {
   settings: (grantId = "personal") => request(`/api/v1/sandbox-settings?${new URLSearchParams({ grantId })}`),
   save: (configuration) => request("/api/v1/sandbox-settings", {
