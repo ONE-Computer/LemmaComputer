@@ -115,45 +115,6 @@ mcp_servers:
     allow_all_keys: false
     available_on_public_internet: false
     delegate_auth_to_upstream: false
-  onecomputer_notion:
-    alias: notion
-    transport: http
-    url: https://mcp.notion.com/mcp
-    description: Official Notion remote MCP connector managed through LiteLLM
-    auth_type: oauth2
-    oauth2_flow: authorization_code
-    scopes:
-      - default
-    available_on_public_internet: true
-  onecomputer_linear:
-    alias: linear
-    transport: http
-    url: https://mcp.linear.app/mcp
-    description: Official Linear remote MCP connector managed through LiteLLM
-    auth_type: oauth2
-    oauth2_flow: authorization_code
-    scopes:
-      - read
-    available_on_public_internet: true
-  onecomputer_atlassian:
-    alias: atlassian
-    transport: http
-    url: https://mcp.atlassian.com/v1/mcp/authv2
-    description: Official Atlassian Rovo remote MCP connector managed through LiteLLM
-    auth_type: oauth2
-    oauth2_flow: authorization_code
-    scopes:
-      - read:me
-      - read:account
-      - offline_access
-      - email
-      - read:jira-work
-      - search:confluence
-      - read:confluence-user
-      - read:page:confluence
-      - read:comment:confluence
-      - read:space:confluence
-    available_on_public_internet: true
   onecomputer_github:
     alias: github
     transport: http

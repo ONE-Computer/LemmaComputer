@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { IdentityContext } from "@onecomputer/contracts";
-import type { GatewayClient, OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
+import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
@@ -20,7 +20,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
   const startedServers: string[] = [];
   const completedServers: string[] = [];
   const disconnects: IdentityContext[] = [];
-  const gateway: GatewayClient & OAuthConnectionGateway = {
+  const gateway: GatewayClient & OAuthConnectionGateway & Pick<McpConnectorAdministrationGateway, "ensureOAuthMcpServers"> = {
     ensureGrant: async () => ({ baseUrl: "http://gateway", credential: "scoped-test-credential-000001", modelAlias: "test", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
     readiness: async () => ({ models: "ready", tools: "ready" }),
     test: async () => ({
@@ -32,6 +32,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       mcpUrl: "http://gateway/mcp",
     }),
     revoke: async () => undefined,
+    ensureOAuthMcpServers: async () => undefined,
     beginUserOAuthConnection: async (input) => {
       oauthState = input.state;
       startedServers.push(input.serverName);

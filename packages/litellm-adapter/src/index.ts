@@ -102,6 +102,7 @@ export interface McpConnectorAdministrationGateway {
     authorizationOrigin: string;
     dynamicClientRegistration: boolean;
   }>;
+  ensureOAuthMcpServers(inputs: McpConnectorRegistrationInput[]): Promise<void>;
   registerOAuthMcpServer(input: McpConnectorRegistrationInput): Promise<void>;
   removeMcpServer(serverId: string): Promise<void>;
 }
@@ -184,6 +185,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   private readonly connectionGrantTtlMs: number;
   private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string }>();
   private readonly modelCapabilityStates = new Map<string, { expiresAt: number; capabilities: GatewayModelCapabilities }>();
+  private readonly oauthClientRegistrationStates = new Map<string, Promise<string>>();
 
   constructor(private readonly config: LiteLLMConfig) {
     this.adminUrl = config.adminUrl.replace(/\/$/, "");
@@ -244,16 +246,23 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       code_challenge_method: "S256",
       response_type: "code",
     });
-    let response: Response;
-    try {
-      response = await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(grant.serverId)}/authorize?${query}`, {
-        method: "GET",
-        headers: { authorization: `Bearer ${grant.credential}` },
-        redirect: "manual",
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
-    } catch {
-      throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
+    const authorize = async () => {
+      try {
+        return await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(grant.serverId)}/authorize?${query}`, {
+          method: "GET",
+          headers: { authorization: `Bearer ${grant.credential}` },
+          redirect: "manual",
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch {
+        throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
+      }
+    };
+    let response = await authorize();
+    if (await this.missingOAuthClient(response)) {
+      await response.body?.cancel().catch(() => undefined);
+      await this.registerDynamicOAuthClient(grant.serverId);
+      response = await authorize();
     }
     if (response.status < 300 || response.status >= 400) {
       await response.body?.cancel().catch(() => undefined);
@@ -277,6 +286,42 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const cookieHeaders = response.headers as Headers & { getSetCookie?: () => string[] };
     const cookies = cookieHeaders.getSetCookie?.() ?? (response.headers.get("set-cookie") ? [response.headers.get("set-cookie")!] : []);
     return { location: authorizationUrl.toString(), cookies };
+  }
+
+  private async missingOAuthClient(response: Response) {
+    if (response.status !== 400) return false;
+    const payload = asObject(await response.clone().json().catch(() => ({})));
+    return asObject(payload.detail).error === "missing_client_id";
+  }
+
+  private async registerDynamicOAuthClient(serverId: string) {
+    const pending = this.oauthClientRegistrationStates.get(serverId);
+    if (pending) return pending;
+    const registration = (async () => {
+      const result = await this.adminCall(`/v1/mcp/server/oauth/${encodeURIComponent(serverId)}/register`, {
+        method: "POST",
+        body: {
+          client_name: "ONEComputer",
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+        },
+      }, true);
+      if (!result.ok) throw this.upstreamError("MCP_OAUTH_REGISTRATION_FAILED", result.status, result.payload);
+      const clientId = asObject(result.payload).client_id;
+      if (typeof clientId !== "string" || !clientId) {
+        throw new OneComputerError("MCP_OAUTH_REGISTRATION_FAILED", "The connector did not register an OAuth client", 502, true);
+      }
+      return clientId;
+    })();
+    this.oauthClientRegistrationStates.set(serverId, registration);
+    try {
+      return await registration;
+    } finally {
+      if (this.oauthClientRegistrationStates.get(serverId) === registration) {
+        this.oauthClientRegistrationStates.delete(serverId);
+      }
+    }
   }
 
   async completeUserOAuthConnection(input: {
@@ -365,6 +410,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     });
     const created = await this.adminCall("/v1/mcp/server/oauth/session", { method: "POST", body: payload }, true);
     if (!created.ok) throw this.upstreamError("MCP_DISCOVERY_FAILED", created.status, created.payload);
+    const dynamicClientId = input.clientId ? undefined : await this.registerDynamicOAuthClient(temporaryId);
     const query = new URLSearchParams({
       redirect_uri: input.callbackUrl,
       state: "onecomputer-discovery",
@@ -372,6 +418,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       code_challenge_method: "S256",
       response_type: "code",
     });
+    if (dynamicClientId) query.set("client_id", dynamicClientId);
     let response: Response;
     try {
       response = await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(temporaryId)}/authorize?${query}`, {
@@ -406,6 +453,30 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       body: this.mcpRegistrationPayload(input),
     }, true);
     if (!result.ok) throw this.upstreamError("MCP_REGISTRATION_FAILED", result.status, result.payload);
+  }
+
+  async ensureOAuthMcpServers(inputs: McpConnectorRegistrationInput[]) {
+    const listed = await this.adminCall("/v1/mcp/server", { method: "GET" });
+    const servers = Array.isArray(listed.payload) ? listed.payload.map(asObject) : [];
+    for (const input of inputs) {
+      const exact = servers.find((server) => server.server_id === input.serverId);
+      if (exact) {
+        if (exact.server_name !== input.serverName || exact.url !== input.url) {
+          throw new OneComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector registration does not match the approved catalog`, 409);
+        }
+        continue;
+      }
+      const nameConflict = servers.find((server) => server.server_name === input.serverName);
+      if (nameConflict) {
+        throw new OneComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector name is already registered`, 409);
+      }
+      await this.registerOAuthMcpServer(input);
+      servers.push({
+        server_id: input.serverId,
+        server_name: input.serverName,
+        url: input.url,
+      });
+    }
   }
 
   async removeMcpServer(serverId: string) {

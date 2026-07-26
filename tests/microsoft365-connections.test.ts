@@ -19,6 +19,7 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   statusServers: string[] = [];
   disconnectedServers: string[] = [];
   registered: McpConnectorRegistrationInput[] = [];
+  ensured: McpConnectorRegistrationInput[][] = [];
   discoveries = 0;
   statusByServer = new Map<string, OAuthConnectionStatus>();
   toolsByServer = new Map<string, string[]>();
@@ -49,6 +50,9 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   }
   async registerOAuthMcpServer(input: McpConnectorRegistrationInput) {
     this.registered.push(input);
+  }
+  async ensureOAuthMcpServers(inputs: McpConnectorRegistrationInput[]) {
+    this.ensured.push(inputs);
   }
   async removeMcpServer() {}
 }
@@ -134,6 +138,11 @@ test("the approved catalog maps every ONEComputer connector to one LiteLLM MCP s
     "onecomputer_linear",
     "onecomputer_atlassian",
     "onecomputer_github",
+  ]);
+  assert.deepEqual(gateway.ensured[0]?.map((connector) => connector.serverName), [
+    "onecomputer_notion",
+    "onecomputer_linear",
+    "onecomputer_atlassian",
   ]);
   assert.ok(catalog.connections.every((connector) => connector.available));
   assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));

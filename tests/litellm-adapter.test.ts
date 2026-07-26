@@ -123,6 +123,69 @@ test("connector discovery and registration keep provider credentials inside Lite
   }
 });
 
+test("connector discovery performs dynamic client registration when credentials are not supplied", async () => {
+  const requests: Array<{ method: string; url: string; authorization: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    requests.push({
+      method: request.method ?? "",
+      url: request.url ?? "",
+      authorization: String(request.headers.authorization ?? ""),
+      body,
+    });
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server/oauth/session") {
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (request.url?.includes("/register")) {
+      response.end(JSON.stringify({ client_id: "dynamic-client-id", token_endpoint_auth_method: "none" }));
+      return;
+    }
+    if (request.url?.includes("/authorize?")) {
+      assert.match(request.url, /client_id=dynamic-client-id/);
+      response.statusCode = 302;
+      response.setHeader("location", "https://login.acme.example/oauth/authorize");
+      response.end();
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const discovered = await liveAdapter.discoverOAuthMcpServer({
+      name: "Acme Projects",
+      description: "Work with Acme projects.",
+      url: "https://mcp.acme.example/mcp",
+      scopes: ["projects:read"],
+      callbackUrl: "https://onecomputer.example/callback",
+    });
+    assert.deepEqual(discovered, {
+      authorizationOrigin: "https://login.acme.example",
+      dynamicClientRegistration: true,
+    });
+    const registration = requests.find((request) => request.url.includes("/register"))!;
+    assert.equal(registration.authorization, "Bearer sk-master-test-not-used-00001");
+    assert.deepEqual(registration.body, {
+      client_name: "ONEComputer",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("owned OAuth uses a narrow per-user connection key and returns only the upstream redirect", async () => {
   const requests: Array<{ url: string; authorization: string; body: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {
@@ -188,6 +251,67 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
     assert.notEqual(authorize.authorization, "Bearer sk-master-test-not-used-00001");
     assert.match(authorize.authorization, /^Bearer sk-occ-/);
     assert.ok(!JSON.stringify(started).includes("sk-occ-"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("owned OAuth registers and retries a persistent MCP server when LiteLLM reports a missing client id", async () => {
+  const requests: Array<{ url: string; authorization: string; body: Record<string, unknown> }> = [];
+  let authorizeAttempts = 0;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length && request.headers["content-type"]?.includes("application/json")
+      ? JSON.parse(Buffer.concat(chunks).toString("utf8"))
+      : {};
+    requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? ""), body });
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{ server_id: "linear-server-id", server_name: "onecomputer_linear" }]));
+      return;
+    }
+    if (request.url?.startsWith("/v1/mcp/server/oauth/linear-server-id/authorize?")) {
+      authorizeAttempts += 1;
+      if (authorizeAttempts === 1) {
+        response.statusCode = 400;
+        response.end(JSON.stringify({ detail: { error: "missing_client_id" } }));
+        return;
+      }
+      response.statusCode = 307;
+      response.setHeader("location", "https://mcp.linear.app/authorize?client_id=dynamic-client-id");
+      response.end();
+      return;
+    }
+    if (request.url === "/v1/mcp/server/oauth/linear-server-id/register") {
+      response.end(JSON.stringify({ client_id: "dynamic-client-id" }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const started = await liveAdapter.beginUserOAuthConnection({
+      identity,
+      serverName: "onecomputer_linear",
+      redirectUri: "https://onecomputer.example/api/v1/connections/linear/callback",
+      state: "opaque-onecomputer-state",
+      codeChallenge: "a".repeat(43),
+      authorizationOrigins: ["https://mcp.linear.app"],
+    });
+    assert.equal(started.location, "https://mcp.linear.app/authorize?client_id=dynamic-client-id");
+    assert.equal(authorizeAttempts, 2);
+    const registration = requests.find((request) => request.url.endsWith("/register"))!;
+    assert.equal(registration.authorization, "Bearer sk-master-test-not-used-00001");
+    const authorizeRequests = requests.filter((request) => request.url.includes("/authorize?"));
+    assert.ok(authorizeRequests.every((request) => request.authorization.startsWith("Bearer sk-occ-")));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

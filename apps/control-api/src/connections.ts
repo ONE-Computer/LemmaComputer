@@ -336,6 +336,7 @@ export class McpConnectionService {
   private async connectors(tenantId: string) {
     const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
     await this.registry.seedConnectors(tenantId, seeded);
+    await this.ensureManagedConnectorServers(seeded).catch(() => undefined);
     const order = new Map(seeded.map((connector, index) => [connector.id, index]));
     return (await this.registry.listConnectors(tenantId)).sort((left, right) => (
       (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
@@ -345,10 +346,33 @@ export class McpConnectionService {
   }
 
   private async connector(tenantId: string, connectorId: string) {
-    await this.registry.seedConnectors(tenantId, connectorCatalog(tenantId, this.microsoftAuthorizationOrigin));
+    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
+    await this.registry.seedConnectors(tenantId, seeded);
     const connector = await this.registry.getConnector(tenantId, connectorId);
     if (!connector) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "That connector is not in the approved catalog", 404);
+    await this.ensureManagedConnectorServers([connector]);
     return connector;
+  }
+
+  private async ensureManagedConnectorServers(connectors: Array<Pick<
+    ConnectorDefinition,
+    "id" | "serverId" | "serverName" | "name" | "description" | "endpointUrl" | "scopes"
+  >>) {
+    const managed = connectors
+      .filter((connector) => ["notion", "linear", "atlassian"].includes(connector.id))
+      .map((connector) => ({
+        serverId: connector.serverId,
+        serverName: connector.serverName,
+        name: connector.name,
+        description: connector.description,
+        url: connector.endpointUrl,
+        scopes: connector.scopes,
+      }));
+    if (!managed.length) return;
+    if (typeof this.gateway.ensureOAuthMcpServers !== "function") {
+      throw new OneComputerError("MCP_ADMINISTRATION_NOT_CONFIGURED", "Managed connector registration is unavailable", 503, true);
+    }
+    await this.gateway.ensureOAuthMcpServers(managed);
   }
 
   private publicConnector(connector: ConnectorDefinition) {
