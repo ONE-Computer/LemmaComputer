@@ -2085,6 +2085,40 @@ function ChatConversation({
 
   const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
   const awaitingAssistant = status === "submitted" && visibleMessages.at(-1)?.role === "user";
+  const messageField = (
+    <>
+      <label className="sr-only" htmlFor="chat-message">Message {agentName}</label>
+      <textarea
+        id="chat-message"
+        value={input}
+        onChange={(event) => setInput(event.target.value)}
+        onPaste={(event) => {
+          const images = [...event.clipboardData.items]
+            .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+            .flatMap((item) => {
+              const blob = item.getAsFile();
+              if (!blob) return [];
+              const extension = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+              return [new File([blob], `pasted-image-${Date.now()}.${extension}`, { type: blob.type })];
+            });
+          if (images.length) {
+            event.preventDefault();
+            void addAttachments(images);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            event.currentTarget.form?.requestSubmit();
+          }
+        }}
+        placeholder={`Message ${agentName}`}
+        rows="1"
+        maxLength="16000"
+        disabled={historyState === "loading"}
+      />
+    </>
+  );
   return (
     <section className={`chat-conversation${visibleMessages.length === 0 ? " is-empty" : ""}`} aria-label="Current conversation">
       <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy || historyState === "loading"}>
@@ -2156,51 +2190,9 @@ function ChatConversation({
             event.target.value = "";
           }}
         />
-        {!companionComposer && (
-          <button
-            className="chat-attach-button"
-            type="button"
-            aria-label="Attach files"
-            title="Attach files"
-            disabled={busy || attachmentBusy || historyState === "loading"}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Attach24Regular aria-hidden="true" />
-          </button>
-        )}
-        <label className="sr-only" htmlFor="chat-message">Message {agentName}</label>
-        <textarea
-          id="chat-message"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onPaste={(event) => {
-            const images = [...event.clipboardData.items]
-              .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-              .flatMap((item) => {
-                const blob = item.getAsFile();
-                if (!blob) return [];
-                const extension = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
-                return [new File([blob], `pasted-image-${Date.now()}.${extension}`, { type: blob.type })];
-              });
-            if (images.length) {
-              event.preventDefault();
-              void addAttachments(images);
-            }
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          placeholder={`Message ${agentName}`}
-          rows="1"
-          maxLength="16000"
-          disabled={historyState === "loading"}
-        />
         {companionComposer ? (
           <div className="companion-chat-composer-row">
-            <div className="companion-chat-composer-control">
+            <div className="companion-chat-composer-control actions-control">
               <button
                 className="chat-attach-button"
                 type="button"
@@ -2259,7 +2251,7 @@ function ChatConversation({
                 </div>
               )}
             </div>
-            <div className="companion-chat-composer-spacer" />
+            {messageField}
             <div className="companion-chat-composer-control context-control">
               {composerContext ? (
                 <>
@@ -2287,6 +2279,17 @@ function ChatConversation({
           </div>
         ) : (
           <>
+            <button
+              className="chat-attach-button"
+              type="button"
+              aria-label="Attach files"
+              title="Attach files"
+              disabled={busy || attachmentBusy || historyState === "loading"}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Attach24Regular aria-hidden="true" />
+            </button>
+            {messageField}
             {busy ? (
               <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={() => { void stop(); }}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
