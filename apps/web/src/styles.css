@@ -1893,7 +1893,7 @@ textarea:focus-visible,
   gap: 10px;
 }
 
-.chat-agent-selector > span {
+.chat-agent-selector-label {
   color: var(--muted);
   font-size: 12px;
   font-weight: 650;
@@ -4303,7 +4303,7 @@ textarea:focus-visible,
     flex: 1;
   }
 
-  .chat-agent-selector > span {
+  .chat-agent-selector-label {
     display: none;
   }
 

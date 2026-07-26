@@ -2,7 +2,7 @@
   "id": "/companion",
   "name": "ONEComputer Companion",
   "short_name": "ONE Companion",
-  "description": "Review and sign ONEComputer governed-operation approvals.",
+  "description": "Chat with workspace agents and review protected ONEComputer actions.",
   "start_url": "/companion",
   "scope": "/",
   "display": "standalone",

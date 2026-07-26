@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Add24Regular } from "@fluentui/react-icons/svg/add";
 import { ArrowClockwise24Regular } from "@fluentui/react-icons/svg/arrow-clockwise";
+import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { CheckmarkCircle24Regular } from "@fluentui/react-icons/svg/checkmark-circle";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
 import { Clock24Regular } from "@fluentui/react-icons/svg/clock";
@@ -7,7 +9,8 @@ import { History24Regular } from "@fluentui/react-icons/svg/history";
 import { Info24Regular } from "@fluentui/react-icons/svg/info";
 import { ShieldCheckmark24Regular } from "@fluentui/react-icons/svg/shield-checkmark";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
-import { approvalApi, authApi } from "./workspace-api.js";
+import { ChatScreen } from "./App.jsx";
+import { approvalApi, authApi, workspaceApi } from "./workspace-api.js";
 import {
   clearBrowserApprover,
   enrollBrowserApprover,
@@ -20,10 +23,38 @@ import {
   enableCompanionPush,
   removeCompanionPush,
 } from "./companion-push.js";
-import { ConfirmDialog } from "./ui.jsx";
+import { ConfirmDialog, SelectMenu } from "./ui.jsx";
 import "./companion.css";
 
 const PROTOCOL_VERSION = "onecomputer-companion-push-0.1";
+const workspacePreferenceKey = "onecomputer.active-workspace-id";
+const chatAgentPreferenceKey = (workspaceId) => `onecomputer.active-chat-agent:${workspaceId}`;
+
+const readPreference = (key) => {
+  try {
+    return window.localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+};
+
+const writePreference = (key, value) => {
+  try {
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // A blocked storage area must not prevent Companion chat from being used.
+  }
+};
+
+const companionViewFromLocation = () => (
+  new URLSearchParams(window.location.search).get("view") === "chat" ? "chat" : "companion"
+);
+
+const companionChatSessionFromLocation = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("view") === "chat" ? params.get("chat") ?? "" : "";
+};
 
 const formatTime = (value) => value
   ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
@@ -193,6 +224,79 @@ function ActivityView({
   );
 }
 
+function CompanionChatView({
+  workspace,
+  workspaces,
+  workspaceState,
+  workspaceError,
+  onWorkspaceChange,
+  onStartWorkspace,
+  onRestartWorkspace,
+  sessions,
+  activeSessionId,
+  onSessionChange,
+  onSessionsChange,
+  preferredAgentId,
+  onAgentChange,
+  historyHasMore,
+  historyLoadingMore,
+  historyLoadRequest,
+  onLoadOlder,
+  onHistoryMetadataChange,
+}) {
+  const sessionOptions = [
+    { value: "", label: "New chat" },
+    ...sessions.map((item, index) => ({
+      value: item.id,
+      label: item.title || `Conversation ${sessions.length - index}`,
+    })),
+  ];
+
+  return (
+    <section className="companion-chat-shell" aria-label="Chat with your workspace agent">
+      <header className="companion-chat-toolbar">
+        <div>
+          <p>Direct chat</p>
+          <SelectMenu
+            className="companion-chat-session-menu"
+            value={activeSessionId}
+            options={sessionOptions}
+            onValueChange={onSessionChange}
+            ariaLabel="Choose recent chat"
+          />
+        </div>
+        <div>
+          {historyHasMore && (
+            <button className="companion-chat-history-button" type="button" disabled={historyLoadingMore} onClick={onLoadOlder}>
+              {historyLoadingMore ? "Loading" : "Older"}
+            </button>
+          )}
+          <button className="companion-chat-new-button" type="button" onClick={() => onSessionChange("")}>
+            <Add24Regular aria-hidden="true" />
+            <span>New chat</span>
+          </button>
+        </div>
+      </header>
+      {workspaceError && <div className="companion-message error companion-chat-error" role="alert">{workspaceError}</div>}
+      <ChatScreen
+        workspace={workspace}
+        workspaces={workspaces}
+        workspaceState={workspaceState}
+        onWorkspaceChange={onWorkspaceChange}
+        onStartWorkspace={onStartWorkspace}
+        onRestartWorkspace={onRestartWorkspace}
+        activeSessionId={activeSessionId}
+        onSessionsChange={onSessionsChange}
+        onSessionChange={onSessionChange}
+        preferredAgentId={preferredAgentId}
+        onAgentChange={onAgentChange}
+        historyLoadRequest={historyLoadRequest}
+        onHistoryMetadataChange={onHistoryMetadataChange}
+      />
+    </section>
+  );
+}
+
 export function CompanionApp() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -209,6 +313,7 @@ export function CompanionApp() {
   const [terminal, setTerminal] = useState(null);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [displayName, setDisplayName] = useState("");
+  const [activeView, setActiveView] = useState(companionViewFromLocation);
   const [activeTab, setActiveTab] = useState("approvals");
   const [activities, setActivities] = useState([]);
   const [activityCursor, setActivityCursor] = useState(null);
@@ -219,6 +324,16 @@ export function CompanionApp() {
   const [activityDetail, setActivityDetail] = useState(null);
   const [activityDetailLoading, setActivityDetailLoading] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [workspaces, setWorkspaces] = useState([]);
+  const [workspace, setWorkspace] = useState(null);
+  const [workspaceState, setWorkspaceState] = useState("loading");
+  const [workspaceError, setWorkspaceError] = useState("");
+  const [chatSessions, setChatSessions] = useState([]);
+  const [activeChatSessionId, setActiveChatSessionId] = useState(companionChatSessionFromLocation);
+  const [chatAgentPreferences, setChatAgentPreferences] = useState({});
+  const [chatHistoryHasMore, setChatHistoryHasMore] = useState(false);
+  const [chatHistoryLoadingMore, setChatHistoryLoadingMore] = useState(false);
+  const [chatHistoryLoadRequest, setChatHistoryLoadRequest] = useState(0);
   const activityDetailRequest = useRef(0);
   const support = useMemo(() => companionPushSupport(), [config]);
 
@@ -250,6 +365,52 @@ export function CompanionApp() {
       })
       .finally(() => setAuthLoading(false));
   }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setActiveView(companionViewFromLocation());
+      setActiveChatSessionId(companionChatSessionFromLocation());
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!session) return undefined;
+    let active = true;
+    setWorkspaceError("");
+    Promise.all([
+      workspaceApi.current().catch((error) => {
+        if (error.code === "WORKSPACE_NOT_FOUND") return null;
+        throw error;
+      }),
+      workspaceApi.list(),
+    ])
+      .then(([current, result]) => {
+        if (!active) return;
+        const listed = result.workspaces ?? [];
+        const nextWorkspaces = current && !listed.some((item) => item.id === current.id)
+          ? [current, ...listed]
+          : listed;
+        const preferredId = readPreference(workspacePreferenceKey);
+        const selected = nextWorkspaces.find((item) => item.id === preferredId)
+          ?? current
+          ?? nextWorkspaces[0]
+          ?? null;
+        setWorkspaces(nextWorkspaces);
+        setWorkspace(selected);
+        setWorkspaceState(selected?.state ?? "not_created");
+        writePreference(workspacePreferenceKey, selected?.id ?? "");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setWorkspace(null);
+        setWorkspaces([]);
+        setWorkspaceState("failed");
+        setWorkspaceError(error.message);
+      });
+    return () => { active = false; };
+  }, [session]);
 
   const refresh = useCallback(async () => {
     if (!session) return;
@@ -489,6 +650,82 @@ export function CompanionApp() {
     try { await authApi.logout(); } finally { window.location.assign("/companion"); }
   };
 
+  const updateWorkspace = (next) => {
+    if (!next) return;
+    setWorkspace(next);
+    setWorkspaceState(next.state);
+    setWorkspaces((current) => [next, ...current.filter((item) => item.id !== next.id)]);
+  };
+
+  const selectWorkspace = (workspaceId) => {
+    const next = workspaces.find((item) => item.id === workspaceId);
+    if (!next || next.id === workspace?.id) return;
+    setWorkspace(next);
+    setWorkspaceState(next.state);
+    setWorkspaceError("");
+    setChatSessions([]);
+    setChatHistoryHasMore(false);
+    setActiveChatSessionId("");
+    writePreference(workspacePreferenceKey, next.id);
+  };
+
+  const startWorkspaceForChat = async () => {
+    setWorkspaceError("");
+    setWorkspaceState(workspace?.state === "not_created" ? "provisioning" : "loading");
+    try {
+      if (!workspace || ["not_created", "stopped", "failed"].includes(workspace.state)) {
+        updateWorkspace(await workspaceApi.create(workspace?.grantId ?? "personal"));
+        return;
+      }
+      const result = await workspaceApi.open(workspace.id);
+      updateWorkspace(result.workspace);
+    } catch (error) {
+      setWorkspaceState(workspace?.state ?? "failed");
+      setWorkspaceError(error.message);
+    }
+  };
+
+  const restartWorkspaceForChat = async () => {
+    if (!workspace) return;
+    setWorkspaceError("");
+    setWorkspaceState("restarting");
+    try {
+      updateWorkspace(await workspaceApi.restart(workspace.id));
+    } catch (error) {
+      setWorkspaceState(workspace.state);
+      setWorkspaceError(error.message);
+    }
+  };
+
+  const saveChatAgentPreference = (workspaceId, agentId) => {
+    if (!workspaceId || !agentId) return;
+    writePreference(chatAgentPreferenceKey(workspaceId), agentId);
+    setChatAgentPreferences((current) => ({ ...current, [workspaceId]: agentId }));
+  };
+
+  const selectChatSession = (sessionId, historyMode = "push") => {
+    setActiveChatSessionId(sessionId);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "chat");
+    if (sessionId) url.searchParams.set("chat", sessionId);
+    else url.searchParams.delete("chat");
+    window.history[historyMode === "replace" ? "replaceState" : "pushState"]({}, "", `${url.pathname}${url.search}`);
+  };
+
+  const selectView = (view) => {
+    if (view === activeView) return;
+    setActiveView(view);
+    const url = new URL(window.location.href);
+    if (view === "chat") {
+      url.searchParams.set("view", "chat");
+      if (activeChatSessionId) url.searchParams.set("chat", activeChatSessionId);
+    } else {
+      url.searchParams.delete("view");
+      url.searchParams.delete("chat");
+    }
+    window.history.pushState({}, "", `${url.pathname}${url.search}`);
+  };
+
   if (authLoading) return <main className="companion-loading">Checking your work account…</main>;
   if (!session) return <CompanionSignIn error={authError} />;
 
@@ -506,8 +743,33 @@ export function CompanionApp() {
         </div>
       </header>
 
-      <main id="companion-main" className="companion-main" inert={confirmRemove ? true : undefined}>
-        <header className="companion-heading">
+      <main id="companion-main" className={`companion-main${activeView === "chat" ? " companion-chat-main" : ""}`} inert={confirmRemove ? true : undefined}>
+        {activeView === "chat" ? (
+          <CompanionChatView
+            workspace={workspace}
+            workspaces={workspaces}
+            workspaceState={workspaceState}
+            workspaceError={workspaceError}
+            onWorkspaceChange={selectWorkspace}
+            onStartWorkspace={startWorkspaceForChat}
+            onRestartWorkspace={restartWorkspaceForChat}
+            sessions={chatSessions}
+            activeSessionId={activeChatSessionId}
+            onSessionChange={(sessionId) => selectChatSession(sessionId, "replace")}
+            onSessionsChange={setChatSessions}
+            preferredAgentId={workspace ? chatAgentPreferences[workspace.id] ?? readPreference(chatAgentPreferenceKey(workspace.id)) : ""}
+            onAgentChange={saveChatAgentPreference}
+            historyHasMore={chatHistoryHasMore}
+            historyLoadingMore={chatHistoryLoadingMore}
+            historyLoadRequest={chatHistoryLoadRequest}
+            onLoadOlder={() => setChatHistoryLoadRequest((value) => value + 1)}
+            onHistoryMetadataChange={({ hasMore, loading }) => {
+              setChatHistoryHasMore(hasMore);
+              setChatHistoryLoadingMore(loading);
+            }}
+          />
+        ) : <>
+          <header className="companion-heading">
           <p>{activeTab === "approvals" ? "Approval companion" : "Your activity"}</p>
           <h1>{activeTab === "approvals"
             ? ready ? "You’re ready for protected actions." : "Set up this browser for approvals."
@@ -613,7 +875,21 @@ export function CompanionApp() {
             </section>
           </aside>
         </div>}
+        </>}
       </main>
+      <nav className="companion-destinations" aria-label="Companion navigation" inert={confirmRemove ? true : undefined}>
+        <button className={activeView === "chat" ? "active" : ""} type="button" aria-current={activeView === "chat" ? "page" : undefined} onClick={() => selectView("chat")}>
+          <Bot24Regular aria-hidden="true" />
+          <span>Chat</span>
+        </button>
+        <button className={activeView === "companion" ? "active" : ""} type="button" aria-current={activeView === "companion" ? "page" : undefined} onClick={() => selectView("companion")}>
+          <span className="companion-destination-icon">
+            <ShieldCheckmark24Regular aria-hidden="true" />
+            {request && <em aria-label="1 pending approval">1</em>}
+          </span>
+          <span>Companion</span>
+        </button>
+      </nav>
       {confirmRemove && (
         <ConfirmDialog
           title="Remove this companion browser?"
