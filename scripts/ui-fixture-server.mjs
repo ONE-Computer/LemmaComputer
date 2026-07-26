@@ -30,7 +30,6 @@ const workspace = {
     alias: "onecomputer-glm",
     status: "ready",
     fallback: "none",
-    budget: { limitUsd: 1, spentUsd: 0.2, remainingUsd: 0.8, duration: "30d", resetsAt: null },
     limits: { requestsPerMinute: 30, tokensPerMinute: 50000, maxParallelRequests: 4 },
   },
   policyIntegrity: {

@@ -80,6 +80,20 @@ const deleteRequestArguments = z.strictObject({
   "If-Match": z.string().trim().min(1).max(512),
   confirm: z.literal(false).optional(),
 });
+const resumableUploadArguments = z.strictObject({
+  driveId: id,
+  driveItemId: uploadDriveItemId,
+  body: z.strictObject({
+    item: z.strictObject({
+      "@microsoft.graph.conflictBehavior": z.enum(["fail", "replace", "rename"]),
+    }),
+  }),
+  onecomputerFile: z.strictObject({
+    name: z.string().trim().min(1).max(255),
+    size: z.number().int().positive(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+});
 
 type CapabilityDefinition = {
   capabilityId: string;
@@ -193,6 +207,17 @@ export const m365CapabilityDefinitions = Object.fromEntries(
   )]),
 ) as Record<keyof typeof m365ToolCatalog, CapabilityDefinition>;
 
+export const resumableUploadCapability = definition(
+  "m365.create-upload-session",
+  "onecomputer.m365.create-upload-session.v1",
+  "Upload large OneDrive file",
+  "Create an approval-bound resumable upload session for one workspace-local file.",
+  "onedrive",
+  "write",
+  "approval_required",
+  resumableUploadArguments,
+);
+
 export const m365LiteLlmServerId = createHash("sha256")
   .update("onecomputer_ms365|http://ms365-mcp:3000/mcp|http|oauth2|")
   .digest("hex")
@@ -217,7 +242,9 @@ export class McpPolicyService {
   ) {}
 
   async authorize(request: McpPolicyRequest, correlationId: string): Promise<McpPolicyDecision> {
-    const capability = m365CapabilityDefinitions[request.toolName as keyof typeof m365CapabilityDefinitions];
+    const capability = request.toolName === "create-upload-session"
+      ? resumableUploadCapability
+      : m365CapabilityDefinitions[request.toolName as keyof typeof m365CapabilityDefinitions];
     if (request.serverId !== m365LiteLlmServerId || request.serverName !== "onecomputer_ms365" || !capability) {
       return this.authorizeHosted(request, correlationId);
     }

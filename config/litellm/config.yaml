@@ -100,6 +100,10 @@ mcp_servers:
       - get-drive-item
       - create-onedrive-folder
       - upload-file-content
+      # Internal execution-only primitive. Workspace grants never expose this
+      # tool directly; Control assigns it only to an approved exact-operation
+      # key for resumable uploads.
+      - create-upload-session
       - move-rename-onedrive-item
       - copy-drive-item
       - delete-onedrive-file

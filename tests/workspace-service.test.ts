@@ -56,7 +56,6 @@ const fakeModelRoute = {
   status: "ready" as const,
   fallback: "none" as const,
   capabilities: { vision: true },
-  budget: { limitUsd: 1, spentUsd: 0.25, remainingUsd: 0.75, duration: "30d" as const, resetsAt: null },
   limits: { requestsPerMinute: 30, tokensPerMinute: 50_000, maxParallelRequests: 4 },
 };
 
@@ -239,7 +238,7 @@ test("workspace lifecycle provisions, reports, tests, and revokes a scoped gatew
   const workspace = await service.create(alex, policy, "personal", "gateway-key-0001", "correlation-002");
   assert.equal(workspace.readiness.models, "ready");
   assert.equal(workspace.readiness.tools, "ready");
-  assert.equal(workspace.modelRoute?.budget.remainingUsd, 0.75);
+  assert.equal(workspace.modelRoute?.limits.requestsPerMinute, 30);
   assert.equal(controller.lastGateway?.modelAlias, "onecomputer-assistant");
   assert.equal(gateway.grants, 1);
   assert.equal(controller.lastPolicy?.policyHash, policy.policyHash);

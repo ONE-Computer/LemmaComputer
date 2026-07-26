@@ -81,21 +81,18 @@ def delete_key(key):
 def main():
     results = {}
     try:
-        revoked = create_key("revoked", max_budget=0.01, rpm_limit=10, tpm_limit=1000)
+        revoked = create_key("revoked", rpm_limit=10, tpm_limit=1000)
         delete_key(revoked)
         results["revokedStatus"] = model_call(revoked)
 
-        expired = create_key("expired", duration="1s", max_budget=0.01, rpm_limit=10, tpm_limit=1000)
+        expired = create_key("expired", duration="1s", rpm_limit=10, tpm_limit=1000)
         time.sleep(2)
         results["expiredStatus"] = model_call(expired)
 
-        token_limited = create_key("token", max_budget=0.01, rpm_limit=10, tpm_limit=1)
+        token_limited = create_key("token", rpm_limit=10, tpm_limit=1)
         results["tokenLimitStatus"] = model_call(token_limited)
 
-        cost_limited = create_key("cost", spend=1, max_budget=0.5, rpm_limit=10, tpm_limit=1000)
-        results["costLimitStatus"] = model_call(cost_limited)
-
-        rate_limited = create_key("rate", max_budget=0.01, rpm_limit=1, tpm_limit=1000)
+        rate_limited = create_key("rate", rpm_limit=1, tpm_limit=1000)
         results["rateFirstStatus"] = model_call(rate_limited)
         results["rateSecondStatus"] = model_call(rate_limited)
         print(json.dumps(results, sort_keys=True))

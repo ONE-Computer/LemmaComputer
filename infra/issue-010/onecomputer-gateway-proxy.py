@@ -3,9 +3,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.client
+import json
 import os
 import sys
+import threading
+import urllib.error
+import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -16,6 +22,11 @@ AGENT_BRIDGE_TOKEN = os.environ["ONECOMPUTER_AGENT_BRIDGE_TOKEN"]
 LISTEN_PORT = int(os.environ.get("ONECOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
 ALLOWED_PATHS = {"/v1/messages", "/v1/chat/completions", "/v1/responses", "/v1/models", "/mcp-rest/tools/list", "/mcp-rest/tools/call"}
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
+LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
+UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
+UPLOAD_JOBS: dict[str, dict] = {}
+UPLOAD_KEYS: dict[tuple, str] = {}
+UPLOAD_LOCK = threading.Lock()
 
 if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CREDENTIAL) < 24
         or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or len(AGENT_BRIDGE_TOKEN) < 24
@@ -41,7 +52,126 @@ class Handler(BaseHTTPRequestHandler):
         self.forward()
 
     def do_POST(self) -> None:
+        if self.path == "/onecomputer/uploads":
+            self.create_local_upload()
+            return
+        if self.path == "/onecomputer/uploads/start":
+            self.start_local_upload()
+            return
         self.forward()
+
+    def read_json(self) -> dict:
+        length = int(self.headers.get("content-length", "0"))
+        if length <= 0 or length > 16 * 1024:
+            raise ValueError("invalid request body")
+        value = json.loads(self.rfile.read(length))
+        if not isinstance(value, dict):
+            raise ValueError("invalid request body")
+        return value
+
+    def send_json(self, status: int, value: dict) -> None:
+        body = json.dumps(value, separators=(",", ":")).encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.send_header("connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
+
+    def control_json(self, path: str, body: dict | None = None) -> dict:
+        headers = {"authorization": f"Bearer {AGENT_BRIDGE_TOKEN}"}
+        encoded = None
+        if body is not None:
+            encoded = json.dumps(body, separators=(",", ":")).encode()
+            headers["content-type"] = "application/json"
+        request = urllib.request.Request(
+            f"{CONTROL.scheme}://{CONTROL.hostname}:{CONTROL.port}{CONTROL.path.rstrip('/')}{path}",
+            data=encoded,
+            method="GET" if body is None else "POST",
+            headers=headers,
+        )
+        with urllib.request.urlopen(request, timeout=70) as response:
+            value = json.load(response)
+        if not isinstance(value, dict):
+            raise ValueError("invalid Control response")
+        return value
+
+    def create_local_upload(self) -> None:
+        try:
+            value = self.read_json()
+            path = value.get("localFilePath")
+            drive_id = value.get("driveId")
+            drive_item_id = value.get("driveItemId")
+            if not all(isinstance(item, str) and item for item in (path, drive_id, drive_item_id)):
+                raise ValueError("localFilePath, driveId, and driveItemId are required")
+            resolved = os.path.realpath(path)
+            if os.path.commonpath([LOCAL_UPLOAD_ROOT, resolved]) != LOCAL_UPLOAD_ROOT or not os.path.isfile(resolved):
+                raise ValueError("localFilePath must identify a regular workspace file")
+            stat = os.stat(resolved)
+            if stat.st_size <= 0:
+                raise ValueError("localFilePath must not be empty")
+            key = (resolved, stat.st_size, stat.st_mtime_ns, drive_id, drive_item_id)
+            with UPLOAD_LOCK:
+                existing_id = UPLOAD_KEYS.get(key)
+                existing = UPLOAD_JOBS.get(existing_id or "")
+            if existing:
+                operation = self.control_json(f"/internal/v1/agent/operations/{existing['operationId']}")
+                self.send_json(200, {"operation": operation})
+                return
+            digest = hashlib.sha256()
+            with open(resolved, "rb") as source:
+                while chunk := source.read(UPLOAD_CHUNK_BYTES):
+                    digest.update(chunk)
+            request_id = f"workspace-upload-{uuid.uuid4().hex}"
+            operation = self.control_json("/internal/v1/agent/uploads", {
+                "driveId": drive_id,
+                "driveItemId": drive_item_id,
+                "fileName": os.path.basename(resolved),
+                "size": stat.st_size,
+                "sha256": digest.hexdigest(),
+                "idempotencyKey": request_id,
+            })
+            job = {
+                "operationId": operation["id"],
+                "path": resolved,
+                "size": stat.st_size,
+                "mtimeNs": stat.st_mtime_ns,
+                "sha256": digest.hexdigest(),
+                "running": False,
+            }
+            with UPLOAD_LOCK:
+                UPLOAD_KEYS[key] = operation["id"]
+                UPLOAD_JOBS[operation["id"]] = job
+            self.send_json(201, {"operation": operation})
+        except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+            self.send_json(400, {"error": str(error)[:240]})
+
+    def start_local_upload(self) -> None:
+        job = None
+        try:
+            value = self.read_json()
+            operation_id = value.get("operationId")
+            if not isinstance(operation_id, str):
+                raise ValueError("operationId is required")
+            with UPLOAD_LOCK:
+                job = UPLOAD_JOBS.get(operation_id)
+                if not job:
+                    raise ValueError("the local upload is not available in this workspace")
+                if job["running"]:
+                    self.send_json(200, {"state": "executing"})
+                    return
+                job["running"] = True
+            started = self.control_json(f"/internal/v1/agent/uploads/{operation_id}/begin", {})
+            job["leaseId"] = started["leaseId"]
+            job["uploadUrl"] = started["uploadUrl"]
+            threading.Thread(target=run_upload, args=(job,), daemon=True).start()
+            self.send_json(202, {"state": "executing"})
+        except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+            if job is not None and "leaseId" not in job:
+                with UPLOAD_LOCK:
+                    job["running"] = False
+            self.send_json(409, {"error": str(error)[:240]})
 
     def forward(self) -> None:
         path = self.path.split("?", 1)[0]
@@ -85,6 +215,70 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(502, "governed gateway unavailable")
         finally:
             connection.close()
+
+
+def control_job_update(operation_id: str, action: str, lease_id: str) -> None:
+    target = f"{CONTROL.scheme}://{CONTROL.hostname}:{CONTROL.port}{CONTROL.path.rstrip('/')}/internal/v1/agent/uploads/{operation_id}/{action}"
+    request = urllib.request.Request(
+        target,
+        data=json.dumps({"leaseId": lease_id}, separators=(",", ":")).encode(),
+        method="POST",
+        headers={
+            "authorization": f"Bearer {AGENT_BRIDGE_TOKEN}",
+            "content-type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=70) as response:
+        response.read()
+
+
+def run_upload(job: dict) -> None:
+    operation_id = job["operationId"]
+    lease_id = job["leaseId"]
+    try:
+        stat = os.stat(job["path"])
+        if stat.st_size != job["size"] or stat.st_mtime_ns != job["mtimeNs"]:
+            raise ValueError("the local file changed after approval was requested")
+        proxy = urllib.request.ProxyHandler({"https": "http://127.0.0.1:4313"})
+        opener = urllib.request.build_opener(proxy)
+        digest = hashlib.sha256()
+        offset = 0
+        with open(job["path"], "rb") as source:
+            while chunk := source.read(UPLOAD_CHUNK_BYTES):
+                digest.update(chunk)
+                end = offset + len(chunk) - 1
+                request = urllib.request.Request(
+                    job["uploadUrl"],
+                    data=chunk,
+                    method="PUT",
+                    headers={
+                        "content-length": str(len(chunk)),
+                        "content-range": f"bytes {offset}-{end}/{job['size']}",
+                    },
+                )
+                try:
+                    with opener.open(request, timeout=300) as response:
+                        if response.status not in ({200, 201} if end + 1 == job["size"] else {202}):
+                            raise ValueError("Microsoft rejected an upload chunk")
+                        response.read()
+                except urllib.error.HTTPError as error:
+                    error.read()
+                    raise ValueError(f"Microsoft rejected an upload chunk (HTTP {error.code})") from None
+                offset = end + 1
+        if digest.hexdigest() != job["sha256"]:
+            raise ValueError("the local file changed while it was uploading")
+        control_job_update(operation_id, "complete", lease_id)
+    except (OSError, ValueError, urllib.error.URLError):
+        try:
+            control_job_update(operation_id, "fail", lease_id)
+        except (OSError, urllib.error.URLError):
+            pass
+    finally:
+        # The preauthenticated Microsoft URL is an execution credential. Keep
+        # it only for the lifetime of the transfer.
+        with UPLOAD_LOCK:
+            job.pop("uploadUrl", None)
+            job.pop("leaseId", None)
 
 
 if __name__ == "__main__":

@@ -119,6 +119,7 @@ mcp_servers:
       - get-drive-item
       - create-onedrive-folder
       - upload-file-content
+      - create-upload-session
       - move-rename-onedrive-item
       - copy-drive-item
       - delete-onedrive-file

@@ -96,7 +96,7 @@ volume, pause when the workspace is stopped, and disappear when it is deleted.
   upstream lease; do not project a new secret into the container or turn the
   workspace into a credential-renewal authority.
 - Re-evaluate workspace state, ownership, assigned agent, verified policy,
-  budget, and revocation before every renewal. A stopped, deleted, replaced,
+  expiry, limits, and revocation before every renewal. A stopped, deleted, replaced,
   unauthorized, or policy-drifted workspace receives no renewal.
 - Ensure daemon restart and crontab restoration are idempotent and cannot
   duplicate a job.
@@ -151,7 +151,7 @@ inspection, and redacted logs.
   workspace home volume.
 - Unattended inference requires extending a reusable credential indefinitely,
   exposing renewal authority inside the workspace, or skipping policy,
-  ownership, budget, expiry, or revocation checks.
+  ownership, limits, expiry, or revocation checks.
 - Product requirements expand to waking stopped workspaces, external
   delivery, workflow orchestration, or exactly-once execution without a
   separate architecture issue.

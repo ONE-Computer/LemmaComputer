@@ -22,7 +22,7 @@ network grants, without direct provider credentials or manual installation.
 - Let policy select one or more approved default agents and project the
   selection into new and intentionally rebuilt workspaces.
 - Give each enabled agent a distinct workload identity, scoped LiteLLM/model
-  route, MCP toolset, budget/rate limits, egress purpose, and audit attribution.
+  route, MCP toolset, rate/concurrency limits, egress purpose, and audit attribution.
 - Expose installed, selected, starting, ready, degraded, and unavailable state
   for each agent in the workspace UI.
 - Define predictable launch and resource behavior when both agents are enabled.

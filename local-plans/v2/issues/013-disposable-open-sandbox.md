@@ -27,7 +27,7 @@ customer SaaS credentials remain outside the workspace.
   privileged container, private-network route, or cross-workspace access.
 - Keep customer Microsoft 365 and other SaaS credentials outside the
   workspace. Existing scoped ONEComputer loopback grants remain bound to their
-  exact workspace, agent, route, audience, policy, expiry, and budget.
+  exact workspace, agent, route, audience, policy, expiry, and rate limits.
 - Make the profile agent-neutral. Do not create separate openness switches for
   Claude, Codex, and Hermes.
 

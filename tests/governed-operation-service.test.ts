@@ -184,3 +184,96 @@ test("expired operations and abandoned leases recover fail closed", async () => 
   assert.equal(recovered.failureCode, "EXECUTION_LEASE_EXPIRED");
   assert.equal(executor.calls.length, 0);
 });
+
+test("approved multi-gigabyte OneDrive uploads use one exact resumable session and a long-lived lease", async () => {
+  const { store, workspace, executor, service } = await setup();
+  executor.executeGovernedTool = async (input) => {
+    executor.calls.push(input);
+    return {
+      upstreamReference: `m365:${input.operationId}`,
+      resultSummary: "Created resumable upload session",
+      result: {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ uploadUrl: "https://example.up.1drv.com/up/session-secret" }),
+        }],
+      },
+    };
+  };
+  const fileSize = 8 * 1024 * 1024 * 1024;
+  const operation = await service.createMicrosoft365Operation(
+    identity,
+    workspace.id,
+    {
+      capabilityId: "m365.create-upload-session",
+      schemaId: "onecomputer.m365.create-upload-session.v1",
+      serverName: "onecomputer_ms365",
+      toolName: "create-upload-session",
+      arguments: {
+        driveId: "drive-1",
+        driveItemId: "root:/huge.iso:",
+        body: { item: { "@microsoft.graph.conflictBehavior": "replace" } },
+        onecomputerFile: {
+          name: "huge.iso",
+          size: fileSize,
+          sha256: "a".repeat(64),
+        },
+        confirm: true,
+      },
+      displayName: "Upload large OneDrive file",
+      safeSummary: `Upload huge.iso (${fileSize} bytes) to OneDrive`,
+      resourceName: "huge.iso",
+      resourceLocation: "OneDrive",
+    },
+    randomUUID(),
+    { policyVersionId: randomUUID(), policyHash: "b".repeat(64) },
+    "resumable-upload-8gb",
+    "upload-create",
+  );
+  const record = await store.getOwnedOperation(identity, operation.id);
+  const decidedAt = new Date();
+  await store.recordApproval({
+    identity,
+    operationId: operation.id,
+    approvalId: randomUUID(),
+    decision: "approve",
+    channel: "openvtc",
+    issuer: "did:key:test",
+    keyId: "did:key:test#key",
+    operationDigest: record!.operationDigest,
+    nonce: record!.nonce,
+    proofHash: "c".repeat(64),
+    issuedAt: decidedAt,
+    expiresAt: new Date(decidedAt.getTime() + 30_000),
+    decidedAt,
+    correlationId: "upload-approve",
+  });
+
+  const started = await service.beginResumableUpload(
+    identity,
+    operation.id,
+    { workspaceId: workspace.id, agentId: record!.agentId! },
+    "upload-begin",
+  );
+  assert.equal(started.uploadUrl, "https://example.up.1drv.com/up/session-secret");
+  assert.equal(executor.calls.length, 1);
+  assert.equal((executor.calls[0]!.arguments as Record<string, unknown>).onecomputerFile instanceof Uint8Array, false);
+  assert.deepEqual((executor.calls[0]!.arguments as Record<string, unknown>).onecomputerFile, {
+    name: "huge.iso",
+    size: fileSize,
+    sha256: "a".repeat(64),
+  });
+  const executing = await store.getOwnedOperation(identity, operation.id);
+  assert.equal(executing?.state, "executing");
+  assert.ok(executing?.leaseExpiresAt && executing.leaseExpiresAt.getTime() > Date.now() + 23 * 60 * 60_000);
+
+  const completed = await service.completeResumableUpload(
+    identity,
+    operation.id,
+    { workspaceId: workspace.id, agentId: record!.agentId! },
+    started.leaseId,
+    "upload-complete",
+  );
+  assert.equal(completed.state, "succeeded");
+  assert.equal(completed.receipt?.resultSummary, "Uploaded huge.iso to OneDrive after signed approval");
+});

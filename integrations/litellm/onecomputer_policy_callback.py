@@ -256,6 +256,17 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             raise HTTPException(status_code=503, detail={"error": "MCP_POLICY_UNAVAILABLE"}) from None
 
         if decision["decision"] == "allow":
+            # onecomputerFile is bound into the signed operation (name, size,
+            # digest) but is ONEComputer metadata, not part of Softeria's
+            # create-upload-session input schema.
+            if payload["toolName"] == "create-upload-session" and isinstance(
+                data.get("arguments"), dict
+            ):
+                data["arguments"] = {
+                    key: value
+                    for key, value in data["arguments"].items()
+                    if key != "onecomputerFile"
+                }
             return data
         if decision["decision"] == "approval_required":
             raise HTTPException(

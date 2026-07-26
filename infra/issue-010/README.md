@@ -112,7 +112,8 @@ policy and audit surfaces continue to identify the actual selected provider
 route rather than treating GLM or OpenAI as Anthropic models.
 
 Only LiteLLM contains provider API keys. Control mints one expiring key bound
-to the workspace, agent, user, model alias, policy hash, budget, and limits.
+to the workspace, agent, user, model alias, policy hash, and rate/concurrency
+limits.
 A root-owned loopback broker holds that scoped key and forwards only
 `/v1/messages` and `/v1/models`. Claude Desktop receives a meaningless local
 broker key. The user process receives no provider key, LiteLLM master key, or

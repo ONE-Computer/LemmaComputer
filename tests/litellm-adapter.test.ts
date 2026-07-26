@@ -41,14 +41,64 @@ test("gateway identity separates OAuth owner, agent actor, and workspace", () =>
   assert.notEqual(rotatedCredentialAdapter.credentialFor("workspace-a", "research"), adapter.credentialFor("workspace-a", "research"));
 });
 
-test("connection credentials are deterministic per user and MCP server without reusing agent keys", () => {
-  const connection = adapter.connectionCredentialFor(identity, "onecomputer_ms365");
-  assert.equal(connection, adapter.connectionCredentialFor(identity, "onecomputer_ms365"));
-  assert.notEqual(connection, adapter.connectionCredentialFor({ ...identity, subjectId: "another-user" }, "onecomputer_ms365"));
-  assert.notEqual(connection, adapter.connectionCredentialFor(identity, "another-server"));
+test("connection credentials are unique per lease and scoped by user and MCP server", () => {
+  const connection = adapter.connectionCredentialFor(identity, "onecomputer_ms365", "lease-a");
+  assert.equal(connection, adapter.connectionCredentialFor(identity, "onecomputer_ms365", "lease-a"));
+  assert.notEqual(connection, adapter.connectionCredentialFor(identity, "onecomputer_ms365", "lease-b"));
+  assert.notEqual(connection, adapter.connectionCredentialFor({ ...identity, subjectId: "another-user" }, "onecomputer_ms365", "lease-a"));
+  assert.notEqual(connection, adapter.connectionCredentialFor(identity, "another-server", "lease-a"));
   assert.notEqual(connection, adapter.credentialFor("workspace-a"));
   assert.notEqual(connection, "sk-master-test-not-used-00001");
   assert.match(connection, /^sk-occ-[A-Za-z0-9_-]+$/);
+});
+
+test("concurrent connection reads use independent temporary grants and revoke each by alias", async () => {
+  const generated: Array<Record<string, unknown>> = [];
+  const deleted: Array<Record<string, unknown>> = [];
+  const statusCredentials: string[] = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "onecomputer_ms365" }]));
+      return;
+    }
+    if (request.url === "/key/generate") generated.push(body);
+    if (request.url === "/key/delete") deleted.push(body);
+    if (request.url === "/v1/mcp/server/ms365-server-id/oauth-user-credential/status") {
+      statusCredentials.push(String(request.headers.authorization ?? ""));
+      response.end(JSON.stringify({ has_credential: false, is_expired: false }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const results = await Promise.all([
+      liveAdapter.userOAuthConnectionStatus(identity, "onecomputer_ms365"),
+      liveAdapter.userOAuthConnectionStatus(identity, "onecomputer_ms365"),
+    ]);
+    assert.deepEqual(results.map((result) => result.state), ["disconnected", "disconnected"]);
+    assert.equal(generated.length, 2);
+    assert.equal(new Set(generated.map((grant) => grant.key)).size, 2);
+    assert.equal(new Set(generated.map((grant) => grant.key_alias)).size, 2);
+    assert.equal(new Set(statusCredentials).size, 2);
+    assert.deepEqual(
+      new Set(deleted.flatMap((request) => request.key_aliases as string[])),
+      new Set(generated.map((grant) => grant.key_alias as string)),
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test("connector discovery and registration keep provider credentials inside LiteLLM payloads", async () => {
@@ -271,7 +321,7 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
     const grant = requests.find((item) => item.url === "/key/generate")!;
     const authorize = requests.find((item) => item.url.startsWith("/v1/mcp/server/oauth/"))!;
     assert.equal(grant.body.user_id, liveAdapter.userIdFor(identity));
-    assert.equal(grant.body.max_budget, 0.01);
+    assert.equal("max_budget" in grant.body, false);
     assert.equal(
       (grant.body.metadata as Record<string, unknown>).onecomputer_connection_account_lookup,
       true,
@@ -490,8 +540,8 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
 
 test("workspace grant expiry renews independently of workspace lifetime", async () => {
   let grantRequests = 0;
-  const server = createServer((_request, response) => {
-    grantRequests += 1;
+  const server = createServer((request, response) => {
+    if (request.url === "/key/generate") grantRequests += 1;
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ ok: true }));
   });
@@ -518,8 +568,8 @@ test("workspace grant expiry renews independently of workspace lifetime", async 
 
 test("a policy projection change bypasses the grant cache immediately", async () => {
   let grantRequests = 0;
-  const server = createServer((_request, response) => {
-    grantRequests += 1;
+  const server = createServer((request, response) => {
+    if (request.url === "/key/generate") grantRequests += 1;
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ ok: true }));
   });
@@ -625,8 +675,8 @@ test("workspace grant materializes the exact Control policy rather than adapter 
   try {
     await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy });
     assert.deepEqual(grantBody.models, ["onecomputer-assistant"]);
-    assert.equal(grantBody.max_budget, 1);
-    assert.equal(grantBody.budget_duration, "30d");
+    assert.equal("max_budget" in grantBody, false);
+    assert.equal("budget_duration" in grantBody, false);
     assert.equal(grantBody.rpm_limit, 30);
     assert.equal(grantBody.tpm_limit, 500_000);
     assert.equal(grantBody.max_parallel_requests, 30);
@@ -688,16 +738,16 @@ test("Claude Desktop receives a Claude-compatible client alias while policy reta
   }
 });
 
-test("a pre-existing key with mismatched identity is replaced rather than updated", async () => {
-  const requests: string[] = [];
-  let generateCalls = 0;
+test("a pre-existing key with mismatched identity is deleted by alias and replaced", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {
-    requests.push(request.url ?? "");
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    requests.push({ url: request.url ?? "", body });
     response.setHeader("content-type", "application/json");
     if (request.url === "/key/generate") {
-      generateCalls += 1;
-      response.statusCode = generateCalls === 1 ? 409 : 200;
-      response.end(JSON.stringify(generateCalls === 1 ? { error: "duplicate key" } : { ok: true }));
+      response.end(JSON.stringify({ ok: true }));
       return;
     }
     if (request.url?.startsWith("/key/list?")) {
@@ -738,10 +788,121 @@ test("a pre-existing key with mismatched identity is replaced rather than update
   });
   try {
     await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
-    assert.equal(generateCalls, 2);
-    assert.ok(requests.some((url) => url.startsWith("/key/list?")));
-    assert.ok(requests.includes("/key/delete"));
-    assert.ok(!requests.includes("/key/update"));
+    assert.equal(requests.filter(({ url }) => url === "/key/generate").length, 1);
+    assert.ok(requests.some(({ url }) => url.startsWith("/key/list?")));
+    assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
+      key_aliases: [`onecomputer-agent-${liveAdapter.agentIdFor("workspace-a")}`],
+    });
+    assert.ok(!requests.some(({ url }) => url === "/key/update"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("a matching existing workspace key is updated without a duplicate generation attempt", async () => {
+  const requests: string[] = [];
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: "http://unused",
+    workspaceUrl: "http://unused",
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const credential = liveAdapter.credentialFor("workspace-a");
+  const gatewayUserId = liveAdapter.userIdFor(identity);
+  const gatewayAgentId = liveAdapter.agentIdFor("workspace-a");
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? "");
+    response.setHeader("content-type", "application/json");
+    if (request.url?.startsWith("/key/list?")) {
+      response.end(JSON.stringify({
+        keys: [{
+          token: createHash("sha256").update(credential).digest("hex"),
+          user_id: gatewayUserId,
+          agent_id: gatewayAgentId,
+          metadata: {
+            onecomputer_tenant_id: identity.tenantId,
+            onecomputer_subject_id: identity.subjectId,
+            onecomputer_workspace_id: "workspace-a",
+            onecomputer_agent_id: "workspace-default:workspace-a",
+          },
+        }],
+      }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const routedAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
+    assert.ok(requests.includes("/key/update"));
+    assert.ok(!requests.includes("/key/generate"));
+    assert.ok(!requests.includes("/key/delete"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("a legacy budgeted workspace key is replaced so the cap cannot survive reconciliation", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: "http://unused",
+    workspaceUrl: "http://unused",
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const credential = liveAdapter.credentialFor("workspace-a");
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({
+      url: request.url ?? "",
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {},
+    });
+    response.setHeader("content-type", "application/json");
+    if (request.url?.startsWith("/key/list?")) {
+      response.end(JSON.stringify({
+        keys: [{
+          token: createHash("sha256").update(credential).digest("hex"),
+          user_id: liveAdapter.userIdFor(identity),
+          agent_id: liveAdapter.agentIdFor("workspace-a"),
+          max_budget: 1,
+          budget_duration: "30d",
+          metadata: {
+            onecomputer_tenant_id: identity.tenantId,
+            onecomputer_subject_id: identity.subjectId,
+            onecomputer_workspace_id: "workspace-a",
+            onecomputer_agent_id: "workspace-default:workspace-a",
+          },
+        }],
+      }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const routedAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
+    assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
+      key_aliases: [`onecomputer-agent-${routedAdapter.agentIdFor("workspace-a")}`],
+    });
+    const generated = requests.find(({ url }) => url === "/key/generate")?.body ?? {};
+    assert.equal("max_budget" in generated, false);
+    assert.equal("budget_duration" in generated, false);
+    assert.ok(!requests.some(({ url }) => url === "/key/update"));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -764,7 +925,12 @@ test("availability check exposes safe route usage without sending a prompt", asy
       return;
     }
     if (request.url === "/mcp-rest/tools/list") {
-      response.end(JSON.stringify({ tools: [{ name: "search_files", description: "Search assigned files" }] }));
+      response.end(JSON.stringify({
+        tools: [
+          { name: "search_files", description: "Search assigned files" },
+          { name: "global_unassigned_tool", description: "Visible globally but rejected by the workspace policy bridge" },
+        ],
+      }));
       return;
     }
     if (request.url === "/model/info") {
@@ -780,9 +946,6 @@ test("availability check exposes safe route usage without sending a prompt", asy
       response.end(JSON.stringify({
         keys: [{
           token: createHash("sha256").update(credential).digest("hex"),
-          spend: 0.125,
-          max_budget: 1,
-          budget_reset_at: "2026-08-19T00:00:00.000Z",
           rpm_limit: 30,
           tpm_limit: 500_000,
           max_parallel_requests: 30,
@@ -806,8 +969,8 @@ test("availability check exposes safe route usage without sending a prompt", asy
     assert.equal(result.model, "onecomputer-assistant");
     assert.equal(result.modelRoute.fallback, "none");
     assert.equal(result.modelRoute.capabilities.vision, true);
-    assert.equal(result.modelRoute.budget.remainingUsd, 0.875);
     assert.equal(result.modelRoute.limits.tokensPerMinute, 500_000);
+    assert.equal(result.tools.length, 2);
     assert.ok(!requests.includes("/v1/chat/completions"));
     assert.ok(!JSON.stringify(result).includes("gpt-"));
   } finally {

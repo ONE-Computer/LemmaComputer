@@ -115,6 +115,8 @@ test("selected Hermes profiles seed only Office skills by default and expose the
 
   assert.match(chatAdapter, /Hermes has workspace-local file, terminal, skills, and vision tools/);
   assert.match(chatAdapter, /public-web and unrelated native toolsets remain restricted/);
+  assert.match(chatAdapter, /Invoke an assigned MCP tool directly/);
+  assert.match(chatAdapter, /path as localFilePath; do not read or base64-encode/);
   assert.match(chatAdapter, /Treat greetings, acknowledgements, small talk/);
   assert.match(chatAdapter, /Do not load or invoke a skill for those messages/);
   assert.match(chatAdapter, /concrete task clearly matches that skill's documented scope/);

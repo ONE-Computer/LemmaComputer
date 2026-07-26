@@ -245,7 +245,7 @@ create deterministic virtual credentials with:
 - exactly one model alias;
 - exactly one MCP server and explicit tool allowlist;
 - expiry;
-- budget, RPM, TPM, and parallel-request limits;
+- RPM, TPM, and parallel-request limits;
 - effective policy identifier and hash.
 
 The custom callback checks image support on model calls. Before every resolved

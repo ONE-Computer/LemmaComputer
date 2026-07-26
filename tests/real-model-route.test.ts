@@ -78,6 +78,10 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(entrypoint, /claude-sonnet-4-5/);
   assert.match(proxy, /"\/v1\/messages"/);
   assert.match(proxy, /"\/mcp-rest\/tools\/call"/);
+  assert.match(proxy, /UPLOAD_CHUNK_BYTES = 10 \* 1024 \* 1024/);
+  assert.match(proxy, /content-range.*bytes \{offset\}-\{end\}\/\{job\['size'\]\}/s);
+  assert.match(proxy, /job\["running"\] = False/);
+  assert.match(proxy, /job\.pop\("uploadUrl", None\)/);
   assert.match(entrypoint, /"managedMcpServers"/);
   assert.match(entrypoint, /onecomputer-mcp-stdio/);
   assert.doesNotMatch(`${dockerfile}\n${entrypoint}\n${proxy}`, /ONECOMPUTER_(?:OPENAI|CLAUDE|GLM)_API_KEY|LITELLM_MASTER_KEY/);
@@ -164,6 +168,8 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(chatAdapter, /"type": "image_url"/);
   assert.match(chatAdapter, /"instructions": SYSTEM_PROMPT/);
   assert.match(chatAdapter, /human identifier such as a filename/);
+  assert.match(chatAdapter, /Invoke an assigned MCP tool directly/);
+  assert.match(chatAdapter, /never wrap.*MCP call.*terminal.*execute_code/s);
   assert.match(chatAdapter, /prompt_with_documents/);
   assert.match(chatAdapter, /pdftotext/);
   assert.match(mcpBridge, /filename visible in an attached screenshot is enough to begin discovery/);
@@ -174,6 +180,8 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(chatAdapter, /STREAM_HEARTBEAT_SECONDS = 15/);
   assert.match(chatAdapter, /timeout=MAX_TURN_SECONDS/);
   assert.match(chatAdapter, /asyncio\.wait\(\s*\{next_event\}, timeout=STREAM_HEARTBEAT_SECONDS/);
+  assert.match(chatAdapter, /\^API call failed after \\d\+ retries:/);
+  assert.match(chatAdapter, /raise RuntimeError\("Hermes could not complete the request"\)/);
   assert.match(hermesDesktopLauncher, /HERMES_DESKTOP_HERMES_ROOT=\/opt\/onecomputer\/hermes-agent/);
   assert.match(hermesDesktopLauncher, /Hermes --no-sandbox/);
   assert.match(entrypoint, /ONEComputer-Agent\.desktop/);

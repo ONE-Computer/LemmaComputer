@@ -14,7 +14,7 @@ Microsoft OAuth tokens, Control service credentials, policy-signing keys, the
 Docker socket, or external-channel credentials.
 
 Control creates a short-lived LiteLLM virtual key for a specific tenant, user,
-workspace, agent, model route, MCP server, tool set, policy version, budget, and
+workspace, agent, model route, MCP server, tool set, policy version, and
 rate limit. A root-owned loopback broker inside the managed image holds that
 scoped key. User applications authenticate to the local broker with a
 non-authoritative local credential.
@@ -176,7 +176,7 @@ need host Docker authority.
 1. The managed AI client calls its local loopback broker.
 2. The broker restricts paths and forwards the request with its
    workspace-and-agent LiteLLM key.
-3. LiteLLM validates key expiry, model allowlist, identity metadata, budget,
+3. LiteLLM validates key expiry, model allowlist, identity metadata,
    concurrency, RPM, and TPM limits.
 4. LiteLLM selects the single configured provider deployment. Cross-provider
    fallback is deliberately disabled.

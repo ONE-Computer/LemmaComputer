@@ -26,6 +26,38 @@ const authentication = (authenticated: SessionPrincipal | null) => ({
   logout: async () => "onecomputer_session=; Max-Age=0",
 });
 
+test("the authenticated MCP policy route accepts bounded upload-sized authorization envelopes", async () => {
+  const mcpPolicyToken = "mcp-policy-token-at-least-24-characters";
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    proxyToken,
+    undefined,
+    undefined,
+    {},
+    {
+      testIdentityMode: true,
+      identityPolicyStore: {} as IdentityPolicyStore,
+      mcpPolicyToken,
+    },
+  );
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/v1/mcp/authorize",
+      headers: {
+        "content-type": "application/json",
+        "x-onecomputer-mcp-policy-token": mcpPolicyToken,
+      },
+      payload: { invalidPadding: "x".repeat(40 * 1024) },
+    });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error.code, "INVALID_REQUEST");
+  } finally {
+    await app.close();
+  }
+});
+
 test("runtime identity comes only from the authenticated server session", async () => {
   const store = new MemoryWorkspaceStore();
   const owned = await store.createOrGet(alpha, "personal", "identity-boundary-workspace");

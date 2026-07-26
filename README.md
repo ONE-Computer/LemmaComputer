@@ -71,7 +71,7 @@ network isolation, policy integrity, and the approval protocol.
 | `web` | Static React application and authenticated reverse proxy to Control | Private |
 | `control-api` | Identity, policy, lifecycle orchestration, grants, governance, audit, and connection APIs | Private |
 | `workspace-controller` | Provisions Kasm workspaces through local Docker or the Kasm Developer API | Private |
-| `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, budgets, and MCP dispatch | `127.0.0.1:4000` |
+| `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, and MCP dispatch | `127.0.0.1:4000` |
 | `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | OAuth bridge on `127.0.0.1:4311` |
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |

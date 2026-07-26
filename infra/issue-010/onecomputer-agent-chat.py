@@ -71,6 +71,10 @@ SYSTEM_PROMPT = (
     "search tools to resolve the required service IDs before asking the employee "
     "for internal IDs. Do not mutate a target if discovery is ambiguous. "
     "Use only the provided onecomputer_ms365 MCP tools for Microsoft 365 work. "
+    "Invoke an assigned MCP tool directly by its advertised tool name; never wrap "
+    "an MCP call in terminal, execute_code, Python, or a tool_call helper. "
+    "When upload-file-content is given a workspace-local file, pass its absolute "
+    "path as localFilePath; do not read or base64-encode the file into model text. "
     "ONEComputer Control is the authority for tool policy and signed approvals. "
     "If a protected operation is pending, use wait-for-governed-operation and "
     "report the final result accurately. Never claim an operation completed until "
@@ -771,6 +775,8 @@ async def hermes_vendor_events(
     message = payload.get("message") if isinstance(payload, dict) else None
     reply = message.get("content") if isinstance(message, dict) else None
     if not isinstance(reply, str) or not reply:
+        raise RuntimeError("Hermes could not complete the request")
+    if re.match(r"^API call failed after \d+ retries:", reply.strip(), re.IGNORECASE):
         raise RuntimeError("Hermes could not complete the request")
     yield {"kind": "text", "delta": reply}
     yield {

@@ -32,13 +32,6 @@ export const modelRouteSchema = z.object({
   capabilities: z.object({
     vision: z.boolean(),
   }).strict(),
-  budget: z.object({
-    limitUsd: z.number().nonnegative(),
-    spentUsd: z.number().nonnegative(),
-    remainingUsd: z.number().nonnegative(),
-    duration: z.literal("30d"),
-    resetsAt: z.iso.datetime().nullable(),
-  }),
   limits: z.object({
     requestsPerMinute: z.number().int().positive(),
     tokensPerMinute: z.number().int().positive(),

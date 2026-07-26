@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { OneComputerError, type IdentityContext, type OwnedJson, type RuntimePolicy } from "@onecomputer/contracts";
 
 export type GatewayGrant = {
@@ -23,13 +23,6 @@ export type GatewayModelRoute = {
   status: "ready" | "failed";
   fallback: "none";
   capabilities: GatewayModelCapabilities;
-  budget: {
-    limitUsd: number;
-    spentUsd: number;
-    remainingUsd: number;
-    duration: "30d";
-    resetsAt: string | null;
-  };
   limits: {
     requestsPerMinute: number;
     tokensPerMinute: number;
@@ -147,17 +140,14 @@ type LiteLLMConfig = {
 type JsonObject = Record<string, unknown>;
 
 const asObject = (value: unknown): JsonObject => value && typeof value === "object" ? value as JsonObject : {};
-const WORKSPACE_MAX_BUDGET_USD = 1;
-const WORKSPACE_BUDGET_DURATION = "30d" as const;
 const WORKSPACE_RPM_LIMIT = 30;
 // Claude Desktop can submit a large managed-system prompt before the user's
-// first message. Keep the workspace budget authoritative, but do not mistake
-// that initial context for abusive request volume.
+// first message. Allow that context while bounding request volume.
 const WORKSPACE_TPM_LIMIT = 500_000;
 // Claude Desktop overlaps its streaming model request, managed MCP calls, and
 // short-lived background work. A limit of four caused healthy agent sessions
-// to deadlock into LiteLLM's retry loop. Keep the 30 RPM and budget controls,
-// while allowing that burst to complete.
+// to deadlock into LiteLLM's retry loop. Keep the 30 RPM control while allowing
+// that burst to complete.
 const WORKSPACE_MAX_PARALLEL_REQUESTS = 30;
 
 const desktopTransportAliases: Record<string, string> = {
@@ -222,9 +212,9 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return `sk-ocw-${digest}`;
   }
 
-  connectionCredentialFor(identity: IdentityContext, serverName: string) {
+  connectionCredentialFor(identity: IdentityContext, serverName: string, grantNonce: string) {
     const digest = createHmac("sha256", this.config.credentialSecret)
-      .update(`onecomputer:litellm:connection:${identity.tenantId}:${identity.subjectId}:${serverName}`)
+      .update(`onecomputer:litellm:connection:${identity.tenantId}:${identity.subjectId}:${serverName}:${grantNonce}`)
       .digest("base64url");
     return `sk-occ-${digest}`;
   }
@@ -239,53 +229,57 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     authorizationOrigin?: string;
   }) {
     const grant = await this.ensureConnectionGrant(input.identity, input.serverName);
-    const query = new URLSearchParams({
-      redirect_uri: input.redirectUri,
-      state: input.state,
-      code_challenge: input.codeChallenge,
-      code_challenge_method: "S256",
-      response_type: "code",
-    });
-    const authorize = async () => {
-      try {
-        return await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(grant.serverId)}/authorize?${query}`, {
-          method: "GET",
-          headers: { authorization: `Bearer ${grant.credential}` },
-          redirect: "manual",
-          signal: AbortSignal.timeout(this.timeoutMs),
-        });
-      } catch {
-        throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
-      }
-    };
-    let response = await authorize();
-    if (await this.missingOAuthClient(response)) {
-      await response.body?.cancel().catch(() => undefined);
-      await this.registerDynamicOAuthClient(grant.serverId);
-      response = await authorize();
-    }
-    if (response.status < 300 || response.status >= 400) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new OneComputerError("MCP_AUTHORIZATION_REJECTED", "Connector authorization could not be started", 502, true);
-    }
-    const location = response.headers.get("location");
-    if (!location) throw new OneComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
-    let authorizationUrl: URL;
-    let expectedOrigins: string[];
     try {
-      authorizationUrl = new URL(location);
-      const configuredOrigins = input.authorizationOrigins
-        ?? (input.authorizationOrigin ? [input.authorizationOrigin] : []);
-      expectedOrigins = configuredOrigins.map((origin) => new URL(origin).origin);
-    } catch {
-      throw new OneComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
+      const query = new URLSearchParams({
+        redirect_uri: input.redirectUri,
+        state: input.state,
+        code_challenge: input.codeChallenge,
+        code_challenge_method: "S256",
+        response_type: "code",
+      });
+      const authorize = async () => {
+        try {
+          return await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(grant.serverId)}/authorize?${query}`, {
+            method: "GET",
+            headers: { authorization: `Bearer ${grant.credential}` },
+            redirect: "manual",
+            signal: AbortSignal.timeout(this.timeoutMs),
+          });
+        } catch {
+          throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
+        }
+      };
+      let response = await authorize();
+      if (await this.missingOAuthClient(response)) {
+        await response.body?.cancel().catch(() => undefined);
+        await this.registerDynamicOAuthClient(grant.serverId);
+        response = await authorize();
+      }
+      if (response.status < 300 || response.status >= 400) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new OneComputerError("MCP_AUTHORIZATION_REJECTED", "Connector authorization could not be started", 502, true);
+      }
+      const location = response.headers.get("location");
+      if (!location) throw new OneComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
+      let authorizationUrl: URL;
+      let expectedOrigins: string[];
+      try {
+        authorizationUrl = new URL(location);
+        const configuredOrigins = input.authorizationOrigins
+          ?? (input.authorizationOrigin ? [input.authorizationOrigin] : []);
+        expectedOrigins = configuredOrigins.map((origin) => new URL(origin).origin);
+      } catch {
+        throw new OneComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
+      }
+      if (!expectedOrigins.includes(authorizationUrl.origin)) {
+        throw new OneComputerError("MCP_AUTHORIZATION_ORIGIN_MISMATCH", "The connector authorization origin was not approved", 502);
+      }
+      const cookieHeaders = response.headers as Headers & { getSetCookie?: () => string[] };
+      const cookies = cookieHeaders.getSetCookie?.() ?? (response.headers.get("set-cookie") ? [response.headers.get("set-cookie")!] : []);
+      return { location: authorizationUrl.toString(), cookies };
+    } finally {
+      await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }
-    if (!expectedOrigins.includes(authorizationUrl.origin)) {
-      throw new OneComputerError("MCP_AUTHORIZATION_ORIGIN_MISMATCH", "The connector authorization origin was not approved", 502);
-    }
-    const cookieHeaders = response.headers as Headers & { getSetCookie?: () => string[] };
-    const cookies = cookieHeaders.getSetCookie?.() ?? (response.headers.get("set-cookie") ? [response.headers.get("set-cookie")!] : []);
-    return { location: authorizationUrl.toString(), cookies };
   }
 
   private async missingOAuthClient(response: Response) {
@@ -365,7 +359,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       }
       return await this.readConnectionStatus(grant.credential, grant.serverId, input.serverName);
     } finally {
-      await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
+      await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }
   }
 
@@ -374,7 +368,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     try {
       return await this.readConnectionStatus(grant.credential, grant.serverId, serverName);
     } finally {
-      await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
+      await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }
   }
 
@@ -385,7 +379,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       if (!result.ok && result.status !== 404) throw this.upstreamError("MCP_DISCONNECT_FAILED", result.status, result.payload);
       return { state: "disconnected", connectedAt: null, expiresAt: null, account: null };
     } finally {
-      await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
+      await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }
   }
 
@@ -405,7 +399,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         .map((tool) => typeof tool.name === "string" ? tool.name : "")
         .filter(Boolean))].sort();
     } finally {
-      await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
+      await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }
   }
 
@@ -526,10 +520,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
 
   private async ensureConnectionGrant(identity: IdentityContext, serverName: string) {
     const serverId = await this.resolveMcpServer(serverName);
-    const credential = this.connectionCredentialFor(identity, serverName);
+    const grantNonce = randomBytes(12).toString("base64url");
+    const credential = this.connectionCredentialFor(identity, serverName, grantNonce);
     const userId = this.userIdFor(identity);
     const serverDigest = createHash("sha256").update(serverName).digest("base64url").slice(0, 12);
-    const keyAlias = `onecomputer-connection-${userId}-${serverDigest}`;
+    const keyAlias = `onecomputer-connection-${userId}-${serverDigest}-${grantNonce}`;
     const credentialRoute = `/v1/mcp/server/${serverId}/oauth-user-credential`;
     const accountLookup = serverName === "onecomputer_ms365";
     const allowedRoutes = [
@@ -548,7 +543,6 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       user_id: userId,
       duration: `${durationSeconds}s`,
       models: [],
-      max_budget: 0.01,
       rpm_limit: 12,
       allowed_routes: allowedRoutes,
       metadata: {
@@ -565,28 +559,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       },
     };
     const generated = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
-    if (!generated.ok) {
-      const existing = await this.adminCall(`/key/list?return_full_object=true&key_alias=${encodeURIComponent(keyAlias)}`, { method: "GET" }, true);
-      const keys = Array.isArray(asObject(existing.payload).keys) ? asObject(existing.payload).keys as unknown[] : [];
-      const tokenHash = createHash("sha256").update(credential).digest("hex");
-      const current = keys.map(asObject).find((key) => key.token === tokenHash);
-      const metadata = asObject(current?.metadata);
-      const identityMatches = current?.user_id === userId
-        && metadata.onecomputer_tenant_id === identity.tenantId
-        && metadata.onecomputer_subject_id === identity.subjectId
-        && metadata.onecomputer_connection_credential === true
-        && metadata.onecomputer_connection_server === serverName
-        && metadata.onecomputer_connection_account_lookup === accountLookup;
-      if (!identityMatches) {
-        await this.deleteConnectionGrant(credential);
-        const replaced = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
-        if (!replaced.ok) throw this.upstreamError("MCP_CONNECTION_IDENTITY_MISMATCH", replaced.status, replaced.payload);
-      } else {
-        const updated = await this.adminCall("/key/update", { method: "POST", body: grant }, true);
-        if (!updated.ok) throw this.upstreamError("MCP_CONNECTION_GRANT_FAILED", updated.status, updated.payload);
-      }
-    }
-    return { credential, serverId };
+    if (!generated.ok) throw this.upstreamError("MCP_CONNECTION_GRANT_FAILED", generated.status, generated.payload);
+    return { credential, serverId, keyAlias };
   }
 
   private async readConnectionStatus(credential: string, serverId: string, serverName: string): Promise<OAuthConnectionStatus> {
@@ -642,8 +616,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return account;
   }
 
-  private async deleteConnectionGrant(credential: string) {
-    const result = await this.adminCall("/key/delete", { method: "POST", body: { keys: [credential] } }, true);
+  private async deleteConnectionGrant(keyAlias: string) {
+    const result = await this.adminCall("/key/delete", {
+      method: "POST",
+      body: { key_aliases: [keyAlias] },
+    }, true);
     if (!result.ok && result.status !== 404) throw this.upstreamError("MCP_CONNECTION_GRANT_REVOKE_FAILED", result.status, result.payload);
   }
 
@@ -691,8 +668,6 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       agent_id: gatewayAgentId,
       duration: `${durationSeconds}s`,
       models: [gatewayModelAlias],
-      max_budget: WORKSPACE_MAX_BUDGET_USD,
-      budget_duration: WORKSPACE_BUDGET_DURATION,
       rpm_limit: WORKSPACE_RPM_LIMIT,
       tpm_limit: WORKSPACE_TPM_LIMIT,
       max_parallel_requests: WORKSPACE_MAX_PARALLEL_REQUESTS,
@@ -718,29 +693,40 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       },
     };
 
-    const generated = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
-    if (!generated.ok) {
-      const existing = await this.adminCall(`/key/list?return_full_object=true&key_alias=${encodeURIComponent(grant.key_alias)}`, { method: "GET" }, true);
-      const keys = Array.isArray(asObject(existing.payload).keys) ? asObject(existing.payload).keys as unknown[] : [];
-      const tokenHash = createHash("sha256").update(credential).digest("hex");
-      const current = keys.map(asObject).find((key) => key.token === tokenHash);
-      const metadata = asObject(current?.metadata);
-      const identityMatches = current?.user_id === gatewayUserId
-        && current?.agent_id === gatewayAgentId
-        && metadata.onecomputer_tenant_id === input.identity.tenantId
-        && metadata.onecomputer_subject_id === input.identity.subjectId
-        && metadata.onecomputer_workspace_id === input.workspaceId
-        && metadata.onecomputer_agent_id === (agentId ?? `workspace-default:${input.workspaceId}`)
-        && (!input.policy || (metadata.onecomputer_policy_version_id === input.policy.policyVersionId
-          && metadata.onecomputer_policy_hash === input.policy.policyHash));
-      if (!identityMatches) {
-        await this.adminCall("/key/delete", { method: "POST", body: { keys: [credential] } }, true);
-        const replaced = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
-        if (!replaced.ok) throw this.upstreamError("GATEWAY_GRANT_IDENTITY_MISMATCH", replaced.status, replaced.payload);
-      } else {
-        const updated = await this.adminCall("/key/update", { method: "POST", body: grant });
-        if (!updated.ok) throw this.upstreamError("GATEWAY_GRANT_FAILED", updated.status, updated.payload);
+    const existing = await this.adminCall(`/key/list?return_full_object=true&key_alias=${encodeURIComponent(grant.key_alias)}`, { method: "GET" }, true);
+    if (!existing.ok) throw this.upstreamError("GATEWAY_GRANT_FAILED", existing.status, existing.payload);
+    const keys = Array.isArray(asObject(existing.payload).keys) ? asObject(existing.payload).keys as unknown[] : [];
+    const tokenHash = createHash("sha256").update(credential).digest("hex");
+    const current = keys.map(asObject).find((key) => key.token === tokenHash);
+    const metadata = asObject(current?.metadata);
+    const identityMatches = current?.user_id === gatewayUserId
+      && current?.agent_id === gatewayAgentId
+      && current?.max_budget == null
+      && current?.budget_duration == null
+      && metadata.onecomputer_tenant_id === input.identity.tenantId
+      && metadata.onecomputer_subject_id === input.identity.subjectId
+      && metadata.onecomputer_workspace_id === input.workspaceId
+      && metadata.onecomputer_agent_id === (agentId ?? `workspace-default:${input.workspaceId}`)
+      && (!input.policy || (metadata.onecomputer_policy_version_id === input.policy.policyVersionId
+        && metadata.onecomputer_policy_hash === input.policy.policyHash));
+    if (keys.length && !identityMatches) {
+      const removed = await this.adminCall("/key/delete", {
+        method: "POST",
+        body: { key_aliases: [grant.key_alias] },
+      }, true);
+      if (!removed.ok && removed.status !== 404) {
+        throw this.upstreamError("GATEWAY_GRANT_IDENTITY_MISMATCH", removed.status, removed.payload);
       }
+    }
+    const reconciled = identityMatches
+      ? await this.adminCall("/key/update", { method: "POST", body: grant }, true)
+      : await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
+    if (!reconciled.ok) {
+      throw this.upstreamError(
+        identityMatches ? "GATEWAY_GRANT_FAILED" : "GATEWAY_GRANT_IDENTITY_MISMATCH",
+        reconciled.status,
+        reconciled.payload,
+      );
     }
     this.workspaceGrantStates.set(credential, { expiresAt: expiresAt.getTime(), projection });
     return { baseUrl: this.workspaceUrl, credential, modelAlias: gatewayModelAlias, expiresAt: expiresAt.toISOString() };
@@ -766,7 +752,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       : [];
     return {
       models: models.ok && modelIds.includes(gatewayModelAlias) ? "ready" : "failed",
-      tools: tools.ok && allowedTools.length === toolNames.length && allowedTools.every((tool) => toolNames.includes(tool)) ? "ready" : "failed",
+      tools: tools.ok && allowedTools.every((tool) => toolNames.includes(tool)) ? "ready" : "failed",
       modelRoute: {
         ...modelRoute,
         status: models.ok && modelIds.includes(gatewayModelAlias) ? "ready" : "failed",
@@ -810,20 +796,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const key = keys.map(asObject).find((item) => item.token === tokenHash);
     if (!key) throw new OneComputerError("GATEWAY_USAGE_UNAVAILABLE", "The model route usage state is unavailable", 502, true);
     const numberOr = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
-    const limitUsd = numberOr(key.max_budget, WORKSPACE_MAX_BUDGET_USD);
-    const spentUsd = Math.max(0, numberOr(key.spend, 0));
     return {
       alias: modelAlias,
       status: "ready",
       fallback: "none",
       capabilities,
-      budget: {
-        limitUsd,
-        spentUsd,
-        remainingUsd: Math.max(0, limitUsd - spentUsd),
-        duration: WORKSPACE_BUDGET_DURATION,
-        resetsAt: typeof key.budget_reset_at === "string" ? key.budget_reset_at : null,
-      },
       limits: {
         requestsPerMinute: numberOr(key.rpm_limit, WORKSPACE_RPM_LIMIT),
         tokensPerMinute: numberOr(key.tpm_limit, WORKSPACE_TPM_LIMIT),
@@ -872,7 +849,6 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         agent_id: gatewayAgentId,
         duration: "60s",
         models: [],
-        max_budget: 0.01,
         rpm_limit: 4,
         metadata: {
           onecomputer_tenant_id: input.tenantId,
@@ -929,9 +905,10 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
 
   async revoke(workspaceId: string, agentId?: string) {
     const credential = this.credentialFor(workspaceId, agentId);
+    const keyAlias = `onecomputer-agent-${this.agentIdFor(workspaceId, agentId)}`;
     const result = await this.adminCall("/key/delete", {
       method: "POST",
-      body: { keys: [credential] },
+      body: { key_aliases: [keyAlias] },
     }, true);
     this.workspaceGrantStates.delete(credential);
     if (!result.ok && result.status !== 404) throw this.upstreamError("GATEWAY_REVOKE_FAILED", result.status, result.payload);

@@ -11,7 +11,7 @@ import { FixtureApprovalAuthority, GovernedOperationService } from "./operations
 import { McpConnectionService } from "./connections.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
 import { EntraAuthenticationService, isAdministrator, testPrincipalFromHeaders } from "./auth.js";
-import { McpPolicyService, m365CapabilityDefinitions } from "./mcp-policy.js";
+import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
 import { HttpOpenVtcConsentClient } from "./openvtc-consent-client.js";
 import { AgentBridgeAuthority, type AgentBridgeIdentity } from "./agent-bridge.js";
@@ -348,7 +348,7 @@ export function createControlServer(
       }
       return;
     }
-    if (request.url.startsWith("/internal/v1/agent/operations/")) {
+    if (request.url.startsWith("/internal/v1/agent/operations/") || request.url.startsWith("/internal/v1/agent/uploads")) {
       const authorization = request.headers.authorization;
       const value = Array.isArray(authorization) ? authorization[0] : authorization;
       const match = typeof value === "string" ? /^Bearer (.+)$/.exec(value) : null;
@@ -535,7 +535,7 @@ export function createControlServer(
   };
 
   app.get("/healthz", async () => ({ status: "ok" }));
-  app.post("/internal/v1/mcp/authorize", async (request) => {
+  app.post("/internal/v1/mcp/authorize", { bodyLimit: 6 * 1024 * 1024 }, async (request) => {
     if (!mcpPolicy) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "MCP policy storage is unavailable", 503, true);
     return mcpPolicy.authorize(mcpPolicyRequestSchema.parse(request.body ?? {}), request.id);
   });
@@ -591,6 +591,89 @@ export function createControlServer(
       { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" },
       request.params.operationId,
       { workspaceId: actor.workspaceId, agentId: actor.agentId },
+    );
+  });
+  app.post("/internal/v1/agent/uploads", async (request, reply) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const input = z.strictObject({
+      driveId: z.string().trim().min(1).max(512),
+      driveItemId: z.string().trim().min(1).max(512),
+      fileName: z.string().trim().min(1).max(255),
+      size: z.number().int().positive(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      idempotencyKey: z.string().min(16).max(128),
+    }).parse(request.body ?? {});
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" as const };
+    const { policy } = await channelPolicy(owner, actor.workspaceId);
+    const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
+    if (
+      actor.policyHash !== policy.policyHash
+      || !allowedAgentIds.has(actor.agentId)
+      || !policy.allowedTools.includes("upload-file-content")
+      || policy.toolPolicies["upload-file-content"] !== "approval_required"
+    ) {
+      throw new OneComputerError("MCP_POLICY_BINDING_MISMATCH", "The upload is not assigned to this workspace agent", 403);
+    }
+    const operation = await operations.createMicrosoft365Operation(
+      owner,
+      actor.workspaceId,
+      {
+        capabilityId: resumableUploadCapability.capabilityId,
+        schemaId: resumableUploadCapability.schemaId,
+        serverName: "onecomputer_ms365",
+        toolName: "create-upload-session",
+        arguments: {
+          driveId: input.driveId,
+          driveItemId: input.driveItemId,
+          body: { item: { "@microsoft.graph.conflictBehavior": "replace" } },
+          onecomputerFile: { name: input.fileName, size: input.size, sha256: input.sha256 },
+          confirm: true,
+        },
+        displayName: "Upload large OneDrive file",
+        safeSummary: `Upload ${input.fileName} (${input.size} bytes) to OneDrive`,
+        resourceName: input.fileName,
+        resourceLocation: "OneDrive",
+      },
+      actor.agentId,
+      { policyVersionId: policy.policyVersionId, policyHash: policy.policyHash },
+      input.idempotencyKey,
+      request.id,
+    );
+    return reply.code(201).send(operation);
+  });
+  app.post<{ Params: { operationId: string } }>("/internal/v1/agent/uploads/:operationId/begin", async (request) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    return operations.beginResumableUpload(
+      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" },
+      request.params.operationId,
+      { workspaceId: actor.workspaceId, agentId: actor.agentId },
+      request.id,
+    );
+  });
+  app.post<{ Params: { operationId: string } }>("/internal/v1/agent/uploads/:operationId/complete", async (request) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const input = z.strictObject({ leaseId: z.uuid() }).parse(request.body ?? {});
+    return operations.completeResumableUpload(
+      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" },
+      request.params.operationId,
+      { workspaceId: actor.workspaceId, agentId: actor.agentId },
+      input.leaseId,
+      request.id,
+    );
+  });
+  app.post<{ Params: { operationId: string } }>("/internal/v1/agent/uploads/:operationId/fail", async (request) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const input = z.strictObject({ leaseId: z.uuid() }).parse(request.body ?? {});
+    return operations.failResumableUpload(
+      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" },
+      request.params.operationId,
+      { workspaceId: actor.workspaceId, agentId: actor.agentId },
+      input.leaseId,
+      request.id,
     );
   });
   app.get<{ Querystring: { return?: string } }>("/v1/auth/login", async (request, reply) => {

@@ -163,6 +163,31 @@ const microsoft365Resource = (toolName: string, argumentsValue: Record<string, O
   return { safeSummary: displayName, resourceName: identifier, resourceLocation: service };
 };
 
+const uploadUrlFrom = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    try {
+      return uploadUrlFrom(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = uploadUrlFrom(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.uploadUrl === "string") return record.uploadUrl;
+  for (const item of Object.values(record)) {
+    const found = uploadUrlFrom(item);
+    if (found) return found;
+  }
+  return null;
+};
+
 export class GovernedOperationService {
   constructor(
     private readonly store: WorkspaceStore & GovernanceStore,
@@ -535,7 +560,111 @@ export class GovernedOperationService {
     const { identity, operation } = await this.openVtc.submitDecision(transportToken, document, correlationId);
     if (!operation.approval) throw new OneComputerError("APPROVAL_STATE_INVALID", "A verified approval record is required before execution", 409);
     if (operation.approval.decision === "deny" || ["denied", "failed", "expired", "succeeded"].includes(operation.state)) return toView(operation);
+    if (operation.toolName === "create-upload-session") return toView(operation);
     return this.execute(identity, operation.id, correlationId);
+  }
+
+  async beginResumableUpload(
+    identity: IdentityContext,
+    operationId: string,
+    binding: { workspaceId: string; agentId: string },
+    correlationId: string,
+  ) {
+    const operation = await this.requireOwned(identity, operationId);
+    if (
+      operation.workspaceId !== binding.workspaceId
+      || operation.agentId !== binding.agentId
+      || operation.toolName !== "create-upload-session"
+      || operation.serverName !== "onecomputer_ms365"
+      || operation.approval?.decision !== "approve"
+      || operation.state !== "approved"
+    ) {
+      throw new OneComputerError("UPLOAD_NOT_APPROVED", "The resumable upload is not approved for this workspace agent", 409);
+    }
+    const leaseId = randomUUID();
+    const claimed = await this.store.claimExecution(
+      identity,
+      operation.id,
+      leaseId,
+      new Date(Date.now() + 24 * 60 * 60_000),
+      correlationId,
+    );
+    if (!claimed || claimed.leaseId !== leaseId) {
+      throw new OneComputerError("UPLOAD_ALREADY_STARTED", "The resumable upload has already started", 409);
+    }
+    try {
+      const result = await this.executor.executeGovernedTool({
+        tenantId: identity.tenantId,
+        subjectId: identity.subjectId,
+        workspaceId: claimed.workspaceId,
+        operationId: claimed.id,
+        operationDigest: claimed.operationDigest,
+        leaseId,
+        agentId: claimed.agentId ?? undefined,
+        serverName: claimed.serverName,
+        toolName: claimed.toolName,
+        arguments: claimed.arguments,
+      });
+      const uploadUrlValue = uploadUrlFrom(result.result);
+      if (!uploadUrlValue) throw new OneComputerError("UPLOAD_SESSION_INVALID", "Microsoft did not return a resumable upload session", 502, true);
+      const uploadUrl = new URL(uploadUrlValue);
+      if (
+        uploadUrl.protocol !== "https:"
+        || !(uploadUrl.hostname.endsWith(".up.1drv.com") || uploadUrl.hostname.endsWith(".sharepoint.com"))
+      ) {
+        throw new OneComputerError("UPLOAD_SESSION_INVALID", "Microsoft returned an invalid resumable upload destination", 502);
+      }
+      return { leaseId, uploadUrl: uploadUrl.toString() };
+    } catch (error) {
+      await this.store.failExecution(
+        identity,
+        operation.id,
+        leaseId,
+        error instanceof OneComputerError ? error.code : "UPLOAD_SESSION_FAILED",
+        correlationId,
+        error instanceof OneComputerError ? error.message : "The resumable upload session could not be created",
+      );
+      throw error;
+    }
+  }
+
+  async completeResumableUpload(
+    identity: IdentityContext,
+    operationId: string,
+    binding: { workspaceId: string; agentId: string },
+    leaseId: string,
+    correlationId: string,
+  ) {
+    const operation = await this.requireOwned(identity, operationId);
+    if (operation.workspaceId !== binding.workspaceId || operation.agentId !== binding.agentId || operation.toolName !== "create-upload-session") {
+      throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+    }
+    const file = (operation.arguments as Record<string, OwnedJson>).onecomputerFile as Record<string, OwnedJson> | undefined;
+    const name = typeof file?.name === "string" ? file.name : "file";
+    const completed = await this.store.completeExecution(identity, operation.id, leaseId, {
+      id: randomUUID(),
+      upstreamReference: `onedrive-upload:${operation.id}`,
+      resultSummary: `Uploaded ${name} to OneDrive after signed approval`,
+      resultHash: createHash("sha256").update(canonicalJson(file ?? null)).digest("hex"),
+      executedAt: new Date(),
+    }, correlationId);
+    if (!completed) throw new OneComputerError("UPLOAD_LEASE_INVALID", "The resumable upload lease is no longer valid", 409);
+    return toView(completed);
+  }
+
+  async failResumableUpload(
+    identity: IdentityContext,
+    operationId: string,
+    binding: { workspaceId: string; agentId: string },
+    leaseId: string,
+    correlationId: string,
+  ) {
+    const operation = await this.requireOwned(identity, operationId);
+    if (operation.workspaceId !== binding.workspaceId || operation.agentId !== binding.agentId || operation.toolName !== "create-upload-session") {
+      throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+    }
+    await this.store.failExecution(identity, operation.id, leaseId, "UPLOAD_TRANSFER_FAILED", correlationId, "The approved OneDrive upload did not complete");
+    return this.get(identity, operation.id);
   }
 
   private requireFixtureOperation(operation: GovernedOperationRecord) {

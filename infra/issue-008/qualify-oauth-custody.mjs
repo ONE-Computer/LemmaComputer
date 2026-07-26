@@ -64,7 +64,6 @@ const generateKey = async ({ key, userId, agentId, tool, alias }) => {
       user_id: userId,
       agent_id: agentId,
       models: [],
-      max_budget: 0.01,
       rpm_limit: 30,
       metadata: {
         onecomputer_tenant_id: "qualification-tenant",
@@ -92,7 +91,6 @@ const generateConnectionKey = async ({ key, userId, alias, serverId }) => {
       key_type: "default",
       user_id: userId,
       models: [],
-      max_budget: 0,
       rpm_limit: 10,
       allowed_routes: [credentialRoute],
       metadata: {

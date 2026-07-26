@@ -26,8 +26,11 @@ if BROKER not in {
     raise SystemExit("invalid ONEComputer MCP broker")
 PROTOCOL_VERSION = "2024-11-05"
 TOOLS: dict[str, dict] = {}
+LOCAL_UPLOADS: dict[str, dict] = {}
 RESPONSE_LOCK = threading.Lock()
 WAIT_TOOL_NAME = "wait-for-governed-operation"
+LOCAL_UPLOAD_ROOT = os.path.realpath(os.path.expanduser("~"))
+MAX_INLINE_UPLOAD_BYTES = 4 * 1024 * 1024
 WRITE_TOOLS = {
     "create-draft-email", "update-mail-message", "delete-mail-message", "move-mail-message",
     "send-mail", "send-draft-message", "reply-mail-message", "reply-all-mail-message", "forward-mail-message",
@@ -52,7 +55,7 @@ SEARCH_ONEDRIVE_DESCRIPTION = """Search one OneDrive or SharePoint drive for ite
 If driveId is unknown, call list-drives first. Search using the filename or other value the user supplied, including a filename visible in an attached screenshot. Use top no greater than 10 and the exact select value id,name,eTag,parentReference. Do not request all pages. OneDrive search is eventually consistent, so use list-folder-files on the known parent immediately after creating an item. Treat multiple matches as ambiguous and ask the user to choose before a mutation."""
 UPLOAD_ONEDRIVE_DESCRIPTION = """Create or replace one file in Microsoft OneDrive or SharePoint through ONEComputer governance.
 
-Pass driveId from list-drives. Pass only the value that belongs between `/items/` and `/content` as driveItemId: use an opaque item ID to replace an existing file, `root:/file.txt:` for a new file in the drive root, or `root:/folder/file.txt:` for a new file below the root. Never include `/items/`, `/content`, `/drives/`, or a complete Microsoft Graph URL in driveItemId. Body must be the file bytes encoded as base64. To verify a just-created file, call list-folder-files on its parent because OneDrive search indexing can lag. Call this tool directly; ONEComputer obtains any required signed approval."""
+Pass driveId from list-drives. Pass only the value that belongs between `/items/` and `/content` as driveItemId: use an opaque item ID to replace an existing file, `root:/file.txt:` for a new file in the drive root, or `root:/folder/file.txt:` for a new file below the root. Never include `/items/`, `/content`, `/drives/`, or a complete Microsoft Graph URL in driveItemId. For a file already in this workspace, pass its absolute path as localFilePath; ONEComputer uses an approval-bound resumable upload and streams bounded chunks without putting file bytes into model text or imposing a product file-size limit. Otherwise pass a small base64-encoded body supported by the connector's inline endpoint. Supply exactly one of localFilePath or body. To verify a just-created file, call list-folder-files on its parent because OneDrive search indexing can lag. Call this tool directly; ONEComputer obtains any required signed approval."""
 LIST_JOINED_TEAMS_DESCRIPTION = """List every Microsoft Teams team joined by the signed-in user.
 
 This Graph endpoint does not accept generic OData paging or filtering options. Call it with no arguments, then match the returned displayName and id locally. Use the selected id with list-team-channels."""
@@ -109,10 +112,20 @@ UPLOAD_ONEDRIVE_INPUT_SCHEMA = {
             "minLength": 1,
             "maxLength": 5_600_000,
             "contentEncoding": "base64",
-            "description": "Base64-encoded file bytes, not plain text.",
+            "description": "Base64-encoded file bytes, not plain text. Do not use this when localFilePath is available.",
+        },
+        "localFilePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Absolute path to an existing regular file inside this workspace, for example /home/kasm-user/report.pptx. This uses an approval-bound resumable upload with no product file-size limit. Prefer it for workspace files; do not read or base64-encode the file yourself.",
         },
     },
-    "required": ["driveId", "driveItemId", "body"],
+    "required": ["driveId", "driveItemId"],
+    "oneOf": [
+        {"required": ["body"]},
+        {"required": ["localFilePath"]},
+    ],
     "additionalProperties": False,
 }
 NO_ARGUMENTS_INPUT_SCHEMA = {
@@ -525,8 +538,31 @@ def validate_upload_body(value: object) -> None:
         decoded = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as error:
         raise ValueError("body must be valid base64-encoded file bytes") from error
-    if len(decoded) > 4 * 1024 * 1024:
-        raise ValueError("upload-file-content supports at most 4 MB of decoded file bytes")
+    if len(decoded) > MAX_INLINE_UPLOAD_BYTES:
+        raise ValueError("inline body uploads support at most 4 MB; use localFilePath for resumable uploads")
+
+
+def prepare_upload_body(arguments: dict) -> bool:
+    body = arguments.get("body")
+    local_path = arguments.get("localFilePath")
+    if body is not None and local_path is not None:
+        raise ValueError("supply exactly one of body or localFilePath")
+    if local_path is None:
+        validate_upload_body(body)
+        return False
+    if not isinstance(local_path, str) or not os.path.isabs(local_path):
+        raise ValueError("localFilePath must be an absolute workspace path")
+    resolved = os.path.realpath(local_path)
+    try:
+        inside_workspace = os.path.commonpath([LOCAL_UPLOAD_ROOT, resolved]) == LOCAL_UPLOAD_ROOT
+    except ValueError:
+        inside_workspace = False
+    if not inside_workspace or not os.path.isfile(resolved):
+        raise ValueError("localFilePath must identify a regular file inside this workspace")
+    if os.path.getsize(resolved) <= 0:
+        raise ValueError("localFilePath must not be empty")
+    arguments["localFilePath"] = resolved
+    return True
 
 
 def discover_tools() -> list[dict]:
@@ -538,7 +574,9 @@ def discover_tools() -> list[dict]:
     TOOLS.clear()
     valid_tools = [
         raw for raw in tools
-        if isinstance(raw, dict) and isinstance(raw.get("name"), str)
+        if isinstance(raw, dict)
+        and isinstance(raw.get("name"), str)
+        and raw.get("name") != "create-upload-session"
     ]
     name_counts: dict[str, int] = {}
     for raw in valid_tools:
@@ -630,6 +668,8 @@ def wait_for_operation(identifier: str, timeout_seconds: int = 75) -> dict:
         state = operation.get("state")
         if state in {"succeeded", "denied", "failed", "expired"}:
             return operation
+        if state == "approved" and identifier in LOCAL_UPLOADS:
+            request_json("/onecomputer/uploads/start", {"operationId": identifier})
         time.sleep(1)
     return operation
 
@@ -687,12 +727,37 @@ def call_tool(name: str, arguments: dict) -> dict:
     if upstream_name == "upload-file-content":
         try:
             arguments["driveItemId"] = normalize_upload_drive_item_id(arguments.get("driveItemId"))
-            validate_upload_body(arguments.get("body"))
+            local_upload = prepare_upload_body(arguments)
         except ValueError as error:
             return error_result(
                 f"The OneDrive upload was not submitted: {error}. "
                 "Use an opaque item ID, root:/file.txt:, or root:/folder/file.txt: as driveItemId."
             )
+        if local_upload:
+            try:
+                response = request_json("/onecomputer/uploads", {
+                    "driveId": arguments["driveId"],
+                    "driveItemId": arguments["driveItemId"],
+                    "localFilePath": arguments["localFilePath"],
+                })
+                operation = response.get("operation") if isinstance(response.get("operation"), dict) else {}
+                identifier = operation.get("id")
+                if not isinstance(identifier, str):
+                    return error_result("ONEComputer did not create a governed resumable upload.")
+                LOCAL_UPLOADS[identifier] = {
+                    "driveId": arguments["driveId"],
+                    "driveItemId": arguments["driveItemId"],
+                    "localFilePath": arguments["localFilePath"],
+                }
+                if operation.get("state") == "succeeded":
+                    return operation_result(operation, identifier)
+                return {
+                    "content": [{"type": "text", "text": f"Signed approval is required for resumable upload operation {identifier}. The file has not been uploaded. Call {WAIT_TOOL_NAME} now with this operationId."}],
+                    "isError": False,
+                    "_meta": {"onecomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
+                }
+            except (OSError, ValueError, urllib.error.URLError):
+                return error_result("The governed resumable upload service is unavailable.")
     if upstream_name == "delete-onedrive-file":
         if not isinstance(arguments.get("If-Match"), str) or not arguments["If-Match"].strip():
             return error_result(DELETE_ONEDRIVE_MISSING_ETAG)

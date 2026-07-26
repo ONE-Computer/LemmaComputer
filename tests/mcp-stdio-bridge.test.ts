@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
 
@@ -361,8 +364,12 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
   assert.equal(toolCalls, 0);
 });
 
-test("Claude Desktop receives a precise upload schema and legacy Graph wrappers are normalized before governance", async (context) => {
-  let forwardedArguments: Record<string, unknown> | undefined;
+test("workspace-local uploads use the approval-bound resumable broker without putting bytes in model text", async (context) => {
+  const uploadDirectory = await mkdtemp(join(homedir(), ".onecomputer-upload-test-"));
+  const uploadPath = join(uploadDirectory, "happy.txt");
+  await writeFile(uploadPath, "happy from a workspace file");
+  context.after(() => rm(uploadDirectory, { recursive: true, force: true }));
+  let localUploadArguments: Record<string, unknown> | undefined;
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -385,9 +392,15 @@ test("Claude Desktop receives a precise upload schema and legacy Graph wrappers 
       }] }));
       return;
     }
-    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
-      forwardedArguments = JSON.parse(Buffer.concat(chunks).toString("utf8")).arguments;
-      response.end(JSON.stringify({ content: [{ type: "text", text: "held" }], isError: false }));
+    if (request.method === "POST" && request.url === "/onecomputer/uploads") {
+      localUploadArguments = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      response.statusCode = 201;
+      response.end(JSON.stringify({
+        operation: {
+          id: "11111111-1111-4111-8111-111111111111",
+          state: "approval_required",
+        },
+      }));
       return;
     }
     response.statusCode = 404;
@@ -416,7 +429,7 @@ test("Claude Desktop receives a precise upload schema and legacy Graph wrappers 
       arguments: {
         driveId: "drive",
         driveItemId: "/items/root:/happy.txt:/content",
-        body: "aGFwcHk=",
+        localFilePath: uploadPath,
       },
     },
   })}\n`);
@@ -427,19 +440,30 @@ test("Claude Desktop receives a precise upload schema and legacy Graph wrappers 
     tools: Array<{
       name: string;
       description: string;
-      inputSchema: { properties: Record<string, { description?: string; pattern?: string }>; required: string[] };
+      inputSchema: {
+        properties: Record<string, { description?: string; pattern?: string }>;
+        required: string[];
+        oneOf: Array<{ required: string[] }>;
+      };
     }>;
   }).tools.find((tool) => tool.name === "upload-file-content")!;
   assert.match(advertised.description, /Never include `\/items\/`, `\/content`/);
+  assert.match(advertised.description, /localFilePath/);
   assert.match(advertised.inputSchema.properties.driveItemId?.description ?? "", /root:\/happy\.txt:/);
   assert.match(advertised.inputSchema.properties.driveItemId?.pattern ?? "", /items/);
-  assert.deepEqual(advertised.inputSchema.required, ["driveId", "driveItemId", "body"]);
-  assert.deepEqual(forwardedArguments, {
+  assert.match(advertised.inputSchema.properties.localFilePath?.description ?? "", /do not read or base64-encode/i);
+  assert.deepEqual(advertised.inputSchema.required, ["driveId", "driveItemId"]);
+  assert.deepEqual(advertised.inputSchema.oneOf, [
+    { required: ["body"] },
+    { required: ["localFilePath"] },
+  ]);
+  assert.deepEqual(localUploadArguments, {
     driveId: "drive",
     driveItemId: "root:/happy.txt:",
-    body: "aGFwcHk=",
-    confirm: true,
+    localFilePath: uploadPath,
   });
+  const called = responses.find((response) => response.id === 2)?.result as { content: Array<{ text: string }> };
+  assert.match(called.content[0]?.text ?? "", /Signed approval is required for resumable upload operation/);
 });
 
 test("managed Microsoft schemas hide unsupported OData and read-only Graph fields", async (context) => {

@@ -24,6 +24,9 @@
     "upload-file-content", "move-rename-onedrive-item", "copy-drive-item", "delete-onedrive-file",
     "send-chat-message", "reply-to-chat-message", "send-channel-message", "reply-to-channel-message"
   ],
+  "internalExecutionOnly": [
+    "create-upload-session"
+  ],
   "executionFlagsOwnedByControl": ["confirm", "excludeResponse"],
   "requalifyWhen": [
     "LiteLLM image/version or MCP dispatcher hook path changes",
