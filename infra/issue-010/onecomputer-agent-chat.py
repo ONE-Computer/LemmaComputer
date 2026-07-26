@@ -964,7 +964,7 @@ async def turns(request: Request) -> Response:
             activity_id = safe_identifier("progress", turn_id, "agent")
             yield frame(canonical(
                 "progress", activityId=activity_id,
-                label=f"{AGENT.replace('-cli', '').replace('-claw', '').title()} is working",
+                label="Got it — I’m working on that.",
                 state="running",
             ))
             terminal_state: str | None = None
@@ -978,7 +978,7 @@ async def turns(request: Request) -> Response:
                     if not ready:
                         yield frame(canonical(
                             "progress", activityId=activity_id,
-                            label=f"{AGENT.replace('-cli', '').replace('-claw', '').title()} is working",
+                            label="Got it — I’m still working on that.",
                             state="running",
                         ))
                         continue

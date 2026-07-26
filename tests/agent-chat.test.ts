@@ -385,7 +385,10 @@ test("terminal history closes stale activity and reconciles approval that comple
     ],
   }];
 
-  const reconciled = await reconcileChatMessages(messages, async () => "succeeded");
+  const reconciled = await reconcileChatMessages(messages, async () => ({
+    state: "succeeded",
+    safeSummary: "Delete Q3-draft.docx from OneDrive",
+  }));
   assert.deepEqual(reconciled[0]?.parts.map((part) => (
     part.type === "data-progress"
       ? [part.type, part.data.state, part.data.label]
@@ -397,7 +400,7 @@ test("terminal history closes stale activity and reconciles approval that comple
   )), [
     ["data-progress", "completed", "Work stopped"],
     ["data-tool", "failed", "Stopped before the tool returned"],
-    ["data-approval", "succeeded", "Approved action completed"],
+    ["data-approval", "succeeded", "Completed: Delete Q3-draft.docx from OneDrive"],
     ["data-terminal", "cancelled", "Stopped by the employee"],
   ]);
 });

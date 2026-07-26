@@ -120,4 +120,20 @@ test("selected Hermes profiles seed only Office skills by default and expose the
   assert.match(chatAdapter, /Treat greetings, acknowledgements, small talk/);
   assert.match(chatAdapter, /Do not load or invoke a skill for those messages/);
   assert.match(chatAdapter, /concrete task clearly matches that skill's documented scope/);
+  assert.match(chatAdapter, /Got it — I’m working on that\./);
+});
+
+test("governed OneDrive deletion carries the resolved filename into approval metadata", async () => {
+  const [bridge, broker, control] = await Promise.all([
+    source("infra/issue-010/onecomputer-mcp-stdio.py"),
+    source("infra/issue-010/onecomputer-gateway-proxy.py"),
+    source("apps/control-api/src/server.ts"),
+  ]);
+
+  assert.match(bridge, /"required": \["driveId", "driveItemId", "resourceName", "If-Match"\]/);
+  assert.match(bridge, /exact name as resourceName/);
+  assert.match(bridge, /request_json\("\/onecomputer\/deletions"/);
+  assert.match(broker, /\/internal\/v1\/agent\/deletions/);
+  assert.match(control, /safeSummary: `Delete \$\{input\.resourceName\} from OneDrive`/);
+  assert.match(control, /resourceName: input\.resourceName/);
 });

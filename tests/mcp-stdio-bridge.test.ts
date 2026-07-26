@@ -22,9 +22,15 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
       }] }));
       return;
     }
-    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
-      response.statusCode = 409;
-      response.end(JSON.stringify({ detail: { error: "MCP_APPROVAL_REQUIRED", operation_id: operationId } }));
+    if (request.method === "POST" && request.url === "/onecomputer/deletions") {
+      response.statusCode = 201;
+      response.end(JSON.stringify({
+        operation: {
+          id: operationId,
+          state: "approval_required",
+          safeSummary: "Delete planning-draft.docx from OneDrive",
+        },
+      }));
       return;
     }
     if (request.method === "GET" && request.url === `/onecomputer/operations/${operationId}`) {
@@ -55,7 +61,15 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
     jsonrpc: "2.0",
     id: 2,
     method: "tools/call",
-    params: { name: "delete-onedrive-file", arguments: { driveId: "drive", driveItemId: "item", "If-Match": "etag" } },
+    params: {
+      name: "delete-onedrive-file",
+      arguments: {
+        driveId: "drive",
+        driveItemId: "item",
+        resourceName: "planning-draft.docx",
+        "If-Match": "etag",
+      },
+    },
   })}\n`);
 
   const deadline = Date.now() + 5_000;
@@ -167,8 +181,8 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
   });
 });
 
-test("Claude Desktop cannot choose connector flags and the managed bridge confirms governed writes", async (context) => {
-  let forwardedArguments: Record<string, unknown> | undefined;
+test("Claude Desktop cannot choose connector flags and governed deletion carries only human-safe metadata", async (context) => {
+  let deletionRequest: Record<string, unknown> | undefined;
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -192,10 +206,17 @@ test("Claude Desktop cannot choose connector flags and the managed bridge confir
       }] }));
       return;
     }
-    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+    if (request.method === "POST" && request.url === "/onecomputer/deletions") {
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      forwardedArguments = body.arguments;
-      response.end(JSON.stringify({ content: [{ type: "text", text: "held" }], isError: false }));
+      deletionRequest = body;
+      response.statusCode = 201;
+      response.end(JSON.stringify({
+        operation: {
+          id: "11111111-1111-4111-8111-111111111111",
+          state: "approval_required",
+          safeSummary: "Delete planning-draft.docx from OneDrive",
+        },
+      }));
       return;
     }
     response.statusCode = 404;
@@ -221,7 +242,14 @@ test("Claude Desktop cannot choose connector flags and the managed bridge confir
     method: "tools/call",
     params: {
       name: "delete-onedrive-file",
-      arguments: { driveId: "drive", driveItemId: "item", "If-Match": "{E1CFF1EF-69D6-4F68-A75F-29D6C6DB2670},3", confirm: true, excludeResponse: false },
+      arguments: {
+        driveId: "drive",
+        driveItemId: "item",
+        resourceName: "planning-draft.docx",
+        "If-Match": "{E1CFF1EF-69D6-4F68-A75F-29D6C6DB2670},3",
+        confirm: true,
+        excludeResponse: false,
+      },
     },
   })}\n`);
 
@@ -232,7 +260,7 @@ test("Claude Desktop cannot choose connector flags and the managed bridge confir
   assert.equal("excludeResponse" in tools[0]!.inputSchema.properties, false);
   assert.deepEqual(
     (tools[0]!.inputSchema as unknown as { required: string[] }).required,
-    ["driveId", "driveItemId", "If-Match"],
+    ["driveId", "driveItemId", "resourceName", "If-Match"],
   );
   assert.match(
     ((responses[0]?.result as { tools: Array<{ description: string }> }).tools[0]?.description ?? ""),
@@ -242,11 +270,11 @@ test("Claude Desktop cannot choose connector flags and the managed bridge confir
     ((responses[0]?.result as { tools: Array<{ description: string }> }).tools[0]?.description ?? ""),
     /list-drives to resolve driveId, then search-onedrive-files or list-folder-files/,
   );
-  assert.deepEqual(forwardedArguments, {
+  assert.deepEqual(deletionRequest, {
     driveId: "drive",
     driveItemId: "item",
+    resourceName: "planning-draft.docx",
     "If-Match": '"{E1CFF1EF-69D6-4F68-A75F-29D6C6DB2670},3"',
-    confirm: true,
   });
 });
 

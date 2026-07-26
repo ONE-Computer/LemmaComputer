@@ -227,8 +227,8 @@ let chatMessages = [
     parts: [
       { type: "data-progress", id: "fixture-progress-1", data: { activityId: "fixture-progress-1", label: "Work complete", state: "completed" } },
       { type: "data-tool", id: "fixture-tool-1", data: { toolCallId: "fixture-tool-1", name: "get-drive-item", state: "completed", summary: "File metadata checked" } },
-      { type: "data-approval", id: "fixture-approval-1", data: { approvalId: "fixture-approval-1", toolCallId: "fixture-tool-2", operationId: "00000000-0000-4000-8000-000000000001", state: "approval_required", summary: "Waiting for signed approval" } },
-      { type: "text", text: "The protected deletion is waiting for your signed approval. The file has not been deleted.", state: "done" },
+      { type: "data-approval", id: "fixture-approval-1", data: { approvalId: "fixture-approval-1", toolCallId: "fixture-tool-2", operationId: "00000000-0000-4000-8000-000000000001", state: "approval_required", summary: "Approval needed: Delete planning-draft.docx from OneDrive" } },
+      { type: "text", text: "**The protected deletion is waiting for your signed approval.**\n\n- The file has not been deleted.\n- ONEComputer will run it only after approval.", state: "done" },
       { type: "data-terminal", id: "terminal-fixture-turn-1", data: { turnId: "fixture-turn-1", state: "completed" } },
     ],
   },
@@ -757,9 +757,9 @@ const server = http.createServer((request, response) => {
       const createdAt = new Date().toISOString();
       const chunks = [
         { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
-        { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Hermes is working", state: "running" } },
+        { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Got it — I’m working on that.", state: "running" } },
         { type: "text-start", id: `${turnId}-text` },
-        { type: "text-delta", id: `${turnId}-text`, delta: "I’m working inside your workspace and can use only the tools and destinations your organization approved." },
+        { type: "text-delta", id: `${turnId}-text`, delta: "**Acknowledged.** I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations" },
         { type: "text-end", id: `${turnId}-text` },
         { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Work complete", state: "completed" } },
         { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },

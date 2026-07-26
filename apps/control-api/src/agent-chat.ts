@@ -115,7 +115,15 @@ type ChatApprovalState = Extract<
   { type: "data-approval" }
 >["data"]["state"];
 
-const approvalSummary = (state: ChatApprovalState) => ({
+export const chatApprovalSummary = (state: ChatApprovalState, action?: string) => action ? ({
+  approval_required: `Approval needed: ${action}`,
+  approved: `Approved: ${action}`,
+  executing: `Running: ${action}`,
+  succeeded: `Completed: ${action}`,
+  denied: `Denied: ${action}`,
+  failed: `Failed: ${action}`,
+  expired: `Expired: ${action}`,
+})[state] : ({
   approval_required: "Waiting for signed approval",
   approved: "Approval received",
   executing: "Approved action is running",
@@ -135,15 +143,26 @@ const approvalSummary = (state: ChatApprovalState) => ({
  */
 export const reconcileChatMessages = async (
   messages: ChatUiMessage[],
-  operationState: (operationId: string) => Promise<ChatApprovalState | undefined>,
+  operationState: (operationId: string) => Promise<{
+    state: ChatApprovalState;
+    safeSummary: string;
+  } | undefined>,
 ): Promise<ChatUiMessage[]> => Promise.all(messages.map(async (message) => {
   if (message.role !== "assistant") return message;
   const terminalState = message.metadata.state;
   const parts = await Promise.all(message.parts.map(async (part) => {
     if (part.type === "data-approval") {
-      const state = await operationState(part.data.operationId);
-      return state && state !== part.data.state
-        ? { ...part, data: { ...part.data, state, summary: approvalSummary(state) } }
+      const operation = await operationState(part.data.operationId);
+      return operation && (operation.state !== part.data.state
+        || part.data.summary !== chatApprovalSummary(operation.state, operation.safeSummary))
+        ? {
+          ...part,
+          data: {
+            ...part.data,
+            state: operation.state,
+            summary: chatApprovalSummary(operation.state, operation.safeSummary),
+          },
+        }
         : part;
     }
     if (terminalState === "streaming") return part;

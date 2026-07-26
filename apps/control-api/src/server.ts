@@ -22,6 +22,7 @@ import {
   AgentUiStreamMapper,
   HttpAgentChatClient,
   assignedChatAgentIds,
+  chatApprovalSummary,
   reconcileChatMessages,
   type AgentChatClient,
 } from "./agent-chat.js";
@@ -363,7 +364,11 @@ export function createControlServer(
       }
       return;
     }
-    if (request.url.startsWith("/internal/v1/agent/operations/") || request.url.startsWith("/internal/v1/agent/uploads")) {
+    if (
+      request.url.startsWith("/internal/v1/agent/operations/")
+      || request.url.startsWith("/internal/v1/agent/uploads")
+      || request.url.startsWith("/internal/v1/agent/deletions")
+    ) {
       const authorization = request.headers.authorization;
       const value = Array.isArray(authorization) ? authorization[0] : authorization;
       const match = typeof value === "string" ? /^Bearer (.+)$/.exec(value) : null;
@@ -673,6 +678,55 @@ export function createControlServer(
         displayName: "Upload large OneDrive file",
         safeSummary: `Upload ${input.fileName} (${input.size} bytes) to OneDrive`,
         resourceName: input.fileName,
+        resourceLocation: "OneDrive",
+      },
+      actor.agentId,
+      { policyVersionId: policy.policyVersionId, policyHash: policy.policyHash },
+      input.idempotencyKey,
+      request.id,
+    );
+    return reply.code(201).send(operation);
+  });
+  app.post("/internal/v1/agent/deletions", async (request, reply) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const input = z.strictObject({
+      driveId: z.string().trim().min(1).max(512),
+      driveItemId: z.string().trim().min(1).max(512),
+      resourceName: z.string().trim().min(1).max(255),
+      "If-Match": z.string().trim().min(1).max(512),
+      idempotencyKey: z.string().min(16).max(128),
+    }).parse(request.body ?? {});
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" as const };
+    const { policy } = await channelPolicy(owner, actor.workspaceId);
+    const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
+    if (
+      actor.policyHash !== policy.policyHash
+      || !allowedAgentIds.has(actor.agentId)
+      || !policy.allowedTools.includes("delete-onedrive-file")
+      || policy.toolPolicies["delete-onedrive-file"] !== "approval_required"
+    ) {
+      throw new OneComputerError("MCP_POLICY_BINDING_MISMATCH", "OneDrive deletion is not assigned to this workspace agent", 403);
+    }
+    const capability = m365CapabilityDefinitions["delete-onedrive-file"];
+    const operation = await operations.createMicrosoft365Operation(
+      owner,
+      actor.workspaceId,
+      {
+        capabilityId: capability.capabilityId,
+        schemaId: capability.schemaId,
+        serverName: "onecomputer_ms365",
+        toolName: "delete-onedrive-file",
+        arguments: {
+          driveId: input.driveId,
+          driveItemId: input.driveItemId,
+          "If-Match": input["If-Match"],
+          confirm: true,
+          excludeResponse: true,
+        },
+        displayName: "Delete OneDrive file",
+        safeSummary: `Delete ${input.resourceName} from OneDrive`,
+        resourceName: input.resourceName,
         resourceLocation: "OneDrive",
       },
       actor.agentId,
@@ -1498,7 +1552,8 @@ export function createControlServer(
       await agentChat.listMessages(access, sessionId),
       async (operationId) => {
         try {
-          return (await operations.get(owner, operationId)).state;
+          const operation = await operations.get(owner, operationId);
+          return { state: operation.state, safeSummary: operation.safeSummary };
         } catch (error) {
           if (error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND") return undefined;
           throw error;
@@ -1540,7 +1595,8 @@ export function createControlServer(
         );
       }
     }
-    const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
+    const owner = identity(request);
+    const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
     const abort = new AbortController();
     request.raw.once("aborted", () => abort.abort("browser-disconnected"));
     reply.raw.once("close", () => {
@@ -1550,7 +1606,19 @@ export function createControlServer(
     const stream = createUIMessageStream<ChatUiMessage>({
       execute: async ({ writer }) => {
         for await (const event of agentChat.streamTurn(access, sessionId, input.message, abort.signal)) {
-          for (const chunk of mapper.chunks(event)) writer.write(chunk);
+          let projected = event;
+          if (event.type === "approval") {
+            try {
+              const operation = await operations.get(owner, event.operationId);
+              projected = {
+                ...event,
+                summary: chatApprovalSummary(event.state, operation.safeSummary),
+              };
+            } catch (error) {
+              if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
+            }
+          }
+          for (const chunk of mapper.chunks(projected)) writer.write(chunk);
         }
       },
       onError: (error) => error instanceof OneComputerError

@@ -42,8 +42,8 @@ DELETE_ONEDRIVE_DESCRIPTION = """Delete one Microsoft OneDrive or SharePoint dri
 
 This is a remote Microsoft 365 action, not a local filesystem action. A user-facing filename, link, folder path, or filename visible in an attached screenshot is enough to begin discovery: call list-drives to resolve driveId, then search-onedrive-files or list-folder-files to resolve the exact driveItemId. Do not ask the user for internal drive or item IDs before attempting those assigned discovery tools. If multiple items match, ask the user to disambiguate before deleting anything.
 
-Before calling this tool, get the exact item's current top-level eTag with get-drive-item (includeHeaders=true and select=id,name,eTag,parentReference). Pass that exact eTag as If-Match. Call this tool directly; do not request Cowork or local-file deletion permission. ONEComputer Control will obtain any required signed approval and this call will wait for the final result."""
-DELETE_ONEDRIVE_MISSING_ETAG = """The remote OneDrive deletion was not submitted because If-Match is missing. Call get-drive-item for this driveId and driveItemId with includeHeaders=true and select=id,name,eTag,parentReference, then call delete-onedrive-file again with the exact top-level eTag as If-Match. Do not use Cowork or local-filesystem deletion permission; ONEComputer handles approval when this remote tool is called."""
+Before calling this tool, get the exact item's current top-level name and eTag with get-drive-item (includeHeaders=true and select=id,name,eTag,parentReference). Pass that exact name as resourceName and exact eTag as If-Match. The resourceName is shown to the user in the signed approval and Trail; never substitute an opaque item ID. Call this tool directly; do not request Cowork or local-file deletion permission. ONEComputer Control will obtain any required signed approval and this call will wait for the final result."""
+DELETE_ONEDRIVE_MISSING_METADATA = """The remote OneDrive deletion was not submitted because resourceName or If-Match is missing. Call get-drive-item for this driveId and driveItemId with includeHeaders=true and select=id,name,eTag,parentReference, then call delete-onedrive-file again with the exact top-level name as resourceName and eTag as If-Match. Do not use Cowork or local-filesystem deletion permission; ONEComputer handles approval when this remote tool is called."""
 CALENDAR_VIEW_DESCRIPTION = """Get chronological event occurrences from the signed-in user's default Outlook calendar within an explicit time window.
 
 Use this tool for requests such as next, upcoming, today, this week, or events between two dates. For upcoming events, set startDateTime to the current time and endDateTime to a bounded future time in ISO 8601 format. Do not use list-calendar-events for upcoming events because that tool returns event series without an implicit from-now window."""
@@ -126,6 +126,37 @@ UPLOAD_ONEDRIVE_INPUT_SCHEMA = {
         {"required": ["body"]},
         {"required": ["localFilePath"]},
     ],
+    "additionalProperties": False,
+}
+DELETE_ONEDRIVE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "driveId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Opaque drive ID returned by list-drives.",
+        },
+        "driveItemId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Opaque item ID returned by get-drive-item.",
+        },
+        "resourceName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "Exact top-level name returned by get-drive-item. ONEComputer shows this human-facing target in the signed approval and Trail.",
+        },
+        "If-Match": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Exact top-level eTag returned by get-drive-item.",
+        },
+    },
+    "required": ["driveId", "driveItemId", "resourceName", "If-Match"],
     "additionalProperties": False,
 }
 NO_ARGUMENTS_INPUT_SCHEMA = {
@@ -607,6 +638,8 @@ def discover_tools() -> list[dict]:
             input_schema = SEARCH_ONEDRIVE_INPUT_SCHEMA
         elif upstream_name == "upload-file-content":
             input_schema = UPLOAD_ONEDRIVE_INPUT_SCHEMA
+        elif upstream_name == "delete-onedrive-file":
+            input_schema = DELETE_ONEDRIVE_INPUT_SCHEMA
         elif upstream_name == "list-joined-teams":
             input_schema = NO_ARGUMENTS_INPUT_SCHEMA
         elif upstream_name in CURATED_WRITE_INPUT_SCHEMAS:
@@ -759,9 +792,32 @@ def call_tool(name: str, arguments: dict) -> dict:
             except (OSError, ValueError, urllib.error.URLError):
                 return error_result("The governed resumable upload service is unavailable.")
     if upstream_name == "delete-onedrive-file":
-        if not isinstance(arguments.get("If-Match"), str) or not arguments["If-Match"].strip():
-            return error_result(DELETE_ONEDRIVE_MISSING_ETAG)
+        if (not isinstance(arguments.get("resourceName"), str)
+                or not arguments["resourceName"].strip()
+                or not isinstance(arguments.get("If-Match"), str)
+                or not arguments["If-Match"].strip()):
+            return error_result(DELETE_ONEDRIVE_MISSING_METADATA)
         arguments["If-Match"] = normalize_graph_etag(arguments["If-Match"])
+        try:
+            response = request_json("/onecomputer/deletions", {
+                "driveId": arguments["driveId"],
+                "driveItemId": arguments["driveItemId"],
+                "resourceName": arguments["resourceName"].strip(),
+                "If-Match": arguments["If-Match"],
+            })
+            operation = response.get("operation") if isinstance(response.get("operation"), dict) else {}
+            identifier = operation.get("id")
+            if not isinstance(identifier, str):
+                return error_result("ONEComputer did not create a governed OneDrive deletion.")
+            if operation.get("state") == "succeeded":
+                return operation_result(operation, identifier)
+            return {
+                "content": [{"type": "text", "text": f"Signed approval is required to delete {arguments['resourceName']} from OneDrive. The file has not been deleted. Call {WAIT_TOOL_NAME} now with operationId {identifier}."}],
+                "isError": False,
+                "_meta": {"onecomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
+            }
+        except (OSError, ValueError, KeyError, urllib.error.URLError):
+            return error_result("The governed OneDrive deletion service is unavailable.")
     try:
         response = request_json("/mcp-rest/tools/call", {
             "server_id": server_id,

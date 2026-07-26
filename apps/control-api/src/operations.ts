@@ -356,7 +356,7 @@ export class GovernedOperationService {
       arguments: operationEnvelope.arguments,
       operationDigest,
       nonce,
-      safeSummary: input.toolName === "delete-onedrive-file" ? `Delete OneDrive item ${resource.resourceName}` : resource.safeSummary,
+      safeSummary: resource.safeSummary,
       resourceName: resource.resourceName,
       resourceLocation: resource.resourceLocation,
       correlationId,

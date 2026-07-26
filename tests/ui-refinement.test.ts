@@ -327,12 +327,17 @@ test("Chat is last in navigation, with recent threads in the sidebar and a focus
   assert.match(chatScreen, /selected workspace model does not support image input/);
   assert.match(app, /part\.type === "file"/);
   assert.match(app, /part\.type === "data-approval"/);
+  assert.match(app, /ReactMarkdown/);
+  assert.match(app, /remarkGfm/);
+  assert.match(chatScreen, /status === "submitted"/);
+  assert.match(chatScreen, /Got it — I’m starting on that\./);
   assert.doesNotMatch(chatScreen, /chatApi\.send/);
   assert.match(styles, /\.chat-composer\s*\{[\s\S]*?border-radius: 26px/);
   assert.match(styles, /\.chat-message\s*\{\s*width: 100%;\s*max-width: 860px/);
   assert.match(styles, /\.chat-send-button:not\(:disabled\)\s*\{\s*background: var\(--navy\)/);
   assert.match(styles, /\.chat-attachment-preview\s*\{/);
   assert.match(styles, /\.chat-file-part\.image img\s*\{/);
+  assert.match(styles, /\.chat-markdown\s*\{/);
 });
 
 test("Chat automatically recovers when a selected agent becomes healthy after the workspace reports ready", async () => {

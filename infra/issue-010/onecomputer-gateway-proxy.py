@@ -58,6 +58,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/onecomputer/uploads/start":
             self.start_local_upload()
             return
+        if self.path == "/onecomputer/deletions":
+            self.create_onedrive_deletion()
+            return
         self.forward()
 
     def read_json(self) -> dict:
@@ -143,6 +146,34 @@ class Handler(BaseHTTPRequestHandler):
             with UPLOAD_LOCK:
                 UPLOAD_KEYS[key] = operation["id"]
                 UPLOAD_JOBS[operation["id"]] = job
+            self.send_json(201, {"operation": operation})
+        except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+            self.send_json(400, {"error": str(error)[:240]})
+
+    def create_onedrive_deletion(self) -> None:
+        try:
+            value = self.read_json()
+            drive_id = value.get("driveId")
+            drive_item_id = value.get("driveItemId")
+            resource_name = value.get("resourceName")
+            etag = value.get("If-Match")
+            if not all(isinstance(item, str) and item.strip() for item in (
+                drive_id, drive_item_id, resource_name, etag
+            )):
+                raise ValueError("driveId, driveItemId, resourceName, and If-Match are required")
+            fingerprint = hashlib.sha256(json.dumps({
+                "driveId": drive_id,
+                "driveItemId": drive_item_id,
+                "resourceName": resource_name.strip(),
+                "If-Match": etag,
+            }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            operation = self.control_json("/internal/v1/agent/deletions", {
+                "driveId": drive_id,
+                "driveItemId": drive_item_id,
+                "resourceName": resource_name.strip(),
+                "If-Match": etag,
+                "idempotencyKey": f"workspace-delete-{fingerprint}",
+            })
             self.send_json(201, {"operation": operation})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
             self.send_json(400, {"error": str(error)[:240]})

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Home24Filled, Home24Regular } from "@fluentui/react-icons/svg/home";
 import { Clock24Regular } from "@fluentui/react-icons/svg/clock";
 import { Calendar24Regular } from "@fluentui/react-icons/svg/calendar";
@@ -1805,8 +1807,12 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
   );
 }
 
-function ChatPart({ part }) {
-  if (part.type === "text") return <p className="chat-message-text">{part.text}</p>;
+function ChatPart({ part, markdown = false }) {
+  if (part.type === "text") {
+    return markdown
+      ? <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown></div>
+      : <p className="chat-message-text">{part.text}</p>;
+  }
   if (part.type === "file") {
     const image = part.mediaType.startsWith("image/");
     return (
@@ -2068,6 +2074,7 @@ function ChatConversation({
   };
 
   const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
+  const awaitingAssistant = status === "submitted" && visibleMessages.at(-1)?.role === "user";
   return (
     <section className={`chat-conversation${visibleMessages.length === 0 ? " is-empty" : ""}`} aria-label="Current conversation">
       <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy || historyState === "loading"}>
@@ -2080,10 +2087,25 @@ function ChatConversation({
           <article className={`chat-message ${message.role}`} key={message.id}>
             <span>{message.role === "assistant" ? agentName : "You"}</span>
             <div className="chat-message-parts">
-              {message.parts.map((part, index) => <ChatPart key={part.id || `${part.type}-${index}`} part={part} />)}
+              {message.parts.map((part, index) => (
+                <ChatPart
+                  key={part.id || `${part.type}-${index}`}
+                  part={part}
+                  markdown={message.role === "assistant"}
+                />
+              ))}
             </div>
           </article>
         ))}
+        {awaitingAssistant && (
+          <article className="chat-message assistant chat-acknowledgement" aria-label={`${agentName} acknowledged your message`}>
+            <span>{agentName}</span>
+            <div className="chat-activity progress running" role="status">
+              <span aria-hidden="true" />
+              <p>Got it — I’m starting on that.</p>
+            </div>
+          </article>
+        )}
       </div>
       {(error || historyError) && <div className="workspace-error chat-error" role="alert"><Info24Regular aria-hidden="true" /><span>{error?.message || historyError}</span></div>}
       <form className="chat-composer" onSubmit={submit}>
