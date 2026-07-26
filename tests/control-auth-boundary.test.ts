@@ -8,6 +8,7 @@ import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "proxy-test-token-at-least-24-characters";
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
+const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "onecomputer-control" };
 const principal: SessionPrincipal = {
   userId: "alpha",
   tenantId: "acme",
@@ -78,6 +79,14 @@ test("runtime identity comes only from the authenticated server session", async 
       payload: { tools: {} },
     });
     assert.equal(employeePolicyWrite.statusCode, 403);
+
+    const employeeSuspend = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/users/another-user/status",
+      headers: { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid", "content-type": "application/json" },
+      payload: { status: "disabled" },
+    });
+    assert.equal(employeeSuspend.statusCode, 403);
   } finally {
     await app.close();
   }
@@ -100,6 +109,9 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   };
   let assigned = false;
   let revoked = false;
+  let betaStatus: "active" | "disabled" = "active";
+  let revokedSessionCount = 0;
+  let assignedWorkspaceSubject = "";
   let savedToolPolicy: Record<string, McpToolPolicyDecision> | null = null;
   let firewallVersion: EgressSecurityGroupVersion = {
     schemaVersion: 1,
@@ -135,8 +147,18 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   const workspaceStore = new MemoryWorkspaceStore();
   const activeWorkspace = await workspaceStore.createOrGet(alpha, "personal", "active-policy-refresh-workspace");
   const openWorkspace = await workspaceStore.createOrGet(alpha, "workspace-open-research", "open-firewall-workspace");
+  const savedSandboxSettings = new Map<string, {
+    tenantId: string;
+    subjectId: string;
+    grantId: string;
+    profileId: "disposable-open-v1";
+    applicationIds: ["firefox"];
+    modelAlias: "onecomputer-claude";
+    agentIds: ["claude-desktop"];
+    updatedAt: Date;
+  }>();
   Object.assign(workspaceStore, {
-    getSandboxSettings: async (_identity: unknown, grantId: string) => grantId === openWorkspace.grantId ? {
+    getSandboxSettings: async (targetIdentity: IdentityContext, grantId: string) => savedSandboxSettings.get(`${targetIdentity.subjectId}:${grantId}`) ?? (grantId === openWorkspace.grantId ? {
       tenantId: "acme",
       subjectId: "alpha",
       grantId,
@@ -145,12 +167,34 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       modelAlias: "onecomputer-claude" as const,
       agentIds: ["claude-desktop"] as const,
       updatedAt: new Date(),
-    } : null,
+    } : null),
+    saveSandboxSettings: async (targetIdentity: IdentityContext, input: {
+      grantId: string;
+      profileId: "disposable-open-v1";
+      applicationIds: ["firefox"];
+      modelAlias: "onecomputer-claude";
+      agentIds: ["claude-desktop"];
+    }) => {
+      const saved = { tenantId: targetIdentity.tenantId, subjectId: targetIdentity.subjectId, ...input, updatedAt: new Date() };
+      savedSandboxSettings.set(`${targetIdentity.subjectId}:${input.grantId}`, saved);
+      return saved;
+    },
   });
   await workspaceStore.update(activeWorkspace.id, { state: "ready" });
   effectivePolicy.workspaceId = activeWorkspace.id;
   const identityPolicyStore = {
-    listUsers: async (tenantId) => tenantId === "acme" ? [{ userId: "alpha", email: principal.email, displayName: principal.displayName, roles: principal.roles, effectivePolicy: revoked ? null : effectivePolicy }] : [],
+    listUsers: async (tenantId) => tenantId === "acme" ? [
+      { userId: "alpha", email: principal.email, displayName: principal.displayName, status: "active" as const, roles: principal.roles, effectivePolicy: revoked ? null : effectivePolicy },
+      { userId: "beta", email: "beta@metech.dev", displayName: "Beta User", status: betaStatus, roles: ["employee"] as const, effectivePolicy },
+    ] : [],
+    setUserStatus: async ({ status }: { status: "active" | "disabled" }) => {
+      betaStatus = status;
+      return { status, revokedSessions: status === "disabled" ? 2 : 0 };
+    },
+    revokeUserSessions: async () => {
+      revokedSessionCount += 1;
+      return 2;
+    },
     assignMvpPolicy: async () => { assigned = true; revoked = false; return effectivePolicy; },
     getEffectivePolicy: async () => assigned && !revoked ? effectivePolicy : null,
     revokeMvpPolicy: async () => { revoked = true; return true; },
@@ -173,7 +217,8 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     getWorkspaceEgressSecurityGroup: async ({ grantId }: { grantId: string }) => grantId === openWorkspace.grantId
       ? { ...firewallVersion, defaultAction: "allow-public-http-https" as const }
       : firewallVersion,
-    assignWorkspaceEgressSecurityGroup: async ({ securityGroupVersionId }: { securityGroupVersionId: string }) => {
+    assignWorkspaceEgressSecurityGroup: async ({ subjectId, securityGroupVersionId }: { subjectId: string; securityGroupVersionId: string }) => {
+      assignedWorkspaceSubject = subjectId;
       firewallVersion = { ...firewallVersion, id: securityGroupVersionId };
       return firewallVersion;
     },
@@ -252,6 +297,70 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     });
     assert.equal(attachedFirewall.statusCode, 200);
     assert.equal(attachedFirewall.json().id, "egv_acme_updates_v2");
+
+    const selfSuspend = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/users/alpha/status",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { status: "disabled" },
+    });
+    assert.equal(selfSuspend.statusCode, 409);
+
+    const suspended = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/users/beta/status",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { status: "disabled" },
+    });
+    assert.equal(suspended.statusCode, 200);
+    assert.equal(suspended.json().status, "disabled");
+    const reactivated = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/users/beta/status",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { status: "active" },
+    });
+    assert.equal(reactivated.statusCode, 200);
+    const signedOut = await app.inject({
+      method: "POST",
+      url: "/v1/admin/users/beta/sessions/revoke",
+      headers,
+    });
+    assert.equal(signedOut.statusCode, 200);
+    assert.equal(signedOut.json().revokedSessions, 2);
+    assert.equal(revokedSessionCount, 1);
+
+    const betaWorkspace = await workspaceStore.createOrGet(beta, "personal", "beta-admin-managed-workspace");
+    const betaSettings = await app.inject({
+      method: "GET",
+      url: "/v1/admin/users/beta/sandbox-settings?grantId=personal",
+      headers,
+    });
+    assert.equal(betaSettings.statusCode, 200);
+    assert.equal(betaSettings.json().grantId, "personal");
+    const savedBetaSettings = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/users/beta/sandbox-settings",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: {
+        grantId: "personal",
+        profileId: "disposable-open-v1",
+        applicationIds: ["firefox"],
+        modelAlias: "onecomputer-claude",
+        agentIds: ["claude-desktop"],
+      },
+    });
+    assert.equal(savedBetaSettings.statusCode, 200);
+    assert.equal(savedBetaSettings.json().profileId, "disposable-open-v1");
+    const betaFirewall = await app.inject({
+      method: "POST",
+      url: "/v1/admin/users/beta/workspaces/personal/egress-security-group",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { securityGroupVersionId: "egv_acme_updates_v2" },
+    });
+    assert.equal(betaFirewall.statusCode, 200);
+    assert.equal(assignedWorkspaceSubject, "beta");
+    assert.equal(betaWorkspace.subjectId, "beta");
 
     const assign = await app.inject({ method: "POST", url: "/v1/admin/users/alpha/policy", headers });
     assert.equal(assign.statusCode, 200);

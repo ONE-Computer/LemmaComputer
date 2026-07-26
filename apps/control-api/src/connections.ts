@@ -88,17 +88,31 @@ export class McpConnectionService {
     this.now = options.now ?? Date.now;
   }
 
-  async list(identity: IdentityContext) {
+  async list(identity: IdentityContext, isAdministrator = false) {
     const connectors = await this.connectors(identity.tenantId);
     const connections = await Promise.all(connectors.map(async (connector) => {
+      const publicConnector = {
+        ...this.publicConnector(connector),
+        canManageConnection: isAdministrator || connector.membersCanManage,
+      };
+      if (!connector.enabled) {
+        return {
+          ...publicConnector,
+          available: false,
+          state: "unavailable" as const,
+          connectedAt: null,
+          expiresAt: null,
+          account: null,
+        };
+      }
       try {
         const status = await this.gateway.userOAuthConnectionStatus(identity, connector.serverName);
-        return { ...this.publicConnector(connector), available: true, ...status };
+        return { ...publicConnector, available: true, ...status };
       } catch (error) {
         const unavailable = error instanceof OneComputerError
           && ["MCP_CONNECTION_NOT_REGISTERED", "M365_MCP_NOT_REGISTERED"].includes(error.code);
         return {
-          ...this.publicConnector(connector),
+          ...publicConnector,
           available: !unavailable,
           state: "unavailable" as const,
           connectedAt: null,
@@ -110,8 +124,9 @@ export class McpConnectionService {
     return { connections };
   }
 
-  async start(identity: IdentityContext, connectorId = "microsoft-365") {
+  async start(identity: IdentityContext, connectorId = "microsoft-365", isAdministrator = false) {
     const connector = await this.connector(identity.tenantId, connectorId);
+    this.requireConnectionManagement(connector, isAdministrator);
     this.pruneExpired();
     const state = randomBytes(32).toString("base64url");
     const codeVerifier = randomBytes(48).toString("base64url");
@@ -143,8 +158,10 @@ export class McpConnectionService {
     identity: IdentityContext,
     connectorId: string,
     input: { state?: string; code?: string; error?: string },
+    isAdministrator = false,
   ): Promise<OAuthConnectionStatus> {
     const connector = await this.connector(identity.tenantId, connectorId);
+    this.requireConnectionManagement(connector, isAdministrator);
     this.pruneExpired();
     if (!input.state) throw new OneComputerError("MCP_OAUTH_STATE_MISSING", `The ${connector.name} connection could not be verified`, 400);
     const key = stateDigest(input.state);
@@ -174,8 +191,9 @@ export class McpConnectionService {
     return this.gateway.userOAuthConnectionStatus(identity, (await this.connector(identity.tenantId, connectorId)).serverName);
   }
 
-  async disconnect(identity: IdentityContext, connectorId = "microsoft-365") {
+  async disconnect(identity: IdentityContext, connectorId = "microsoft-365", isAdministrator = false) {
     const connector = await this.connector(identity.tenantId, connectorId);
+    this.requireConnectionManagement(connector, isAdministrator);
     const result = await this.gateway.disconnectUserOAuthConnection(identity, connector.serverName);
     this.invalidateProjection(identity);
     return result;
@@ -195,6 +213,19 @@ export class McpConnectionService {
 
   async adminList(identity: IdentityContext) {
     return { connectors: await this.connectors(identity.tenantId) };
+  }
+
+  async updateAccessPolicy(
+    identity: IdentityContext,
+    updatedBy: string,
+    connectorId: string,
+    input: { enabled: boolean; membersCanManage: boolean },
+  ) {
+    await this.connector(identity.tenantId, connectorId);
+    const saved = await this.registry.updateAccessPolicy(identity.tenantId, connectorId, { ...input, updatedBy });
+    if (!saved) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    this.invalidateTenantProjection(identity.tenantId);
+    return this.publicConnector(saved);
   }
 
   async discoverConnector(input: CreateConnectorInput) {
@@ -347,7 +378,7 @@ export class McpConnectionService {
 
   async hostedToolPolicy(identity: IdentityContext, serverName: string, toolName: string) {
     const connector = (await this.connectors(identity.tenantId))
-      .find((candidate) => candidate.serverName === serverName && candidate.id !== "microsoft-365");
+      .find((candidate) => candidate.enabled && candidate.serverName === serverName && candidate.id !== "microsoft-365");
     if (!connector) return null;
     return {
       connectorId: connector.id,
@@ -365,14 +396,20 @@ export class McpConnectionService {
     const cached = this.projectionCache.get(cacheKey);
     if (cached && cached.expiresAt > this.now()) return cached.policy;
     const connectors = await this.connectors(identity.tenantId);
+    const primaryConnector = connectors.find((connector) => connector.serverName === policy.mcpServer);
+    const primaryToolPolicies = primaryConnector?.enabled === false
+      ? Object.fromEntries(policy.allowedTools.map((tool) => [tool, "deny" as const]))
+      : policy.toolPolicies;
     const connected = await Promise.all(connectors
-      .filter((connector) => connector.serverName !== policy.mcpServer)
+      .filter((connector) => connector.enabled && connector.serverName !== policy.mcpServer)
       .map(async (connector) => {
         try {
           const status = await this.gateway.userOAuthConnectionStatus(identity, connector.serverName);
           if (status.state !== "connected") return null;
-          const tools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
-          return tools.length ? { connector, tools } : null;
+          const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
+          const tools = discoveredTools.filter((tool) => (connector.toolPolicies[tool] ?? "allow") !== "deny");
+          const toolPolicies = Object.fromEntries(tools.map((tool) => [tool, connector.toolPolicies[tool] ?? "allow"]));
+          return tools.length ? { connector, tools, toolPolicies } : null;
         } catch {
           return null;
         }
@@ -384,21 +421,21 @@ export class McpConnectionService {
       ...Object.fromEntries(active.map(({ connector, tools }) => [connector.serverName, tools])),
     };
     const allowedTools = [...new Set(Object.values(mcpToolPermissions).flat())].sort();
-    const projectionDocument = JSON.stringify({ mcpServers, mcpToolPermissions });
+    const hostedToolPolicies = Object.assign({}, ...active.map(({ toolPolicies }) => toolPolicies));
+    const toolPolicies = { ...primaryToolPolicies, ...hostedToolPolicies };
+    const projectionDocument = JSON.stringify({ mcpServers, mcpToolPermissions, toolPolicies });
     const projected = runtimePolicySchema.parse({
       ...policy,
       mcpServers,
       mcpToolPermissions,
       allowedTools,
+      toolPolicies,
       connectionProjectionHash: createHash("sha256").update(projectionDocument).digest("hex"),
       ...(policy.agents ? {
         agents: policy.agents.map((agent) => ({
           ...agent,
           allowedTools,
-          toolPolicies: {
-            ...agent.toolPolicies,
-            ...Object.fromEntries(allowedTools.filter((tool) => !(tool in agent.toolPolicies)).map((tool) => [tool, "allow"])),
-          },
+          toolPolicies: { ...agent.toolPolicies, ...primaryToolPolicies, ...hostedToolPolicies },
         })),
       } : {}),
     });
@@ -457,9 +494,19 @@ export class McpConnectionService {
       tenantId: _tenantId,
       serverId: _serverId,
       createdBy: _createdBy,
+      accessPolicyUpdatedBy: _accessPolicyUpdatedBy,
       ...safe
     } = connector;
     return safe;
+  }
+
+  private requireConnectionManagement(connector: ConnectorDefinition, isAdministrator: boolean) {
+    if (!connector.enabled) {
+      throw new OneComputerError("MCP_CONNECTOR_DISABLED", `${connector.name} is disabled by your organization`, 403);
+    }
+    if (!isAdministrator && !connector.membersCanManage) {
+      throw new OneComputerError("MCP_CONNECTOR_LOCKED", `${connector.name} connections are managed by your administrator`, 403);
+    }
   }
 
   private administratorGateway() {

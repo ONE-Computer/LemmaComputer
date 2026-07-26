@@ -4,6 +4,12 @@ import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, OneComputerEr
 import { compileEgressSecurityGroup } from "@onecomputer/egress-policy";
 
 export type OneComputerRole = "employee" | "administrator";
+export type OneComputerUserStatus = "active" | "disabled";
+
+export const shouldAssignDefaultPolicyOnAuthentication = (
+  hasExistingIdentityMapping: boolean,
+  shouldBootstrapAdministrator: boolean,
+) => !hasExistingIdentityMapping || shouldBootstrapAdministrator;
 
 export type SessionPrincipal = {
   userId: string;
@@ -196,6 +202,7 @@ export type AdminUserSummary = {
   userId: string;
   email: string;
   displayName: string;
+  status: OneComputerUserStatus;
   roles: OneComputerRole[];
   effectivePolicy: EffectivePolicy | null;
 };
@@ -221,6 +228,8 @@ export interface IdentityPolicyStore {
   getPrincipal(userId: string): Promise<SessionPrincipal | null>;
   getEffectivePolicy(userId: string): Promise<EffectivePolicy | null>;
   listUsers(tenantId: string): Promise<AdminUserSummary[]>;
+  setUserStatus(input: { tenantId: string; targetUserId: string; status: OneComputerUserStatus; updatedBy: string }): Promise<{ status: OneComputerUserStatus; revokedSessions: number }>;
+  revokeUserSessions(input: { tenantId: string; targetUserId: string; revokedBy: string }): Promise<number>;
   assignMvpPolicy(input: { tenantId: string; targetUserId: string; assignedBy: string }): Promise<EffectivePolicy>;
   revokeMvpPolicy(input: { tenantId: string; targetUserId: string; revokedBy: string }): Promise<boolean>;
   createMvpPolicyVersion(input: { tenantId: string; createdBy: string; revisionNote: string }): Promise<{ id: string; version: number; documentHash: string }>;
@@ -531,6 +540,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         "SELECT u.id,u.tenant_id FROM external_identities ei JOIN users u ON u.id=ei.user_id WHERE ei.provider='entra' AND ei.issuer=$1 AND ei.external_subject=$2",
         [input.issuer, input.externalSubject],
       );
+      const firstAuthentication = !mapped.rowCount;
       const tenantId = mapped.rowCount ? String(mapped.rows[0].tenant_id) : input.ownedTenantId;
       const userId = mapped.rowCount ? String(mapped.rows[0].id) : input.ownedUserId;
       await client.query(
@@ -576,7 +586,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
          ON CONFLICT (user_id,vendor,mapping_kind) DO UPDATE SET vendor_user_id=EXCLUDED.vendor_user_id,verified_at=now()`,
         [randomUUID(), tenantId, userId, input.gatewayUserId],
       );
-      if (shouldBootstrapAdministrator) {
+      if (shouldAssignDefaultPolicyOnAuthentication(!firstAuthentication, shouldBootstrapAdministrator)) {
         await this.ensurePolicyFoundation(client, tenantId, userId);
         await this.assignMvpPolicyWithClient(client, tenantId, userId, userId);
       }
@@ -626,15 +636,61 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
 
   async listUsers(tenantId: string) {
     const result = await this.pool.query(
-      `SELECT u.id AS user_id,u.email,u.display_name,
+      `SELECT u.id AS user_id,u.email,u.display_name,u.status,
        COALESCE(array_agg(ur.role ORDER BY ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
        FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id WHERE u.tenant_id=$1 GROUP BY u.id ORDER BY u.email`,
       [tenantId],
     );
     return Promise.all(result.rows.map(async (row) => ({
       userId: String(row.user_id), email: String(row.email), displayName: String(row.display_name),
+      status: String(row.status) as OneComputerUserStatus,
       roles: (row.roles as OneComputerRole[] | null) ?? [], effectivePolicy: await this.getEffectivePolicy(String(row.user_id)),
     })));
+  }
+
+  async setUserStatus(input: { tenantId: string; targetUserId: string; status: OneComputerUserStatus; updatedBy: string }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const target = await client.query(
+        "SELECT id FROM users WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+        [input.targetUserId, input.tenantId],
+      );
+      if (!target.rowCount) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+      await client.query("UPDATE users SET status=$3,updated_at=now() WHERE id=$1 AND tenant_id=$2", [
+        input.targetUserId,
+        input.tenantId,
+        input.status,
+      ]);
+      let revokedSessions = 0;
+      if (input.status === "disabled") {
+        const revoked = await client.query(
+          "UPDATE browser_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL RETURNING id",
+          [input.targetUserId],
+        );
+        revokedSessions = revoked.rowCount ?? 0;
+      }
+      await client.query("COMMIT");
+      return { status: input.status, revokedSessions };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeUserSessions(input: { tenantId: string; targetUserId: string; revokedBy: string }) {
+    const target = await this.pool.query(
+      "SELECT id FROM users WHERE id=$1 AND tenant_id=$2",
+      [input.targetUserId, input.tenantId],
+    );
+    if (!target.rowCount) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+    const revoked = await this.pool.query(
+      "UPDATE browser_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL RETURNING id",
+      [input.targetUserId],
+    );
+    return revoked.rowCount ?? 0;
   }
 
   async assignMvpPolicy(input: { tenantId: string; targetUserId: string; assignedBy: string }) {

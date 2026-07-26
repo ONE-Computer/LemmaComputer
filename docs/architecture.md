@@ -140,9 +140,12 @@ design in any networked deployment.
 2. Control starts an Entra authorization-code flow with PKCE, state, and nonce.
 3. Control verifies issuer, audience, tenant, nonce, and callback state.
 4. The external Entra identity is mapped to an owned tenant/user record.
-5. A random session token is stored as a hash and returned in an HttpOnly,
+5. A first-time user in the configured tenant receives the default employee
+   policy. Returning users keep their current assignment state, including an
+   administrator-revoked assignment.
+6. A random session token is stored as a hash and returned in an HttpOnly,
    SameSite cookie.
-6. Control loads the user's immutable effective policy for every protected
+7. Control loads the user's immutable effective policy for every protected
    route. Administrator status is derived from the configured bootstrap email
    allowlist on first sign-in.
 

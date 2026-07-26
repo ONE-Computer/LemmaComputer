@@ -437,6 +437,23 @@ export function createControlServer(
       failed: results.filter((result) => result.status === "rejected").length,
     };
   };
+  const refreshTenantWorkspaceConnectionGrants = async (tenantId: string) => {
+    if (!security.identityPolicyStore) return { refreshed: 0, failed: 0 };
+    const users = await security.identityPolicyStore.listUsers(tenantId);
+    const results = await Promise.allSettled(users.map(async (user) => {
+      if (user.status === "disabled") return { refreshed: 0, failed: 0 };
+      const owner = await security.identityPolicyStore!.getPrincipal(user.userId);
+      if (!owner || owner.tenantId !== tenantId) return { refreshed: 0, failed: 0 };
+      return refreshOwnedWorkspaceConnectionGrants(owner);
+    }));
+    return results.reduce((summary, result) => {
+      if (result.status === "rejected") return { ...summary, failed: summary.failed + 1 };
+      return {
+        refreshed: summary.refreshed + result.value.refreshed,
+        failed: summary.failed + result.value.failed,
+      };
+    }, { refreshed: 0, failed: 0 });
+  };
   const requirePolicy = async (request: object) => {
     const { principal: value, effective } = await assignedPolicy(request);
     return policyForGrant(value, effective);
@@ -653,6 +670,57 @@ export function createControlServer(
       })),
     };
   });
+  app.patch<{ Params: { userId: string } }>("/v1/admin/users/:userId/status", async (request) => {
+    const actor = requireAdministrator(request);
+    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    const input = z.strictObject({ status: z.enum(["active", "disabled"]) }).parse(request.body ?? {});
+    if (request.params.userId === actor.userId && input.status === "disabled") {
+      throw new OneComputerError("ADMIN_SELF_DISABLE_FORBIDDEN", "You cannot suspend your own administrator account", 409);
+    }
+    const target = (await security.identityPolicyStore.listUsers(actor.tenantId)).find((item) => item.userId === request.params.userId);
+    if (!target) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+    const targetIdentity = identityContextSchema.parse({
+      tenantId: actor.tenantId,
+      subjectId: target.userId,
+      audience: "onecomputer-control",
+    });
+    const targetPrincipal: SessionPrincipal = {
+      userId: target.userId,
+      tenantId: actor.tenantId,
+      email: target.email,
+      displayName: target.displayName,
+      tenantDisplayName: actor.tenantDisplayName,
+      roles: target.roles,
+      identity: targetIdentity,
+    };
+    const workspaces = input.status === "disabled" ? await store.listCurrent(targetIdentity) : [];
+    const policies = input.status === "disabled" && target.effectivePolicy
+      ? await Promise.all(workspaces.map(async (workspace) => ({
+          workspace,
+          policy: (await policyForGrant(targetPrincipal, target.effectivePolicy, workspace.grantId)).policy,
+        })))
+      : [];
+    const updated = await security.identityPolicyStore.setUserStatus({
+      tenantId: actor.tenantId,
+      targetUserId: target.userId,
+      status: input.status,
+      updatedBy: actor.userId,
+    });
+    if (input.status === "disabled") {
+      await Promise.allSettled(policies.map(({ workspace, policy }) => service.revokePolicyGrant(workspace.id, policy)));
+    }
+    return { userId: target.userId, ...updated };
+  });
+  app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/sessions/revoke", async (request) => {
+    const actor = requireAdministrator(request);
+    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    const revokedSessions = await security.identityPolicyStore.revokeUserSessions({
+      tenantId: actor.tenantId,
+      targetUserId: request.params.userId,
+      revokedBy: actor.userId,
+    });
+    return { userId: request.params.userId, revokedSessions };
+  });
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request) => {
     const actor = requireAdministrator(request);
     if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
@@ -793,7 +861,10 @@ export function createControlServer(
       },
     };
   });
-  app.get("/v1/connections", async (request) => requireConnections().list(identity(request)));
+  app.get("/v1/connections", async (request) => {
+    const actor = principal(request);
+    return requireConnections().list(actor.identity, isAdministrator(actor));
+  });
   app.get("/v1/admin/connectors", async (request) => {
     const actor = requireAdministrator(request);
     return requireConnections().adminList(actor.identity);
@@ -818,7 +889,22 @@ export function createControlServer(
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/tool-policy", async (request) => {
     const actor = requireAdministrator(request);
     const input = saveMcpToolPolicySchema.parse(request.body ?? {});
-    return requireConnections().saveConnectorToolPolicy(actor.identity, request.params.connectorId, input.tools);
+    const saved = await requireConnections().saveConnectorToolPolicy(actor.identity, request.params.connectorId, input.tools);
+    return { ...saved, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
+  });
+  app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/access-policy", async (request) => {
+    const actor = requireAdministrator(request);
+    const input = z.strictObject({
+      enabled: z.boolean(),
+      membersCanManage: z.boolean(),
+    }).parse(request.body ?? {});
+    const connector = await requireConnections().updateAccessPolicy(
+      actor.identity,
+      actor.userId,
+      request.params.connectorId,
+      input,
+    );
+    return { connector, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/icon", async (request) => {
     const actor = requireAdministrator(request);
@@ -828,14 +914,15 @@ export function createControlServer(
   app.delete<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId", async (request) => {
     const actor = requireAdministrator(request);
     const result = await requireConnections().deleteConnector(actor.identity, request.params.connectorId);
-    await refreshOwnedWorkspaceConnectionGrants(actor);
+    await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
     return result;
   });
   app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId", async (request) => (
     requireConnections().status(identity(request), request.params.connectorId)
   ));
   app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId/authorize", async (request, reply) => {
-    const started = await requireConnections().start(identity(request), request.params.connectorId);
+    const actor = principal(request);
+    const started = await requireConnections().start(actor.identity, request.params.connectorId, isAdministrator(actor));
     if (started.cookies.length) reply.header("set-cookie", started.cookies);
     return reply.code(302).header("location", started.location).send();
   });
@@ -847,7 +934,7 @@ export function createControlServer(
         state: request.query.state,
         code: request.query.code,
         error: request.query.error,
-      });
+      }, isAdministrator(actor));
       await refreshOwnedWorkspaceConnectionGrants(actor);
       return reply.code(303).header("location", service.resultUrl(request.params.connectorId, "connected")).send();
     } catch (error) {
@@ -857,7 +944,7 @@ export function createControlServer(
   });
   app.delete<{ Params: { connectorId: string } }>("/v1/connections/:connectorId", async (request) => {
     const actor = principal(request);
-    const result = await requireConnections().disconnect(actor.identity, request.params.connectorId);
+    const result = await requireConnections().disconnect(actor.identity, request.params.connectorId, isAdministrator(actor));
     await refreshOwnedWorkspaceConnectionGrants(actor);
     return result;
   });
@@ -913,9 +1000,12 @@ export function createControlServer(
     await requireChannelBroker().disconnect(identity(request), workspaceId);
     return reply.code(204).send();
   });
-  app.get<{ Querystring: { grantId?: string } }>("/v1/sandbox-settings", async (request) => {
-    const { principal: actor, effective } = await assignedPolicy(request);
-    const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
+  const sandboxSettingsFor = async (
+    actor: SessionPrincipal,
+    effective: EffectivePolicy | null,
+    grantId: string,
+    includeAdministratorOptions: boolean,
+  ) => {
     const document = (effective?.document ?? {}) as Record<string, unknown>;
     const assignedProfiles = Array.isArray(document.workspaceProfiles)
       ? document.workspaceProfiles.filter((item): item is string => typeof item === "string")
@@ -943,7 +1033,7 @@ export function createControlServer(
       ? runtimePolicyFor(effective, modelAlias, profileId, selectedAgentIds, selectedApplicationIds, workspaceEgress)
       : undefined;
     const egress = runtime?.egress;
-    const availableSecurityGroups = actor.roles.includes("administrator") && security.identityPolicyStore?.listEgressSecurityGroups
+    const availableSecurityGroups = includeAdministratorOptions && security.identityPolicyStore?.listEgressSecurityGroups
       ? await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId)
       : undefined;
     const configuration = sandboxConfigurationSchema.parse({
@@ -977,11 +1067,14 @@ export function createControlServer(
       manifest: workspaceManifest(configuration, telegram),
       updatedAt: saved?.updatedAt.toISOString() ?? null,
     });
-  });
-  app.put("/v1/sandbox-settings", async (request) => {
+  };
+  const saveSandboxSettingsFor = async (
+    actor: SessionPrincipal,
+    effective: EffectivePolicy | null,
+    input: z.infer<typeof saveSandboxSettingsSchema>,
+    includeAdministratorOptions: boolean,
+  ) => {
     if (!store.saveSandboxSettings) throw new OneComputerError("SANDBOX_SETTINGS_NOT_CONFIGURED", "Sandbox settings storage is unavailable", 503, true);
-    const input = saveSandboxSettingsSchema.parse(request.body ?? {});
-    const { principal: actor, effective } = await assignedPolicy(request);
     const document = (effective?.document ?? {}) as Record<string, unknown>;
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
     const applications = assignedApplicationIds(document);
@@ -1000,42 +1093,78 @@ export function createControlServer(
       modelAlias: input.modelAlias as SandboxModelAlias,
       agentIds: input.agentIds,
     });
-    const profile = sandboxProfiles.find((item) => item.id === input.profileId)!;
-    const workspaceEgress = await workspaceEgressFor(actor, effective, input.grantId);
-    const runtime = effective
-      ? runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds, workspaceEgress)
-      : undefined;
-    const egress = runtime?.egress;
-    const availableSecurityGroups = actor.roles.includes("administrator") && security.identityPolicyStore?.listEgressSecurityGroups
-      ? await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId)
-      : undefined;
-    const configuration = sandboxConfigurationSchema.parse({
-      schemaVersion: 1,
-      profileId: input.profileId,
-      executionMode: profile.executionMode,
-      egressMode: runtime?.egressMode ?? profile.egressMode,
-      applicationIds: input.applicationIds,
-      agentIds: input.agentIds,
-      modelAlias: input.modelAlias,
-      egress: egress ?? null,
+    return sandboxSettingsFor(actor, effective, input.grantId, includeAdministratorOptions);
+  };
+  const administratorTarget = async (actor: SessionPrincipal, userId: string) => {
+    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    const target = (await security.identityPolicyStore.listUsers(actor.tenantId)).find((item) => item.userId === userId);
+    if (!target) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+    const identity = identityContextSchema.parse({
+      tenantId: actor.tenantId,
+      subjectId: target.userId,
+      audience: "onecomputer-control",
     });
-    const telegram = current && channelBroker
-      ? await channelBroker.status(actor.identity, current.id)
-      : null;
-    return sandboxSettingsSchema.parse({
-      ...input,
-      profile,
-      availableProfiles: sandboxProfiles.filter((item) => profiles.includes(item.id)),
-      availableApplications: sandboxApplications.filter((item) => applications.includes(item.id)),
-      availableModels: sandboxModels.filter((item) => models.includes(item.alias)),
-      agentIds: input.agentIds,
-      availableAgents: ownedAgentCatalog.filter((item) => agents.includes(item.id)),
-      ...(workspaceEgress ? { securityGroup: workspaceEgress } : {}),
-      ...(availableSecurityGroups ? { availableSecurityGroups } : {}),
-      ...(egress ? { egress } : {}),
-      manifest: workspaceManifest(configuration, telegram),
-      updatedAt: new Date().toISOString(),
-    });
+    const principal: SessionPrincipal = {
+      userId: target.userId,
+      tenantId: actor.tenantId,
+      email: target.email,
+      displayName: target.displayName,
+      tenantDisplayName: actor.tenantDisplayName,
+      roles: target.roles,
+      identity,
+    };
+    return { target, principal };
+  };
+  app.get<{ Params: { userId: string }; Querystring: { grantId?: string } }>(
+    "/v1/admin/users/:userId/sandbox-settings",
+    async (request) => {
+      const actor = requireAdministrator(request);
+      const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+      if (!target.effectivePolicy) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+      const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
+      return sandboxSettingsFor(targetPrincipal, target.effectivePolicy, grantId, true);
+    },
+  );
+  app.put<{ Params: { userId: string } }>("/v1/admin/users/:userId/sandbox-settings", async (request) => {
+    const actor = requireAdministrator(request);
+    const input = saveSandboxSettingsSchema.parse(request.body ?? {});
+    const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+    if (!target.effectivePolicy) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+    return saveSandboxSettingsFor(targetPrincipal, target.effectivePolicy, input, true);
+  });
+  app.post<{ Params: { userId: string; grantId: string } }>(
+    "/v1/admin/users/:userId/workspaces/:grantId/egress-security-group",
+    async (request) => {
+      const actor = requireAdministrator(request);
+      if (!security.identityPolicyStore?.assignWorkspaceEgressSecurityGroup) {
+        throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
+      }
+      const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
+      const grantId = z.string().min(1).max(128).parse(request.params.grantId);
+      const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+      const assigned = await security.identityPolicyStore.assignWorkspaceEgressSecurityGroup({
+        tenantId: actor.tenantId,
+        subjectId: target.userId,
+        grantId,
+        assignedBy: actor.userId,
+        securityGroupVersionId: input.securityGroupVersionId,
+      });
+      if (target.effectivePolicy) {
+        const { policy } = await policyForGrant(targetPrincipal, target.effectivePolicy, grantId);
+        await service.refreshEgressPolicy(targetPrincipal.identity, policy, grantId);
+      }
+      return assigned;
+    },
+  );
+  app.get<{ Querystring: { grantId?: string } }>("/v1/sandbox-settings", async (request) => {
+    const { principal: actor, effective } = await assignedPolicy(request);
+    const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
+    return sandboxSettingsFor(actor, effective, grantId, actor.roles.includes("administrator"));
+  });
+  app.put("/v1/sandbox-settings", async (request) => {
+    const input = saveSandboxSettingsSchema.parse(request.body ?? {});
+    const { principal: actor, effective } = await assignedPolicy(request);
+    return saveSandboxSettingsFor(actor, effective, input, actor.roles.includes("administrator"));
   });
   app.post("/v1/openvtc/enrollment-challenges", async (request, reply) => {
     if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);

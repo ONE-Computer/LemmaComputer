@@ -8,6 +8,8 @@ When implementing from a selected generated mock, treat that image as the source
 
 ## Durable product direction
 
+- ONEComputer is a single-organization, multi-user product for ME TECH: every user in the configured Entra tenant may sign in and receives the default employee policy on first sign-in; `mike@metech.dev` is the bootstrap administrator who manages the organization.
+- Connector availability and member connection rights are organization policy. Administrators may enable or disable a connector and lock personal connection changes; members can connect or disconnect only when the organization policy permits it, and never edit that policy.
 - The user selected the light Calm Launchpad direction because its layout feels familiar to Windows users.
 - Preserve the calm, practical, employee-first experience and visible readiness without exposing infrastructure or turning the home screen into an admin dashboard.
 - During the prototype, ONEComputer Web also serves as the local administrator/control surface. The user accepted a temporary loopback-only Gateway link while the owned workspace journey remains the primary screen.
