@@ -404,7 +404,6 @@ function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
       title={draft.id ? "Edit schedule" : "Create schedule"}
       description="ONEComputer will re-check the workspace, agent, and current policy before every run."
       eyebrow="Scheduled agent prompt"
-      className="schedule-modal"
       onClose={onClose}
     >
       <form className="schedule-form" onSubmit={save}>
@@ -418,7 +417,7 @@ function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
           <label><span>Agent</span><SelectMenu value={draft.agentCatalogId} options={agentOptions} ariaLabel="Agent" disabled={!agentOptions.length} onValueChange={(value) => set("agentCatalogId", value)} /></label>
         </div>
         <label><span>Prompt</span><textarea name="schedule-prompt" value={draft.prompt} maxLength="16000" rows="6" required onChange={(event) => set("prompt", event.target.value)} placeholder="Describe what the agent should do on each run." /></label>
-        <div className="schedule-form-grid schedule-timing-grid">
+        <div className={`schedule-form-grid schedule-timing-grid${draft.cadence === "weekly" ? " schedule-timing-grid-weekly" : ""}`}>
           <label><span>Repeat</span><SelectMenu value={draft.cadence} options={scheduleCadences} ariaLabel="Repeat schedule" onValueChange={(value) => set("cadence", value)} /></label>
           {draft.cadence === "weekly" && <label><span>Day</span><SelectMenu value={draft.weekday} options={scheduleWeekdays} ariaLabel="Day of week" onValueChange={(value) => set("weekday", value)} /></label>}
           <label><span>Time</span><input name="schedule-time" type="time" value={draft.time} required onChange={(event) => set("time", event.target.value)} /></label>
@@ -429,7 +428,7 @@ function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
         )}
         <div className="modal-actions">
           <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Cancel</button>
-          <button className="primary-button" type="submit" disabled={busy || !draft.workspaceId || !draft.agentCatalogId}>{busy ? "Saving schedule" : draft.id ? "Save changes" : "Create schedule"}</button>
+          <button className="primary-button" type="submit" disabled={busy || !draft.workspaceId || !draft.agentCatalogId}>{busy ? "Saving schedule" : draft.id ? "Save" : "Create schedule"}</button>
         </div>
       </form>
     </ModalDialog>

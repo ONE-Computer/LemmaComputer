@@ -53,7 +53,7 @@
 }
 
 .modal-card {
-  width: min(100%, 520px);
+  width: min(100%, 720px);
   max-height: min(720px, calc(100vh - 40px));
   overflow: auto;
   padding: 26px;
@@ -111,6 +111,12 @@
   justify-content: flex-end;
   gap: 12px;
   margin-top: 24px;
+}
+
+.modal-actions > button {
+  flex: 0 0 auto;
+  width: 210px;
+  min-width: 0;
 }
 
 .modal-field {
