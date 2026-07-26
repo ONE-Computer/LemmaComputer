@@ -42,6 +42,29 @@ def _optional_string(metadata, name):
     return value if isinstance(value, str) and value else None
 
 
+def _server_binding(metadata, data, permitted_servers):
+    bindings = metadata.get("onecomputer_mcp_server_bindings")
+    if not isinstance(bindings, dict):
+        bindings = {}
+    server_names = metadata.get("onecomputer_mcp_servers")
+    if isinstance(server_names, list) and len(server_names) == len(permitted_servers):
+        bindings = {
+            **dict(zip(permitted_servers, server_names)),
+            **bindings,
+        }
+    server_id = data.get("server_id")
+    if not isinstance(server_id, str) or not server_id:
+        server_id = permitted_servers[0] if len(permitted_servers) == 1 else None
+    if not isinstance(server_id, str) or server_id not in permitted_servers:
+        return None, None
+    server_name = bindings.get(server_id)
+    if server_id == MS365_SERVER_ID and not isinstance(server_name, str):
+        server_name = MS365_SERVER_NAME
+    if not isinstance(server_name, str) or not server_name:
+        return None, None
+    return server_id, server_name
+
+
 def _is_connection_account_lookup(metadata, payload):
     return (
         metadata.get("onecomputer_connection_credential") is True
@@ -154,7 +177,37 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         permitted_servers = getattr(permission, "mcp_servers", None)
         if permitted_servers is None and isinstance(permission, dict):
             permitted_servers = permission.get("mcp_servers")
-        if permitted_servers != [MS365_SERVER_ID]:
+        if not isinstance(permitted_servers, list) or not permitted_servers:
+            raise HTTPException(status_code=403, detail={"error": "MCP_SERVER_BINDING_INVALID"})
+        # LiteLLM invokes the hook once during request parsing and again from
+        # the resolved MCP dispatcher. Enforce policy on the resolved call.
+        if data.get("name") is None and data.get("arguments") is None:
+            return data
+        if not isinstance(data.get("server_id"), str) and len(permitted_servers) > 1:
+            bindings = metadata.get("onecomputer_mcp_server_bindings")
+            server_names = metadata.get("onecomputer_mcp_servers")
+            if not isinstance(bindings, dict):
+                bindings = {}
+            if isinstance(server_names, list) and len(server_names) == len(permitted_servers):
+                bindings = {**dict(zip(permitted_servers, server_names)), **bindings}
+            tool_permissions = getattr(permission, "mcp_tool_permissions", None)
+            if tool_permissions is None and isinstance(permission, dict):
+                tool_permissions = permission.get("mcp_tool_permissions")
+            if isinstance(bindings, dict) and isinstance(tool_permissions, dict):
+                candidates = [
+                    identifier
+                    for identifier, name in bindings.items()
+                    if isinstance(identifier, str)
+                    and isinstance(name, str)
+                    and data.get("name") in (
+                        tool_permissions.get(identifier, [])
+                        or tool_permissions.get(name, [])
+                    )
+                ]
+                if len(candidates) == 1:
+                    data = {**data, "server_id": candidates[0]}
+        server_id, server_name = _server_binding(metadata, data, permitted_servers)
+        if server_id is None or server_name is None:
             raise HTTPException(status_code=403, detail={"error": "MCP_SERVER_BINDING_INVALID"})
 
         payload = {
@@ -168,15 +221,11 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             "operationId": _optional_string(metadata, "onecomputer_operation_id"),
             "operationDigest": _optional_string(metadata, "onecomputer_operation_digest"),
             "leaseId": _optional_string(metadata, "onecomputer_lease_id"),
-            "serverId": MS365_SERVER_ID,
-            "serverName": MS365_SERVER_NAME,
+            "serverId": server_id,
+            "serverName": server_name,
             "toolName": data.get("name"),
             "arguments": data.get("arguments"),
         }
-        # LiteLLM invokes the hook once during request parsing and again from
-        # the resolved MCP dispatcher. Enforce policy on the resolved call.
-        if payload["toolName"] is None and payload["arguments"] is None:
-            return data
         # A connection credential may read only the non-secret account label
         # displayed on the Connections page. It has no workspace or agent
         # context and is independently restricted to this exact tool by the

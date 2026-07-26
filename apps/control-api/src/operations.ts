@@ -275,6 +275,9 @@ export class GovernedOperationService {
       schemaId: string;
       arguments: Record<string, OwnedJson>;
       displayName: string;
+      safeSummary?: string;
+      resourceName?: string;
+      resourceLocation?: string;
     },
     agentId: string,
     policy: { policyVersionId: string; policyHash: string },
@@ -309,7 +312,11 @@ export class GovernedOperationService {
       expiresAt: expiresAt.toISOString(),
     };
     const operationDigest = governedOperationDigest(operationEnvelope);
-    const resource = microsoft365Resource(input.toolName, input.arguments, input.displayName);
+    const resource = input.resourceLocation ? {
+      safeSummary: input.safeSummary ?? input.displayName,
+      resourceName: input.resourceName ?? input.displayName,
+      resourceLocation: input.resourceLocation,
+    } : microsoft365Resource(input.toolName, input.arguments, input.displayName);
     const record = await this.store.createGovernedOperation({
       id: operationId,
       identity,

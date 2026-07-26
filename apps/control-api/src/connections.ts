@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { OneComputerError, runtimePolicySchema, type IdentityContext, type RuntimePolicy } from "@onecomputer/contracts";
+import { OneComputerError, runtimePolicySchema, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@onecomputer/contracts";
 import type {
   McpConnectorAdministrationGateway,
   OAuthConnectionGateway,
@@ -287,6 +287,65 @@ export class McpConnectionService {
     return { deleted: true };
   }
 
+  async connectorToolPolicy(identity: IdentityContext, connectorId: string) {
+    const connector = await this.connector(identity.tenantId, connectorId);
+    if (connector.id === "microsoft-365") {
+      throw new OneComputerError("MCP_CONNECTOR_POLICY_MANAGED", "Use the Microsoft 365 tool policy", 409);
+    }
+    const status = await this.gateway.userOAuthConnectionStatus(identity, connector.serverName);
+    if (status.state !== "connected") {
+      throw new OneComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
+    }
+    const toolNames = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
+    const tools = toolNames.map((name) => ({
+      name,
+      displayName: this.toolDisplayName(name),
+      description: `Use ${this.toolDisplayName(name)} in ${connector.name}.`,
+      service: "tools",
+      risk: "unknown" as const,
+      decision: (connector.toolPolicies[name] ?? "allow") as McpToolPolicyDecision,
+    }));
+    const decisions = Object.fromEntries(tools.map((tool) => [tool.name, tool.decision]));
+    return {
+      connectorId: connector.id,
+      connectorName: connector.name,
+      serverName: connector.serverName,
+      documentHash: createHash("sha256").update(JSON.stringify(decisions)).digest("hex"),
+      tools,
+    };
+  }
+
+  async saveConnectorToolPolicy(
+    identity: IdentityContext,
+    connectorId: string,
+    tools: Record<string, McpToolPolicyDecision>,
+  ) {
+    const current = await this.connectorToolPolicy(identity, connectorId);
+    const expected = current.tools.map((tool) => tool.name).sort();
+    if (Object.keys(tools).sort().join("\0") !== expected.join("\0")) {
+      throw new OneComputerError("INVALID_TOOL_POLICY", `A decision is required for every ${current.connectorName} tool`, 400);
+    }
+    const saved = await this.registry.updateToolPolicies(identity.tenantId, connectorId, tools);
+    if (!saved) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    this.invalidateTenantProjection(identity.tenantId);
+    return this.connectorToolPolicy(identity, connectorId);
+  }
+
+  async hostedToolPolicy(identity: IdentityContext, serverName: string, toolName: string) {
+    const connector = (await this.connectors(identity.tenantId))
+      .find((candidate) => candidate.serverName === serverName && candidate.id !== "microsoft-365");
+    if (!connector) return null;
+    return {
+      connectorId: connector.id,
+      connectorName: connector.name,
+      serverId: connector.serverId,
+      serverName: connector.serverName,
+      toolName,
+      displayName: this.toolDisplayName(toolName),
+      decision: (connector.toolPolicies[toolName] ?? "allow") as McpToolPolicyDecision,
+    };
+  }
+
   async projectConnectedConnectors(identity: IdentityContext, policy: RuntimePolicy) {
     const cacheKey = `${identity.tenantId}:${identity.subjectId}:${policy.policyHash}:${policy.agentId}`;
     const cached = this.projectionCache.get(cacheKey);
@@ -380,6 +439,7 @@ export class McpConnectionService {
       authorizationOrigins: _authorizationOrigins,
       endpointUrl: _endpointUrl,
       scopes: _scopes,
+      toolPolicies: _toolPolicies,
       tenantId: _tenantId,
       serverId: _serverId,
       createdBy: _createdBy,
@@ -423,6 +483,16 @@ export class McpConnectionService {
     if (input.clientSecret && !input.clientId) {
       throw new OneComputerError("MCP_CONNECTOR_CLIENT_INVALID", "Client ID is required when a client secret is supplied", 400);
     }
+  }
+
+  private toolDisplayName(name: string) {
+    const words = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim();
+    return words ? words.replace(/\b\w/g, (letter) => letter.toUpperCase()).slice(0, 128) : "Connector tool";
+  }
+
+  private invalidateTenantProjection(tenantId: string) {
+    const prefix = `${tenantId}:`;
+    for (const key of this.projectionCache.keys()) if (key.startsWith(prefix)) this.projectionCache.delete(key);
   }
 
   private invalidateProjection(identity: IdentityContext) {

@@ -352,14 +352,18 @@ function SignInScreen({ error }) {
 }
 
 function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, onPolicySave }) {
-  const serviceLabels = { mail: "Outlook Mail", calendar: "Calendar", onedrive: "OneDrive", teams: "Teams" };
-  const groupedTools = Object.entries(serviceLabels).map(([service, label]) => ({ service, label, tools: mcpPolicy?.tools.filter((tool) => tool.service === service) ?? [] }));
-  if (loading && !mcpPolicy) return <div className="tool-policy-loading">Loading Microsoft 365 tools…</div>;
+  const serviceLabels = mcpPolicy?.connectorId
+    ? { tools: `${mcpPolicy.connectorName} tools` }
+    : { mail: "Outlook Mail", calendar: "Calendar", onedrive: "OneDrive", teams: "Teams" };
+  const groupedTools = Object.entries(serviceLabels)
+    .map(([service, label]) => ({ service, label, tools: mcpPolicy?.tools.filter((tool) => tool.service === service) ?? [] }))
+    .filter((group) => group.tools.length);
+  if (loading && !mcpPolicy) return <div className="tool-policy-loading">Loading connector tools…</div>;
   return (
       <section className="tool-policy-card connector-tool-policy" aria-labelledby="tool-policy-heading">
         <div className="tool-policy-heading">
           <div><p>Organization tool policy</p><h2 id="tool-policy-heading">Tools &amp; approvals</h2></div>
-          {mcpPolicy && <span>Version {mcpPolicy.version} · {mcpPolicy.documentHash.slice(0, 12)}…</span>}
+          {mcpPolicy && <span>{mcpPolicy.version ? `Version ${mcpPolicy.version} · ` : ""}{mcpPolicy.documentHash.slice(0, 12)}…</span>}
         </div>
         <p className="tool-policy-intro">Choose what assigned workspace agents may run immediately, what requires a signed approval, and what is blocked. Saving creates an immutable policy version and refreshes running workspace grants.</p>
         <div className="tool-policy-groups">
@@ -1062,7 +1066,7 @@ function Microsoft365AccountMetadata({ account }) {
   const accountId = account?.userPrincipalName || account?.email;
   if (!accountId) return <p className="connection-metadata">Connected account details unavailable</p>;
   return (
-    <p className="connection-metadata">
+    <p className="connection-metadata connection-account-metadata">
       Connected as <strong>{account?.displayName || accountId}</strong>
       {account?.displayName && accountId !== account.displayName ? ` · ${accountId}` : ""}
     </p>
@@ -1122,7 +1126,7 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
   );
 }
 
-function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onBack }) {
+function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
   const unavailable = connector?.state === "unavailable";
@@ -1152,10 +1156,13 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
       </header>
 
       <nav className="connector-tabs" aria-label={`${connector.name} settings`}>
-        <button className="active" type="button">Overview</button>
+        <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
+        {isAdmin && connected && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
       </nav>
 
-      <div className="connector-overview">
+      {activeTab === "tools" && isAdmin && connected ? (
+        <ToolPolicyEditor mcpPolicy={mcpPolicy} loading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />
+      ) : <div className="connector-overview">
         <section className="connector-overview-card">
           <div>
             <p>Connection status</p>
@@ -1165,7 +1172,7 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
               : unavailable
                 ? "An administrator must finish setting up this service before people can connect it."
                 : connector.description}</span>
-            <div className="connection-services" aria-label="Included services">{connector.services.map((service) => <span key={service}>{service}</span>)}</div>
+            {connector.services.length > 0 && <div className="connection-services" aria-label="Included services">{connector.services.map((service) => <span key={service}>{service}</span>)}</div>}
             {connectedAt && <p className="connection-metadata">Connected {connectedAt}</p>}
           </div>
           <div className="connection-actions">
@@ -1185,7 +1192,7 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
             ? "Your organization decides which tools each workspace can use."
             : "Once connected, this service and its available tools are added to your workspace agents automatically."}</p>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -1309,9 +1316,7 @@ const emptyConnectorDraft = {
   shortDescription: "",
   description: "",
   category: "Productivity",
-  services: "",
   endpointUrl: "",
-  scopes: "",
   clientId: "",
   clientSecret: "",
 };
@@ -1324,8 +1329,6 @@ function AddConnectorDialog({ onCreated, onClose }) {
   const [error, setError] = useState("");
   const payload = {
     ...draft,
-    services: draft.services.split(",").map((item) => item.trim()).filter(Boolean),
-    scopes: draft.scopes.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean),
     clientId: draft.clientId.trim() || undefined,
     clientSecret: draft.clientSecret || undefined,
   };
@@ -1384,8 +1387,6 @@ function AddConnectorDialog({ onCreated, onClose }) {
         <label><span>Category</span><SelectMenu value={draft.category} onValueChange={(value) => update("category", value)} ariaLabel="Connector category" disabled={Boolean(busy)} options={["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"].map((value) => ({ value, label: value }))} /></label>
         <label className="wide"><span>Card description</span><input name="connector-short-description" placeholder="What people can do with this service" value={draft.shortDescription} onChange={(event) => update("shortDescription", event.target.value)} disabled={Boolean(busy)} /></label>
         <label className="wide"><span>Connection description</span><textarea name="connector-description" rows="3" value={draft.description} onChange={(event) => update("description", event.target.value)} disabled={Boolean(busy)} /></label>
-        <label><span>Services</span><input name="connector-services" placeholder="Issues, projects, comments" value={draft.services} onChange={(event) => update("services", event.target.value)} disabled={Boolean(busy)} /><small>Comma-separated labels shown to people.</small></label>
-        <label><span>Requested scopes</span><input name="connector-scopes" placeholder="read write" value={draft.scopes} onChange={(event) => update("scopes", event.target.value)} disabled={Boolean(busy)} /><small>Use the provider’s documented scope names.</small></label>
       </div>
       {showCredentials && <section className="add-connector-app-credentials" role="alert" aria-labelledby="connector-credentials-title">
         <div className="add-connector-app-credentials-heading">
@@ -1415,9 +1416,9 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
     if (view.startsWith("microsoft365-") && microsoft) {
       return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} displayName={displayName} isAdmin={isAdmin} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
-    const selected = connections.find((connector) => view === `connector-${connector.id}`);
+    const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
-      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onBack={() => onViewChange("list")} />;
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
   }
   const categories = ["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"];
@@ -2376,13 +2377,18 @@ export function App() {
   }, [activeNav, session?.user.id]);
 
   useEffect(() => {
-    if (activeNav !== "Connections" || !session?.roles.includes("administrator") || connectionsView !== "microsoft365-tools") return;
+    if (activeNav !== "Connections" || !session?.roles.includes("administrator") || !connectionsView.endsWith("-tools")) return;
+    const hosted = mcpConnections.find((connector) => connectionsView === `connector-${connector.id}-tools`);
     setMcpPolicyLoading(true);
-    adminApi.mcpPolicy()
+    (connectionsView === "microsoft365-tools"
+      ? adminApi.mcpPolicy()
+      : hosted
+        ? adminApi.connectorToolPolicy(hosted.id)
+        : Promise.reject(new Error("That connector is unavailable.")))
       .then(setMcpPolicy)
       .catch(showApiError)
       .finally(() => setMcpPolicyLoading(false));
-  }, [activeNav, connectionsView, session?.user.id]);
+  }, [activeNav, connectionsView, session?.user.id, mcpConnections]);
 
   useEffect(() => {
     if (activeNav !== "Workspace" || !session || !selectedSandboxGrantId) return;
@@ -2958,7 +2964,14 @@ export function App() {
     if (!mcpPolicy) return;
     setMcpPolicySaving(true);
     try {
-      const saved = await adminApi.saveMcpPolicy(Object.fromEntries(mcpPolicy.tools.map((tool) => [tool.name, tool.decision])));
+      const decisions = Object.fromEntries(mcpPolicy.tools.map((tool) => [tool.name, tool.decision]));
+      if (mcpPolicy.connectorId) {
+        const refreshed = await adminApi.saveConnectorToolPolicy(mcpPolicy.connectorId, decisions);
+        setMcpPolicy(refreshed);
+        setToast(`${mcpPolicy.connectorName} tool and approval rules are active.`);
+        return;
+      }
+      const saved = await adminApi.saveMcpPolicy(decisions);
       const refreshed = await adminApi.mcpPolicy();
       setMcpPolicy(refreshed);
       await refreshAdminUsers();

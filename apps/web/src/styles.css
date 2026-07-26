@@ -3668,6 +3668,7 @@ textarea:focus-visible,
 .connector-overview-card p { color: #5e6874; font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; }
 .connector-overview-card h2 { margin: 7px 0; color: #142135; font-size: 21px; }
 .connector-overview-card > div > span { color: var(--muted); font-size: 14px; line-height: 1.55; }
+.connector-overview-card .connection-account-metadata { margin-top: 20px; }
 
 .approval-device-card {
   margin-top: 18px;

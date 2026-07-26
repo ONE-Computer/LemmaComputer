@@ -268,7 +268,6 @@ export function createControlServer(
     ? { executeGovernedTool: (input) => gateway.executeGovernedTool!(input) }
     : { executeGovernedTool: async () => { throw new OneComputerError("GATEWAY_NOT_CONFIGURED", "The governed tool gateway is not configured", 503, true); } };
   const operations = new GovernedOperationService(store, executor, new FixtureApprovalAuthority(fixtureApprovalSecret), undefined, security.openVtc);
-  const mcpPolicy = security.identityPolicyStore ? new McpPolicyService(security.identityPolicyStore, store, operations) : undefined;
   const oauthGateway = gateway
     && typeof (gateway as Partial<OAuthConnectionGateway>).beginUserOAuthConnection === "function"
     && typeof (gateway as Partial<OAuthConnectionGateway>).completeUserOAuthConnection === "function"
@@ -282,6 +281,12 @@ export function createControlServer(
     liteLlmPublicUrl: connectionOptions.liteLlmPublicUrl,
     registry: security.connectorRegistryStore,
   }) : undefined;
+  const mcpPolicy = security.identityPolicyStore ? new McpPolicyService(
+    security.identityPolicyStore,
+    store,
+    operations,
+    connections ? (actor, serverName, toolName) => connections.hostedToolPolicy(actor, serverName, toolName) : undefined,
+  ) : undefined;
   const requireConnections = () => {
     if (!connections) throw new OneComputerError("MCP_CONNECTIONS_NOT_CONFIGURED", "MCP connections are not configured", 503, true);
     return connections;
@@ -800,6 +805,15 @@ export function createControlServer(
       createConnectorSchema.parse(request.body ?? {}),
     );
     return reply.code(201).send({ connector });
+  });
+  app.get<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/tool-policy", async (request) => {
+    const actor = requireAdministrator(request);
+    return requireConnections().connectorToolPolicy(actor.identity, request.params.connectorId);
+  });
+  app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/tool-policy", async (request) => {
+    const actor = requireAdministrator(request);
+    const input = saveMcpToolPolicySchema.parse(request.body ?? {});
+    return requireConnections().saveConnectorToolPolicy(actor.identity, request.params.connectorId, input.tools);
   });
   app.delete<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId", async (request) => {
     const actor = requireAdministrator(request);

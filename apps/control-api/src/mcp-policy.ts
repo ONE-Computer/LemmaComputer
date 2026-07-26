@@ -93,6 +93,16 @@ type CapabilityDefinition = {
   parse: (argumentsValue: OwnedJson) => Record<string, OwnedJson>;
 };
 
+export type HostedToolPolicy = {
+  connectorId: string;
+  connectorName: string;
+  serverId: string;
+  serverName: string;
+  toolName: string;
+  displayName: string;
+  decision: "allow" | "approval_required" | "deny";
+};
+
 const definition = (
   capabilityId: string,
   schemaId: string,
@@ -203,11 +213,14 @@ export class McpPolicyService {
     private readonly identityPolicies: IdentityPolicyStore,
     private readonly governance: WorkspaceStore & GovernanceStore,
     private readonly operations: GovernedOperationService,
+    private readonly hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>,
   ) {}
 
   async authorize(request: McpPolicyRequest, correlationId: string): Promise<McpPolicyDecision> {
     const capability = m365CapabilityDefinitions[request.toolName as keyof typeof m365CapabilityDefinitions];
-    if (request.serverId !== m365LiteLlmServerId || request.serverName !== "onecomputer_ms365" || !capability) return denied("MCP_TOOL_NOT_GOVERNED");
+    if (request.serverId !== m365LiteLlmServerId || request.serverName !== "onecomputer_ms365" || !capability) {
+      return this.authorizeHosted(request, correlationId);
+    }
 
     const identity: IdentityContext = {
       tenantId: request.tenantId,
@@ -331,6 +344,110 @@ export class McpPolicyService {
       schemaHash: capability.schemaHash,
       operationId: operation.id,
     };
+  }
+
+  private async authorizeHosted(request: McpPolicyRequest, correlationId: string): Promise<McpPolicyDecision> {
+    if (!this.hostedToolPolicy) return denied("MCP_TOOL_NOT_GOVERNED");
+    const identity: IdentityContext = {
+      tenantId: request.tenantId,
+      subjectId: request.subjectId,
+      audience: "onecomputer-control",
+    };
+    const hosted = await this.hostedToolPolicy(identity, request.serverName, request.toolName);
+    if (!hosted || hosted.serverId !== request.serverId) return denied("MCP_TOOL_NOT_GOVERNED");
+    const capabilityId = `mcp.${hosted.connectorId}.${request.toolName}`.slice(0, 128);
+    const schemaId = `onecomputer.mcp.${createHash("sha256").update(`${request.serverName}\0${request.toolName}`).digest("hex").slice(0, 32)}.v1`;
+    const schemaHash = createHash("sha256").update(canonicalJson({
+      schemaVersion: 1,
+      serverName: request.serverName,
+      toolName: request.toolName,
+      arguments: "owned-json-object",
+    })).digest("hex");
+    const genericDecision = (
+      decision: McpPolicyDecision["decision"],
+      code: string,
+      operationId: string | null = null,
+    ): McpPolicyDecision => ({
+      schemaVersion: 1,
+      decision,
+      code,
+      capabilityId,
+      schemaId,
+      schemaHash,
+      operationId,
+    });
+    const [principal, effectivePolicy, workspace] = await Promise.all([
+      this.identityPolicies.getPrincipal(request.subjectId),
+      this.identityPolicies.getEffectivePolicy(request.subjectId),
+      this.governance.getOwned(identity, request.workspaceId),
+    ]);
+    if (!principal || principal.tenantId !== request.tenantId) return genericDecision("deny", "MCP_IDENTITY_MISMATCH");
+    if (!effectivePolicy || !workspace) return genericDecision("deny", "MCP_POLICY_NOT_ASSIGNED");
+    const runtime = runtimePolicyFor(effectivePolicy);
+    const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id));
+    const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);
+    const bindingMatches = allowedAgentIds.has(request.agentId)
+      && runtime.policyVersionId === request.policyVersionId
+      && runtime.policyHash === request.policyHash
+      && effectivePolicy.workspaceId === request.workspaceId;
+    const isExecution = Boolean(request.operationId || request.operationDigest || request.leaseId);
+    if (!bindingMatches && !isExecution) return genericDecision("deny", "MCP_POLICY_BINDING_MISMATCH");
+    if (isExecution) {
+      if (!request.operationId || !request.operationDigest || !request.leaseId) {
+        return genericDecision("deny", "MCP_EXECUTION_BINDING_INCOMPLETE");
+      }
+      const claimed = await this.governance.claimToolDispatch(identity, {
+        operationId: request.operationId,
+        operationDigest: request.operationDigest,
+        leaseId: request.leaseId,
+        workspaceId: request.workspaceId,
+        agentId: request.agentId,
+        serverName: request.serverName,
+        toolName: request.toolName,
+        arguments: request.arguments,
+        dispatchedAt: new Date(),
+        correlationId,
+      });
+      return claimed
+        ? genericDecision("allow", "MCP_APPROVED_EXECUTION_LEASE", request.operationId)
+        : genericDecision("deny", "MCP_EXECUTION_BINDING_INVALID");
+    }
+    if (hosted.decision === "deny") return genericDecision("deny", "MCP_TOOL_BLOCKED_BY_POLICY");
+    if (hosted.decision === "allow") return genericDecision("allow", "MCP_POLICY_ALLOWED");
+    if (!request.arguments || typeof request.arguments !== "object" || Array.isArray(request.arguments)) {
+      return genericDecision("deny", "MCP_ARGUMENTS_OUT_OF_POLICY");
+    }
+    const requestFingerprint = createHash("sha256").update(canonicalJson({
+      tenantId: request.tenantId,
+      subjectId: request.subjectId,
+      workspaceId: request.workspaceId,
+      agentId: request.agentId,
+      policyVersionId: request.policyVersionId,
+      serverName: request.serverName,
+      toolName: request.toolName,
+      arguments: request.arguments,
+    })).digest("hex");
+    const operation = await this.operations.createMicrosoft365Operation(
+      identity,
+      request.workspaceId,
+      {
+        capabilityId,
+        schemaId,
+        serverName: request.serverName,
+        toolName: request.toolName,
+        arguments: request.arguments,
+        displayName: hosted.displayName,
+        safeSummary: `${hosted.displayName} in ${hosted.connectorName}`,
+        resourceName: hosted.displayName,
+        resourceLocation: hosted.connectorName,
+      },
+      request.agentId,
+      { policyVersionId: runtime.policyVersionId, policyHash: runtime.policyHash },
+      `mcp:${requestFingerprint}`,
+      correlationId || randomUUID(),
+      true,
+    );
+    return genericDecision("approval_required", "MCP_APPROVAL_REQUIRED", operation.id);
   }
 }
 

@@ -156,6 +156,7 @@ test("Connections stays employee-facing and uses spacing instead of decorative r
     source("apps/web/src/styles.css"),
   ]);
   const connections = app.slice(app.indexOf("function Microsoft365Detail"), app.indexOf("function ChatPart"));
+  const addConnector = app.slice(app.indexOf("const emptyConnectorDraft"), app.indexOf("function ConnectionsScreen"));
   assert.match(connections, /Your services/);
   assert.match(connections, /Connect the work services you want to use/);
   assert.doesNotMatch(connections, /LiteLLM|OAuth credentials|refresh tokens|MCP catalog|MCP connector/);
@@ -166,6 +167,9 @@ test("Connections stays employee-facing and uses spacing instead of decorative r
   assert.match(connections, /\{showCredentials && <section className="add-connector-app-credentials"/);
   assert.match(connections, /Connection setup is automatic\. No provider credentials are needed\./);
   assert.doesNotMatch(connections, /<details className="add-connector-app-credentials"/);
+  assert.doesNotMatch(addConnector, /connector-services|connector-scopes|Requested scopes/);
+  assert.match(connections, /Tools &amp; approvals/);
+  assert.match(connections, /connector-\$\{selected\.id\}-tools/);
 });
 
 test("remote-only approvals notify desktop without opening its decision drawer", async () => {

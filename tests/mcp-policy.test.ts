@@ -4,7 +4,7 @@ import test from "node:test";
 import { m365ToolCatalog, type IdentityContext, type McpPolicyRequest } from "@onecomputer/contracts";
 import type { GovernedToolExecutor } from "@onecomputer/litellm-adapter";
 import { MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@onecomputer/workspace-store";
-import { McpPolicyService, m365CapabilityDefinitions } from "../apps/control-api/src/mcp-policy.js";
+import { McpPolicyService, m365CapabilityDefinitions, type HostedToolPolicy } from "../apps/control-api/src/mcp-policy.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "../apps/control-api/src/operations.js";
 
 const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "onecomputer-control" };
@@ -12,7 +12,7 @@ const agentId = randomUUID();
 const policyVersionId = randomUUID();
 const policyHash = "a".repeat(64);
 
-const setup = async () => {
+const setup = async (hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>) => {
   const store = new MemoryWorkspaceStore();
   const workspace = await store.createOrGet(identity, "personal", randomUUID());
   await store.update(workspace.id, { state: "ready" });
@@ -54,7 +54,7 @@ const setup = async () => {
   } as unknown as IdentityPolicyStore;
   const executor = { executeGovernedTool: async () => ({ upstreamReference: "unused", resultSummary: "unused", result: {} }) } as GovernedToolExecutor;
   const operations = new GovernedOperationService(store, executor, new FixtureApprovalAuthority("mcp-policy-fixture-secret-at-least-32-characters"));
-  const policy = new McpPolicyService(identityPolicies, store, operations);
+  const policy = new McpPolicyService(identityPolicies, store, operations, hostedToolPolicy);
   const base: McpPolicyRequest = {
     schemaVersion: 1,
     tenantId: identity.tenantId,
@@ -73,6 +73,40 @@ const setup = async () => {
   };
   return { store, workspace, policy, base, effective, operations };
 };
+
+test("hosted connector policy defaults can allow, block, or hold an exact tool for approval", async () => {
+  let decision: HostedToolPolicy["decision"] = "allow";
+  const hosted = async (_identity: IdentityContext, serverName: string, toolName: string): Promise<HostedToolPolicy | null> => (
+    serverName === "onecomputer_linear" ? {
+      connectorId: "linear",
+      connectorName: "Linear",
+      serverId: "onecomputer_linear",
+      serverName,
+      toolName,
+      displayName: "Create Issue",
+      decision,
+    } : null
+  );
+  const { policy, base, store } = await setup(hosted);
+  const request: McpPolicyRequest = {
+    ...base,
+    serverId: "onecomputer_linear",
+    serverName: "onecomputer_linear",
+    toolName: "create_issue",
+    arguments: { title: "Investigate connector policy" },
+  };
+  assert.equal((await policy.authorize(request, "hosted-allow")).decision, "allow");
+  decision = "deny";
+  assert.equal((await policy.authorize(request, "hosted-deny")).code, "MCP_TOOL_BLOCKED_BY_POLICY");
+  decision = "approval_required";
+  const held = await policy.authorize(request, "hosted-approval");
+  assert.equal(held.decision, "approval_required");
+  const operation = await store.getOwnedOperation(identity, held.operationId!);
+  assert.equal(operation?.serverName, "onecomputer_linear");
+  assert.equal(operation?.toolName, "create_issue");
+  assert.equal(operation?.resourceLocation, "Linear");
+  assert.equal((await policy.authorize({ ...request, serverId: "another_server" }, "hosted-server-mutation")).code, "MCP_TOOL_NOT_GOVERNED");
+});
 
 test("the curated Microsoft 365 surface is complete and defaults every write to approval", () => {
   assert.equal(Object.keys(m365ToolCatalog).length, 38);

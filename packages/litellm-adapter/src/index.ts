@@ -710,6 +710,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         } : {}),
         onecomputer_gateway_user_id: gatewayUserId,
         onecomputer_gateway_agent_id: gatewayAgentId,
+        onecomputer_mcp_servers: mcpServers,
       },
       object_permission: {
         mcp_servers: mcpServers,
@@ -883,6 +884,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           onecomputer_operation_id: input.operationId,
           onecomputer_operation_digest: input.operationDigest,
           onecomputer_lease_id: input.leaseId,
+          onecomputer_mcp_servers: [input.serverName],
         },
         object_permission: {
           mcp_servers: [input.serverName],
@@ -896,13 +898,13 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       if (!availableTools.ok) throw this.upstreamError("GATEWAY_EXECUTION_DISCOVERY_FAILED", availableTools.status, availableTools.payload);
       const tools = Array.isArray(asObject(availableTools.payload).tools) ? asObject(availableTools.payload).tools as unknown[] : [];
       const selectedTool = tools.map(asObject).find((tool) => tool.name === input.toolName);
-      const serverId = asObject(selectedTool?.mcp_info).server_id;
-      if (typeof serverId !== "string" || !serverId) {
+      const selectedServerId = asObject(selectedTool?.mcp_info).server_id;
+      if (typeof selectedServerId !== "string" || !selectedServerId) {
         throw new OneComputerError("GATEWAY_EXECUTION_TOOL_NOT_ASSIGNED", "The exact governed tool is not assigned to this execution", 403);
       }
       const called = await this.dataCall("/mcp-rest/tools/call", credential, {
         method: "POST",
-        body: { server_id: serverId, name: input.toolName, arguments: input.arguments as JsonObject },
+        body: { server_id: selectedServerId, name: input.toolName, arguments: input.arguments as JsonObject },
       });
       if (!called.ok) throw this.upstreamError("GATEWAY_TOOL_EXECUTION_FAILED", called.status, called.payload);
       const payload = asObject(called.payload);

@@ -1,4 +1,5 @@
 import pg from "pg";
+import type { McpToolPolicyDecision } from "@onecomputer/contracts";
 
 export type ConnectorCategory = "Productivity" | "Developer tools" | "Communication" | "Data and analytics" | "Other";
 
@@ -15,6 +16,7 @@ export type ConnectorRegistryRecord = {
   endpointUrl: string;
   authorizationOrigins: string[];
   scopes: string[];
+  toolPolicies: Record<string, McpToolPolicyDecision>;
   brand: string;
   policySupport: "governed" | "automatic";
   source: "built-in" | "custom";
@@ -23,13 +25,16 @@ export type ConnectorRegistryRecord = {
   updatedAt: Date;
 };
 
-export type SaveConnectorRegistryRecord = Omit<ConnectorRegistryRecord, "createdAt" | "updatedAt">;
+export type SaveConnectorRegistryRecord = Omit<ConnectorRegistryRecord, "createdAt" | "updatedAt" | "toolPolicies"> & {
+  toolPolicies?: Record<string, McpToolPolicyDecision>;
+};
 
 export interface ConnectorRegistryStore {
   seedConnectors(tenantId: string, connectors: SaveConnectorRegistryRecord[]): Promise<void>;
   listConnectors(tenantId: string): Promise<ConnectorRegistryRecord[]>;
   getConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
   saveConnector(record: SaveConnectorRegistryRecord): Promise<ConnectorRegistryRecord>;
+  updateToolPolicies(tenantId: string, connectorId: string, tools: Record<string, McpToolPolicyDecision>): Promise<ConnectorRegistryRecord | null>;
   deleteConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
 }
 
@@ -46,6 +51,9 @@ const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
   endpointUrl: String(row.endpoint_url),
   authorizationOrigins: Array.isArray(row.authorization_origins) ? row.authorization_origins.map(String) : [],
   scopes: Array.isArray(row.scopes) ? row.scopes.map(String) : [],
+  toolPolicies: row.tool_policies && typeof row.tool_policies === "object" && !Array.isArray(row.tool_policies)
+    ? row.tool_policies as Record<string, McpToolPolicyDecision>
+    : {},
   brand: String(row.brand),
   policySupport: row.policy_support as ConnectorRegistryRecord["policySupport"],
   source: row.source as ConnectorRegistryRecord["source"],
@@ -67,6 +75,7 @@ const values = (record: SaveConnectorRegistryRecord) => [
   record.endpointUrl,
   JSON.stringify(record.authorizationOrigins),
   JSON.stringify(record.scopes),
+  JSON.stringify(record.toolPolicies ?? {}),
   record.brand,
   record.policySupport,
   record.source,
@@ -87,8 +96,8 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
       await this.pool.query(
         `INSERT INTO connector_registry (
           tenant_id,id,server_id,server_name,name,short_description,description,category,services,
-          endpoint_url,authorization_origins,scopes,brand,policy_support,source,created_by
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12::jsonb,$13,$14,$15,$16)
+          endpoint_url,authorization_origins,scopes,tool_policies,brand,policy_support,source,created_by
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15,$16,$17)
         ON CONFLICT (tenant_id,id) DO UPDATE SET
           server_id=EXCLUDED.server_id,
           server_name=EXCLUDED.server_name,
@@ -129,12 +138,20 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
     const result = await this.pool.query(
       `INSERT INTO connector_registry (
         tenant_id,id,server_id,server_name,name,short_description,description,category,services,
-        endpoint_url,authorization_origins,scopes,brand,policy_support,source,created_by
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12::jsonb,$13,$14,$15,$16)
+        endpoint_url,authorization_origins,scopes,tool_policies,brand,policy_support,source,created_by
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15,$16,$17)
       RETURNING *`,
       values(record),
     );
     return mapRow(result.rows[0]);
+  }
+
+  async updateToolPolicies(tenantId: string, connectorId: string, tools: Record<string, McpToolPolicyDecision>) {
+    const result = await this.pool.query(
+      "UPDATE connector_registry SET tool_policies=$3::jsonb,updated_at=now() WHERE tenant_id=$1 AND id=$2 RETURNING *",
+      [tenantId, connectorId, JSON.stringify(tools)],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
   }
 
   async deleteConnector(tenantId: string, connectorId: string) {
@@ -156,7 +173,7 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       const current = this.records.get(key);
       if (!current) await this.saveConnector(connector);
       else if (current.source === "built-in") {
-        this.records.set(key, { ...current, ...connector, updatedAt: new Date() });
+        this.records.set(key, { ...current, ...connector, toolPolicies: current.toolPolicies, updatedAt: new Date() });
       }
     }
   }
@@ -175,7 +192,16 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
     const key = this.key(record.tenantId, record.id);
     if (this.records.has(key)) throw new Error("Connector already exists");
     const now = new Date();
-    const saved = { ...record, createdAt: now, updatedAt: now };
+    const saved = { ...record, toolPolicies: record.toolPolicies ?? {}, createdAt: now, updatedAt: now };
+    this.records.set(key, saved);
+    return saved;
+  }
+
+  async updateToolPolicies(tenantId: string, connectorId: string, tools: Record<string, McpToolPolicyDecision>) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const saved = { ...record, toolPolicies: { ...tools }, updatedAt: new Date() };
     this.records.set(key, saved);
     return saved;
   }

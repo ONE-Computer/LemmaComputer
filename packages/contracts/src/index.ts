@@ -1044,7 +1044,7 @@ export const mcpPolicyRequestSchema = z.strictObject({
   operationId: z.uuid().nullable(),
   operationDigest: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   leaseId: z.uuid().nullable(),
-  serverId: z.string().regex(/^[a-f0-9]{32}$/),
+  serverId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
   serverName: z.string().min(1).max(128),
   toolName: z.string().min(1).max(128),
   arguments: ownedJsonSchema,
