@@ -95,7 +95,6 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   const effectivePolicy: EffectivePolicy = {
     assignmentId: "assignment-1", policyBundleId: "mvp-standard:acme", policyVersionId: "version-1", version: 1,
     documentHash: "a".repeat(64), assignedBy: "alpha", assignedAt: new Date().toISOString(), agentId: "agent-1",
-    workspaceIdentityId: "workspace-identity-1", workspaceId: "11111111-1111-4111-8111-111111111111",
     vendorUserId: "oc-user-test", document: { schemaVersion: 1 },
   };
   let assigned = false;
@@ -148,7 +147,6 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     } : null,
   });
   await workspaceStore.update(activeWorkspace.id, { state: "ready" });
-  effectivePolicy.workspaceId = activeWorkspace.id;
   const identityPolicyStore = {
     listUsers: async (tenantId) => tenantId === "acme" ? [{ userId: "alpha", email: principal.email, displayName: principal.displayName, roles: principal.roles, effectivePolicy: revoked ? null : effectivePolicy }] : [],
     assignMvpPolicy: async () => { assigned = true; revoked = false; return effectivePolicy; },
@@ -265,9 +263,9 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     const revoke = await app.inject({ method: "DELETE", url: "/v1/admin/users/alpha/policy", headers });
     assert.equal(revoke.statusCode, 204);
     assert.deepEqual(revokedKeys.sort(), [
-      `${activeWorkspace.id}:agent-1`,
-      `${activeWorkspace.id}:default`,
-    ]);
+      `${activeWorkspace.id}:agent-1:claude-desktop`,
+      `${openWorkspace.id}:agent-1:claude-desktop`,
+    ].sort());
   } finally {
     await app.close();
   }

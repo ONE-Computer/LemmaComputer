@@ -16,6 +16,14 @@ BEGIN
     WHERE table_schema='public'
       AND table_name='workspace_egress_security_group_assignments'
       AND column_name='security_group_version_id'
+  )
+  AND to_regclass('public.workspace_identities') IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema='public'
+      AND table_name='policy_assignments'
+      AND column_name='workspace_identity_id'
   ) THEN
     EXECUTE $migration$
       INSERT INTO workspace_egress_security_group_assignments (
@@ -40,7 +48,15 @@ BEGIN
       ORDER BY pa.tenant_id, pa.user_id, wi.grant_id, pa.assigned_at DESC
       ON CONFLICT (tenant_id, subject_id, grant_id) DO NOTHING
     $migration$;
+  END IF;
 
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema='public'
+      AND table_name='workspace_egress_security_group_assignments'
+      AND column_name='security_group_version_id'
+  ) THEN
     CREATE INDEX IF NOT EXISTS workspace_egress_security_group_version_idx
       ON workspace_egress_security_group_assignments (security_group_version_id);
   END IF;

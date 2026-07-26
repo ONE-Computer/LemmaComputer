@@ -30,8 +30,6 @@ export type EffectivePolicy = {
   assignedBy: string;
   assignedAt: string;
   agentId: string;
-  workspaceIdentityId: string;
-  workspaceId: string | null;
   vendorUserId: string;
   document: OwnedJson;
   egressSecurityGroup?: EgressSecurityGroupVersion | null;
@@ -231,7 +229,6 @@ export interface IdentityPolicyStore {
   getWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string }): Promise<EgressSecurityGroupVersion | null>;
   listWorkspaceEgressSecurityGroupAssignments?(input: { tenantId: string; securityGroupId: string }): Promise<Array<{ subjectId: string; grantId: string }>>;
   assignWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string; assignedBy: string; securityGroupVersionId: string }): Promise<EgressSecurityGroupVersion>;
-  bindWorkspaceIdentity(userId: string, workspaceId: string): Promise<void>;
 }
 
 const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"] as const;
@@ -330,14 +327,13 @@ const principalSelect = `
 const effectivePolicySelect = `
   SELECT pa.id AS assignment_id, pb.id AS policy_bundle_id, pv.id AS policy_version_id, pv.version,
     pv.document_hash, pv.document, pa.assigned_by, pa.assigned_at, pa.agent_id,
-    pa.workspace_identity_id, wi.workspace_id, vim.vendor_user_id, pa.tenant_id,
+    vim.vendor_user_id, pa.tenant_id,
     esgv.id AS egress_version_id, esgv.security_group_id, esgv.version AS egress_version,
     esgv.document AS egress_document, esgv.document_hash AS egress_document_hash,
     esgv.created_by AS egress_created_by, esgv.created_at AS egress_created_at
   FROM policy_assignments pa
   JOIN policy_versions pv ON pv.id=pa.policy_version_id
   JOIN policy_bundles pb ON pb.id=pv.policy_bundle_id
-  JOIN workspace_identities wi ON wi.id=pa.workspace_identity_id
   JOIN vendor_identity_mappings vim ON vim.user_id=pa.user_id AND vim.vendor='litellm' AND vim.mapping_kind='user'
   LEFT JOIN egress_security_group_versions esgv ON esgv.id=pa.egress_security_group_version_id
   WHERE pa.user_id=$1 AND pa.revoked_at IS NULL
@@ -374,8 +370,6 @@ const mapPolicy = (row: Record<string, unknown>): EffectivePolicy => {
     assignedBy: String(row.assigned_by),
     assignedAt: new Date(String(row.assigned_at)).toISOString(),
     agentId: String(row.agent_id),
-    workspaceIdentityId: String(row.workspace_identity_id),
-    workspaceId: row.workspace_id ? String(row.workspace_id) : null,
     vendorUserId: String(row.vendor_user_id),
     document: row.document as OwnedJson,
     egressSecurityGroup: row.egress_version_id && egressDocument ? mapEgressVersion(row) : null,
@@ -411,7 +405,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         await client.query("BEGIN");
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`policy-version:${candidate.policy_bundle_id}`]);
         const assignments = await client.query(
-          `SELECT id,tenant_id,user_id,agent_id,workspace_identity_id,egress_security_group_version_id,assigned_by
+          `SELECT id,tenant_id,user_id,agent_id,egress_security_group_version_id,assigned_by
            FROM policy_assignments
            WHERE policy_version_id=$1 AND revoked_at IS NULL
            FOR UPDATE`,
@@ -459,15 +453,14 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
           const replacementId = randomUUID();
           await client.query(
             `INSERT INTO policy_assignments (
-               id,tenant_id,user_id,agent_id,workspace_identity_id,policy_version_id,
+               id,tenant_id,user_id,agent_id,policy_version_id,
                egress_security_group_version_id,assigned_by
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
             [
               replacementId,
               assignment.tenant_id,
               assignment.user_id,
               assignment.agent_id,
-              assignment.workspace_identity_id,
               policyVersionId,
               assignment.egress_security_group_version_id,
               assignment.assigned_by,
@@ -559,16 +552,9 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         await client.query("UPDATE tenants SET administrator_bootstrapped_at=now() WHERE id=$1", [tenantId]);
       }
       const agentId = randomUUID();
-      const workspaceIdentityId = randomUUID();
       await client.query(
         "INSERT INTO agent_identities (id,tenant_id,owner_user_id,name) VALUES ($1,$2,$3,'Default agent') ON CONFLICT (owner_user_id,name) DO NOTHING",
         [agentId, tenantId, userId],
-      );
-      await client.query(
-        `INSERT INTO workspace_identities (id,tenant_id,owner_user_id,grant_id,workspace_id)
-         VALUES ($1,$2,$3,'personal',(SELECT id FROM workspaces WHERE tenant_id=$2 AND subject_id=$3 AND grant_id='personal' LIMIT 1))
-         ON CONFLICT (owner_user_id,grant_id) DO NOTHING`,
-        [workspaceIdentityId, tenantId, userId],
       );
       await client.query(
         `INSERT INTO vendor_identity_mappings (id,tenant_id,user_id,vendor,vendor_user_id,mapping_kind,verified_at)
@@ -723,7 +709,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         );
       }
       const assignments = await client.query(
-        `SELECT pa.id,pa.tenant_id,pa.user_id,pa.agent_id,pa.workspace_identity_id,pa.egress_security_group_version_id
+        `SELECT pa.id,pa.tenant_id,pa.user_id,pa.agent_id,pa.egress_security_group_version_id
          FROM policy_assignments pa JOIN policy_versions pv ON pv.id=pa.policy_version_id
          WHERE pa.tenant_id=$1 AND pv.policy_bundle_id=$2 AND pa.revoked_at IS NULL FOR UPDATE`,
         [input.tenantId, bundleId],
@@ -732,9 +718,9 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         await client.query("UPDATE policy_assignments SET revoked_at=now(),revoked_by=$2 WHERE id=$1", [assignment.id, input.updatedBy]);
         const replacementId = randomUUID();
         await client.query(
-          `INSERT INTO policy_assignments (id,tenant_id,user_id,agent_id,workspace_identity_id,policy_version_id,egress_security_group_version_id,assigned_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [replacementId, assignment.tenant_id, assignment.user_id, assignment.agent_id, assignment.workspace_identity_id, id, assignment.egress_security_group_version_id, input.updatedBy],
+          `INSERT INTO policy_assignments (id,tenant_id,user_id,agent_id,policy_version_id,egress_security_group_version_id,assigned_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [replacementId, assignment.tenant_id, assignment.user_id, assignment.agent_id, id, assignment.egress_security_group_version_id, input.updatedBy],
         );
         await client.query(
           "INSERT INTO capability_assignments (policy_assignment_id,capability_id) SELECT $1,capability_id FROM capability_assignments WHERE policy_assignment_id=$2",
@@ -974,7 +960,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       );
       if (!groupVersion.rowCount) throw new OneComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group version not found", 404);
       const current = await client.query(
-        `SELECT id,tenant_id,user_id,agent_id,workspace_identity_id,policy_version_id
+        `SELECT id,tenant_id,user_id,agent_id,policy_version_id
          FROM policy_assignments WHERE user_id=$1 AND tenant_id=$2 AND revoked_at IS NULL
          ORDER BY assigned_at DESC LIMIT 1 FOR UPDATE`,
         [input.targetUserId, input.tenantId],
@@ -984,9 +970,9 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       await client.query("UPDATE policy_assignments SET revoked_at=now(),revoked_by=$2 WHERE id=$1", [assignment.id, input.assignedBy]);
       const replacementId = randomUUID();
       await client.query(
-        `INSERT INTO policy_assignments (id,tenant_id,user_id,agent_id,workspace_identity_id,policy_version_id,egress_security_group_version_id,assigned_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [replacementId, assignment.tenant_id, assignment.user_id, assignment.agent_id, assignment.workspace_identity_id, assignment.policy_version_id, input.securityGroupVersionId, input.assignedBy],
+        `INSERT INTO policy_assignments (id,tenant_id,user_id,agent_id,policy_version_id,egress_security_group_version_id,assigned_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [replacementId, assignment.tenant_id, assignment.user_id, assignment.agent_id, assignment.policy_version_id, input.securityGroupVersionId, input.assignedBy],
       );
       await client.query(
         "INSERT INTO capability_assignments (policy_assignment_id,capability_id) SELECT $1,capability_id FROM capability_assignments WHERE policy_assignment_id=$2",
@@ -999,15 +985,6 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       await client.query("ROLLBACK");
       throw error;
     } finally { client.release(); }
-  }
-
-  async bindWorkspaceIdentity(userId: string, workspaceId: string) {
-    await this.pool.query(
-      `UPDATE workspace_identities wi SET workspace_id=$2
-       FROM workspaces w WHERE wi.owner_user_id=$1 AND wi.grant_id=w.grant_id AND w.id=$2
-       AND w.tenant_id=wi.tenant_id AND w.subject_id=wi.owner_user_id`,
-      [userId, workspaceId],
-    );
   }
 
   private async ensurePolicyFoundation(client: pg.PoolClient, tenantId: string, createdBy: string) {
@@ -1042,11 +1019,8 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     );
     await client.query(
       `UPDATE policy_assignments pa SET egress_security_group_version_id=$2
-       FROM workspace_identities wi
-       LEFT JOIN workspaces w ON w.id=wi.workspace_id
-       WHERE pa.tenant_id=$1 AND pa.workspace_identity_id=wi.id
-       AND pa.revoked_at IS NULL AND pa.egress_security_group_version_id IS NULL
-       AND (wi.workspace_id IS NULL OR w.state IN ('not_created','stopped','failed'))`,
+       WHERE pa.tenant_id=$1
+       AND pa.revoked_at IS NULL AND pa.egress_security_group_version_id IS NULL`,
       [tenantId, securityGroupVersionId],
     );
   }
@@ -1062,18 +1036,18 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     const existing = await client.query(effectivePolicySelect, [targetUserId]);
     if (existing.rowCount) return mapPolicy(existing.rows[0]);
     const resources = await client.query(
-      `SELECT a.id AS agent_id,wi.id AS workspace_identity_id,pv.id AS policy_version_id
-       FROM agent_identities a JOIN workspace_identities wi ON wi.owner_user_id=a.owner_user_id
+      `SELECT a.id AS agent_id,pv.id AS policy_version_id
+       FROM agent_identities a
        CROSS JOIN LATERAL (SELECT id FROM policy_versions WHERE policy_bundle_id=$2 ORDER BY version DESC LIMIT 1) pv
-       WHERE a.owner_user_id=$1 AND a.status='active' AND wi.status='active' LIMIT 1`,
+       WHERE a.owner_user_id=$1 AND a.status='active' LIMIT 1`,
       [targetUserId, mvpPolicyBundleId(tenantId)],
     );
-    if (!resources.rowCount) throw new Error("Policy target identities are missing");
+    if (!resources.rowCount) throw new Error("Policy target agent identity is missing");
     const assignmentId = randomUUID();
     await client.query(
-      `INSERT INTO policy_assignments (id,tenant_id,user_id,agent_id,workspace_identity_id,policy_version_id,egress_security_group_version_id,assigned_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [assignmentId, tenantId, targetUserId, resources.rows[0].agent_id, resources.rows[0].workspace_identity_id, resources.rows[0].policy_version_id, defaultEgressSecurityGroupVersionId(tenantId), assignedBy],
+      `INSERT INTO policy_assignments (id,tenant_id,user_id,agent_id,policy_version_id,egress_security_group_version_id,assigned_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [assignmentId, tenantId, targetUserId, resources.rows[0].agent_id, resources.rows[0].policy_version_id, defaultEgressSecurityGroupVersionId(tenantId), assignedBy],
     );
     await client.query(
       "INSERT INTO capability_assignments (policy_assignment_id,capability_id) SELECT $1,id FROM capabilities ON CONFLICT DO NOTHING",

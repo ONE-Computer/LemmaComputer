@@ -4,6 +4,7 @@ import http from "node:http";
 import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { controlRequestTimeout } from "./proxy-timeout.mjs";
 
 const host = process.env.WEB_HOST ?? "127.0.0.1";
 const port = Number(process.env.WEB_PORT ?? 4173);
@@ -100,7 +101,10 @@ const proxy = (request, response, requestUrl) => {
     response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
     upstreamResponse.pipe(response);
   });
-  upstream.setTimeout(30_000, () => upstream.destroy(new Error("Control API timeout")));
+  upstream.setTimeout(
+    controlRequestTimeout(request.method, upstreamUrl.pathname),
+    () => upstream.destroy(new Error("Control API timeout")),
+  );
   upstream.on("error", () => {
     if (response.headersSent) {
       response.destroy();

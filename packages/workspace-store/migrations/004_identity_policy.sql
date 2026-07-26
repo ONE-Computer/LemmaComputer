@@ -71,17 +71,6 @@ CREATE TABLE IF NOT EXISTS agent_identities (
   UNIQUE (owner_user_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS workspace_identities (
-  id uuid PRIMARY KEY,
-  tenant_id text NOT NULL REFERENCES tenants(id),
-  owner_user_id text NOT NULL REFERENCES users(id),
-  grant_id text NOT NULL,
-  workspace_id uuid REFERENCES workspaces(id) ON DELETE SET NULL,
-  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled')),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (owner_user_id, grant_id)
-);
-
 CREATE TABLE IF NOT EXISTS vendor_identity_mappings (
   id uuid PRIMARY KEY,
   tenant_id text NOT NULL REFERENCES tenants(id),
@@ -130,7 +119,6 @@ CREATE TABLE IF NOT EXISTS policy_assignments (
   tenant_id text NOT NULL REFERENCES tenants(id),
   user_id text NOT NULL REFERENCES users(id),
   agent_id uuid NOT NULL REFERENCES agent_identities(id),
-  workspace_identity_id uuid NOT NULL REFERENCES workspace_identities(id),
   policy_version_id uuid NOT NULL REFERENCES policy_versions(id),
   assigned_by text NOT NULL REFERENCES users(id),
   assigned_at timestamptz NOT NULL DEFAULT now(),
@@ -139,7 +127,7 @@ CREATE TABLE IF NOT EXISTS policy_assignments (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS policy_assignments_one_active_idx
-  ON policy_assignments (user_id, agent_id, workspace_identity_id)
+  ON policy_assignments (user_id)
   WHERE revoked_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS capability_assignments (

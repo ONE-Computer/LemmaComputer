@@ -18,11 +18,14 @@ export type WorkspaceIngressConfig = {
   microsoft365AuthorizationUpstream?: string;
   litellmOAuthUpstream?: string;
   requestTimeoutMs?: number;
+  agentChatRequestTimeoutMs?: number;
   verifyWorkspaceTls?: boolean;
   audit?: (event: Record<string, unknown>) => void;
 };
 
 const workspacePathPattern = /^\/workspaces\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/.*)?$/i;
+const agentChatTurnPathPattern = /^\/api\/v1\/workspaces\/[^/]+\/chat\/agents\/[^/]+\/sessions\/[^/]+\/messages\/?$/;
+const defaultAgentChatRequestTimeoutMs = 16 * 60_000;
 const hopByHopHeaders = new Set([
   "connection",
   "keep-alive",
@@ -94,6 +97,15 @@ const requestOptions = (
     rejectUnauthorized: options.workspace ? options.verifyWorkspaceTls : true,
   } : {}),
 });
+
+const requestTimeout = (
+  request: IncomingMessage,
+  ordinaryTimeoutMs: number,
+  agentChatTimeoutMs: number,
+) => request.method === "POST"
+  && agentChatTurnPathPattern.test(new URL(request.url ?? "/", "http://workspace-ingress.invalid").pathname)
+  ? agentChatTimeoutMs
+  : ordinaryTimeoutMs;
 
 const proxyRequest = (
   request: IncomingMessage,
@@ -227,6 +239,7 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
     ? new URL(config.litellmOAuthUpstream)
     : null;
   const timeoutMs = config.requestTimeoutMs ?? 30_000;
+  const agentChatTimeoutMs = config.agentChatRequestTimeoutMs ?? defaultAgentChatRequestTimeoutMs;
   const verifyWorkspaceTls = config.verifyWorkspaceTls ?? true;
   const audit = config.audit ?? ((event) => process.stdout.write(`${JSON.stringify(event)}\n`));
 
@@ -258,7 +271,16 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
     }
     const route = workspaceRoute(request);
     if (!route) {
-      proxyRequest(request, response, webUpstream, request.url ?? "/", timeoutMs, false, true, audit);
+      proxyRequest(
+        request,
+        response,
+        webUpstream,
+        request.url ?? "/",
+        requestTimeout(request, timeoutMs, agentChatTimeoutMs),
+        false,
+        true,
+        audit,
+      );
       return;
     }
     const accessToken = route.url.searchParams.get(workspaceIngressAccessParameter);

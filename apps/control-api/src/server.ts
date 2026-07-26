@@ -667,11 +667,23 @@ export function createControlServer(
     if (!target) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
     const current = await security.identityPolicyStore.getEffectivePolicy(request.params.userId);
     const revoked = await security.identityPolicyStore.revokeMvpPolicy({ tenantId: actor.tenantId, targetUserId: request.params.userId, revokedBy: actor.userId });
-    if (revoked && current?.workspaceId && gateway) {
-      await Promise.all([
-        gateway.revoke(current.workspaceId).catch(() => undefined),
-        gateway.revoke(current.workspaceId, current.agentId).catch(() => undefined),
-      ]);
+    if (revoked && current && gateway) {
+      const targetIdentity: IdentityContext = {
+        tenantId: actor.tenantId,
+        subjectId: request.params.userId,
+        audience: "onecomputer-control",
+      };
+      const runtime = runtimePolicyFor(
+        current,
+        undefined,
+        undefined,
+        assignedAgentIds(current.document as Record<string, unknown>),
+      );
+      const agentIds = runtime.agents?.map((agent) => agent.agentId) ?? [runtime.agentId];
+      const workspaces = await store.listCurrent(targetIdentity);
+      await Promise.all(workspaces.flatMap((workspace) => (
+        agentIds.map((agentId) => gateway.revoke(workspace.id, agentId).catch(() => undefined))
+      )));
     }
     return revoked ? reply.code(204).send() : reply.code(404).send({ error: { code: "POLICY_ASSIGNMENT_NOT_FOUND", message: "Active policy assignment not found", correlationId: request.id, retryable: false } });
   });
@@ -1133,7 +1145,6 @@ export function createControlServer(
     const { principal: actor, effective } = await assignedPolicy(request);
     const { policy } = await policyForGrant(actor, effective, input.grantId);
     const workspace = await service.create(identity(request), policy, input.grantId, idempotency(request.headers), request.id);
-    await security.identityPolicyStore?.bindWorkspaceIdentity(actor.userId, workspace.id);
     return reply.code(201).send(workspace);
   });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/open", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.open(identity(request), policy, request.params.workspaceId); });

@@ -196,3 +196,36 @@ test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth rout
     await Promise.all([close(ingress), close(litellm), close(microsoft365), close(web)]);
   }
 });
+
+test("workspace ingress gives agent chat turns a longer timeout than ordinary web requests", async () => {
+  const web = http.createServer((_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("finished");
+    }, 80);
+  });
+  const webPort = await listen(web);
+  const ingress = createWorkspaceIngress({
+    authority: new WorkspaceIngressAuthority(secret),
+    publicUrl: "http://localhost:4174",
+    webUpstream: `http://127.0.0.1:${webPort}`,
+    requestTimeoutMs: 25,
+    agentChatRequestTimeoutMs: 250,
+    audit: () => undefined,
+  });
+  const ingressPort = await listen(ingress);
+
+  try {
+    const ordinary = await fetch(`http://127.0.0.1:${ingressPort}/api/v1/workspaces`);
+    assert.equal(ordinary.status, 502);
+
+    const chat = await fetch(
+      `http://127.0.0.1:${ingressPort}/api/v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/session-1/messages`,
+      { method: "POST", body: "{}" },
+    );
+    assert.equal(chat.status, 200);
+    assert.equal(await chat.text(), "finished");
+  } finally {
+    await Promise.all([close(ingress), close(web)]);
+  }
+});

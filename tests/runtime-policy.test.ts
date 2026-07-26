@@ -20,7 +20,7 @@ test("legacy managed policy upgrades add open access without changing agent sele
   assert.equal(withOpenWorkspaceProfile(upgraded!), null);
 });
 
-test("effective policy projects to the one approved workspace runtime", () => {
+test("a user policy projects into an approved workspace runtime", () => {
   const effective: EffectivePolicy = {
     assignmentId: "assignment-1",
     policyBundleId: "bundle-1",
@@ -30,8 +30,6 @@ test("effective policy projects to the one approved workspace runtime", () => {
     assignedBy: "admin-1",
     assignedAt: "2026-07-20T00:00:00.000Z",
     agentId: "agent-1",
-    workspaceIdentityId: "workspace-identity-1",
-    workspaceId: null,
     vendorUserId: "oc-user-1",
     document: {
       schemaVersion: 1,
@@ -78,7 +76,7 @@ test("disposable-open projects explicit open execution and full-web egress witho
   const effective: EffectivePolicy = {
     assignmentId: "assignment-open", policyBundleId: "bundle-1", policyVersionId: "version-open", version: 5,
     documentHash: "1".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-26T00:00:00.000Z",
-    agentId: "agent-open", workspaceIdentityId: "workspace-identity-open", workspaceId: null, vendorUserId: "oc-user-1",
+    agentId: "agent-open", vendorUserId: "oc-user-1",
     document: {
       schemaVersion: 1,
       workspaceProfile: "claude-desktop-standard-v1",
@@ -108,7 +106,7 @@ test("disposable-open projects attached deny rules as full-web exceptions", () =
   const effective: EffectivePolicy = {
     assignmentId: "assignment-open-deny", policyBundleId: "bundle-1", policyVersionId: "version-open-deny", version: 6,
     documentHash: "2".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-26T00:00:00.000Z",
-    agentId: "agent-open", workspaceIdentityId: "workspace-identity-open", workspaceId: null, vendorUserId: "oc-user-1",
+    agentId: "agent-open", vendorUserId: "oc-user-1",
     document: {
       schemaVersion: 1,
       workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
@@ -164,7 +162,7 @@ test("an assigned sandbox selection can narrow a multi-model policy but cannot b
   const effective: EffectivePolicy = {
     assignmentId: "assignment-2", policyBundleId: "bundle-1", policyVersionId: "version-2", version: 2,
     documentHash: "d".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-21T00:00:00.000Z",
-    agentId: "agent-1", workspaceIdentityId: "workspace-identity-1", workspaceId: null, vendorUserId: "oc-user-1",
+    agentId: "agent-1", vendorUserId: "oc-user-1",
     document: {
       schemaVersion: 1,
       workspaceProfile: "claude-desktop-standard-v1",
@@ -185,7 +183,7 @@ test("policy-selected Claude and Hermes clients receive distinct governed identi
   const effective: EffectivePolicy = {
     assignmentId: "assignment-3", policyBundleId: "bundle-1", policyVersionId: "version-3", version: 3,
     documentHash: "e".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-23T00:00:00.000Z",
-    agentId: "agent-1", workspaceIdentityId: "workspace-identity-1", workspaceId: null, vendorUserId: "oc-user-1",
+    agentId: "agent-1", vendorUserId: "oc-user-1",
     document: {
       schemaVersion: 1,
       workspaceProfile: "claude-desktop-standard-v1",
@@ -219,7 +217,7 @@ test("optional Chrome, Claude CLI, and Hermes Agent Desktop stay off until selec
   const effective: EffectivePolicy = {
     assignmentId: "assignment-4", policyBundleId: "bundle-1", policyVersionId: "version-4", version: 4,
     documentHash: "f".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-24T00:00:00.000Z",
-    agentId: "agent-1", workspaceIdentityId: "workspace-identity-1", workspaceId: null, vendorUserId: "oc-user-1",
+    agentId: "agent-1", vendorUserId: "oc-user-1",
     document: {
       schemaVersion: 1,
       workspaceProfile: "claude-desktop-standard-v1",

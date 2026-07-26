@@ -34,8 +34,6 @@ const setup = async (hostedToolPolicy?: (identity: IdentityContext, serverName: 
     assignedBy: "admin",
     assignedAt: new Date().toISOString(),
     agentId,
-    workspaceIdentityId: randomUUID(),
-    workspaceId: workspace.id,
     vendorUserId: "oc-user-alex",
     document: {
       schemaVersion: 1,
@@ -96,6 +94,12 @@ test("hosted connector policy defaults can allow, block, or hold an exact tool f
     arguments: { title: "Investigate connector policy" },
   };
   assert.equal((await policy.authorize(request, "hosted-allow")).decision, "allow");
+  const second = await store.createOrGet(identity, "workspace-hosted", randomUUID());
+  await store.update(second.id, { state: "ready" });
+  assert.equal((await policy.authorize({
+    ...request,
+    workspaceId: second.id,
+  }, "hosted-second-owned-workspace")).decision, "allow");
   decision = "deny";
   assert.equal((await policy.authorize(request, "hosted-deny")).code, "MCP_TOOL_BLOCKED_BY_POLICY");
   decision = "approval_required";
@@ -162,6 +166,38 @@ test("Control auto-allows only an exact assigned bounded Microsoft 365 read", as
   assert.equal((await policy.authorize({ ...base, arguments: { fetchAllPages: true } }, "read-over-broad")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
   assert.equal((await policy.authorize({ ...base, policyHash: "b".repeat(64) }, "read-policy-mutation")).code, "MCP_POLICY_BINDING_MISMATCH");
   assert.equal((await policy.authorize({ ...base, serverName: "attacker" }, "read-server-mutation")).code, "MCP_TOOL_NOT_GOVERNED");
+});
+
+test("one user-scoped connector policy serves every owned workspace but no foreign workspace", async () => {
+  const { store, policy, base } = await setup();
+  const second = await store.createOrGet(identity, "workspace-research", randomUUID());
+  await store.update(second.id, { state: "ready" });
+
+  assert.equal((await policy.authorize({
+    ...base,
+    workspaceId: second.id,
+    toolName: "list-drives",
+    arguments: { top: 2 },
+  }, "second-owned-workspace")).decision, "allow");
+  assert.equal((await policy.authorize({
+    ...base,
+    toolName: "list-drives",
+    arguments: { top: 2 },
+  }, "first-owned-workspace")).decision, "allow");
+
+  const foreignIdentity: IdentityContext = {
+    tenantId: identity.tenantId,
+    subjectId: "mallory",
+    audience: "onecomputer-control",
+  };
+  const foreign = await store.createOrGet(foreignIdentity, "workspace-research", randomUUID());
+  await store.update(foreign.id, { state: "ready" });
+  assert.equal((await policy.authorize({
+    ...base,
+    workspaceId: foreign.id,
+    toolName: "list-drives",
+    arguments: { top: 2 },
+  }, "foreign-workspace")).code, "MCP_POLICY_NOT_ASSIGNED");
 });
 
 test("Control permits bounded OneDrive discovery but rejects broad search", async () => {

@@ -35,7 +35,7 @@ const headers = {
   "x-onecomputer-test-user-id": alpha.subjectId,
 };
 
-const effectivePolicy = (workspaceId: string): EffectivePolicy => ({
+const effectivePolicy = (): EffectivePolicy => ({
   assignmentId: "assignment-channel",
   policyBundleId: "bundle-channel",
   policyVersionId: "policy-channel",
@@ -44,8 +44,6 @@ const effectivePolicy = (workspaceId: string): EffectivePolicy => ({
   assignedBy: "administrator",
   assignedAt: new Date().toISOString(),
   agentId: "agent-channel",
-  workspaceIdentityId: "workspace-identity-channel",
-  workspaceId,
   vendorUserId: "vendor-alpha",
   document: {
     schemaVersion: 1,
@@ -135,7 +133,7 @@ test("credential APIs keep Telegram tokens write-only across create, rotate, lis
   const broker = new FakeBroker();
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
-    identityPolicyStore: policyStore(effectivePolicy(workspace.id)),
+    identityPolicyStore: policyStore(effectivePolicy()),
     channelBrokerClient: broker,
   });
   const credentialId = "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24";
@@ -229,7 +227,7 @@ test("workspace channel APIs bind an owned credential and policy-check the defau
   const broker = new FakeBroker();
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
-    identityPolicyStore: policyStore(effectivePolicy(workspace.id)),
+    identityPolicyStore: policyStore(effectivePolicy()),
     channelBrokerClient: broker,
   });
   const credentialId = "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24";
@@ -282,7 +280,7 @@ test("workspace settings expose one manifest with a non-secret Telegram binding"
   });
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
-    identityPolicyStore: policyStore(effectivePolicy(workspace.id)),
+    identityPolicyStore: policyStore(effectivePolicy()),
     channelBrokerClient: broker,
   });
   try {
@@ -335,7 +333,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
   const chat = new FakeAgentChat();
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
-    identityPolicyStore: policyStore(effectivePolicy(workspace.id)),
+    identityPolicyStore: policyStore(effectivePolicy()),
     agentChatSecret: "channel-agent-chat-secret-at-least-32-characters",
     agentChatClient: chat,
     channelBrokerInternalToken: channelToken,

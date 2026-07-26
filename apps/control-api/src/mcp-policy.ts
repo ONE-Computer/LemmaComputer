@@ -238,10 +238,12 @@ export class McpPolicyService {
     const runtime = runtimePolicyFor(effectivePolicy);
     const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id));
     const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);
+    // Connector credentials and effective policy are user-scoped. Workspace
+    // isolation comes from the exact owned lookup above and from the
+    // workspace/agent/policy metadata on the LiteLLM grant.
     const bindingMatches = allowedAgentIds.has(request.agentId)
       && runtime.policyVersionId === request.policyVersionId
       && runtime.policyHash === request.policyHash
-      && effectivePolicy.workspaceId === request.workspaceId
       && runtime.mcpServer === request.serverName
       && runtime.allowedTools.includes(request.toolName);
     const isExecution = Boolean(request.operationId || request.operationDigest || request.leaseId);
@@ -388,8 +390,7 @@ export class McpPolicyService {
     const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);
     const bindingMatches = allowedAgentIds.has(request.agentId)
       && runtime.policyVersionId === request.policyVersionId
-      && runtime.policyHash === request.policyHash
-      && effectivePolicy.workspaceId === request.workspaceId;
+      && runtime.policyHash === request.policyHash;
     const isExecution = Boolean(request.operationId || request.operationDigest || request.leaseId);
     if (!bindingMatches && !isExecution) return genericDecision("deny", "MCP_POLICY_BINDING_MISMATCH");
     if (isExecution) {
