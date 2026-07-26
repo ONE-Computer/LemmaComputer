@@ -161,6 +161,7 @@ test("Connections stays employee-facing and uses spacing instead of decorative r
   assert.doesNotMatch(connections, /LiteLLM|OAuth credentials|refresh tokens|MCP catalog|MCP connector/);
   assert.match(styles, /\.connections-page-intro > \.page-heading\s*\{[\s\S]*?border-bottom: 0/);
   assert.match(styles, /\.connector-category-heading\s*\{[\s\S]*?border-bottom: 0/);
+  assert.match(styles, /\.connector-mark\.microsoft\s*\{[\s\S]*?place-content: center/);
 });
 
 test("remote-only approvals notify desktop without opening its decision drawer", async () => {

@@ -3028,6 +3028,7 @@ textarea:focus-visible,
 .connector-mark.microsoft {
   grid-template-columns: repeat(2, 13px);
   grid-template-rows: repeat(2, 13px);
+  place-content: center;
   gap: 3px;
 }
 
