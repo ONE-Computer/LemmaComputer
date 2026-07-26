@@ -282,9 +282,9 @@ document = {
     "autoModeEnabled": False,
     "toolSearchEnabled": False,
     "managedMcpServers": [{
-        "name": "Microsoft 365 through ONEComputer",
+        "name": "ONEComputer connectors",
         "transport": "stdio",
-        "command": "/usr/local/libexec/onecomputer-mcp-stdio",
+        "command": "/usr/local/libexec/onecomputer-connectors-stdio",
         "args": [],
     }],
     "isLocalDevMcpEnabled": False,
@@ -312,11 +312,11 @@ with open("/home/kasm-user/.claude-cli/onecomputer.env", "w", encoding="utf-8") 
 with open("/home/kasm-user/.claude-cli/mcp.json", "w", encoding="utf-8") as output:
     json.dump({
         "mcpServers": {
-            "onecomputer_ms365": {
+            "onecomputer_connectors": {
                 "type": "stdio",
-                "command": "/usr/local/libexec/onecomputer-mcp-stdio",
+                "command": "/usr/local/libexec/onecomputer-connectors-stdio",
                 "args": [],
-                "env": {"ONECOMPUTER_MCP_BROKER": "http://127.0.0.1:4315"},
+                "env": {"ONECOMPUTER_CONNECTORS_BROKER": "http://127.0.0.1:4315"},
             },
         },
     }, output, separators=(",", ":"))
@@ -358,13 +358,13 @@ supports_websockets = false
 [analytics]
 enabled = false
 
-[mcp_servers.onecomputer_ms365]
-command = "/usr/local/libexec/onecomputer-mcp-stdio"
+[mcp_servers.onecomputer_connectors]
+command = "/usr/local/libexec/onecomputer-connectors-stdio"
 args = []
 default_tools_approval_mode = "approve"
 
-[mcp_servers.onecomputer_ms365.env]
-ONECOMPUTER_MCP_BROKER = "http://127.0.0.1:4317"
+[mcp_servers.onecomputer_connectors.env]
+ONECOMPUTER_CONNECTORS_BROKER = "http://127.0.0.1:4317"
 """
 path = os.path.join(home, "config.toml")
 with open(path, "w", encoding="utf-8") as output:
@@ -566,7 +566,7 @@ if agent_enabled hermes-claw; then
       HERMES_BUNDLED_SKILLS=/opt/onecomputer/hermes-agent/skills \
       NODE_PATH=/opt/onecomputer/hermes-office-node/node_modules \
       OPENAI_API_KEY=onecomputer-loopback-broker \
-      ONECOMPUTER_MCP_BROKER=http://127.0.0.1:4314 \
+      ONECOMPUTER_CONNECTORS_BROKER=http://127.0.0.1:4314 \
       API_SERVER_ENABLED=true \
       API_SERVER_HOST=127.0.0.1 \
       API_SERVER_PORT=8652 \

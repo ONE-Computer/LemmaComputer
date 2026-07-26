@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Credentialless stdio MCP bridge for Claude Desktop inside a managed workspace."""
+"""Credentialless aggregate MCP bridge for agents inside a managed workspace."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 
-BROKER = os.environ.get("ONECOMPUTER_MCP_BROKER", "http://127.0.0.1:4312")
+BROKER = os.environ.get("ONECOMPUTER_CONNECTORS_BROKER", "http://127.0.0.1:4312")
 if BROKER not in {
     "http://127.0.0.1:4312",
     "http://127.0.0.1:4314",
@@ -23,7 +23,7 @@ if BROKER not in {
     "http://127.0.0.1:4316",
     "http://127.0.0.1:4317",
 }:
-    raise SystemExit("invalid ONEComputer MCP broker")
+    raise SystemExit("invalid ONEComputer connectors broker")
 PROTOCOL_VERSION = "2024-11-05"
 TOOLS: dict[str, dict] = {}
 LOCAL_UPLOADS: dict[str, dict] = {}
@@ -609,18 +609,18 @@ def discover_tools() -> list[dict]:
         and isinstance(raw.get("name"), str)
         and raw.get("name") != "create-upload-session"
     ]
-    name_counts: dict[str, int] = {}
-    for raw in valid_tools:
-        name_counts[raw["name"]] = name_counts.get(raw["name"], 0) + 1
     used_names = {WAIT_TOOL_NAME}
     for raw in valid_tools:
         upstream_name = raw["name"]
-        visible_name = upstream_name
-        if name_counts[upstream_name] > 1 or upstream_name == WAIT_TOOL_NAME:
-            mcp_info = raw.get("mcp_info") if isinstance(raw.get("mcp_info"), dict) else {}
-            server_label = str(mcp_info.get("server_name") or mcp_info.get("server_id") or "connector")
-            server_label = re.sub(r"[^A-Za-z0-9_-]+", "_", server_label).strip("_")[:32] or "connector"
-            visible_name = f"{server_label}__{upstream_name}"
+        mcp_info = raw.get("mcp_info") if isinstance(raw.get("mcp_info"), dict) else {}
+        server_label = str(mcp_info.get("server_name") or mcp_info.get("server_id") or "connector")
+        server_label = re.sub(r"[^A-Za-z0-9_-]+", "_", server_label).strip("_").lower()
+        if server_label.startswith("onecomputer_"):
+            server_label = server_label.removeprefix("onecomputer_")
+        if server_label == "ms365":
+            server_label = "microsoft365"
+        server_label = server_label[:32] or "connector"
+        visible_name = f"{server_label}__{upstream_name}"
         unique_name = visible_name
         suffix = 2
         while unique_name in used_names:
@@ -670,7 +670,7 @@ def discover_tools() -> list[dict]:
                 else UPLOAD_ONEDRIVE_DESCRIPTION if upstream_name == "upload-file-content"
                 else LIST_JOINED_TEAMS_DESCRIPTION if upstream_name == "list-joined-teams"
                 else CURATED_WRITE_DESCRIPTIONS[upstream_name] if upstream_name in CURATED_WRITE_DESCRIPTIONS
-                else raw.get("description", "Microsoft 365 tool governed by ONEComputer policy.")
+                else raw.get("description", f"{server_label} tool governed by ONEComputer policy.")
             ),
             "inputSchema": input_schema,
         })
@@ -825,7 +825,7 @@ def call_tool(name: str, arguments: dict) -> dict:
             "arguments": arguments,
         })
         if not isinstance(response.get("content"), list):
-            return error_result("The Microsoft 365 connector returned an invalid tool result.")
+            return error_result("The connected service returned an invalid tool result.")
         return omit_nulls(response)
     except urllib.error.HTTPError as error:
         try:
@@ -874,10 +874,10 @@ def execute_tool_call(identifier: object, name: str, arguments: dict) -> None:
     try:
         respond(identifier, call_tool(name, arguments))
     except Exception as error:  # Tool failures must not terminate the managed connector.
-        print(f"onecomputer-mcp: {type(error).__name__}", file=sys.stderr, flush=True)
+        print(f"onecomputer-connectors: {type(error).__name__}", file=sys.stderr, flush=True)
         respond(identifier, error={
             "code": -32603,
-            "message": "The governed Microsoft 365 connector is unavailable.",
+            "message": "The governed connector bridge is unavailable.",
         })
 
 
@@ -891,8 +891,8 @@ def handle(message: dict) -> None:
             respond(identifier, {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "onecomputer-microsoft-365", "version": "0.1.0"},
-                "instructions": "Microsoft 365 tools operate on remote Outlook Mail, Calendar, OneDrive, and Teams resources. Use the corresponding MCP tool directly. Read calls normally run immediately. Writes may return a governed operation; call wait-for-governed-operation with that operationId until signed approval or denial is final. Never substitute Cowork or local-filesystem permission tools. ONEComputer Control enforces policy and obtains signed approval inside protected tool calls.",
+                "serverInfo": {"name": "onecomputer-connectors", "version": "0.1.0"},
+                "instructions": "Tools are prefixed with their connected service name and operate on remote service resources. Use the corresponding MCP tool directly. Read calls normally run immediately. Writes may return a governed operation; call wait-for-governed-operation with that operationId until signed approval or denial is final. Never substitute Cowork or local-filesystem permission tools for remote-service actions. ONEComputer Control enforces policy and obtains signed approval inside protected tool calls.",
             })
         elif method == "ping":
             respond(identifier, {})
@@ -912,13 +912,13 @@ def handle(message: dict) -> None:
                 target=execute_tool_call,
                 args=(identifier, name, arguments),
                 daemon=True,
-                name=f"onecomputer-mcp-call-{identifier}",
+                name=f"onecomputer-connectors-call-{identifier}",
             ).start()
         else:
             respond(identifier, error={"code": -32601, "message": "Method not found"})
     except Exception as error:  # MCP must report failures without terminating the managed connector.
-        print(f"onecomputer-mcp: {type(error).__name__}", file=sys.stderr, flush=True)
-        respond(identifier, error={"code": -32603, "message": "The governed Microsoft 365 connector is unavailable."})
+        print(f"onecomputer-connectors: {type(error).__name__}", file=sys.stderr, flush=True)
+        respond(identifier, error={"code": -32603, "message": "The governed connector bridge is unavailable."})
 
 
 for line in sys.stdin:
@@ -927,4 +927,4 @@ for line in sys.stdin:
         if isinstance(message, dict):
             handle(message)
     except json.JSONDecodeError:
-        print("onecomputer-mcp: ignored malformed input", file=sys.stderr, flush=True)
+        print("onecomputer-connectors: ignored malformed input", file=sys.stderr, flush=True)

@@ -83,7 +83,10 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(proxy, /job\["running"\] = False/);
   assert.match(proxy, /job\.pop\("uploadUrl", None\)/);
   assert.match(entrypoint, /"managedMcpServers"/);
-  assert.match(entrypoint, /onecomputer-mcp-stdio/);
+  assert.match(entrypoint, /onecomputer-connectors-stdio/);
+  assert.match(entrypoint, /onecomputer_connectors/);
+  assert.match(entrypoint, /ONECOMPUTER_CONNECTORS_BROKER/);
+  assert.doesNotMatch(entrypoint, /mcp_servers\.onecomputer_ms365|ONECOMPUTER_MCP_BROKER/);
   assert.doesNotMatch(`${dockerfile}\n${entrypoint}\n${proxy}`, /ONECOMPUTER_(?:OPENAI|CLAUDE|GLM)_API_KEY|LITELLM_MASTER_KEY/);
 });
 
@@ -133,7 +136,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
   const gatewayProxy = await source("infra/issue-010/onecomputer-gateway-proxy.py");
-  const mcpBridge = await source("infra/issue-010/onecomputer-mcp-stdio.py");
+  const mcpBridge = await source("infra/issue-010/onecomputer-connectors-stdio.py");
   const chatAdapter = await source("infra/issue-010/onecomputer-agent-chat.py");
   const chatRequirements = await source("infra/issue-010/agent-chat-requirements.txt");
   const chromePolicies = JSON.parse(await source("infra/issue-010/google-chrome-policies.json"));
@@ -203,6 +206,9 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   for (const port of [4312, 4314, 4315, 4316, 4317]) {
     assert.match(mcpBridge, new RegExp(`127\\.0\\.0\\.1:${port}`));
   }
+  assert.match(mcpBridge, /server_label\.removeprefix\("onecomputer_"\)/);
+  assert.match(mcpBridge, /server_label == "ms365"/);
+  assert.match(mcpBridge, /visible_name = f"\{server_label\}__\{upstream_name\}"/);
 });
 
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
@@ -215,10 +221,10 @@ test("the Hermes sandbox gateway includes its pinned private API runtime without
   assert.match(dockerfile, /importlib\.metadata\.version\("mcp"\).*1\.26\.0/);
   assert.match(entrypoint, /hermes gateway run/);
   assert.match(profileConfig, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
-  assert.match(profileConfig, /cli_toolsets = managed_office_toolsets \+ \["onecomputer_ms365"\]/);
-  assert.match(profileConfig, /api_toolsets = managed_office_toolsets \+ \["onecomputer_ms365"\]/);
-  assert.match(profileConfig, /cli_toolsets = \["hermes-cli", "onecomputer_ms365"\]/);
-  assert.match(profileConfig, /api_toolsets = \["hermes-api-server", "onecomputer_ms365"\]/);
+  assert.match(profileConfig, /cli_toolsets = managed_office_toolsets \+ \["onecomputer_connectors"\]/);
+  assert.match(profileConfig, /api_toolsets = managed_office_toolsets \+ \["onecomputer_connectors"\]/);
+  assert.match(profileConfig, /cli_toolsets = \["hermes-cli", "onecomputer_connectors"\]/);
+  assert.match(profileConfig, /api_toolsets = \["hermes-api-server", "onecomputer_connectors"\]/);
   assert.match(profileConfig, /"reasoning_effort": False/);
   assert.match(entrypoint, /\/run\/onecomputer\/hermes-gateway-bootstrap\.log/);
   assert.doesNotMatch(entrypoint, />>\/home\/kasm-user\/\.hermes\/logs\/gateway\.log/);

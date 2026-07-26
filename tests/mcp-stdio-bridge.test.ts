@@ -18,7 +18,7 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
         name: "delete-onedrive-file",
         description: "Delete a file",
         inputSchema: { type: "object" },
-        mcp_info: { server_id: "server-1" },
+        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
       }] }));
       return;
     }
@@ -47,7 +47,7 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -62,7 +62,7 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
     id: 2,
     method: "tools/call",
     params: {
-      name: "delete-onedrive-file",
+      name: "microsoft365__delete-onedrive-file",
       arguments: {
         driveId: "drive",
         driveItemId: "item",
@@ -113,7 +113,7 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
           name: "list-drives",
           description: "List drives",
           inputSchema: { type: "object" },
-          mcp_info: { server_id: "server-1" },
+          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
         },
         {
           name: "search-onedrive-files",
@@ -127,7 +127,7 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
               fetchAllPages: { type: "boolean" },
             },
           },
-          mcp_info: { server_id: "server-1" },
+          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
         },
       ] }));
       return;
@@ -148,7 +148,7 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -158,7 +158,7 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
   lines.on("line", (line) => responses.push(JSON.parse(line)));
 
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
-  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list-drives", arguments: {} } })}\n`);
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "microsoft365__list-drives", arguments: {} } })}\n`);
 
   const deadline = Date.now() + 5_000;
   while (responses.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
@@ -166,8 +166,8 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
   const advertised = (responses[0]?.result as {
     tools: Array<{ name: string; description: string; inputSchema: { properties: Record<string, { maximum?: number; const?: string }>; additionalProperties?: boolean } }>;
   }).tools;
-  const listDrives = advertised.find((tool) => tool.name === "list-drives")!;
-  const searchFiles = advertised.find((tool) => tool.name === "search-onedrive-files")!;
+  const listDrives = advertised.find((tool) => tool.name === "microsoft365__list-drives")!;
+  const searchFiles = advertised.find((tool) => tool.name === "microsoft365__search-onedrive-files")!;
   assert.equal(listDrives.inputSchema.properties.top?.maximum, 25);
   assert.equal(listDrives.inputSchema.additionalProperties, false);
   assert.equal(searchFiles.inputSchema.properties.top?.maximum, 10);
@@ -202,7 +202,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
           },
           required: ["driveId", "driveItemId", "confirm"],
         },
-        mcp_info: { server_id: "server-1" },
+        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
       }] }));
       return;
     }
@@ -226,7 +226,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -241,7 +241,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
     id: 2,
     method: "tools/call",
     params: {
-      name: "delete-onedrive-file",
+      name: "microsoft365__delete-onedrive-file",
       arguments: {
         driveId: "drive",
         driveItemId: "item",
@@ -293,7 +293,7 @@ test("Claude Desktop bridge supplies Softeria confirmation for an allowed calend
           properties: { body: { type: "object" }, confirm: { type: "boolean" } },
           required: ["body"],
         },
-        mcp_info: { server_id: "server-1" },
+        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
       }] }));
       return;
     }
@@ -309,7 +309,7 @@ test("Claude Desktop bridge supplies Softeria confirmation for an allowed calend
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -324,7 +324,7 @@ test("Claude Desktop bridge supplies Softeria confirmation for an allowed calend
     id: 2,
     method: "tools/call",
     params: {
-      name: "create-calendar-event",
+      name: "microsoft365__create-calendar-event",
       arguments: { body: { subject: "OC-MVP-ALLOW" }, confirm: false },
     },
   })}\n`);
@@ -354,7 +354,7 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
           },
           required: ["driveId", "driveItemId"],
         },
-        mcp_info: { server_id: "server-1" },
+        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
       }] }));
       return;
     }
@@ -366,7 +366,7 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -380,7 +380,7 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
     jsonrpc: "2.0",
     id: 2,
     method: "tools/call",
-    params: { name: "delete-onedrive-file", arguments: { driveId: "drive", driveItemId: "item" } },
+    params: { name: "microsoft365__delete-onedrive-file", arguments: { driveId: "drive", driveItemId: "item" } },
   })}\n`);
 
   const deadline = Date.now() + 5_000;
@@ -416,7 +416,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
           },
           required: ["driveId", "driveItemId", "body", "confirm"],
         },
-        mcp_info: { server_id: "server-1" },
+        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
       }] }));
       return;
     }
@@ -438,7 +438,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -453,7 +453,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
     id: 2,
     method: "tools/call",
     params: {
-      name: "upload-file-content",
+      name: "microsoft365__upload-file-content",
       arguments: {
         driveId: "drive",
         driveItemId: "/items/root:/happy.txt:/content",
@@ -474,7 +474,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
         oneOf: Array<{ required: string[] }>;
       };
     }>;
-  }).tools.find((tool) => tool.name === "upload-file-content")!;
+  }).tools.find((tool) => tool.name === "microsoft365__upload-file-content")!;
   assert.match(advertised.description, /Never include `\/items\/`, `\/content`/);
   assert.match(advertised.description, /localFilePath/);
   assert.match(advertised.inputSchema.properties.driveItemId?.description ?? "", /root:\/happy\.txt:/);
@@ -506,7 +506,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
             type: "object",
             properties: { top: { type: "number" }, filter: { type: "string" } },
           },
-          mcp_info: { server_id: "server-1" },
+          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
         },
         {
           name: "send-channel-message",
@@ -529,7 +529,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
             },
             required: ["teamId", "channelId", "body", "confirm"],
           },
-          mcp_info: { server_id: "server-1" },
+          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
         },
         {
           name: "create-draft-email",
@@ -551,7 +551,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
             },
             required: ["body", "confirm"],
           },
-          mcp_info: { server_id: "server-1" },
+          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
         },
         {
           name: "create-calendar-event",
@@ -573,7 +573,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
             },
             required: ["body", "confirm"],
           },
-          mcp_info: { server_id: "server-1" },
+          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
         },
       ] }));
       return;
@@ -585,7 +585,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -616,12 +616,12 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
       };
     }>;
   }).tools;
-  const joined = tools.find((tool) => tool.name === "list-joined-teams")!;
+  const joined = tools.find((tool) => tool.name === "microsoft365__list-joined-teams")!;
   assert.deepEqual(joined.inputSchema.properties, {});
   assert.equal(joined.inputSchema.additionalProperties, false);
   assert.match(joined.description, /does not accept generic OData/);
 
-  const send = tools.find((tool) => tool.name === "send-channel-message")!;
+  const send = tools.find((tool) => tool.name === "microsoft365__send-channel-message")!;
   assert.deepEqual(Object.keys(send.inputSchema.properties), ["teamId", "channelId", "body"]);
   assert.deepEqual(send.inputSchema.required, ["teamId", "channelId", "body"]);
   assert.deepEqual(Object.keys(send.inputSchema.properties.body?.properties ?? {}), ["body"]);
@@ -632,7 +632,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
   assert.deepEqual(send.inputSchema.properties.body?.properties?.body?.required, ["contentType", "content"]);
   assert.match(send.description, /Get teamId from list-joined-teams/);
 
-  const draft = tools.find((tool) => tool.name === "create-draft-email")!;
+  const draft = tools.find((tool) => tool.name === "microsoft365__create-draft-email")!;
   assert.doesNotMatch(draft.description, /open extension/);
   assert.match(draft.description, /without sending/);
   assert.deepEqual(
@@ -641,7 +641,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
   );
   assert.deepEqual(draft.inputSchema.properties.body?.required, ["subject", "body"]);
 
-  const event = tools.find((tool) => tool.name === "create-calendar-event")!;
+  const event = tools.find((tool) => tool.name === "microsoft365__create-calendar-event")!;
   assert.deepEqual(event.inputSchema.properties.body?.required, ["subject", "start", "end"]);
   assert.equal("id" in (event.inputSchema.properties.body?.properties ?? {}), false);
   assert.equal("changeKey" in (event.inputSchema.properties.body?.properties ?? {}), false);
@@ -672,7 +672,7 @@ test("an approved execution failure cannot be reported as an approval rejection"
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -738,7 +738,7 @@ test("tools with the same upstream name remain advertised and route to the selec
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -754,15 +754,15 @@ test("tools with the same upstream name remain advertised and route to the selec
   }
   const tools = (responses.find((response) => response.id === 1)?.result as { tools: Array<{ name: string }> }).tools;
   assert.deepEqual(tools.slice(0, 2).map((tool) => tool.name), [
-    "onecomputer_notion__search",
-    "onecomputer_linear__search",
+    "notion__search",
+    "linear__search",
   ]);
 
   child.stdin.write(`${JSON.stringify({
     jsonrpc: "2.0",
     id: 2,
     method: "tools/call",
-    params: { name: "onecomputer_linear__search", arguments: { query: "roadmap" } },
+    params: { name: "linear__search", arguments: { query: "roadmap" } },
   })}\n`);
   const callDeadline = Date.now() + 5_000;
   while (!responses.some((response) => response.id === 2) && Date.now() < callDeadline) {
@@ -773,4 +773,85 @@ test("tools with the same upstream name remain advertised and route to the selec
     name: "search",
     arguments: { query: "roadmap" },
   }]);
+});
+
+test("Microsoft 365 and Linear tools are always connector-prefixed and retain upstream routing", async (context) => {
+  const calls: Array<Record<string, unknown>> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [
+        {
+          name: "list-calendars",
+          description: "List Microsoft 365 calendars",
+          inputSchema: { type: "object" },
+          mcp_info: { server_id: "microsoft365-id", server_name: "onecomputer_ms365" },
+        },
+        {
+          name: "list_issues",
+          description: "List Linear issues",
+          inputSchema: { type: "object" },
+          mcp_info: { server_id: "linear-id", server_name: "onecomputer_linear" },
+        },
+      ] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      calls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.end(JSON.stringify({ content: [{ type: "text", text: "ok" }], isError: false }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const tools = (responses.find((response) => response.id === 1)?.result as { tools: Array<{ name: string }> }).tools;
+  assert.deepEqual(tools.slice(0, 2).map((tool) => tool.name), [
+    "microsoft365__list-calendars",
+    "linear__list_issues",
+  ]);
+
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "microsoft365__list-calendars", arguments: {} },
+  })}\n`);
+  const microsoftDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 2) && Date.now() < microsoftDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: { name: "linear__list_issues", arguments: { limit: 10 } },
+  })}\n`);
+  const callDeadline = Date.now() + 5_000;
+  while (responses.filter((response) => response.id === 2 || response.id === 3).length < 2 && Date.now() < callDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.deepEqual(calls, [
+    { server_id: "microsoft365-id", name: "list-calendars", arguments: {} },
+    { server_id: "linear-id", name: "list_issues", arguments: { limit: 10 } },
+  ]);
 });

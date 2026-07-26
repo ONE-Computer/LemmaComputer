@@ -6,6 +6,6 @@ export HERMES_BUNDLED_SKILLS=/opt/onecomputer/hermes-agent/skills
 export PATH=/opt/onecomputer/hermes-office-venv/bin:/opt/onecomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin
 export NODE_PATH=/opt/onecomputer/hermes-office-node/node_modules
 export OPENAI_API_KEY=onecomputer-loopback-broker
-export ONECOMPUTER_MCP_BROKER=http://127.0.0.1:4314
+export ONECOMPUTER_CONNECTORS_BROKER=http://127.0.0.1:4314
 
 exec /opt/onecomputer/hermes-venv/bin/hermes chat "$@"

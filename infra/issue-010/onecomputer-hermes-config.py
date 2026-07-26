@@ -124,11 +124,11 @@ def main() -> None:
     skills_config["disabled"] = sorted(disabled)
 
     managed_office_toolsets = ["file", "skills", "terminal", "vision"]
-    cli_toolsets = managed_office_toolsets + ["onecomputer_ms365"]
-    api_toolsets = managed_office_toolsets + ["onecomputer_ms365"]
+    cli_toolsets = managed_office_toolsets + ["onecomputer_connectors"]
+    api_toolsets = managed_office_toolsets + ["onecomputer_connectors"]
     if execution_mode == "disposable-open":
-        cli_toolsets = ["hermes-cli", "onecomputer_ms365"]
-        api_toolsets = ["hermes-api-server", "onecomputer_ms365"]
+        cli_toolsets = ["hermes-cli", "onecomputer_connectors"]
+        api_toolsets = ["hermes-api-server", "onecomputer_connectors"]
 
     document: dict[str, Any] = {
         "model": {
@@ -152,11 +152,11 @@ def main() -> None:
             "reasoning_effort": False,
         },
         "mcp_servers": {
-            "onecomputer_ms365": {
-                "command": "/usr/local/libexec/onecomputer-mcp-stdio",
+            "onecomputer_connectors": {
+                "command": "/usr/local/libexec/onecomputer-connectors-stdio",
                 "args": [],
                 "env": {
-                    "ONECOMPUTER_MCP_BROKER": f"http://127.0.0.1:{broker_port}",
+                    "ONECOMPUTER_CONNECTORS_BROKER": f"http://127.0.0.1:{broker_port}",
                 },
             },
         },

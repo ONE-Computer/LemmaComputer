@@ -70,7 +70,7 @@ SYSTEM_PROMPT = (
     "path, or a value visible in an attached screenshot, use assigned read and "
     "search tools to resolve the required service IDs before asking the employee "
     "for internal IDs. Do not mutate a target if discovery is ambiguous. "
-    "Use only the provided onecomputer_ms365 MCP tools for Microsoft 365 work. "
+    "Use only the provided onecomputer_connectors MCP tools for connected-service work. "
     "Invoke an assigned MCP tool directly by its advertised tool name; never wrap "
     "an MCP call in terminal, execute_code, Python, or a tool_call helper. "
     "When upload-file-content is given a workspace-local file, pass its absolute "
@@ -201,7 +201,7 @@ def safe_identifier(prefix: str, turn_id: str, source: str) -> str:
 
 
 def safe_tool_name(value: object) -> str:
-    candidate = str(value or "workspace-tool").replace("mcp__onecomputer_ms365__", "")
+    candidate = str(value or "workspace-tool").replace("mcp__onecomputer_connectors__", "")
     cleaned = re.sub(r"[^A-Za-z0-9_.:-]", "-", candidate)[:160]
     return cleaned or "workspace-tool"
 
@@ -515,7 +515,7 @@ async def claude_vendor_events(
     # The LiteLLM key is the exact, live connector/tool ceiling. Keep the
     # aggregate MCP server discoverable so a newly connected service appears
     # without rebuilding this workspace process.
-    tool_names = ["mcp__onecomputer_ms365__*"]
+    tool_names = ["mcp__onecomputer_connectors__*"]
     local_tools = [
         "Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Skill",
         "Task", "TodoWrite", "WebFetch", "WebSearch", "Write",
@@ -527,11 +527,11 @@ async def claude_vendor_events(
         disallowed_tools=[] if open_mode else local_tools,
         system_prompt=SYSTEM_PROMPT,
         mcp_servers={
-            "onecomputer_ms365": {
+            "onecomputer_connectors": {
                 "type": "stdio",
-                "command": "/usr/local/libexec/onecomputer-mcp-stdio",
+                "command": "/usr/local/libexec/onecomputer-connectors-stdio",
                 "args": [],
-                "env": {"ONECOMPUTER_MCP_BROKER": BROKER},
+                "env": {"ONECOMPUTER_CONNECTORS_BROKER": BROKER},
             },
         },
         strict_mcp_config=True,

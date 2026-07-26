@@ -102,8 +102,8 @@ test("selected Hermes profiles seed only Office skills by default and expose the
   assert.match(profileConfig, /existing\.get\("skills"\)/);
   assert.match(profileConfig, /SKILL_STATE_FILE = "\.onecomputer-skill-defaults\.json"/);
   assert.match(profileConfig, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
-  assert.match(profileConfig, /cli_toolsets = \["hermes-cli", "onecomputer_ms365"\]/);
-  assert.match(profileConfig, /api_toolsets = \["hermes-api-server", "onecomputer_ms365"\]/);
+  assert.match(profileConfig, /cli_toolsets = \["hermes-cli", "onecomputer_connectors"\]/);
+  assert.match(profileConfig, /api_toolsets = \["hermes-api-server", "onecomputer_connectors"\]/);
   assert.match(profileConfig, /managed_office_tools\.isdisjoint\(resolve_toolset\(name\)\)/);
 
   for (const launcher of [cliLauncher, desktopLauncher]) {
@@ -125,7 +125,7 @@ test("selected Hermes profiles seed only Office skills by default and expose the
 
 test("governed OneDrive deletion carries the resolved filename into approval metadata", async () => {
   const [bridge, broker, control] = await Promise.all([
-    source("infra/issue-010/onecomputer-mcp-stdio.py"),
+    source("infra/issue-010/onecomputer-connectors-stdio.py"),
     source("infra/issue-010/onecomputer-gateway-proxy.py"),
     source("apps/control-api/src/server.ts"),
   ]);
