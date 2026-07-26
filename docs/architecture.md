@@ -246,6 +246,13 @@ signed bindings remain mandatory even on private networks.
 Control PostgreSQL is authoritative for identities, sessions, assignments,
 workspace records, signed-policy keys, connection metadata, OpenVTC enrollment,
 operations, execution leases, receipts, audit events, and channel routes.
+It also owns encrypted agent schedules and their content-free run metadata.
+
+A dedicated scheduler worker polls this database and leases due occurrences.
+It sends only run identifiers and lease tokens to Control. Control decrypts the
+prompt, re-evaluates current ownership and policy, and dispatches through the
+existing agent-chat bridge. The worker has no Docker socket, provider
+credential, prompt key, or direct workspace-network access.
 
 LiteLLM PostgreSQL owns gateway keys, model configuration stored by LiteLLM,
 and user OAuth state. Per-workspace home directories are Docker volumes for the

@@ -3,6 +3,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { Home24Filled, Home24Regular } from "@fluentui/react-icons/svg/home";
 import { Clock24Regular } from "@fluentui/react-icons/svg/clock";
+import { Calendar24Regular } from "@fluentui/react-icons/svg/calendar";
 import { Open24Regular } from "@fluentui/react-icons/svg/open";
 import { ArrowClockwise24Regular } from "@fluentui/react-icons/svg/arrow-clockwise";
 import { CheckmarkCircle24Regular } from "@fluentui/react-icons/svg/checkmark-circle";
@@ -25,7 +26,7 @@ import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { PlugConnected24Regular } from "@fluentui/react-icons/svg/plug-connected";
 import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
-import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi } from "./workspace-api.js";
+import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi } from "./workspace-api.js";
 import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
@@ -50,6 +51,7 @@ const operationStateLabels = {
 };
 const navByView = Object.freeze({
   home: "Workspace",
+  schedules: "Schedules",
   chat: "Chat",
   trail: "Trail",
   firewall: "Firewall",
@@ -331,6 +333,164 @@ function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorksp
           })}
         </section>
       )}
+    </div>
+  );
+}
+
+const scheduledAgentIds = new Set(["claude-cli", "codex-cli", "hermes-claw"]);
+const defaultScheduleTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+const scheduleWeekdays = [
+  { value: "1", label: "Monday" },
+  { value: "2", label: "Tuesday" },
+  { value: "3", label: "Wednesday" },
+  { value: "4", label: "Thursday" },
+  { value: "5", label: "Friday" },
+  { value: "6", label: "Saturday" },
+  { value: "0", label: "Sunday" },
+];
+const scheduleCadences = [
+  { value: "daily", label: "Every day" },
+  { value: "weekdays", label: "Weekdays" },
+  { value: "weekly", label: "Every week" },
+];
+const scheduleDateTime = (value) => value
+  ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+  : "Not scheduled";
+const scheduleDraft = (schedule, workspaces) => {
+  const [minute = "0", hour = "9", , , days = "*"] = schedule?.cronExpression?.split(/\s+/) ?? [];
+  const cadence = days === "*" ? "daily" : days === "1-5" ? "weekdays" : "weekly";
+  const workspace = workspaces.find((item) => item.id === schedule?.workspaceId) ?? workspaces[0];
+  const agents = workspace?.agents?.filter((agent) => scheduledAgentIds.has(agent.id)) ?? [];
+  return {
+    id: schedule?.id ?? "",
+    title: schedule?.title ?? "",
+    workspaceId: workspace?.id ?? "",
+    agentCatalogId: schedule?.agentCatalogId ?? agents[0]?.id ?? "",
+    prompt: schedule?.prompt ?? "",
+    cadence,
+    weekday: cadence === "weekly" ? days : "1",
+    time: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+    timeZone: schedule?.timeZone ?? defaultScheduleTimeZone,
+    state: schedule?.state ?? "enabled",
+  };
+};
+
+function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
+  const [draft, setDraft] = useState(() => scheduleDraft(schedule, workspaces));
+  const selectedWorkspace = workspaces.find((item) => item.id === draft.workspaceId);
+  const agentOptions = (selectedWorkspace?.agents ?? [])
+    .filter((agent) => scheduledAgentIds.has(agent.id))
+    .map((agent) => ({ value: agent.id, label: agent.displayName }));
+  const workspaceOptions = workspaces.map((item) => ({ value: item.id, label: workspaceName(item) }));
+  const set = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+  const save = async (event) => {
+    event.preventDefault();
+    const [hour, minute] = draft.time.split(":");
+    const days = draft.cadence === "daily" ? "*" : draft.cadence === "weekdays" ? "1-5" : draft.weekday;
+    const saved = await onSave({
+      ...(draft.id ? { id: draft.id } : {}),
+      title: draft.title,
+      workspaceId: draft.workspaceId,
+      agentCatalogId: draft.agentCatalogId,
+      prompt: draft.prompt,
+      cronExpression: `${Number(minute)} ${Number(hour)} * * ${days}`,
+      timeZone: draft.timeZone,
+      state: draft.state,
+    });
+    if (saved) onClose();
+  };
+  return (
+    <ModalDialog
+      title={draft.id ? "Edit schedule" : "Create schedule"}
+      description="ONEComputer will re-check the workspace, agent, and current policy before every run."
+      eyebrow="Scheduled agent prompt"
+      className="schedule-modal"
+      onClose={onClose}
+    >
+      <form className="schedule-form" onSubmit={save}>
+        <label><span>Name</span><input name="schedule-title" value={draft.title} maxLength="120" required onChange={(event) => set("title", event.target.value)} placeholder="Weekday project summary" /></label>
+        <div className="schedule-form-grid">
+          <label><span>Workspace</span><SelectMenu value={draft.workspaceId} options={workspaceOptions} ariaLabel="Workspace" onValueChange={(value) => {
+            const nextWorkspace = workspaces.find((item) => item.id === value);
+            const nextAgent = nextWorkspace?.agents?.find((agent) => scheduledAgentIds.has(agent.id));
+            setDraft((current) => ({ ...current, workspaceId: value, agentCatalogId: nextAgent?.id ?? "" }));
+          }} /></label>
+          <label><span>Agent</span><SelectMenu value={draft.agentCatalogId} options={agentOptions} ariaLabel="Agent" disabled={!agentOptions.length} onValueChange={(value) => set("agentCatalogId", value)} /></label>
+        </div>
+        <label><span>Prompt</span><textarea name="schedule-prompt" value={draft.prompt} maxLength="16000" rows="6" required onChange={(event) => set("prompt", event.target.value)} placeholder="Describe what the agent should do on each run." /></label>
+        <div className="schedule-form-grid schedule-timing-grid">
+          <label><span>Repeat</span><SelectMenu value={draft.cadence} options={scheduleCadences} ariaLabel="Repeat schedule" onValueChange={(value) => set("cadence", value)} /></label>
+          {draft.cadence === "weekly" && <label><span>Day</span><SelectMenu value={draft.weekday} options={scheduleWeekdays} ariaLabel="Day of week" onValueChange={(value) => set("weekday", value)} /></label>}
+          <label><span>Time</span><input name="schedule-time" type="time" value={draft.time} required onChange={(event) => set("time", event.target.value)} /></label>
+          <label><span>Timezone</span><input name="schedule-time-zone" value={draft.timeZone} maxLength="100" required onChange={(event) => set("timeZone", event.target.value)} /></label>
+        </div>
+        {selectedWorkspace && !["ready", "open"].includes(selectedWorkspace.state) && (
+          <p className="schedule-workspace-note"><Info24Regular aria-hidden="true" />Runs are skipped while this workspace is stopped.</p>
+        )}
+        <div className="modal-actions">
+          <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Cancel</button>
+          <button className="primary-button" type="submit" disabled={busy || !draft.workspaceId || !draft.agentCatalogId}>{busy ? "Saving schedule" : draft.id ? "Save changes" : "Create schedule"}</button>
+        </div>
+      </form>
+    </ModalDialog>
+  );
+}
+
+function SchedulesScreen({ schedules, workspaces, loading, busyId, error, onSave, onToggle, onDelete, onRunNow, onLoadRuns }) {
+  const [editor, setEditor] = useState(null);
+  const [runsFor, setRunsFor] = useState("");
+  const [runs, setRuns] = useState([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const showRuns = async (scheduleId) => {
+    if (runsFor === scheduleId) { setRunsFor(""); return; }
+    setRunsFor(scheduleId);
+    setRunsLoading(true);
+    try { setRuns(await onLoadRuns(scheduleId)); } finally { setRunsLoading(false); }
+  };
+  return (
+    <div className="secondary-screen schedules-screen">
+      <header className="page-heading schedules-heading">
+        <div><p>Unattended work</p><h1>Schedules</h1><span>Run a saved prompt with a selected workspace agent. Current policy is checked at execution time.</span></div>
+        <button className="primary-button" type="button" disabled={!workspaces.length} onClick={() => setEditor({})}><Add24Regular aria-hidden="true" />Create schedule</button>
+      </header>
+      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Schedules unavailable</strong>{error}</span></div>}
+      {loading ? <div className="workspace-overview-empty" role="status">Loading schedules…</div> : schedules.length === 0 ? (
+        <section className="workspace-overview-empty schedules-empty">
+          <Calendar24Regular aria-hidden="true" />
+          <div><h2>No schedules yet</h2><p>Create a recurring prompt for one of your workspace agents.</p></div>
+        </section>
+      ) : (
+        <section className="schedule-list" aria-label="Your schedules">
+          {schedules.map((schedule) => {
+            const selectedWorkspace = workspaces.find((item) => item.id === schedule.workspaceId);
+            const selectedAgent = selectedWorkspace?.agents?.find((item) => item.id === schedule.agentCatalogId);
+            const busy = busyId === schedule.id;
+            return <article className="schedule-card" key={schedule.id}>
+              <div className="schedule-card-main">
+                <span className="schedule-card-icon"><Calendar24Regular aria-hidden="true" /></span>
+                <span className="schedule-card-copy"><strong>{schedule.title}</strong><small>{workspaceName(selectedWorkspace)} · {selectedAgent?.displayName ?? schedule.agentCatalogId}</small></span>
+                <span className={`schedule-state ${schedule.state}`}>{schedule.state === "enabled" ? "Active" : "Paused"}</span>
+              </div>
+              <dl className="schedule-metadata">
+                <div><dt>Next run</dt><dd>{scheduleDateTime(schedule.nextRunAt)}</dd></div>
+                <div><dt>Timezone</dt><dd>{schedule.timeZone}</dd></div>
+                <div><dt>Last run</dt><dd>{scheduleDateTime(schedule.lastRunAt)}</dd></div>
+              </dl>
+              <div className="schedule-actions">
+                <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => onRunNow(schedule)}>Run now</button>
+                <button className="secondary-button compact-button" type="button" disabled={busy} onClick={() => setEditor(schedule)}>Edit</button>
+                <button className="secondary-button compact-button" type="button" disabled={busy} onClick={() => onToggle(schedule)}>{schedule.state === "enabled" ? "Pause" : "Resume"}</button>
+                <button className="text-button" type="button" disabled={busy} onClick={() => showRuns(schedule.id)}>{runsFor === schedule.id ? "Hide runs" : "Recent runs"}</button>
+                <button className="text-button danger-button" type="button" disabled={busy} onClick={() => onDelete(schedule)}>Delete</button>
+              </div>
+              {runsFor === schedule.id && <div className="schedule-runs">
+                {runsLoading ? <p>Loading recent runs…</p> : runs.length ? <ol>{runs.map((run) => <li key={run.id}><span className={`schedule-run-state ${run.state}`}>{run.state}</span><span>{scheduleDateTime(run.scheduledFor)}</span>{run.failureSummary && <small>{run.failureSummary}</small>}</li>)}</ol> : <p>No runs recorded yet.</p>}
+              </div>}
+            </article>;
+          })}
+        </section>
+      )}
+      {editor && <ScheduleDialog schedule={editor.id ? editor : null} workspaces={workspaces} busy={Boolean(busyId)} onSave={onSave} onClose={() => setEditor(null)} />}
     </div>
   );
 }
@@ -2174,6 +2334,10 @@ export function App() {
   const [homeWorkspacesLoading, setHomeWorkspacesLoading] = useState(true);
   const [workspaceActionId, setWorkspaceActionId] = useState("");
   const [apiError, setApiError] = useState("");
+  const [schedules, setSchedules] = useState([]);
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
+  const [scheduleBusyId, setScheduleBusyId] = useState("");
+  const [scheduleError, setScheduleError] = useState("");
   const [drawer, setDrawer] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -2407,6 +2571,25 @@ export function App() {
     const interval = window.setInterval(refresh, 10_000);
     return () => { active = false; window.clearInterval(interval); };
   }, [activeNav, session?.user.id, workspace?.id]);
+
+  useEffect(() => {
+    if (!session || activeNav !== "Schedules") return undefined;
+    let active = true;
+    const refresh = () => {
+      setSchedulesLoading(true);
+      return scheduleApi.list()
+        .then((value) => {
+          if (!active) return;
+          setSchedules(value.schedules);
+          setScheduleError("");
+        })
+        .catch((error) => { if (active) setScheduleError(error.message); })
+        .finally(() => { if (active) setSchedulesLoading(false); });
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 15_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [activeNav, session?.user.id]);
 
   useEffect(() => {
     if (!session) return;
@@ -2981,6 +3164,65 @@ export function App() {
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
   };
 
+  const saveSchedule = async (input) => {
+    const { id, ...document } = input;
+    setScheduleBusyId(id || "new");
+    setScheduleError("");
+    try {
+      const saved = id
+        ? await scheduleApi.update(id, document)
+        : await scheduleApi.create(document);
+      setSchedules((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      setToast(id ? "Schedule updated." : "Schedule created.");
+      return true;
+    } catch (error) {
+      setScheduleError(error.message);
+      return false;
+    } finally {
+      setScheduleBusyId("");
+    }
+  };
+
+  const toggleSchedule = async (schedule) => {
+    setScheduleBusyId(schedule.id);
+    setScheduleError("");
+    try {
+      const saved = await scheduleApi.update(schedule.id, {
+        state: schedule.state === "enabled" ? "paused" : "enabled",
+      });
+      setSchedules((current) => current.map((item) => item.id === saved.id ? saved : item));
+      setToast(saved.state === "enabled" ? "Schedule resumed." : "Schedule paused.");
+    } catch (error) { setScheduleError(error.message); }
+    finally { setScheduleBusyId(""); }
+  };
+
+  const deleteSchedule = async (schedule) => {
+    if (!await requestConfirmation({
+      title: "Delete schedule?",
+      description: `"${schedule.title}" and its run history will be permanently removed.`,
+      confirmLabel: "Delete schedule",
+      danger: true,
+    })) return;
+    setScheduleBusyId(schedule.id);
+    setScheduleError("");
+    try {
+      await scheduleApi.delete(schedule.id);
+      setSchedules((current) => current.filter((item) => item.id !== schedule.id));
+      setToast("Schedule deleted.");
+    } catch (error) { setScheduleError(error.message); }
+    finally { setScheduleBusyId(""); }
+  };
+
+  const runScheduleNow = async (schedule) => {
+    setScheduleBusyId(schedule.id);
+    setScheduleError("");
+    try {
+      await scheduleApi.runNow(schedule.id);
+      setToast("Scheduled run queued.");
+    } catch (error) { setScheduleError(error.message); }
+    finally { setScheduleBusyId(""); }
+  };
+
   const selectChatSession = (sessionId, historyMode = "push") => {
     setActiveChatSessionId(sessionId);
     const url = new URL(window.location.href);
@@ -3106,6 +3348,7 @@ export function App() {
         </div>
         <nav aria-label="Primary navigation">
           <NavButton active={activeNav === "Workspace"} icon={activeNav === "Workspace" ? Home24Filled : Home24Regular} label="Workspace" onClick={() => selectNav("Workspace")} />
+          <NavButton active={activeNav === "Schedules"} icon={Calendar24Regular} label="Schedules" onClick={() => selectNav("Schedules")} />
           <NavButton active={activeNav === "Trail"} icon={Clock24Regular} label="Trail" onClick={() => selectNav("Trail")} />
           {session.roles.includes("administrator") && <NavButton active={activeNav === "Firewall"} icon={ShieldCheckmark24Regular} label="Firewall" onClick={() => selectNav("Firewall")} />}
           <NavButton active={activeNav === "Connections"} icon={PlugConnected24Regular} label="Connections" onClick={() => selectNav("Connections")} />
@@ -3169,6 +3412,18 @@ export function App() {
           />
         )}
         {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
+        {activeNav === "Schedules" && <SchedulesScreen
+          schedules={schedules}
+          workspaces={homeWorkspaces}
+          loading={schedulesLoading}
+          busyId={scheduleBusyId}
+          error={scheduleError}
+          onSave={saveSchedule}
+          onToggle={toggleSchedule}
+          onDelete={deleteSchedule}
+          onRunNow={runScheduleNow}
+          onLoadRuns={async (scheduleId) => (await scheduleApi.runs(scheduleId)).runs}
+        />}
         {activeNav === "Chat" && <ChatScreen
           workspace={workspace}
           workspaces={homeWorkspaces}

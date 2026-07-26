@@ -60,6 +60,8 @@ volume, pause when the workspace is stopped, and disappear when it is deleted.
 - A custom scheduler database, scheduling API, MCP tool, chat-native schedule
   object, calendar UI, schedules dashboard, notification inbox, or
   control-plane job runner.
+- The separately owned Control-plane Schedules product is tracked by Issue 025;
+  it does not read, write, or proxy this workspace-local crontab.
 - Waking or provisioning a stopped workspace to execute a due job.
 - Replaying missed runs after downtime, distributed scheduling, exactly-once
   execution, leader election, cross-workspace workflows, or a claim that cron
