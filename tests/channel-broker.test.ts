@@ -31,6 +31,8 @@ class FakeTelegram implements TelegramBotClient {
   sent: Array<{ token: string; chatId: string; text: string; options?: TelegramMessageOptions }> = [];
   chatActions: Array<{ token: string; chatId: string; action: "typing" }> = [];
   answeredCallbacks: Array<{ token: string; callbackQueryId: string; text?: string }> = [];
+  sendFailuresRemaining = 0;
+  sendFailureMatch = "";
 
   async validate(received: string) {
     assert.ok(received === token || received === secondToken);
@@ -45,6 +47,10 @@ class FakeTelegram implements TelegramBotClient {
   }
 
   async sendMessage(received: string, chatId: string, text: string, options?: TelegramMessageOptions) {
+    if (this.sendFailuresRemaining > 0 && (!this.sendFailureMatch || text.includes(this.sendFailureMatch))) {
+      this.sendFailuresRemaining -= 1;
+      throw new Error("temporary Telegram outage");
+    }
     this.sent.push({ token: received, chatId, text, options });
   }
 
@@ -431,6 +437,45 @@ test("the broker acknowledges an accepted Telegram task before the agent finishe
   assert.equal(telegram.sent[0]?.text, "Got it — I’m starting on that now.");
   await polling;
   assert.equal(telegram.sent.at(-1)?.text, "hermes-claw: send the deck");
+});
+
+test("the broker durably retries a completed response without rerunning the agent", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-delivery-retry-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: false,
+  });
+  telegram.updates = [
+    { updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "send the deck" },
+  ];
+  telegram.sendFailuresRemaining = 1;
+  telegram.sendFailureMatch = "hermes-claw:";
+
+  await service.pollOnce();
+  assert.deepEqual(telegram.sent.map((message) => message.text), [
+    "Got it — I’m starting on that now.",
+  ]);
+  assert.equal(control.turns.length, 1);
+
+  await service.pollOnce();
+  assert.deepEqual(telegram.sent.map((message) => message.text), [
+    "Got it — I’m starting on that now.",
+    "hermes-claw: send the deck",
+  ]);
+  assert.equal(control.turns.length, 1);
 });
 
 test("the broker forwards approval notices during a turn and keeps a later failure actionable", async () => {

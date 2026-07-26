@@ -28,7 +28,12 @@ import {
   type TelegramChannelConnectionStatus,
   type TelegramCredentialStatus,
 } from "@onecomputer/contracts";
-import type { ChannelConnectionRecord, ChannelCredentialRecord, ChannelStore } from "./store.js";
+import type {
+  ChannelConnectionRecord,
+  ChannelCredentialRecord,
+  ChannelPendingResponse,
+  ChannelStore,
+} from "./store.js";
 
 export type TelegramUpdate = {
   updateId: string;
@@ -335,13 +340,23 @@ export class TelegramBotApiClient implements TelegramBotClient {
   }
 
   private async request(token: string, method: string, body?: Record<string, unknown>) {
-    const response = await this.fetcher(`${this.apiOrigin}/bot${token}/${method}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body ?? {}),
-      signal: AbortSignal.timeout(35_000),
-    });
-    const payload = botResponseSchema.object(await response.json().catch(() => null));
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.apiOrigin}/bot${token}/${method}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body ?? {}),
+        signal: AbortSignal.timeout(35_000),
+      });
+    } catch {
+      throw new OneComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram could not be reached", 503, true);
+    }
+    let payload: Record<string, unknown>;
+    try {
+      payload = botResponseSchema.object(await response.json());
+    } catch {
+      throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid response", 502, true);
+    }
     if (!response.ok || payload.ok !== true) {
       throw new OneComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram rejected the bot request", 503, true);
     }
@@ -603,11 +618,14 @@ export class ChannelBrokerService {
   async pollOnce() {
     const connections = await this.store.listActiveChannelConnections("telegram");
     const results = await Promise.allSettled(connections.map((connection) => this.pollConnection(connection)));
-    const failures = results.filter((result) => result.status === "rejected").length;
-    if (failures) {
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length === 1 && failures[0]!.reason instanceof OneComputerError) {
+      throw failures[0]!.reason;
+    }
+    if (failures.length) {
       throw new OneComputerError(
         "CHANNEL_POLL_FAILED",
-        `${failures} Telegram connection${failures === 1 ? "" : "s"} could not be polled`,
+        `${failures.length} Telegram connection${failures.length === 1 ? "" : "s"} could not be polled`,
         503,
         true,
       );
@@ -621,6 +639,7 @@ export class ChannelBrokerService {
       audience: "onecomputer-control",
     };
     const token = this.vault.unprotect(identity, connection.credentialId, connection.credentialCiphertext);
+    await this.deliverPendingResponses(connection.id, token);
     const updates = (await this.telegram.getUpdates(token, connection.telegramUpdateOffset))
       .sort((left, right) => Number(BigInt(left.updateId) - BigInt(right.updateId)));
     const current = await this.store.getOwnedChannelConnection(identity, "telegram", connection.workspaceId);
@@ -628,6 +647,21 @@ export class ChannelBrokerService {
     for (const update of updates) {
       await this.processUpdate(current, identity, token, update);
       await this.store.advanceTelegramUpdateOffset(connection.id, String(BigInt(update.updateId) + 1n));
+    }
+  }
+
+  private async deliverPendingResponse(token: string, response: ChannelPendingResponse) {
+    const characters = [...response.text];
+    for (let start = response.offset; start < characters.length; start += 4_000) {
+      const end = Math.min(start + 4_000, characters.length);
+      await this.telegram.sendMessage(token, response.chatId, characters.slice(start, end).join(""));
+      await this.store.advanceChannelResponseDelivery(response.connectionId, response.updateId, end);
+    }
+  }
+
+  private async deliverPendingResponses(connectionId: string, token: string) {
+    for (const response of await this.store.listPendingChannelResponses(connectionId)) {
+      await this.deliverPendingResponse(token, response);
     }
   }
 
@@ -758,6 +792,7 @@ export class ChannelBrokerService {
     const sessionId = await this.store.getChannelSession(connection.id, update.senderId, agentCatalogId);
     await this.telegram.sendMessage(token, update.chatId, acknowledgementMessage).catch(() => undefined);
     let approvalNoticeSent = false;
+    let responseStaged = false;
     try {
       const response = channelTurnResponseSchema.parse(await this.withTypingIndicator(
         token,
@@ -777,22 +812,27 @@ export class ChannelBrokerService {
       ));
       await this.store.saveChannelSession(connection.id, update.senderId, agentCatalogId, response.sessionId);
       const rendered = [response.text, ...response.notices].filter(Boolean).join("\n\n") || "The agent completed without a text response.";
-      for (let start = 0; start < rendered.length; start += 4_000) {
-        await this.telegram.sendMessage(token, update.chatId, rendered.slice(start, start + 4_000));
-      }
-      await this.store.finishChannelUpdate(connection.id, update.updateId, "delivered");
-    } catch (error) {
-      await this.telegram.sendMessage(
-        token,
-        update.chatId,
-        approvalNoticeSent ? approvalFailureMessage : safeFailureMessage,
-      ).catch(() => undefined);
-      await this.store.finishChannelUpdate(
+      await this.store.stageChannelResponse(
         connection.id,
         update.updateId,
-        "failed",
-        error instanceof OneComputerError ? error.code : "CHANNEL_TURN_FAILED",
+        update.chatId,
+        rendered,
+        "delivered",
       );
+      responseStaged = true;
+      await this.deliverPendingResponses(connection.id, token);
+    } catch (error) {
+      if (responseStaged) return;
+      const failureCode = error instanceof OneComputerError ? error.code : "CHANNEL_TURN_FAILED";
+      await this.store.stageChannelResponse(
+        connection.id,
+        update.updateId,
+        update.chatId,
+        approvalNoticeSent ? approvalFailureMessage : safeFailureMessage,
+        "failed",
+        failureCode,
+      );
+      await this.deliverPendingResponses(connection.id, token).catch(() => undefined);
     }
   }
 }

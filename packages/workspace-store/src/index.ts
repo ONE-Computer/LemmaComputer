@@ -66,6 +66,16 @@ export type ChannelCredentialRecord = {
   updatedAt: Date;
 };
 
+export type ChannelPendingResponse = {
+  connectionId: string;
+  updateId: string;
+  chatId: string;
+  text: string;
+  offset: number;
+  finalState: "delivered" | "failed";
+  finalFailureCode: string | null;
+};
+
 export interface ChannelStore {
   listOwnedChannelCredentials(identity: IdentityContext): Promise<Array<ChannelCredentialRecord & { workspaceId: string | null; connectionId: string | null }>>;
   getOwnedChannelCredential(identity: IdentityContext, credentialId: string): Promise<ChannelCredentialRecord | null>;
@@ -87,6 +97,16 @@ export interface ChannelStore {
   reserveChannelUpdate(connectionId: string, updateId: string, senderId: string): Promise<boolean>;
   claimChannelUpdate(connectionId: string, updateId: string, senderId: string): Promise<boolean>;
   finishChannelUpdate(connectionId: string, updateId: string, state: "delivered" | "rejected" | "failed", failureCode?: string): Promise<void>;
+  stageChannelResponse(
+    connectionId: string,
+    updateId: string,
+    chatId: string,
+    text: string,
+    finalState: "delivered" | "failed",
+    finalFailureCode?: string,
+  ): Promise<void>;
+  listPendingChannelResponses(connectionId: string): Promise<ChannelPendingResponse[]>;
+  advanceChannelResponseDelivery(connectionId: string, updateId: string, offset: number): Promise<void>;
   advanceTelegramUpdateOffset(connectionId: string, offset: string): Promise<void>;
   getChannelSenderAgent(connectionId: string, senderId: string): Promise<ChatAgentCatalogId | null>;
   setChannelSenderAgent(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId): Promise<void>;
@@ -532,7 +552,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   }
 
   async migrate() {
-    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql", "014_sandbox_applications.sql", "015_agent_neutral_chat.sql", "016_channel_broker.sql", "017_openvtc_request_proof_hash.sql", "018_governed_operation_failure_summary.sql", "019_disposable_open_profile.sql", "020_workspace_egress_security_groups.sql", "021_workspace_egress_security_group_identity.sql", "022_connector_registry.sql", "023_connector_tool_policies.sql", "024_connector_icons.sql", "025_user_scoped_policy_assignments.sql", "026_connector_access_policy.sql", "027_schedules.sql"]) {
+    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql", "014_sandbox_applications.sql", "015_agent_neutral_chat.sql", "016_channel_broker.sql", "017_openvtc_request_proof_hash.sql", "018_governed_operation_failure_summary.sql", "019_disposable_open_profile.sql", "020_workspace_egress_security_groups.sql", "021_workspace_egress_security_group_identity.sql", "022_connector_registry.sql", "023_connector_tool_policies.sql", "024_connector_icons.sql", "025_user_scoped_policy_assignments.sql", "026_connector_access_policy.sql", "027_schedules.sql", "028_channel_delivery_retry.sql"]) {
       const migrationPath = fileURLToPath(new URL(`../migrations/${migration}`, import.meta.url));
       await this.pool.query(await readFile(migrationPath, "utf8"));
     }
@@ -817,6 +837,57 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       `UPDATE channel_updates SET state=$3,failure_code=$4,updated_at=now()
        WHERE connection_id=$1 AND update_id=$2::bigint AND state IN ('reserved','dispatched')`,
       [connectionId, updateId, state, failureCode ?? null],
+    );
+  }
+
+  async stageChannelResponse(
+    connectionId: string,
+    updateId: string,
+    chatId: string,
+    text: string,
+    finalState: "delivered" | "failed",
+    finalFailureCode?: string,
+  ) {
+    await this.pool.query(
+      `UPDATE channel_updates
+       SET state='dispatched',response_chat_id=$3,response_text=$4,response_offset=0,final_state=$5,
+           final_failure_code=$6,failure_code=NULL,updated_at=now()
+       WHERE connection_id=$1 AND update_id=$2::bigint AND state IN ('reserved','dispatched')`,
+      [connectionId, updateId, chatId, text, finalState, finalFailureCode ?? null],
+    );
+  }
+
+  async listPendingChannelResponses(connectionId: string) {
+    const result = await this.pool.query(
+      `SELECT connection_id,update_id,response_chat_id,response_text,response_offset,
+              final_state,final_failure_code
+       FROM channel_updates
+       WHERE connection_id=$1 AND state='dispatched' AND response_text IS NOT NULL
+       ORDER BY created_at,update_id`,
+      [connectionId],
+    );
+    return result.rows.map((row): ChannelPendingResponse => ({
+      connectionId: String(row.connection_id),
+      updateId: String(row.update_id),
+      chatId: String(row.response_chat_id),
+      text: String(row.response_text),
+      offset: Number(row.response_offset),
+      finalState: row.final_state as "delivered" | "failed",
+      finalFailureCode: row.final_failure_code ? String(row.final_failure_code) : null,
+    }));
+  }
+
+  async advanceChannelResponseDelivery(connectionId: string, updateId: string, offset: number) {
+    await this.pool.query(
+      `UPDATE channel_updates
+       SET response_offset=$3,
+           state=CASE WHEN $3 >= char_length(response_text) THEN final_state ELSE state END,
+           failure_code=CASE WHEN $3 >= char_length(response_text) THEN final_failure_code ELSE failure_code END,
+           updated_at=now()
+       WHERE connection_id=$1 AND update_id=$2::bigint
+         AND state='dispatched' AND response_text IS NOT NULL
+         AND response_offset <= $3`,
+      [connectionId, updateId, offset],
     );
   }
 
@@ -1561,7 +1632,11 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   private records = new Map<string, WorkspaceRecord>();
   private channelConnections = new Map<string, ChannelConnectionRecord>();
   private channelCredentials = new Map<string, ChannelCredentialRecord>();
-  private channelUpdates = new Map<string, { senderId: string; state: "reserved" | "dispatched" | "delivered" | "rejected" | "failed" }>();
+  private channelUpdates = new Map<string, {
+    senderId: string;
+    state: "reserved" | "dispatched" | "delivered" | "rejected" | "failed";
+    response?: Omit<ChannelPendingResponse, "connectionId" | "updateId">;
+  }>();
   private channelRoutes = new Map<string, ChatAgentCatalogId>();
   private channelSessions = new Map<string, string>();
   private operations = new Map<string, GovernedOperationRecord>();
@@ -1760,6 +1835,53 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     const key = `${connectionId}:${updateId}`;
     const update = this.channelUpdates.get(key);
     if (update && ["reserved", "dispatched"].includes(update.state)) this.channelUpdates.set(key, { ...update, state });
+  }
+
+  async stageChannelResponse(
+    connectionId: string,
+    updateId: string,
+    chatId: string,
+    text: string,
+    finalState: "delivered" | "failed",
+    finalFailureCode?: string,
+  ) {
+    const key = `${connectionId}:${updateId}`;
+    const update = this.channelUpdates.get(key);
+    if (!update || !["reserved", "dispatched"].includes(update.state)) return;
+    this.channelUpdates.set(key, {
+      ...update,
+      state: "dispatched",
+      response: {
+        chatId,
+        text,
+        offset: 0,
+        finalState,
+        finalFailureCode: finalFailureCode ?? null,
+      },
+    });
+  }
+
+  async listPendingChannelResponses(connectionId: string) {
+    return [...this.channelUpdates.entries()].flatMap(([key, update]) => {
+      if (!key.startsWith(`${connectionId}:`) || update.state !== "dispatched" || !update.response) return [];
+      return [{
+        connectionId,
+        updateId: key.slice(connectionId.length + 1),
+        ...update.response,
+      }];
+    });
+  }
+
+  async advanceChannelResponseDelivery(connectionId: string, updateId: string, offset: number) {
+    const key = `${connectionId}:${updateId}`;
+    const update = this.channelUpdates.get(key);
+    if (update?.state !== "dispatched" || !update.response || offset < update.response.offset) return;
+    const complete = offset >= [...update.response.text].length;
+    this.channelUpdates.set(key, {
+      ...update,
+      state: complete ? update.response.finalState : update.state,
+      response: { ...update.response, offset },
+    });
   }
 
   async advanceTelegramUpdateOffset(connectionId: string, offset: string) {

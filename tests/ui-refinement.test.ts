@@ -130,11 +130,14 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
   assert.match(companion, /Activity/);
   assert.doesNotMatch(companion, /companion-destinations/);
   assert.match(app, /companion-chat-composer/);
+  assert.match(app, /className="companion-chat-context-button"/);
+  assert.match(app, /<span>\{contextSummary\}<\/span>/);
   assert.match(app, /New conversation/);
   assert.match(app, /Recent conversations/);
   assert.match(app, /ariaLabel="Choose workspace"/);
   assert.match(companionStyles, /\.companion-mode-switch\s*\{/);
   assert.match(companionStyles, /\.companion-chat-composer\s*\{/);
+  assert.match(companionStyles, /\.companion-chat-shell \.companion-chat-context-button\s*\{/);
   assert.doesNotMatch(companionStyles, /\.companion-destinations/);
   assert.match(manifest, /Chat with workspace agents and review protected ONEComputer actions/);
 });

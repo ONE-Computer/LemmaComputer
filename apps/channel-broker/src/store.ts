@@ -5,5 +5,6 @@ export {
 export type {
   ChannelConnectionRecord,
   ChannelCredentialRecord,
+  ChannelPendingResponse,
   ChannelStore,
 } from "@onecomputer/workspace-store";
