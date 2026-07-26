@@ -908,9 +908,29 @@ export const channelTurnResponseSchema = z.object({
   text: z.string().max(16_000),
   notices: z.array(z.string().trim().min(1).max(500)).max(16),
 }).strict();
+export const channelTurnStreamEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("heartbeat"),
+  }).strict(),
+  z.object({
+    type: z.literal("notice"),
+    notice: z.string().trim().min(1).max(500),
+  }).strict(),
+  z.object({
+    type: z.literal("result"),
+    response: channelTurnResponseSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("error"),
+    code: z.string().regex(/^[A-Z][A-Z0-9_]{2,63}$/),
+    message: z.string().trim().min(1).max(500),
+    retryable: z.boolean(),
+  }).strict(),
+]);
 export type ChannelRoute = z.infer<typeof channelRouteSchema>;
 export type ChannelTurnRequest = z.infer<typeof channelTurnRequestSchema>;
 export type ChannelTurnResponse = z.infer<typeof channelTurnResponseSchema>;
+export type ChannelTurnStreamEvent = z.infer<typeof channelTurnStreamEventSchema>;
 
 const agentChatEventBaseSchema = z.object({
   version: z.literal(1),

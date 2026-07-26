@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
@@ -586,7 +586,7 @@ export function createControlServer(
     await agentChat.health(access);
     return reply.code(204).send();
   });
-  app.post("/internal/v1/channels/turns", async (request) => {
+  app.post("/internal/v1/channels/turns", async (request, reply) => {
     const input = channelTurnRequestSchema.parse(request.body ?? {});
     const { access } = await verifiedChannelRoute(input, true);
     if (!store.claimChannelUpdate || !await store.claimChannelUpdate(
@@ -609,21 +609,63 @@ export function createControlServer(
       },
       parts: [{ type: "text", text: input.text }],
     };
-    let text = "";
-    const notices: string[] = [];
-    for await (const event of agentChat.streamTurn(access, session.id, message)) {
-      if (event.type === "text-delta") {
-        text += event.delta;
-        if (text.length > 16_000) throw new OneComputerError("CHANNEL_RESPONSE_TOO_LARGE", "The channel response exceeded its limit", 502);
+    const frame = (event: unknown) => `${JSON.stringify(channelTurnStreamEventSchema.parse(event))}\n`;
+    const stream = async function*() {
+      let text = "";
+      const notices: string[] = [];
+      try {
+        for await (const event of agentChat.streamTurn(access, session.id, message)) {
+          if (event.type === "progress") {
+            yield frame({ type: "heartbeat" });
+          }
+          if (event.type === "text-delta") {
+            text += event.delta;
+            if (text.length > 16_000) {
+              throw new OneComputerError("CHANNEL_RESPONSE_TOO_LARGE", "The channel response exceeded its limit", 502);
+            }
+          }
+          if (event.type === "approval") {
+            let summary = event.summary;
+            try {
+              const operation = await operations.get(input.identity, event.operationId);
+              summary = chatApprovalSummary(event.state, operation.safeSummary);
+            } catch (error) {
+              if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
+            }
+            const notice = `${summary.replace(/[.!?]+$/, "")}. Open ONEComputer to review this protected action.`;
+            if (!notices.includes(notice)) {
+              notices.push(notice);
+              yield frame({ type: "notice", notice });
+            }
+          }
+          if (event.type === "turn-finish" && event.state === "failed" && !text) {
+            yield frame({
+              type: "error",
+              code: "CHANNEL_TURN_FAILED",
+              message: event.message ?? "The agent could not complete the message",
+              retryable: true,
+            });
+            return;
+          }
+        }
+        yield frame({
+          type: "result",
+          response: channelTurnResponseSchema.parse({ sessionId: session.id, text, notices }),
+        });
+      } catch (error) {
+        const owned = error instanceof OneComputerError ? error : undefined;
+        yield frame({
+          type: "error",
+          code: owned?.code ?? "CHANNEL_TURN_FAILED",
+          message: owned?.message ?? "The agent could not complete the message",
+          retryable: owned?.retryable ?? true,
+        });
       }
-      if (event.type === "approval" && !notices.includes(event.summary)) {
-        notices.push(`${event.summary} Open ONEComputer to review this protected action.`);
-      }
-      if (event.type === "turn-finish" && event.state === "failed" && !text) {
-        throw new OneComputerError("CHANNEL_TURN_FAILED", event.message ?? "The agent could not complete the message", 502, true);
-      }
-    }
-    return channelTurnResponseSchema.parse({ sessionId: session.id, text, notices });
+    };
+    return reply
+      .header("content-type", "application/x-ndjson; charset=utf-8")
+      .header("cache-control", "no-store")
+      .send(Readable.from(stream()));
   });
   app.post("/internal/v1/schedules/runs/execute", async (request) => {
     const input = executeScheduleRunSchema.parse(request.body ?? {});

@@ -173,6 +173,7 @@ test("credential APIs keep Telegram tokens write-only across create, rotate, lis
 
 class FakeAgentChat implements AgentChatClient {
   turns: ChannelTurnRequest[] = [];
+  approvalSummary: string | undefined;
   async health() {}
   async listSessions() { return { sessions: [], nextCursor: null }; }
   async createSession() {
@@ -190,18 +191,33 @@ class FakeAgentChat implements AgentChatClient {
       sessionId,
       text: message.parts.find((part) => part.type === "text")?.text ?? "",
     });
+    let sequence = 0;
     yield {
       version: 1,
-      sequence: 0,
+      sequence: sequence++,
       sessionId,
       turnId: "turn-channel",
       type: "turn-start",
       messageId: "message-channel",
       createdAt: new Date().toISOString(),
     };
+    if (this.approvalSummary) {
+      yield {
+        version: 1,
+        sequence: sequence++,
+        sessionId,
+        turnId: "turn-channel",
+        type: "approval",
+        approvalId: "approval-channel",
+        toolCallId: "tool-channel",
+        operationId: "11111111-1111-4111-8111-111111111111",
+        state: "approval_required",
+        summary: this.approvalSummary,
+      };
+    }
     yield {
       version: 1,
-      sequence: 1,
+      sequence: sequence++,
       sessionId,
       turnId: "turn-channel",
       type: "text-delta",
@@ -210,7 +226,7 @@ class FakeAgentChat implements AgentChatClient {
     };
     yield {
       version: 1,
-      sequence: 2,
+      sequence,
       sessionId,
       turnId: "turn-channel",
       type: "turn-finish",
@@ -331,6 +347,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     telegramUpdateOffset: "0",
   });
   const chat = new FakeAgentChat();
+  chat.approvalSummary = "Approval needed: Send Teams chat message.";
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
     identityPolicyStore: policyStore(effectivePolicy()),
@@ -363,11 +380,26 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
       payload,
     });
     assert.equal(accepted.statusCode, 200);
-    assert.deepEqual(accepted.json(), {
-      sessionId: "telegram-session-hermes",
-      text: "Hello from Hermes",
-      notices: [],
-    });
+    assert.match(accepted.headers["content-type"] ?? "", /^application\/x-ndjson/);
+    assert.deepEqual(
+      accepted.body.trim().split("\n").map((line) => JSON.parse(line)),
+      [
+        {
+          type: "notice",
+          notice: "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+        },
+        {
+          type: "result",
+          response: {
+            sessionId: "telegram-session-hermes",
+            text: "Hello from Hermes",
+            notices: [
+              "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+            ],
+          },
+        },
+      ],
+    );
 
     const replayed = await app.inject({
       method: "POST",

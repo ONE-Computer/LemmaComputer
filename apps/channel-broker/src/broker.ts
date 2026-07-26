@@ -13,6 +13,7 @@ import {
   channelRouteSchema,
   channelTurnRequestSchema,
   channelTurnResponseSchema,
+  channelTurnStreamEventSchema,
   chatAgentCatalogIdSchema,
   saveTelegramChannelConnectionSchema,
   saveTelegramCredentialSchema,
@@ -58,7 +59,7 @@ export interface TelegramBotClient {
 
 export interface ChannelControlClient {
   validateRoute(input: ChannelRoute): Promise<void>;
-  turn(input: ChannelTurnRequest): Promise<ChannelTurnResponse>;
+  turn(input: ChannelTurnRequest, onNotice?: (notice: string) => Promise<void>): Promise<ChannelTurnResponse>;
 }
 
 export class HttpChannelControlClient implements ChannelControlClient {
@@ -119,13 +120,144 @@ export class HttpChannelControlClient implements ChannelControlClient {
     }
   }
 
+  private async streamTurn(
+    path: string,
+    input: unknown,
+    onNotice?: (notice: string) => Promise<void>,
+  ): Promise<ChannelTurnResponse> {
+    const target = new URL(path, this.baseUrl);
+    if (!["http:", "https:"].includes(target.protocol)) {
+      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
+    }
+    const payload = Buffer.from(JSON.stringify(input));
+    return new Promise((resolve, reject) => {
+      const request = (target.protocol === "https:" ? httpsRequest : httpRequest)(target, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(payload.length),
+          "x-onecomputer-channel-token": this.internalToken,
+        },
+      }, (upstream) => {
+        void (async () => {
+          try {
+            if ((upstream.statusCode ?? 502) < 200 || (upstream.statusCode ?? 502) >= 300) {
+              for await (const _chunk of upstream) {
+                // Drain the bounded internal error response before rejecting.
+              }
+              throw new OneComputerError(
+                "CHANNEL_ROUTE_REJECTED",
+                "ONEComputer rejected the channel route",
+                upstream.statusCode ?? 502,
+                (upstream.statusCode ?? 502) >= 500,
+              );
+            }
+            const contentType = Array.isArray(upstream.headers["content-type"])
+              ? upstream.headers["content-type"][0]
+              : upstream.headers["content-type"];
+            if (!contentType?.startsWith("application/x-ndjson")) {
+              throw new OneComputerError(
+                "CHANNEL_CONTROL_INVALID_RESPONSE",
+                "ONEComputer Control returned an invalid response",
+                502,
+                true,
+              );
+            }
+
+            let buffer = "";
+            let totalSize = 0;
+            let result: ChannelTurnResponse | undefined;
+            const deliveredNotices = new Set<string>();
+            for await (const chunk of upstream) {
+              const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+              totalSize += Buffer.byteLength(text);
+              if (totalSize > 512 * 1024) {
+                throw new OneComputerError(
+                  "CHANNEL_CONTROL_INVALID_RESPONSE",
+                  "ONEComputer Control response exceeded its limit",
+                  502,
+                  true,
+                );
+              }
+              buffer += text;
+              while (buffer.includes("\n")) {
+                const index = buffer.indexOf("\n");
+                const line = buffer.slice(0, index);
+                buffer = buffer.slice(index + 1);
+                if (!line) continue;
+                const event = channelTurnStreamEventSchema.parse(JSON.parse(line));
+                if (event.type === "heartbeat") continue;
+                if (event.type === "notice") {
+                  if (onNotice && !deliveredNotices.has(event.notice)) {
+                    try {
+                      await onNotice(event.notice);
+                      deliveredNotices.add(event.notice);
+                    } catch {
+                      // Keep the notice in the final response so delivery can be retried.
+                    }
+                  }
+                  continue;
+                }
+                if (event.type === "error") {
+                  throw new OneComputerError(
+                    event.code,
+                    event.message,
+                    event.code === "CHAT_RUNTIME_UNAVAILABLE" ? 503 : 502,
+                    event.retryable,
+                  );
+                }
+                if (result) {
+                  throw new OneComputerError(
+                    "CHANNEL_CONTROL_INVALID_RESPONSE",
+                    "ONEComputer Control returned multiple results",
+                    502,
+                    true,
+                  );
+                }
+                result = channelTurnResponseSchema.parse({
+                  ...event.response,
+                  notices: event.response.notices.filter((notice) => !deliveredNotices.has(notice)),
+                });
+              }
+            }
+            if (buffer.length || !result) {
+              throw new OneComputerError(
+                "CHANNEL_CONTROL_INVALID_RESPONSE",
+                "ONEComputer Control ended without a complete result",
+                502,
+                true,
+              );
+            }
+            resolve(result);
+          } catch (error) {
+            reject(error instanceof OneComputerError
+              ? error
+              : new OneComputerError(
+                "CHANNEL_CONTROL_INVALID_RESPONSE",
+                "ONEComputer Control returned an invalid response",
+                502,
+                true,
+              ));
+          }
+        })();
+      });
+      request.setTimeout(this.timeoutMs, () => request.destroy(new Error("Control request timed out")));
+      request.on("error", () => reject(
+        new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true),
+      ));
+      request.end(payload);
+    });
+  }
+
   async validateRoute(input: ChannelRoute) {
     await this.post("/internal/v1/channels/routes/validate", channelRouteSchema.parse(input));
   }
 
-  async turn(input: ChannelTurnRequest) {
-    return channelTurnResponseSchema.parse(
-      await this.post("/internal/v1/channels/turns", channelTurnRequestSchema.parse(input)),
+  async turn(input: ChannelTurnRequest, onNotice?: (notice: string) => Promise<void>) {
+    return this.streamTurn(
+      "/internal/v1/channels/turns",
+      channelTurnRequestSchema.parse(input),
+      onNotice,
     );
   }
 }
@@ -329,7 +461,9 @@ const displayNames: Readonly<Record<ChatAgentCatalogId, string>> = Object.freeze
   "codex-cli": "Codex CLI",
 });
 
-const safeFailureMessage = "ONEComputer could not complete that message. Select an available agent with /agent, or restart the workspace from ONEComputer, then try again.";
+const acknowledgementMessage = "Got it — I’m starting on that now.";
+const safeFailureMessage = "I started the task, but the agent could not complete it. Try again, or use /agent to select another available agent.";
+const approvalFailureMessage = "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.";
 const telegramAgentCallbackPrefix = "onecomputer:agent:";
 const switchableAgentIds = ["hermes-claw", "claude-cli", "codex-cli"] as const;
 
@@ -622,16 +756,24 @@ export class ChannelBrokerService {
     }
 
     const sessionId = await this.store.getChannelSession(connection.id, update.senderId, agentCatalogId);
+    await this.telegram.sendMessage(token, update.chatId, acknowledgementMessage).catch(() => undefined);
+    let approvalNoticeSent = false;
     try {
       const response = channelTurnResponseSchema.parse(await this.withTypingIndicator(
         token,
         update.chatId,
-        () => this.control.turn(channelTurnRequestSchema.parse({
-          ...this.route(connection, identity, update.senderId, agentCatalogId),
-          updateId: update.updateId,
-          ...(sessionId ? { sessionId } : {}),
-          text: update.text,
-        })),
+        () => this.control.turn(
+          channelTurnRequestSchema.parse({
+            ...this.route(connection, identity, update.senderId, agentCatalogId),
+            updateId: update.updateId,
+            ...(sessionId ? { sessionId } : {}),
+            text: update.text,
+          }),
+          async (notice) => {
+            await this.telegram.sendMessage(token, update.chatId, notice);
+            approvalNoticeSent = true;
+          },
+        ),
       ));
       await this.store.saveChannelSession(connection.id, update.senderId, agentCatalogId, response.sessionId);
       const rendered = [response.text, ...response.notices].filter(Boolean).join("\n\n") || "The agent completed without a text response.";
@@ -639,9 +781,18 @@ export class ChannelBrokerService {
         await this.telegram.sendMessage(token, update.chatId, rendered.slice(start, start + 4_000));
       }
       await this.store.finishChannelUpdate(connection.id, update.updateId, "delivered");
-    } catch {
-      await this.telegram.sendMessage(token, update.chatId, safeFailureMessage).catch(() => undefined);
-      await this.store.finishChannelUpdate(connection.id, update.updateId, "failed", "CHANNEL_TURN_FAILED");
+    } catch (error) {
+      await this.telegram.sendMessage(
+        token,
+        update.chatId,
+        approvalNoticeSent ? approvalFailureMessage : safeFailureMessage,
+      ).catch(() => undefined);
+      await this.store.finishChannelUpdate(
+        connection.id,
+        update.updateId,
+        "failed",
+        error instanceof OneComputerError ? error.code : "CHANNEL_TURN_FAILED",
+      );
     }
   }
 }

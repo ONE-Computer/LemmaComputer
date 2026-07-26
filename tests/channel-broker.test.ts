@@ -59,6 +59,8 @@ class FakeTelegram implements TelegramBotClient {
 
 class FakeControl implements ChannelControlClient {
   turnDelayMs = 0;
+  notice: string | undefined;
+  failAfterNotice = false;
   turns: Array<{
     workspaceId: string;
     agentCatalogId: string;
@@ -79,11 +81,13 @@ class FakeControl implements ChannelControlClient {
     externalSenderId: string;
     sessionId?: string;
     text: string;
-  }) {
+  }, onNotice?: (notice: string) => Promise<void>) {
     this.turns.push(input);
+    if (this.notice) await onNotice?.(this.notice);
     if (this.turnDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, this.turnDelayMs));
     }
+    if (this.failAfterNotice) throw new Error("turn failed after approval");
     return {
       sessionId: input.sessionId ?? `session-${input.agentCatalogId}`,
       text: `${input.agentCatalogId}: ${input.text}`,
@@ -94,13 +98,20 @@ class FakeControl implements ChannelControlClient {
 
 test("the channel control client owns a long response timeout instead of inheriting fetch's five-minute header limit", async () => {
   const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/x-ndjson; charset=utf-8" });
+    response.write(`${JSON.stringify({
+      type: "notice",
+      notice: "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+    })}\n`);
     setTimeout(() => {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({
-        sessionId: "932b72c3-220a-465d-96d0-d1ac11270f25",
-        text: "completed",
-        notices: [],
-      }));
+      response.end(`${JSON.stringify({
+        type: "result",
+        response: {
+          sessionId: "932b72c3-220a-465d-96d0-d1ac11270f25",
+          text: "completed",
+          notices: ["Approval needed: Send Teams chat message. Open ONEComputer to review this protected action."],
+        },
+      })}\n`);
     }, 75);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -121,7 +132,18 @@ test("the channel control client owns a long response timeout instead of inherit
       "channel-control-test-secret-at-least-32-characters",
       250,
     );
-    assert.equal((await patient.turn(input)).text, "completed");
+    const notices: string[] = [];
+    let completed = false;
+    const patientTurn = patient.turn(input, async (notice) => { notices.push(notice); })
+      .finally(() => { completed = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(notices, [
+      "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+    ]);
+    assert.equal(completed, false);
+    const result = await patientTurn;
+    assert.equal(result.text, "completed");
+    assert.deepEqual(result.notices, []);
 
     const impatient = new HttpChannelControlClient(
       `http://127.0.0.1:${address.port}`,
@@ -375,6 +397,74 @@ test("the broker shows and renews Telegram typing only while an agent turn is pe
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(telegram.chatActions.length, completedActionCount);
   assert.equal(telegram.sent.at(-1)?.text, "hermes-claw: take your time");
+});
+
+test("the broker acknowledges an accepted Telegram task before the agent finishes", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  control.turnDelayMs = 40;
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+    5,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-acknowledgement-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: false,
+  });
+  telegram.updates = [
+    { updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "send the deck" },
+  ];
+
+  let completed = false;
+  const polling = service.pollOnce().finally(() => { completed = true; });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(completed, false);
+  assert.equal(telegram.sent[0]?.text, "Got it — I’m starting on that now.");
+  await polling;
+  assert.equal(telegram.sent.at(-1)?.text, "hermes-claw: send the deck");
+});
+
+test("the broker forwards approval notices during a turn and keeps a later failure actionable", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  control.notice = "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.";
+  control.failAfterNotice = true;
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-approval-notice-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: false,
+  });
+  telegram.updates = [
+    { updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "send the deck" },
+  ];
+
+  await service.pollOnce();
+
+  assert.deepEqual(telegram.sent.map((message) => message.text), [
+    "Got it — I’m starting on that now.",
+    "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+    "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.",
+  ]);
 });
 
 test("each workspace can own one Telegram connection and credentials cannot be shared across workspaces", async () => {
