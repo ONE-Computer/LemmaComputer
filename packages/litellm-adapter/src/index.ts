@@ -308,9 +308,17 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         },
       }, true);
       if (!result.ok) throw this.upstreamError("MCP_OAUTH_REGISTRATION_FAILED", result.status, result.payload);
-      const clientId = asObject(result.payload).client_id;
+      const registrationPayload = asObject(result.payload);
+      const clientId = registrationPayload.client_id;
       if (typeof clientId !== "string" || !clientId) {
         throw new OneComputerError("MCP_OAUTH_REGISTRATION_FAILED", "The connector did not register an OAuth client", 502, true);
+      }
+      if (clientId === serverId && registrationPayload.client_secret === "dummy") {
+        throw new OneComputerError(
+          "MCP_OAUTH_CLIENT_REQUIRED",
+          "This connector requires provider app credentials",
+          400,
+        );
       }
       return clientId;
     })();

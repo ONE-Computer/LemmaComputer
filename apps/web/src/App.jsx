@@ -1319,6 +1319,7 @@ const emptyConnectorDraft = {
 function AddConnectorDialog({ onCreated, onClose }) {
   const [draft, setDraft] = useState(emptyConnectorDraft);
   const [checked, setChecked] = useState(null);
+  const [showCredentials, setShowCredentials] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const payload = {
@@ -1336,6 +1337,7 @@ function AddConnectorDialog({ onCreated, onClose }) {
     setDraft((current) => ({ ...current, [field]: value }));
     setChecked(null);
     setError("");
+    if (field === "endpointUrl") setShowCredentials(false);
   };
   const discover = async () => {
     setBusy("checking");
@@ -1343,7 +1345,14 @@ function AddConnectorDialog({ onCreated, onClose }) {
     try {
       setChecked(await adminApi.discoverConnector(payload));
     } catch (requestError) {
-      setError(requestError.message);
+      const credentialsRequired = !payload.clientId
+        && (requestError.code === "MCP_OAUTH_CLIENT_REQUIRED"
+          || (requestError.code === "MCP_OAUTH_REGISTRATION_FAILED" && !requestError.retryable));
+      if (credentialsRequired) {
+        setShowCredentials(true);
+      } else {
+        setError(requestError.message);
+      }
     } finally {
       setBusy("");
     }
@@ -1378,14 +1387,17 @@ function AddConnectorDialog({ onCreated, onClose }) {
         <label><span>Services</span><input name="connector-services" placeholder="Issues, projects, comments" value={draft.services} onChange={(event) => update("services", event.target.value)} disabled={Boolean(busy)} /><small>Comma-separated labels shown to people.</small></label>
         <label><span>Requested scopes</span><input name="connector-scopes" placeholder="read write" value={draft.scopes} onChange={(event) => update("scopes", event.target.value)} disabled={Boolean(busy)} /><small>Use the provider’s documented scope names.</small></label>
       </div>
-      <details className="add-connector-app-credentials">
-        <summary>Provider app credentials <span>Only if required</span></summary>
+      {showCredentials && <section className="add-connector-app-credentials" role="alert" aria-labelledby="connector-credentials-title">
+        <div className="add-connector-app-credentials-heading">
+          <strong id="connector-credentials-title">Provider app required</strong>
+          <span>This server cannot set up the connection automatically. Enter credentials from the provider, then check it again.</span>
+        </div>
         <div>
           <label><span>Client ID</span><input name="connector-client-id" autoComplete="off" value={draft.clientId} onChange={(event) => update("clientId", event.target.value)} disabled={Boolean(busy)} /></label>
           <label><span>Client secret</span><input name="connector-client-secret" type="password" autoComplete="new-password" value={draft.clientSecret} onChange={(event) => update("clientSecret", event.target.value)} disabled={Boolean(busy)} /></label>
         </div>
-      </details>
-      {checked && <div className="connector-discovery-result" role="status"><CheckmarkCircle24Regular aria-hidden="true" /><span><strong>Connection flow verified</strong>{checked.dynamicClientRegistration ? "The provider can create its app registration automatically." : "The supplied provider app is ready to use."}</span></div>}
+      </section>}
+      {checked && <div className="connector-discovery-result" role="status"><CheckmarkCircle24Regular aria-hidden="true" /><span><strong>Connection flow verified</strong>{checked.dynamicClientRegistration ? "Connection setup is automatic. No provider credentials are needed." : "The provider app is ready to use."}</span></div>}
       {error && <p className="add-connector-error" role="alert">{error}</p>}
       <div className="modal-actions">
         <button className="secondary-button" type="button" onClick={onClose} disabled={Boolean(busy)}>Cancel</button>

@@ -186,6 +186,44 @@ test("connector discovery performs dynamic client registration when credentials 
   }
 });
 
+test("connector discovery asks for provider credentials when LiteLLM reports its no-registration fallback", async () => {
+  const server = createServer(async (request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server/oauth/session") {
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (request.url?.includes("/register")) {
+      const serverId = request.url.split("/").at(-2);
+      response.end(JSON.stringify({ client_id: serverId, client_secret: "dummy" }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await assert.rejects(
+      liveAdapter.discoverOAuthMcpServer({
+        name: "Static OAuth",
+        description: "Requires a pre-registered provider app.",
+        url: "https://mcp.static.example/mcp",
+        scopes: ["read"],
+        callbackUrl: "https://onecomputer.example/callback",
+      }),
+      (error: Error & { code?: string }) => error.code === "MCP_OAUTH_CLIENT_REQUIRED",
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("owned OAuth uses a narrow per-user connection key and returns only the upstream redirect", async () => {
   const requests: Array<{ url: string; authorization: string; body: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {

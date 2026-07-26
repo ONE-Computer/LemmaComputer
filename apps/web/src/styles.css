@@ -2905,20 +2905,22 @@ textarea:focus-visible,
   background: #fafbfc;
 }
 
-.add-connector-app-credentials summary {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
+.add-connector-app-credentials-heading {
+  display: grid;
+  gap: 4px;
   padding: 14px 16px;
   color: #26374a;
   font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
 }
 
-.add-connector-app-credentials summary span {
+.add-connector-app-credentials-heading strong {
+  font-weight: 700;
+}
+
+.add-connector-app-credentials-heading span {
   color: #74808c;
   font-weight: 500;
+  line-height: 1.45;
 }
 
 .add-connector-app-credentials > div {

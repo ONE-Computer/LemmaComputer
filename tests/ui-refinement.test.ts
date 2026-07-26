@@ -162,6 +162,10 @@ test("Connections stays employee-facing and uses spacing instead of decorative r
   assert.match(styles, /\.connections-page-intro > \.page-heading\s*\{[\s\S]*?border-bottom: 0/);
   assert.match(styles, /\.connector-category-heading\s*\{[\s\S]*?border-bottom: 0/);
   assert.match(styles, /\.connector-mark\.microsoft\s*\{[\s\S]*?place-content: center/);
+  assert.match(connections, /const \[showCredentials, setShowCredentials\] = useState\(false\)/);
+  assert.match(connections, /\{showCredentials && <section className="add-connector-app-credentials"/);
+  assert.match(connections, /Connection setup is automatic\. No provider credentials are needed\./);
+  assert.doesNotMatch(connections, /<details className="add-connector-app-credentials"/);
 });
 
 test("remote-only approvals notify desktop without opening its decision drawer", async () => {
