@@ -1,72 +1,75 @@
-# Design QA — Chat workspace selector and recent-chat sidebar
+# Firewall evolution design QA
 
-## Comparison target
+## Evidence
 
-- Source visual truth: `/home/mike/.codex/attachments/e11d9010-501c-4d17-bc4c-ac9fe7e3102f/codex-clipboard-795c6e12-970e-43bc-8ceb-9a36f000c9b8.png` (the existing ONEComputer Chat screen, 2048 × 1248) and `/home/mike/.codex/attachments/1f6c03a9-4063-496b-b4b1-ad85fed1d456/codex-clipboard-ade667bc-8d8e-4954-aeac-dee53791ea70.png` (the supplied ChatGPT Recents reference, 1306 × 1740).
-- Implementation screenshot: Chrome DevTools in-chat capture of `http://127.0.0.1:4174/?view=chat&mock=3` (file export is disallowed by the browser tool); 1440 × 1000 CSS px at device scale factor 1.
-- State: desktop Chat welcome screen, one visible workspace, one configured agent, and enough realistic recent sessions to exercise sidebar scrolling. The browser mock supplies this rendering state because the normal local route requires a Microsoft session.
-- Density normalization: source screenshots use different crops and display scale, so the comparison is structural: one desktop sidebar, compact single-line recents, and a fixed right-aligned context picker. Typography and native controls were assessed at their rendered CSS size rather than pixel-for-pixel against the differently scaled captures.
+- Source visual truth:
+  - `/home/mike/.codex/attachments/18a2dfa8-5270-461f-9669-42eadb6c804a/codex-clipboard-9a96717a-5938-423f-90d9-a8e001019d16.png`
+  - `/home/mike/.codex/attachments/f929d2eb-5f6d-418a-92ee-cff358088fbc/codex-clipboard-e556e029-b1c3-4d39-8930-4a68bc6b4963.png`
+- Browser-rendered implementation:
+  - `design-qa-assets/firewall-table-v1.png`
+  - `design-qa-assets/firewall-deny-modal-v1.png`
+  - `design-qa-assets/firewall-deny-saved-v1.png`
+  - `design-qa-assets/firewall-manage-modal-v1.png`
+- Combined comparison evidence:
+  - `design-qa-assets/firewall-table-comparison-v1.png`
+  - `design-qa-assets/firewall-manage-modal-comparison-v1.png`
+
+## Viewport and normalization
+
+- Table source: 3000 × 1600 px.
+- Table implementation: 1920 × 1024 px at a 1920 × 1024 CSS viewport and device scale factor 1.
+- The table images have the same 1.875 aspect ratio and were both normalized to 1500 × 800 px before being placed in the combined comparison.
+- Modal source: 2048 × 1536 px.
+- Modal implementation: 2048 × 1536 px at a 1024 × 768 CSS viewport and device scale factor 2.
+- The modal comparison uses equal pixel dimensions without density resampling.
+- Theme: light.
+- State: tenant administrator firewall table; open-workspace default allow visible; explicit deny visible; security-group editor open.
+
+## Full-view comparison
+
+The implementation preserves the source hierarchy, typography, white canvas, navy actions, blue administrator notice, table density, borders, semantic colors, and centered modal treatment. The persistent product sidebar is intentionally present in the implementation because it is part of the current application shell; the supplied table reference is cropped to the page content.
+
+The new open-workspace default is shown as an effective row with all public destinations, HTTP/HTTPS, ports 80/443, and an Allow result. Explicit deny rows use the same table anatomy and a red semantic result. Managed workspaces retain their default-deny row.
+
+## Focused comparison
+
+The modal comparison was captured at the source's apparent 1024 × 768 CSS viewport and 2× density. Field heights, group selector, two-column metadata row, rule card, light rule-builder panel, footer notice, and primary/secondary actions align with the source. The new Action control adds one compact grid track without overflowing or obscuring any input.
+
+## Required fidelity surfaces
+
+- Fonts and typography: Inter, weights, sizes, line heights, letter spacing, and hierarchy remain consistent with the source and existing product.
+- Spacing and layout rhythm: page and modal spacing, field heights, section gaps, radii, and borders remain consistent. The table continues to use intentional horizontal overflow for dense columns.
+- Colors and visual tokens: navy primary actions, pale-blue notice, green Allow, red Deny, gray defaults, and warm policy-required status retain sufficient contrast and match the existing token language.
+- Image quality and assets: no raster imagery is required. Existing Fluent UI icons remain sharp at both densities; no placeholder or handcrafted graphic was introduced.
+- Copy and content: managed default-deny and open default-allow behavior are explicit. The deny action, attachment scope, stopped-workspace requirement, and protected destination classes are stated in the relevant flow.
+
+## Primary interactions tested
+
+- Opened the open-workspace `Add deny rule` action.
+- Verified the rule action defaults to Deny.
+- Entered a new security-group name, description, destination, and purpose.
+- Saved and attached the immutable group version.
+- Verified the dialog closed and the deny destination appeared in both affected managed and open effective-policy rows.
+- Opened the saved group editor and verified the deny rule and Action selector.
+- Checked browser console and runtime exceptions: no errors or warnings.
+
+## Findings
+
+- No actionable P0, P1, or P2 findings remain.
+- P3: programmatic initial focus gives the modal close button a visible focus ring. This is an intentional accessibility affordance and does not block fidelity or use.
 
 ## Comparison history
 
-### Iteration 1 — corrected
-
-**Findings**
-
-- [P1] Recent chats were distributed through the remaining sidebar height.
-  Location: `.sidebar-chat-history` and `.sidebar-chat-history button`.
-  Evidence: the supplied ONEComputer screen leaves very large vertical gaps between successive titles; the supplied ChatGPT reference instead forms a compact, scrollable recents list.
-  Impact: only a few conversations are visible and the chat sidebar feels unfinished.
-  Fix: replaced the stretched grid with a flexible, overflow-scrolling column; gave rows a compact 38 px minimum height and stable horizontal padding.
-
-### Iteration 2 — post-fix comparison
-
-Full-view evidence: the browser-rendered implementation and both supplied screenshots were opened in one visual comparison input. The new desktop screen shows the workspace picker at the top right and eleven compact recent rows before the viewport boundary, with the remaining rows reachable by the sidebar scroll bar.
-
-Focused-region evidence: the header selector and recent-chat column are both legible in the full comparison, so no separate crop was needed.
-
-**Findings**
-
-- No actionable P0, P1, or P2 visual differences remain for this requested change.
-
-### Iteration 3 — composer text alignment
-
-Source visual truth: `/home/mike/.codex/attachments/f06d1192-8b0e-4990-977f-1b136c2799b0/codex-clipboard-0ccc4c59-54f8-4bdf-b0c1-0a0ef944caf8.png` (2048 × 288). Implementation evidence: Chrome DevTools in-chat capture of `http://127.0.0.1:4174/?view=chat&mock=4` (1440 × 1000 CSS px at device scale factor 1; file export is disallowed by the browser tool).
-
-**Findings**
-
-- [P1] The composer placeholder was not constrained to the same vertical track as its attachment and send controls.
-  Location: `.chat-composer textarea`.
-  Evidence: the supplied composer crop shows the placeholder sitting optically above the two circular controls.
-  Fix: made the textarea a 36 px, center-aligned element with a 24 px line-height and balanced 6 px vertical padding.
-
-Post-fix evidence: the browser capture shows the composer, textarea, attachment control, and send control all centered on the same y-coordinate (943 px); the textarea and both controls share the exact `top: 925 px` / `height: 36 px` track. No console errors were present. `npm run build --workspace web` passed.
-
-## Fidelity surfaces
-
-- **Fonts and typography:** retains ONEComputer's Inter-based visual system; chat titles remain single-line, readable, and truncated only when necessary.
-- **Spacing and layout rhythm:** recents use compact, consistent rows rather than vertical distribution; the sidebar remains independently scrollable; the workspace picker occupies the existing top-right context-control area.
-- **Colors and visual tokens:** existing neutral sidebar, selected Chat treatment, and primary-text contrast are unchanged.
-- **Image quality and assets:** no raster imagery changed; existing Fluent UI icon assets remain in use.
-- **Copy and content:** the selector is explicitly labelled “Workspace”; the existing “RECENT” label and conversation titles are preserved.
-
-## Interaction and runtime checks
-
-- Opened the accessible **Choose workspace** selector; it reports an expanded listbox.
-- Activated **Start a new chat**; it remains keyboard focusable and preserves the welcome composition.
-- Confirmed current-page console errors: none.
-- `npm test`: 154 passing, 0 failing.
-- `npm run build`: passed (only existing Vite dependency/chunk-size warnings).
+- Pass 1: no P0/P1/P2 visual or interaction issues found. No corrective visual iteration was required.
 
 ## Implementation checklist
 
-- [x] Always render the workspace picker when a Chat workspace is available.
-- [x] Preserve the selected workspace and agent across refresh.
-- [x] Page and lazily extend chat history instead of bounding the sidebar visually.
-- [x] Use a compact, scrollable recent-chat list.
-
-## Follow-up polish
-
-- [P3] If a future desktop layout calls for a wider navigation rail, revisit it across every primary page rather than widening only Chat.
+- [x] Show the effective open-workspace all-public HTTP/HTTPS rule.
+- [x] Show managed and open defaults per workspace.
+- [x] Create explicit allow or deny rules.
+- [x] Give explicit deny rules precedence at runtime.
+- [x] Attach a saved deny group from the open-workspace row.
+- [x] Preserve the centered immutable-version editor.
+- [x] Verify responsive overflow, modal fit, core interaction, and console state.
 
 final result: passed

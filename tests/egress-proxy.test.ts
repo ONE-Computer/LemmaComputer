@@ -27,6 +27,7 @@ const expectedGrant = {
   workspaceId: "11111111-1111-4111-8111-111111111111",
   agentId: "agent-alex",
   securityGroupVersionId: policy.id,
+  egressMode: "restricted" as const,
   policyHash: "d".repeat(64),
 };
 

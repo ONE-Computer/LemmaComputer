@@ -21,6 +21,10 @@ MS365_SERVER_NAME = "onecomputer_ms365"
 MS365_SERVER_ID = hashlib.sha256(
     b"onecomputer_ms365|http://ms365-mcp:3000/mcp|http|oauth2|"
 ).hexdigest()[:32]
+MS365_ACCOUNT_LOOKUP_TOOL = "get-current-user"
+MS365_ACCOUNT_LOOKUP_ARGUMENTS = {
+    "$select": "displayName,mail,userPrincipalName",
+}
 
 
 def _metadata(auth):
@@ -36,6 +40,19 @@ def _metadata(auth):
 def _optional_string(metadata, name):
     value = metadata.get(name)
     return value if isinstance(value, str) and value else None
+
+
+def _is_connection_account_lookup(metadata, payload):
+    return (
+        metadata.get("onecomputer_connection_credential") is True
+        and metadata.get("onecomputer_connection_account_lookup") is True
+        and metadata.get("onecomputer_connection_server") == MS365_SERVER_NAME
+        and payload.get("tenantId") is not None
+        and payload.get("subjectId") is not None
+        and payload.get("serverName") == MS365_SERVER_NAME
+        and payload.get("toolName") == MS365_ACCOUNT_LOOKUP_TOOL
+        and payload.get("arguments") == MS365_ACCOUNT_LOOKUP_ARGUMENTS
+    )
 
 
 def _contains_image_input(value):
@@ -159,6 +176,12 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         # LiteLLM invokes the hook once during request parsing and again from
         # the resolved MCP dispatcher. Enforce policy on the resolved call.
         if payload["toolName"] is None and payload["arguments"] is None:
+            return data
+        # A connection credential may read only the non-secret account label
+        # displayed on the Connections page. It has no workspace or agent
+        # context and is independently restricted to this exact tool by the
+        # LiteLLM key's MCP tool permissions.
+        if _is_connection_account_lookup(metadata, payload):
             return data
         missing = [
             name

@@ -15,6 +15,8 @@ export type WorkspaceIngressConfig = {
   authority: WorkspaceIngressAuthority;
   publicUrl: string;
   webUpstream: string;
+  microsoft365AuthorizationUpstream?: string;
+  litellmOAuthUpstream?: string;
   requestTimeoutMs?: number;
   verifyWorkspaceTls?: boolean;
   audit?: (event: Record<string, unknown>) => void;
@@ -102,6 +104,7 @@ const proxyRequest = (
   workspace: boolean,
   verifyWorkspaceTls: boolean,
   audit: (event: Record<string, unknown>) => void,
+  failure?: { code: string; message: string },
 ) => {
   const transport = target.protocol === "https:" ? https : http;
   const upstream = transport.request(requestOptions(request, target, path, { workspace, verifyWorkspaceTls }), (upstreamResponse) => {
@@ -118,7 +121,9 @@ const proxyRequest = (
     if (!response.headersSent) {
       response.writeHead(502, { "content-type": "application/json", "cache-control": "no-store" });
     }
-    response.end(JSON.stringify({ error: { code: "WORKSPACE_UPSTREAM_UNAVAILABLE", message: "The workspace is unavailable" } }));
+    response.end(JSON.stringify({
+      error: failure ?? { code: "WORKSPACE_UPSTREAM_UNAVAILABLE", message: "The workspace is unavailable" },
+    }));
   });
   request.pipe(upstream);
 };
@@ -182,6 +187,27 @@ const workspaceRoute = (request: IncomingMessage) => {
   };
 };
 
+const publicOAuthRoute = (
+  request: IncomingMessage,
+  microsoft365AuthorizationUpstream: URL | null,
+  litellmOAuthUpstream: URL | null,
+) => {
+  const url = new URL(request.url ?? "/", "http://workspace-ingress.invalid");
+  if (url.pathname === "/m365/authorize" && microsoft365AuthorizationUpstream) {
+    return {
+      upstream: microsoft365AuthorizationUpstream,
+      upstreamPath: `/authorize${url.search}`,
+    };
+  }
+  if (url.pathname === "/callback" && litellmOAuthUpstream) {
+    return {
+      upstream: litellmOAuthUpstream,
+      upstreamPath: `/callback${url.search}`,
+    };
+  }
+  return null;
+};
+
 const sessionCookie = (token: string, workspaceId: string, maxAge: number, secure: boolean) => [
   `${workspaceIngressSessionCookie}=${encodeURIComponent(token)}`,
   `Path=/workspaces/${workspaceId}/`,
@@ -194,6 +220,12 @@ const sessionCookie = (token: string, workspaceId: string, maxAge: number, secur
 export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
   const publicUrl = new URL(config.publicUrl);
   const webUpstream = new URL(config.webUpstream);
+  const microsoft365AuthorizationUpstream = config.microsoft365AuthorizationUpstream
+    ? new URL(config.microsoft365AuthorizationUpstream)
+    : null;
+  const litellmOAuthUpstream = config.litellmOAuthUpstream
+    ? new URL(config.litellmOAuthUpstream)
+    : null;
   const timeoutMs = config.requestTimeoutMs ?? 30_000;
   const verifyWorkspaceTls = config.verifyWorkspaceTls ?? true;
   const audit = config.audit ?? ((event) => process.stdout.write(`${JSON.stringify(event)}\n`));
@@ -202,6 +234,26 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
     if (request.url === "/__onecomputer/healthz") {
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+    const oauthRoute = publicOAuthRoute(request, microsoft365AuthorizationUpstream, litellmOAuthUpstream);
+    if (oauthRoute) {
+      if (request.method !== "GET") {
+        response.writeHead(405, { allow: "GET", "cache-control": "no-store" });
+        response.end();
+        return;
+      }
+      proxyRequest(
+        request,
+        response,
+        oauthRoute.upstream,
+        oauthRoute.upstreamPath,
+        timeoutMs,
+        false,
+        true,
+        audit,
+        { code: "OAUTH_UPSTREAM_UNAVAILABLE", message: "The Microsoft 365 connection service is unavailable" },
+      );
       return;
     }
     const route = workspaceRoute(request);
@@ -262,6 +314,8 @@ const envSchema = z.object({
   WORKSPACE_INGRESS_PORT: z.coerce.number().int().positive().default(4174),
   WORKSPACE_INGRESS_PUBLIC_URL: z.string().url().default("http://localhost:4174"),
   WORKSPACE_INGRESS_WEB_UPSTREAM: z.string().url().default("http://127.0.0.1:4173"),
+  WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM: z.string().url().optional(),
+  WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM: z.string().url().optional(),
   WORKSPACE_INGRESS_SECRET: z.string().min(32),
   WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(300),
   WORKSPACE_INGRESS_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
@@ -278,6 +332,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     ),
     publicUrl: env.WORKSPACE_INGRESS_PUBLIC_URL,
     webUpstream: env.WORKSPACE_INGRESS_WEB_UPSTREAM,
+    microsoft365AuthorizationUpstream: env.WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM,
+    litellmOAuthUpstream: env.WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM,
     verifyWorkspaceTls: env.WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS,
   });
   server.listen(env.WORKSPACE_INGRESS_PORT, env.WORKSPACE_INGRESS_HOST);

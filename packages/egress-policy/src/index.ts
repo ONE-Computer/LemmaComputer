@@ -5,13 +5,15 @@ import {
   egressDecisionSchema,
   egressSecurityGroupVersionSchema,
   type EgressDecision,
+  type EgressMode,
   type EgressProtocol,
+  type RuntimeEgressPolicy,
   type EgressSecurityGroupVersion,
 } from "@onecomputer/contracts";
 
 export type CompiledEgressRule = {
   id: string;
-  action: "allow";
+  action: "allow" | "deny";
   protocol: EgressProtocol;
   host: string;
   includeSubdomains: boolean;
@@ -20,15 +22,31 @@ export type CompiledEgressRule = {
 };
 
 export type CompiledEgressSecurityGroup = {
+  schemaVersion?: 1 | 2;
+  mode?: "restricted";
   id: string;
   securityGroupId: string;
-  tenantId: string;
+  tenantId?: string;
   version: number;
   name: string;
   defaultAction: "deny";
   documentHash: string;
   rules: CompiledEgressRule[];
 };
+
+export type CompiledFullWebPolicy = {
+  schemaVersion: 2;
+  mode: "full-web";
+  id: string;
+  securityGroupId: string;
+  version: number;
+  name: string;
+  defaultAction: "allow-public-http-https";
+  documentHash: string;
+  rules: CompiledEgressRule[];
+};
+
+export type CompiledEgressPolicy = CompiledEgressSecurityGroup | CompiledFullWebPolicy;
 
 export type EgressConnection = {
   protocol: EgressProtocol;
@@ -44,6 +62,7 @@ export type EgressProxyGrantClaims = {
   workspaceId: string;
   agentId: string;
   securityGroupVersionId: string;
+  egressMode: EgressMode;
   policyHash: string;
   iat: number;
   exp: number;
@@ -79,7 +98,7 @@ export function issueEgressProxyGrant(
 export function verifyEgressProxyGrant(
   token: string,
   secret: string,
-  expected: Pick<EgressProxyGrantClaims, "tenantId" | "subjectId" | "workspaceId" | "agentId" | "securityGroupVersionId" | "policyHash">,
+  expected: Pick<EgressProxyGrantClaims, "tenantId" | "subjectId" | "workspaceId" | "agentId" | "securityGroupVersionId" | "egressMode" | "policyHash">,
   now = new Date(),
 ) {
   const [encoded, signature, extra] = token.split(".");
@@ -175,6 +194,14 @@ export function compileEgressSecurityGroup(input: EgressSecurityGroupVersion): C
   };
 }
 
+export function compileRuntimeEgressPolicy(input: RuntimeEgressPolicy): CompiledEgressPolicy {
+  const rules = input.rules.map((rule) => ({
+    ...rule,
+    host: normalizeEgressHost(rule.host),
+  })).sort((left, right) => left.id.localeCompare(right.id));
+  return { ...input, rules };
+}
+
 const isReservedIpv4 = (address: string) => {
   const octets = address.split(".").map(Number);
   if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return true;
@@ -203,14 +230,36 @@ export function isReservedAddress(address: string) {
   const normalized = address.toLowerCase();
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized);
   if (mapped) return isReservedIpv4(mapped[1]!);
+
+  const ipv6Value = (input: string) => {
+    const withExpandedIpv4 = input.includes(".")
+      ? input.replace(/(\d+\.\d+\.\d+\.\d+)$/, (literal) => {
+        const octets = literal.split(".").map(Number);
+        return `${((octets[0]! << 8) | octets[1]!).toString(16)}:${((octets[2]! << 8) | octets[3]!).toString(16)}`;
+      })
+      : input;
+    const halves = withExpandedIpv4.split("::");
+    const left = halves[0] ? halves[0].split(":") : [];
+    const right = halves[1] ? halves[1].split(":") : [];
+    const groups = halves.length === 2
+      ? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right]
+      : left;
+    return groups.reduce((value, group) => (value << 16n) | BigInt(`0x${group || "0"}`), 0n);
+  };
+  const value = ipv6Value(normalized);
+  const inCidr = (base: string, prefix: number) => {
+    const shift = BigInt(128 - prefix);
+    return (value >> shift) === (ipv6Value(base) >> shift);
+  };
+
+  // Public IPv6 is currently allocated from 2000::/3. Deny the IETF special,
+  // transition, benchmarking, and documentation sub-ranges within it too.
   return (
-    normalized === "::"
-    || normalized === "::1"
-    || normalized.startsWith("fc")
-    || normalized.startsWith("fd")
-    || /^fe[89ab]/.test(normalized)
-    || normalized.startsWith("ff")
-    || normalized.startsWith("2001:db8:")
+    !inCidr("2000::", 3)
+    || inCidr("2001::", 23)
+    || inCidr("2001:db8::", 32)
+    || inCidr("2002::", 16)
+    || inCidr("3fff::", 20)
   );
 }
 
@@ -220,7 +269,7 @@ const deny = (reasonCode: EgressDecision["reasonCode"]) => egressDecisionSchema.
 });
 
 export function decideEgress(
-  policy: CompiledEgressSecurityGroup,
+  policy: CompiledEgressPolicy,
   connection: EgressConnection,
 ): EgressDecision {
   let host: string;
@@ -232,7 +281,7 @@ export function decideEgress(
   }
   if (!connection.resolvedAddresses.length) return deny("EGRESS_DNS_UNAVAILABLE");
   if (connection.resolvedAddresses.some(isReservedAddress)) return deny("EGRESS_DESTINATION_RESERVED");
-  const rule = policy.rules.find((candidate) => (
+  const matchingRules = policy.rules.filter((candidate) => (
     candidate.protocol === connection.protocol
     && candidate.port === connection.port
     && (
@@ -240,6 +289,22 @@ export function decideEgress(
       || (candidate.includeSubdomains && host.endsWith(`.${candidate.host}`))
     )
   ));
+  const deniedByRule = matchingRules.find((candidate) => candidate.action === "deny");
+  if (deniedByRule) {
+    return egressDecisionSchema.parse({
+      decision: "deny",
+      reasonCode: "EGRESS_EXPLICIT_DENY",
+      ruleId: deniedByRule.id,
+    });
+  }
+  if (policy.mode === "full-web") {
+    const standardPort = (connection.protocol === "http" && connection.port === 80)
+      || (connection.protocol === "https" && connection.port === 443);
+    return standardPort
+      ? egressDecisionSchema.parse({ decision: "allow", reasonCode: "EGRESS_ALLOWED" })
+      : deny("EGRESS_DEFAULT_DENY");
+  }
+  const rule = matchingRules.find((candidate) => candidate.action === "allow");
   return rule
     ? egressDecisionSchema.parse({ decision: "allow", reasonCode: "EGRESS_ALLOWED", ruleId: rule.id })
     : deny("EGRESS_DEFAULT_DENY");

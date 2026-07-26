@@ -4,6 +4,7 @@ import {
   canonicalJson,
   defaultClipboardPolicy,
   OneComputerError,
+  runtimePolicySchema,
   signedPolicyBundleSchema,
   type AgentCatalogId,
   type ClipboardPolicy,
@@ -73,6 +74,7 @@ export type SandboxCreateInput = {
       workspaceId: string;
       agentId: string;
       securityGroupVersionId: string;
+      egressMode: RuntimePolicy["egressMode"];
       policyHash: string;
     };
   };
@@ -266,6 +268,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
   }
 
   async create(input: SandboxCreateInput): Promise<Sandbox> {
+    input = { ...input, policy: runtimePolicySchema.parse(input.policy) };
     const clipboard = clipboardPolicyFor(input.policy);
     if (!input.policyBundle || !input.policyVerificationKeys) {
       throw new OneComputerError("POLICY_SIGNATURE_REQUIRED", "A verified signed policy is required to provision the workspace", 503);
@@ -317,6 +320,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
         "com.onecomputer.policy-bundle-digest": policyBundleDigest,
         "com.onecomputer.agent-id": input.policy.agentId,
         "com.onecomputer.sandbox-profile": input.policy.workspaceProfile,
+        "com.onecomputer.execution-mode": input.policy.executionMode,
+        "com.onecomputer.egress-mode": input.policy.egressMode,
         "com.onecomputer.model-alias": input.policy.modelAlias,
         "com.onecomputer.enabled-agents": enabledAgents.join(","),
         "com.onecomputer.enabled-applications": enabledApplications.join(","),
@@ -342,6 +347,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
         `ONECOMPUTER_CLIPBOARD_MAX_BYTES=${clipboard.maxBytes}`,
         `ONECOMPUTER_ENABLED_AGENTS=${enabledAgents.join(",")}`,
         `ONECOMPUTER_ENABLED_APPLICATIONS=${enabledApplications.join(",")}`,
+        `ONECOMPUTER_EXECUTION_MODE=${input.policy.executionMode}`,
+        `ONECOMPUTER_EGRESS_MODE=${input.policy.egressMode}`,
         `ONECOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
         `ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(canonicalJson(input.policyVerificationKeys), "utf8").toString("base64url")}`,
         ...(input.chatRuntimes?.flatMap(chatRuntimeEnvironment) ?? []),
@@ -696,6 +703,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       input.egressProxy.expectedGrant.workspaceId !== input.workspaceId
       || input.egressProxy.expectedGrant.agentId !== input.policy.agentId
       || input.egressProxy.expectedGrant.securityGroupVersionId !== input.policy.egress.id
+      || (input.egressProxy.expectedGrant.egressMode ?? input.policy.egressMode) !== input.policy.egressMode
       || input.egressProxy.expectedGrant.policyHash !== input.policy.policyHash
     ) {
       throw new OneComputerError("EGRESS_PROXY_GRANT_MISMATCH", "The egress proxy grant does not match the sandbox policy", 403);
@@ -705,20 +713,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const existing = await this.inspectByName(proxyName);
     if (existing?.running) return;
     if (existing) await this.removeContainer(existing.id);
-    const policy = {
-      schemaVersion: 1,
-      id: input.policy.egress.id,
-      securityGroupId: input.policy.egress.securityGroupId,
-      tenantId: input.egressProxy.expectedGrant.tenantId,
-      version: input.policy.egress.version,
-      name: input.policy.egress.name,
-      description: input.policy.egress.description,
-      defaultAction: input.policy.egress.defaultAction,
-      rules: input.policy.egress.rules,
-      documentHash: input.policy.egress.documentHash,
-      createdBy: input.egressProxy.expectedGrant.subjectId,
-      createdAt: new Date().toISOString(),
-    };
+    const policy = input.policy.egress;
     const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(proxyName)}`, {
       Image: this.config.egressProxyImage,
       Cmd: ["npm", "run", "start", "-w", "@onecomputer/egress-proxy"],
@@ -727,6 +722,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         "com.onecomputer.workspace-id": input.workspaceId,
         "com.onecomputer.egress-security-group-version-id": input.policy.egress.id,
         "com.onecomputer.egress-policy-hash": input.policy.egress.documentHash,
+        "com.onecomputer.egress-mode": input.policy.egress.mode,
       },
       Env: [
         "EGRESS_PROXY_PORT=3128",

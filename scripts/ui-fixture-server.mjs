@@ -43,9 +43,11 @@ const workspace = {
   policyAssignment: { version: 7, hash: digest },
   profile: {
     id: "claude-desktop-standard-v1",
-    client: "Claude Desktop",
-    clientVersion: "1.22209.3",
+    client: "ONEComputer managed workspace",
+    clientVersion: "managed-v1",
     modelAlias: "onecomputer-glm",
+    executionMode: "managed",
+    egressMode: "restricted",
     persistence: "persistent-home",
     network: "gateway-only",
   },
@@ -64,10 +66,12 @@ const sandboxWorkspace = {
   modelRoute: undefined,
   policyAssignment: { version: 4, hash: digest },
   profile: {
-    id: "kasm-persistent-standard",
-    client: "ONEComputer qualification CLI",
-    clientVersion: "issue-006",
+    id: "disposable-open-v1",
+    client: "ONEComputer open workspace",
+    clientVersion: "disposable-open-v1",
     modelAlias: "onecomputer-openai",
+    executionMode: "disposable-open",
+    egressMode: "full-web",
     persistence: "persistent-home",
     network: "gateway-only",
   },
@@ -76,10 +80,28 @@ const sandboxWorkspace = {
 const profile = {
   id: "claude-desktop-standard-v1",
   version: 1,
-  displayName: "Claude Desktop",
-  description: "A managed Claude Desktop chat workspace routed only through the ONEComputer AI gateway.",
-  client: "Claude Desktop",
-  clientVersion: "1.22209.3",
+  displayName: "Managed workspace",
+  description: "A restricted workspace for any selected AI agent, routed through organization-approved models, tools, and destinations.",
+  executionMode: "managed",
+  egressMode: "restricted",
+  dataGuidance: "Use for organization work. Local tools and public destinations remain policy restricted.",
+  client: "ONEComputer managed workspace",
+  clientVersion: "managed-v1",
+  persistence: "persistent-home",
+  network: "gateway-only",
+  resources: { cpus: 2, memoryGiB: 3 },
+};
+
+const disposableProfile = {
+  id: "disposable-open-v1",
+  version: 1,
+  displayName: "Disposable open workspace",
+  description: "A flexible workspace with local coding tools and public web access inside the isolated Kasm boundary.",
+  executionMode: "disposable-open",
+  egressMode: "full-web",
+  dataGuidance: "Non-sensitive work only. Delete permanently removes the workspace.",
+  client: "ONEComputer open workspace",
+  clientVersion: "disposable-open-v1",
   persistence: "persistent-home",
   network: "gateway-only",
   resources: { cpus: 2, memoryGiB: 3 },
@@ -151,7 +173,7 @@ let sandboxSettings = {
   applicationIds: ["firefox"],
   modelAlias: "onecomputer-glm",
   profile,
-  availableProfiles: [profile],
+  availableProfiles: [profile, disposableProfile],
   availableApplications,
   availableModels: [{ alias: "onecomputer-glm", displayName: "GLM", provider: "Z.ai" }],
   agentIds: ["claude-desktop", "hermes-claw"],
@@ -225,11 +247,39 @@ let egressSecurityGroups = [{
   rules: [
     { id: "claude-downloads", action: "allow", protocol: "https", host: "downloads.claude.ai", includeSubdomains: false, port: 443, purpose: "Download approved Claude Desktop updates" },
     { id: "anthropic-api", action: "allow", protocol: "https", host: "api.anthropic.com", includeSubdomains: false, port: 443, purpose: "Connect approved Anthropic services" },
+    { id: "blocked-downloads", action: "deny", protocol: "https", host: "untrusted-downloads.example", includeSubdomains: true, port: 443, purpose: "Block untrusted downloads in open workspaces" },
   ],
   documentHash: digest,
   createdBy: session.user.id,
   createdAt: now,
 }];
+
+const firewallWorkspaces = (group) => [
+  {
+    id: workspace.id,
+    grantId: workspace.grantId,
+    state: workspace.state,
+    profileId: workspace.profile.id,
+    executionMode: "managed",
+    egressMode: "restricted",
+    egress: { ...group, schemaVersion: 2, mode: "restricted" },
+  },
+  {
+    id: sandboxWorkspace.id,
+    grantId: sandboxWorkspace.grantId,
+    state: sandboxWorkspace.state,
+    profileId: "disposable-open-v1",
+    executionMode: "disposable-open",
+    egressMode: "full-web",
+    egress: {
+      ...group,
+      schemaVersion: 2,
+      mode: "full-web",
+      defaultAction: "allow-public-http-https",
+      rules: group.rules.filter((rule) => rule.action === "deny"),
+    },
+  },
+];
 
 let adminUsers = [
   {
@@ -238,6 +288,7 @@ let adminUsers = [
     displayName: session.user.displayName,
     roles: session.roles,
     effectivePolicy: { egressSecurityGroup: egressSecurityGroups[0] },
+    workspaces: firewallWorkspaces(egressSecurityGroups[0]),
   },
   {
     userId: "hello-metech",
@@ -247,6 +298,7 @@ let adminUsers = [
     effectivePolicy: null,
   },
 ];
+let fixtureWorkspaces = [workspace, sandboxWorkspace];
 
 const responses = new Map([
   ["GET /v1/auth/session", session],
@@ -303,6 +355,40 @@ const server = http.createServer((request, response) => {
   const key = `${request.method} ${url.pathname}`;
   response.setHeader("content-type", "application/json");
   response.setHeader("cache-control", "no-store");
+  if (key === "GET /v1/workspaces") {
+    response.end(JSON.stringify({ workspaces: fixtureWorkspaces }));
+    return;
+  }
+  if (key === "GET /v1/sandbox-settings") {
+    response.end(JSON.stringify({
+      ...sandboxSettings,
+      grantId: url.searchParams.get("grantId") ?? "personal",
+    }));
+    return;
+  }
+  if (key === "POST /v1/workspaces") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const created = {
+        ...sandboxWorkspace,
+        id: `fixture-workspace-${Date.now()}`,
+        grantId: input.grantId,
+        state: "provisioning",
+        profile: {
+          ...sandboxSettings.profile,
+          modelAlias: sandboxSettings.modelAlias,
+        },
+        applications: sandboxSettings.applicationIds,
+        agents: sandboxSettings.availableAgents.filter((agent) => sandboxSettings.agentIds.includes(agent.id)),
+      };
+      fixtureWorkspaces = [...fixtureWorkspaces, created];
+      response.statusCode = 201;
+      response.end(JSON.stringify(created));
+    });
+    return;
+  }
   if (key === "PUT /v1/sandbox-settings") {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -317,7 +403,10 @@ const server = http.createServer((request, response) => {
           applicationIds: input.applicationIds,
           agentIds: input.agentIds,
           modelAlias: input.modelAlias,
+          executionMode: input.profileId === disposableProfile.id ? "disposable-open" : "managed",
+          egressMode: input.profileId === disposableProfile.id ? "full-web" : "restricted",
         },
+        profile: input.profileId === disposableProfile.id ? disposableProfile : profile,
         updatedAt: new Date().toISOString(),
       };
       responses.set("GET /v1/sandbox-settings", sandboxSettings);
@@ -391,7 +480,11 @@ const server = http.createServer((request, response) => {
       const userId = url.pathname.split("/")[4];
       const input = JSON.parse(body);
       const group = egressSecurityGroups.find((candidate) => candidate.id === input.securityGroupVersionId);
-      adminUsers = adminUsers.map((user) => user.userId === userId ? { ...user, effectivePolicy: { egressSecurityGroup: group } } : user);
+      adminUsers = adminUsers.map((user) => user.userId === userId ? {
+        ...user,
+        effectivePolicy: { egressSecurityGroup: group },
+        workspaces: firewallWorkspaces(group),
+      } : user);
       response.end(JSON.stringify({ egressSecurityGroup: group }));
     });
     return;

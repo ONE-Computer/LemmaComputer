@@ -119,7 +119,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   effectivePolicy.document = {
     schemaVersion: 1,
     workspaceProfile: "claude-desktop-standard-v1",
-    workspaceProfiles: ["claude-desktop-standard-v1"],
+    workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
     agentProfile: "claude-desktop-managed-v1",
     modelAliases: ["onecomputer-claude"],
     networkProfile: "controlled-egress-v1",
@@ -134,6 +134,19 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   };
   const workspaceStore = new MemoryWorkspaceStore();
   const activeWorkspace = await workspaceStore.createOrGet(alpha, "personal", "active-policy-refresh-workspace");
+  const openWorkspace = await workspaceStore.createOrGet(alpha, "workspace-open-research", "open-firewall-workspace");
+  Object.assign(workspaceStore, {
+    getSandboxSettings: async (_identity: unknown, grantId: string) => grantId === openWorkspace.grantId ? {
+      tenantId: "acme",
+      subjectId: "alpha",
+      grantId,
+      profileId: "disposable-open-v1" as const,
+      applicationIds: ["firefox"] as const,
+      modelAlias: "onecomputer-claude" as const,
+      agentIds: ["claude-desktop"] as const,
+      updatedAt: new Date(),
+    } : null,
+  });
   await workspaceStore.update(activeWorkspace.id, { state: "ready" });
   effectivePolicy.workspaceId = activeWorkspace.id;
   const identityPolicyStore = {
@@ -176,6 +189,13 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   });
   const headers = { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid" };
   try {
+    const adminUsers = await app.inject({ method: "GET", url: "/v1/admin/users", headers });
+    assert.equal(adminUsers.statusCode, 200);
+    const openFirewall = adminUsers.json().users[0].workspaces.find((workspace: { id: string }) => workspace.id === openWorkspace.id);
+    assert.equal(openFirewall.executionMode, "disposable-open");
+    assert.equal(openFirewall.egress.mode, "full-web");
+    assert.equal(openFirewall.egress.defaultAction, "allow-public-http-https");
+
     const policy = await app.inject({ method: "GET", url: "/v1/admin/mcp-policy", headers });
     assert.equal(policy.statusCode, 200);
     assert.equal(policy.json().tools.length, 38);

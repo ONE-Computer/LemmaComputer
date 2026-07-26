@@ -1,0 +1,107 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("the workspace image pins the Hermes Office skills and their native runtimes", async () => {
+  const [dockerfile, requirements, nodePackage, nodeLock] = await Promise.all([
+    source("docker/Dockerfile.workspace"),
+    source("infra/issue-010/hermes-office-requirements.txt"),
+    source("infra/issue-010/hermes-office-node/package.json"),
+    source("infra/issue-010/hermes-office-node/package-lock.json"),
+  ]);
+
+  assert.match(dockerfile, /HERMES_OFFICE_SKILLS_COMMIT=a606d24cf2a9d1137d77fd92e7da459c89947fbd/);
+  assert.match(dockerfile, /HERMES_OFFICE_SKILLS_SHA256=c379fc38badf3bc31938be80c15aa3a13bc6c4bb3b852902e5d988676763c20c/);
+  assert.match(dockerfile, /NODE_VERSION=22\.23\.1/);
+  assert.match(dockerfile, /NODE_SHA256=9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578/);
+
+  for (const skill of ["docx", "pdf", "powerpoint", "xlsx", "ocr-and-documents"]) {
+    assert.match(
+      dockerfile,
+      new RegExp(`hermes-office-skills/skills/productivity/${skill} /opt/onecomputer/hermes-agent/skills/productivity/${skill}`),
+    );
+    assert.match(
+      dockerfile,
+      new RegExp(`/opt/onecomputer/hermes-agent/skills/productivity/${skill}/SKILL\\.md`),
+    );
+  }
+
+  for (const aptPackage of [
+    "libreoffice",
+    "pandoc",
+    "poppler-utils",
+    "qpdf",
+    "tesseract-ocr",
+    "unzip",
+    "zip",
+  ]) {
+    assert.match(dockerfile, new RegExp(`\\s${aptPackage}\\s`));
+  }
+  assert.match(dockerfile, /onecomputer-libreoffice/);
+  assert.match(dockerfile, /command -v npm soffice libreoffice pandoc pdftoppm pdftotext qpdf tesseract unzip zip/);
+  assert.match(dockerfile, /soffice --headless --version/);
+  assert.match(dockerfile, /hermes-office-venv/);
+  assert.match(dockerfile, /hermes-office-requirements\.txt/);
+
+  for (const requirement of [
+    "defusedxml",
+    "lxml",
+    "markitdown[pptx,xlsx]",
+    "openpyxl",
+    "pandas",
+    "pdf2image",
+    "pdfplumber",
+    "pillow",
+    "pymupdf",
+    "pymupdf4llm",
+    "pypdf",
+    "pytesseract",
+    "python-docx",
+    "python-pptx",
+    "reportlab",
+  ]) {
+    assert.match(requirements.toLowerCase(), new RegExp(`^${requirement.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}==`, "m"));
+  }
+
+  const packageJson = JSON.parse(nodePackage);
+  const packageLock = JSON.parse(nodeLock);
+  assert.deepEqual(packageJson.dependencies, {
+    docx: "9.7.1",
+    pptxgenjs: "4.0.1",
+    react: "19.2.8",
+    "react-dom": "19.2.8",
+    "react-icons": "5.7.0",
+    sharp: "0.35.3",
+  });
+  assert.deepEqual(packageLock.packages[""].dependencies, packageJson.dependencies);
+});
+
+test("selected Hermes profiles seed Office skills and expose the mode-appropriate tools", async () => {
+  const [entrypoint, cliLauncher, desktopLauncher, chatAdapter] = await Promise.all([
+    source("infra/issue-010/onecomputer-workspace-entrypoint.sh"),
+    source("infra/issue-010/onecomputer-hermes"),
+    source("infra/issue-010/onecomputer-hermes-desktop"),
+    source("infra/issue-010/onecomputer-agent-chat.py"),
+  ]);
+
+  assert.match(entrypoint, /sync_hermes_skills\(\)/);
+  assert.match(entrypoint, /from tools\.skills_sync import sync_skills; sync_skills\(quiet=True\)/);
+  assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes/);
+  assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes-desktop/);
+  assert.match(entrypoint, /HERMES_BUNDLED_SKILLS=\/opt\/onecomputer\/hermes-agent\/skills/);
+  assert.match(entrypoint, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
+  assert.match(entrypoint, /cli_toolsets = \["hermes-cli", "onecomputer_ms365"\]/);
+  assert.match(entrypoint, /api_toolsets = \["hermes-api-server", "onecomputer_ms365"\]/);
+  assert.match(entrypoint, /managed_office_tools\.isdisjoint\(resolve_toolset\(name\)\)/);
+
+  for (const launcher of [cliLauncher, desktopLauncher]) {
+    assert.match(launcher, /HERMES_BUNDLED_SKILLS=\/opt\/onecomputer\/hermes-agent\/skills/);
+    assert.match(launcher, /PATH=\/opt\/onecomputer\/hermes-office-venv\/bin:/);
+    assert.match(launcher, /NODE_PATH=\/opt\/onecomputer\/hermes-office-node\/node_modules/);
+  }
+
+  assert.match(chatAdapter, /Hermes has workspace-local file, terminal, skills, and vision tools/);
+  assert.match(chatAdapter, /public-web and unrelated native toolsets remain restricted/);
+});

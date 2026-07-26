@@ -43,6 +43,19 @@ test("LiteLLM rejects image input when the selected deployment does not advertis
   assert.match(callback, /status_code=422/);
 });
 
+test("the connection account lookup bypass is purpose-bound and exact", async () => {
+  const callback = await source("integrations/litellm/onecomputer_policy_callback.py");
+  const adapter = await source("packages/litellm-adapter/src/index.ts");
+  assert.match(callback, /metadata\.get\("onecomputer_connection_credential"\) is True/);
+  assert.match(callback, /metadata\.get\("onecomputer_connection_account_lookup"\) is True/);
+  assert.match(callback, /metadata\.get\("onecomputer_connection_server"\) == MS365_SERVER_NAME/);
+  assert.match(callback, /payload\.get\("toolName"\) == MS365_ACCOUNT_LOOKUP_TOOL/);
+  assert.match(callback, /payload\.get\("arguments"\) == MS365_ACCOUNT_LOOKUP_ARGUMENTS/);
+  assert.match(callback, /\{\s*"\$select": "displayName,mail,userPrincipalName",?\s*\}/);
+  assert.match(adapter, /onecomputer_connection_account_lookup: true/);
+  assert.match(adapter, /mcp_tool_permissions: \{ \[serverName\]: \["get-current-user"\] \}/);
+});
+
 test("Claude Desktop is pinned and receives managed gateway policy rather than provider credentials", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
@@ -75,7 +88,7 @@ test("the workspace image enforces bounded native text clipboard without content
   const client = await source("infra/issue-010/onecomputer-kasm-clipboard.js");
   assert.match(dockerfile, /onecomputer-kasm-clipboard\.js/);
   assert.match(dockerfile, /COPY .* \/usr\/share\/kasmvnc\/www\/app\/onecomputer-kasm-clipboard\.js/);
-  assert.match(dockerfile, /apt-get install -y --no-install-recommends mousepad zstd/);
+  assert.match(dockerfile, /apt-get install -y --no-install-recommends[\s\S]*\n      mousepad \\\n[\s\S]*\n      zstd \\/);
   assert.match(dockerfile, /chmod 0644 \/usr\/share\/kasmvnc\/www\/app\/onecomputer-kasm-clipboard\.js/);
   assert.match(dockerfile, /<script src="app\/onecomputer-kasm-clipboard\.js">/);
   assert.match(entrypoint, /ONECOMPUTER_CLIPBOARD_MAX_BYTES:=65536/);
@@ -184,8 +197,11 @@ test("the Hermes sandbox gateway includes its pinned private API runtime without
   assert.match(dockerfile, /uv pip install[\s\S]*mcp==1\.26\.0[\s\S]*starlette==1\.0\.1/);
   assert.match(dockerfile, /importlib\.metadata\.version\("mcp"\).*1\.26\.0/);
   assert.match(entrypoint, /hermes gateway run/);
-  assert.match(entrypoint, /"cli": \["onecomputer_ms365"\]/);
-  assert.match(entrypoint, /"api_server": \["onecomputer_ms365"\]/);
+  assert.match(entrypoint, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
+  assert.match(entrypoint, /cli_toolsets = managed_office_toolsets \+ \["onecomputer_ms365"\]/);
+  assert.match(entrypoint, /api_toolsets = managed_office_toolsets \+ \["onecomputer_ms365"\]/);
+  assert.match(entrypoint, /cli_toolsets = \["hermes-cli", "onecomputer_ms365"\]/);
+  assert.match(entrypoint, /api_toolsets = \["hermes-api-server", "onecomputer_ms365"\]/);
   assert.match(entrypoint, /"reasoning_effort": False/);
   assert.match(entrypoint, /\/run\/onecomputer\/hermes-gateway-bootstrap\.log/);
   assert.doesNotMatch(entrypoint, />>\/home\/kasm-user\/\.hermes\/logs\/gateway\.log/);

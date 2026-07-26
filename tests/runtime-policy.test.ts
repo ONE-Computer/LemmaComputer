@@ -1,6 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runtimePolicyFor, type EffectivePolicy } from "@onecomputer/workspace-store";
+import { runtimePolicyFor, withOpenWorkspaceProfile, type EffectivePolicy } from "@onecomputer/workspace-store";
+
+test("legacy managed policy upgrades add open access without changing agent selection", () => {
+  const legacy = {
+    schemaVersion: 1,
+    workspaceProfile: "claude-desktop-standard-v1",
+    workspaceProfiles: ["claude-desktop-standard-v1"],
+    agents: ["hermes-claw"],
+    defaultAgents: ["hermes-claw"],
+  };
+  const upgraded = withOpenWorkspaceProfile(legacy);
+
+  assert.deepEqual(upgraded, {
+    ...legacy,
+    workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
+  });
+  assert.deepEqual(legacy.workspaceProfiles, ["claude-desktop-standard-v1"]);
+  assert.equal(withOpenWorkspaceProfile(upgraded!), null);
+});
 
 test("effective policy projects to the one approved workspace runtime", () => {
   const effective: EffectivePolicy = {
@@ -30,6 +48,8 @@ test("effective policy projects to the one approved workspace runtime", () => {
     policyVersion: 1,
     policyHash: "c".repeat(64),
     workspaceProfile: "kasm-persistent-standard",
+    executionMode: "managed",
+    egressMode: "restricted",
     agentId: "agent-1",
     agentProfile: "onecomputer-default-agent",
     applications: ["firefox"],
@@ -52,6 +72,92 @@ test("effective policy projects to the one approved workspace runtime", () => {
       "delete-onedrive-file": "approval_required",
     },
   });
+});
+
+test("disposable-open projects explicit open execution and full-web egress without weakening managed mode", () => {
+  const effective: EffectivePolicy = {
+    assignmentId: "assignment-open", policyBundleId: "bundle-1", policyVersionId: "version-open", version: 5,
+    documentHash: "1".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-26T00:00:00.000Z",
+    agentId: "agent-open", workspaceIdentityId: "workspace-identity-open", workspaceId: null, vendorUserId: "oc-user-1",
+    document: {
+      schemaVersion: 1,
+      workspaceProfile: "claude-desktop-standard-v1",
+      workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
+      agentProfile: "codex-cli-managed-v1",
+      agents: ["codex-cli", "hermes-claw"],
+      modelAliases: ["onecomputer-openai"],
+      networkProfile: "controlled-egress-v1",
+      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders"] } } },
+    },
+  };
+
+  const managed = runtimePolicyFor(effective, undefined, "claude-desktop-standard-v1");
+  const open = runtimePolicyFor(effective, undefined, "disposable-open-v1");
+
+  assert.equal(managed.executionMode, "managed");
+  assert.equal(managed.egressMode, "restricted");
+  assert.equal(managed.egress, undefined);
+  assert.equal(open.executionMode, "disposable-open");
+  assert.equal(open.egressMode, "full-web");
+  assert.equal(open.egress?.mode, "full-web");
+  assert.equal(open.egress?.defaultAction, "allow-public-http-https");
+  assert.deepEqual(open.egress?.rules, []);
+});
+
+test("disposable-open projects attached deny rules as full-web exceptions", () => {
+  const effective: EffectivePolicy = {
+    assignmentId: "assignment-open-deny", policyBundleId: "bundle-1", policyVersionId: "version-open-deny", version: 6,
+    documentHash: "2".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-26T00:00:00.000Z",
+    agentId: "agent-open", workspaceIdentityId: "workspace-identity-open", workspaceId: null, vendorUserId: "oc-user-1",
+    document: {
+      schemaVersion: 1,
+      workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
+      agents: ["codex-cli"],
+      modelAliases: ["onecomputer-openai"],
+      networkProfile: "controlled-egress-v1",
+      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders"] } } },
+    },
+    egressSecurityGroup: {
+      schemaVersion: 1,
+      id: "egv_open_exceptions_v1",
+      securityGroupId: "esg_open_exceptions",
+      tenantId: "acme",
+      version: 1,
+      name: "Open workspace exceptions",
+      description: "Blocks reviewed destinations from open workspaces.",
+      defaultAction: "deny",
+      rules: [
+        {
+          id: "approved-updates",
+          action: "allow",
+          protocol: "https",
+          host: "updates.example.com",
+          includeSubdomains: false,
+          port: 443,
+          purpose: "Managed workspace updates",
+        },
+        {
+          id: "blocked-downloads",
+          action: "deny",
+          protocol: "https",
+          host: "downloads.example.com",
+          includeSubdomains: true,
+          port: 443,
+          purpose: "Untrusted downloads",
+        },
+      ],
+      documentHash: "3".repeat(64),
+      createdBy: "admin-1",
+      createdAt: "2026-07-26T00:00:00.000Z",
+    },
+  };
+
+  const open = runtimePolicyFor(effective, undefined, "disposable-open-v1");
+  assert.equal(open.egress?.mode, "full-web");
+  assert.equal(open.egress?.id, "egv_open_exceptions_v1");
+  assert.deepEqual(open.egress?.rules.map((rule) => [rule.id, rule.action]), [
+    ["blocked-downloads", "deny"],
+  ]);
 });
 
 test("an assigned sandbox selection can narrow a multi-model policy but cannot broaden it", () => {

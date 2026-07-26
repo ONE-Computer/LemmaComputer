@@ -129,22 +129,44 @@ export const runtimePolicyFor = (
     };
   }) : undefined;
   const primaryAgent = agents?.[0];
-  const egress = policy.egressSecurityGroup ? {
-    id: policy.egressSecurityGroup.id,
-    securityGroupId: policy.egressSecurityGroup.securityGroupId,
-    version: policy.egressSecurityGroup.version,
-    name: policy.egressSecurityGroup.name,
-    description: policy.egressSecurityGroup.description,
-    defaultAction: policy.egressSecurityGroup.defaultAction,
-    rules: policy.egressSecurityGroup.rules,
-    documentHash: policy.egressSecurityGroup.documentHash,
-  } : undefined;
+  const executionMode = workspaceProfile === "disposable-open-v1" ? "disposable-open" as const : "managed" as const;
+  const egressMode = executionMode === "disposable-open" ? "full-web" as const : "restricted" as const;
+  const attachedEgress = policy.egressSecurityGroup;
+  const egress = executionMode === "disposable-open"
+    ? {
+        schemaVersion: 2 as const,
+        mode: "full-web" as const,
+        id: attachedEgress?.id ?? `egv_full_web_${policy.documentHash.slice(0, 24)}`,
+        securityGroupId: attachedEgress?.securityGroupId ?? "esg_disposable_open",
+        version: attachedEgress?.version ?? policy.version,
+        name: attachedEgress?.name ?? "Disposable open public web",
+        description: attachedEgress?.description ?? "Public HTTP and HTTPS through the workspace egress proxy; private and reserved destinations remain blocked.",
+        defaultAction: "allow-public-http-https" as const,
+        rules: attachedEgress?.rules.filter((rule) => rule.action === "deny") ?? [],
+        documentHash: createHash("sha256")
+          .update(`onecomputer-full-web-v2\0${policy.documentHash}\0${attachedEgress?.documentHash ?? "no-explicit-rules"}`)
+          .digest("hex"),
+      }
+    : attachedEgress ? {
+        schemaVersion: 2 as const,
+        mode: "restricted" as const,
+        id: attachedEgress.id,
+        securityGroupId: attachedEgress.securityGroupId,
+        version: attachedEgress.version,
+        name: attachedEgress.name,
+        description: attachedEgress.description,
+        defaultAction: attachedEgress.defaultAction,
+        rules: attachedEgress.rules,
+        documentHash: attachedEgress.documentHash,
+      } : undefined;
   return runtimePolicySchema.parse({
     schemaVersion: 1,
     policyVersionId: policy.policyVersionId,
     policyVersion: policy.version,
     policyHash: policy.documentHash,
     workspaceProfile,
+    executionMode,
+    egressMode,
     agentId: primaryAgent?.agentId ?? policy.agentId,
     agentProfile: primaryAgent?.agentProfile ?? document.agentProfile,
     ...(agents ? { agents } : {}),
@@ -209,6 +231,8 @@ const mvpApplicationIds = ["firefox", "google-chrome"] as const;
 const mvpDefaultApplicationIds = ["firefox"] as const;
 
 const applyMvpSandboxCatalog = (document: Record<string, OwnedJson>) => {
+  document.workspaceProfile = "claude-desktop-standard-v1";
+  document.workspaceProfiles = ["claude-desktop-standard-v1", "disposable-open-v1"];
   document.agents = [...mvpAgentIds];
   document.defaultAgents = [...mvpDefaultAgentIds];
   document.applications = [...mvpApplicationIds];
@@ -216,11 +240,26 @@ const applyMvpSandboxCatalog = (document: Record<string, OwnedJson>) => {
   return document;
 };
 
+export const withOpenWorkspaceProfile = (document: OwnedJson): OwnedJson | null => {
+  if (!document || typeof document !== "object" || Array.isArray(document)) return null;
+  const source = document as Record<string, OwnedJson>;
+  const profiles = Array.isArray(source.workspaceProfiles)
+    ? source.workspaceProfiles.filter((value): value is string => typeof value === "string")
+    : typeof source.workspaceProfile === "string"
+      ? [source.workspaceProfile]
+      : [];
+  if (!profiles.includes("claude-desktop-standard-v1") || profiles.includes("disposable-open-v1")) return null;
+  return {
+    ...structuredClone(source),
+    workspaceProfiles: [...profiles, "disposable-open-v1"],
+  };
+};
+
 const mvpPolicyDocument = (revisionNote = "Initial MVP policy") => ({
   schemaVersion: 1,
   revisionNote,
   workspaceProfile: "claude-desktop-standard-v1",
-  workspaceProfiles: ["claude-desktop-standard-v1"],
+  workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
   agentProfile: "claude-desktop-managed-v1",
   agents: [...mvpAgentIds],
   defaultAgents: [...mvpDefaultAgentIds],
@@ -348,6 +387,106 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
   }
 
   async close() { await this.pool.end(); }
+
+  async upgradeLegacyWorkspaceProfiles() {
+    const candidates = await this.pool.query(
+      `SELECT DISTINCT pv.id AS policy_version_id,pv.policy_bundle_id,pv.document,pv.created_by
+       FROM policy_assignments pa
+       JOIN policy_versions pv ON pv.id=pa.policy_version_id
+       WHERE pa.revoked_at IS NULL
+       AND pv.policy_bundle_id='mvp-standard:' || pa.tenant_id
+       AND (
+         pv.document->>'workspaceProfile'='claude-desktop-standard-v1'
+         OR pv.document->'workspaceProfiles' @> '["claude-desktop-standard-v1"]'::jsonb
+       )
+       AND NOT COALESCE(pv.document->'workspaceProfiles', '[]'::jsonb) @> '["disposable-open-v1"]'::jsonb`,
+    );
+    let upgradedAssignments = 0;
+    for (const candidate of candidates.rows) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`policy-version:${candidate.policy_bundle_id}`]);
+        const assignments = await client.query(
+          `SELECT id,tenant_id,user_id,agent_id,workspace_identity_id,egress_security_group_version_id,assigned_by
+           FROM policy_assignments
+           WHERE policy_version_id=$1 AND revoked_at IS NULL
+           FOR UPDATE`,
+          [candidate.policy_version_id],
+        );
+        if (!assignments.rowCount) {
+          await client.query("COMMIT");
+          continue;
+        }
+        const document = withOpenWorkspaceProfile(candidate.document as OwnedJson);
+        if (!document) {
+          await client.query("COMMIT");
+          continue;
+        }
+        const documentHash = policyHash(document);
+        const existing = await client.query(
+          "SELECT id FROM policy_versions WHERE policy_bundle_id=$1 AND document_hash=$2",
+          [candidate.policy_bundle_id, documentHash],
+        );
+        let policyVersionId = existing.rowCount ? String(existing.rows[0].id) : "";
+        if (!policyVersionId) {
+          const latest = await client.query(
+            "SELECT COALESCE(max(version),0) AS version FROM policy_versions WHERE policy_bundle_id=$1",
+            [candidate.policy_bundle_id],
+          );
+          policyVersionId = randomUUID();
+          await client.query(
+            `INSERT INTO policy_versions (id,policy_bundle_id,version,document,document_hash,created_by)
+             VALUES ($1,$2,$3,$4::jsonb,$5,$6)`,
+            [
+              policyVersionId,
+              candidate.policy_bundle_id,
+              Number(latest.rows[0].version) + 1,
+              JSON.stringify(document),
+              documentHash,
+              candidate.created_by,
+            ],
+          );
+        }
+        for (const assignment of assignments.rows) {
+          await client.query(
+            "UPDATE policy_assignments SET revoked_at=now(),revoked_by=$2 WHERE id=$1",
+            [assignment.id, assignment.assigned_by],
+          );
+          const replacementId = randomUUID();
+          await client.query(
+            `INSERT INTO policy_assignments (
+               id,tenant_id,user_id,agent_id,workspace_identity_id,policy_version_id,
+               egress_security_group_version_id,assigned_by
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [
+              replacementId,
+              assignment.tenant_id,
+              assignment.user_id,
+              assignment.agent_id,
+              assignment.workspace_identity_id,
+              policyVersionId,
+              assignment.egress_security_group_version_id,
+              assignment.assigned_by,
+            ],
+          );
+          await client.query(
+            `INSERT INTO capability_assignments (policy_assignment_id,capability_id)
+             SELECT $1,capability_id FROM capability_assignments WHERE policy_assignment_id=$2`,
+            [replacementId, assignment.id],
+          );
+          upgradedAssignments += 1;
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+    return upgradedAssignments;
+  }
 
   async createLoginAttempt(input: { stateHash: string; verifierCiphertext: string; nonce: string; returnPath: string; expiresAt: Date }) {
     await this.pool.query("DELETE FROM oidc_login_attempts WHERE expires_at<=now()");

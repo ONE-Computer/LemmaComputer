@@ -124,3 +124,75 @@ test("workspace ingress forwards the web app and exchanges a launch for an isola
     await Promise.all([close(ingress), close(workspace), close(web)]);
   }
 });
+
+test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth routes", async () => {
+  const upstreamRequests: Array<{ service: string; method?: string; url?: string; cookie?: string }> = [];
+  const web = http.createServer((request, response) => {
+    upstreamRequests.push({ service: "web", method: request.method, url: request.url });
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("web");
+  });
+  const microsoft365 = http.createServer((request, response) => {
+    upstreamRequests.push({ service: "microsoft365", method: request.method, url: request.url });
+    response.writeHead(302, { location: "https://login.microsoftonline.com/example/oauth2/v2.0/authorize" });
+    response.end();
+  });
+  const litellm = http.createServer((request, response) => {
+    upstreamRequests.push({
+      service: "litellm",
+      method: request.method,
+      url: request.url,
+      cookie: request.headers.cookie,
+    });
+    response.writeHead(303, { location: "/api/v1/connections/microsoft-365/callback?state=relay&code=sentinel" });
+    response.end();
+  });
+  const [webPort, microsoft365Port, litellmPort] = await Promise.all([
+    listen(web),
+    listen(microsoft365),
+    listen(litellm),
+  ]);
+  const ingress = createWorkspaceIngress({
+    authority: new WorkspaceIngressAuthority(secret),
+    publicUrl: "https://onecomputer.example",
+    webUpstream: `http://127.0.0.1:${webPort}`,
+    microsoft365AuthorizationUpstream: `http://127.0.0.1:${microsoft365Port}`,
+    litellmOAuthUpstream: `http://127.0.0.1:${litellmPort}`,
+    audit: () => undefined,
+  });
+  const ingressPort = await listen(ingress);
+
+  try {
+    const authorize = await fetch(`http://127.0.0.1:${ingressPort}/m365/authorize?state=opaque`, { redirect: "manual" });
+    assert.equal(authorize.status, 302);
+    assert.equal(authorize.headers.get("location"), "https://login.microsoftonline.com/example/oauth2/v2.0/authorize");
+
+    const callback = await fetch(`http://127.0.0.1:${ingressPort}/callback?state=relay&code=sentinel`, {
+      headers: { cookie: "mcp_oauth_state_relay=opaque" },
+      redirect: "manual",
+    });
+    assert.equal(callback.status, 303);
+    assert.equal(callback.headers.get("location"), "/api/v1/connections/microsoft-365/callback?state=relay&code=sentinel");
+
+    const rejectedMethod = await fetch(`http://127.0.0.1:${ingressPort}/callback`, { method: "POST" });
+    assert.equal(rejectedMethod.status, 405);
+    assert.equal(rejectedMethod.headers.get("allow"), "GET");
+
+    const privateConnectorRoute = await fetch(`http://127.0.0.1:${ingressPort}/m365/token`);
+    assert.equal(privateConnectorRoute.status, 200);
+    assert.equal(await privateConnectorRoute.text(), "web");
+
+    assert.deepEqual(upstreamRequests, [
+      { service: "microsoft365", method: "GET", url: "/authorize?state=opaque" },
+      {
+        service: "litellm",
+        method: "GET",
+        url: "/callback?state=relay&code=sentinel",
+        cookie: "mcp_oauth_state_relay=opaque",
+      },
+      { service: "web", method: "GET", url: "/m365/token" },
+    ]);
+  } finally {
+    await Promise.all([close(ingress), close(litellm), close(microsoft365), close(web)]);
+  }
+});

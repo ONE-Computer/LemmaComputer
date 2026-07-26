@@ -2,7 +2,9 @@
 set -euo pipefail
 
 export HERMES_HOME=/home/kasm-user/.hermes-desktop
+export HERMES_BUNDLED_SKILLS=/opt/onecomputer/hermes-agent/skills
 export HERMES_DESKTOP_HERMES_ROOT=/opt/onecomputer/hermes-agent
-export PATH=/opt/onecomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin
+export PATH=/opt/onecomputer/hermes-office-venv/bin:/opt/onecomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin
+export NODE_PATH=/opt/onecomputer/hermes-office-node/node_modules
 
 exec /opt/onecomputer/hermes-desktop/Hermes --no-sandbox "$@"

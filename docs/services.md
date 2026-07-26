@@ -178,6 +178,16 @@ The image contains KasmVNC, Firefox, Chrome, Claude Desktop, Claude CLI, Codex
 CLI, Hermes Agent CLI, and Hermes Desktop. Software and source archives are
 version- and checksum-pinned.
 
+The Hermes payload also contains checksum-pinned copies of the official DOCX,
+PDF, PowerPoint, XLSX, and OCR/document skills and their native, Python, Node,
+and font dependencies. When either Hermes client is selected, the entrypoint
+uses Hermes' bundled-skill manifest sync to seed its persistent profile.
+Managed/restricted Hermes exposes the workspace-local file, terminal, skill,
+and vision tools required by these workflows while keeping public-web and
+unrelated native toolsets disabled. Disposable-open Hermes exposes its normal
+CLI/API toolset. The optional multi-gigabyte `marker-pdf` OCR stack is not part
+of the default image; PyMuPDF/PyMuPDF4LLM and Tesseract are.
+
 At launch, the root-owned entrypoint:
 
 - verifies the signed runtime policy;

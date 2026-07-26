@@ -23,6 +23,8 @@ tests
 infra/*
 !infra/issue-010/
 !infra/issue-010/**
+!infra/issue-014/
+!infra/issue-014/**
 !infra/issue-008/
 infra/issue-008/*
 !infra/issue-008/softeria/

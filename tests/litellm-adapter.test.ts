@@ -96,12 +96,22 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
     const grant = requests.find((item) => item.url === "/key/generate")!;
     const authorize = requests.find((item) => item.url.startsWith("/v1/mcp/server/oauth/"))!;
     assert.equal(grant.body.user_id, liveAdapter.userIdFor(identity));
-    assert.deepEqual(grant.body.object_permission, { mcp_servers: ["onecomputer_ms365"] });
+    assert.equal(grant.body.max_budget, 0.01);
+    assert.equal(
+      (grant.body.metadata as Record<string, unknown>).onecomputer_connection_account_lookup,
+      true,
+    );
+    assert.deepEqual(grant.body.object_permission, {
+      mcp_servers: ["onecomputer_ms365"],
+      mcp_tool_permissions: { onecomputer_ms365: ["get-current-user"] },
+    });
     assert.deepEqual(grant.body.allowed_routes, [
       "/v1/mcp/server/oauth/ms365-server-id/authorize",
       "/v1/mcp/server/oauth/ms365-server-id/token",
       "/v1/mcp/server/ms365-server-id/oauth-user-credential",
       "/v1/mcp/server/ms365-server-id/oauth-user-credential/status",
+      "/mcp-rest/tools/list",
+      "/mcp-rest/tools/call",
     ]);
     assert.notEqual(authorize.authorization, "Bearer sk-master-test-not-used-00001");
     assert.match(authorize.authorization, /^Bearer sk-occ-/);
@@ -133,6 +143,19 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
       response.end(JSON.stringify({ server_id: "ms365-server-id", has_credential: true, is_expired: false, connected_at: "2026-07-20T01:02:03Z", expires_at: "2026-07-20T02:02:03Z" }));
       return;
     }
+    if (request.url === "/mcp-rest/tools/call") {
+      response.end(JSON.stringify({
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            displayName: "Alex Morgan",
+            mail: "alex.morgan@acme.example",
+            userPrincipalName: "alex@acme.example",
+          }),
+        }],
+      }));
+      return;
+    }
     response.end(JSON.stringify({ ok: true }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -154,6 +177,11 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
       state: "connected",
       connectedAt: "2026-07-20T01:02:03Z",
       expiresAt: "2026-07-20T02:02:03Z",
+      account: {
+        displayName: "Alex Morgan",
+        email: "alex.morgan@acme.example",
+        userPrincipalName: "alex@acme.example",
+      },
     });
     assert.ok(!JSON.stringify(status).includes(markerAccessToken));
     assert.ok(!JSON.stringify(status).includes(markerRefreshToken));
@@ -162,6 +190,12 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
     assert.match(exchange.body, /grant_type=authorization_code/);
     assert.match(exchange.body, /code=one-time-authorization-code/);
     assert.match(exchange.body, /code_verifier=v+/);
+    const accountLookup = requests.find((item) => item.url === "/mcp-rest/tools/call")!;
+    assert.deepEqual(JSON.parse(accountLookup.body), {
+      server_id: "ms365-server-id",
+      name: "get-current-user",
+      arguments: { $select: "displayName,mail,userPrincipalName" },
+    });
     assert.equal(requests.at(-1)?.url, "/key/delete");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

@@ -58,6 +58,11 @@ export type OAuthConnectionStatus = {
   state: "disconnected" | "connected" | "expired";
   connectedAt: string | null;
   expiresAt: string | null;
+  account: {
+    displayName: string | null;
+    email: string | null;
+    userPrincipalName: string | null;
+  } | null;
 };
 
 export interface OAuthConnectionGateway {
@@ -300,7 +305,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     try {
       const result = await this.dataCall(`/v1/mcp/server/${encodeURIComponent(grant.serverId)}/oauth-user-credential`, grant.credential, { method: "DELETE" });
       if (!result.ok && result.status !== 404) throw this.upstreamError("M365_DISCONNECT_FAILED", result.status, result.payload);
-      return { state: "disconnected", connectedAt: null, expiresAt: null };
+      return { state: "disconnected", connectedAt: null, expiresAt: null, account: null };
     } finally {
       await this.deleteConnectionGrant(grant.credential).catch(() => undefined);
     }
@@ -328,6 +333,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       `/v1/mcp/server/oauth/${serverId}/token`,
       credentialRoute,
       `${credentialRoute}/status`,
+      "/mcp-rest/tools/list",
+      "/mcp-rest/tools/call",
     ];
     const durationSeconds = Math.max(60, Math.ceil(this.connectionGrantTtlMs / 1_000));
     const grant = {
@@ -337,7 +344,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       user_id: userId,
       duration: `${durationSeconds}s`,
       models: [],
-      max_budget: 0,
+      max_budget: 0.01,
       rpm_limit: 12,
       allowed_routes: allowedRoutes,
       metadata: {
@@ -346,8 +353,12 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         onecomputer_gateway_user_id: userId,
         onecomputer_connection_credential: true,
         onecomputer_connection_server: serverName,
+        onecomputer_connection_account_lookup: true,
       },
-      object_permission: { mcp_servers: [serverName] },
+      object_permission: {
+        mcp_servers: [serverName],
+        mcp_tool_permissions: { [serverName]: ["get-current-user"] },
+      },
     };
     const generated = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
     if (!generated.ok) {
@@ -360,7 +371,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         && metadata.onecomputer_tenant_id === identity.tenantId
         && metadata.onecomputer_subject_id === identity.subjectId
         && metadata.onecomputer_connection_credential === true
-        && metadata.onecomputer_connection_server === serverName;
+        && metadata.onecomputer_connection_server === serverName
+        && metadata.onecomputer_connection_account_lookup === true;
       if (!identityMatches) {
         await this.deleteConnectionGrant(credential);
         const replaced = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
@@ -379,11 +391,51 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const payload = asObject(result.payload);
     const hasCredential = payload.has_credential === true;
     const isExpired = payload.is_expired === true;
+    const state = !hasCredential ? "disconnected" : isExpired ? "expired" : "connected";
+    const account = state === "connected"
+      ? await this.readConnectionAccount(credential, serverId).catch(() => null)
+      : null;
     return {
-      state: !hasCredential ? "disconnected" : isExpired ? "expired" : "connected",
+      state,
       connectedAt: typeof payload.connected_at === "string" ? payload.connected_at : null,
       expiresAt: typeof payload.expires_at === "string" ? payload.expires_at : null,
+      account,
     };
+  }
+
+  private async readConnectionAccount(credential: string, serverId: string): Promise<NonNullable<OAuthConnectionStatus["account"]>> {
+    const called = await this.dataCall("/mcp-rest/tools/call", credential, {
+      method: "POST",
+      body: {
+        server_id: serverId,
+        name: "get-current-user",
+        arguments: { $select: "displayName,mail,userPrincipalName" },
+      },
+    });
+    if (!called.ok) throw this.upstreamError("M365_ACCOUNT_LOOKUP_FAILED", called.status, called.payload);
+    const payload = asObject(called.payload);
+    if (payload.isError === true) throw new OneComputerError("M365_ACCOUNT_LOOKUP_FAILED", "Microsoft account details are unavailable", 502, true);
+    const content = Array.isArray(payload.content) ? payload.content : [];
+    const text = content.map(asObject).find((item) => item.type === "text" && typeof item.text === "string")?.text;
+    if (typeof text !== "string") throw new OneComputerError("M365_ACCOUNT_LOOKUP_FAILED", "Microsoft account details are unavailable", 502, true);
+    let profile: JsonObject;
+    try {
+      profile = asObject(JSON.parse(text));
+    } catch {
+      throw new OneComputerError("M365_ACCOUNT_LOOKUP_FAILED", "Microsoft account details are unavailable", 502, true);
+    }
+    const safeString = (value: unknown) => typeof value === "string" && value.trim()
+      ? value.trim().slice(0, 320)
+      : null;
+    const account = {
+      displayName: safeString(profile.displayName),
+      email: safeString(profile.mail),
+      userPrincipalName: safeString(profile.userPrincipalName),
+    };
+    if (!account.displayName && !account.email && !account.userPrincipalName) {
+      throw new OneComputerError("M365_ACCOUNT_LOOKUP_FAILED", "Microsoft account details are unavailable", 502, true);
+    }
+    return account;
   }
 
   private async deleteConnectionGrant(credential: string) {

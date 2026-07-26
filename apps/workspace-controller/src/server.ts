@@ -119,6 +119,7 @@ const verifyGrantBindings = (
     input.egressProxy.expectedGrant.tenantId !== verified.payload.tenantId
     || input.egressProxy.expectedGrant.subjectId !== verified.payload.subjectId
     || input.egressProxy.expectedGrant.workspaceId !== verified.payload.workspaceId
+    || input.egressProxy.expectedGrant.egressMode !== verified.payload.policy.egressMode
     || input.egressProxy.expectedGrant.policyHash !== verified.payload.policy.policyHash
   )) {
     throw new PolicyVerificationError("POLICY_BINDING_MISMATCH", "The egress grant does not match the signed policy");

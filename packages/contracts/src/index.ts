@@ -46,7 +46,13 @@ export const modelRouteSchema = z.object({
   }),
 });
 
-export const sandboxProfileIds = ["claude-desktop-standard-v1", "kasm-persistent-standard"] as const;
+export const executionModeSchema = z.enum(["managed", "disposable-open"]);
+export type ExecutionMode = z.infer<typeof executionModeSchema>;
+
+export const egressModeSchema = z.enum(["restricted", "full-web"]);
+export type EgressMode = z.infer<typeof egressModeSchema>;
+
+export const sandboxProfileIds = ["claude-desktop-standard-v1", "kasm-persistent-standard", "disposable-open-v1"] as const;
 export const sandboxProfileIdSchema = z.enum(sandboxProfileIds);
 export type SandboxProfileId = z.infer<typeof sandboxProfileIdSchema>;
 
@@ -75,7 +81,14 @@ export const sandboxProfileSchema = z.object({
   version: z.literal(1),
   displayName: z.string().min(1),
   description: z.string().min(1),
-  client: z.enum(["Claude Desktop", "ONEComputer qualification CLI"]),
+  executionMode: executionModeSchema.default("managed"),
+  egressMode: egressModeSchema.default("restricted"),
+  dataGuidance: z.string().min(1),
+  client: z.enum([
+    "ONEComputer managed workspace",
+    "ONEComputer open workspace",
+    "ONEComputer qualification CLI",
+  ]),
   clientVersion: z.string().min(1),
   persistence: z.literal("persistent-home"),
   network: z.literal("gateway-only"),
@@ -186,7 +199,7 @@ export type EgressProtocol = z.infer<typeof egressProtocolSchema>;
 
 export const egressSecurityGroupRuleSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{2,63}$/),
-  action: z.literal("allow"),
+  action: z.enum(["allow", "deny"]),
   protocol: egressProtocolSchema,
   host: z.string().min(1).max(253),
   includeSubdomains: z.boolean(),
@@ -223,7 +236,7 @@ export const egressSecurityGroupVersionSchema = z.object({
 }).strict();
 export type EgressSecurityGroupVersion = z.infer<typeof egressSecurityGroupVersionSchema>;
 
-export const runtimeEgressPolicySchema = egressSecurityGroupVersionSchema.pick({
+export const runtimeRestrictedEgressPolicySchema = egressSecurityGroupVersionSchema.pick({
   id: true,
   securityGroupId: true,
   version: true,
@@ -232,12 +245,46 @@ export const runtimeEgressPolicySchema = egressSecurityGroupVersionSchema.pick({
   defaultAction: true,
   rules: true,
   documentHash: true,
-});
+}).extend({
+  schemaVersion: z.literal(2),
+  mode: z.literal("restricted"),
+}).strict();
+
+export const runtimeFullWebEgressPolicySchema = z.object({
+  schemaVersion: z.literal(2),
+  mode: z.literal("full-web"),
+  id: z.string().regex(/^egv_[a-z0-9_]{3,96}$/),
+  securityGroupId: z.string().regex(/^esg_[a-z0-9_]{3,96}$/),
+  version: z.number().int().positive(),
+  name: z.string().min(3).max(96),
+  description: z.string().min(3).max(500),
+  defaultAction: z.literal("allow-public-http-https"),
+  rules: z.array(egressSecurityGroupRuleSchema).max(64),
+  documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
+const runtimeEgressPolicyV2Schema = z.discriminatedUnion("mode", [
+  runtimeRestrictedEgressPolicySchema,
+  runtimeFullWebEgressPolicySchema,
+]);
+export const runtimeEgressPolicySchema = z.preprocess((value) => {
+  if (
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && !("mode" in value)
+  ) {
+    return { ...value, schemaVersion: 2, mode: "restricted" };
+  }
+  return value;
+}, runtimeEgressPolicyV2Schema);
 export type RuntimeEgressPolicy = z.infer<typeof runtimeEgressPolicySchema>;
 
 export const sandboxConfigurationSchema = z.object({
   schemaVersion: z.literal(1),
   profileId: sandboxProfileIdSchema,
+  executionMode: executionModeSchema.default("managed"),
+  egressMode: egressModeSchema.default("restricted"),
   applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
   agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length),
   modelAlias: sandboxModelAliasSchema,
@@ -277,6 +324,8 @@ export const telegramUserIdSchema = z.string().regex(/^\d{1,20}$/);
 export const workspaceManifestSandboxSchema = z.object({
   schemaVersion: z.literal(1),
   profileId: sandboxProfileIdSchema,
+  executionMode: executionModeSchema,
+  egressMode: egressModeSchema,
   applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
   agentIds: z.array(workspaceManifestAgentCatalogIdSchema).min(1).max(workspaceManifestAgentCatalogIds.length),
   modelAlias: sandboxModelAliasSchema,
@@ -308,6 +357,7 @@ export type WorkspaceManifest = z.infer<typeof workspaceManifestSchema>;
 
 export const egressDecisionReasonSchema = z.enum([
   "EGRESS_ALLOWED",
+  "EGRESS_EXPLICIT_DENY",
   "EGRESS_DEFAULT_DENY",
   "EGRESS_INVALID_HOST",
   "EGRESS_IP_LITERAL_DENIED",
@@ -377,6 +427,8 @@ export const workspaceViewSchema = z.object({
     client: z.string().min(1),
     clientVersion: z.string().min(1),
     modelAlias: z.string().min(1),
+    executionMode: executionModeSchema,
+    egressMode: egressModeSchema,
     persistence: z.literal("persistent-home"),
     network: z.literal("gateway-only"),
   }).optional(),
@@ -418,7 +470,9 @@ export const runtimePolicySchema = z.object({
   policyVersionId: z.string().min(1),
   policyVersion: z.number().int().positive(),
   policyHash: z.string().regex(/^[a-f0-9]{64}$/),
-  workspaceProfile: z.enum(["kasm-persistent-standard", "claude-desktop-standard-v1"]),
+  workspaceProfile: sandboxProfileIdSchema,
+  executionMode: executionModeSchema.default("managed"),
+  egressMode: egressModeSchema.default("restricted"),
   agentId: z.string().min(1),
   agentProfile: agentProfileSchema,
   agents: z.array(runtimeAgentPolicySchema).min(1).max(agentCatalogIds.length).optional(),
@@ -559,6 +613,7 @@ export const controllerCreateSchema = z.object({
       workspaceId: z.uuid(),
       agentId: z.string().min(1),
       securityGroupVersionId: z.string().regex(/^egv_[a-z0-9_]{3,96}$/),
+      egressMode: egressModeSchema.default("restricted"),
       policyHash: z.string().regex(/^[a-f0-9]{64}$/),
     }).strict(),
   }).optional(),

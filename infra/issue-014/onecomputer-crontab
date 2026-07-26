@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+canonical_dir="/home/kasm-user/.onecomputer"
+canonical_file="${canonical_dir}/crontab"
+runtime_crontab="/usr/bin/crontab"
+
+if [[ "$(id -u)" -ne 1000 ]]; then
+  echo "onecomputer-crontab must run as kasm-user" >&2
+  exit 77
+fi
+
+install -d -m 0700 "$canonical_dir"
+
+case "${1:-}" in
+  -l)
+    [[ "$#" -eq 1 ]] || { echo "usage: onecomputer-crontab -l" >&2; exit 64; }
+    if [[ -f "$canonical_file" ]]; then
+      cat "$canonical_file"
+    else
+      echo "no crontab for kasm-user" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+  -r)
+    [[ "$#" -eq 1 ]] || { echo "usage: onecomputer-crontab -r" >&2; exit 64; }
+    "$runtime_crontab" -r 2>/dev/null || true
+    rm -f "$canonical_file"
+    exit 0
+    ;;
+  -e)
+    echo "Use 'onecomputer-crontab -l > schedule', edit the file, then run 'onecomputer-crontab schedule'." >&2
+    exit 64
+    ;;
+esac
+
+source_file="${1:--}"
+[[ "$#" -le 1 ]] || { echo "usage: onecomputer-crontab [file|-]" >&2; exit 64; }
+temporary="$(mktemp "${canonical_dir}/.crontab.XXXXXX")"
+trap 'rm -f "$temporary"' EXIT
+if [[ "$source_file" == "-" ]]; then
+  cat > "$temporary"
+else
+  [[ -f "$source_file" ]] || { echo "crontab file not found" >&2; exit 66; }
+  cp -- "$source_file" "$temporary"
+fi
+
+size="$(stat -c %s "$temporary")"
+(( size <= 65536 )) || { echo "crontab exceeds 64 KiB" >&2; exit 65; }
+if LC_ALL=C grep -qP '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]' "$temporary"; then
+  echo "crontab contains unsupported control characters" >&2
+  exit 65
+fi
+
+normalized="$(mktemp "${canonical_dir}/.crontab-normalized.XXXXXX")"
+trap 'rm -f "$temporary" "$normalized"' EXIT
+{
+  printf '%s\n' \
+    'SHELL=/bin/bash' \
+    'HOME=/home/kasm-user' \
+    'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' \
+    'HTTP_PROXY=http://127.0.0.1:4313' \
+    'HTTPS_PROXY=http://127.0.0.1:4313' \
+    'NO_PROXY=localhost,127.0.0.1' \
+    'MAILTO=""'
+  sed \
+    -e '/^SHELL=/d' \
+    -e '/^HOME=/d' \
+    -e '/^PATH=/d' \
+    -e '/^HTTP_PROXY=/d' \
+    -e '/^HTTPS_PROXY=/d' \
+    -e '/^NO_PROXY=/d' \
+    -e '/^MAILTO=/d' \
+    "$temporary"
+} > "$normalized"
+
+chmod 0600 "$normalized"
+"$runtime_crontab" "$normalized"
+mv -f "$normalized" "$canonical_file"
+chmod 0600 "$canonical_file"
+trap - EXIT
+rm -f "$temporary"

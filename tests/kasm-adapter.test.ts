@@ -205,6 +205,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
           workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
           agentId: "agent-alex",
           securityGroupVersionId: "egv_acme_updates_v1",
+          egressMode: "restricted",
           policyHash: "d".repeat(64),
         },
       },
@@ -281,6 +282,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
     assert.ok(requests.some((item) => item.method === "DELETE" && item.path === `/volumes/${workspaceVolume}?force=true`));
   } finally {
+    server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });
   }

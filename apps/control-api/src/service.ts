@@ -1,6 +1,7 @@
 import {
   OneComputerError,
   readinessFor,
+  runtimePolicySchema,
   type IdentityContext,
   type Launch,
   type PolicyIntegrityView,
@@ -58,6 +59,7 @@ export type EgressProxyGrant = {
     workspaceId: string;
     agentId: string;
     securityGroupVersionId: string;
+    egressMode: RuntimePolicy["egressMode"];
     policyHash: string;
   };
 };
@@ -74,6 +76,7 @@ export class EgressProxyGrantAuthority {
       workspaceId,
       agentId: policy.agentId,
       securityGroupVersionId: policy.egress.id,
+      egressMode: policy.egressMode,
       policyHash: policy.policyHash,
     };
     const ttlSeconds = 24 * 60 * 60;
@@ -96,10 +99,11 @@ export class PolicyBundleAuthority {
 
   authorize(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy, now = new Date()) {
     try {
+      const normalizedPolicy = runtimePolicySchema.parse(policy);
       const bundle = this.signer.issue({
         identity,
         workspaceId,
-        policy,
+        policy: normalizedPolicy,
         routes: this.routes,
         ttlSeconds: this.ttlSeconds,
         now,
@@ -107,8 +111,8 @@ export class PolicyBundleAuthority {
       return verifySignedPolicyBundle(bundle, this.verificationKeys, {
         identity,
         workspaceId,
-        policy,
-        minimumPolicyVersion: policy.policyVersion,
+        policy: normalizedPolicy,
+        minimumPolicyVersion: normalizedPolicy.policyVersion,
         now,
       });
     } catch (error) {
@@ -145,8 +149,10 @@ export class HttpControllerClient implements ControllerClient {
 }
 
 const profileClient = (profileId: RuntimePolicy["workspaceProfile"]) => profileId === "claude-desktop-standard-v1"
-  ? { client: "Claude Desktop", clientVersion: "1.22209.3" }
-  : { client: "ONEComputer qualification CLI", clientVersion: "issue-006" };
+  ? { client: "ONEComputer managed workspace", clientVersion: "managed-v1" }
+  : profileId === "disposable-open-v1"
+    ? { client: "ONEComputer open workspace", clientVersion: "disposable-open-v1" }
+    : { client: "ONEComputer qualification CLI", clientVersion: "issue-006" };
 
 export const toView = (
   record: WorkspaceRecord,
@@ -184,6 +190,8 @@ export const toView = (
     id: policy.workspaceProfile,
     ...profileClient(policy.workspaceProfile),
     modelAlias: policy.modelAlias,
+    executionMode: policy.executionMode,
+    egressMode: policy.egressMode,
     persistence: "persistent-home" as const,
     network: "gateway-only" as const,
   } } : {}),

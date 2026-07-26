@@ -34,6 +34,7 @@ MODEL = os.environ["ONECOMPUTER_CHAT_MODEL_ALIAS"]
 ALLOWED_TOOLS = tuple(item for item in os.environ["ONECOMPUTER_CHAT_ALLOWED_TOOLS"].split(",") if item)
 BROKER = os.environ["ONECOMPUTER_CHAT_BROKER"]
 PORT = int(os.environ["ONECOMPUTER_CHAT_PORT"])
+EXECUTION_MODE = os.environ.get("ONECOMPUTER_EXECUTION_MODE", "managed")
 HERMES_URL = os.environ.get("ONECOMPUTER_HERMES_CHAT_URL", "")
 HERMES_KEY = os.environ.get("ONECOMPUTER_HERMES_CHAT_KEY", "")
 HOME = Path("/home/kasm-user")
@@ -60,7 +61,7 @@ OFFICE_TYPES = frozenset({
 })
 ATTACHMENT_TYPES = IMAGE_TYPES | TEXT_TYPES | OFFICE_TYPES | {"application/pdf"}
 SYSTEM_PROMPT = (
-    "You are the selected agent in a ONEComputer managed workspace. "
+    f"You are the selected agent in a ONEComputer {EXECUTION_MODE} workspace. "
     "Complete the employee's requested work with the assigned tools instead of "
     "shifting executable steps back to the employee. Tool descriptions are the "
     "canonical source for tool-specific prerequisites. When the employee gives a "
@@ -72,7 +73,20 @@ SYSTEM_PROMPT = (
     "ONEComputer Control is the authority for tool policy and signed approvals. "
     "If a protected operation is pending, use wait-for-governed-operation and "
     "report the final result accurately. Never claim an operation completed until "
-    "the tool confirms it."
+    "the tool confirms it. "
+    + (
+        "Local shell, filesystem, browser, skills, and public-web tools are available "
+        "inside this disposable non-sensitive workspace. For scheduled work, read "
+        "/home/kasm-user/.onecomputer/SCHEDULING.md and use onecomputer-crontab."
+        if EXECUTION_MODE == "disposable-open"
+        else (
+            "Hermes has workspace-local file, terminal, skills, and vision tools for "
+            "document work; public-web and unrelated native toolsets remain restricted "
+            "by the managed profile."
+            if AGENT == "hermes-claw"
+            else "Local and public-web tools remain restricted by the managed profile."
+        )
+    )
 )
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 OPERATION_PATTERN = re.compile(
@@ -84,6 +98,7 @@ APPROVAL_STATES = (
 
 if (
     AGENT not in {"claude-cli", "codex-cli", "hermes-claw"}
+    or EXECUTION_MODE not in {"managed", "disposable-open"}
     or len(API_KEY) < 32
     or not MODEL
     or not ALLOWED_TOOLS
@@ -490,13 +505,15 @@ async def claude_vendor_events(
     )
 
     tool_names = [f"mcp__onecomputer_ms365__{name}" for name in (*ALLOWED_TOOLS, "wait-for-governed-operation")]
+    local_tools = [
+        "Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Skill",
+        "Task", "TodoWrite", "WebFetch", "WebSearch", "Write",
+    ]
+    open_mode = EXECUTION_MODE == "disposable-open"
     had_messages = bool(item["messages"])
     options = ClaudeAgentOptions(
-        allowed_tools=tool_names,
-        disallowed_tools=[
-            "Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Skill",
-            "Task", "TodoWrite", "WebFetch", "WebSearch", "Write",
-        ],
+        allowed_tools=tool_names + (local_tools if open_mode else []),
+        disallowed_tools=[] if open_mode else local_tools,
         system_prompt=SYSTEM_PROMPT,
         mcp_servers={
             "onecomputer_ms365": {
@@ -507,7 +524,7 @@ async def claude_vendor_events(
             },
         },
         strict_mcp_config=True,
-        permission_mode="dontAsk",
+        permission_mode="bypassPermissions" if open_mode else "dontAsk",
         resume=item.get("vendorSessionId") if had_messages else None,
         session_id=None if had_messages else item["id"],
         max_turns=30,
@@ -609,6 +626,7 @@ async def codex_vendor_events(
     from openai_codex import ApprovalMode, ImageInput, Sandbox, TextInput
 
     vendor_id = item.get("vendorSessionId")
+    sandbox = Sandbox.danger_full_access if EXECUTION_MODE == "disposable-open" else Sandbox.read_only
     if vendor_id:
         thread = await codex.thread_resume(
             vendor_id,
@@ -616,7 +634,7 @@ async def codex_vendor_events(
             base_instructions=SYSTEM_PROMPT,
             cwd=str(HOME),
             model=MODEL,
-            sandbox=Sandbox.read_only,
+            sandbox=sandbox,
         )
     else:
         thread = await codex.thread_start(
@@ -624,7 +642,7 @@ async def codex_vendor_events(
             base_instructions=SYSTEM_PROMPT,
             cwd=str(HOME),
             model=MODEL,
-            sandbox=Sandbox.read_only,
+            sandbox=sandbox,
         )
     prompt_text = prompt_with_documents(text, attachments)
     images = [attachment for attachment in attachments if attachment["mediaType"] in IMAGE_TYPES]
@@ -632,7 +650,7 @@ async def codex_vendor_events(
         [TextInput(prompt_text), *(ImageInput(attachment["url"]) for attachment in images)]
         if images else prompt_text
     )
-    turn = await thread.turn(prompt, approval_mode=ApprovalMode.deny_all, sandbox=Sandbox.read_only)
+    turn = await thread.turn(prompt, approval_mode=ApprovalMode.deny_all, sandbox=sandbox)
     streamed_text = False
     final_text = ""
     tool_names: dict[str, str] = {}

@@ -12,6 +12,7 @@ import {
   ownedAgentCatalog,
   policyBundlePayloadSchema,
   policyVerificationKeySetSchema,
+  runtimePolicySchema,
   signedPolicyBundleSchema,
   type IdentityContext,
   type PolicyBundlePayload,
@@ -254,7 +255,7 @@ export function verifySignedPolicyBundle(
       || payload.subjectId !== expected.identity.subjectId
     )
     || expected.workspaceId && payload.workspaceId !== expected.workspaceId
-    || expected.policy && !exactJsonEqual(payload.policy, expected.policy)
+    || expected.policy && !exactJsonEqual(payload.policy, runtimePolicySchema.parse(expected.policy))
   ) {
     throw new PolicyVerificationError("POLICY_BINDING_MISMATCH", "The signed policy does not match its enforcement boundary");
   }

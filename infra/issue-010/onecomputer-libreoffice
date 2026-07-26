@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Ubuntu's LibreOffice launcher eventually execs soffice.bin without carrying
+# its private library directory into the child process in the Kasm base image.
+# Scope the loader path to LibreOffice rather than changing it image-wide.
+if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+  export LD_LIBRARY_PATH="/usr/lib/libreoffice/program:${LD_LIBRARY_PATH}"
+else
+  export LD_LIBRARY_PATH="/usr/lib/libreoffice/program"
+fi
+
+exec /usr/bin/soffice "$@"

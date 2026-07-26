@@ -1,9 +1,9 @@
 import { lookup } from "node:dns/promises";
 import http from "node:http";
 import net from "node:net";
-import { egressSecurityGroupVersionSchema } from "@onecomputer/contracts";
+import { runtimeEgressPolicySchema } from "@onecomputer/contracts";
 import {
-  compileEgressSecurityGroup,
+  compileRuntimeEgressPolicy,
   decideEgress,
   normalizeEgressHost,
   verifyEgressProxyGrant,
@@ -11,9 +11,9 @@ import {
 } from "@onecomputer/egress-policy";
 
 export type ProxyConfig = {
-  policy: ReturnType<typeof compileEgressSecurityGroup>;
+  policy: ReturnType<typeof compileRuntimeEgressPolicy>;
   verificationSecret: string;
-  expectedGrant: Pick<EgressProxyGrantClaims, "tenantId" | "subjectId" | "workspaceId" | "agentId" | "securityGroupVersionId" | "policyHash">;
+  expectedGrant: Pick<EgressProxyGrantClaims, "tenantId" | "subjectId" | "workspaceId" | "agentId" | "securityGroupVersionId" | "egressMode" | "policyHash">;
   resolveHost?: (host: string) => Promise<Array<{ address: string; family: number }>>;
   connect?: (options: net.NetConnectOpts) => net.Socket;
   audit?: (event: Record<string, unknown>) => void;
@@ -59,14 +59,31 @@ const resolveAndDecide = async (config: ProxyConfig, protocol: "http" | "https",
   };
 };
 
-const audit = (config: ProxyConfig, reasonCode: string, ruleId?: string) => {
+const audit = (
+  config: ProxyConfig,
+  reasonCode: string,
+  ruleId?: string,
+  destination?: { protocol: "http" | "https"; host: string; port: number },
+) => {
+  let normalizedHost: string | undefined;
+  if (destination) {
+    try { normalizedHost = normalizeEgressHost(destination.host); } catch { normalizedHost = undefined; }
+  }
   const event = {
     event: "egress_decision",
     workspaceId: config.expectedGrant.workspaceId,
+    agentId: config.expectedGrant.agentId,
+    egressMode: config.expectedGrant.egressMode,
+    policyHash: config.expectedGrant.policyHash,
     securityGroupVersionId: config.expectedGrant.securityGroupVersionId,
     decision: reasonCode === "EGRESS_ALLOWED" ? "allow" : "deny",
     reasonCode,
     ...(ruleId ? { ruleId } : {}),
+    ...(destination ? {
+      protocol: destination.protocol,
+      ...(normalizedHost ? { host: normalizedHost } : {}),
+      port: destination.port,
+    } : {}),
   };
   if (config.audit) config.audit(event);
   else process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -132,7 +149,7 @@ export function createEgressProxy(config: ProxyConfig) {
     }
     const port = Number(target.port || 80);
     const result = await resolveAndDecide(config, "http", target.hostname, port);
-    audit(config, result.decision.reasonCode, result.decision.ruleId);
+    audit(config, result.decision.reasonCode, result.decision.ruleId, { protocol: "http", host: target.hostname, port });
     if (result.decision.decision !== "allow" || !result.addresses[0]) {
       denyResponse(response, 403, result.decision.reasonCode);
       return;
@@ -171,21 +188,21 @@ export function createEgressProxy(config: ProxyConfig) {
     const port = Number(target.port || 443);
     const result = await resolveAndDecide(config, "https", target.hostname, port);
     if (result.decision.decision !== "allow" || !result.addresses[0]) {
-      audit(config, result.decision.reasonCode, result.decision.ruleId);
+      audit(config, result.decision.reasonCode, result.decision.ruleId, { protocol: "https", host: target.hostname, port });
       client.end(`HTTP/1.1 403 Forbidden\r\nX-OneComputer-Reason: ${result.decision.reasonCode}\r\nConnection: close\r\n\r\n`);
       return;
     }
     client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     let hello = head;
     const timeout = setTimeout(() => {
-      audit(config, "EGRESS_TLS_SNI_REQUIRED");
+      audit(config, "EGRESS_TLS_SNI_REQUIRED", undefined, { protocol: "https", host: target.hostname, port });
       client.destroy();
     }, 5_000);
     const inspectHello = (chunk?: Buffer) => {
       if (chunk?.length) hello = Buffer.concat([hello, chunk]);
       if (hello.length > 65_540) {
         clearTimeout(timeout);
-        audit(config, "EGRESS_TLS_SNI_REQUIRED");
+        audit(config, "EGRESS_TLS_SNI_REQUIRED", undefined, { protocol: "https", host: target.hostname, port });
         client.destroy();
         return;
       }
@@ -203,7 +220,7 @@ export function createEgressProxy(config: ProxyConfig) {
         return;
       }
       if (parsed.status !== "found" || !parsed.host) {
-        audit(config, "EGRESS_TLS_SNI_REQUIRED");
+        audit(config, "EGRESS_TLS_SNI_REQUIRED", undefined, { protocol: "https", host: target.hostname, port });
         client.destroy();
         return;
       }
@@ -211,16 +228,16 @@ export function createEgressProxy(config: ProxyConfig) {
       try {
         sniHost = normalizeEgressHost(parsed.host);
       } catch {
-        audit(config, "EGRESS_TLS_SNI_MISMATCH");
+        audit(config, "EGRESS_TLS_SNI_MISMATCH", undefined, { protocol: "https", host: target.hostname, port });
         client.destroy();
         return;
       }
       if (sniHost !== requestedHost) {
-        audit(config, "EGRESS_TLS_SNI_MISMATCH");
+        audit(config, "EGRESS_TLS_SNI_MISMATCH", undefined, { protocol: "https", host: target.hostname, port });
         client.destroy();
         return;
       }
-      audit(config, result.decision.reasonCode, result.decision.ruleId);
+      audit(config, result.decision.reasonCode, result.decision.ruleId, { protocol: "https", host: target.hostname, port });
       const upstream = (config.connect ?? net.connect)({ host: result.addresses[0]!.address, family: result.addresses[0]!.family, port });
       const close = () => {
         client.destroy();
@@ -239,11 +256,11 @@ export function createEgressProxy(config: ProxyConfig) {
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-  const policy = egressSecurityGroupVersionSchema.parse(JSON.parse(process.env.EGRESS_POLICY_JSON ?? ""));
+  const policy = runtimeEgressPolicySchema.parse(JSON.parse(process.env.EGRESS_POLICY_JSON ?? ""));
   const expectedGrant = JSON.parse(process.env.EGRESS_EXPECTED_GRANT_JSON ?? "") as ProxyConfig["expectedGrant"];
   const verificationSecret = process.env.EGRESS_GRANT_SECRET;
   if (!verificationSecret || verificationSecret.length < 32) throw new Error("EGRESS_GRANT_SECRET is required");
   const port = Number(process.env.EGRESS_PROXY_PORT ?? 3128);
-  createEgressProxy({ policy: compileEgressSecurityGroup(policy), verificationSecret, expectedGrant })
+  createEgressProxy({ policy: compileRuntimeEgressPolicy(policy), verificationSecret, expectedGrant })
     .listen(port, "0.0.0.0");
 }

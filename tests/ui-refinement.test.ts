@@ -36,6 +36,53 @@ test("Workspace configuration is reached from its overview card instead of a dup
   assert.doesNotMatch(app, /title="Create a managed sandbox"/);
 });
 
+test("workspace creation collects configuration before provisioning", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  const createNameStep = app.slice(app.indexOf("const createAdditionalWorkspace"), app.indexOf("const openFirewallFromWorkspace"));
+  const saveStep = app.slice(app.indexOf("const saveWorkspaceSettings"), app.indexOf("const selectNav"));
+  assert.match(app, /confirmLabel="Continue to configuration"/);
+  assert.match(app, /Choose the profile, applications, agents, and model before ONEComputer starts this workspace/);
+  assert.match(createNameStep, /selectWorkspaceConfiguration\(grantId\)/);
+  assert.doesNotMatch(createNameStep, /workspaceApi\.create/);
+  assert.ok(saveStep.indexOf("sandboxApi.save(configuration)") < saveStep.indexOf("workspaceApi.create(configuration.grantId)"));
+  assert.match(saveStep, /!homeWorkspaces\.some/);
+  assert.match(app, /creatingWorkspace \? "Create workspace" : "Save configuration"/);
+});
+
+test("workspace setup makes disposable-open an explicit accessible choice with durable lifecycle guidance", async () => {
+  const [app, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/styles.css"),
+  ]);
+  assert.match(app, /type="radio"/);
+  assert.match(app, /name="workspace-profile"/);
+  assert.match(app, /<h2 id="workspace-profile-heading">Workspace access<\/h2>/);
+  assert.match(app, /This does not choose your AI agent/);
+  assert.match(app, /Claude Desktop is only enabled when you select it there/);
+  assert.match(app, /profile\.executionMode === "disposable-open"/);
+  assert.match(app, /Non-sensitive work only/);
+  assert.match(app, /Stop keeps this workspace and pauses schedules; restarting restores it and resumes future schedules/);
+  assert.match(app, /Delete permanently removes its files, schedules, logs, and installed tools/);
+  assert.match(app, /Public web through isolated proxy/);
+  assert.match(app, /Private, local, metadata, reserved, raw-IP, alternate-port, and direct-network destinations remain blocked/);
+  assert.match(styles, /\.workspace-profile-option:has\(input:focus-visible\)/);
+  assert.match(styles, /\.disposable-profile-warning/);
+});
+
+test("workspace channels are compact, optional, and do not participate in configuration validation", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  const channels = app.slice(app.indexOf("function TelegramChannelSection"), app.indexOf("function ConnectionsScreen"));
+  assert.match(channels, /<details className="sandbox-management-section workspace-channels-section/);
+  assert.match(channels, /<h2 id="workspace-channels-heading">Channels<\/h2><em>Optional<\/em>/);
+  assert.match(channels, /<strong>Telegram<\/strong>/);
+  assert.match(channels, /<strong>Slack<\/strong>/);
+  assert.match(channels, /Coming soon/);
+  assert.match(channels, /Create this workspace without a channel/);
+  assert.doesNotMatch(channels, /telegram-allowed-user-ids"[^>]+required/);
+  const footer = app.slice(app.indexOf('<div className="sandbox-management-footer">'), app.indexOf("<details className=\"sandbox-json\""));
+  assert.doesNotMatch(footer, /telegram|credential|channel/i);
+});
+
 test("Telegram is workspace-scoped while typed credentials live under Settings", async () => {
   const app = await source("apps/web/src/App.jsx");
   const connections = app.slice(app.indexOf("function ConnectionsScreen"), app.indexOf("function ChatPart"));
@@ -243,7 +290,7 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
   assert.doesNotMatch(styles, /\.sidebar-chat-history\s*\{[\s\S]*?max-height: clamp/);
 });
 
-test("Firewall presents tenant-wide effective policies in one rules table with centered change dialogs", async () => {
+test("Firewall presents tenant-wide managed and open effective policies with explicit deny rules", async () => {
   const [app, styles] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/styles.css"),
@@ -260,8 +307,13 @@ test("Firewall presents tenant-wide effective policies in one rules table with c
   assert.match(app, /function FirewallEditorDialog/);
   assert.match(app, /function FirewallAddRuleDialog/);
   assert.match(app, /const \[selectedId, setSelectedId\] = useState\("__new__"\)/);
-  assert.match(app, /Create a security group and allow one reviewed destination/);
-  assert.match(firewallScreen, /setAddRuleOpen\(true\)/);
+  assert.match(app, /value: "deny", label: "Deny"/);
+  assert.match(app, /open workspaces use deny rules as exceptions/);
+  assert.match(firewallScreen, /All public destinations/);
+  assert.match(firewallScreen, /HTTP \/ HTTPS/);
+  assert.match(firewallScreen, /80 \/ 443/);
+  assert.match(firewallScreen, /Add deny rule/);
+  assert.match(firewallScreen, /setAddRuleContext/);
   assert.doesNotMatch(firewallScreen, /onClick=\{\(\) => setEditor\(\{ securityGroupId: latestVersions\[0\]/);
   assert.doesNotMatch(app.slice(app.indexOf("function FirewallAddRuleDialog"), app.indexOf("function AdminScreen")), /firewall-editor-rule-list/);
   assert.match(app, /<ModalDialog/);
@@ -277,7 +329,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
     source("apps/web/src/ui.css"),
   ]);
   assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog \}/);
-  assert.equal((app.match(/<SelectMenu/g) ?? []).length, 12);
+  assert.ok((app.match(/<SelectMenu/g) ?? []).length >= 14);
   assert.doesNotMatch(app, /<select/);
   assert.match(ui, /export function SelectMenu/);
   assert.match(ui, /role="combobox"/);

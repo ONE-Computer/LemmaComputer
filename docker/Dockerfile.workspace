@@ -36,9 +36,14 @@ ARG GOOGLE_CHROME_SHA256=4193e00b6d5d5969ee63f7a69596868f546aa0e8cb077b3e0bf9cc1
 ARG HERMES_AGENT_VERSION=0.19.0
 ARG HERMES_AGENT_TAG=v2026.7.20
 ARG HERMES_AGENT_SHA256=285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990
+ARG HERMES_OFFICE_SKILLS_COMMIT=a606d24cf2a9d1137d77fd92e7da459c89947fbd
+ARG HERMES_OFFICE_SKILLS_SHA256=c379fc38badf3bc31938be80c15aa3a13bc6c4bb3b852902e5d988676763c20c
 ARG HERMES_PYTHON_VERSION=3.13.5
+ARG NODE_VERSION=22.23.1
+ARG NODE_SHA256=9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578
 
 COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+COPY --chmod=0755 infra/issue-010/onecomputer-libreoffice /usr/local/libexec/onecomputer-libreoffice
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get purge -y \
@@ -58,16 +63,55 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${GOOGLE_CHROME_VERSION}_amd64.deb" \
     && curl -fsSLo /tmp/hermes-agent.tar.gz \
       "https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_AGENT_TAG}.tar.gz" \
+    && curl -fsSLo /tmp/hermes-office-skills.tar.gz \
+      "https://github.com/NousResearch/hermes-agent/archive/${HERMES_OFFICE_SKILLS_COMMIT}.tar.gz" \
+    && curl -fsSLo /tmp/node.tar.xz \
+      "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
     && echo "${CLAUDE_DESKTOP_SHA256}  /tmp/claude-desktop.deb" | sha256sum -c - \
     && echo "${CLAUDE_CODE_SHA256}  /tmp/claude-code.zst" | sha256sum -c - \
     && echo "${FIREFOX_SHA256}  /tmp/firefox.tar.xz" | sha256sum -c - \
     && echo "${GOOGLE_CHROME_SHA256}  /tmp/google-chrome.deb" | sha256sum -c - \
     && echo "${HERMES_AGENT_SHA256}  /tmp/hermes-agent.tar.gz" | sha256sum -c - \
+    && echo "${HERMES_OFFICE_SKILLS_SHA256}  /tmp/hermes-office-skills.tar.gz" | sha256sum -c - \
+    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
     && apt-get update \
-    && apt-get install -y --no-install-recommends mousepad zstd /tmp/claude-desktop.deb /tmp/google-chrome.deb \
+    && apt-get install -y --no-install-recommends \
+      cron=3.0pl1-137ubuntu3 \
+      fonts-dejavu-core \
+      fonts-liberation2 \
+      fonts-noto-cjk \
+      fonts-noto-color-emoji \
+      fonts-noto-core \
+      libreoffice \
+      mousepad \
+      pandoc \
+      poppler-utils \
+      qpdf \
+      tesseract-ocr \
+      unzip \
+      zip \
+      zstd \
+      /tmp/claude-desktop.deb \
+      /tmp/google-chrome.deb \
+    && ln -s /usr/local/libexec/onecomputer-libreoffice /usr/local/bin/soffice \
+    && ln -s /usr/local/libexec/onecomputer-libreoffice /usr/local/bin/libreoffice \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
     && tar -xJf /tmp/firefox.tar.xz -C /opt \
     && install -d -o root -g root -m 0755 /opt/onecomputer/hermes-agent \
     && tar -xzf /tmp/hermes-agent.tar.gz -C /opt/onecomputer/hermes-agent --strip-components=1 \
+    && install -d -o root -g root -m 0755 /tmp/hermes-office-skills \
+    && tar -xzf /tmp/hermes-office-skills.tar.gz -C /tmp/hermes-office-skills --strip-components=1 \
+    && rm -rf \
+      /opt/onecomputer/hermes-agent/skills/productivity/docx \
+      /opt/onecomputer/hermes-agent/skills/productivity/pdf \
+      /opt/onecomputer/hermes-agent/skills/productivity/powerpoint \
+      /opt/onecomputer/hermes-agent/skills/productivity/xlsx \
+      /opt/onecomputer/hermes-agent/skills/productivity/ocr-and-documents \
+    && cp -a /tmp/hermes-office-skills/skills/productivity/docx /opt/onecomputer/hermes-agent/skills/productivity/docx \
+    && cp -a /tmp/hermes-office-skills/skills/productivity/pdf /opt/onecomputer/hermes-agent/skills/productivity/pdf \
+    && cp -a /tmp/hermes-office-skills/skills/productivity/powerpoint /opt/onecomputer/hermes-agent/skills/productivity/powerpoint \
+    && cp -a /tmp/hermes-office-skills/skills/productivity/xlsx /opt/onecomputer/hermes-agent/skills/productivity/xlsx \
+    && cp -a /tmp/hermes-office-skills/skills/productivity/ocr-and-documents /opt/onecomputer/hermes-agent/skills/productivity/ocr-and-documents \
     && uv python install "${HERMES_PYTHON_VERSION}" --install-dir /opt/onecomputer/python --no-bin --no-progress \
     && UV_PROJECT_ENVIRONMENT=/opt/onecomputer/hermes-venv \
       uv sync --project /opt/onecomputer/hermes-agent --frozen --no-dev --no-editable \
@@ -85,7 +129,16 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       yarl==1.22.0 \
     && test "$(/opt/onecomputer/hermes-venv/bin/python -c 'import aiohttp; print(aiohttp.__version__)')" = "3.14.1" \
     && test "$(/opt/onecomputer/hermes-venv/bin/python -c 'from hermes_cli import __version__; print(__version__)')" = "${HERMES_AGENT_VERSION}" \
+    && test "$(node --version)" = "v${NODE_VERSION}" \
+    && command -v npm soffice libreoffice pandoc pdftoppm pdftotext qpdf tesseract unzip zip \
+    && soffice --headless --version \
+    && test -f /opt/onecomputer/hermes-agent/skills/productivity/docx/SKILL.md \
+    && test -f /opt/onecomputer/hermes-agent/skills/productivity/pdf/SKILL.md \
+    && test -f /opt/onecomputer/hermes-agent/skills/productivity/powerpoint/SKILL.md \
+    && test -f /opt/onecomputer/hermes-agent/skills/productivity/xlsx/SKILL.md \
+    && test -f /opt/onecomputer/hermes-agent/skills/productivity/ocr-and-documents/SKILL.md \
     && ln -s /opt/firefox/firefox /usr/local/bin/firefox \
+    && ln -s /opt/onecomputer/hermes-venv/bin/hermes /usr/local/bin/hermes \
     && install -d -o root -g root -m 0755 "/opt/onecomputer/claude-code/${CLAUDE_CODE_VERSION}" \
     && unzstd -c /tmp/claude-code.zst > "/opt/onecomputer/claude-code/${CLAUDE_CODE_VERSION}/claude" \
     && chmod 0755 "/opt/onecomputer/claude-code/${CLAUDE_CODE_VERSION}/claude" \
@@ -93,17 +146,39 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && test "$(/opt/firefox/firefox --version | awk '{print $3}')" = "${FIREFOX_VERSION}" \
     && test "$(google-chrome-stable --version | awk '{print $3}')" = "${GOOGLE_CHROME_VERSION%-1}" \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /root/.cache/uv /tmp/claude-desktop.deb /tmp/claude-code.zst /tmp/firefox.tar.xz /tmp/google-chrome.deb /tmp/hermes-agent.tar.gz /opt/Telegram \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/uv /tmp/claude-desktop.deb /tmp/claude-code.zst /tmp/firefox.tar.xz /tmp/google-chrome.deb /tmp/hermes-agent.tar.gz /tmp/hermes-office-skills.tar.gz /tmp/hermes-office-skills /tmp/node.tar.xz /opt/Telegram \
       /home/kasm-default-profile/Desktop/* \
       /home/kasm-default-profile/.mozilla \
       /home/kasm-default-profile/.local/share/remmina \
     && install -d -o root -g root -m 0755 /etc/claude-desktop /run/onecomputer
+
+COPY infra/issue-010/hermes-office-node/package.json infra/issue-010/hermes-office-node/package-lock.json /opt/onecomputer/hermes-office-node/
+RUN npm ci \
+      --prefix /opt/onecomputer/hermes-office-node \
+      --omit=dev \
+      --no-audit \
+      --no-fund \
+    && NODE_PATH=/opt/onecomputer/hermes-office-node/node_modules \
+      node -e 'for (const name of ["docx", "pptxgenjs", "react", "react-dom", "react-icons", "sharp"]) require.resolve(name)' \
+    && npm cache clean --force
 
 RUN uv pip install \
       --python /opt/onecomputer/hermes-venv/bin/python \
       mcp==1.26.0 \
       starlette==1.0.1 \
     && test "$(/opt/onecomputer/hermes-venv/bin/python -c 'import importlib.metadata; print(importlib.metadata.version("mcp"))')" = "1.26.0"
+
+COPY infra/issue-010/hermes-office-requirements.txt /opt/onecomputer/hermes-office-requirements.txt
+RUN uv venv \
+      --python "/opt/onecomputer/python/cpython-${HERMES_PYTHON_VERSION}-linux-x86_64-gnu/bin/python" \
+      /opt/onecomputer/hermes-office-venv \
+    && uv pip install \
+      --python /opt/onecomputer/hermes-office-venv/bin/python \
+      --requirements /opt/onecomputer/hermes-office-requirements.txt \
+    && /opt/onecomputer/hermes-office-venv/bin/python -c \
+      'import defusedxml, docx, fitz, lxml, markitdown, openpyxl, pandas, pdf2image, pdfplumber, PIL, pptx, pypdf, pytesseract, reportlab' \
+    && /opt/onecomputer/hermes-office-venv/bin/markitdown --help >/dev/null \
+    && rm -rf /root/.cache/uv
 
 COPY infra/issue-010/agent-chat-requirements.txt /opt/onecomputer/agent-chat-requirements.txt
 RUN uv venv \
@@ -141,16 +216,22 @@ COPY infra/issue-010/onecomputer-hermes /usr/local/bin/onecomputer-hermes
 COPY infra/issue-010/hermes-agent-cli.desktop /usr/local/share/onecomputer/applications/onecomputer-hermes-agent-cli.desktop
 COPY infra/issue-010/onecomputer-hermes-desktop /usr/local/bin/onecomputer-hermes-desktop
 COPY infra/issue-010/hermes-desktop.desktop /usr/local/share/onecomputer/applications/onecomputer-hermes-desktop.desktop
+COPY infra/issue-014/onecomputer-crontab /usr/local/bin/onecomputer-crontab
+COPY infra/issue-014/onecomputer-cron-run /usr/local/bin/onecomputer-cron-run
+COPY infra/issue-014/SCHEDULING.md /usr/local/share/onecomputer/SCHEDULING.md
 RUN chmod 0755 \
       /usr/local/libexec/onecomputer-egress-broker \
       /usr/local/libexec/onecomputer-gateway-proxy \
       /usr/local/libexec/onecomputer-mcp-stdio \
       /usr/local/libexec/onecomputer-agent-chat \
+      /usr/local/libexec/onecomputer-libreoffice \
       /usr/local/sbin/onecomputer-workspace-entrypoint \
       /usr/local/bin/onecomputer-claude \
       /usr/local/bin/onecomputer-codex \
       /usr/local/bin/onecomputer-hermes \
       /usr/local/bin/onecomputer-hermes-desktop \
+      /usr/local/bin/onecomputer-crontab \
+      /usr/local/bin/onecomputer-cron-run \
       /usr/local/share/onecomputer/applications/onecomputer-claude-desktop.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-claude-cli.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-codex-cli.desktop \
@@ -158,7 +239,8 @@ RUN chmod 0755 \
       /usr/local/share/onecomputer/applications/onecomputer-google-chrome.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-hermes-agent-cli.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-hermes-desktop.desktop \
-    && chmod 0644 /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js /opt/firefox/distribution/policies.json /etc/opt/chrome/policies/managed/onecomputer.json \
+    && chmod 0644 /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js /opt/firefox/distribution/policies.json /etc/opt/chrome/policies/managed/onecomputer.json /usr/local/share/onecomputer/SCHEDULING.md \
+    && test "$(dpkg-query -W -f='${Version}' cron)" = "3.0pl1-137ubuntu3" \
     && grep -q 'dist/style.bundle.js' /usr/share/kasmvnc/www/index.html \
     && printf '%s\n' '<script src="app/onecomputer-kasm-clipboard.js"></script>' >> /usr/share/kasmvnc/www/index.html \
     && chown -R 1000:1000 /home/kasm-default-profile/Desktop /home/kasm-default-profile/.config

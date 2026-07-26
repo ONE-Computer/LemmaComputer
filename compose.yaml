@@ -66,7 +66,7 @@ services:
       - 0.0.0.0:3000
       - --org-mode
       - --enabled-tools
-      - ^(list-mail-folders|list-mail-messages|get-mail-message|create-draft-email|update-mail-message|delete-mail-message|move-mail-message|send-mail|send-draft-message|reply-mail-message|reply-all-mail-message|forward-mail-message|list-calendars|list-calendar-events|get-calendar-view|get-calendar-event|create-calendar-event|update-calendar-event|delete-calendar-event|list-drives|get-drive-root-item|list-folder-files|search-onedrive-files|get-drive-item|create-onedrive-folder|upload-file-content|move-rename-onedrive-item|copy-drive-item|delete-onedrive-file|list-chats|list-chat-messages|list-joined-teams|list-team-channels|list-channel-messages|send-chat-message|reply-to-chat-message|send-channel-message|reply-to-channel-message)$
+      - ^(get-current-user|list-mail-folders|list-mail-messages|get-mail-message|create-draft-email|update-mail-message|delete-mail-message|move-mail-message|send-mail|send-draft-message|reply-mail-message|reply-all-mail-message|forward-mail-message|list-calendars|list-calendar-events|get-calendar-view|get-calendar-event|create-calendar-event|update-calendar-event|delete-calendar-event|list-drives|get-drive-root-item|list-folder-files|search-onedrive-files|get-drive-item|create-onedrive-folder|upload-file-content|move-rename-onedrive-item|copy-drive-item|delete-onedrive-file|list-chats|list-chat-messages|list-joined-teams|list-team-channels|list-channel-messages|send-chat-message|reply-to-chat-message|send-channel-message|reply-to-channel-message)$
       - --allowed-scopes
       - User.Read offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite Chat.Read ChatMessage.Read ChatMessage.Send Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send
       - --no-dynamic-registration
@@ -132,6 +132,8 @@ services:
       UI_USERNAME: ${ONECOMPUTER_LITELLM_UI_USERNAME:-admin}
       UI_PASSWORD: ${ONECOMPUTER_LITELLM_UI_PASSWORD:?set ONECOMPUTER_LITELLM_UI_PASSWORD}
       PROXY_BASE_URL: ${ONECOMPUTER_LITELLM_PUBLIC_URL:-http://localhost:4000}
+      MCP_TRUSTED_REDIRECT_ORIGINS: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
+      ONECOMPUTER_M365_AUTHORIZATION_URL: ${ONECOMPUTER_M365_AUTHORIZATION_ORIGIN:-http://localhost:4311}/authorize
       ONECOMPUTER_MCP_POLICY_URL: http://control-api:4100/internal/v1/mcp/authorize
       ONECOMPUTER_MCP_POLICY_TOKEN: ${ONECOMPUTER_CONTROLLER_TOKEN:?set ONECOMPUTER_CONTROLLER_TOKEN}
     networks:
@@ -363,6 +365,8 @@ services:
       WORKSPACE_INGRESS_PORT: "4174"
       WORKSPACE_INGRESS_PUBLIC_URL: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
       WORKSPACE_INGRESS_WEB_UPSTREAM: http://web:4173
+      WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM: http://ms365-mcp:3000
+      WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM: http://litellm:4000
       WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:-${ONECOMPUTER_SESSION_SECRET:-${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}}}
       WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS:-300}
       WORKSPACE_INGRESS_SESSION_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS:-28800}
@@ -371,10 +375,15 @@ services:
       - public-edge
       - web-edge
       - control-private
+      - gateway-private
     ports:
       - "${ONECOMPUTER_HTTP_BIND_ADDRESS:-127.0.0.1}:${ONECOMPUTER_WEB_PORT:-4174}:4174"
     depends_on:
       web:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+      ms365-mcp:
         condition: service_healthy
     healthcheck:
       test:

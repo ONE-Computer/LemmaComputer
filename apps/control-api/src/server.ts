@@ -33,10 +33,13 @@ const sandboxProfiles = [
   sandboxProfileSchema.parse({
     id: "claude-desktop-standard-v1",
     version: 1,
-    displayName: "Claude Desktop",
-    description: "A managed Claude Desktop chat workspace routed only through the ONEComputer AI gateway.",
-    client: "Claude Desktop",
-    clientVersion: "1.22209.3",
+    displayName: "Managed workspace",
+    description: "A restricted workspace for any selected AI agent, routed through organization-approved models, tools, and destinations.",
+    executionMode: "managed",
+    egressMode: "restricted",
+    dataGuidance: "Use for organization work. Local tools and public destinations remain policy restricted.",
+    client: "ONEComputer managed workspace",
+    clientVersion: "managed-v1",
     persistence: "persistent-home",
     network: "gateway-only",
     resources: { cpus: 2, memoryGiB: 3 },
@@ -46,8 +49,25 @@ const sandboxProfiles = [
     version: 1,
     displayName: "Qualification workspace (legacy)",
     description: "The earlier CLI qualification image retained only for pinned policy compatibility.",
+    executionMode: "managed",
+    egressMode: "restricted",
+    dataGuidance: "Use only for existing qualification workspaces.",
     client: "ONEComputer qualification CLI",
     clientVersion: "issue-006",
+    persistence: "persistent-home",
+    network: "gateway-only",
+    resources: { cpus: 2, memoryGiB: 3 },
+  }),
+  sandboxProfileSchema.parse({
+    id: "disposable-open-v1",
+    version: 1,
+    displayName: "Disposable open workspace",
+    description: "A flexible workspace with local coding tools and public web access inside the isolated Kasm boundary.",
+    executionMode: "disposable-open",
+    egressMode: "full-web",
+    dataGuidance: "Non-sensitive work only. Downloads and installed tools are untrusted; Delete permanently removes the workspace.",
+    client: "ONEComputer open workspace",
+    clientVersion: "disposable-open-v1",
     persistence: "persistent-home",
     network: "gateway-only",
     resources: { cpus: 2, memoryGiB: 3 },
@@ -152,6 +172,7 @@ const envSchema = z.object({
   POLICY_SIGNING_PRIVATE_KEY_B64: z.string().min(40),
   POLICY_VERIFICATION_KEYS_B64: z.string().min(32),
   POLICY_BUNDLE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(86_400),
+  GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   BOOTSTRAP_TENANT_ID: z.string().min(1).default("acme"),
   BOOTSTRAP_USER_ID: z.string().min(1).default("alex-morgan"),
   TENANT_DISPLAY_NAME: z.string().min(1).default("ME TECH"),
@@ -188,6 +209,10 @@ export function createControlServer(
       publicUrl: string;
       authority: WorkspaceIngressAuthority;
     };
+    grantRenewal?: {
+      tenantId: string;
+      intervalMs: number;
+    };
   } = {},
 ) {
   const testRuntimePolicy: RuntimePolicy = {
@@ -196,6 +221,8 @@ export function createControlServer(
     policyVersion: 1,
     policyHash: "0".repeat(64),
     workspaceProfile: "kasm-persistent-standard",
+    executionMode: "managed",
+    egressMode: "restricted",
     agentId: "test-default-agent",
     agentProfile: "onecomputer-default-agent",
     applications: ["firefox"],
@@ -252,6 +279,8 @@ export function createControlServer(
     sandbox: {
       schemaVersion: 1,
       profileId: configuration.profileId,
+      executionMode: configuration.executionMode,
+      egressMode: configuration.egressMode,
       applicationIds: configuration.applicationIds,
       agentIds: configuration.agentIds.map(workspaceManifestAgentIdFor),
       modelAlias: configuration.modelAlias,
@@ -521,7 +550,41 @@ export function createControlServer(
   app.get("/v1/admin/users", async (request) => {
     const actor = requireAdministrator(request);
     if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
-    return { users: await security.identityPolicyStore.listUsers(actor.tenantId) };
+    const users = await security.identityPolicyStore.listUsers(actor.tenantId);
+    return {
+      users: await Promise.all(users.map(async (user) => {
+        const targetIdentity = identityContextSchema.parse({
+          tenantId: actor.tenantId,
+          subjectId: user.userId,
+          audience: "onecomputer-control",
+        });
+        const workspaces = await store.listCurrent(targetIdentity);
+        return {
+          ...user,
+          workspaces: await Promise.all(workspaces.map(async (workspace) => {
+            const settings = await store.getSandboxSettings?.(targetIdentity, workspace.grantId);
+            const runtime = user.effectivePolicy
+              ? runtimePolicyFor(
+                  user.effectivePolicy,
+                  settings?.modelAlias,
+                  settings?.profileId,
+                  settings?.agentIds,
+                  settings?.applicationIds,
+                )
+              : null;
+            return {
+              id: workspace.id,
+              grantId: workspace.grantId,
+              state: workspace.state,
+              profileId: runtime?.workspaceProfile ?? settings?.profileId ?? null,
+              executionMode: runtime?.executionMode ?? null,
+              egressMode: runtime?.egressMode ?? null,
+              egress: runtime?.egress ?? null,
+            };
+          })),
+        };
+      })),
+    };
   });
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request) => {
     const actor = requireAdministrator(request);
@@ -576,9 +639,9 @@ export function createControlServer(
       subjectId: request.params.userId,
       audience: "onecomputer-control",
     });
-    const workspace = await store.getCurrent(targetIdentity, "personal");
-    if (workspace && !["not_created", "stopped", "failed"].includes(workspace.state)) {
-      throw new OneComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop the workspace before changing its egress firewall", 409, true);
+    const workspaces = await store.listCurrent(targetIdentity);
+    if (workspaces.some((workspace) => !["not_created", "stopped", "failed"].includes(workspace.state))) {
+      throw new OneComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop every workspace owned by this account before changing its egress firewall", 409, true);
     }
     return security.identityPolicyStore.assignEgressSecurityGroup({
       tenantId: actor.tenantId,
@@ -742,12 +805,14 @@ export function createControlServer(
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
-    const egress = effective?.egressSecurityGroup
+    const egress = effective
       ? runtimePolicyFor(effective, modelAlias, profileId, selectedAgentIds, selectedApplicationIds).egress
       : undefined;
     const configuration = sandboxConfigurationSchema.parse({
       schemaVersion: 1,
       profileId,
+      executionMode: availableProfiles.find((profile) => profile.id === profileId)!.executionMode,
+      egressMode: availableProfiles.find((profile) => profile.id === profileId)!.egressMode,
       applicationIds: selectedApplicationIds,
       agentIds: selectedAgentIds,
       modelAlias,
@@ -796,12 +861,14 @@ export function createControlServer(
       agentIds: input.agentIds,
     });
     const profile = sandboxProfiles.find((item) => item.id === input.profileId)!;
-    const egress = effective?.egressSecurityGroup
+    const egress = effective
       ? runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds).egress
       : undefined;
     const configuration = sandboxConfigurationSchema.parse({
       schemaVersion: 1,
       profileId: input.profileId,
+      executionMode: profile.executionMode,
+      egressMode: profile.egressMode,
       applicationIds: input.applicationIds,
       agentIds: input.agentIds,
       modelAlias: input.modelAlias,
@@ -1121,6 +1188,46 @@ export function createControlServer(
     request.log.error({ err: { name: errorName, code: known.code } }, "control request failed");
     reply.code(known.statusCode).send({ error: { code: known.code, message: known.message, correlationId: request.id, retryable: known.retryable } });
   });
+
+  let grantRenewalTimer: NodeJS.Timeout | undefined;
+  let grantRenewalRunning = false;
+  const renewRunningGrants = async () => {
+    if (
+      grantRenewalRunning
+      || !security.grantRenewal
+      || !security.identityPolicyStore
+      || !gateway
+    ) return;
+    grantRenewalRunning = true;
+    try {
+      const users = await security.identityPolicyStore.listUsers(security.grantRenewal.tenantId);
+      const results = await Promise.allSettled(users.map(async (user) => {
+        if (!user.effectivePolicy) return false;
+        const actor = await security.identityPolicyStore!.getPrincipal(user.userId);
+        if (!actor || actor.tenantId !== security.grantRenewal!.tenantId) return false;
+        const { policy } = await policyForGrant(actor, user.effectivePolicy);
+        return service.refreshPolicyGrant(actor.identity, policy);
+      }));
+      app.log.info({
+        event: "workspace_grant_renewal",
+        renewed: results.filter((result) => result.status === "fulfilled" && result.value).length,
+        skipped: results.filter((result) => result.status === "fulfilled" && !result.value).length,
+        failed: results.filter((result) => result.status === "rejected").length,
+      }, "workspace gateway grants reconciled");
+    } finally {
+      grantRenewalRunning = false;
+    }
+  };
+  if (security.grantRenewal && security.identityPolicyStore && gateway) {
+    app.addHook("onReady", async () => {
+      await renewRunningGrants();
+      grantRenewalTimer = setInterval(() => { void renewRunningGrants(); }, security.grantRenewal!.intervalMs);
+      grantRenewalTimer.unref();
+    });
+    app.addHook("onClose", async () => {
+      if (grantRenewalTimer) clearInterval(grantRenewalTimer);
+    });
+  }
   return app;
 }
 
@@ -1129,6 +1236,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const store = PostgresWorkspaceStore.fromConnectionString(env.DATABASE_URL);
   await store.migrate();
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
+  await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
   if (gatewayValues.some(Boolean) && !gatewayValues.every(Boolean)) throw new Error("All LiteLLM gateway settings must be configured together");
   const gateway = env.LITELLM_ADMIN_URL && env.LITELLM_WORKSPACE_URL && env.LITELLM_MASTER_KEY && env.LITELLM_CREDENTIAL_SECRET
@@ -1225,6 +1333,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
       workspaceIngress,
+      grantRenewal: {
+        tenantId: env.BOOTSTRAP_TENANT_ID,
+        intervalMs: env.GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS * 1000,
+      },
     },
   );
   const pushRetryTimer = pushProvider && openVtc

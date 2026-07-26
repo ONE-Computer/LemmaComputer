@@ -56,7 +56,7 @@ mcp_servers:
     auth_type: oauth2
     oauth2_flow: authorization_code
     client_id: onecomputer-litellm
-    authorization_url: http://localhost:4311/authorize
+    authorization_url: os.environ/ONECOMPUTER_M365_AUTHORIZATION_URL
     token_url: http://ms365-mcp:3000/token
     scopes:
       - User.Read
@@ -73,6 +73,7 @@ mcp_servers:
       - ChannelMessage.Read.All
       - ChannelMessage.Send
     allowed_tools:
+      - get-current-user
       - list-mail-folders
       - list-mail-messages
       - get-mail-message

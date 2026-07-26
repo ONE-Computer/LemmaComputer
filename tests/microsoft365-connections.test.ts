@@ -6,7 +6,12 @@ import { Microsoft365ConnectionService } from "../apps/control-api/src/connectio
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
 const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "onecomputer-control" };
-const connected: OAuthConnectionStatus = { state: "connected", connectedAt: "2026-07-20T01:02:03Z", expiresAt: "2026-07-20T02:02:03Z" };
+const connected: OAuthConnectionStatus = {
+  state: "connected",
+  connectedAt: "2026-07-20T01:02:03Z",
+  expiresAt: "2026-07-20T02:02:03Z",
+  account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
+};
 
 class FakeConnectionGateway implements OAuthConnectionGateway {
   started: Parameters<OAuthConnectionGateway["beginUserOAuthConnection"]>[0][] = [];
@@ -20,8 +25,8 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
     this.completed.push(input);
     return connected;
   }
-  async userOAuthConnectionStatus() { return { state: "disconnected", connectedAt: null, expiresAt: null } as const; }
-  async disconnectUserOAuthConnection() { return { state: "disconnected", connectedAt: null, expiresAt: null } as const; }
+  async userOAuthConnectionStatus() { return { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const; }
+  async disconnectUserOAuthConnection() { return { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const; }
 }
 
 test("owned Microsoft 365 flow binds state and PKCE to the initiating ONEComputer identity", async () => {

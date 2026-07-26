@@ -89,3 +89,21 @@ workspace user before Kasm starts.
 The product owner explicitly waived another firewall acceptance run before
 Issue 003. This record relies on the already completed Issue 002 boundary and
 does not expand its security claim.
+
+## 2026-07-26 Office capability amendment
+
+The original qualification above records the behavior of the 2026-07-23
+image. The managed Hermes profile now also enables the narrowly scoped native
+`file`, `terminal`, `skills`, and `vision` toolsets required to make bundled
+document skills functional. Public-web, browser automation, delegation,
+memory, cron, and other unrelated native toolsets remain disabled in managed
+mode. Disposable-open Hermes receives its normal CLI or API-server toolset.
+
+The image now checksum-pins and seeds the official bundled `docx`, `pdf`,
+`powerpoint`, `xlsx`, and `ocr-and-documents` skills whenever a Hermes client
+is selected. It also preinstalls their LibreOffice, Pandoc, Poppler, qpdf,
+Tesseract, Python, Node.js, and font dependencies. The qualified Hermes runtime
+remains at `v2026.7.20`; only those five skill directories are overlaid from
+upstream commit `a606d24cf2a9d1137d77fd92e7da459c89947fbd`, preserving their
+upstream license files. The optional multi-gigabyte `marker-pdf` route remains
+opt-in; the default OCR path uses PyMuPDF/PyMuPDF4LLM and Tesseract.

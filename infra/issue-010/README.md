@@ -23,6 +23,13 @@ workspace-scoped LiteLLM gateway.
   Desktop `0.17.0`
 - Hermes source archive SHA-256:
   `285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990`
+- Hermes bundled Office skill snapshot commit:
+  `a606d24cf2a9d1137d77fd92e7da459c89947fbd`
+- Hermes bundled Office skill archive SHA-256:
+  `c379fc38badf3bc31938be80c15aa3a13bc6c4bb3b852902e5d988676763c20c`
+- Node.js `22.23.1`, used by the bundled DOCX and PowerPoint skills
+- Node.js archive SHA-256:
+  `9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578`
 - Kasm Ubuntu Jammy base:
   `sha256:58b0710b320b99ab7e352342d7ec3a25b09740c523b75d794c5f7476910da580`
 - resulting local workspace image is printed by `build-workspace.sh` and pinned
@@ -33,6 +40,37 @@ its selection without rebuilding. Launchers, executable permissions, loopback
 brokers, and agent grants are exposed only for the selected entries. Firefox,
 Claude Desktop, and Hermes Agent CLI remain the initial defaults; Chrome, Claude
 CLI, and Hermes Agent Desktop are opt-in.
+
+## Hermes document runtime
+
+Selecting Hermes Agent CLI or Hermes Desktop seeds that profile with the
+official bundled `docx`, `pdf`, `powerpoint`, `xlsx`, and
+`ocr-and-documents` skills. The workspace image supplies their dependencies:
+
+- LibreOffice, Pandoc, Poppler, qpdf, Tesseract OCR, ZIP tools, and broad
+  document fonts;
+- pinned Python libraries for DOCX, PDF, PowerPoint, XLSX, OCR, rendering,
+  extraction, and validation in `/opt/onecomputer/hermes-office-venv`;
+- pinned Node.js libraries for DOCX and PowerPoint generation in
+  `/opt/onecomputer/hermes-office-node`.
+
+The Hermes runtime remains pinned to the qualified `v2026.7.20` release. The
+five skill definitions are overlaid from a separately checksum-pinned upstream
+commit because that release predates several current bundled Office skills.
+Hermes' manifest-based sync copies them into each selected persistent profile,
+updates unmodified bundled copies, and preserves user edits or deletions.
+
+Both workspace modes support the document runtime. A managed/restricted Hermes
+profile receives only its workspace-local file, terminal, skill, and vision
+tools plus the governed Microsoft 365 server; public-web and unrelated native
+toolsets remain disabled. A disposable-open profile receives the normal Hermes
+CLI or API toolset plus the governed server.
+
+`marker-pdf` is intentionally not preinstalled. The upstream OCR skill calls it
+an optional higher-accuracy path that adds roughly 3–5 GB of packages and
+downloads about 2.5 GB of models on first use. The default image instead
+includes the upstream safe path, PyMuPDF/PyMuPDF4LLM, plus Tesseract and
+PDF-to-image support.
 
 This follows Anthropic's supported Linux and gateway paths:
 

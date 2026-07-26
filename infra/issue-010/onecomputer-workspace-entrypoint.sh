@@ -3,12 +3,30 @@ set -euo pipefail
 
 : "${ONECOMPUTER_ENABLED_AGENTS:=claude-desktop}"
 : "${ONECOMPUTER_ENABLED_APPLICATIONS:=firefox}"
+: "${ONECOMPUTER_EXECUTION_MODE:=managed}"
+: "${ONECOMPUTER_EGRESS_MODE:=restricted}"
 : "${ONECOMPUTER_CLIPBOARD_ENABLED:=true}"
 : "${ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE:=true}"
 : "${ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL:=true}"
 : "${ONECOMPUTER_CLIPBOARD_MAX_BYTES:=65536}"
 : "${ONECOMPUTER_SIGNED_POLICY_B64:?Signed ONEComputer policy projection is required}"
 : "${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?Policy verification keys are required}"
+
+[[ "$ONECOMPUTER_EXECUTION_MODE" == "managed" || "$ONECOMPUTER_EXECUTION_MODE" == "disposable-open" ]] || {
+  echo "invalid execution mode" >&2
+  exit 78
+}
+if [[ "$ONECOMPUTER_EXECUTION_MODE" == "disposable-open" ]]; then
+  [[ "$ONECOMPUTER_EGRESS_MODE" == "full-web" ]] || {
+    echo "disposable-open requires full-web egress" >&2
+    exit 78
+  }
+else
+  [[ "$ONECOMPUTER_EGRESS_MODE" == "restricted" ]] || {
+    echo "managed workspaces require restricted egress" >&2
+    exit 78
+  }
+fi
 
 claude_code_version="2.1.215"
 claude_code_checksum="7ff9594e53cd89d1af9ceb3c18d3d70be1a5c6d27475e31ee2bed65d748f18c0"
@@ -305,19 +323,22 @@ configure_codex() {
   local home="$1"
   local model="$2"
   local allowed_tools="$3"
+  local execution_mode="$4"
   install -d -o 1000 -g 1000 -m 0700 "$home"
-  python3 - "$home" "$model" "$allowed_tools" <<'PY'
+  python3 - "$home" "$model" "$allowed_tools" "$execution_mode" <<'PY'
 import json
 import os
 import sys
 
-home, model, allowed_tools = sys.argv[1:]
+home, model, allowed_tools, execution_mode = sys.argv[1:]
 tools = [item for item in allowed_tools.split(",") if item]
+sandbox_mode = "danger-full-access" if execution_mode == "disposable-open" else "read-only"
+web_search = "live" if execution_mode == "disposable-open" else "disabled"
 document = f"""model = {json.dumps(model)}
 model_provider = "onecomputer"
 approval_policy = "never"
-sandbox_mode = "read-only"
-web_search = "disabled"
+sandbox_mode = {json.dumps(sandbox_mode)}
+web_search = {json.dumps(web_search)}
 
 [model_providers.onecomputer]
 name = "ONEComputer governed OpenAI"
@@ -347,8 +368,8 @@ PY
 }
 
 if agent_enabled codex-cli; then
-  configure_codex /home/kasm-user/.codex-cli "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS"
-  configure_codex /home/kasm-user/.codex-chat-sdk "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS"
+  configure_codex /home/kasm-user/.codex-cli "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS" "$ONECOMPUTER_EXECUTION_MODE"
+  configure_codex /home/kasm-user/.codex-chat-sdk "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS" "$ONECOMPUTER_EXECUTION_MODE"
 fi
 
 configure_hermes() {
@@ -356,15 +377,22 @@ configure_hermes() {
   local model="$2"
   local allowed_tools="$3"
   local broker_port="$4"
+  local execution_mode="$5"
   install -d -o 1000 -g 1000 -m 0700 "$home"
-  /opt/onecomputer/hermes-venv/bin/python - "$home" "$model" "$allowed_tools" "$broker_port" <<'PY'
+  /opt/onecomputer/hermes-venv/bin/python - "$home" "$model" "$allowed_tools" "$broker_port" "$execution_mode" <<'PY'
 import json
 import os
 import sys
-from toolsets import TOOLSETS
+from toolsets import TOOLSETS, resolve_toolset
 
-home, model, allowed_tools, broker_port = sys.argv[1:]
+home, model, allowed_tools, broker_port, execution_mode = sys.argv[1:]
 tools = [item for item in allowed_tools.split(",") if item]
+managed_office_toolsets = ["file", "skills", "terminal", "vision"]
+cli_toolsets = managed_office_toolsets + ["onecomputer_ms365"]
+api_toolsets = managed_office_toolsets + ["onecomputer_ms365"]
+if execution_mode == "disposable-open":
+    cli_toolsets = ["hermes-cli", "onecomputer_ms365"]
+    api_toolsets = ["hermes-api-server", "onecomputer_ms365"]
 document = {
     "model": {
         "default": model,
@@ -376,12 +404,11 @@ document = {
     # platform by default. Web Chat uses api_server, so name the governed
     # server explicitly for both the API and interactive CLI surfaces.
     "platform_toolsets": {
-        "cli": ["onecomputer_ms365"],
-        "api_server": ["onecomputer_ms365"],
+        "cli": cli_toolsets,
+        "api_server": api_toolsets,
         "telegram": [],
     },
     "agent": {
-        "disabled_toolsets": sorted(TOOLSETS),
         # Hermes defaults custom GPT-5 models to medium reasoning, while its
         # chat-completions transport cannot combine that parameter with MCP
         # function tools. The governed model still reasons normally; this only
@@ -398,6 +425,15 @@ document = {
     },
     "stt": {"enabled": False},
 }
+if execution_mode == "managed":
+    managed_office_tools = set()
+    for toolset in managed_office_toolsets:
+        managed_office_tools.update(resolve_toolset(toolset))
+    document["agent"]["disabled_toolsets"] = sorted(
+        name
+        for name in TOOLSETS
+        if managed_office_tools.isdisjoint(resolve_toolset(name))
+    )
 path = os.path.join(home, "config.yaml")
 with open(path, "w", encoding="utf-8") as output:
     json.dump(document, output, separators=(",", ":"))
@@ -407,10 +443,24 @@ os.chown(path, 1000, 1000)
 PY
 }
 
+sync_hermes_skills() {
+  local home="$1"
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    env -i \
+      PATH=/opt/onecomputer/hermes-office-venv/bin:/opt/onecomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin \
+      HOME=/home/kasm-user \
+      HERMES_HOME="$home" \
+      HERMES_BUNDLED_SKILLS=/opt/onecomputer/hermes-agent/skills \
+      /opt/onecomputer/hermes-venv/bin/python -c \
+      'from tools.skills_sync import sync_skills; sync_skills(quiet=True)'
+}
+
 agent_enabled hermes-claw \
-  && configure_hermes /home/kasm-user/.hermes "$ONECOMPUTER_HERMES_MODEL_ALIAS" "$ONECOMPUTER_HERMES_ALLOWED_TOOLS" 4314
+  && configure_hermes /home/kasm-user/.hermes "$ONECOMPUTER_HERMES_MODEL_ALIAS" "$ONECOMPUTER_HERMES_ALLOWED_TOOLS" 4314 "$ONECOMPUTER_EXECUTION_MODE" \
+  && sync_hermes_skills /home/kasm-user/.hermes
 agent_enabled hermes-desktop \
-  && configure_hermes /home/kasm-user/.hermes-desktop "$ONECOMPUTER_HERMES_DESKTOP_MODEL_ALIAS" "$ONECOMPUTER_HERMES_DESKTOP_ALLOWED_TOOLS" 4316
+  && configure_hermes /home/kasm-user/.hermes-desktop "$ONECOMPUTER_HERMES_DESKTOP_MODEL_ALIAS" "$ONECOMPUTER_HERMES_DESKTOP_ALLOWED_TOOLS" 4316 "$ONECOMPUTER_EXECUTION_MODE" \
+  && sync_hermes_skills /home/kasm-user/.hermes-desktop
 
 install -d -o 1000 -g 1000 -m 0755 /home/kasm-user/.config/autostart /home/kasm-user/Desktop
 rm -f /home/kasm-user/.config/autostart/claude-desktop.desktop \
@@ -559,10 +609,12 @@ if agent_enabled hermes-claw; then
   install -d -o 1000 -g 1000 -m 0700 /home/kasm-user/.hermes/logs
   setpriv --reuid=1000 --regid=1000 --init-groups \
     env -i \
-      PATH=/opt/onecomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin \
+      PATH=/opt/onecomputer/hermes-office-venv/bin:/opt/onecomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin \
       HOME=/home/kasm-user \
       USER=kasm-user \
       HERMES_HOME=/home/kasm-user/.hermes \
+      HERMES_BUNDLED_SKILLS=/opt/onecomputer/hermes-agent/skills \
+      NODE_PATH=/opt/onecomputer/hermes-office-node/node_modules \
       OPENAI_API_KEY=onecomputer-loopback-broker \
       ONECOMPUTER_MCP_BROKER=http://127.0.0.1:4314 \
       API_SERVER_ENABLED=true \
@@ -606,6 +658,7 @@ start_sdk_chat_adapter() {
       ONECOMPUTER_CHAT_API_KEY="$api_key" \
       ONECOMPUTER_CHAT_MODEL_ALIAS="$model" \
       ONECOMPUTER_CHAT_ALLOWED_TOOLS="$allowed_tools" \
+      ONECOMPUTER_EXECUTION_MODE="$ONECOMPUTER_EXECUTION_MODE" \
       ONECOMPUTER_CHAT_BROKER="http://127.0.0.1:${broker_port}" \
       ONECOMPUTER_CHAT_PORT="$port" \
       ONECOMPUTER_HERMES_CHAT_URL="$hermes_url" \
@@ -647,6 +700,56 @@ if agent_enabled codex-cli; then
     "$codex_chat_api_key"
   unset ONECOMPUTER_CODEX_CHAT_API_KEY codex_chat_api_key
 fi
+
+cron_supervisor_pid=""
+if [[ "$ONECOMPUTER_EXECUTION_MODE" == "disposable-open" ]]; then
+  install -d -o 1000 -g 1000 -m 0700 \
+    /home/kasm-user/.onecomputer \
+    /home/kasm-user/.onecomputer/logs \
+    /home/kasm-user/.onecomputer/locks \
+    /home/kasm-user/.onecomputer/scripts \
+    /home/kasm-user/.onecomputer/results
+  install -o 1000 -g 1000 -m 0644 \
+    /usr/local/share/onecomputer/SCHEDULING.md \
+    /home/kasm-user/.onecomputer/SCHEDULING.md
+  install -o 1000 -g 1000 -m 0600 /dev/null /run/onecomputer/cron-events.log
+  canonical_crontab="/home/kasm-user/.onecomputer/crontab"
+  if [[ -f "$canonical_crontab" ]]; then
+    [[ "$(stat -c %u "$canonical_crontab")" -eq 1000 \
+      && "$(stat -c %g "$canonical_crontab")" -eq 1000 \
+      && "$(stat -c %a "$canonical_crontab")" == "600" \
+      && "$(stat -c %s "$canonical_crontab")" -le 65536 ]] || {
+      echo "persistent crontab has unsafe ownership, mode, or size" >&2
+      exit 78
+    }
+    if LC_ALL=C grep -qP '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]' "$canonical_crontab"; then
+      echo "persistent crontab contains unsupported control characters" >&2
+      exit 78
+    fi
+    /usr/bin/crontab -u kasm-user "$canonical_crontab"
+    printf '%s\n' '{"event":"crontab_restore","result":"installed"}' >> /run/onecomputer/cron-events.log
+  else
+    /usr/bin/crontab -u kasm-user -r 2>/dev/null || true
+    printf '%s\n' '{"event":"crontab_restore","result":"empty"}' >> /run/onecomputer/cron-events.log
+  fi
+  (
+    set +e
+    /usr/sbin/cron -f -L 0 >>/run/onecomputer/cron-daemon.log 2>&1
+    cron_status=$?
+    rm -f /run/onecomputer/workspace-ready
+    printf '{"event":"cron_daemon_exit","exitStatus":%d}\n' "$cron_status" >> /run/onecomputer/cron-events.log
+    kill -TERM 1 2>/dev/null || true
+    exit "$cron_status"
+  ) &
+  cron_supervisor_pid="$!"
+  printf '%s\n' "$cron_supervisor_pid" > /run/onecomputer/cron-supervisor.pid
+  sleep 0.2
+  kill -0 "$cron_supervisor_pid"
+else
+  /usr/bin/crontab -u kasm-user -r 2>/dev/null || true
+fi
+
+[[ -z "$cron_supervisor_pid" ]] || kill -0 "$cron_supervisor_pid"
 touch /run/onecomputer/workspace-ready
 
 exec setpriv --reuid=1000 --regid=1000 --init-groups \

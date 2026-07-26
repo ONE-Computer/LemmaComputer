@@ -36,12 +36,22 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     },
     completeUserOAuthConnection: async (input) => {
       completions.push(input.code);
-      return { state: "connected", connectedAt: "2026-07-20T01:02:03Z", expiresAt: "2026-07-20T02:02:03Z" };
+      return {
+        state: "connected",
+        connectedAt: "2026-07-20T01:02:03Z",
+        expiresAt: "2026-07-20T02:02:03Z",
+        account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
+      };
     },
-    userOAuthConnectionStatus: async () => ({ state: "connected", connectedAt: "2026-07-20T01:02:03Z", expiresAt: "2026-07-20T02:02:03Z" }),
+    userOAuthConnectionStatus: async () => ({
+      state: "connected",
+      connectedAt: "2026-07-20T01:02:03Z",
+      expiresAt: "2026-07-20T02:02:03Z",
+      account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
+    }),
     disconnectUserOAuthConnection: async (identity) => {
       disconnects.push(identity);
-      return { state: "disconnected", connectedAt: null, expiresAt: null };
+      return { state: "disconnected", connectedAt: null, expiresAt: null, account: null };
     },
   };
   const app = createControlServer(
@@ -56,7 +66,12 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
   try {
     const status = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(status.statusCode, 200);
-    assert.deepEqual(status.json(), { state: "connected", connectedAt: "2026-07-20T01:02:03Z", expiresAt: "2026-07-20T02:02:03Z" });
+    assert.deepEqual(status.json(), {
+      state: "connected",
+      connectedAt: "2026-07-20T01:02:03Z",
+      expiresAt: "2026-07-20T02:02:03Z",
+      account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
+    });
 
     const start = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365/authorize", headers: headersFor(alpha) });
     assert.equal(start.statusCode, 302);
@@ -85,7 +100,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
 
     const disconnected = await app.inject({ method: "DELETE", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(disconnected.statusCode, 200);
-    assert.deepEqual(disconnected.json(), { state: "disconnected", connectedAt: null, expiresAt: null });
+    assert.deepEqual(disconnected.json(), { state: "disconnected", connectedAt: null, expiresAt: null, account: null });
     assert.deepEqual(disconnects, [alpha]);
   } finally {
     await app.close();

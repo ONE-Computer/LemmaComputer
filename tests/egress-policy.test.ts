@@ -6,6 +6,7 @@ import {
 } from "@onecomputer/contracts";
 import {
   compileEgressSecurityGroup,
+  compileRuntimeEgressPolicy,
   decideEgress,
   deriveEgressProxySecret,
   issueEgressProxyGrant,
@@ -123,6 +124,7 @@ test("egress proxy grants are scoped, signed, expiring, and cannot cross workspa
     workspaceId: "workspace-a",
     agentId: "agent-a",
     securityGroupVersionId: group.id,
+    egressMode: "restricted" as const,
     policyHash: "b".repeat(64),
   };
   const now = new Date("2026-07-23T04:00:00.000Z");
@@ -133,5 +135,138 @@ test("egress proxy grants are scoped, signed, expiring, and cannot cross workspa
   assert.equal(verifyEgressProxyGrant(token, secret, { ...expected, workspaceId: "workspace-b" }, now), null);
   assert.equal(verifyEgressProxyGrant(token, secret, { ...expected, tenantId: "other" }, now), null);
   assert.equal(verifyEgressProxyGrant(token, secret, { ...expected, agentId: "agent-b" }, now), null);
+  assert.equal(verifyEgressProxyGrant(token, secret, { ...expected, egressMode: "full-web" }, now), null);
   assert.equal(verifyEgressProxyGrant(token, secret, expected, new Date("2026-07-23T04:01:01.000Z")), null);
+});
+
+test("full-web allows only public HTTP and HTTPS on standard ports", () => {
+  const compiled = compileRuntimeEgressPolicy({
+    schemaVersion: 2,
+    mode: "full-web",
+    id: "egv_full_web_fixture",
+    securityGroupId: "esg_disposable_open",
+    version: 1,
+    name: "Disposable public web",
+    description: "Public web without a destination allowlist.",
+    defaultAction: "allow-public-http-https",
+    rules: [],
+    documentHash: "f".repeat(64),
+  });
+  assert.equal(decideEgress(compiled, {
+    protocol: "https",
+    host: "registry.npmjs.org",
+    port: 443,
+    resolvedAddresses: ["104.16.24.34"],
+  }).decision, "allow");
+  assert.equal(decideEgress(compiled, {
+    protocol: "http",
+    host: "example.org",
+    port: 80,
+    resolvedAddresses: ["93.184.216.34"],
+  }).decision, "allow");
+  assert.equal(decideEgress(compiled, {
+    protocol: "https",
+    host: "registry.npmjs.org",
+    port: 8443,
+    resolvedAddresses: ["104.16.24.34"],
+  }).decision, "deny");
+  assert.equal(decideEgress(compiled, {
+    protocol: "https",
+    host: "metadata.google.internal",
+    port: 443,
+    resolvedAddresses: ["169.254.169.254"],
+  }).reasonCode, "EGRESS_DESTINATION_RESERVED");
+  for (const reservedAddress of [
+    "::1",
+    "fc00::1",
+    "fe80::1",
+    "ff02::1",
+    "2001:2::1",
+    "2001:db8::1",
+    "2002:c000:0201::1",
+    "3fff::1",
+  ]) {
+    assert.equal(decideEgress(compiled, {
+      protocol: "https",
+      host: "ipv6.example.org",
+      port: 443,
+      resolvedAddresses: [reservedAddress],
+    }).reasonCode, "EGRESS_DESTINATION_RESERVED", reservedAddress);
+  }
+  assert.equal(decideEgress(compiled, {
+    protocol: "https",
+    host: "dns.google",
+    port: 443,
+    resolvedAddresses: ["2001:4860:4860::8888"],
+  }).decision, "allow");
+});
+
+test("explicit deny rules override both full-web defaults and broader managed allows", () => {
+  const denyRule = {
+    id: "blocked-packages",
+    action: "deny" as const,
+    protocol: "https" as const,
+    host: "blocked.example.com",
+    includeSubdomains: true,
+    port: 443,
+    purpose: "Block an untrusted package source",
+  };
+  const fullWeb = compileRuntimeEgressPolicy({
+    schemaVersion: 2,
+    mode: "full-web",
+    id: "egv_full_web_with_deny",
+    securityGroupId: "esg_open_exceptions",
+    version: 2,
+    name: "Open workspace exceptions",
+    description: "Default public web with reviewed blocks.",
+    defaultAction: "allow-public-http-https",
+    rules: [denyRule],
+    documentHash: "d".repeat(64),
+  });
+  assert.deepEqual(decideEgress(fullWeb, {
+    protocol: "https",
+    host: "cdn.blocked.example.com",
+    port: 443,
+    resolvedAddresses: ["104.18.0.10"],
+  }), {
+    decision: "deny",
+    reasonCode: "EGRESS_EXPLICIT_DENY",
+    ruleId: "blocked-packages",
+  });
+  assert.equal(decideEgress(fullWeb, {
+    protocol: "https",
+    host: "registry.npmjs.org",
+    port: 443,
+    resolvedAddresses: ["104.16.24.34"],
+  }).decision, "allow");
+
+  const managed = compileRuntimeEgressPolicy({
+    schemaVersion: 2,
+    mode: "restricted",
+    id: "egv_managed_with_deny",
+    securityGroupId: "esg_managed_with_deny",
+    version: 1,
+    name: "Managed exceptions",
+    description: "Allow a domain family except a reviewed host.",
+    defaultAction: "deny",
+    rules: [
+      {
+        id: "allow-example",
+        action: "allow",
+        protocol: "https",
+        host: "example.com",
+        includeSubdomains: true,
+        port: 443,
+        purpose: "Approved example services",
+      },
+      denyRule,
+    ],
+    documentHash: "e".repeat(64),
+  });
+  assert.equal(decideEgress(managed, {
+    protocol: "https",
+    host: "blocked.example.com",
+    port: 443,
+    resolvedAddresses: ["104.18.0.11"],
+  }).reasonCode, "EGRESS_EXPLICIT_DENY");
 });
