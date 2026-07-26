@@ -19,7 +19,10 @@ const envSchema = z.object({
   CONTROLLER_PORT: z.coerce.number().int().positive().default(4101),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
   SANDBOX_DRIVER: z.enum(["kasm", "kasm-local"]).default("kasm-local"),
-  KASM_BASE_URL: z.string().url().optional(),
+  KASM_BASE_URL: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.string().url().optional(),
+  ),
   KASM_API_KEY: z.string().optional(),
   KASM_API_SECRET: z.string().optional(),
   KASM_USER_ID: z.string().optional(),

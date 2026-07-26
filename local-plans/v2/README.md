@@ -20,7 +20,10 @@ the workspace, with Telegram as its first official adapter and without
 projecting the bot token into any agent. The native Hermes, Claude, and Codex
 adapter baseline produced by cancelled Issue 009 is retained, while Issue 010
 replaces its final-only Chat surface with AI SDK structured streaming. ACP is
-explicitly deferred.
+explicitly deferred. Issue 013 adds an explicit disposable-open profile for
+non-sensitive work without weakening the managed profile or the Kasm boundary.
+Issue 014 then adds conventional persistent cron inside that profile so agents
+can schedule local commands without a custom scheduler product.
 
 The archived V1 plan is historical evidence, not an active issue dependency.
 Every V2 issue must inspect the real V1 implementation and carry forward only
@@ -44,8 +47,11 @@ default agent. The remaining priorities come directly from the V2 scope.
 2. Policy and network enforcement live outside the workspace. Environment
    variables, application settings, a policy signature, or cooperative client
    behavior alone are never an enforcement boundary.
-3. Public internet access is deny by default and granted only through an
-   authenticated, workspace-bound, externally enforced egress policy.
+3. Managed public internet access is deny by default and granted only through
+   an authenticated, workspace-bound, externally enforced egress policy. An
+   explicitly selected disposable-open profile may allow all public HTTP/HTTPS
+   destinations through the same external proxy, but never private, reserved,
+   metadata, host, control-plane, or direct bypass routes.
 4. Direct model-provider, Microsoft Graph, upstream MCP, metadata/link-local,
    host-control, database, Docker, cross-workspace, and alternate tunnel paths
    remain unavailable unless an issue explicitly introduces a bounded route.
@@ -139,6 +145,8 @@ consistent, and the completion record points to the bundle.
 | 010 | P1 | verification | Replace the bespoke Chat surface with AI SDK structured streaming | 003, 007 |
 | 011 | P1 | verification | Replace custom OpenVTC consent crypto with upstream Rust and browser components | 003 |
 | 012 | P1 | verification | Add an agent-agnostic channel broker with Telegram as the first adapter | 002, 003, 010 |
+| 013 | P1 | planned | Add a disposable open-sandbox profile for non-sensitive work | 002, 003, 010 |
+| 014 | P1 | planned | Add persistent conventional cron to the base Kasm image | 013 |
 
 ## Assignment template
 

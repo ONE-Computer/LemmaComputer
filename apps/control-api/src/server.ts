@@ -499,6 +499,13 @@ export function createControlServer(
       return reply.code(303).header("location", completed.returnPath).send();
     } catch (error) {
       const reason = error instanceof OneComputerError ? error.code : "OIDC_FAILED";
+      request.log.warn({
+        err: {
+          name: error instanceof Error ? error.name : "UnknownError",
+          code: reason,
+          message: error instanceof Error ? error.message : "Unknown OIDC callback error",
+        },
+      }, "OIDC callback rejected");
       return reply.code(303).header("location", `/?signin=error&reason=${encodeURIComponent(reason)}`).send();
     }
   });

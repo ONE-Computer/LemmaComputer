@@ -815,7 +815,10 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     const owned = await client.query("SELECT id FROM users WHERE id=$1 AND tenant_id=$2", [targetUserId, tenantId]);
     if (!owned.rowCount) throw new Error("Policy target is outside the tenant");
     await this.ensurePolicyFoundation(client, tenantId, assignedBy);
-    const existing = await client.query(`${effectivePolicySelect} FOR UPDATE`, [targetUserId]);
+    // The per-user advisory lock above serializes assignment changes. Do not
+    // append FOR UPDATE here: effectivePolicySelect contains nullable outer
+    // joins, which PostgreSQL correctly refuses to lock as a single rowset.
+    const existing = await client.query(effectivePolicySelect, [targetUserId]);
     if (existing.rowCount) return mapPolicy(existing.rows[0]);
     const resources = await client.query(
       `SELECT a.id AS agent_id,wi.id AS workspace_identity_id,pv.id AS policy_version_id

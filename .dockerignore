@@ -1,8 +1,30 @@
 .git
+.github
+.artifacts
+.env
+.env.*
 node_modules
 **/node_modules
+target
+**/target
+coverage
+dist
 **/dist
-.artifacts
-apps/web/.artifacts
+**/.npm-cache
+**/.artifacts
 *.log
-.env*
+
+docs
+local-plans
+tests
+
+# The control runtime only needs application and package source. The workspace
+# build still consumes its pinned image assets from this directory.
+infra/*
+!infra/issue-010/
+!infra/issue-010/**
+!infra/issue-008/
+infra/issue-008/*
+!infra/issue-008/softeria/
+!infra/issue-008/softeria/package.json
+!infra/issue-008/softeria/package-lock.json

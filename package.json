@@ -10,6 +10,11 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "tsx --test tests/**/*.test.ts",
+    "env:init": "node scripts/initialize-env.mjs",
+    "compose:config": "docker compose config --quiet",
+    "compose:up": "docker compose up -d --build --wait --wait-timeout 300",
+    "compose:down": "docker compose down",
+    "image:workspace": "docker compose --profile build build workspace-image",
     "dev:control": "npm run dev -w @onecomputer/control-api",
     "dev:controller": "npm run dev -w @onecomputer/workspace-controller",
     "dev:web": "npm run dev -w web",

@@ -1,0 +1,15 @@
+FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+
+WORKDIR /app
+
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY apps ./apps
+COPY packages ./packages
+
+RUN npm ci --include=optional \
+  && npm run build --workspace web \
+  && test -x node_modules/vite/node_modules/@esbuild/linux-x64/bin/esbuild \
+  && npm cache clean --force \
+  && chmod -R a+rX /app
+
+ENV NODE_ENV=production

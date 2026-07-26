@@ -1,0 +1,129 @@
+model_list:
+  # Policy-facing aliases. Keep these stable when changing the underlying
+  # provider deployment so existing signed policies remain meaningful.
+  - model_name: onecomputer-assistant
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      supports_vision: true
+  - model_name: onecomputer-claude
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      supports_vision: true
+  - model_name: onecomputer-openai
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      supports_vision: true
+  - model_name: onecomputer-glm
+    litellm_params:
+      model: zai/glm-5
+      api_key: os.environ/ZAI_API_KEY
+    model_info:
+      supports_vision: false
+
+  # Claude Desktop validates model identifiers against its own catalog before
+  # sending a gateway request. These transport aliases project an approved
+  # policy route onto identifiers accepted by the managed desktop client.
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      supports_vision: true
+  - model_name: claude-opus-4-6
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      supports_vision: true
+  - model_name: claude-sonnet-4-5
+    litellm_params:
+      model: zai/glm-5
+      api_key: os.environ/ZAI_API_KEY
+    model_info:
+      supports_vision: false
+
+mcp_servers:
+  onecomputer_ms365:
+    transport: http
+    url: http://ms365-mcp:3000/mcp
+    description: Governed Outlook Mail, Calendar, OneDrive, and Teams connector
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    client_id: onecomputer-litellm
+    authorization_url: http://localhost:4311/authorize
+    token_url: http://ms365-mcp:3000/token
+    scopes:
+      - User.Read
+      - offline_access
+      - Mail.ReadWrite
+      - Mail.Send
+      - Calendars.ReadWrite
+      - Files.ReadWrite
+      - Chat.Read
+      - ChatMessage.Read
+      - ChatMessage.Send
+      - Team.ReadBasic.All
+      - Channel.ReadBasic.All
+      - ChannelMessage.Read.All
+      - ChannelMessage.Send
+    allowed_tools:
+      - list-mail-folders
+      - list-mail-messages
+      - get-mail-message
+      - create-draft-email
+      - update-mail-message
+      - delete-mail-message
+      - move-mail-message
+      - send-mail
+      - send-draft-message
+      - reply-mail-message
+      - reply-all-mail-message
+      - forward-mail-message
+      - list-calendars
+      - list-calendar-events
+      - get-calendar-view
+      - get-calendar-event
+      - create-calendar-event
+      - update-calendar-event
+      - delete-calendar-event
+      - list-drives
+      - get-drive-root-item
+      - list-folder-files
+      - search-onedrive-files
+      - get-drive-item
+      - create-onedrive-folder
+      - upload-file-content
+      - move-rename-onedrive-item
+      - copy-drive-item
+      - delete-onedrive-file
+      - list-chats
+      - list-chat-messages
+      - list-joined-teams
+      - list-team-channels
+      - list-channel-messages
+      - send-chat-message
+      - reply-to-chat-message
+      - send-channel-message
+      - reply-to-channel-message
+    allow_all_keys: false
+    available_on_public_internet: false
+    delegate_auth_to_upstream: false
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  store_model_in_db: true
+
+litellm_settings:
+  callbacks: onecomputer_policy_callback.proxy_handler_instance
+  drop_params: true
+  set_verbose: false
+  turn_off_message_logging: true
+  log_raw_request_response: false
+
+# Routes fail closed. There is intentionally no cross-provider fallback.

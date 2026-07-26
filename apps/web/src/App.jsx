@@ -107,6 +107,19 @@ const chatAttachmentTypeByExtension = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
+const signInErrorByReason = {
+  OIDC_DENIED: "Microsoft sign-in was cancelled or denied.",
+  OIDC_CALLBACK_INVALID: "Microsoft returned an incomplete sign-in response.",
+  OIDC_STATE_MISMATCH: "Sign-in returned to a different browser origin. Start again from this page.",
+  OIDC_STATE_EXPIRED: "The sign-in attempt expired or was already used. Please try again.",
+  OIDC_TOKEN_EXCHANGE_FAILED: "Microsoft rejected the authorization-code exchange. Check the configured callback URL.",
+  OIDC_ID_TOKEN_MISSING: "Microsoft did not return an identity token.",
+  OIDC_ID_TOKEN_INVALID: "Microsoft returned an identity token that could not be verified.",
+  OIDC_NONCE_MISMATCH: "Microsoft returned an identity token for a different sign-in attempt.",
+  OIDC_IDENTITY_INVALID: "This Microsoft identity is not allowed for the configured tenant.",
+  OIDC_STATE_INVALID: "The saved sign-in state could not be decrypted.",
+  OIDC_FAILED: "ONEComputer could not finish the sign-in bootstrap.",
+};
 const attachmentMediaType = (file) => {
   if (chatAttachmentTypes.has(file.type)) return file.type;
   const extension = file.name.split(".").at(-1)?.toLowerCase();
@@ -1978,7 +1991,10 @@ export function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("signin") === "error") setAuthError("Microsoft could not verify this sign-in. Please try again.");
+    if (params.get("signin") === "error") {
+      const reason = params.get("reason") ?? "OIDC_FAILED";
+      setAuthError(signInErrorByReason[reason] ?? "Microsoft could not verify this sign-in. Please try again.");
+    }
     authApi.session()
       .then((value) => { setSession(value); setAuthError(""); })
       .catch((error) => { if (error.code !== "UNAUTHENTICATED") setAuthError(error.message); })

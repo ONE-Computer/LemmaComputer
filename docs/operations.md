@@ -1,0 +1,298 @@
+# Configuration and operations
+
+The root `compose.yaml` is the reference deployment for a single-host
+development or evaluation environment. It replaces layered infrastructure
+snapshots with one validated topology, two managed database volumes, explicit
+network boundaries, health-gated dependencies, and a separate build target for
+the workspace image.
+
+## Configuration lifecycle
+
+Create `.env` once:
+
+```bash
+npm ci
+npm run env:init
+```
+
+The initializer reads `.env.example`, generates local cryptographic material,
+writes the result with mode `0600`, and refuses to replace an existing file.
+Use `--force` only when intentionally invalidating all current local sessions,
+policy signatures, approvals, encrypted credentials, and service trust:
+
+```bash
+npm run env:init -- --force
+```
+
+For an alternate path:
+
+```bash
+npm run env:init -- --file=/absolute/path/to/onecomputer.env
+docker compose --env-file /absolute/path/to/onecomputer.env config --quiet
+```
+
+Compose automatically loads only a root `.env`. Pass `--env-file` for any
+other location.
+
+## Environment variable groups
+
+### Public routing
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ONECOMPUTER_HTTP_BIND_ADDRESS` | `127.0.0.1` | Host bind address for all published ports |
+| `ONECOMPUTER_WEB_PORT` | `4174` | Product and workspace-ingress port |
+| `ONECOMPUTER_LITELLM_PORT` | `4000` | LiteLLM UI and OAuth callback port |
+| `ONECOMPUTER_M365_PORT` | `4311` | Microsoft connector authorization bridge |
+| `ONECOMPUTER_PUBLIC_WEB_URL` | `http://localhost:4174` | Canonical product origin and Entra callback base |
+| `ONECOMPUTER_LITELLM_PUBLIC_URL` | `http://localhost:4000` | Canonical gateway callback base |
+| `ONECOMPUTER_M365_AUTHORIZATION_ORIGIN` | `http://localhost:4311` | Browser-facing connector origin |
+
+The three URLs and port mappings must describe the same externally observed
+origins. Changing a URL also requires updating its Entra redirect URI.
+
+### Identity and bootstrap
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `ONECOMPUTER_ENTRA_TENANT_ID` | Yes | Single Entra directory accepted for Web sign-in |
+| `ONECOMPUTER_ENTRA_CLIENT_ID` | Yes | Web OIDC application |
+| `ONECOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Web OIDC confidential-client secret |
+| `ONECOMPUTER_ADMINISTRATOR_EMAILS` | Yes | Comma-separated bootstrap administrators |
+| `ONECOMPUTER_BOOTSTRAP_TENANT_ID` | No | Owned tenant identifier |
+| `ONECOMPUTER_BOOTSTRAP_USER_ID` | No | Owned ID for a bootstrap administrator |
+| `ONECOMPUTER_TENANT_DISPLAY_NAME` | No | Initial organization display name |
+
+Administrator email matching is case-insensitive. Keep the allowlist small.
+After identity records and assignments exist, changing bootstrap identifiers
+does not migrate existing rows.
+
+### Microsoft 365
+
+`ONECOMPUTER_MS365_TENANT_ID`, `ONECOMPUTER_MS365_CLIENT_ID`, and
+`ONECOMPUTER_MS365_CLIENT_SECRET` are optional as a group. Empty values reuse
+the Web Entra application. A separate connector application is recommended for
+production because it isolates Graph scopes and credential rotation.
+
+The connector requests only the fixed scope list in `compose.yaml`. Tenant
+administrators should review those scopes against the enabled tool allowlist.
+
+### Model providers
+
+| Variable | Route |
+| --- | --- |
+| `ONECOMPUTER_OPENAI_API_KEY` | `onecomputer-assistant`, `onecomputer-openai` |
+| `ONECOMPUTER_CLAUDE_API_KEY` | `onecomputer-claude` |
+| `ONECOMPUTER_GLM_API_KEY` | `onecomputer-glm` |
+
+Only LiteLLM receives these variables. A route can remain unconfigured until
+policy assigns it, but the default bootstrap policy expects configured model
+routes. Remove unlicensed routes from both policy and gateway configuration.
+
+### Stable cryptographic material
+
+These values must remain stable while their dependent state exists:
+
+- policy signing private key and verification-key set;
+- OpenVTC executor seed;
+- session and workspace-ingress secrets;
+- LiteLLM salt and credential-derivation secret;
+- channel credential encryption secret;
+- egress grant and agent-chat derivation secrets;
+- Web Push subscription encryption secret.
+
+Loss or blind replacement can invalidate signed bundles, enrolled approvers,
+sessions, OAuth custody, stored channel credentials, or running workspaces.
+Back these values up through an approved secret manager.
+
+### Sandbox driver
+
+`SANDBOX_DRIVER=kasm-local` uses the host Docker Engine. Build the workspace
+image first:
+
+```bash
+npm run image:workspace
+```
+
+`ONECOMPUTER_WORKSPACE_IMAGE` may be a local tag for development. Production
+deployments should use an immutable digest.
+
+For an external Kasm installation, set:
+
+```text
+SANDBOX_DRIVER=kasm
+KASM_BASE_URL=https://kasm.example.com
+KASM_API_KEY=...
+KASM_API_SECRET=...
+KASM_USER_ID=...
+KASM_IMAGE_ID=...
+```
+
+Remove the Docker socket mount from the controller when using the remote
+adapter.
+
+## Start and stop
+
+Validate interpolation and schema before any mutation:
+
+```bash
+npm run compose:config
+```
+
+Start and wait for health:
+
+```bash
+npm run compose:up
+```
+
+The workspace build is intentionally not part of normal `up`; it is a build
+profile and not a service. Rebuild it explicitly after changing its Dockerfile
+or assets.
+
+Stop containers while retaining state:
+
+```bash
+npm run compose:down
+```
+
+Pull pinned upstream images and rebuild owned images:
+
+```bash
+docker compose pull --ignore-buildable
+docker compose build --pull
+docker compose up -d --wait --wait-timeout 300
+```
+
+Review upstream version and digest changes before updating pins.
+
+## Health and diagnostics
+
+```bash
+docker compose ps
+docker compose logs --since=10m control-api
+docker compose logs --since=10m workspace-controller
+docker compose logs --since=10m litellm
+```
+
+Expected health endpoints:
+
+| Service | Endpoint |
+| --- | --- |
+| workspace ingress | `http://localhost:4174/__onecomputer/healthz` |
+| Web, private | `http://web:4173/healthz` |
+| Control, private | `http://control-api:4100/healthz` |
+| controller, private | `http://workspace-controller:4101/healthz` |
+| channel broker, private | `http://channel-broker:4102/healthz` |
+| OpenVTC, private | `http://openvtc-consent:8788/healthz` |
+| LiteLLM | `http://localhost:4000/health/liveliness` |
+
+Health confirms process readiness, not a successful provider request,
+Microsoft consent, active policy assignment, or a built workspace image.
+
+Common failures:
+
+- **Control stays unhealthy:** inspect required environment validation,
+  database migration, policy key parsing, and OpenVTC profile connection.
+- **LiteLLM stays unhealthy:** inspect its database, master/salt keys, mounted
+  YAML, and custom callback import.
+- **Workspace creation fails with image not found:** run
+  `npm run image:workspace` and verify `ONECOMPUTER_WORKSPACE_IMAGE`.
+- **Workspace opens but ingress returns 502:** inspect the dynamic relay,
+  `onecomputer-control` membership, and the ingress logs.
+- **MCP calls return policy unavailable:** verify Control health and the shared
+  controller/policy callback token.
+- **Microsoft connection callback fails:** verify all three public origins,
+  Entra redirect URIs, client type, tenant, and clock.
+
+Do not enable verbose gateway request/response logging to diagnose production
+traffic. Correlate safe error codes and operation IDs instead.
+
+## Persistence
+
+Compose manages:
+
+- `onecomputer_control-data` for Control PostgreSQL;
+- `onecomputer_gateway-data` for LiteLLM PostgreSQL.
+
+The local sandbox adapter creates separately labeled volumes named
+`onecomputer-sandbox-<workspace UUID>`. Compose does not own or delete them.
+
+List owned workspace volumes:
+
+```bash
+docker volume ls --filter label=com.onecomputer.runtime=workspace-home
+```
+
+Normal `docker compose down` retains all state. `docker compose down --volumes`
+deletes both database volumes but still leaves workspace home volumes. Purge a
+workspace through the product/API so Control and provider state remain
+consistent.
+
+## Backup and restore
+
+Back up these as one recovery set:
+
+1. Control PostgreSQL;
+2. LiteLLM PostgreSQL;
+3. per-workspace persistent volumes;
+4. the exact secret-manager versions active at backup time;
+5. immutable control and workspace image digests.
+
+Example logical database backups:
+
+```bash
+docker compose exec -T postgres \
+  pg_dump --username onecomputer --dbname onecomputer --format=custom \
+  > onecomputer-control.dump
+
+docker compose exec -T litellm-postgres \
+  pg_dump --username litellm --dbname litellm --format=custom \
+  > onecomputer-gateway.dump
+```
+
+Protect backups as credentials: they contain identity, governance, operation,
+OAuth, and audit state. Test restore in an isolated environment. Restore
+databases and matching cryptographic material before starting Control or
+LiteLLM.
+
+## Rotation
+
+Rotation is not equivalent to regenerating `.env`.
+
+- Rotate provider keys in LiteLLM and revoke the prior provider credential
+  after route verification.
+- Rotate Entra client secrets with an overlap window.
+- Rotate service tokens by deploying consumers and producers with a
+  dual-acceptance window where supported.
+- Rotate policy signing keys by publishing the new public key alongside the old
+  verification key, switching the active signer, waiting for the maximum bundle
+  TTL, and only then retiring the old key.
+- Rotating the OpenVTC executor seed changes executor identity and requires a
+  trust re-enrollment design.
+- Rotating encryption keys requires decrypt-and-reencrypt migration; replacing
+  them directly makes stored credentials unreadable.
+
+## Production considerations
+
+The reference Compose stack is not a production security perimeter by itself.
+Before network exposure:
+
+- terminate TLS at an authenticated reverse proxy;
+- publish only the product origin and intentionally designed OAuth routes;
+- protect or disable the LiteLLM administrator UI;
+- replace loopback callback URLs with reviewed HTTPS origins;
+- use an external secret manager rather than environment files;
+- use managed PostgreSQL with encryption, backup, monitoring, and restricted
+  roles;
+- use the remote Kasm adapter and remove the Docker socket;
+- configure trusted TLS between ingress and workspace relays;
+- isolate egress networks with host/cloud firewall policy;
+- send safe audit events to an append-protected sink;
+- define log retention, data residency, incident response, and key rotation;
+- validate resource limits for every service and workspace;
+- use immutable images, an SBOM, vulnerability scanning, and signed release
+  artifacts.
+
+The published ports default to `127.0.0.1` specifically to prevent accidental
+LAN exposure. Do not change `ONECOMPUTER_HTTP_BIND_ADDRESS` to `0.0.0.0`
+without the controls above.

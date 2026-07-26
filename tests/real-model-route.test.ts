@@ -7,7 +7,7 @@ const root = path.resolve(import.meta.dirname, "..");
 const source = (relativePath: string) => readFile(path.join(root, relativePath), "utf8");
 
 test("the approved model aliases have pinned real routes and no fallback", async () => {
-  const config = await source("infra/issue-008/litellm-config.yaml");
+  const config = await source("config/litellm/config.yaml");
   for (const alias of ["onecomputer-assistant", "onecomputer-claude", "onecomputer-openai", "onecomputer-glm"]) {
     assert.equal((config.match(new RegExp(`model_name: ${alias}`, "g")) ?? []).length, 1);
   }
@@ -25,8 +25,8 @@ test("the approved model aliases have pinned real routes and no fallback", async
 });
 
 test("the provider credential is injected only into LiteLLM", async () => {
-  const compose = await source("infra/issue-002/compose.yml");
-  const litellm = compose.split("  litellm:")[1]?.split("\n  workspace-controller:")[0] ?? "";
+  const compose = await source("compose.yaml");
+  const litellm = compose.split("  litellm:")[1]?.split("\n  openvtc-consent:")[0] ?? "";
   const everythingElse = compose.replace(litellm, "");
   assert.match(litellm, /OPENAI_API_KEY: \$\{ONECOMPUTER_OPENAI_API_KEY:/);
   assert.match(litellm, /ANTHROPIC_API_KEY: \$\{ONECOMPUTER_CLAUDE_API_KEY:/);
@@ -35,7 +35,7 @@ test("the provider credential is injected only into LiteLLM", async () => {
 });
 
 test("LiteLLM rejects image input when the selected deployment does not advertise vision", async () => {
-  const callback = await source("infra/issue-008/onecomputer_policy_callback.py");
+  const callback = await source("integrations/litellm/onecomputer_policy_callback.py");
   assert.match(callback, /async_pre_call_deployment_hook/);
   assert.match(callback, /_contains_image_input/);
   assert.match(callback, /litellm\.get_model_info\(model\)/);
@@ -44,7 +44,7 @@ test("LiteLLM rejects image input when the selected deployment does not advertis
 });
 
 test("Claude Desktop is pinned and receives managed gateway policy rather than provider credentials", async () => {
-  const dockerfile = await source("infra/issue-010/Dockerfile.workspace");
+  const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
   const proxy = await source("infra/issue-010/onecomputer-gateway-proxy.py");
   assert.match(dockerfile, /CLAUDE_DESKTOP_VERSION=1\.22209\.3/);
@@ -70,7 +70,7 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
 });
 
 test("the workspace image enforces bounded native text clipboard without content logging", async () => {
-  const dockerfile = await source("infra/issue-010/Dockerfile.workspace");
+  const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
   const client = await source("infra/issue-010/onecomputer-kasm-clipboard.js");
   assert.match(dockerfile, /onecomputer-kasm-clipboard\.js/);
@@ -90,7 +90,7 @@ test("the workspace image enforces bounded native text clipboard without content
 });
 
 test("the workspace image includes a pinned Firefox ESR locked to governed egress", async () => {
-  const dockerfile = await source("infra/issue-010/Dockerfile.workspace");
+  const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
   const policies = JSON.parse(await source("infra/issue-010/firefox-policies.json"));
   assert.match(dockerfile, /FIREFOX_VERSION=140\.12\.0esr/);
@@ -112,7 +112,7 @@ test("the workspace image includes a pinned Firefox ESR locked to governed egres
 });
 
 test("optional browser and agent artifacts are pinned and launch-gated", async () => {
-  const dockerfile = await source("infra/issue-010/Dockerfile.workspace");
+  const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
   const gatewayProxy = await source("infra/issue-010/onecomputer-gateway-proxy.py");
   const mcpBridge = await source("infra/issue-010/onecomputer-mcp-stdio.py");
@@ -177,7 +177,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
 });
 
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
-  const dockerfile = await source("infra/issue-010/Dockerfile.workspace");
+  const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
   assert.match(dockerfile, /aiohttp==3\.14\.1/);
   assert.match(dockerfile, /import aiohttp/);

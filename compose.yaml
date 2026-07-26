@@ -1,0 +1,418 @@
+name: onecomputer
+
+x-control-runtime: &control-runtime
+  image: onecomputer/control-runtime:${ONECOMPUTER_IMAGE_TAG:-dev}
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.node
+  init: true
+
+x-hardened: &hardened
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: onecomputer
+      POSTGRES_USER: onecomputer
+      POSTGRES_PASSWORD: ${ONECOMPUTER_POSTGRES_PASSWORD:?set ONECOMPUTER_POSTGRES_PASSWORD}
+    networks:
+      - control-private
+    volumes:
+      - control-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onecomputer -d onecomputer"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  litellm-postgres:
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${ONECOMPUTER_LITELLM_POSTGRES_PASSWORD:?set ONECOMPUTER_LITELLM_POSTGRES_PASSWORD}
+    networks:
+      - gateway-private
+    volumes:
+      - gateway-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  ms365-mcp:
+    image: onecomputer/ms365-mcp:0.131.2
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ms365-mcp
+    command:
+      - --http
+      - 0.0.0.0:3000
+      - --org-mode
+      - --enabled-tools
+      - ^(list-mail-folders|list-mail-messages|get-mail-message|create-draft-email|update-mail-message|delete-mail-message|move-mail-message|send-mail|send-draft-message|reply-mail-message|reply-all-mail-message|forward-mail-message|list-calendars|list-calendar-events|get-calendar-view|get-calendar-event|create-calendar-event|update-calendar-event|delete-calendar-event|list-drives|get-drive-root-item|list-folder-files|search-onedrive-files|get-drive-item|create-onedrive-folder|upload-file-content|move-rename-onedrive-item|copy-drive-item|delete-onedrive-file|list-chats|list-chat-messages|list-joined-teams|list-team-channels|list-channel-messages|send-chat-message|reply-to-chat-message|send-channel-message|reply-to-channel-message)$
+      - --allowed-scopes
+      - User.Read offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite Chat.Read ChatMessage.Read ChatMessage.Send Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send
+      - --no-dynamic-registration
+      - --allow-unauthenticated-discovery
+    environment:
+      MS365_MCP_CLIENT_ID: ${ONECOMPUTER_MS365_CLIENT_ID:-${ONECOMPUTER_ENTRA_CLIENT_ID:?set ONECOMPUTER_ENTRA_CLIENT_ID}}
+      MS365_MCP_TENANT_ID: ${ONECOMPUTER_MS365_TENANT_ID:-${ONECOMPUTER_ENTRA_TENANT_ID:?set ONECOMPUTER_ENTRA_TENANT_ID}}
+      MS365_MCP_CLIENT_SECRET: ${ONECOMPUTER_MS365_CLIENT_SECRET:-${ONECOMPUTER_ENTRA_CLIENT_SECRET:?set ONECOMPUTER_ENTRA_CLIENT_SECRET}}
+      MS365_MCP_PUBLIC_URL: ${ONECOMPUTER_M365_AUTHORIZATION_ORIGIN:-http://localhost:4311}
+      MS365_MCP_ALLOWED_REDIRECT_URIS: ${ONECOMPUTER_LITELLM_PUBLIC_URL:-http://localhost:4000}/callback
+      MS365_MCP_MAX_TOP: "25"
+      MS365_MCP_MAX_PAGES: "4"
+      MS365_MCP_MAX_ITEMS: "100"
+      MS365_MCP_REDACT_PII: "true"
+      MS365_MCP_REQUIRE_CONFIRM: "true"
+      MS365_MCP_TRUST_PROXY_HOPS: "0"
+      LOG_LEVEL: info
+    networks:
+      - gateway-private
+      - microsoft-egress
+    ports:
+      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:-127.0.0.1}:${ONECOMPUTER_M365_PORT:-4311}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+      - /home/node/.ms-365-mcp-server:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/').then(async r=>{if(!r.ok||!(await r.text()).includes('Microsoft 365 MCP Server'))process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  litellm:
+    container_name: onecomputer-litellm
+    image: ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e
+    command:
+      - --config
+      - /app/config.yaml
+      - --port
+      - "4000"
+      - --num_workers
+      - "1"
+      - --log_config
+      - /app/logging.yaml
+    environment:
+      LITELLM_MASTER_KEY: ${ONECOMPUTER_LITELLM_MASTER_KEY:?set ONECOMPUTER_LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${ONECOMPUTER_LITELLM_SALT_KEY:?set ONECOMPUTER_LITELLM_SALT_KEY}
+      DATABASE_URL: postgres://litellm:${ONECOMPUTER_LITELLM_POSTGRES_PASSWORD}@litellm-postgres:5432/litellm
+      OPENAI_API_KEY: ${ONECOMPUTER_OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ONECOMPUTER_CLAUDE_API_KEY:-}
+      ZAI_API_KEY: ${ONECOMPUTER_GLM_API_KEY:-}
+      DISABLE_ADMIN_UI: "false"
+      UI_USERNAME: ${ONECOMPUTER_LITELLM_UI_USERNAME:-admin}
+      UI_PASSWORD: ${ONECOMPUTER_LITELLM_UI_PASSWORD:?set ONECOMPUTER_LITELLM_UI_PASSWORD}
+      PROXY_BASE_URL: ${ONECOMPUTER_LITELLM_PUBLIC_URL:-http://localhost:4000}
+      ONECOMPUTER_MCP_POLICY_URL: http://control-api:4100/internal/v1/mcp/authorize
+      ONECOMPUTER_MCP_POLICY_TOKEN: ${ONECOMPUTER_CONTROLLER_TOKEN:?set ONECOMPUTER_CONTROLLER_TOKEN}
+    networks:
+      - gateway-private
+      - model-egress
+    ports:
+      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:-127.0.0.1}:${ONECOMPUTER_LITELLM_PORT:-4000}:4000"
+    volumes:
+      - ./config/litellm/config.yaml:/app/config.yaml:ro
+      - ./config/litellm/logging.yaml:/app/logging.yaml:ro
+      - ./integrations/litellm/onecomputer_policy_callback.py:/app/onecomputer_policy_callback.py:ro
+    depends_on:
+      litellm-postgres:
+        condition: service_healthy
+      ms365-mcp:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 20s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  openvtc-consent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openvtc-consent
+    image: onecomputer/openvtc-consent:${ONECOMPUTER_IMAGE_TAG:-dev}
+    environment:
+      OPENVTC_CONSENT_LISTEN: 0.0.0.0:8788
+      OPENVTC_CONSENT_TOKEN: ${ONECOMPUTER_OPENVTC_CONSENT_TOKEN:?set ONECOMPUTER_OPENVTC_CONSENT_TOKEN}
+      OPENVTC_EXECUTOR_SEED_B64: ${ONECOMPUTER_OPENVTC_EXECUTOR_SEED_B64:?set ONECOMPUTER_OPENVTC_EXECUTOR_SEED_B64}
+      RUST_LOG: onecomputer_openvtc_consent=info
+    networks:
+      - consent-private
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8788/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  workspace-controller:
+    <<: [*control-runtime, *hardened]
+    command: ["npm", "run", "start", "--workspace", "@onecomputer/workspace-controller"]
+    environment:
+      CONTROLLER_HOST: 0.0.0.0
+      CONTROLLER_PORT: "4101"
+      CONTROLLER_INTERNAL_TOKEN: ${ONECOMPUTER_CONTROLLER_TOKEN:?set ONECOMPUTER_CONTROLLER_TOKEN}
+      SANDBOX_DRIVER: ${SANDBOX_DRIVER:-kasm-local}
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+      KASM_LOCAL_NETWORK_PREFIX: ${KASM_LOCAL_NETWORK_PREFIX:-onecomputer-workspace}
+      KASM_LOCAL_CONTROL_NETWORK: onecomputer-control
+      KASM_LOCAL_GATEWAY_CONTAINER: onecomputer-litellm
+      KASM_LOCAL_CONTROL_CONTAINER: onecomputer-control-api
+      KASM_LOCAL_IMAGE: ${ONECOMPUTER_WORKSPACE_IMAGE:-onecomputer/workspace:dev}
+      KASM_LOCAL_RELAY_IMAGE: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+      KASM_LOCAL_EGRESS_PROXY_IMAGE: onecomputer/control-runtime:${ONECOMPUTER_IMAGE_TAG:-dev}
+      KASM_LOCAL_EGRESS_NETWORK: ${KASM_LOCAL_EGRESS_NETWORK:-onecomputer-egress}
+      KASM_PUBLIC_HOST: ${KASM_PUBLIC_HOST:-127.0.0.1}
+      KASM_BASE_URL: ${KASM_BASE_URL:-}
+      KASM_API_KEY: ${KASM_API_KEY:-}
+      KASM_API_SECRET: ${KASM_API_SECRET:-}
+      KASM_USER_ID: ${KASM_USER_ID:-}
+      KASM_IMAGE_ID: ${KASM_IMAGE_ID:-}
+      POLICY_VERIFICATION_KEYS_B64: ${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?set ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64}
+    networks:
+      - control-private
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4101/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  control-api:
+    <<: [*control-runtime, *hardened]
+    container_name: onecomputer-control-api
+    user: node
+    command: ["npm", "run", "start", "--workspace", "@onecomputer/control-api"]
+    environment:
+      CONTROL_HOST: 0.0.0.0
+      CONTROL_PORT: "4100"
+      WEB_PROXY_TOKEN: ${ONECOMPUTER_WEB_PROXY_TOKEN:?set ONECOMPUTER_WEB_PROXY_TOKEN}
+      CONTROLLER_URL: http://workspace-controller:4101
+      CONTROLLER_INTERNAL_TOKEN: ${ONECOMPUTER_CONTROLLER_TOKEN:?set ONECOMPUTER_CONTROLLER_TOKEN}
+      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
+      LITELLM_ADMIN_URL: http://litellm:4000
+      LITELLM_WORKSPACE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${ONECOMPUTER_LITELLM_MASTER_KEY:?set ONECOMPUTER_LITELLM_MASTER_KEY}
+      LITELLM_CREDENTIAL_SECRET: ${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_LITELLM_CREDENTIAL_SECRET}
+      PUBLIC_WEB_URL: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
+      M365_AUTHORIZATION_ORIGIN: ${ONECOMPUTER_M365_AUTHORIZATION_ORIGIN:-http://localhost:4311}
+      AGENT_BRIDGE_URL: http://onecomputer-control:4100
+      FIXTURE_APPROVAL_SECRET: ${ONECOMPUTER_FIXTURE_APPROVAL_SECRET:?set ONECOMPUTER_FIXTURE_APPROVAL_SECRET}
+      OPENVTC_CONSENT_URL: http://openvtc-consent:8788
+      OPENVTC_CONSENT_TOKEN: ${ONECOMPUTER_OPENVTC_CONSENT_TOKEN:?set ONECOMPUTER_OPENVTC_CONSENT_TOKEN}
+      WEB_PUSH_VAPID_SUBJECT: ${ONECOMPUTER_WEB_PUSH_VAPID_SUBJECT:-}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${ONECOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY:-}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${ONECOMPUTER_WEB_PUSH_VAPID_PRIVATE_KEY:-}
+      WEB_PUSH_SUBSCRIPTION_SECRET: ${ONECOMPUTER_WEB_PUSH_SUBSCRIPTION_SECRET:-}
+      ENTRA_TENANT_ID: ${ONECOMPUTER_ENTRA_TENANT_ID:-${ONECOMPUTER_MS365_TENANT_ID:?set ONECOMPUTER_ENTRA_TENANT_ID}}
+      ENTRA_CLIENT_ID: ${ONECOMPUTER_ENTRA_CLIENT_ID:-${ONECOMPUTER_MS365_CLIENT_ID:?set ONECOMPUTER_ENTRA_CLIENT_ID}}
+      ENTRA_CLIENT_SECRET: ${ONECOMPUTER_ENTRA_CLIENT_SECRET:-${ONECOMPUTER_MS365_CLIENT_SECRET:?set ONECOMPUTER_ENTRA_CLIENT_SECRET}}
+      SESSION_SECRET: ${ONECOMPUTER_SESSION_SECRET:-${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_SESSION_SECRET}}
+      WORKSPACE_INGRESS_PUBLIC_URL: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
+      WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:-${ONECOMPUTER_SESSION_SECRET:-${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}}}
+      WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS:-300}
+      WORKSPACE_INGRESS_SESSION_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS:-28800}
+      EGRESS_GRANT_SECRET: ${ONECOMPUTER_EGRESS_GRANT_SECRET:?set ONECOMPUTER_EGRESS_GRANT_SECRET}
+      AGENT_CHAT_SECRET: ${ONECOMPUTER_HERMES_API_SECRET:?set ONECOMPUTER_HERMES_API_SECRET}
+      CHANNEL_BROKER_URL: http://channel-broker:4102
+      CHANNEL_BROKER_INTERNAL_TOKEN: ${ONECOMPUTER_CHANNEL_BROKER_TOKEN:?set ONECOMPUTER_CHANNEL_BROKER_TOKEN}
+      POLICY_SIGNING_KEY_ID: ${ONECOMPUTER_POLICY_SIGNING_KEY_ID:?set ONECOMPUTER_POLICY_SIGNING_KEY_ID}
+      POLICY_SIGNING_PRIVATE_KEY_B64: ${ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64:?set ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64}
+      POLICY_VERIFICATION_KEYS_B64: ${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?set ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64}
+      POLICY_BUNDLE_TTL_SECONDS: ${ONECOMPUTER_POLICY_BUNDLE_TTL_SECONDS:-86400}
+      BOOTSTRAP_TENANT_ID: ${ONECOMPUTER_BOOTSTRAP_TENANT_ID:-example}
+      BOOTSTRAP_USER_ID: ${ONECOMPUTER_BOOTSTRAP_USER_ID:-bootstrap-admin}
+      TENANT_DISPLAY_NAME: ${ONECOMPUTER_TENANT_DISPLAY_NAME:-Example Organization}
+      ADMINISTRATOR_EMAILS: ${ONECOMPUTER_ADMINISTRATOR_EMAILS:-admin@example.com}
+    networks:
+      - web-edge
+      - control-private
+      - consent-private
+      - gateway-private
+      - identity-egress
+    depends_on:
+      postgres:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+      openvtc-consent:
+        condition: service_healthy
+      workspace-controller:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4100/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  channel-broker:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["npm", "run", "start", "--workspace", "@onecomputer/channel-broker"]
+    environment:
+      CHANNEL_BROKER_HOST: 0.0.0.0
+      CHANNEL_BROKER_PORT: "4102"
+      CHANNEL_BROKER_INTERNAL_TOKEN: ${ONECOMPUTER_CHANNEL_BROKER_TOKEN:?set ONECOMPUTER_CHANNEL_BROKER_TOKEN}
+      CHANNEL_CREDENTIAL_SECRET: ${ONECOMPUTER_CHANNEL_CREDENTIAL_SECRET:?set ONECOMPUTER_CHANNEL_CREDENTIAL_SECRET}
+      CONTROL_URL: http://control-api:4100
+      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
+      POLL_INTERVAL_MS: ${ONECOMPUTER_CHANNEL_POLL_INTERVAL_MS:-1000}
+    networks:
+      - control-private
+      - channel-egress
+    depends_on:
+      postgres:
+        condition: service_healthy
+      control-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4102/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["node", "apps/web/server.mjs"]
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "4173"
+      ONECOMPUTER_CONTROL_URL: http://control-api:4100
+      ONECOMPUTER_WEB_PROXY_TOKEN: ${ONECOMPUTER_WEB_PROXY_TOKEN:?set ONECOMPUTER_WEB_PROXY_TOKEN}
+    networks:
+      - web-edge
+    depends_on:
+      control-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4173/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  workspace-ingress:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["npm", "run", "start", "--workspace", "@onecomputer/workspace-ingress-server"]
+    environment:
+      WORKSPACE_INGRESS_HOST: 0.0.0.0
+      WORKSPACE_INGRESS_PORT: "4174"
+      WORKSPACE_INGRESS_PUBLIC_URL: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
+      WORKSPACE_INGRESS_WEB_UPSTREAM: http://web:4173
+      WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:-${ONECOMPUTER_SESSION_SECRET:-${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}}}
+      WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS:-300}
+      WORKSPACE_INGRESS_SESSION_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS:-28800}
+      WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "false"
+    networks:
+      - public-edge
+      - web-edge
+      - control-private
+    ports:
+      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:-127.0.0.1}:${ONECOMPUTER_WEB_PORT:-4174}:4174"
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4174/__onecomputer/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # This is a build target, not a long-running service. The controller creates
+  # workspace containers from the resulting image through the Docker API.
+  workspace-image:
+    profiles:
+      - build
+    image: ${ONECOMPUTER_WORKSPACE_IMAGE:-onecomputer/workspace:dev}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.workspace
+    entrypoint: ["/bin/true"]
+
+networks:
+  public-edge: {}
+  web-edge:
+    internal: true
+  control-private:
+    name: onecomputer-control
+    internal: true
+  consent-private:
+    internal: true
+  gateway-private:
+    internal: true
+  identity-egress: {}
+  model-egress: {}
+  microsoft-egress: {}
+  channel-egress: {}
+
+volumes:
+  control-data:
+  gateway-data:
