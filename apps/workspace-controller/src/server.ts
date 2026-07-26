@@ -4,6 +4,7 @@ import {
   OneComputerError,
   chatAgentCatalogIdSchema,
   controllerCreateSchema,
+  controllerEgressPolicyUpdateSchema,
   policyVerificationKeySetSchema,
   type PolicyIntegrityView,
   type PolicyVerificationKeySet,
@@ -144,6 +145,24 @@ const verifyGrantBindings = (
   }
 };
 
+const verifyEgressGrantBinding = (
+  input: z.infer<typeof controllerEgressPolicyUpdateSchema>,
+  verified: ReturnType<typeof verifySignedPolicyBundle>,
+) => {
+  if (
+    !verified.payload.policy.egress
+    || input.egressProxy.expectedGrant.tenantId !== verified.payload.tenantId
+    || input.egressProxy.expectedGrant.subjectId !== verified.payload.subjectId
+    || input.egressProxy.expectedGrant.workspaceId !== verified.payload.workspaceId
+    || input.egressProxy.expectedGrant.agentId !== verified.payload.policy.agentId
+    || input.egressProxy.expectedGrant.securityGroupVersionId !== verified.payload.policy.egress.id
+    || input.egressProxy.expectedGrant.egressMode !== verified.payload.policy.egressMode
+    || input.egressProxy.expectedGrant.policyHash !== verified.payload.policy.policyHash
+  ) {
+    throw new PolicyVerificationError("POLICY_BINDING_MISMATCH", "The egress proxy grant does not match the signed policy");
+  }
+};
+
 export function createControllerServer(adapter: SandboxAdapter, internalToken: string, verificationKeys: PolicyVerificationKeySet) {
   const keys = policyVerificationKeySetSchema.parse(verificationKeys);
   const app = Fastify({
@@ -194,6 +213,31 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
       projectedPolicyBundle: sandbox.projectedPolicyBundle ?? input.policyBundle,
       policyProjectionPresent: true,
     }, keys, input.policy));
+  });
+  app.put<{ Params: { providerId: string } }>("/internal/v1/sandboxes/:providerId/egress-policy", async (request, reply) => {
+    const input = controllerEgressPolicyUpdateSchema.parse(request.body);
+    let verified: ReturnType<typeof verifySignedPolicyBundle>;
+    try {
+      verified = verifySignedPolicyBundle(input.policyBundle, keys, {
+        workspaceId: input.workspaceId,
+        policy: input.policy,
+        minimumPolicyVersion: input.policy.policyVersion,
+      });
+      verifyEgressGrantBinding(input, verified);
+    } catch (error) {
+      if (error instanceof PolicyVerificationError) {
+        throw new OneComputerError(error.code, error.message, 403);
+      }
+      throw error;
+    }
+    await adapter.updateEgressPolicy(request.params.providerId, {
+      workspaceId: input.workspaceId,
+      policy: verified.payload.policy,
+      policyBundle: input.policyBundle,
+      policyVerificationKeys: keys,
+      egressProxy: input.egressProxy,
+    });
+    return reply.code(204).send();
   });
   app.get<{ Params: { providerId: string } }>("/internal/v1/sandboxes/:providerId", async (request) => (
     publicSandbox(await adapter.status(request.params.providerId), keys)

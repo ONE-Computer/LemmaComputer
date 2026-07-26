@@ -212,6 +212,7 @@ export const saveEgressSecurityGroupSchema = z.object({
   securityGroupId: z.string().regex(/^esg_[a-z0-9_]{3,96}$/).optional(),
   name: z.string().min(3).max(96),
   description: z.string().min(3).max(500),
+  defaultAction: z.enum(["deny", "allow-public-http-https"]).default("deny"),
   rules: z.array(egressSecurityGroupRuleSchema).max(64),
 }).strict();
 export type SaveEgressSecurityGroup = z.infer<typeof saveEgressSecurityGroupSchema>;
@@ -228,11 +229,12 @@ export const egressSecurityGroupVersionSchema = z.object({
   version: z.number().int().positive(),
   name: z.string().min(3).max(96),
   description: z.string().min(3).max(500),
-  defaultAction: z.literal("deny"),
+  defaultAction: z.enum(["deny", "allow-public-http-https"]),
   rules: z.array(egressSecurityGroupRuleSchema).max(64),
   documentHash: z.string().regex(/^[a-f0-9]{64}$/),
   createdBy: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
+  isDefault: z.boolean().optional(),
 }).strict();
 export type EgressSecurityGroupVersion = z.infer<typeof egressSecurityGroupVersionSchema>;
 
@@ -242,12 +244,12 @@ export const runtimeRestrictedEgressPolicySchema = egressSecurityGroupVersionSch
   version: true,
   name: true,
   description: true,
-  defaultAction: true,
   rules: true,
   documentHash: true,
 }).extend({
   schemaVersion: z.literal(2),
   mode: z.literal("restricted"),
+  defaultAction: z.literal("deny"),
 }).strict();
 
 export const runtimeFullWebEgressPolicySchema = z.object({
@@ -386,6 +388,8 @@ export const sandboxSettingsSchema = z.object({
   availableModels: z.array(z.object({ alias: sandboxModelAliasSchema, displayName: z.string().min(1), provider: z.string().min(1) })).min(1),
   agentIds: z.array(agentCatalogIdSchema).min(1),
   availableAgents: z.array(agentCatalogEntrySchema).min(1),
+  securityGroup: egressSecurityGroupVersionSchema.optional(),
+  availableSecurityGroups: z.array(egressSecurityGroupVersionSchema).optional(),
   egress: runtimeEgressPolicySchema.optional(),
   manifest: workspaceManifestSchema,
   updatedAt: z.iso.datetime().nullable(),
@@ -618,6 +622,15 @@ export const controllerCreateSchema = z.object({
     }).strict(),
   }).optional(),
 });
+
+export const controllerEgressPolicyUpdateSchema = controllerCreateSchema.pick({
+  workspaceId: true,
+  policy: true,
+  policyBundle: true,
+  egressProxy: true,
+}).extend({
+  egressProxy: controllerCreateSchema.shape.egressProxy.unwrap(),
+}).strict();
 
 export const chatSessionIdSchema = z.string().regex(
   /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
@@ -881,6 +894,10 @@ export const sandboxSchema = z.object({
   workspaceId: z.uuid().optional(),
   state: z.enum(["provisioning", "ready", "stopped", "failed"]),
   failureCode: z.string().nullable().default(null),
+  egressPolicyProjection: z.strictObject({
+    securityGroupVersionId: z.string().regex(/^egv_[a-z0-9_]{3,96}$/),
+    documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }).optional(),
   policyIntegrity: policyIntegrityViewSchema.optional(),
   projectedPolicyBundle: signedPolicyBundleSchema.optional(),
   policyProjectionPresent: z.boolean().optional(),

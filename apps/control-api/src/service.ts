@@ -43,6 +43,12 @@ export interface ControllerClient {
     chatRuntimes?: Array<{ catalogId: ChatAgentCatalogId; key: string }>;
     egressProxy?: EgressProxyGrant;
   }): Promise<Sandbox>;
+  updateEgressPolicy(providerId: string, input: {
+    workspaceId: string;
+    policy: RuntimePolicy;
+    policyBundle: SignedPolicyBundle;
+    egressProxy: EgressProxyGrant;
+  }): Promise<void>;
   status(providerId: string): Promise<Sandbox>;
   open(providerId: string): Promise<ControllerLaunch>;
   destroy(providerId: string): Promise<void>;
@@ -141,6 +147,9 @@ export class HttpControllerClient implements ControllerClient {
   }
   async create(input: Parameters<ControllerClient["create"]>[0]) {
     return await this.call("/internal/v1/sandboxes", { method: "POST", body: JSON.stringify(input) }) as Sandbox;
+  }
+  async updateEgressPolicy(providerId: string, input: Parameters<ControllerClient["updateEgressPolicy"]>[1]) {
+    await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}/egress-policy`, { method: "PUT", body: JSON.stringify(input) });
   }
   async status(providerId: string) { return await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`) as Sandbox; }
   async open(providerId: string) { return await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}/open`, { method: "POST" }) as Launch; }
@@ -308,14 +317,34 @@ export class WorkspaceService {
     let record = await this.store.getCurrent(identity, grantId);
     if (!record) return null;
     let projectedIntegrity: PolicyIntegrityView | undefined;
+    let projectedEgressPolicy: Sandbox["egressPolicyProjection"];
     if (record.providerId && ["provisioning", "ready", "open", "restarting", "stopping"].includes(record.state)) {
       const sandbox = await this.controller.status(record.providerId);
       projectedIntegrity = sandbox.policyIntegrity;
+      projectedEgressPolicy = sandbox.egressPolicyProjection;
       record = await this.store.update(record.id, {
         state: sandbox.state === "ready" && record.state === "open" ? "open" : sandbox.state === "ready" ? "ready" : sandbox.state,
         ...(sandbox.state === "stopped" ? { providerId: null } : {}),
         failureCode: sandbox.failureCode,
       });
+    }
+    const projectedPolicy = projectedIntegrity?.projected;
+    if (
+      record.providerId
+      && ["ready", "open"].includes(record.state)
+      && policy.egress
+      && projectedPolicy
+      && (
+        projectedPolicy.version !== policy.policyVersion
+        || projectedPolicy.digest !== policy.policyHash
+        || projectedEgressPolicy?.securityGroupVersionId !== policy.egress.id
+        || projectedEgressPolicy?.documentHash !== policy.egress.documentHash
+      )
+    ) {
+      const refreshed = await this.refreshEgressPolicy(identity, policy, grantId).catch(() => false);
+      if (refreshed) {
+        projectedIntegrity = (await this.controller.status(record.providerId)).policyIntegrity;
+      }
     }
     const authorized = this.authorizePolicy(identity, record.id, policy);
     if (this.gateway && ["ready", "open"].includes(record.state)) {
@@ -337,6 +366,23 @@ export class WorkspaceService {
     if (!record || !this.gateway || !["ready", "open"].includes(record.state)) return false;
     const authorized = this.authorizePolicy(identity, record.id, policy);
     await this.ensureAgentGrants(identity, record.id, authorized?.payload.policy ?? policy);
+    return true;
+  }
+
+  async refreshEgressPolicy(identity: IdentityContext, policy: RuntimePolicy, grantId = "personal") {
+    const record = await this.store.getCurrent(identity, grantId);
+    if (!record?.providerId || !["ready", "open"].includes(record.state)) return false;
+    const authorized = this.authorizePolicy(identity, record.id, policy);
+    if (!authorized || !this.egressProxyAuthority || !policy.egress) return false;
+    const verifiedPolicy = authorized.payload.policy;
+    const egressProxy = this.egressProxyAuthority.issue(identity, record.id, verifiedPolicy);
+    if (!egressProxy) return false;
+    await this.controller.updateEgressPolicy(record.providerId, {
+      workspaceId: record.id,
+      policy: verifiedPolicy,
+      policyBundle: authorized.bundle,
+      egressProxy,
+    });
     return true;
   }
 

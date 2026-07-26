@@ -136,6 +136,12 @@ test("egress proxy grants are scoped, signed, expiring, and cannot cross workspa
   assert.equal(verifyEgressProxyGrant(token, secret, { ...expected, tenantId: "other" }, now), null);
   assert.equal(verifyEgressProxyGrant(token, secret, { ...expected, agentId: "agent-b" }, now), null);
   assert.equal(verifyEgressProxyGrant(token, secret, { ...expected, egressMode: "full-web" }, now), null);
+  assert.equal(verifyEgressProxyGrant(token, secret, {
+    tenantId: expected.tenantId,
+    subjectId: expected.subjectId,
+    workspaceId: expected.workspaceId,
+    agentId: expected.agentId,
+  }, now)?.securityGroupVersionId, group.id);
   assert.equal(verifyEgressProxyGrant(token, secret, expected, new Date("2026-07-23T04:01:01.000Z")), null);
 });
 

@@ -394,21 +394,20 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
 
 function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecurityGroupId, createNew = false }) {
   const latest = versions.filter((item, index, all) => all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index);
-  const [selectedId, setSelectedId] = useState(createNew ? "__new__" : initialSecurityGroupId ?? latest[0]?.securityGroupId ?? "__new__");
-  const selected = selectedId === "__new__" ? undefined : latest.find((item) => item.securityGroupId === selectedId) ?? latest[0];
+  const selected = createNew ? undefined : latest.find((item) => item.securityGroupId === initialSecurityGroupId) ?? latest[0];
   const [draft, setDraft] = useState(null);
   const [rule, setRule] = useState({ action: "allow", host: "", protocol: "https", port: 443, includeSubdomains: false, purpose: "" });
 
   useEffect(() => {
     if (!selected) {
-      setDraft({ name: "Approved web access", description: "Reviewed outbound web destinations for this workspace.", rules: [] });
+      setDraft({ name: "", description: "", defaultAction: "deny", rules: [] });
       return;
     }
-    setSelectedId(selected.securityGroupId);
     setDraft({
       securityGroupId: selected.securityGroupId,
       name: selected.name,
       description: selected.description,
+      defaultAction: selected.defaultAction,
       rules: selected.rules,
     });
   }, [selected?.id]);
@@ -430,31 +429,23 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
     <ModalDialog
       className="firewall-editor-modal"
       title={draft?.securityGroupId ? `Manage ${draft.name}` : "Create security group"}
-      description="Managed workspaces deny unmatched destinations. Open workspaces allow public HTTP and HTTPS, then apply matching deny rules. Saving creates an immutable group version."
+      description="A security group is a reusable collection of Allow and Deny rules. Saved changes apply live to every workspace using the group."
       eyebrow="Egress firewall"
       labelledBy="firewall-editor-title"
       onClose={saving ? () => undefined : onClose}
     >
-      {latest.length > 0 && <label className="firewall-editor-group">
-        <span>Security group</span>
-        <SelectMenu
-          value={selectedId}
-          disabled={saving}
-          onValueChange={setSelectedId}
-          ariaLabel="Security group"
-          options={[
-            { value: "__new__", label: "Create a new security group" },
-            ...latest.map((item) => ({ value: item.securityGroupId, label: `${item.name} · v${item.version}` })),
-          ]}
-        />
-      </label>}
       {draft && <div className="firewall-editor">
         <div className="firewall-editor-fields">
-          <label><span>Name</span><input name="security-group-name" value={draft.name} disabled={saving} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-          <label><span>Description</span><input name="security-group-description" value={draft.description} disabled={saving} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+          <label><span>Name</span><input name="security-group-name" placeholder="Approved agent updates" value={draft.name} disabled={saving} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+          <label><span>Description</span><input name="security-group-description" placeholder="What this group controls" value={draft.description} disabled={saving} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+          <label className="firewall-editor-default-action"><span>Default behavior</span><SelectMenu value={draft.defaultAction} disabled={saving} onValueChange={(value) => setDraft({ ...draft, defaultAction: value })} ariaLabel="Default security group behavior" options={[{ value: "deny", label: "Deny unmatched destinations" }, { value: "allow-public-http-https", label: "Allow public HTTP and HTTPS" }]} /></label>
+        </div>
+        <div className="firewall-editor-rule-heading">
+          <div><h3>Rules</h3><p>Rules are evaluated for every workspace using this group. A matching Deny rule takes precedence.</p></div>
+          <span>{draft.rules.length}</span>
         </div>
         <div className="firewall-editor-rule-list" aria-label="Firewall rules in this group">
-          {draft.rules.length === 0 ? <p>No rules yet. Add a destination below.</p> : draft.rules.map((item, index) => (
+          {draft.rules.length === 0 ? <p>No rules yet. Add an Allow or Deny rule below.</p> : draft.rules.map((item, index) => (
             <article key={`${item.id}-${index}`}>
               <div><strong>{item.host}</strong><small>{item.purpose}</small></div>
               <code><span className={`firewall-rule-effect ${item.action}`}>{item.action}</span> · {item.protocol.toUpperCase()} · {item.port} · {item.includeSubdomains ? "Subdomains" : "Exact domain"}</code>
@@ -462,7 +453,8 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
             </article>
           ))}
         </div>
-        <div className="firewall-editor-rule-builder">
+        <div className="firewall-editor-rule-builder" role="group" aria-labelledby="firewall-add-rule-heading">
+          <div className="firewall-editor-rule-builder-title"><strong id="firewall-add-rule-heading">Add rule</strong><span>Choose whether this destination should be allowed or denied.</span></div>
           <label><span>Action</span><SelectMenu value={rule.action} disabled={saving} onValueChange={(value) => setRule({ ...rule, action: value })} ariaLabel="Rule action" options={[{ value: "allow", label: "Allow" }, { value: "deny", label: "Deny" }]} /></label>
           <label><span>Destination</span><input name="firewall-rule-destination" placeholder="updates.example.com" value={rule.host} disabled={saving} onChange={(event) => setRule({ ...rule, host: event.target.value })} /></label>
           <label><span>Protocol</span><SelectMenu value={rule.protocol} disabled={saving} onValueChange={(value) => setRule({ ...rule, protocol: value, port: value === "https" ? 443 : 80 })} ariaLabel="Protocol" options={[{ value: "https", label: "HTTPS" }, { value: "http", label: "HTTP" }]} /></label>
@@ -475,67 +467,10 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
           <span><ShieldCheckmark24Regular aria-hidden="true" />HTTPS paths are not inspected. Redirects are checked as new connections.</span>
           <div>
             <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button>
-            <button className="primary-button compact-button" type="button" disabled={saving || !draft.name || !draft.description} onClick={save}>{saving ? "Saving version" : draft.securityGroupId ? "Save new version" : "Create security group"}</button>
+            <button className="primary-button compact-button" type="button" disabled={saving || !draft.name || !draft.description} onClick={save}>{saving ? "Saving changes" : draft.securityGroupId ? "Save changes" : "Create security group"}</button>
           </div>
         </div>
       </div>}
-    </ModalDialog>
-  );
-}
-
-function FirewallAddRuleDialog({ versions, saving, busy, onSave, onAttach, onClose, targetUser = null, defaultAction = "allow" }) {
-  const latest = versions.filter((item, index, all) => all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index);
-  const [selectedId, setSelectedId] = useState("__new__");
-  const [newGroup, setNewGroup] = useState({ name: "", description: "" });
-  const [rule, setRule] = useState({ action: defaultAction, host: "", protocol: "https", port: 443, includeSubdomains: false, purpose: "" });
-  const selected = latest.find((item) => item.securityGroupId === selectedId);
-  const creatingGroup = selectedId === "__new__";
-
-  const save = async () => {
-    if (!rule.host.trim() || !rule.purpose.trim() || (creatingGroup && (!newGroup.name.trim() || !newGroup.description.trim()))) return;
-    const id = `${rule.action}-${rule.protocol}-${rule.host.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${rule.port}`.slice(0, 64);
-    const nextRule = { ...rule, id, host: rule.host.trim(), purpose: rule.purpose.trim(), port: Number(rule.port) };
-    const draft = creatingGroup
-      ? { name: newGroup.name.trim(), description: newGroup.description.trim(), rules: [nextRule] }
-      : { securityGroupId: selected.securityGroupId, name: selected.name, description: selected.description, rules: [...selected.rules, nextRule] };
-    const saved = await onSave(draft);
-    if (!saved) return;
-    if (targetUser && !await onAttach(targetUser.userId, saved.id)) {
-      setSelectedId(saved.securityGroupId);
-      return;
-    }
-    onClose();
-  };
-
-  return (
-    <ModalDialog
-      className="firewall-add-rule-modal"
-      title="Add firewall rule"
-      description={targetUser
-        ? `Create or update a security group, then attach it across ${targetUser.displayName}’s workspaces. Managed workspaces deny by default; open workspaces use deny rules as exceptions.`
-        : "Create or update a security group with an explicit allow or deny rule. Attach the saved version to an account when it is ready."}
-      eyebrow="Egress firewall"
-      labelledBy="firewall-add-rule-title"
-      onClose={saving ? () => undefined : onClose}
-    >
-      <div className="firewall-add-rule-fields">
-        <label className="firewall-add-rule-group"><span>Security group</span><SelectMenu value={selectedId} disabled={saving} onValueChange={setSelectedId} ariaLabel="Security group" options={[{ value: "__new__", label: "Create a new security group" }, ...latest.map((item) => ({ value: item.securityGroupId, label: `${item.name} · v${item.version}` }))]} /></label>
-        {creatingGroup && <div className="firewall-add-rule-new-group">
-          <label><span>Name</span><input name="new-security-group-name" value={newGroup.name} disabled={saving} onChange={(event) => setNewGroup({ ...newGroup, name: event.target.value })} /></label>
-          <label><span>Description</span><input name="new-security-group-description" value={newGroup.description} disabled={saving} onChange={(event) => setNewGroup({ ...newGroup, description: event.target.value })} /></label>
-        </div>}
-        <label className="firewall-add-rule-destination"><span>Destination</span><input name="new-firewall-rule-destination" placeholder="updates.example.com" value={rule.host} disabled={saving} onChange={(event) => setRule({ ...rule, host: event.target.value })} /></label>
-        <label><span>Action</span><SelectMenu value={rule.action} disabled={saving} onValueChange={(value) => setRule({ ...rule, action: value })} ariaLabel="Rule action" options={[{ value: "allow", label: "Allow" }, { value: "deny", label: "Deny" }]} /></label>
-        <label><span>Protocol</span><SelectMenu value={rule.protocol} disabled={saving} onValueChange={(value) => setRule({ ...rule, protocol: value, port: value === "https" ? 443 : 80 })} ariaLabel="Protocol" options={[{ value: "https", label: "HTTPS" }, { value: "http", label: "HTTP" }]} /></label>
-        <label><span>Port</span><input name="new-firewall-rule-port" type="number" min="1" max="65535" value={rule.port} disabled={saving} onChange={(event) => setRule({ ...rule, port: event.target.value })} /></label>
-        <label className="firewall-add-rule-subdomains"><input name="new-firewall-rule-subdomains" type="checkbox" checked={rule.includeSubdomains} disabled={saving} onChange={(event) => setRule({ ...rule, includeSubdomains: event.target.checked })} /><span>Include subdomains</span></label>
-        <label className="firewall-add-rule-purpose"><span>Purpose</span><input name="new-firewall-rule-purpose" placeholder={`Why this access is ${rule.action === "deny" ? "denied" : "needed"}`} value={rule.purpose} disabled={saving} onChange={(event) => setRule({ ...rule, purpose: event.target.value })} /></label>
-      </div>
-      <div className="modal-notice firewall-add-rule-note"><ShieldCheckmark24Regular aria-hidden="true" /><span>HTTPS paths are not inspected. Redirects are checked as new connections.{targetUser ? " Every workspace owned by this account must be stopped before attachment." : ""}</span></div>
-      <div className="modal-actions">
-        <button className="secondary-button" type="button" disabled={saving || busy} onClick={onClose}>Cancel</button>
-        <button className="primary-button" type="button" disabled={saving || busy || !rule.host.trim() || !rule.purpose.trim() || (creatingGroup && (!newGroup.name.trim() || !newGroup.description.trim()))} onClick={save}>{saving ? "Saving rule" : busy ? "Attaching group" : targetUser ? "Save & attach rule" : creatingGroup ? "Create group & rule" : "Add rule"}</button>
-      </div>
     </ModalDialog>
   );
 }
@@ -680,147 +615,19 @@ function SettingsScreen({ view, isAdmin, gatewayUrl, onOpenAdmin, onOpenCredenti
   );
 }
 
-function FirewallAttachmentDialog({ user, versions, busy, onAttach, onClose }) {
-  const currentVersionId = user.effectivePolicy?.egressSecurityGroup?.id ?? "";
-  const [securityGroupVersionId, setSecurityGroupVersionId] = useState(currentVersionId || versions[0]?.id || "");
-  const attach = async () => {
-    if (!securityGroupVersionId) return;
-    const attached = await onAttach(user.userId, securityGroupVersionId);
-    if (attached) onClose();
-  };
-
-  return (
-    <ModalDialog
-      title={`Attach firewall to ${user.displayName}`}
-      description="Every workspace owned by this account must be stopped before you can change its firewall. The selected immutable version supplies managed-workspace allows and open-workspace denies."
-      eyebrow="Workspace attachment"
-      labelledBy="firewall-attachment-title"
-      onClose={busy ? () => undefined : onClose}
-    >
-      <label className="modal-field">
-        <span>Security group version</span>
-        <SelectMenu
-          value={securityGroupVersionId}
-          disabled={busy}
-          onValueChange={setSecurityGroupVersionId}
-          ariaLabel="Security group version"
-          options={versions.map((version) => ({ value: version.id, label: `${version.name} · v${version.version}` }))}
-        />
-      </label>
-      <div className="modal-notice firewall-attachment-note"><ShieldCheckmark24Regular aria-hidden="true" /><span>The assignment is tenant-wide administrator work. {user.email} remains the owner of every affected workspace.</span></div>
-      <div className="modal-actions">
-        <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Cancel</button>
-        <button className="primary-button" type="button" disabled={busy || !securityGroupVersionId} onClick={attach}>{busy ? "Attaching firewall" : "Attach firewall"}</button>
-      </div>
-    </ModalDialog>
-  );
-}
-
-function FirewallScreen({ users, loading, busyUserId, versions, saving, onSave, onAttach }) {
-  const latestVersions = versions.filter((item, index, all) => all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index);
+function FirewallScreen({ loading, versions, saving, onSave }) {
+  const latestVersions = versions.filter((item, index, all) => (
+    all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index
+  ));
   const [search, setSearch] = useState("");
-  const [workspaceFilter, setWorkspaceFilter] = useState("all");
-  const [securityGroupFilter, setSecurityGroupFilter] = useState("all");
-  const [rulesOnly, setRulesOnly] = useState(false);
   const [editor, setEditor] = useState(null);
-  const [addRuleContext, setAddRuleContext] = useState(null);
-  const [attachmentTarget, setAttachmentTarget] = useState(null);
-  const policyRows = users.flatMap((user) => {
-    const attachedGroup = user.effectivePolicy?.egressSecurityGroup;
-    const workspaces = user.workspaces?.length ? user.workspaces : [{
-      id: `${user.userId}-personal`,
-      grantId: "personal",
-      state: "unknown",
-      executionMode: "managed",
-      egressMode: "restricted",
-      egress: attachedGroup ? { ...attachedGroup, schemaVersion: 2, mode: "restricted" } : null,
-    }];
-    return workspaces.flatMap((workspace) => {
-      const group = workspace.egress ?? null;
-      if (!group) return [{
-        id: `${workspace.id}-unassigned`,
-        kind: "workspace",
-        workspace,
-        user,
-        group: null,
-        state: user.effectivePolicy ? "No firewall attached" : "Policy required",
-      }];
-      const explicitRules = group.rules.map((rule, index) => ({
-        id: `${workspace.id}-${group.id}-${rule.id}-${index}`,
-        kind: "rule",
-        workspace,
-        user,
-        group,
-        rule,
-        ruleNumber: index + 1,
-        implicit: false,
-      }));
-      if (group.mode === "full-web") {
-        return [{
-          id: `${workspace.id}-${group.id}-default-allow`,
-          kind: "rule",
-          workspace,
-          user,
-          group,
-          rule: {
-            id: "default-public-web",
-            action: "allow",
-            host: "All public destinations",
-            protocol: "http-https",
-            port: "80 / 443",
-            includeSubdomains: true,
-            purpose: "Default public HTTP and HTTPS access for this open workspace.",
-          },
-          ruleNumber: "—",
-          implicit: true,
-          defaultRule: "open",
-        }, ...explicitRules];
-      }
-      return [...explicitRules, {
-        id: `${workspace.id}-${group.id}-default-deny`,
-        kind: "rule",
-        workspace,
-        user,
-        group,
-        rule: {
-          id: "default-deny",
-          action: "deny",
-          host: "All unmatched destinations",
-          protocol: "http-https",
-          port: "All",
-          includeSubdomains: true,
-          purpose: "Managed workspaces deny every destination not matched by an allow rule.",
-        },
-        ruleNumber: "—",
-        implicit: true,
-        defaultRule: "managed",
-      }];
-    });
-  });
-  const workspaceOptions = policyRows
-    .map((row) => row.workspace)
-    .filter((workspace, index, all) => all.findIndex((candidate) => candidate.id === workspace.id) === index);
-  const securityGroupOptions = policyRows
-    .map((row) => row.group)
-    .filter(Boolean)
-    .filter((group, index, all) => all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index);
   const normalizedSearch = search.trim().toLowerCase();
-  const visibleRows = policyRows.filter((row) => {
-    if (rulesOnly && row.kind !== "rule") return false;
-    if (workspaceFilter !== "all" && row.workspace.id !== workspaceFilter) return false;
-    if (securityGroupFilter !== "all" && row.group?.securityGroupId !== securityGroupFilter) return false;
-    if (!normalizedSearch) return true;
-    return [
-      workspaceName(row.workspace),
-      row.workspace.grantId,
-      row.user.displayName,
-      row.user.email,
-      row.group?.name,
-      row.rule?.host,
-      row.rule?.purpose,
-    ].filter(Boolean).join(" ").toLowerCase().includes(normalizedSearch);
-  });
-  const ruleCount = policyRows.filter((row) => row.kind === "rule").length;
+  const groups = latestVersions.filter((group) => (
+    !normalizedSearch
+    || `${group.name} ${group.description} ${group.rules.map((rule) => `${rule.host} ${rule.purpose}`).join(" ")}`
+      .toLowerCase()
+      .includes(normalizedSearch)
+  ));
 
   return (
     <div className="secondary-screen firewall-screen">
@@ -828,78 +635,58 @@ function FirewallScreen({ users, loading, busyUserId, versions, saving, onSave, 
         <div>
           <p>Network control</p>
           <h1>Egress firewall</h1>
-          <span>Managed workspaces deny unmatched destinations. Open workspaces allow public HTTP and HTTPS, with explicit deny rules applied as exceptions.</span>
+          <span>Create and manage reusable security groups with Allow and Deny rules.</span>
         </div>
         <div className="firewall-page-actions">
-          <button className="primary-button" type="button" onClick={() => setAddRuleContext({ targetUser: null, defaultAction: "allow" })}><Add24Regular aria-hidden="true" />Add rule</button>
+          <button className="primary-button" type="button" onClick={() => setEditor({ securityGroupId: null, createNew: true })}><Add24Regular aria-hidden="true" />Create security group</button>
         </div>
       </header>
 
-      <section className="firewall-tenant-notice" aria-label="Administrator view notice">
-        <Info24Regular aria-hidden="true" />
-        <span><strong>Administrator view</strong> You can see firewall policies for every workspace in the ME TECH tenant, including workspaces owned by other accounts.</span>
-      </section>
-
-      <section className="firewall-policy-table" aria-labelledby="firewall-policy-heading">
-        <div className="firewall-policy-heading">
+      <section className="firewall-security-groups" aria-labelledby="firewall-security-groups-heading">
+        <div className="firewall-security-groups-heading">
           <div>
-            <p>Effective policies</p>
-            <h2 id="firewall-policy-heading">Firewall rules</h2>
+            <p>Rule collections</p>
+            <h2 id="firewall-security-groups-heading">Security groups</h2>
+            <span>Default applies to new workspaces. Rule changes apply live.</span>
           </div>
-          <span>{ruleCount} {ruleCount === 1 ? "rule" : "rules"}</span>
+          <strong>{latestVersions.length} {latestVersions.length === 1 ? "group" : "groups"}</strong>
         </div>
-
-        <div className="firewall-toolbar">
-          <label className="firewall-search"><span className="sr-only">Search firewall rules</span><input id="firewall-rule-search" name="firewall-rule-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search destination, purpose, workspace, or owner" /></label>
-          <label className="firewall-filter-control"><span className="sr-only">Filter by workspace</span><SelectMenu value={workspaceFilter} onValueChange={setWorkspaceFilter} ariaLabel="Filter by workspace" options={[{ value: "all", label: "All workspaces" }, ...workspaceOptions.map((workspace) => ({ value: workspace.id, label: workspaceName(workspace) }))]} /></label>
-          <label className="firewall-filter-control"><span className="sr-only">Filter by security group</span><SelectMenu value={securityGroupFilter} onValueChange={setSecurityGroupFilter} ariaLabel="Filter by security group" options={[{ value: "all", label: "All security groups" }, ...securityGroupOptions.map((group) => ({ value: group.securityGroupId, label: group.securityGroupId === "esg_disposable_open" ? "Open workspace default" : group.name }))]} /></label>
-          <label className="firewall-rules-toggle"><input id="firewall-rules-only" name="firewall-rules-only" type="checkbox" checked={rulesOnly} onChange={(event) => setRulesOnly(event.target.checked)} /><span>Rules only</span></label>
+        <div className="firewall-group-toolbar">
+          <label className="firewall-search"><span className="sr-only">Search security groups</span><input id="firewall-security-group-search" name="firewall-security-group-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search security groups, destinations, or purposes" /></label>
         </div>
-
-        <div className="firewall-table-scroll">
-          <table>
-            <thead>
-              <tr><th scope="col">Rule</th><th scope="col">Workspace</th><th scope="col">Owner</th><th scope="col">Security group</th><th scope="col">Destination</th><th scope="col">Protocol</th><th scope="col">Port</th><th scope="col">Match</th><th scope="col">Purpose</th><th scope="col">State</th><th scope="col" aria-label="Actions" /></tr>
-            </thead>
-            <tbody>
-              {loading ? <tr><td colSpan="11" className="firewall-empty">Loading firewall policies…</td></tr> : visibleRows.length === 0 ? <tr><td colSpan="11" className="firewall-empty">No firewall rules match these filters.</td></tr> : visibleRows.map((row) => row.kind === "rule" ? (
-                <tr key={row.id} className={row.implicit ? "firewall-default-row" : undefined}>
-                  <td className="firewall-rule-number">{row.ruleNumber}</td>
-                  <td><strong>{workspaceName(row.workspace)}</strong></td>
-                  <td><span className="firewall-owner"><strong>{row.user.email}</strong><small>{row.user.roles.includes("administrator") ? "Administrator" : "Employee"}</small></span></td>
-                  <td>{latestVersions.some((version) => version.securityGroupId === row.group.securityGroupId)
-                    ? <button className="firewall-group-link" type="button" onClick={() => setEditor({ securityGroupId: row.group.securityGroupId, createNew: false })}>{row.group.name} · v{row.group.version}</button>
-                    : <span className="firewall-system-group">Open workspace default</span>}</td>
-                  <td>{row.implicit ? row.rule.host : <code>{row.rule.host}</code>}</td>
-                  <td>{row.rule.protocol === "http-https" ? "HTTP / HTTPS" : row.rule.protocol.toUpperCase()}</td>
-                  <td>{row.rule.port}</td>
-                  <td>{row.implicit ? "Default" : row.rule.includeSubdomains ? "Subdomains" : "Exact domain"}</td>
-                  <td className="firewall-purpose">{row.rule.purpose}</td>
-                  <td><span className={`firewall-state ${row.rule.action === "deny" ? "denied" : "allowed"}`}>{row.rule.action === "deny" ? "Deny" : "Allow"}</span></td>
-                  <td>{row.defaultRule === "open"
-                    ? <button className="firewall-row-action" type="button" onClick={() => setAddRuleContext({ targetUser: row.user, defaultAction: "deny" })}>Add deny rule</button>
-                    : <button className="firewall-row-action" type="button" onClick={() => setAttachmentTarget(row.user)}>Change attachment</button>}</td>
-                </tr>
-              ) : (
-                <tr key={row.id} className="firewall-workspace-row">
-                  <td>—</td>
-                  <td><strong>{workspaceName(row.workspace)}</strong></td>
-                  <td><span className="firewall-owner"><strong>{row.user.email}</strong><small>{row.user.roles.includes("administrator") ? "Administrator" : "Employee"}</small></span></td>
-                  <td colSpan="5">{row.state === "Policy required" ? "No workspace policy assigned" : "No security group attached"}</td>
-                  <td className="firewall-purpose">{row.state === "Policy required" ? "Assign a workspace policy before attaching a firewall." : "Attach an immutable group version to enable governed egress."}</td>
-                  <td><span className={`firewall-state ${row.state === "Policy required" ? "warning" : "neutral"}`}>{row.state}</span></td>
-                  <td>{row.state === "Policy required" ? <span className="firewall-row-muted">Policy required</span> : <button className="firewall-row-action" type="button" onClick={() => setAttachmentTarget(row.user)}>Attach firewall</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="firewall-security-group-list">
+          {loading ? <p className="firewall-security-group-empty">Loading security groups…</p> : groups.length === 0 ? (
+            <div className="firewall-security-group-empty">
+              <strong>{normalizedSearch ? "No security groups match" : "No security groups yet"}</strong>
+              <span>{normalizedSearch ? "Try a different search." : "Create a group and add Allow or Deny rules."}</span>
+            </div>
+          ) : groups.map((group) => {
+            const allowCount = group.rules.filter((rule) => rule.action === "allow").length;
+            const denyCount = group.rules.filter((rule) => rule.action === "deny").length;
+            return (
+              <article key={group.securityGroupId}>
+                <div className="firewall-security-group-copy">
+                  <button type="button" onClick={() => setEditor({ securityGroupId: group.securityGroupId, createNew: false })}>{group.name}</button>
+                  <small>{group.description}</small>
+                  {group.isDefault && <span className="firewall-default-badge">Default</span>}
+                </div>
+                <div className="firewall-security-group-rules" aria-label={`${allowCount} Allow and ${denyCount} Deny rules`}>
+                  <span className="allow"><strong>{allowCount}</strong> Allow</span>
+                  <span className="deny"><strong>{denyCount}</strong> Deny</span>
+                </div>
+                <div className="firewall-security-group-baseline">
+                  <strong>{group.defaultAction === "allow-public-http-https" ? "Allow public web" : "Deny unmatched"}</strong>
+                  <small>{group.isDefault ? "Built-in default" : "Deny rules take precedence"}</small>
+                </div>
+                <span className="firewall-security-group-version">Revision {group.version}</span>
+                <button className="secondary-button" type="button" onClick={() => setEditor({ securityGroupId: group.securityGroupId, createNew: false })}>Manage group</button>
+              </article>
+            );
+          })}
         </div>
-        <footer className="firewall-table-footer"><span><ShieldCheckmark24Regular aria-hidden="true" />Open workspaces allow public HTTP and HTTPS unless a deny rule matches. Private, reserved, raw-IP, and alternate-port destinations remain blocked.</span><span>Stop every workspace owned by an account before changing its attachment.</span></footer>
       </section>
 
       {editor && <FirewallEditorDialog versions={versions} saving={saving} onSave={onSave} initialSecurityGroupId={editor.securityGroupId} createNew={editor.createNew} onClose={() => setEditor(null)} />}
-      {addRuleContext && <FirewallAddRuleDialog versions={versions} saving={saving} busy={Boolean(addRuleContext.targetUser && busyUserId === addRuleContext.targetUser.userId)} onSave={onSave} onAttach={onAttach} targetUser={addRuleContext.targetUser} defaultAction={addRuleContext.defaultAction} onClose={() => setAddRuleContext(null)} />}
-      {attachmentTarget && <FirewallAttachmentDialog user={attachmentTarget} versions={versions} busy={busyUserId === attachmentTarget.userId} onAttach={onAttach} onClose={() => setAttachmentTarget(null)} />}
     </div>
   );
 }
@@ -985,11 +772,12 @@ const workspaceConfigurationStatus = (state) => ({
   failed: "Needs attention",
 }[state] ?? "Unknown");
 
-function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onNavigateFirewall, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential }) {
+function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onAssignSecurityGroup, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState("");
   const [agentIds, setAgentIds] = useState([]);
+  const [securityGroupVersionId, setSecurityGroupVersionId] = useState("");
 
   useEffect(() => {
     if (!settings) return;
@@ -997,7 +785,8 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
     setApplicationIds(settings.applicationIds);
     setModelAlias(settings.modelAlias);
     setAgentIds(settings.agentIds);
-  }, [settings?.profileId, settings?.applicationIds, settings?.modelAlias, settings?.agentIds]);
+    setSecurityGroupVersionId(settings.securityGroup?.id ?? settings.availableSecurityGroups?.find((group) => group.isDefault)?.id ?? "");
+  }, [settings?.profileId, settings?.applicationIds, settings?.modelAlias, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
 
   const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
   const creatingWorkspace = !selectedWorkspace;
@@ -1007,6 +796,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
     || applicationIds.join(",") !== settings.applicationIds.join(",")
     || modelAlias !== settings.modelAlias
     || agentIds.join(",") !== settings.agentIds.join(",")
+    || (creatingWorkspace && securityGroupVersionId !== (settings.securityGroup?.id ?? ""))
   );
   const toggleApplication = (applicationId) => setApplicationIds((current) => (
     current.includes(applicationId) ? current.filter((id) => id !== applicationId) : [...current, applicationId]
@@ -1030,7 +820,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       </header>
       {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong>{error}</span></div>}
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
-        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, agentIds }); }}>
+        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, agentIds, securityGroupVersionId }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>Choose a restricted organization workspace or an open workspace for non-sensitive work. This does not choose your AI agent.</p></span></div>
             <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{settings.availableProfiles.map((profile) => {
@@ -1088,15 +878,36 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
           </section>
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Security</h2><p>Network policy is enforced by the external proxy, not by mutable settings inside the workspace.</p></span></div>
-            <div className="sandbox-security-card"><div><strong>{disposableOpen ? "Public web through isolated proxy" : "Attached firewall"}</strong><span>{disposableOpen ? "Full public HTTP and HTTPS" : settings.egress ? `${settings.egress.name} · version ${settings.egress.version}` : "No firewall attached"}</span><small>{disposableOpen ? "Private, local, metadata, reserved, raw-IP, alternate-port, and direct-network destinations remain blocked." : settings.egress ? `${settings.egress.rules.length} approved ${settings.egress.rules.length === 1 ? "destination" : "destinations"}; every other public destination is denied.` : "An administrator must attach a firewall before public egress is available."}</small></div>{canManageFirewall && !disposableOpen && <button className="secondary-button" type="button" onClick={onNavigateFirewall}>Open firewall <ChevronRight16Regular aria-hidden="true" /></button>}</div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Security</h2><p>Choose the security group for this workspace. Group and rule changes apply live without restarting.</p></span></div>
+            <div className="sandbox-security-card">
+              <div>
+                <strong>Security group</strong>
+                <span>{settings.securityGroup?.name ?? "Default security group"}</span>
+                <small>{settings.securityGroup ? `Revision ${settings.securityGroup.version} · ` : ""}{settings.securityGroup?.defaultAction === "allow-public-http-https" ? "Public HTTP and HTTPS are allowed by default; matching Deny rules block exceptions." : "Unmatched destinations are denied; matching Allow rules grant exceptions."}</small>
+              </div>
+              {canManageFirewall && settings.availableSecurityGroups?.length ? <label className="workspace-security-group-select">
+                <span className="sr-only">Security group</span>
+                <SelectMenu
+                  value={securityGroupVersionId}
+                  disabled={saving}
+                  onValueChange={(value) => {
+                    setSecurityGroupVersionId(value);
+                    if (!creatingWorkspace) onAssignSecurityGroup(settings.grantId, value);
+                  }}
+                  ariaLabel="Security group"
+                  options={settings.availableSecurityGroups
+                    .filter((group, index, all) => all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index)
+                    .map((group) => ({ value: group.id, label: `${group.name}${group.isDefault ? " · Default" : ""}` }))}
+                />
+              </label> : null}
+            </div>
           </section>
 
           <div className="sandbox-management-footer">
             <div><strong>{creatingWorkspace ? "Ready to create" : "Workspace manifest"}</strong><small>Schema v2 · {selectedProfile?.displayName} · persistent home · gateway-only network</small></div>
             <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !applicationIds.length || !agentIds.length}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
           </div>
-          {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its profile, applications, agents, or AI model.</p>}
+          {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its profile, applications, agents, or AI model. Security-group changes apply live.</p>}
           <details className="sandbox-json"><summary>View workspace manifest JSON</summary><pre>{JSON.stringify(settings.manifest, null, 2)}</pre></details>
         </form>
       )}
@@ -2348,11 +2159,7 @@ export function App() {
     if (activeNav !== "Firewall" || !session?.roles.includes("administrator")) return;
     setAdminLoading(true);
     adminApi.egressSecurityGroups()
-      .then(async (egress) => {
-        const users = await adminApi.users();
-        setAdminUsers(users.users);
-        setEgressVersions(egress.securityGroups);
-      })
+      .then((egress) => setEgressVersions(egress.securityGroups))
       .catch(showApiError)
       .finally(() => setAdminLoading(false));
   }, [activeNav, session?.user.id]);
@@ -2783,7 +2590,11 @@ export function App() {
     setSandboxSaving(true);
     setSandboxError("");
     try {
-      const saved = await sandboxApi.save(configuration);
+      const { securityGroupVersionId, ...sandboxConfiguration } = configuration;
+      if (securityGroupVersionId && securityGroupVersionId !== sandboxSettings?.securityGroup?.id) {
+        await adminApi.assignWorkspaceEgressSecurityGroup(configuration.grantId, securityGroupVersionId);
+      }
+      const saved = await sandboxApi.save(sandboxConfiguration);
       const creatingWorkspace = !homeWorkspaces.some((item) => item.grantId === configuration.grantId);
       if (creatingWorkspace) {
         const created = await workspaceApi.create(configuration.grantId);
@@ -2799,6 +2610,21 @@ export function App() {
       }
     } catch (error) {
       setSandboxError(error.message);
+    } finally {
+      setSandboxSaving(false);
+    }
+  };
+
+  const assignWorkspaceSecurityGroup = async (grantId, securityGroupVersionId) => {
+    setSandboxSaving(true);
+    setSandboxError("");
+    try {
+      const assigned = await adminApi.assignWorkspaceEgressSecurityGroup(grantId, securityGroupVersionId);
+      setSandboxSettings(await sandboxApi.settings(grantId));
+      setToast(`${assigned.name} is now active. No workspace restart was needed.`);
+    } catch (error) {
+      setSandboxError(error.message);
+      setSandboxSettings(await sandboxApi.settings(grantId).catch(() => sandboxSettings));
     } finally {
       setSandboxSaving(false);
     }
@@ -2855,13 +2681,6 @@ export function App() {
     setToast("Choose the configuration, then create the workspace.");
   };
 
-  const openFirewallFromWorkspace = () => {
-    setSelectedSandboxGrantId(null);
-    setSandboxSettings(null);
-    selectNav("Firewall");
-    window.requestAnimationFrame(() => mainContentRef.current?.focus());
-  };
-
   const configureMicrosoft365 = () => {
     selectNav("Connections");
     setConnectionsView("microsoft365-tools");
@@ -2905,20 +2724,13 @@ export function App() {
     try {
       const saved = await adminApi.saveEgressSecurityGroup(document);
       await refreshEgressGroups();
-      setToast(`${saved.name} version ${saved.version} is ready to attach.`);
+      const applied = saved.workspaceProxies?.refreshed ?? 0;
+      setToast(applied
+        ? `${saved.name} saved and applied live to ${applied} running ${applied === 1 ? "workspace" : "workspaces"}.`
+        : `${saved.name} saved. Workspaces using this group will resolve revision ${saved.version}.`);
       return saved;
     } catch (error) { showApiError(error); }
     finally { setEgressSaving(false); }
-  };
-  const attachEgressSecurityGroup = async (userId, securityGroupVersionId) => {
-    setAdminBusyUserId(userId);
-    try {
-      await adminApi.assignEgressSecurityGroup(userId, securityGroupVersionId);
-      await refreshAdminUsers();
-      setToast("The workspace firewall assignment is pinned to that version.");
-      return true;
-    } catch (error) { showApiError(error); }
-    finally { setAdminBusyUserId(""); }
   };
   const changeMcpPolicy = (name, decision) => setMcpPolicy((current) => ({
     ...current,
@@ -3046,7 +2858,7 @@ export function App() {
           selectedGrantId={selectedSandboxGrantId}
           onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); setTelegramConnection(null); setTelegramError(""); }}
           onSave={saveWorkspaceSettings}
-          onNavigateFirewall={openFirewallFromWorkspace}
+          onAssignSecurityGroup={assignWorkspaceSecurityGroup}
           canManageFirewall={session.roles.includes("administrator")}
           telegram={telegramConnection}
           credentials={credentials}
@@ -3076,7 +2888,7 @@ export function App() {
             onPolicySave={saveMcpPolicy}
           />
         )}
-        {activeNav === "Firewall" && session.roles.includes("administrator") && <FirewallScreen users={adminUsers} loading={adminLoading} busyUserId={adminBusyUserId} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} onAttach={attachEgressSecurityGroup} />}
+        {activeNav === "Firewall" && session.roles.includes("administrator") && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
         {activeNav === "Settings" && <SettingsScreen
           view={settingsView}
           isAdmin={session.roles.includes("administrator")}

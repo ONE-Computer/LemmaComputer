@@ -89,7 +89,7 @@ const profile = {
   clientVersion: "managed-v1",
   persistence: "persistent-home",
   network: "gateway-only",
-  resources: { cpus: 2, memoryGiB: 3 },
+  resources: { cpus: 2, memoryGiB: 4 },
 };
 
 const disposableProfile = {
@@ -104,7 +104,7 @@ const disposableProfile = {
   clientVersion: "disposable-open-v1",
   persistence: "persistent-home",
   network: "gateway-only",
-  resources: { cpus: 2, memoryGiB: 3 },
+  resources: { cpus: 2, memoryGiB: 4 },
 };
 
 const availableApplications = [
@@ -237,12 +237,26 @@ let chatMessages = [
 
 let egressSecurityGroups = [{
   schemaVersion: 1,
+  id: "egv_fixture_default_v1",
+  securityGroupId: "esg_fixture_default",
+  tenantId: session.tenant.id,
+  version: 1,
+  name: "Default security group",
+  description: "The built-in network policy attached to new workspaces.",
+  defaultAction: "allow-public-http-https",
+  rules: [],
+  documentHash: digest,
+  createdBy: session.user.id,
+  createdAt: now,
+  isDefault: true,
+}, {
+  schemaVersion: 1,
   id: "egv_fixture_agent_updates_v1",
   securityGroupId: "esg_fixture_agent_updates",
   tenantId: session.tenant.id,
   version: 1,
   name: "Approved agent updates",
-  description: "Default-deny public egress for approved agent updates.",
+  description: "Allow approved update services and block untrusted download hosts.",
   defaultAction: "deny",
   rules: [
     { id: "claude-downloads", action: "allow", protocol: "https", host: "downloads.claude.ai", includeSubdomains: false, port: 443, purpose: "Download approved Claude Desktop updates" },
@@ -252,6 +266,7 @@ let egressSecurityGroups = [{
   documentHash: digest,
   createdBy: session.user.id,
   createdAt: now,
+  isDefault: false,
 }];
 
 const firewallWorkspaces = (group) => [
@@ -363,6 +378,8 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({
       ...sandboxSettings,
       grantId: url.searchParams.get("grantId") ?? "personal",
+      securityGroup: sandboxSettings.securityGroup ?? egressSecurityGroups.find((group) => group.isDefault),
+      availableSecurityGroups: egressSecurityGroups,
     }));
     return;
   }
@@ -468,24 +485,22 @@ const server = http.createServer((request, response) => {
         createdAt: new Date().toISOString(),
       };
       egressSecurityGroups = [saved, ...egressSecurityGroups.filter((group) => group.securityGroupId !== securityGroupId)];
+      if (sandboxSettings.securityGroup?.securityGroupId === securityGroupId) {
+        sandboxSettings = { ...sandboxSettings, securityGroup: saved };
+      }
       response.statusCode = 201;
-      response.end(JSON.stringify(saved));
+      response.end(JSON.stringify({ ...saved, workspaceProxies: { refreshed: 1, failed: 0 } }));
     });
     return;
   }
-  if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/egress-security-group$/.test(url.pathname)) {
+  if (request.method === "POST" && /^\/v1\/admin\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
-      const userId = url.pathname.split("/")[4];
       const input = JSON.parse(body);
       const group = egressSecurityGroups.find((candidate) => candidate.id === input.securityGroupVersionId);
-      adminUsers = adminUsers.map((user) => user.userId === userId ? {
-        ...user,
-        effectivePolicy: { egressSecurityGroup: group },
-        workspaces: firewallWorkspaces(group),
-      } : user);
-      response.end(JSON.stringify({ egressSecurityGroup: group }));
+      sandboxSettings = { ...sandboxSettings, securityGroup: group };
+      response.end(JSON.stringify(group));
     });
     return;
   }

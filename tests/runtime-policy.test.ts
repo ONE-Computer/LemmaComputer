@@ -125,7 +125,7 @@ test("disposable-open projects attached deny rules as full-web exceptions", () =
       version: 1,
       name: "Open workspace exceptions",
       description: "Blocks reviewed destinations from open workspaces.",
-      defaultAction: "deny",
+      defaultAction: "allow-public-http-https",
       rules: [
         {
           id: "approved-updates",

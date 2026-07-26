@@ -17,6 +17,7 @@ import {
 
 export interface SandboxAdapter {
   create(input: SandboxCreateInput): Promise<Sandbox>;
+  updateEgressPolicy(providerId: string, input: SandboxEgressPolicyUpdateInput): Promise<void>;
   status(providerId: string): Promise<Sandbox>;
   open(providerId: string): Promise<SandboxLaunch>;
   destroy(providerId: string): Promise<void>;
@@ -79,6 +80,11 @@ export type SandboxCreateInput = {
     };
   };
 };
+
+export type SandboxEgressPolicyUpdateInput = Pick<
+  SandboxCreateInput,
+  "workspaceId" | "policy" | "policyBundle" | "policyVerificationKeys" | "egressProxy"
+>;
 
 type KasmConfig = {
   baseUrl: string;
@@ -197,6 +203,10 @@ export class KasmDeveloperApiAdapter implements SandboxAdapter {
     const providerId = textValue(kasm, "kasm_id");
     if (!providerId) throw new OneComputerError("KASM_INVALID_RESPONSE", "Kasm did not return a session identifier", 502, true);
     return { providerId, state: mapKasmState(textValue(kasm, "operational_status", "status")), failureCode: null };
+  }
+
+  async updateEgressPolicy(_providerId: string, _input: SandboxEgressPolicyUpdateInput) {
+    throw new OneComputerError("EGRESS_LIVE_UPDATE_UNSUPPORTED", "This Kasm provider cannot update its egress proxy while running", 409, true);
   }
 
   async status(providerId: string): Promise<Sandbox> {
@@ -386,7 +396,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         RestartPolicy: { Name: "unless-stopped" },
         ShmSize: 536_870_912,
         PidsLimit: 1024,
-        Memory: 3_221_225_472,
+        Memory: 4_294_967_296,
         NanoCpus: 2_000_000_000,
         CapDrop: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
         SecurityOpt: ["no-new-privileges"],
@@ -403,6 +413,27 @@ export class KasmLocalAdapter implements SandboxAdapter {
       await this.destroy(providerId).catch(() => undefined);
       throw error;
     }
+  }
+
+  async updateEgressPolicy(providerId: string, input: SandboxEgressPolicyUpdateInput) {
+    input = { ...input, policy: runtimePolicySchema.parse(input.policy) };
+    if (!input.policyBundle || !input.policyVerificationKeys || !input.policy.egress || !input.egressProxy) {
+      throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "A signed egress policy and proxy grant are required", 503);
+    }
+    const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+    const state = asObject(inspected.State);
+    const labels = asObject(asObject(inspected.Config).Labels);
+    const workspaceId = labels["com.onecomputer.workspace-id"];
+    const workspaceNetwork = labels["com.onecomputer.workspace-network"];
+    if (
+      state.Running !== true
+      || workspaceId !== input.workspaceId
+      || typeof workspaceNetwork !== "string"
+      || !this.isWorkspaceNetwork(workspaceNetwork)
+    ) {
+      throw new OneComputerError("WORKSPACE_NOT_READY", "The running workspace could not accept the firewall update", 409, true);
+    }
+    await this.ensureEgressProxy(input, workspaceNetwork, true);
   }
 
   async status(providerId: string): Promise<Sandbox> {
@@ -422,6 +453,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         typeof entry === "string" && entry.startsWith("ONECOMPUTER_SIGNED_POLICY_B64=")
       ));
       let projectedPolicyBundle: SignedPolicyBundle | undefined;
+      let egressPolicyProjection: Sandbox["egressPolicyProjection"];
       if (typeof projectedPolicyEntry === "string") {
         try {
           projectedPolicyBundle = signedPolicyBundleSchema.parse(JSON.parse(
@@ -429,6 +461,41 @@ export class KasmLocalAdapter implements SandboxAdapter {
           ));
         } catch {
           projectedPolicyBundle = undefined;
+        }
+      }
+      const sandboxName = textValue(inspected, "Name")?.replace(/^\//, "");
+      if (sandboxName) {
+        const proxy = await this.request("GET", `/containers/${encodeURIComponent(`${sandboxName}-egress`)}/json`).catch(() => null);
+        const proxyLabels = proxy
+          ? asObject(asObject(asObject(proxy).Config).Labels)
+          : undefined;
+        const proxyEnvironment = proxy
+          ? asObject(proxy.Config).Env
+          : undefined;
+        const proxySecurityGroupVersionId = proxyLabels?.["com.onecomputer.egress-security-group-version-id"];
+        const proxyDocumentHash = proxyLabels?.["com.onecomputer.egress-policy-hash"];
+        if (
+          typeof proxySecurityGroupVersionId === "string"
+          && /^egv_[a-z0-9_]{3,96}$/.test(proxySecurityGroupVersionId)
+          && typeof proxyDocumentHash === "string"
+          && /^[a-f0-9]{64}$/.test(proxyDocumentHash)
+        ) {
+          egressPolicyProjection = {
+            securityGroupVersionId: proxySecurityGroupVersionId,
+            documentHash: proxyDocumentHash,
+          };
+        }
+        const proxyPolicyEntry = Array.isArray(proxyEnvironment)
+          ? proxyEnvironment.find((entry) => typeof entry === "string" && entry.startsWith("ONECOMPUTER_SIGNED_POLICY_B64="))
+          : undefined;
+        if (typeof proxyPolicyEntry === "string") {
+          try {
+            projectedPolicyBundle = signedPolicyBundleSchema.parse(JSON.parse(
+              Buffer.from(proxyPolicyEntry.slice(proxyPolicyEntry.indexOf("=") + 1), "base64url").toString("utf8"),
+            ));
+          } catch {
+            projectedPolicyBundle = undefined;
+          }
         }
       }
       const controlAttached = labels["com.onecomputer.control-attached"] === "true"
@@ -447,6 +514,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
           : {}),
         state: running ? "ready" : failed ? "failed" : "stopped",
         failureCode: failed ? "FIXTURE_EXITED" : null,
+        ...(egressPolicyProjection ? { egressPolicyProjection } : {}),
         policyProjectionPresent: Boolean(projectedPolicyEntry),
         ...(projectedPolicyBundle ? { projectedPolicyBundle } : {}),
       };
@@ -697,7 +765,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     await this.connectContainer(workspaceNetwork, relayId);
   }
 
-  private async ensureEgressProxy(input: SandboxCreateInput, workspaceNetwork: string) {
+  private async ensureEgressProxy(input: SandboxEgressPolicyUpdateInput, workspaceNetwork: string, replace = false) {
     if (!input.policy.egress || !input.egressProxy || !this.config.egressProxyImage) return;
     if (
       input.egressProxy.expectedGrant.workspaceId !== input.workspaceId
@@ -711,7 +779,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const sandboxName = `onecomputer-sandbox-${input.workspaceId}`;
     const proxyName = `${sandboxName}-egress`;
     const existing = await this.inspectByName(proxyName);
-    if (existing?.running) return;
+    if (existing?.running && !replace) return;
     if (existing) await this.removeContainer(existing.id);
     const policy = input.policy.egress;
     const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(proxyName)}`, {
@@ -729,6 +797,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         `EGRESS_POLICY_JSON=${JSON.stringify(policy)}`,
         `EGRESS_EXPECTED_GRANT_JSON=${JSON.stringify(input.egressProxy.expectedGrant)}`,
         `EGRESS_GRANT_SECRET=${input.egressProxy.verificationSecret}`,
+        `ONECOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
       ],
       NetworkingConfig: {
         EndpointsConfig: {

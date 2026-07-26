@@ -29,6 +29,8 @@ import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient }
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
+const workspaceMemoryGiB = 4;
+
 const sandboxProfiles = [
   sandboxProfileSchema.parse({
     id: "claude-desktop-standard-v1",
@@ -42,7 +44,7 @@ const sandboxProfiles = [
     clientVersion: "managed-v1",
     persistence: "persistent-home",
     network: "gateway-only",
-    resources: { cpus: 2, memoryGiB: 3 },
+    resources: { cpus: 2, memoryGiB: workspaceMemoryGiB },
   }),
   sandboxProfileSchema.parse({
     id: "kasm-persistent-standard",
@@ -56,7 +58,7 @@ const sandboxProfiles = [
     clientVersion: "issue-006",
     persistence: "persistent-home",
     network: "gateway-only",
-    resources: { cpus: 2, memoryGiB: 3 },
+    resources: { cpus: 2, memoryGiB: workspaceMemoryGiB },
   }),
   sandboxProfileSchema.parse({
     id: "disposable-open-v1",
@@ -70,7 +72,7 @@ const sandboxProfiles = [
     clientVersion: "disposable-open-v1",
     persistence: "persistent-home",
     network: "gateway-only",
-    resources: { cpus: 2, memoryGiB: 3 },
+    resources: { cpus: 2, memoryGiB: workspaceMemoryGiB },
   }),
 ] as const;
 
@@ -363,9 +365,17 @@ export function createControlServer(
     if (security.identityPolicyStore && !effective) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
     return { principal: value, effective };
   };
+  const workspaceEgressFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string) => (
+    await security.identityPolicyStore?.getWorkspaceEgressSecurityGroup?.({
+      tenantId: value.tenantId,
+      subjectId: value.userId,
+      grantId,
+    }) ?? effective?.egressSecurityGroup ?? null
+  );
   const policyForGrant = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId = "personal") => {
     if (!effective) return { principal: value, policy: testRuntimePolicy };
     const saved = await store.getSandboxSettings?.(value.identity, grantId);
+    const workspaceEgress = await workspaceEgressFor(value, effective, grantId);
     const document = effective.document as Record<string, unknown>;
     const availableAgentIds = assignedAgentIds(document);
     return { principal: value, policy: runtimePolicyFor(
@@ -374,6 +384,7 @@ export function createControlServer(
       saved?.profileId,
       saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
       saved?.applicationIds ?? defaultApplicationIds(document),
+      workspaceEgress,
     ) };
   };
   const requirePolicy = async (request: object) => {
@@ -563,6 +574,11 @@ export function createControlServer(
           ...user,
           workspaces: await Promise.all(workspaces.map(async (workspace) => {
             const settings = await store.getSandboxSettings?.(targetIdentity, workspace.grantId);
+            const workspaceEgress = await workspaceEgressFor({
+              ...actor,
+              userId: user.userId,
+              identity: targetIdentity,
+            }, user.effectivePolicy, workspace.grantId);
             const runtime = user.effectivePolicy
               ? runtimePolicyFor(
                   user.effectivePolicy,
@@ -570,6 +586,7 @@ export function createControlServer(
                   settings?.profileId,
                   settings?.agentIds,
                   settings?.applicationIds,
+                  workspaceEgress,
                 )
               : null;
             return {
@@ -628,27 +645,46 @@ export function createControlServer(
       updatedBy: actor.userId,
       ...input,
     });
-    return reply.code(201).send(saved);
-  });
-  app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/egress-security-group", async (request) => {
-    const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
-    const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
-    const targetIdentity = identityContextSchema.parse({
+    const assignments = await security.identityPolicyStore.listWorkspaceEgressSecurityGroupAssignments?.({
       tenantId: actor.tenantId,
-      subjectId: request.params.userId,
-      audience: "onecomputer-control",
+      securityGroupId: saved.securityGroupId,
+    }) ?? [];
+    const refreshed = await Promise.allSettled(assignments.map(async (assignment) => {
+      const owner = await security.identityPolicyStore!.getPrincipal(assignment.subjectId);
+      if (!owner || owner.tenantId !== actor.tenantId) return false;
+      const effective = await security.identityPolicyStore!.getEffectivePolicy(owner.userId);
+      if (!effective) return false;
+      const { policy } = await policyForGrant(owner, effective, assignment.grantId);
+      return service.refreshEgressPolicy(owner.identity, policy, assignment.grantId);
+    }));
+    return reply.code(201).send({
+      ...saved,
+      workspaceProxies: {
+        refreshed: refreshed.filter((result) => result.status === "fulfilled" && result.value).length,
+        failed: refreshed.filter((result) => result.status === "rejected").length,
+      },
     });
-    const workspaces = await store.listCurrent(targetIdentity);
-    if (workspaces.some((workspace) => !["not_created", "stopped", "failed"].includes(workspace.state))) {
-      throw new OneComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop every workspace owned by this account before changing its egress firewall", 409, true);
+  });
+  app.post<{ Params: { grantId: string } }>("/v1/admin/workspaces/:grantId/egress-security-group", async (request) => {
+    const actor = requireAdministrator(request);
+    if (!security.identityPolicyStore?.assignWorkspaceEgressSecurityGroup) {
+      throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
     }
-    return security.identityPolicyStore.assignEgressSecurityGroup({
+    const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
+    const grantId = z.string().min(1).max(128).parse(request.params.grantId);
+    const assigned = await security.identityPolicyStore.assignWorkspaceEgressSecurityGroup({
       tenantId: actor.tenantId,
-      targetUserId: request.params.userId,
+      subjectId: actor.userId,
+      grantId,
       assignedBy: actor.userId,
       securityGroupVersionId: input.securityGroupVersionId,
     });
+    const effective = await security.identityPolicyStore.getEffectivePolicy(actor.userId);
+    if (effective) {
+      const { policy } = await policyForGrant(actor, effective, grantId);
+      await service.refreshEgressPolicy(actor.identity, policy, grantId);
+    }
+    return assigned;
   });
   app.get("/v1/admin/mcp-policy", async (request) => {
     const actor = requireAdministrator(request);
@@ -805,14 +841,19 @@ export function createControlServer(
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
-    const egress = effective
-      ? runtimePolicyFor(effective, modelAlias, profileId, selectedAgentIds, selectedApplicationIds).egress
+    const workspaceEgress = await workspaceEgressFor(actor, effective, grantId);
+    const runtime = effective
+      ? runtimePolicyFor(effective, modelAlias, profileId, selectedAgentIds, selectedApplicationIds, workspaceEgress)
+      : undefined;
+    const egress = runtime?.egress;
+    const availableSecurityGroups = actor.roles.includes("administrator") && security.identityPolicyStore?.listEgressSecurityGroups
+      ? await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId)
       : undefined;
     const configuration = sandboxConfigurationSchema.parse({
       schemaVersion: 1,
       profileId,
       executionMode: availableProfiles.find((profile) => profile.id === profileId)!.executionMode,
-      egressMode: availableProfiles.find((profile) => profile.id === profileId)!.egressMode,
+      egressMode: runtime?.egressMode ?? availableProfiles.find((profile) => profile.id === profileId)!.egressMode,
       applicationIds: selectedApplicationIds,
       agentIds: selectedAgentIds,
       modelAlias,
@@ -833,6 +874,8 @@ export function createControlServer(
       availableModels,
       agentIds: selectedAgentIds,
       availableAgents,
+      ...(workspaceEgress ? { securityGroup: workspaceEgress } : {}),
+      ...(availableSecurityGroups ? { availableSecurityGroups } : {}),
       ...(egress ? { egress } : {}),
       manifest: workspaceManifest(configuration, telegram),
       updatedAt: saved?.updatedAt.toISOString() ?? null,
@@ -861,14 +904,19 @@ export function createControlServer(
       agentIds: input.agentIds,
     });
     const profile = sandboxProfiles.find((item) => item.id === input.profileId)!;
-    const egress = effective
-      ? runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds).egress
+    const workspaceEgress = await workspaceEgressFor(actor, effective, input.grantId);
+    const runtime = effective
+      ? runtimePolicyFor(effective, input.modelAlias, input.profileId, input.agentIds, input.applicationIds, workspaceEgress)
+      : undefined;
+    const egress = runtime?.egress;
+    const availableSecurityGroups = actor.roles.includes("administrator") && security.identityPolicyStore?.listEgressSecurityGroups
+      ? await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId)
       : undefined;
     const configuration = sandboxConfigurationSchema.parse({
       schemaVersion: 1,
       profileId: input.profileId,
       executionMode: profile.executionMode,
-      egressMode: profile.egressMode,
+      egressMode: runtime?.egressMode ?? profile.egressMode,
       applicationIds: input.applicationIds,
       agentIds: input.agentIds,
       modelAlias: input.modelAlias,
@@ -885,6 +933,8 @@ export function createControlServer(
       availableModels: sandboxModels.filter((item) => models.includes(item.alias)),
       agentIds: input.agentIds,
       availableAgents: ownedAgentCatalog.filter((item) => agents.includes(item.id)),
+      ...(workspaceEgress ? { securityGroup: workspaceEgress } : {}),
+      ...(availableSecurityGroups ? { availableSecurityGroups } : {}),
       ...(egress ? { egress } : {}),
       manifest: workspaceManifest(configuration, telegram),
       updatedAt: new Date().toISOString(),

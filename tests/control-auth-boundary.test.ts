@@ -170,9 +170,12 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       firewallVersion = { ...firewallVersion, version: 2, id: "egv_acme_updates_v2", name: input.name, description: input.description, rules: input.rules, documentHash: "f".repeat(64) };
       return firewallVersion;
     },
-    assignEgressSecurityGroup: async ({ securityGroupVersionId }: { securityGroupVersionId: string }) => {
-      effectivePolicy.egressSecurityGroup = { ...firewallVersion, id: securityGroupVersionId };
-      return effectivePolicy;
+    getWorkspaceEgressSecurityGroup: async ({ grantId }: { grantId: string }) => grantId === openWorkspace.grantId
+      ? { ...firewallVersion, defaultAction: "allow-public-http-https" as const }
+      : firewallVersion,
+    assignWorkspaceEgressSecurityGroup: async ({ securityGroupVersionId }: { securityGroupVersionId: string }) => {
+      firewallVersion = { ...firewallVersion, id: securityGroupVersionId };
+      return firewallVersion;
     },
   } as unknown as IdentityPolicyStore;
   const revokedKeys: string[] = [];
@@ -243,21 +246,12 @@ test("only an administrator can assign and revoke the tenant policy through Cont
 
     const attachedFirewall = await app.inject({
       method: "POST",
-      url: "/v1/admin/users/alpha/egress-security-group",
+      url: "/v1/admin/workspaces/personal/egress-security-group",
       headers: { ...headers, "content-type": "application/json" },
       payload: { securityGroupVersionId: "egv_acme_updates_v2" },
     });
-    assert.equal(attachedFirewall.statusCode, 409);
-    await workspaceStore.update(activeWorkspace.id, { state: "stopped" });
-    const attachedStoppedFirewall = await app.inject({
-      method: "POST",
-      url: "/v1/admin/users/alpha/egress-security-group",
-      headers: { ...headers, "content-type": "application/json" },
-      payload: { securityGroupVersionId: "egv_acme_updates_v2" },
-    });
-    assert.equal(attachedStoppedFirewall.statusCode, 200);
-    assert.equal(attachedStoppedFirewall.json().egressSecurityGroup.id, "egv_acme_updates_v2");
-    await workspaceStore.update(activeWorkspace.id, { state: "ready" });
+    assert.equal(attachedFirewall.statusCode, 200);
+    assert.equal(attachedFirewall.json().id, "egv_acme_updates_v2");
 
     const assign = await app.inject({ method: "POST", url: "/v1/admin/users/alpha/policy", headers });
     assert.equal(assign.statusCode, 200);

@@ -41,7 +41,13 @@ const proxyToken = (header: string | undefined) => {
 
 const authorize = (header: string | undefined, config: ProxyConfig) => {
   const token = proxyToken(header);
-  return token ? verifyEgressProxyGrant(token, config.verificationSecret, config.expectedGrant) : null;
+  const { tenantId, subjectId, workspaceId, agentId } = config.expectedGrant;
+  return token ? verifyEgressProxyGrant(token, config.verificationSecret, {
+    tenantId,
+    subjectId,
+    workspaceId,
+    agentId,
+  }) : null;
 };
 
 const resolveAndDecide = async (config: ProxyConfig, protocol: "http" | "https", host: string, port: number) => {

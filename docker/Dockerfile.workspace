@@ -195,6 +195,14 @@ RUN uv venv \
     && ln -s "$codex_bin" /usr/local/libexec/onecomputer-codex-bin \
     && rm -rf /root/.cache/uv
 
+ENV PATH="/opt/onecomputer/hermes-office-venv/bin:${PATH}" \
+    NODE_PATH="/opt/onecomputer/hermes-office-node/node_modules"
+
+RUN python -c \
+      'import defusedxml, docx, fitz, lxml, markitdown, openpyxl, pandas, pdf2image, pdfplumber, PIL, pptx, pypdf, pytesseract, reportlab' \
+    && node -e \
+      'for (const name of ["docx", "pptxgenjs", "react", "react-dom", "react-icons", "sharp"]) require.resolve(name)'
+
 COPY --from=hermes_desktop_builder /src/apps/desktop/release/linux-unpacked /opt/onecomputer/hermes-desktop
 COPY --from=hermes_desktop_builder /src/apps/desktop/assets/icon.png /opt/onecomputer/hermes-desktop-icon.png
 COPY infra/issue-010/onecomputer-gateway-proxy.py /usr/local/libexec/onecomputer-gateway-proxy

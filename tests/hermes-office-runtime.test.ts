@@ -101,6 +101,7 @@ test("selected Hermes profiles seed Office skills and expose the mode-appropriat
     assert.match(launcher, /PATH=\/opt\/onecomputer\/hermes-office-venv\/bin:/);
     assert.match(launcher, /NODE_PATH=\/opt\/onecomputer\/hermes-office-node\/node_modules/);
   }
+  assert.match(desktopLauncher, /HERMES_DESKTOP_PYTHON=\/opt\/onecomputer\/hermes-venv\/bin\/python/);
 
   assert.match(chatAdapter, /Hermes has workspace-local file, terminal, skills, and vision tools/);
   assert.match(chatAdapter, /public-web and unrelated native toolsets remain restricted/);

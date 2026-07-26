@@ -225,6 +225,8 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const sandboxCreate = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=onecomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"))!;
     const host = sandboxCreate.body.HostConfig as Record<string, unknown>;
     assert.equal(host.NetworkMode, workspaceNetwork);
+    assert.equal(host.Memory, 4_294_967_296);
+    assert.equal(host.NanoCpus, 2_000_000_000);
     assert.deepEqual(host.CapDrop, ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]);
     assert.deepEqual(host.SecurityOpt, ["no-new-privileges"]);
     const workspaceVolume = "onecomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
@@ -268,6 +270,50 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.deepEqual(egressNetworking.EndpointsConfig[workspaceNetwork]?.Aliases, ["onecomputer-egress-proxy"]);
     assert.ok(JSON.stringify(egressCreate.body).includes("downloads.claude.ai"));
     assert.ok(requests.some((item) => item.path === "/networks/onecomputer-egress/connect" && item.body.Container === "egress-id"));
+    const updatedPolicy = {
+      ...policy,
+      policyHash: "f".repeat(64),
+      egress: {
+        ...policy.egress,
+        id: "egv_acme_updates_v2",
+        version: 2,
+        documentHash: "1".repeat(64),
+        rules: [{
+          id: "deny-chatgpt",
+          action: "deny" as const,
+          protocol: "https" as const,
+          host: "chatgpt.com",
+          includeSubdomains: true,
+          port: 443,
+          purpose: "Block ChatGPT",
+        }],
+      },
+    };
+    const updatedSignedPolicy = policyFixture(updatedPolicy, "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
+    await adapter.updateEgressPolicy("sandbox-id", {
+      workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+      policy: updatedPolicy,
+      policyBundle: updatedSignedPolicy.bundle,
+      policyVerificationKeys: updatedSignedPolicy.keys,
+      egressProxy: {
+        token: "replacement-egress-token-at-least-24-characters",
+        verificationSecret: "workspace-derived-verification-secret-at-least-32-characters",
+        expiresAt: "2026-07-24T00:00:00.000Z",
+        expectedGrant: {
+          tenantId: "acme",
+          subjectId: "alex",
+          workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+          agentId: "agent-alex",
+          securityGroupVersionId: "egv_acme_updates_v2",
+          egressMode: "restricted",
+          policyHash: "f".repeat(64),
+        },
+      },
+    });
+    const egressCreates = requests.filter((item) => item.method === "POST" && item.path.startsWith("/containers/create") && item.path.includes("-egress"));
+    assert.equal(egressCreates.length, 2);
+    assert.ok(JSON.stringify(egressCreates[1]!.body).includes("chatgpt.com"));
+    assert.equal(requests.some((item) => item.method === "DELETE" && item.path === "/containers/sandbox-id?force=true&v=true"), false);
     // Simulate Compose replacing Control and dropping its dynamic endpoint.
     controlConnected = false;
     await adapter.status("sandbox-id");

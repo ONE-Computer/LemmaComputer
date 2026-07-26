@@ -59,6 +59,7 @@ export const runtimePolicyFor = (
   selectedWorkspaceProfile?: string,
   selectedAgentIds?: AgentCatalogId[],
   selectedApplicationIds?: SandboxApplicationId[],
+  workspaceEgressSecurityGroup?: EgressSecurityGroupVersion | null,
 ): RuntimePolicy => {
   const document = policy.document as Record<string, unknown>;
   const mcp = document.mcp as Record<string, unknown> | undefined;
@@ -130,9 +131,14 @@ export const runtimePolicyFor = (
   }) : undefined;
   const primaryAgent = agents?.[0];
   const executionMode = workspaceProfile === "disposable-open-v1" ? "disposable-open" as const : "managed" as const;
-  const egressMode = executionMode === "disposable-open" ? "full-web" as const : "restricted" as const;
-  const attachedEgress = policy.egressSecurityGroup;
-  const egress = executionMode === "disposable-open"
+  const attachedEgress = workspaceEgressSecurityGroup === undefined
+    ? policy.egressSecurityGroup
+    : workspaceEgressSecurityGroup;
+  const fullWebEgress = attachedEgress
+    ? attachedEgress.defaultAction === "allow-public-http-https"
+    : executionMode === "disposable-open";
+  const egressMode = fullWebEgress ? "full-web" as const : "restricted" as const;
+  const egress = fullWebEgress
     ? {
         schemaVersion: 2 as const,
         mode: "full-web" as const,
@@ -220,8 +226,11 @@ export interface IdentityPolicyStore {
   createMvpPolicyVersion(input: { tenantId: string; createdBy: string; revisionNote: string }): Promise<{ id: string; version: number; documentHash: string }>;
   updateMvpToolPolicy(input: { tenantId: string; updatedBy: string; tools: Record<string, McpToolPolicyDecision> }): Promise<{ id: string; version: number; documentHash: string }>;
   listEgressSecurityGroups(tenantId: string, createdBy?: string): Promise<EgressSecurityGroupVersion[]>;
-  saveEgressSecurityGroup(input: { tenantId: string; updatedBy: string; securityGroupId?: string; name: string; description: string; rules: EgressSecurityGroupRule[] }): Promise<EgressSecurityGroupVersion>;
+  saveEgressSecurityGroup(input: { tenantId: string; updatedBy: string; securityGroupId?: string; name: string; description: string; defaultAction: "deny" | "allow-public-http-https"; rules: EgressSecurityGroupRule[] }): Promise<EgressSecurityGroupVersion>;
   assignEgressSecurityGroup(input: { tenantId: string; targetUserId: string; assignedBy: string; securityGroupVersionId: string }): Promise<EffectivePolicy>;
+  getWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string }): Promise<EgressSecurityGroupVersion | null>;
+  listWorkspaceEgressSecurityGroupAssignments?(input: { tenantId: string; securityGroupId: string }): Promise<Array<{ subjectId: string; grantId: string }>>;
+  assignWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string; assignedBy: string; securityGroupVersionId: string }): Promise<EgressSecurityGroupVersion>;
   bindWorkspaceIdentity(userId: string, workspaceId: string): Promise<void>;
 }
 
@@ -295,18 +304,10 @@ const defaultEgressSecurityGroupId = (tenantId: string) => `esg_${createHash("sh
 const defaultEgressSecurityGroupVersionId = (tenantId: string) => `egv_${createHash("sha256").update(`egress:${tenantId}`).digest("hex").slice(0, 24)}_v1`;
 const defaultEgressDocument = () => ({
   schemaVersion: 1,
-  name: "Approved agent updates",
-  description: "Default-deny public egress for approved agent update downloads.",
-  defaultAction: "deny",
-  rules: [{
-    id: "claude-downloads",
-    action: "allow",
-    protocol: "https",
-    host: "downloads.claude.ai",
-    includeSubdomains: false,
-    port: 443,
-    purpose: "Download approved Claude Desktop updates",
-  }],
+  name: "Default security group",
+  description: "The built-in network policy attached to new workspaces.",
+  defaultAction: "allow-public-http-https",
+  rules: [],
 }) satisfies OwnedJson;
 
 const mapPrincipal = (row: Record<string, unknown>): SessionPrincipal => ({
@@ -344,19 +345,21 @@ const effectivePolicySelect = `
 
 const mapEgressVersion = (row: Record<string, unknown>): EgressSecurityGroupVersion => {
   const document = row.egress_document as Record<string, unknown>;
+  const isDefault = String(row.security_group_id) === defaultEgressSecurityGroupId(String(row.tenant_id));
   return egressSecurityGroupVersionSchema.parse({
     schemaVersion: 1,
     id: String(row.egress_version_id),
     securityGroupId: String(row.security_group_id),
     tenantId: String(row.tenant_id),
     version: Number(row.egress_version),
-    name: document.name,
-    description: document.description,
-    defaultAction: "deny",
+    name: isDefault ? "Default security group" : document.name,
+    description: isDefault ? "The built-in network policy attached to new workspaces." : document.description,
+    defaultAction: isDefault ? "allow-public-http-https" : document.defaultAction ?? "deny",
     rules: document.rules,
     documentHash: String(row.egress_document_hash),
     createdBy: String(row.egress_created_by),
     createdAt: new Date(String(row.egress_created_at)).toISOString(),
+    isDefault,
   });
 };
 
@@ -772,7 +775,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     return result.rows.map(mapEgressVersion);
   }
 
-  async saveEgressSecurityGroup(input: { tenantId: string; updatedBy: string; securityGroupId?: string; name: string; description: string; rules: EgressSecurityGroupRule[] }) {
+  async saveEgressSecurityGroup(input: { tenantId: string; updatedBy: string; securityGroupId?: string; name: string; description: string; defaultAction: "deny" | "allow-public-http-https"; rules: EgressSecurityGroupRule[] }) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -806,7 +809,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         version,
         name: input.name,
         description: input.description,
-        defaultAction: "deny",
+        defaultAction: input.defaultAction,
         rules: input.rules,
         documentHash: "0".repeat(64),
         createdBy: input.updatedBy,
@@ -817,7 +820,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         schemaVersion: 1,
         name: input.name,
         description: input.description,
-        defaultAction: "deny",
+        defaultAction: input.defaultAction,
         rules: compiled.rules,
       } satisfies OwnedJson;
       const documentHash = policyHash(document);
@@ -855,6 +858,105 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       await client.query("ROLLBACK");
       throw error;
     } finally { client.release(); }
+  }
+
+  async getWorkspaceEgressSecurityGroup(input: { tenantId: string; subjectId: string; grantId: string }) {
+    const result = await this.pool.query(
+      `SELECT esg.tenant_id,esgv.id AS egress_version_id,esgv.security_group_id,
+       esgv.version AS egress_version,esgv.document AS egress_document,
+       esgv.document_hash AS egress_document_hash,esgv.created_by AS egress_created_by,
+       esgv.created_at AS egress_created_at
+       FROM workspace_egress_security_group_assignments assignment
+       JOIN egress_security_groups esg ON esg.id=assignment.security_group_id
+       JOIN LATERAL (
+         SELECT *
+         FROM egress_security_group_versions candidate
+         WHERE candidate.security_group_id=assignment.security_group_id
+         ORDER BY candidate.version DESC
+         LIMIT 1
+       ) esgv ON true
+       WHERE assignment.tenant_id=$1 AND assignment.subject_id=$2 AND assignment.grant_id=$3`,
+      [input.tenantId, input.subjectId, input.grantId],
+    );
+    if (result.rowCount) return mapEgressVersion(result.rows[0]);
+    const fallback = await this.pool.query(
+      `SELECT esg.tenant_id,esgv.id AS egress_version_id,esgv.security_group_id,
+       esgv.version AS egress_version,esgv.document AS egress_document,
+       esgv.document_hash AS egress_document_hash,esgv.created_by AS egress_created_by,
+       esgv.created_at AS egress_created_at
+       FROM egress_security_group_versions esgv
+       JOIN egress_security_groups esg ON esg.id=esgv.security_group_id
+       WHERE esgv.security_group_id=$1 AND esg.tenant_id=$2
+       ORDER BY esgv.version DESC
+       LIMIT 1`,
+      [defaultEgressSecurityGroupId(input.tenantId), input.tenantId],
+    );
+    return fallback.rowCount ? mapEgressVersion(fallback.rows[0]) : null;
+  }
+
+  async listWorkspaceEgressSecurityGroupAssignments(input: { tenantId: string; securityGroupId: string }) {
+    const result = await this.pool.query(
+      `SELECT workspace.subject_id,workspace.grant_id
+       FROM workspaces workspace
+       LEFT JOIN workspace_egress_security_group_assignments assignment
+         ON assignment.tenant_id=workspace.tenant_id
+        AND assignment.subject_id=workspace.subject_id
+        AND assignment.grant_id=workspace.grant_id
+       WHERE workspace.tenant_id=$1
+         AND (
+           assignment.security_group_id=$2
+           OR (
+             assignment.security_group_id IS NULL
+             AND $2=$3
+           )
+         )
+       ORDER BY workspace.subject_id,workspace.grant_id`,
+      [input.tenantId, input.securityGroupId, defaultEgressSecurityGroupId(input.tenantId)],
+    );
+    return result.rows.map((row) => ({
+      subjectId: String(row.subject_id),
+      grantId: String(row.grant_id),
+    }));
+  }
+
+  async assignWorkspaceEgressSecurityGroup(input: { tenantId: string; subjectId: string; grantId: string; assignedBy: string; securityGroupVersionId: string }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const target = await client.query(
+        "SELECT id FROM users WHERE id=$1 AND tenant_id=$2",
+        [input.subjectId, input.tenantId],
+      );
+      if (!target.rowCount) throw new OneComputerError("USER_NOT_FOUND", "Workspace owner not found", 404);
+      const version = await client.query(
+        `SELECT esg.tenant_id,esgv.id AS egress_version_id,esgv.security_group_id,
+         esgv.version AS egress_version,esgv.document AS egress_document,
+         esgv.document_hash AS egress_document_hash,esgv.created_by AS egress_created_by,
+         esgv.created_at AS egress_created_at
+         FROM egress_security_group_versions esgv
+         JOIN egress_security_groups esg ON esg.id=esgv.security_group_id
+         WHERE esgv.id=$1 AND esg.tenant_id=$2`,
+        [input.securityGroupVersionId, input.tenantId],
+      );
+      if (!version.rowCount) throw new OneComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Security group version not found", 404);
+      await client.query(
+        `INSERT INTO workspace_egress_security_group_assignments
+         (tenant_id,subject_id,grant_id,security_group_id,assigned_by,assigned_at)
+         VALUES ($1,$2,$3,$4,$5,now())
+         ON CONFLICT (tenant_id,subject_id,grant_id) DO UPDATE
+         SET security_group_id=EXCLUDED.security_group_id,
+             assigned_by=EXCLUDED.assigned_by,
+             assigned_at=now()`,
+        [input.tenantId, input.subjectId, input.grantId, version.rows[0].security_group_id, input.assignedBy],
+      );
+      await client.query("COMMIT");
+      return mapEgressVersion(version.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async assignEgressSecurityGroup(input: { tenantId: string; targetUserId: string; assignedBy: string; securityGroupVersionId: string }) {

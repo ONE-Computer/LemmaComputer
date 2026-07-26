@@ -80,6 +80,22 @@ application_enabled() {
   [[ ",${ONECOMPUTER_ENABLED_APPLICATIONS}," == *",$1,"* ]]
 }
 
+remove_stale_chrome_singletons() {
+  local chrome_profile="/home/kasm-user/.config/google-chrome"
+  [[ -d "$chrome_profile" ]] || return 0
+  if pgrep -u 1000 -f '/opt/google/chrome/google-chrome|/usr/bin/google-chrome-stable' >/dev/null; then
+    return 0
+  fi
+  # The profile lives on the persistent workspace volume, while Chrome's
+  # process and /tmp socket do not. A recreated container therefore inherits
+  # locks owned by the prior container and Chrome refuses to launch until the
+  # three process-singleton artifacts are removed.
+  rm -f -- \
+    "$chrome_profile/SingletonLock" \
+    "$chrome_profile/SingletonCookie" \
+    "$chrome_profile/SingletonSocket"
+}
+
 require_agent_environment() {
   local prefix="$1"
   local label="$2"
@@ -518,6 +534,7 @@ else
   chmod 0700 /opt/firefox/firefox
 fi
 if application_enabled google-chrome; then
+  remove_stale_chrome_singletons
   chmod 0755 /opt/google/chrome/google-chrome
   install -o 1000 -g 1000 -m 0755 "$launcher_dir/onecomputer-google-chrome.desktop" /home/kasm-user/Desktop/Google-Chrome.desktop
 else

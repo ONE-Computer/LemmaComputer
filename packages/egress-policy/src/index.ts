@@ -69,6 +69,14 @@ export type EgressProxyGrantClaims = {
   jti: string;
 };
 
+export type EgressProxyGrantExpectation = Pick<
+  EgressProxyGrantClaims,
+  "tenantId" | "subjectId" | "workspaceId" | "agentId"
+> & Partial<Pick<
+  EgressProxyGrantClaims,
+  "securityGroupVersionId" | "egressMode" | "policyHash"
+>>;
+
 const encode = (value: string | Buffer) => Buffer.from(value).toString("base64url");
 const sign = (value: string, secret: string) => encode(createHmac("sha256", secret).update(value).digest());
 
@@ -98,7 +106,7 @@ export function issueEgressProxyGrant(
 export function verifyEgressProxyGrant(
   token: string,
   secret: string,
-  expected: Pick<EgressProxyGrantClaims, "tenantId" | "subjectId" | "workspaceId" | "agentId" | "securityGroupVersionId" | "egressMode" | "policyHash">,
+  expected: EgressProxyGrantExpectation,
   now = new Date(),
 ) {
   const [encoded, signature, extra] = token.split(".");
@@ -167,7 +175,7 @@ export function normalizeEgressHost(input: string) {
   return normalized;
 }
 
-export function compileEgressSecurityGroup(input: EgressSecurityGroupVersion): CompiledEgressSecurityGroup {
+export function compileEgressSecurityGroup(input: EgressSecurityGroupVersion): CompiledEgressPolicy {
   const group = egressSecurityGroupVersionSchema.parse(input);
   const rules = group.rules.map((rule) => ({
     ...rule,
@@ -182,16 +190,18 @@ export function compileEgressSecurityGroup(input: EgressSecurityGroupVersion): C
     if (identities.has(identity)) throw new Error(`Duplicate egress rule destination: ${rule.id}`);
     identities.add(identity);
   }
-  return {
+  const compiled = {
     id: group.id,
     securityGroupId: group.securityGroupId,
     tenantId: group.tenantId,
     version: group.version,
     name: group.name,
-    defaultAction: group.defaultAction,
     documentHash: group.documentHash,
     rules,
   };
+  return group.defaultAction === "allow-public-http-https"
+    ? { ...compiled, schemaVersion: 2, mode: "full-web", defaultAction: "allow-public-http-https" }
+    : { ...compiled, defaultAction: "deny" };
 }
 
 export function compileRuntimeEgressPolicy(input: RuntimeEgressPolicy): CompiledEgressPolicy {

@@ -23,6 +23,7 @@ const runtimePolicy = {
 const signedPolicy = policyFixture(runtimePolicy, workspaceId);
 let lastGatewayCredential: string | undefined;
 let lastAgentBridge: { baseUrl: string; token: string } | undefined;
+let lastEgressUpdate: { providerId: string; versionId: string } | undefined;
 let purgedWorkspaceId: string | undefined;
 const adapter: SandboxAdapter = {
   async create({ workspaceId, gateway, agentBridge }) {
@@ -30,11 +31,71 @@ const adapter: SandboxAdapter = {
     lastAgentBridge = agentBridge;
     return { providerId: `provider-${workspaceId}`, state: "ready", failureCode: null };
   },
+  async updateEgressPolicy(providerId, input) {
+    lastEgressUpdate = { providerId, versionId: input.policy.egress!.id };
+  },
   async status(providerId) { return { providerId, state: "ready", failureCode: null }; },
   async open() { return { launchUrl: "https://127.0.0.1:16920/", expiresAt: new Date(Date.now() + 60_000).toISOString() }; },
   async destroy() {},
   async purgeWorkspace(workspaceId) { purgedWorkspaceId = workspaceId; },
 };
+
+test("controller applies a newly signed egress revision without replacing the sandbox", async () => {
+  const egressPolicy = {
+    ...runtimePolicy,
+    policyHash: "c".repeat(64),
+    egressMode: "full-web" as const,
+    egress: {
+      schemaVersion: 2 as const,
+      mode: "full-web" as const,
+      id: "egv_default_v3",
+      securityGroupId: "esg_default",
+      version: 3,
+      name: "Default security group",
+      description: "Default public web with explicit deny exceptions.",
+      defaultAction: "allow-public-http-https" as const,
+      rules: [{
+        id: "deny-chatgpt",
+        action: "deny" as const,
+        protocol: "https" as const,
+        host: "chatgpt.com",
+        includeSubdomains: true,
+        port: 443,
+        purpose: "Block ChatGPT",
+      }],
+      documentHash: "d".repeat(64),
+    },
+  };
+  const signedEgressPolicy = policyFixture(egressPolicy, workspaceId);
+  const app = createControllerServer(adapter, token, signedEgressPolicy.keys);
+  const response = await app.inject({
+    method: "PUT",
+    url: "/internal/v1/sandboxes/provider-existing/egress-policy",
+    headers: { "x-controller-token": token },
+    payload: {
+      workspaceId,
+      policy: egressPolicy,
+      policyBundle: signedEgressPolicy.bundle,
+      egressProxy: {
+        token: "signed-workspace-egress-token-at-least-24-characters",
+        verificationSecret: "workspace-derived-verification-secret-at-least-32-characters",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        expectedGrant: {
+          tenantId: "acme",
+          subjectId: "alex",
+          workspaceId,
+          agentId: egressPolicy.agentId,
+          securityGroupVersionId: egressPolicy.egress.id,
+          egressMode: egressPolicy.egressMode,
+          policyHash: egressPolicy.policyHash,
+        },
+      },
+    },
+  });
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(lastEgressUpdate, { providerId: "provider-existing", versionId: "egv_default_v3" });
+  await app.close();
+});
 
 test("private controller hides routes without its internal token", async () => {
   const app = createControllerServer(adapter, token, signedPolicy.keys);

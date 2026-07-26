@@ -38,13 +38,13 @@ test("Workspace configuration is reached from its overview card instead of a dup
 
 test("workspace creation collects configuration before provisioning", async () => {
   const app = await source("apps/web/src/App.jsx");
-  const createNameStep = app.slice(app.indexOf("const createAdditionalWorkspace"), app.indexOf("const openFirewallFromWorkspace"));
+  const createNameStep = app.slice(app.indexOf("const createAdditionalWorkspace"), app.indexOf("const configureMicrosoft365"));
   const saveStep = app.slice(app.indexOf("const saveWorkspaceSettings"), app.indexOf("const selectNav"));
   assert.match(app, /confirmLabel="Continue to configuration"/);
   assert.match(app, /Choose the profile, applications, agents, and model before ONEComputer starts this workspace/);
   assert.match(createNameStep, /selectWorkspaceConfiguration\(grantId\)/);
   assert.doesNotMatch(createNameStep, /workspaceApi\.create/);
-  assert.ok(saveStep.indexOf("sandboxApi.save(configuration)") < saveStep.indexOf("workspaceApi.create(configuration.grantId)"));
+  assert.ok(saveStep.indexOf("sandboxApi.save(sandboxConfiguration)") < saveStep.indexOf("workspaceApi.create(configuration.grantId)"));
   assert.match(saveStep, /!homeWorkspaces\.some/);
   assert.match(app, /creatingWorkspace \? "Create workspace" : "Save configuration"/);
 });
@@ -63,8 +63,8 @@ test("workspace setup makes disposable-open an explicit accessible choice with d
   assert.match(app, /Non-sensitive work only/);
   assert.match(app, /Stop keeps this workspace and pauses schedules; restarting restores it and resumes future schedules/);
   assert.match(app, /Delete permanently removes its files, schedules, logs, and installed tools/);
-  assert.match(app, /Public web through isolated proxy/);
-  assert.match(app, /Private, local, metadata, reserved, raw-IP, alternate-port, and direct-network destinations remain blocked/);
+  assert.match(app, /Group and rule changes apply live without restarting/);
+  assert.match(app, /Public HTTP and HTTPS are allowed by default; matching Deny rules block exceptions/);
   assert.match(styles, /\.workspace-profile-option:has\(input:focus-visible\)/);
   assert.match(styles, /\.disposable-profile-warning/);
 });
@@ -290,35 +290,36 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
   assert.doesNotMatch(styles, /\.sidebar-chat-history\s*\{[\s\S]*?max-height: clamp/);
 });
 
-test("Firewall presents tenant-wide managed and open effective policies with explicit deny rules", async () => {
+test("Firewall is a security-group library and workspace attachment stays in Workspace", async () => {
   const [app, styles] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/styles.css"),
   ]);
   const firewallScreen = app.slice(app.indexOf("function FirewallScreen"), app.indexOf("function ActivityScreen"));
-  assert.match(firewallScreen, /Administrator view/);
-  assert.match(firewallScreen, /You can see firewall policies for every workspace/);
-  assert.doesNotMatch(firewallScreen, /Manage security groups/);
-  assert.match(firewallScreen, />Add rule<\/button>/);
-  assert.match(firewallScreen, /<th scope="col">Workspace<\/th>/);
-  assert.match(firewallScreen, /<th scope="col">Owner<\/th>/);
-  assert.match(firewallScreen, /<th scope="col">Security group<\/th>/);
-  assert.match(app, /function FirewallAttachmentDialog/);
+  assert.doesNotMatch(firewallScreen, /Workspace attachments/);
+  assert.match(firewallScreen, /Create security group<\/button>/);
+  assert.match(firewallScreen, /<h2 id="firewall-security-groups-heading">Security groups<\/h2>/);
+  assert.match(firewallScreen, /Default applies to new workspaces/);
+  assert.doesNotMatch(firewallScreen, /Effective workspace policies/);
+  assert.doesNotMatch(firewallScreen, /<table>/);
+  assert.match(app, /assignWorkspaceEgressSecurityGroup/);
+  assert.match(app, /Security-group changes apply live/);
   assert.match(app, /function FirewallEditorDialog/);
-  assert.match(app, /function FirewallAddRuleDialog/);
-  assert.match(app, /const \[selectedId, setSelectedId\] = useState\("__new__"\)/);
+  assert.doesNotMatch(app, /function FirewallAddRuleDialog/);
+  assert.doesNotMatch(app, /setAddRuleContext/);
+  assert.match(app, /Saved changes apply live to every workspace using the group/);
+  assert.match(app, /id="firewall-add-rule-heading">Add rule/);
   assert.match(app, /value: "deny", label: "Deny"/);
-  assert.match(app, /open workspaces use deny rules as exceptions/);
-  assert.match(firewallScreen, /All public destinations/);
-  assert.match(firewallScreen, /HTTP \/ HTTPS/);
-  assert.match(firewallScreen, /80 \/ 443/);
-  assert.match(firewallScreen, /Add deny rule/);
-  assert.match(firewallScreen, /setAddRuleContext/);
+  assert.match(firewallScreen, /firewall-default-badge/);
+  assert.match(firewallScreen, /Built-in default/);
+  assert.match(app, /Default security group behavior/);
+  assert.match(firewallScreen, /Manage group/);
+  assert.doesNotMatch(firewallScreen, /Add deny rule/);
   assert.doesNotMatch(firewallScreen, /onClick=\{\(\) => setEditor\(\{ securityGroupId: latestVersions\[0\]/);
-  assert.doesNotMatch(app.slice(app.indexOf("function FirewallAddRuleDialog"), app.indexOf("function AdminScreen")), /firewall-editor-rule-list/);
   assert.match(app, /<ModalDialog/);
   assert.doesNotMatch(firewallScreen, /drawer/);
-  assert.match(styles, /\.firewall-table-scroll\s*\{[^}]*overflow-x: auto;[^}]*contain: paint;/);
+  assert.match(styles, /\.firewall-security-groups\s*\{/);
+  assert.match(styles, /\.firewall-group-toolbar/);
   assert.match(styles, /\.modal-card\.firewall-editor-modal\s*\{\s*width: min\(100%, 880px\)/);
 });
 
@@ -329,7 +330,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
     source("apps/web/src/ui.css"),
   ]);
   assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog \}/);
-  assert.ok((app.match(/<SelectMenu/g) ?? []).length >= 14);
+  assert.ok((app.match(/<SelectMenu/g) ?? []).length >= 9);
   assert.doesNotMatch(app, /<select/);
   assert.match(ui, /export function SelectMenu/);
   assert.match(ui, /role="combobox"/);
@@ -338,7 +339,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
   assert.match(ui, /createPortal/);
   assert.match(uiStyles, /\.select-menu-popup/);
   assert.match(uiStyles, /\.select-menu-trigger\[data-state="open"\]/);
-  assert.match(app, /id="firewall-rule-search" name="firewall-rule-search"/);
-  assert.match(app, /id="firewall-rules-only" name="firewall-rules-only"/);
+  assert.match(app, /id="firewall-security-group-search" name="firewall-security-group-search"/);
+  assert.match(app, /ariaLabel="Security group"/);
   assert.match(await source("apps/web/src/styles.css"), /@media \(max-width: 1180px\)[\s\S]*?\.firewall-page-heading[\s\S]*?flex-direction: column/);
 });

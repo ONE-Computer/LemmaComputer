@@ -122,5 +122,5 @@ export const adminApi = {
   saveMcpPolicy: (tools) => request("/api/v1/admin/mcp-policy", { method: "PUT", headers: jsonHeaders, body: JSON.stringify({ tools }) }),
   egressSecurityGroups: () => request("/api/v1/admin/egress-security-groups"),
   saveEgressSecurityGroup: (document) => request("/api/v1/admin/egress-security-groups", mutation("POST", document)),
-  assignEgressSecurityGroup: (userId, securityGroupVersionId) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/egress-security-group`, mutation("POST", { securityGroupVersionId })),
+  assignWorkspaceEgressSecurityGroup: (grantId, securityGroupVersionId) => request(`/api/v1/admin/workspaces/${encodeURIComponent(grantId)}/egress-security-group`, mutation("POST", { securityGroupVersionId })),
 };

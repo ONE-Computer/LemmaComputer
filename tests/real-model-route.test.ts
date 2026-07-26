@@ -181,6 +181,11 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
     assert.match(entrypoint, new RegExp(selection));
   }
   assert.match(entrypoint, /chmod 0700 \/opt\/google\/chrome\/google-chrome/);
+  assert.match(entrypoint, /remove_stale_chrome_singletons/);
+  for (const singleton of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+    assert.match(entrypoint, new RegExp(singleton));
+  }
+  assert.match(entrypoint, /pgrep -u 1000/);
   assert.match(entrypoint, /chmod 0700 \/usr\/local\/bin\/onecomputer-claude/);
   assert.match(entrypoint, /chmod 0700 \/usr\/local\/bin\/onecomputer-hermes-desktop/);
   assert.match(gatewayProxy, /\{4312, 4314, 4315, 4316, 4317\}/);
