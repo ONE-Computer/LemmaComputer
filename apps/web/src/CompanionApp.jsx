@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Add24Regular } from "@fluentui/react-icons/svg/add";
 import { ArrowClockwise24Regular } from "@fluentui/react-icons/svg/arrow-clockwise";
-import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { CheckmarkCircle24Regular } from "@fluentui/react-icons/svg/checkmark-circle";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
 import { Clock24Regular } from "@fluentui/react-icons/svg/clock";
@@ -23,7 +21,7 @@ import {
   enableCompanionPush,
   removeCompanionPush,
 } from "./companion-push.js";
-import { ConfirmDialog, SelectMenu } from "./ui.jsx";
+import { ConfirmDialog } from "./ui.jsx";
 import "./companion.css";
 
 const PROTOCOL_VERSION = "onecomputer-companion-push-0.1";
@@ -244,39 +242,8 @@ function CompanionChatView({
   onLoadOlder,
   onHistoryMetadataChange,
 }) {
-  const sessionOptions = [
-    { value: "", label: "New chat" },
-    ...sessions.map((item, index) => ({
-      value: item.id,
-      label: item.title || `Conversation ${sessions.length - index}`,
-    })),
-  ];
-
   return (
     <section className="companion-chat-shell" aria-label="Chat with your workspace agent">
-      <header className="companion-chat-toolbar">
-        <div>
-          <p>Direct chat</p>
-          <SelectMenu
-            className="companion-chat-session-menu"
-            value={activeSessionId}
-            options={sessionOptions}
-            onValueChange={onSessionChange}
-            ariaLabel="Choose recent chat"
-          />
-        </div>
-        <div>
-          {historyHasMore && (
-            <button className="companion-chat-history-button" type="button" disabled={historyLoadingMore} onClick={onLoadOlder}>
-              {historyLoadingMore ? "Loading" : "Older"}
-            </button>
-          )}
-          <button className="companion-chat-new-button" type="button" onClick={() => onSessionChange("")}>
-            <Add24Regular aria-hidden="true" />
-            <span>New chat</span>
-          </button>
-        </div>
-      </header>
       {workspaceError && <div className="companion-message error companion-chat-error" role="alert">{workspaceError}</div>}
       <ChatScreen
         workspace={workspace}
@@ -292,6 +259,11 @@ function CompanionChatView({
         onAgentChange={onAgentChange}
         historyLoadRequest={historyLoadRequest}
         onHistoryMetadataChange={onHistoryMetadataChange}
+        sessions={sessions}
+        companionComposer
+        historyHasMore={historyHasMore}
+        historyLoadingMore={historyLoadingMore}
+        onLoadOlder={onLoadOlder}
       />
     </section>
   );
@@ -737,9 +709,15 @@ export function CompanionApp() {
       <a className="skip-link" href="#companion-main">Skip to main content</a>
       <header className="companion-topbar" inert={confirmRemove ? true : undefined}>
         <Brand />
-        <div>
+        <div className="companion-topbar-actions">
           {installPrompt && <button className="companion-quiet" type="button" onClick={install}>Install app</button>}
-          <button className="companion-account" type="button" onClick={logout} aria-label={`Sign out ${session.user.displayName}`}><span>{session.user.displayName}</span><SignOut24Regular aria-hidden="true" /></button>
+          <nav className="companion-mode-switch" aria-label="Primary navigation">
+            <button className={activeView === "chat" ? "active" : ""} type="button" aria-current={activeView === "chat" ? "page" : undefined} onClick={() => selectView("chat")}>Chat</button>
+            <button className={activeView === "companion" ? "active" : ""} type="button" aria-current={activeView === "companion" ? "page" : undefined} onClick={() => selectView("companion")} aria-label="Companion">
+              <span className="companion-mode-shield"><ShieldCheckmark24Regular aria-hidden="true" />{request && <em aria-label="1 pending approval">1</em>}</span>
+            </button>
+          </nav>
+          <button className="companion-account" type="button" onClick={logout} aria-label={`Sign out ${session.user.displayName}`}><SignOut24Regular aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -877,19 +855,6 @@ export function CompanionApp() {
         </div>}
         </>}
       </main>
-      <nav className="companion-destinations" aria-label="Companion navigation" inert={confirmRemove ? true : undefined}>
-        <button className={activeView === "chat" ? "active" : ""} type="button" aria-current={activeView === "chat" ? "page" : undefined} onClick={() => selectView("chat")}>
-          <Bot24Regular aria-hidden="true" />
-          <span>Chat</span>
-        </button>
-        <button className={activeView === "companion" ? "active" : ""} type="button" aria-current={activeView === "companion" ? "page" : undefined} onClick={() => selectView("companion")}>
-          <span className="companion-destination-icon">
-            <ShieldCheckmark24Regular aria-hidden="true" />
-            {request && <em aria-label="1 pending approval">1</em>}
-          </span>
-          <span>Companion</span>
-        </button>
-      </nav>
       {confirmRemove && (
         <ConfirmDialog
           title="Remove this companion browser?"

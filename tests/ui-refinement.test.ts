@@ -109,7 +109,7 @@ test("critical UI paths use owned accessible dialogs, skip targets, live state, 
   assert.doesNotMatch(app, /dateTime="2026-/);
 });
 
-test("Companion exposes Chat as a parallel mobile destination without replacing approval navigation", async () => {
+test("Companion exposes Chat and approvals through the compact top-bar switch", async () => {
   const [app, companion, companionStyles, manifest] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/CompanionApp.jsx"),
@@ -118,19 +118,24 @@ test("Companion exposes Chat as a parallel mobile destination without replacing 
   ]);
   assert.match(app, /export function ChatScreen/);
   assert.match(companion, /import \{ ChatScreen \} from "\.\/App\.jsx"/);
-  assert.match(companion, /className="companion-destinations"/);
-  assert.match(companion, /aria-label="Companion navigation"/);
-  assert.match(companion, /<span>Chat<\/span>/);
-  assert.match(companion, /<span>Companion<\/span>/);
+  assert.match(companion, /className="companion-mode-switch"/);
+  assert.match(companion, /aria-label="Primary navigation"/);
+  assert.match(companion, /aria-label="Companion"/);
+  assert.match(companion, /Sign out \$\{session\.user\.displayName\}/);
   assert.match(companion, /activeView === "chat"/);
   assert.match(companion, /<ChatScreen/);
+  assert.match(companion, /companionComposer/);
   assert.match(companion, /className="companion-tabs"/);
   assert.match(companion, /Approvals\{request/);
   assert.match(companion, /Activity/);
-  assert.match(companion, /ariaLabel="Choose recent chat"/);
+  assert.doesNotMatch(companion, /companion-destinations/);
+  assert.match(app, /companion-chat-composer/);
+  assert.match(app, /New conversation/);
+  assert.match(app, /Recent conversations/);
   assert.match(app, /ariaLabel="Choose workspace"/);
-  assert.match(companionStyles, /\.companion-destinations\s*\{[\s\S]*?position: fixed/);
-  assert.match(companionStyles, /@media \(max-width: 600px\)[\s\S]*?\.companion-destinations\s*\{[\s\S]*?bottom: 0/);
+  assert.match(companionStyles, /\.companion-mode-switch\s*\{/);
+  assert.match(companionStyles, /\.companion-chat-composer\s*\{/);
+  assert.doesNotMatch(companionStyles, /\.companion-destinations/);
   assert.match(manifest, /Chat with workspace agents and review protected ONEComputer actions/);
 });
 
