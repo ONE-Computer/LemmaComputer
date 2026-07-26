@@ -5,6 +5,7 @@ import { CompanionApp } from "./CompanionApp.jsx";
 import { AppErrorBoundary } from "./ui.jsx";
 import "./styles.css";
 import "./ui.css";
+import "./companion.css";
 
 const RootApp = window.location.pathname === "/companion" ? CompanionApp : App;
 

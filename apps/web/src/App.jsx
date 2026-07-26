@@ -1878,6 +1878,7 @@ function ChatConversation({
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [historyState, setHistoryState] = useState("ready");
   const [historyError, setHistoryError] = useState("");
+  const [historyReload, setHistoryReload] = useState(0);
   const [chatActionsOpen, setChatActionsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const transcriptRef = useRef(null);
@@ -1951,7 +1952,7 @@ function ChatConversation({
         setHistoryState("error");
       });
     return () => { active = false; };
-  }, [activeSessionId, workspaceId, agentId, setMessages, clearError]);
+  }, [activeSessionId, workspaceId, agentId, historyReload, setMessages, clearError]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
@@ -2116,7 +2117,17 @@ function ChatConversation({
           </article>
         )}
       </div>
-      {(error || historyError) && <div className="workspace-error chat-error" role="alert"><Info24Regular aria-hidden="true" /><span>{error?.message || historyError}</span></div>}
+      {(error || historyError) && (
+        <div className="workspace-error chat-error" role="alert">
+          <Info24Regular aria-hidden="true" />
+          <span>{error?.message || historyError}</span>
+          {historyError && (
+            <button type="button" className="chat-error-retry" onClick={() => setHistoryReload((value) => value + 1)}>
+              Try again
+            </button>
+          )}
+        </div>
+      )}
       <form className={`chat-composer${companionComposer ? " companion-chat-composer" : ""}`} onSubmit={submit}>
         {attachments.length > 0 && (
           <div className="chat-attachment-list" aria-label="Attachments">
@@ -2441,10 +2452,10 @@ export function ChatScreen({
     onAgentChange?.(workspace?.id, catalogId);
   };
   const workspaceOptions = workspaces?.length ? workspaces : workspace ? [workspace] : [];
-  const hasContextControls = workspaceOptions.length > 1 || agents.length > 1;
+  const hasContextControls = workspaceOptions.length > 0 || agents.length > 0;
   const contextControls = hasContextControls ? (
     <>
-      {workspaceOptions.length > 1 && <div className="chat-agent-selector">
+      {workspaceOptions.length > 0 && <div className="chat-agent-selector">
         <span className="chat-agent-selector-label">Workspace</span>
         <SelectMenu
           value={workspace?.id ?? ""}
@@ -2453,7 +2464,7 @@ export function ChatScreen({
           options={workspaceOptions.map((item) => ({ value: item.id, label: workspaceName(item) }))}
         />
       </div>}
-      {agents.length > 1 && <div className="chat-agent-selector">
+      {agents.length > 0 && <div className="chat-agent-selector">
         <span className="chat-agent-selector-label">Agent</span>
         <SelectMenu
           value={activeAgentId}
@@ -3786,6 +3797,11 @@ export function App() {
             setChatHistoryHasMore(hasMore);
             setChatHistoryLoadingMore(loading);
           }}
+          sessions={chatSessions}
+          companionComposer
+          historyHasMore={chatHistoryHasMore}
+          historyLoadingMore={chatHistoryLoadingMore}
+          onLoadOlder={() => setChatHistoryLoadRequest((value) => value + 1)}
         />}
         {activeNav === "Workspace" && selectedSandboxGrantId && <WorkspaceConfigurationScreen
           settings={sandboxSettings}

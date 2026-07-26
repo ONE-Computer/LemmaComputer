@@ -44,6 +44,7 @@ export const chatApi = {
   ),
   messages: (workspaceId, catalogId, sessionId) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+    { cache: "no-store" },
   ),
 };
 

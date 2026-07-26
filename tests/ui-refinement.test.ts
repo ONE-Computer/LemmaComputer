@@ -110,10 +110,11 @@ test("critical UI paths use owned accessible dialogs, skip targets, live state, 
 });
 
 test("Companion exposes Chat and approvals through the compact top-bar switch", async () => {
-  const [app, companion, companionStyles, manifest] = await Promise.all([
+  const [app, companion, companionStyles, main, manifest] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/CompanionApp.jsx"),
     source("apps/web/src/companion.css"),
+    source("apps/web/src/main.jsx"),
     source("apps/web/public/companion.webmanifest"),
   ]);
   assert.match(app, /export function ChatScreen/);
@@ -135,9 +136,12 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
   assert.match(app, /New conversation/);
   assert.match(app, /Recent conversations/);
   assert.match(app, /ariaLabel="Choose workspace"/);
+  assert.match(app, /sessions=\{chatSessions\}[\s\S]*companionComposer[\s\S]*historyHasMore=\{chatHistoryHasMore\}/);
+  assert.match(app, /className="chat-error-retry"[\s\S]*setHistoryReload/);
+  assert.match(main, /import "\.\/companion\.css"/);
   assert.match(companionStyles, /\.companion-mode-switch\s*\{/);
   assert.match(companionStyles, /\.companion-chat-composer\s*\{/);
-  assert.match(companionStyles, /\.companion-chat-shell \.companion-chat-context-button\s*\{/);
+  assert.match(companionStyles, /\.companion-chat-context-button\s*\{/);
   assert.doesNotMatch(companionStyles, /\.companion-destinations/);
   assert.match(manifest, /Chat with workspace agents and review protected ONEComputer actions/);
 });
