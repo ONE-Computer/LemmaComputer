@@ -68,7 +68,7 @@ test("connector discovery and registration keep provider credentials inside Lite
       response.end(JSON.stringify({ ok: true }));
       return;
     }
-    if (request.url?.startsWith("/v1/mcp/server/oauth/onecomputer-discovery-") && request.url.includes("/authorize?")) {
+    if (request.url?.startsWith("/v1/mcp/server/oauth/onecomputer_discovery_") && request.url.includes("/authorize?")) {
       response.statusCode = 302;
       response.setHeader("location", "https://login.acme.example/oauth/authorize");
       response.end();
@@ -108,6 +108,8 @@ test("connector discovery and registration keep provider credentials inside Lite
     });
     const discovery = requests.find((request) => request.url === "/v1/mcp/server/oauth/session")!;
     const registration = requests.find((request) => request.url === "/v1/mcp/server" && request.method === "POST")!;
+    assert.match(String(discovery.body.server_name), /^onecomputer_discovery_[a-f0-9]{20}$/);
+    assert.doesNotMatch(String(discovery.body.server_name), /-/);
     assert.deepEqual(discovery.body.credentials, {
       client_id: "acme-client",
       client_secret: "acme-secret",

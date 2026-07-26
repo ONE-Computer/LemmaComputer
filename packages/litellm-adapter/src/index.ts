@@ -410,7 +410,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   }
 
   async discoverOAuthMcpServer(input: Omit<McpConnectorRegistrationInput, "serverId" | "serverName"> & { callbackUrl: string }) {
-    const temporaryId = `onecomputer-discovery-${createHash("sha256").update(`${input.url}:${Date.now()}`).digest("hex").slice(0, 20)}`;
+    const temporaryId = `onecomputer_discovery_${createHash("sha256").update(`${input.url}:${Date.now()}`).digest("hex").slice(0, 20)}`;
     const payload = this.mcpRegistrationPayload({
       ...input,
       serverId: temporaryId,
