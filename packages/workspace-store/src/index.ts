@@ -294,8 +294,13 @@ export interface OpenVtcApprovalStore {
   listOpenVtcCompanionSubscriptions(identity: IdentityContext): Promise<OpenVtcCompanionSubscriptionRecord[]>;
   getOpenVtcCompanionSubscriptionForApprover(approverId: string): Promise<OpenVtcCompanionSubscriptionRecord | null>;
   revokeOpenVtcCompanionSubscription(identity: IdentityContext, subscriptionId: string, revokedAt: Date): Promise<boolean>;
-  claimOpenVtcCompanionPushDelivery(input: {
+  enqueueOpenVtcCompanionPushDelivery(input: {
     id: string;
+    taskId: string;
+    subscriptionId: string;
+    queuedAt: Date;
+  }): Promise<boolean>;
+  claimOpenVtcCompanionPushDelivery(input: {
     taskId: string;
     subscriptionId: string;
     claimedAt: Date;
@@ -1485,20 +1490,30 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return Boolean(result.rowCount);
   }
 
-  async claimOpenVtcCompanionPushDelivery(input: { id: string; taskId: string; subscriptionId: string; claimedAt: Date }) {
+  async enqueueOpenVtcCompanionPushDelivery(input: { id: string; taskId: string; subscriptionId: string; queuedAt: Date }) {
     const result = await this.pool.query(
       `INSERT INTO openvtc_companion_push_deliveries (
         id,task_id,subscription_id,state,attempt_count,available_at,created_at,updated_at
-      ) VALUES ($1,$2,$3,'queued',1,$4,$4,$4)
-      ON CONFLICT (task_id,subscription_id) DO UPDATE SET
-        state='queued',attempt_count=openvtc_companion_push_deliveries.attempt_count+1,
-        updated_at=EXCLUDED.updated_at
-      WHERE (openvtc_companion_push_deliveries.state='retry'
-          AND openvtc_companion_push_deliveries.available_at<=EXCLUDED.available_at)
-        OR (openvtc_companion_push_deliveries.state='queued'
-          AND openvtc_companion_push_deliveries.updated_at<=EXCLUDED.available_at - interval '30 seconds')
+      ) VALUES ($1,$2,$3,'queued',0,$4,$4,$4)
+      ON CONFLICT (task_id,subscription_id) DO NOTHING
       RETURNING id`,
-      [input.id, input.taskId, input.subscriptionId, input.claimedAt],
+      [input.id, input.taskId, input.subscriptionId, input.queuedAt],
+    );
+    return Boolean(result.rowCount);
+  }
+
+  async claimOpenVtcCompanionPushDelivery(input: { taskId: string; subscriptionId: string; claimedAt: Date }) {
+    const result = await this.pool.query(
+      `UPDATE openvtc_companion_push_deliveries SET
+        state='queued',attempt_count=attempt_count+1,updated_at=$3
+       WHERE task_id=$1 AND subscription_id=$2
+         AND (
+           (state='retry' AND available_at<=$3)
+           OR (state='queued' AND attempt_count=0 AND available_at<=$3)
+           OR (state='queued' AND attempt_count>0 AND updated_at<=$3::timestamptz - interval '30 seconds')
+         )
+      RETURNING id`,
+      [input.taskId, input.subscriptionId, input.claimedAt],
     );
     return Boolean(result.rowCount);
   }
@@ -1511,7 +1526,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
        JOIN openvtc_consent_tasks t ON t.id=d.task_id AND t.state IN ('queued','delivered')
        JOIN governed_operations o ON o.id=t.operation_id AND o.state='approval_required' AND o.expires_at>$1
        WHERE (d.state='retry' AND d.available_at<=$1)
-          OR (d.state='queued' AND d.updated_at<=$1::timestamptz - interval '30 seconds')
+          OR (d.state='queued' AND d.attempt_count=0 AND d.available_at<=$1)
+          OR (d.state='queued' AND d.attempt_count>0 AND d.updated_at<=$1::timestamptz - interval '30 seconds')
        ORDER BY d.available_at,d.created_at
        LIMIT $2`,
       [now, limit],
@@ -2280,18 +2296,33 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     return true;
   }
 
-  async claimOpenVtcCompanionPushDelivery(input: { id: string; taskId: string; subscriptionId: string; claimedAt: Date }) {
+  async enqueueOpenVtcCompanionPushDelivery(input: { id: string; taskId: string; subscriptionId: string; queuedAt: Date }) {
+    const key = `${input.taskId}:${input.subscriptionId}`;
+    if (this.openVtcCompanionPushDeliveries.has(key)) return false;
+    this.openVtcCompanionPushDeliveries.set(key, {
+      taskId: input.taskId,
+      subscriptionId: input.subscriptionId,
+      state: "queued",
+      attemptCount: 0,
+      availableAt: input.queuedAt,
+    });
+    return true;
+  }
+
+  async claimOpenVtcCompanionPushDelivery(input: { taskId: string; subscriptionId: string; claimedAt: Date }) {
     const key = `${input.taskId}:${input.subscriptionId}`;
     const prior = this.openVtcCompanionPushDeliveries.get(key);
-    if (prior && !(
+    if (!prior || !(
       prior.state === "retry" && prior.availableAt <= input.claimedAt
-      || prior.state === "queued" && prior.availableAt <= new Date(input.claimedAt.getTime() - 30_000)
+      || prior.state === "queued" && prior.attemptCount === 0 && prior.availableAt <= input.claimedAt
+      || prior.state === "queued" && prior.attemptCount > 0
+        && prior.availableAt <= new Date(input.claimedAt.getTime() - 30_000)
     )) return false;
     this.openVtcCompanionPushDeliveries.set(key, {
       taskId: input.taskId,
       subscriptionId: input.subscriptionId,
       state: "queued",
-      attemptCount: (prior?.attemptCount ?? 0) + 1,
+      attemptCount: prior.attemptCount + 1,
       availableAt: input.claimedAt,
     });
     return true;
@@ -2300,7 +2331,9 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async listDueOpenVtcCompanionPushDeliveries(now: Date, limit: number) {
     return [...this.openVtcCompanionPushDeliveries.values()]
       .filter((delivery) => delivery.state === "retry" && delivery.availableAt <= now
-        || delivery.state === "queued" && delivery.availableAt <= new Date(now.getTime() - 30_000))
+        || delivery.state === "queued" && delivery.attemptCount === 0 && delivery.availableAt <= now
+        || delivery.state === "queued" && delivery.attemptCount > 0
+          && delivery.availableAt <= new Date(now.getTime() - 30_000))
       .slice(0, limit)
       .flatMap((delivery) => {
         const subscription = this.openVtcCompanionSubscriptions.get(delivery.subscriptionId);

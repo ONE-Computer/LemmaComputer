@@ -136,6 +136,7 @@ const auditTargetLabel = (record: GovernedOperationRecord) => {
   const context = ownedRecord(ownedRecord(record.arguments)?.onecomputerAudit);
   return ({
     recipient: "To",
+    chat: "Chat",
     channel: "Channel",
     file: "File",
     folder: "Folder",

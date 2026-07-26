@@ -56,8 +56,36 @@ const teamsMessageBody = z.strictObject({
 });
 const operationAuditContext = z.strictObject({
   target: z.string().trim().min(1).max(512),
-  targetType: z.enum(["recipient", "channel", "file", "folder", "event", "message", "item", "destination"]),
+  targetType: z.enum(["recipient", "chat", "channel", "file", "folder", "event", "message", "item", "destination"]),
 });
+type OperationAuditTargetType = z.infer<typeof operationAuditContext>["targetType"];
+
+const governedTargetType: Partial<Record<string, OperationAuditTargetType>> = Object.freeze({
+  "send-chat-message": "chat",
+  "reply-to-chat-message": "chat",
+  "send-channel-message": "channel",
+  "reply-to-channel-message": "channel",
+});
+
+const canonicalizeOperationAudit = (
+  toolName: string,
+  argumentsValue: Record<string, OwnedJson>,
+): Record<string, OwnedJson> => {
+  const targetType = governedTargetType[toolName];
+  if (!targetType) return argumentsValue;
+  const context = argumentsValue.onecomputerAudit;
+  if (!context || typeof context !== "object" || Array.isArray(context)) return argumentsValue;
+  return {
+    ...argumentsValue,
+    onecomputerAudit: {
+      ...context,
+      // The tool determines whether a destination is a chat or a channel.
+      // Keeping this out of model control makes retries of the same provider
+      // effect converge on one active governed operation.
+      targetType,
+    },
+  };
+};
 const withId = (key: string) => z.strictObject({ [key]: id });
 const withBody = z.strictObject({ body });
 const withIdAndBody = (key: string) => z.strictObject({ [key]: id, body });
@@ -330,7 +358,7 @@ export class McpPolicyService {
         && !Array.isArray(request.arguments)
         ? Object.fromEntries(Object.entries(request.arguments).filter(([key]) => !["confirm", "excludeResponse"].includes(key)))
         : request.arguments;
-      canonicalArguments = capability.parse(policyArguments);
+      canonicalArguments = canonicalizeOperationAudit(request.toolName, capability.parse(policyArguments));
     } catch {
       return denied("MCP_ARGUMENTS_OUT_OF_POLICY", capability);
     }

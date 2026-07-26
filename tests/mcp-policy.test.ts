@@ -258,6 +258,21 @@ test("Teams reads are bounded and Teams sends are held for approval", async () =
   const operation = await store.getOwnedOperation(identity, held.operationId!);
   assert.equal(operation?.toolName, "send-chat-message");
   assert.equal((operation?.arguments as Record<string, unknown>).confirm, true);
+  assert.deepEqual((operation?.arguments as Record<string, unknown>).onecomputerAudit, {
+    target: "Alex Morgan",
+    targetType: "chat",
+  });
+  const semanticRetry = await policy.authorize({
+    ...base,
+    toolName: "send-chat-message",
+    arguments: {
+      chatId: "chat-1",
+      onecomputerAudit: { target: "Alex Morgan", targetType: "channel" },
+      body: { body: { contentType: "html", content: "Hello" } },
+      confirm: true,
+    },
+  }, "teams-send-semantic-retry");
+  assert.equal(semanticRetry.operationId, held.operationId);
   assert.equal((await policy.authorize({
     ...base,
     toolName: "send-chat-message",

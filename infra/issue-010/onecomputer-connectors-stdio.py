@@ -45,11 +45,11 @@ AUDIT_CONTEXT_SCHEMA = {
             "type": "string",
             "minLength": 1,
             "maxLength": 512,
-            "description": "Exact human-facing recipient, file, folder, event, message, channel, item, or destination selected for this action.",
+            "description": "Exact human-facing recipient, chat, file, folder, event, message, channel, item, or destination selected for this action.",
         },
         "targetType": {
             "type": "string",
-            "enum": ["recipient", "channel", "file", "folder", "event", "message", "item", "destination"],
+            "enum": ["recipient", "chat", "channel", "file", "folder", "event", "message", "item", "destination"],
         },
     },
     "required": ["target", "targetType"],
@@ -77,8 +77,8 @@ LIST_JOINED_TEAMS_DESCRIPTION = """List every Microsoft Teams team joined by the
 
 This Graph endpoint does not accept generic OData paging or filtering options. Call it with no arguments, then match the returned displayName and id locally. Use the selected id with list-team-channels."""
 TEAMS_TOOL_DESCRIPTIONS = {
-    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation selected during discovery. ONEComputer obtains signed approval before sending.",
-    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation. ONEComputer obtains signed approval before sending.",
+    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation selected during discovery with targetType chat. ONEComputer obtains signed approval before sending.",
+    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation with targetType chat. ONEComputer obtains signed approval before sending.",
     "send-channel-message": "Post one HTML message to a Teams channel. Get teamId from list-joined-teams and channelId from list-team-channels. Put the post in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact team and channel display names selected during discovery. ONEComputer obtains signed approval before posting.",
     "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Set onecomputerAudit to the exact team and channel display names. Put the reply in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before posting.",
 }

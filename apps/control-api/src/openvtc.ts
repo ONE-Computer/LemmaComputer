@@ -174,7 +174,7 @@ export class OpenVtcApprovalCoordinator {
   private async ensureTaskForApprover(identity: IdentityContext, operation: GovernedOperationRecord, approver: OpenVtcApproverRecord) {
     const existing = await this.store.getOpenVtcConsentTaskForApprover(identity, operation.id, approver.id);
     if (existing) {
-      if (["queued", "delivered"].includes(existing.state)) await this.dispatchCompanionPush(existing, approver);
+      if (["queued", "delivered"].includes(existing.state)) await this.enqueueCompanionPush(existing, approver);
       return existing;
     }
     const createdAt = new Date();
@@ -219,7 +219,7 @@ export class OpenVtcApprovalCoordinator {
       createdAt,
       expiresAt: operation.expiresAt,
     });
-    if (task) await this.dispatchCompanionPush(task, approver);
+    if (task) await this.enqueueCompanionPush(task, approver);
     return task;
   }
 
@@ -324,7 +324,6 @@ export class OpenVtcApprovalCoordinator {
     for (const delivery of due) {
       const claimedAt = new Date();
       if (!await this.store.claimOpenVtcCompanionPushDelivery({
-        id: randomUUID(),
         taskId: delivery.taskId,
         subscriptionId: delivery.subscriptionId,
         claimedAt,
@@ -410,18 +409,16 @@ export class OpenVtcApprovalCoordinator {
     return approver;
   }
 
-  private async dispatchCompanionPush(task: OpenVtcConsentTaskRecord, approver: OpenVtcApproverRecord) {
+  private async enqueueCompanionPush(task: OpenVtcConsentTaskRecord, approver: OpenVtcApproverRecord) {
     if (!this.pushProvider) return;
     const subscription = await this.store.getOpenVtcCompanionSubscriptionForApprover(approver.id);
     if (!subscription) return;
-    const claimedAt = new Date();
-    if (!await this.store.claimOpenVtcCompanionPushDelivery({
+    await this.store.enqueueOpenVtcCompanionPushDelivery({
       id: randomUUID(),
       taskId: task.id,
       subscriptionId: subscription.id,
-      claimedAt,
-    })) return;
-    await this.deliverClaimedCompanionPush(task.id, subscription.id, subscription.subscriptionCiphertext);
+      queuedAt: new Date(),
+    });
   }
 
   private async deliverClaimedCompanionPush(taskId: string, subscriptionId: string, subscriptionCiphertext: string) {

@@ -102,6 +102,11 @@ test("companion subscriptions are identity-bound, redacted, and receive one dedu
 
   await coordinator.ensureTask(identity, operation);
   await coordinator.ensureTask(identity, operation);
+  assert.equal(provider.sent.length, 0);
+  assert.equal(await coordinator.flushCompanionPushQueue(), 2);
+  assert.equal(provider.sent.length, 2);
+  await coordinator.ensureTask(identity, operation);
+  assert.equal(await coordinator.flushCompanionPushQueue(), 0);
   assert.equal(provider.sent.length, 2);
 
   const publicStatus = await coordinator.companions(identity);
@@ -110,6 +115,69 @@ test("companion subscriptions are identity-bound, redacted, and receive one dedu
   assert.ok(!serialized.includes("push.example.test"));
   assert.ok(!serialized.includes("p".repeat(65)));
   assert.ok(!serialized.includes("a".repeat(22)));
+});
+
+test("approval creation never waits for Companion network delivery", async () => {
+  const store = new MemoryWorkspaceStore();
+  let releasePush = () => {};
+  let markStarted = () => {};
+  const pushGate = new Promise<void>((resolve) => { releasePush = resolve; });
+  const pushStarted = new Promise<void>((resolve) => { markStarted = resolve; });
+  class SlowPushProvider extends FakePushProvider {
+    override async sendHint(ciphertext: string) {
+      markStarted();
+      await pushGate;
+      return super.sendHint(ciphertext);
+    }
+  }
+  const provider = new SlowPushProvider();
+  const coordinator = new OpenVtcApprovalCoordinator(store, new TestOpenVtcConsentClient(), provider);
+  const approver = await enroll(store, "did:key:zSlowCompanionA");
+  await coordinator.subscribeCompanion(identity, {
+    approverDid: approver.approverDid,
+    installationId: randomUUID(),
+    browserFamily: "edge",
+    platform: "windows",
+    subscription: subscription("slow"),
+  });
+
+  const workspace = await store.createOrGet(identity, "slow-companion", randomUUID());
+  const now = new Date();
+  const operation = await store.createGovernedOperation({
+    id: randomUUID(),
+    identity,
+    workspaceId: workspace.id,
+    agentId: "agent-slow-companion",
+    capabilityId: "m365-write-protected",
+    serverName: "onecomputer_ms365",
+    toolName: "send-chat-message",
+    schemaId: "onecomputer.m365.send-chat-message.v1",
+    arguments: {
+      chatId: "chat-1",
+      body: { body: { contentType: "html", content: "Hello" } },
+      onecomputerAudit: { target: "Project chat", targetType: "chat" },
+    },
+    operationDigest: "b".repeat(64),
+    nonce: randomUUID(),
+    safeSummary: "Send Teams chat message: Project chat",
+    resourceName: "Project chat",
+    resourceLocation: "Microsoft Teams",
+    correlationId: "slow-companion-push-test",
+    idempotencyKey: randomUUID(),
+    createdAt: now,
+    expiresAt: new Date(now.getTime() + 10 * 60_000),
+  });
+  assert.ok(operation);
+
+  await coordinator.ensureTask(identity, operation);
+  assert.equal(provider.sent.length, 0);
+
+  const flush = coordinator.flushCompanionPushQueue();
+  await pushStarted;
+  assert.equal(provider.sent.length, 0);
+  releasePush();
+  assert.equal(await flush, 1);
+  assert.equal(provider.sent.length, 1);
 });
 
 test("the Web Push adapter encrypts subscriptions and the notification payload carries no approval authority", async () => {

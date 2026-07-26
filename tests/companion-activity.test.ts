@@ -145,7 +145,7 @@ test("companion activity exposes a whitelisted human-readable request audit", as
     schemaId: "onecomputer.m365.send-chat-message.v1",
     arguments: {
       chatId: "opaque-chat-id-that-must-not-be-projected",
-      onecomputerAudit: { target: "Alex Morgan", targetType: "recipient" },
+      onecomputerAudit: { target: "Alex Morgan", targetType: "chat" },
       body: { body: { contentType: "html", content: "<p>Hello <strong>Alex</strong>,</p><p>The report is ready.</p>" } },
       confirm: true,
     },
@@ -178,7 +178,7 @@ test("companion activity exposes a whitelisted human-readable request audit", as
   });
   assert.equal(detail.statusCode, 200);
   assert.equal(detail.json().activity.request.action, "Send Teams message");
-  assert.deepEqual(detail.json().activity.request.target, { label: "To", name: "Alex Morgan", context: "Microsoft Teams" });
+  assert.deepEqual(detail.json().activity.request.target, { label: "Chat", name: "Alex Morgan", context: "Microsoft Teams" });
   assert.equal(detail.json().activity.audit.requestedBy, "Codex CLI");
   assert.deepEqual(detail.json().activity.request.details, [
     { label: "Message", value: "Hello Alex,\n\nThe report is ready.", format: "long-text" },

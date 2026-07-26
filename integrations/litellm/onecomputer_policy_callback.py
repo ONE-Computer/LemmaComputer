@@ -17,6 +17,8 @@ POLICY_URL = os.environ.get(
     "http://control-api:4100/internal/v1/mcp/authorize",
 )
 POLICY_TOKEN = os.environ.get("ONECOMPUTER_MCP_POLICY_TOKEN", "")
+POLICY_TIMEOUT_SECONDS = 2
+POLICY_ATTEMPTS = 2
 MS365_SERVER_NAME = "onecomputer_ms365"
 MS365_SERVER_ID = hashlib.sha256(
     b"onecomputer_ms365|http://ms365-mcp:3000/mcp|http|oauth2|"
@@ -125,19 +127,33 @@ def _supports_vision(kwargs):
 def _request_decision(payload):
     if len(POLICY_TOKEN) < 24:
         raise RuntimeError("MCP policy callback token is not configured")
-    request = urllib.request.Request(
-        POLICY_URL,
-        data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        method="POST",
-        headers={
-            "content-type": "application/json",
-            "x-onecomputer-mcp-policy-token": POLICY_TOKEN,
-        },
-    )
-    with urllib.request.urlopen(request, timeout=2) as response:
-        if response.status != 200:
-            raise RuntimeError("MCP policy authority returned a non-success status")
-        result = json.load(response)
+    encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    result = None
+    for attempt in range(POLICY_ATTEMPTS):
+        request = urllib.request.Request(
+            POLICY_URL,
+            data=encoded,
+            method="POST",
+            headers={
+                "content-type": "application/json",
+                "x-onecomputer-mcp-policy-token": POLICY_TOKEN,
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=POLICY_TIMEOUT_SECONDS) as response:
+                if response.status != 200:
+                    raise RuntimeError("MCP policy authority returned a non-success status")
+                result = json.load(response)
+            break
+        except urllib.error.HTTPError:
+            raise
+        except (OSError, urllib.error.URLError):
+            # Authorization is idempotent for an exact tool call. If Control
+            # committed the operation but the response was lost, one immediate
+            # retry recovers the same operation ID instead of making the model
+            # retry the original write with newly generated arguments.
+            if attempt + 1 >= POLICY_ATTEMPTS:
+                raise
     required = {
         "schemaVersion",
         "decision",

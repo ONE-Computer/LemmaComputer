@@ -62,7 +62,11 @@ test("human-facing audit context is approval-bound but never forwarded to a conn
   const bridge = await source("infra/issue-010/onecomputer-connectors-stdio.py");
   assert.match(callback, /AUDIT_ONLY_ARGUMENTS = \{"onecomputerAudit"\}/);
   assert.match(callback, /key not in AUDIT_ONLY_ARGUMENTS/);
+  assert.match(callback, /POLICY_ATTEMPTS = 2/);
+  assert.match(callback, /for attempt in range\(POLICY_ATTEMPTS\)/);
   assert.match(bridge, /AUDIT_CONTEXT_SCHEMA/);
+  assert.match(bridge, /"recipient", "chat", "channel"/);
+  assert.match(bridge, /targetType chat/);
   assert.match(bridge, /required = list\(dict\.fromkeys\(required \+ \["onecomputerAudit"\]\)\)/);
 });
 
