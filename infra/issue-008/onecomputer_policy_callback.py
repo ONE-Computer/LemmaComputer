@@ -21,6 +21,7 @@ MS365_SERVER_NAME = "onecomputer_ms365"
 MS365_SERVER_ID = hashlib.sha256(
     b"onecomputer_ms365|http://ms365-mcp:3000/mcp|http|oauth2|"
 ).hexdigest()[:32]
+AUDIT_ONLY_ARGUMENTS = {"onecomputerAudit"}
 
 
 def _metadata(auth):
@@ -160,11 +161,12 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             raise HTTPException(status_code=503, detail={"error": "MCP_POLICY_UNAVAILABLE"}) from None
 
         if decision["decision"] == "allow":
-            if payload["toolName"] == "create-upload-session" and isinstance(data.get("arguments"), dict):
+            if isinstance(data.get("arguments"), dict):
                 data["arguments"] = {
                     key: value
                     for key, value in data["arguments"].items()
-                    if key != "onecomputerFile"
+                    if key not in AUDIT_ONLY_ARGUMENTS
+                    and not (payload["toolName"] == "create-upload-session" and key == "onecomputerFile")
                 }
             return data
         if decision["decision"] == "approval_required":

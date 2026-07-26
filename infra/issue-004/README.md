@@ -82,11 +82,13 @@ a second audit store and exposes no decision endpoint.
 
 `GET /v1/openvtc/companion/activity` uses a stable, bounded cursor and filters
 by the authenticated tenant and subject in storage. The projection contains
-only the safe action and resource labels, lifecycle state, timestamps,
-humanized requester class, decision, and terminal outcome. The detail endpoint
-adds a human-readable timeline. It omits raw tool arguments, Microsoft content,
-operation digests, nonces, policy hashes, workspace IDs, correlation IDs,
-approver/device identifiers, subscription data, tokens, and keys.
+the action, human-facing target, lifecycle state, timestamps, humanized
+requester, decision, and terminal outcome. The detail endpoint adds a
+tool-specific allowlisted projection of user-visible request content (for
+example, Teams destination and message text) plus a human-readable timeline.
+It never returns the raw argument object or opaque target IDs, operation
+digests, nonces, policy hashes, workspace IDs, correlation IDs,
+approver/device identifiers, subscription data, tokens, or keys.
 
 Historical rows never contain approval controls. A live
 `approval_required` row can only navigate back to the Approvals view, where the

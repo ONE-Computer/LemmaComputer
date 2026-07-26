@@ -25,6 +25,7 @@ MS365_ACCOUNT_LOOKUP_TOOL = "get-current-user"
 MS365_ACCOUNT_LOOKUP_ARGUMENTS = {
     "$select": "displayName,mail,userPrincipalName",
 }
+AUDIT_ONLY_ARGUMENTS = {"onecomputerAudit"}
 
 
 def _metadata(auth):
@@ -256,16 +257,17 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             raise HTTPException(status_code=503, detail={"error": "MCP_POLICY_UNAVAILABLE"}) from None
 
         if decision["decision"] == "allow":
-            # onecomputerFile is bound into the signed operation (name, size,
-            # digest) but is ONEComputer metadata, not part of Softeria's
-            # create-upload-session input schema.
-            if payload["toolName"] == "create-upload-session" and isinstance(
-                data.get("arguments"), dict
-            ):
+            # Audit context and onecomputerFile are bound into the signed
+            # operation but are ONEComputer metadata, not Softeria arguments.
+            if isinstance(data.get("arguments"), dict):
                 data["arguments"] = {
                     key: value
                     for key, value in data["arguments"].items()
-                    if key != "onecomputerFile"
+                    if key not in AUDIT_ONLY_ARGUMENTS
+                    and not (
+                        payload["toolName"] == "create-upload-session"
+                        and key == "onecomputerFile"
+                    )
                 }
             return data
         if decision["decision"] == "approval_required":

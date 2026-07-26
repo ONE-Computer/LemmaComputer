@@ -57,6 +57,15 @@ test("the connection account lookup bypass is purpose-bound and exact", async ()
   assert.match(adapter, /mcp_tool_permissions: \{ \[serverName\]: accountLookup \? \["get-current-user"\] : \[\] \}/);
 });
 
+test("human-facing audit context is approval-bound but never forwarded to a connector", async () => {
+  const callback = await source("integrations/litellm/onecomputer_policy_callback.py");
+  const bridge = await source("infra/issue-010/onecomputer-connectors-stdio.py");
+  assert.match(callback, /AUDIT_ONLY_ARGUMENTS = \{"onecomputerAudit"\}/);
+  assert.match(callback, /key not in AUDIT_ONLY_ARGUMENTS/);
+  assert.match(bridge, /AUDIT_CONTEXT_SCHEMA/);
+  assert.match(bridge, /required = list\(dict\.fromkeys\(required \+ \["onecomputerAudit"\]\)\)/);
+});
+
 test("Claude Desktop is pinned and receives managed gateway policy rather than provider credentials", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");

@@ -126,6 +126,7 @@ test("upload-file-content rejects Graph endpoint wrappers before approval", () =
       driveId: "drive",
       driveItemId: "/items/root:/happy.txt:/content",
       body: "aGFwcHk=",
+      onecomputerAudit: { target: "happy.txt", targetType: "file" },
     }),
     /driveItemId must be an item ID or drive-relative path selector/,
   );
@@ -133,10 +134,12 @@ test("upload-file-content rejects Graph endpoint wrappers before approval", () =
     driveId: "drive",
     driveItemId: "root:/happy.txt:",
     body: "aGFwcHk=",
+    onecomputerAudit: { target: "happy.txt", targetType: "file" },
   }), {
     driveId: "drive",
     driveItemId: "root:/happy.txt:",
     body: "aGFwcHk=",
+    onecomputerAudit: { target: "happy.txt", targetType: "file" },
   });
 });
 
@@ -249,7 +252,7 @@ test("Teams reads are bounded and Teams sends are held for approval", async () =
   const held = await policy.authorize({
     ...base,
     toolName: "send-chat-message",
-    arguments: { chatId: "chat-1", body: { body: { contentType: "html", content: "Hello" } }, confirm: true },
+    arguments: { chatId: "chat-1", onecomputerAudit: { target: "Alex Morgan", targetType: "recipient" }, body: { body: { contentType: "html", content: "Hello" } }, confirm: true },
   }, "teams-send");
   assert.equal(held.decision, "approval_required");
   const operation = await store.getOwnedOperation(identity, held.operationId!);
@@ -258,7 +261,7 @@ test("Teams reads are bounded and Teams sends are held for approval", async () =
   assert.equal((await policy.authorize({
     ...base,
     toolName: "send-chat-message",
-    arguments: { chatId: "chat-1", body: { body: { contentType: "text", content: "Hello" } }, confirm: true },
+    arguments: { chatId: "chat-1", onecomputerAudit: { target: "Alex Morgan", targetType: "recipient" }, body: { body: { contentType: "text", content: "Hello" } }, confirm: true },
   }, "teams-send-text")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
 });
 
@@ -279,6 +282,7 @@ test("Control treats Softeria confirmation as a connector flag, not a policy dec
         start: { dateTime: "2026-07-23T15:00:00", timeZone: "Singapore Standard Time" },
         end: { dateTime: "2026-07-23T15:15:00", timeZone: "Singapore Standard Time" },
       },
+      onecomputerAudit: { target: "OC-MVP-ALLOW", targetType: "event" },
       confirm: true,
     },
   }, "calendar-write-allow");
@@ -368,7 +372,7 @@ test("protected OneDrive delete persists before approval and an exact lease disp
   const requested = await policy.authorize({
     ...base,
     toolName: "delete-onedrive-file",
-    arguments: { driveId: "drive-1", driveItemId: "item-1", "If-Match": "etag-1" },
+    arguments: { driveId: "drive-1", driveItemId: "item-1", "If-Match": "etag-1", onecomputerAudit: { target: "Q3 draft.docx", targetType: "file" } },
   }, "delete-request");
   assert.equal(requested.decision, "approval_required");
   assert.ok(requested.operationId);
@@ -379,6 +383,7 @@ test("protected OneDrive delete persists before approval and an exact lease disp
     driveId: "drive-1",
     driveItemId: "item-1",
     excludeResponse: true,
+    onecomputerAudit: { target: "Q3 draft.docx", targetType: "file" },
   });
 
   const decidedAt = new Date();
@@ -419,7 +424,7 @@ test("a repeated protected MCP action reuses the active approval and replaces a 
   const request: McpPolicyRequest = {
     ...base,
     toolName: "delete-onedrive-file",
-    arguments: { driveId: "drive-1", driveItemId: "item-1", "If-Match": "etag-1" },
+    arguments: { driveId: "drive-1", driveItemId: "item-1", "If-Match": "etag-1", onecomputerAudit: { target: "Q3 draft.docx", targetType: "file" } },
   };
 
   const first = await policy.authorize(request, "delete-attempt-1");

@@ -244,7 +244,7 @@ export class OpenVtcApprovalCoordinator {
     return {
       enabled: Boolean(this.pushProvider),
       protocolVersion: COMPANION_PUSH_PROTOCOL,
-      serviceWorkerVersion: "onecomputer-companion-sw-0.1",
+      serviceWorkerVersion: "onecomputer-companion-sw-0.2",
       vapidPublicKey: this.pushProvider?.publicKey ?? null,
       notificationPayload: { version: "1", event: "approval-pending" },
       support: [

@@ -3,6 +3,7 @@ import {
   OneComputerError,
   canonicalJson,
   governedOperationDigest,
+  ownedAgentCatalog,
   type GovernedOperationEnvelope,
   type IdentityContext,
   type OperationView,
@@ -49,6 +50,190 @@ const actionFor = (record: GovernedOperationRecord) => (
     : record.safeSummary
 );
 
+const companionActionFor = (record: GovernedOperationRecord) => ({
+  "create-draft-email": "Create email draft",
+  "update-mail-message": "Update email",
+  "delete-mail-message": "Delete email",
+  "move-mail-message": "Move email",
+  "send-mail": "Send email",
+  "send-draft-message": "Send draft",
+  "reply-mail-message": "Reply to email",
+  "reply-all-mail-message": "Reply all",
+  "forward-mail-message": "Forward email",
+  "create-calendar-event": "Create calendar event",
+  "update-calendar-event": "Update calendar event",
+  "delete-calendar-event": "Delete calendar event",
+  "create-onedrive-folder": "Create OneDrive folder",
+  "upload-file-content": "Upload file",
+  "create-upload-session": "Upload large file",
+  "move-rename-onedrive-item": "Move or rename OneDrive item",
+  "copy-drive-item": "Copy OneDrive item",
+  "send-chat-message": "Send Teams message",
+  "reply-to-chat-message": "Reply in Teams chat",
+  "send-channel-message": "Post Teams channel message",
+  "reply-to-channel-message": "Reply in Teams channel",
+}[record.toolName] ?? actionFor(record));
+
+const activityRequester = (record: GovernedOperationRecord) => {
+  if (!record.agentId) return "ONEComputer";
+  const agent = ownedAgentCatalog.find((candidate) => (
+    record.agentId === candidate.id || record.agentId?.endsWith(`:${candidate.id}`)
+  ));
+  return agent?.displayName ?? "Workspace agent";
+};
+
+type CompanionRequestDetail = {
+  label: string;
+  value: string;
+  format?: "text" | "long-text";
+};
+
+type CompanionTarget = {
+  label: string;
+  name: string;
+  context: string;
+};
+
+const ownedRecord = (value: OwnedJson | undefined) => (
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, OwnedJson>
+    : undefined
+);
+
+const htmlToAuditText = (value: string) => value
+  .replace(/<br\s*\/?>/gi, "\n")
+  .replace(/<\/p\s*>/gi, "\n\n")
+  .replace(/<[^>]+>/g, "")
+  .replaceAll("&nbsp;", " ")
+  .replaceAll("&amp;", "&")
+  .replaceAll("&lt;", "<")
+  .replaceAll("&gt;", ">")
+  .replaceAll("&quot;", "\"")
+  .replaceAll("&#39;", "'")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+
+const emailRecipients = (value: OwnedJson | undefined) => Array.isArray(value)
+  ? value.flatMap((item) => {
+    const address = ownedRecord(ownedRecord(item)?.emailAddress);
+    if (typeof address?.address !== "string") return [];
+    return [typeof address.name === "string" ? `${address.name} <${address.address}>` : address.address];
+  }).join(", ")
+  : "";
+
+const messageContent = (value: OwnedJson | undefined) => {
+  const item = ownedRecord(value);
+  const content = typeof item?.content === "string" ? item.content : "";
+  return item?.contentType === "html" ? htmlToAuditText(content) : content.trim();
+};
+
+const auditTarget = (record: GovernedOperationRecord) => {
+  const context = ownedRecord(ownedRecord(record.arguments)?.onecomputerAudit);
+  return typeof context?.target === "string" ? context.target : "";
+};
+
+const auditTargetLabel = (record: GovernedOperationRecord) => {
+  const context = ownedRecord(ownedRecord(record.arguments)?.onecomputerAudit);
+  return ({
+    recipient: "To",
+    channel: "Channel",
+    file: "File",
+    folder: "Folder",
+    event: "Event",
+    message: "Message",
+    item: "Item",
+    destination: "Destination",
+  } as Record<string, string>)[typeof context?.targetType === "string" ? context.targetType : ""] ?? "Target";
+};
+
+const companionTarget = (record: GovernedOperationRecord): CompanionTarget => {
+  const argumentsValue = ownedRecord(record.arguments);
+  if (record.toolName === "send-mail") {
+    const message = ownedRecord(ownedRecord(argumentsValue?.body)?.Message);
+    const recipients = emailRecipients(message?.toRecipients);
+    if (recipients) return { label: "To", name: recipients, context: record.resourceLocation };
+  }
+  return {
+    label: auditTargetLabel(record),
+    name: auditTarget(record) || record.resourceName,
+    context: record.resourceLocation,
+  };
+};
+
+const companionRequestDetails = (record: GovernedOperationRecord): CompanionRequestDetail[] => {
+  const argumentsValue = ownedRecord(record.arguments);
+  if (!argumentsValue) return [];
+
+  if (["send-chat-message", "reply-to-chat-message"].includes(record.toolName)) {
+    const body = ownedRecord(ownedRecord(argumentsValue.body)?.body);
+    const content = messageContent(body);
+    return [
+      ...(content ? [{ label: record.toolName.startsWith("reply") ? "Reply" : "Message", value: content, format: "long-text" as const }] : []),
+    ];
+  }
+
+  if (["send-channel-message", "reply-to-channel-message"].includes(record.toolName)) {
+    const body = ownedRecord(ownedRecord(argumentsValue.body)?.body);
+    const content = messageContent(body);
+    return [
+      ...(content ? [{ label: record.toolName.startsWith("reply") ? "Reply" : "Message", value: content, format: "long-text" as const }] : []),
+    ];
+  }
+
+  if (["send-mail", "create-draft-email", "update-mail-message"].includes(record.toolName)) {
+    const supplied = ownedRecord(argumentsValue.body);
+    const message = record.toolName === "send-mail" ? ownedRecord(supplied?.Message) : supplied;
+    const body = ownedRecord(message?.body);
+    const cc = emailRecipients(message?.ccRecipients);
+    const bcc = emailRecipients(message?.bccRecipients);
+    const content = messageContent(body);
+    return [
+      ...(cc ? [{ label: "Cc", value: cc }] : []),
+      ...(bcc ? [{ label: "Bcc", value: bcc }] : []),
+      ...(typeof message?.subject === "string" ? [{ label: "Subject", value: message.subject }] : []),
+      ...(content ? [{ label: "Message", value: content, format: "long-text" as const }] : []),
+    ];
+  }
+
+  if (["reply-mail-message", "reply-all-mail-message"].includes(record.toolName)) {
+    const comment = ownedRecord(argumentsValue.body)?.Comment;
+    return typeof comment === "string"
+      ? [{ label: "Message", value: comment, format: "long-text" }]
+      : [];
+  }
+
+  if (record.toolName === "forward-mail-message") {
+    const body = ownedRecord(argumentsValue.body);
+    const recipients = emailRecipients(body?.ToRecipients);
+    return [
+      ...(recipients ? [{ label: "To", value: recipients }] : []),
+      ...(typeof body?.Comment === "string" ? [{ label: "Message", value: body.Comment, format: "long-text" as const }] : []),
+    ];
+  }
+
+  if (["create-calendar-event", "update-calendar-event"].includes(record.toolName)) {
+    const event = ownedRecord(argumentsValue.body);
+    const start = ownedRecord(event?.start);
+    const end = ownedRecord(event?.end);
+    const attendees = Array.isArray(event?.attendees)
+      ? emailRecipients(event.attendees)
+      : "";
+    return [
+      ...(typeof event?.subject === "string" ? [{ label: "Event", value: event.subject }] : []),
+      ...(typeof start?.dateTime === "string" ? [{ label: "Starts", value: `${start.dateTime}${typeof start.timeZone === "string" ? ` · ${start.timeZone}` : ""}` }] : []),
+      ...(typeof end?.dateTime === "string" ? [{ label: "Ends", value: `${end.dateTime}${typeof end.timeZone === "string" ? ` · ${end.timeZone}` : ""}` }] : []),
+      ...(attendees ? [{ label: "Attendees", value: attendees }] : []),
+    ];
+  }
+
+  if (["create-onedrive-folder", "move-rename-onedrive-item", "copy-drive-item"].includes(record.toolName)) {
+    const body = ownedRecord(argumentsValue.body);
+    return typeof body?.name === "string" ? [{ label: "Name", value: body.name }] : [];
+  }
+
+  return [];
+};
+
 const toView = (record: GovernedOperationRecord): OperationView => ({
   id: record.id,
   workspaceId: record.workspaceId,
@@ -85,27 +270,32 @@ const toView = (record: GovernedOperationRecord): OperationView => ({
   failureSummary: record.failureSummary,
 });
 
-const toCompanionActivity = (record: GovernedOperationRecord) => ({
+const toCompanionActivity = (record: GovernedOperationRecord, includeRequestDetails = false) => ({
   id: record.id,
-  action: actionFor(record),
-  resourceName: record.resourceName,
-  resourceLocation: record.resourceLocation,
-  requestedBy: record.agentId ? "Workspace agent" : "ONEComputer",
   state: record.state,
-  requestedAt: record.createdAt.toISOString(),
-  updatedAt: record.updatedAt.toISOString(),
-  expiresAt: record.expiresAt.toISOString(),
-  decision: record.approval ? {
-    value: record.approval.decision,
-    decidedAt: record.approval.decidedAt.toISOString(),
-  } : null,
-  outcome: record.receipt ? {
-    status: "succeeded" as const,
-    completedAt: record.receipt.executedAt.toISOString(),
-  } : record.state === "failed" ? {
-    status: "failed" as const,
-    completedAt: record.updatedAt.toISOString(),
-  } : null,
+  request: {
+    action: companionActionFor(record),
+    summary: record.safeSummary,
+    target: companionTarget(record),
+    details: includeRequestDetails ? companionRequestDetails(record) : [],
+  },
+  audit: {
+    requestedBy: activityRequester(record),
+    requestedAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+    expiresAt: record.expiresAt.toISOString(),
+    decision: record.approval ? {
+      value: record.approval.decision,
+      decidedAt: record.approval.decidedAt.toISOString(),
+    } : null,
+    outcome: record.receipt ? {
+      status: "succeeded" as const,
+      completedAt: record.receipt.executedAt.toISOString(),
+    } : record.state === "failed" ? {
+      status: "failed" as const,
+      completedAt: record.updatedAt.toISOString(),
+    } : null,
+  },
 });
 
 type CompanionActivityCursor = {
@@ -151,11 +341,38 @@ const shortIdentifier = (value: OwnedJson | undefined, fallback: string) => type
   ? (value.length > 20 ? `${value.slice(0, 8)}…${value.slice(-8)}` : value)
   : fallback;
 
+const microsoft365ArgumentTarget = (toolName: string, argumentsValue: Record<string, OwnedJson>) => {
+  const body = ownedRecord(argumentsValue.body);
+  if (toolName === "send-mail") {
+    return emailRecipients(ownedRecord(body?.Message)?.toRecipients);
+  }
+  if (toolName === "forward-mail-message") {
+    return emailRecipients(body?.ToRecipients);
+  }
+  if (["create-draft-email", "update-mail-message", "create-calendar-event", "update-calendar-event"].includes(toolName)) {
+    return typeof body?.subject === "string" ? body.subject.trim() : "";
+  }
+  if (["create-onedrive-folder", "move-rename-onedrive-item", "copy-drive-item"].includes(toolName)) {
+    return typeof body?.name === "string" ? body.name.trim() : "";
+  }
+  return "";
+};
+
 const microsoft365Resource = (toolName: string, argumentsValue: Record<string, OwnedJson>, displayName: string) => {
   const service = toolName.includes("mail") || toolName.includes("draft") ? "Outlook Mail"
     : toolName.includes("calendar") ? "Outlook Calendar"
       : toolName.includes("chat") || toolName.includes("channel") ? "Microsoft Teams"
         : "OneDrive";
+  const context = ownedRecord(argumentsValue.onecomputerAudit);
+  const declaredTarget = typeof context?.target === "string" ? context.target.trim() : "";
+  const target = microsoft365ArgumentTarget(toolName, argumentsValue) || declaredTarget;
+  if (target) {
+    return {
+      safeSummary: `${displayName}: ${target}`,
+      resourceName: target,
+      resourceLocation: service,
+    };
+  }
   const identifier = shortIdentifier(
     argumentsValue.driveItemId ?? argumentsValue.messageId ?? argumentsValue.eventId ?? argumentsValue.chatMessageId,
     displayName,
@@ -431,7 +648,7 @@ export class GovernedOperationService {
       await this.store.recoverOperation(identity, record.id, new Date(), "companion-activity") ?? record
     )));
     return {
-      activities: recovered.map(toCompanionActivity),
+      activities: recovered.map((record) => toCompanionActivity(record)),
       nextCursor: records.length > limit && page.length
         ? encodeCompanionActivityCursor(page[page.length - 1]!)
         : null,
@@ -459,7 +676,7 @@ export class GovernedOperationService {
       }] : []),
     ];
     return {
-      activity: toCompanionActivity(operation),
+      activity: toCompanionActivity(operation, true),
       timeline: (events.length ? events.map((event) => ({
         label: activityEventLabel(event.eventType),
         createdAt: event.createdAt.toISOString(),

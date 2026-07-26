@@ -38,6 +38,23 @@ WRITE_TOOLS = {
     "upload-file-content", "move-rename-onedrive-item", "copy-drive-item", "delete-onedrive-file",
     "send-chat-message", "reply-to-chat-message", "send-channel-message", "reply-to-channel-message",
 }
+AUDIT_CONTEXT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Exact human-facing recipient, file, folder, event, message, channel, item, or destination selected for this action.",
+        },
+        "targetType": {
+            "type": "string",
+            "enum": ["recipient", "channel", "file", "folder", "event", "message", "item", "destination"],
+        },
+    },
+    "required": ["target", "targetType"],
+    "additionalProperties": False,
+}
 DELETE_ONEDRIVE_DESCRIPTION = """Delete one Microsoft OneDrive or SharePoint drive item through ONEComputer governance.
 
 This is a remote Microsoft 365 action, not a local filesystem action. A user-facing filename, link, folder path, or filename visible in an attached screenshot is enough to begin discovery: call list-drives to resolve driveId, then search-onedrive-files or list-folder-files to resolve the exact driveItemId. Do not ask the user for internal drive or item IDs before attempting those assigned discovery tools. If multiple items match, ask the user to disambiguate before deleting anything.
@@ -60,10 +77,10 @@ LIST_JOINED_TEAMS_DESCRIPTION = """List every Microsoft Teams team joined by the
 
 This Graph endpoint does not accept generic OData paging or filtering options. Call it with no arguments, then match the returned displayName and id locally. Use the selected id with list-team-channels."""
 TEAMS_TOOL_DESCRIPTIONS = {
-    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before sending.",
-    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before sending.",
-    "send-channel-message": "Post one HTML message to a Teams channel. Get teamId from list-joined-teams and channelId from list-team-channels. Put the post in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before posting.",
-    "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Put the reply in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before posting.",
+    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation selected during discovery. ONEComputer obtains signed approval before sending.",
+    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation. ONEComputer obtains signed approval before sending.",
+    "send-channel-message": "Post one HTML message to a Teams channel. Get teamId from list-joined-teams and channelId from list-team-channels. Put the post in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact team and channel display names selected during discovery. ONEComputer obtains signed approval before posting.",
+    "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Set onecomputerAudit to the exact team and channel display names. Put the reply in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before posting.",
 }
 
 LIST_DRIVES_INPUT_SCHEMA = {
@@ -653,11 +670,13 @@ def discover_tools() -> list[dict]:
                 properties.pop("confirm", None)
                 properties.pop("excludeResponse", None)
                 properties.pop("includeHeaders", None)
+                properties["onecomputerAudit"] = AUDIT_CONTEXT_SCHEMA
             required = input_schema.get("required")
             if isinstance(required, list):
                 required = [item for item in required if item not in {"confirm", "excludeResponse", "includeHeaders"}]
                 if upstream_name == "delete-onedrive-file":
                     required = list(dict.fromkeys(required + ["If-Match"]))
+                required = list(dict.fromkeys(required + ["onecomputerAudit"]))
                 input_schema["required"] = required
             input_schema["additionalProperties"] = False
         result.append({

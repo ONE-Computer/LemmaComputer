@@ -247,6 +247,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
         driveItemId: "item",
         resourceName: "planning-draft.docx",
         "If-Match": "{E1CFF1EF-69D6-4F68-A75F-29D6C6DB2670},3",
+        onecomputerAudit: { target: "planning-draft.docx", targetType: "file" },
         confirm: true,
         excludeResponse: false,
       },
@@ -260,7 +261,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
   assert.equal("excludeResponse" in tools[0]!.inputSchema.properties, false);
   assert.deepEqual(
     (tools[0]!.inputSchema as unknown as { required: string[] }).required,
-    ["driveId", "driveItemId", "resourceName", "If-Match"],
+    ["driveId", "driveItemId", "resourceName", "If-Match", "onecomputerAudit"],
   );
   assert.match(
     ((responses[0]?.result as { tools: Array<{ description: string }> }).tools[0]?.description ?? ""),
@@ -458,6 +459,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
         driveId: "drive",
         driveItemId: "/items/root:/happy.txt:/content",
         localFilePath: uploadPath,
+        onecomputerAudit: { target: "happy.txt", targetType: "file" },
       },
     },
   })}\n`);
@@ -480,7 +482,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
   assert.match(advertised.inputSchema.properties.driveItemId?.description ?? "", /root:\/happy\.txt:/);
   assert.match(advertised.inputSchema.properties.driveItemId?.pattern ?? "", /items/);
   assert.match(advertised.inputSchema.properties.localFilePath?.description ?? "", /do not read or base64-encode/i);
-  assert.deepEqual(advertised.inputSchema.required, ["driveId", "driveItemId"]);
+  assert.deepEqual(advertised.inputSchema.required, ["driveId", "driveItemId", "onecomputerAudit"]);
   assert.deepEqual(advertised.inputSchema.oneOf, [
     { required: ["body"] },
     { required: ["localFilePath"] },
@@ -622,8 +624,8 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
   assert.match(joined.description, /does not accept generic OData/);
 
   const send = tools.find((tool) => tool.name === "microsoft365__send-channel-message")!;
-  assert.deepEqual(Object.keys(send.inputSchema.properties), ["teamId", "channelId", "body"]);
-  assert.deepEqual(send.inputSchema.required, ["teamId", "channelId", "body"]);
+  assert.deepEqual(Object.keys(send.inputSchema.properties), ["teamId", "channelId", "body", "onecomputerAudit"]);
+  assert.deepEqual(send.inputSchema.required, ["teamId", "channelId", "body", "onecomputerAudit"]);
   assert.deepEqual(Object.keys(send.inputSchema.properties.body?.properties ?? {}), ["body"]);
   assert.deepEqual(
     Object.keys(send.inputSchema.properties.body?.properties?.body?.properties ?? {}),
@@ -640,9 +642,11 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
     ["subject", "body", "toRecipients", "ccRecipients", "bccRecipients", "importance"],
   );
   assert.deepEqual(draft.inputSchema.properties.body?.required, ["subject", "body"]);
+  assert.ok(draft.inputSchema.required?.includes("onecomputerAudit"));
 
   const event = tools.find((tool) => tool.name === "microsoft365__create-calendar-event")!;
   assert.deepEqual(event.inputSchema.properties.body?.required, ["subject", "start", "end"]);
+  assert.ok(event.inputSchema.required?.includes("onecomputerAudit"));
   assert.equal("id" in (event.inputSchema.properties.body?.properties ?? {}), false);
   assert.equal("changeKey" in (event.inputSchema.properties.body?.properties ?? {}), false);
 });

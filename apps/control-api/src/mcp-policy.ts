@@ -54,6 +54,10 @@ const teamsMessageBody = z.strictObject({
     content: z.string().trim().min(1).max(28_000),
   }),
 });
+const operationAuditContext = z.strictObject({
+  target: z.string().trim().min(1).max(512),
+  targetType: z.enum(["recipient", "channel", "file", "folder", "event", "message", "item", "destination"]),
+});
 const withId = (key: string) => z.strictObject({ [key]: id });
 const withBody = z.strictObject({ body });
 const withIdAndBody = (key: string) => z.strictObject({ [key]: id, body });
@@ -133,9 +137,20 @@ const definition = (
   description,
   service,
   risk,
-  schemaHash: createHash("sha256").update(canonicalJson({ schemaId, jsonSchema: z.toJSONSchema(schema) })).digest("hex"),
+  schemaHash: createHash("sha256").update(canonicalJson({
+    schemaId,
+    jsonSchema: z.toJSONSchema(schema),
+    ...(risk === "write" ? { operationAuditContext: z.toJSONSchema(operationAuditContext) } : {}),
+  })).digest("hex"),
   mode,
-  parse: (value) => schema.parse(value),
+  parse: (value) => {
+    if (risk !== "write" || !value || typeof value !== "object" || Array.isArray(value)) return schema.parse(value);
+    const { onecomputerAudit, ...toolArguments } = value as Record<string, OwnedJson>;
+    return {
+      ...schema.parse(toolArguments),
+      onecomputerAudit: operationAuditContext.parse(onecomputerAudit),
+    };
+  },
 });
 
 const toolSchemas: Record<keyof typeof m365ToolCatalog, z.ZodType<Record<string, OwnedJson>>> = {

@@ -148,4 +148,7 @@ test("the companion service worker never caches or decides a task", async () => 
   assert.doesNotMatch(source, /\bapprove\b|\bdeny\b|\btoken\b|\bdigest\b|\btenant\b|\bsubject\b/i);
   assert.match(source, /Object\.keys\(payload\)\.length === 2/);
   assert.match(source, /caches\.delete/);
+  assert.match(source, /existing\.postMessage\(OPEN_APPROVALS_MESSAGE\)/);
+  assert.match(source, /existing\.navigate\(COMPANION_PATH\)/);
+  assert.match(source, /from=notification/);
 });

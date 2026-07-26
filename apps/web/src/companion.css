@@ -934,35 +934,59 @@
   padding: 4px 38px 26px 4px;
 }
 
-.companion-activity-detail > dl {
+.companion-request-details > dl,
+.companion-audit-details > dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
-  margin: 0 0 24px;
+  margin: 10px 0 24px;
   overflow: hidden;
   border: 1px solid #e1e5e9;
   border-radius: 10px;
   background: #e1e5e9;
 }
 
-.companion-activity-detail > dl > div {
+.companion-request-details > h3,
+.companion-audit-details > h3 {
+  margin: 0;
+  color: #263348;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.companion-request-details > dl > div,
+.companion-audit-details > dl > div {
   display: grid;
   gap: 5px;
   padding: 14px 16px;
   background: #f9fafb;
 }
 
-.companion-activity-detail dt {
+.companion-request-details > dl > div.long-text {
+  grid-column: 1 / -1;
+}
+
+.companion-request-details dt,
+.companion-audit-details dt {
   color: #737c88;
   font-size: 11px;
   font-weight: 650;
   text-transform: uppercase;
 }
 
-.companion-activity-detail dd {
+.companion-request-details dd,
+.companion-audit-details dd {
   margin: 0;
   color: #2d394b;
   font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.companion-request-details .long-text dd {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
 }
 
 .companion-timeline > strong {
@@ -1364,8 +1388,13 @@
     padding-right: 4px;
   }
 
-  .companion-activity-detail > dl {
+  .companion-request-details > dl,
+  .companion-audit-details > dl {
     grid-template-columns: 1fr;
+  }
+
+  .companion-request-details > dl > div.long-text {
+    grid-column: auto;
   }
 
   .companion-task dl > div {

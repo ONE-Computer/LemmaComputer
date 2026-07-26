@@ -54,6 +54,15 @@ const companionChatSessionFromLocation = () => {
   return params.get("view") === "chat" ? params.get("chat") ?? "" : "";
 };
 
+const companionTabFromLocation = () => (
+  new URLSearchParams(window.location.search).get("tab") === "activity" ? "activity" : "approvals"
+);
+
+const companionLoginUrl = () => {
+  const returnTo = `${window.location.pathname}${window.location.search}`;
+  return `/api/v1/auth/login?return=${encodeURIComponent(returnTo)}`;
+};
+
 const formatTime = (value) => value
   ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
   : "Not yet";
@@ -82,7 +91,7 @@ function CompanionSignIn({ error }) {
         <h1>Review protected actions without opening your workspace.</h1>
         <span>Sign in with your work account. Notifications contain no task details and can never approve an action.</span>
         {error && <div className="companion-message error" role="alert">{error}</div>}
-        <a className="companion-primary" href="/api/v1/auth/login?return=%2Fcompanion">Sign in to Companion</a>
+        <a className="companion-primary" href={companionLoginUrl()}>Sign in to Companion</a>
       </section>
     </main>
   );
@@ -147,7 +156,7 @@ function ActivityView({
         <div>
           <p>Request history</p>
           <h2 id="companion-activity-title">Protected activity</h2>
-          <span>Only safe request metadata is shown here. Historical entries are always read-only.</span>
+          <span>Expand a request to review what was requested and its lifecycle evidence. Historical entries are always read-only.</span>
         </div>
         <button className="companion-secondary compact" type="button" disabled={loading} onClick={onRefresh}>
           <ArrowClockwise24Regular aria-hidden="true" />Refresh
@@ -168,11 +177,11 @@ function ActivityView({
               <button type="button" onClick={() => onSelect(item.id)} aria-expanded={selectedId === item.id}>
                 <div className="companion-activity-item-main">
                   <div className="companion-activity-item-heading">
-                    <strong>{item.action}</strong>
+                    <strong>{item.request.action}</strong>
                     <ActivityStatus state={item.state} />
                   </div>
-                  <span>{item.resourceName}{item.resourceLocation ? ` · ${item.resourceLocation}` : ""}</span>
-                  <small>{formatTime(item.requestedAt)} · {item.requestedBy}</small>
+                  <span>{item.request.target.name}{item.request.target.context ? ` · ${item.request.target.context}` : ""}</span>
+                  <small>{formatTime(item.audit.requestedAt)} · {item.audit.requestedBy}</small>
                 </div>
                 <ChevronRight16Regular aria-hidden="true" />
               </button>
@@ -183,12 +192,28 @@ function ActivityView({
                     <span className="companion-detail-loading">Loading request timeline…</span>
                   ) : detail ? (
                     <>
-                      <dl>
-                        <div><dt>Requested</dt><dd>{formatTime(detail.activity.requestedAt)}</dd></div>
-                        <div><dt>Last updated</dt><dd>{formatTime(detail.activity.updatedAt)}</dd></div>
-                        <div><dt>Decision</dt><dd>{detail.activity.decision ? `${detail.activity.decision.value === "approve" ? "Approved" : "Denied"} · ${formatTime(detail.activity.decision.decidedAt)}` : "No decision recorded"}</dd></div>
-                        <div><dt>Outcome</dt><dd>{detail.activity.outcome ? `${detail.activity.outcome.status === "succeeded" ? "Completed" : "Couldn’t complete"} · ${formatTime(detail.activity.outcome.completedAt)}` : "Not completed"}</dd></div>
-                      </dl>
+                      <section className="companion-request-details" aria-labelledby={`request-details-${item.id}`}>
+                        <h3 id={`request-details-${item.id}`}>Request details</h3>
+                        <dl>
+                          <div><dt>Action</dt><dd>{detail.activity.request.action}</dd></div>
+                          <div><dt>{detail.activity.request.target.label}</dt><dd>{detail.activity.request.target.name}{detail.activity.request.target.context ? ` · ${detail.activity.request.target.context}` : ""}</dd></div>
+                          {detail.activity.request.details.map((field, index) => (
+                            <div className={field.format === "long-text" ? "long-text" : ""} key={`${field.label}-${index}`}>
+                              <dt>{field.label}</dt><dd>{field.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </section>
+                      <section className="companion-audit-details" aria-labelledby={`audit-details-${item.id}`}>
+                        <h3 id={`audit-details-${item.id}`}>Audit details</h3>
+                        <dl>
+                          <div><dt>Requested by</dt><dd>{detail.activity.audit.requestedBy}</dd></div>
+                          <div><dt>Requested</dt><dd>{formatTime(detail.activity.audit.requestedAt)}</dd></div>
+                          <div><dt>Last updated</dt><dd>{formatTime(detail.activity.audit.updatedAt)}</dd></div>
+                          <div><dt>Decision</dt><dd>{detail.activity.audit.decision ? `${detail.activity.audit.decision.value === "approve" ? "Approved" : "Denied"} · ${formatTime(detail.activity.audit.decision.decidedAt)}` : "No decision recorded"}</dd></div>
+                          <div><dt>Outcome</dt><dd>{detail.activity.audit.outcome ? `${detail.activity.audit.outcome.status === "succeeded" ? "Completed" : "Couldn’t complete"} · ${formatTime(detail.activity.audit.outcome.completedAt)}` : "Not completed"}</dd></div>
+                        </dl>
+                      </section>
                       <div className="companion-timeline">
                         <strong>Timeline</strong>
                         <ol>
@@ -286,7 +311,7 @@ export function CompanionApp() {
   const [installPrompt, setInstallPrompt] = useState(null);
   const [displayName, setDisplayName] = useState("");
   const [activeView, setActiveView] = useState(companionViewFromLocation);
-  const [activeTab, setActiveTab] = useState("approvals");
+  const [activeTab, setActiveTab] = useState(companionTabFromLocation);
   const [activities, setActivities] = useState([]);
   const [activityCursor, setActivityCursor] = useState(null);
   const [activityLoaded, setActivityLoaded] = useState(false);
@@ -341,6 +366,7 @@ export function CompanionApp() {
   useEffect(() => {
     const onPopState = () => {
       setActiveView(companionViewFromLocation());
+      setActiveTab(companionTabFromLocation());
       setActiveChatSessionId(companionChatSessionFromLocation());
     };
     window.addEventListener("popstate", onPopState);
@@ -432,6 +458,25 @@ export function CompanionApp() {
       setDecisionMessage(error.message);
     }
   }, [localApprover?.did, approverStatus?.connected, approverStatus?.executorDid]);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+    const openApproval = (event) => {
+      if (event.data?.type !== "onecomputer-open-approvals") return;
+      setActiveView("companion");
+      setActiveTab("approvals");
+      setTerminal(null);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("view");
+      url.searchParams.delete("chat");
+      url.searchParams.delete("tab");
+      url.searchParams.set("from", "notification");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+      refreshPending();
+    };
+    navigator.serviceWorker.addEventListener("message", openApproval);
+    return () => navigator.serviceWorker.removeEventListener("message", openApproval);
+  }, [refreshPending]);
 
   useEffect(() => {
     if (!session || !localApprover || !approverStatus?.connected) return undefined;
@@ -691,10 +736,21 @@ export function CompanionApp() {
     if (view === "chat") {
       url.searchParams.set("view", "chat");
       if (activeChatSessionId) url.searchParams.set("chat", activeChatSessionId);
+      url.searchParams.delete("tab");
     } else {
       url.searchParams.delete("view");
       url.searchParams.delete("chat");
     }
+    url.searchParams.delete("from");
+    window.history.pushState({}, "", `${url.pathname}${url.search}`);
+  };
+
+  const selectTab = (tab) => {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    if (tab === "activity") url.searchParams.set("tab", "activity");
+    else url.searchParams.delete("tab");
+    url.searchParams.delete("from");
     window.history.pushState({}, "", `${url.pathname}${url.search}`);
   };
 
@@ -754,14 +810,14 @@ export function CompanionApp() {
             : "See what your workspace has requested."}</h1>
           <span>{activeTab === "approvals"
             ? "Approval alerts work independently of your managed workspace. Every decision still requires this device and the exact live signed request."
-            : "Review a read-only history of protected requests, decisions, and outcomes without exposing raw request content."}</span>
+            : "Review what was requested, who or what it targeted, who requested it, and how the protected action concluded."}</span>
         </header>
 
         <nav className="companion-tabs" aria-label="Companion sections">
-          <button className={activeTab === "approvals" ? "active" : ""} type="button" aria-current={activeTab === "approvals" ? "page" : undefined} onClick={() => setActiveTab("approvals")}>
+          <button className={activeTab === "approvals" ? "active" : ""} type="button" aria-current={activeTab === "approvals" ? "page" : undefined} onClick={() => selectTab("approvals")}>
             Approvals{request && <span aria-label="pending approval">1</span>}
           </button>
-          <button className={activeTab === "activity" ? "active" : ""} type="button" aria-current={activeTab === "activity" ? "page" : undefined} onClick={() => setActiveTab("activity")}>
+          <button className={activeTab === "activity" ? "active" : ""} type="button" aria-current={activeTab === "activity" ? "page" : undefined} onClick={() => selectTab("activity")}>
             Activity
           </button>
         </nav>
@@ -781,7 +837,7 @@ export function CompanionApp() {
             onLoadMore={() => loadActivity(activityCursor, true)}
             onSelect={selectActivity}
             onReviewPending={() => {
-              setActiveTab("approvals");
+              selectTab("approvals");
               refreshPending();
             }}
           />

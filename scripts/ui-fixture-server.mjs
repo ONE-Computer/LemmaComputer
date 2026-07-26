@@ -206,6 +206,27 @@ const operation = {
   receipt: { resultSummary: "The approved file deletion completed." },
 };
 
+const companionActivity = {
+  id: "00000000-0000-4000-8000-000000000010",
+  state: "succeeded",
+  request: {
+    action: "Send Teams message",
+    summary: "Send Teams chat message to Alex Morgan",
+    target: { label: "To", name: "Alex Morgan", context: "Microsoft Teams" },
+    details: [
+      { label: "Message", value: "Hello Alex,\n\nThe quarterly report is ready for your review.", format: "long-text" },
+    ],
+  },
+  audit: {
+    requestedBy: "Codex CLI",
+    requestedAt: now,
+    updatedAt: now,
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    decision: { value: "approve", decidedAt: now },
+    outcome: { status: "succeeded", completedAt: now },
+  },
+};
+
 const chatSession = {
   id: "fixture-session-1",
   title: "Quarterly planning",
@@ -505,6 +526,16 @@ const responses = new Map([
   ["GET /v1/openvtc/approvers/current", { connected: false, executorDid: "did:key:z6MkFixture", approver: null }],
   ["GET /v1/openvtc/companion/config", { enabled: false, vapidPublicKey: null }],
   ["GET /v1/openvtc/companions", { companions: [] }],
+  ["GET /v1/openvtc/companion/activity", { activities: [companionActivity], nextCursor: null }],
+  [`GET /v1/openvtc/companion/activity/${companionActivity.id}`, {
+    activity: companionActivity,
+    timeline: [
+      { label: "Approval requested", createdAt: now },
+      { label: "Request approved", createdAt: now },
+      { label: "Action sent to the connected service", createdAt: now },
+      { label: "Action completed", createdAt: now },
+    ],
+  }],
 ]);
 
 const server = http.createServer((request, response) => {

@@ -1,5 +1,6 @@
-const VERSION = "onecomputer-companion-sw-0.1";
+const VERSION = "onecomputer-companion-sw-0.2";
 const COMPANION_PATH = "/companion?from=notification";
+const OPEN_APPROVALS_MESSAGE = { type: "onecomputer-open-approvals" };
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -36,8 +37,13 @@ self.addEventListener("notificationclick", (event) => {
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const existing = windows.find((client) => new URL(client.url).pathname === "/companion");
     if (existing) {
-      await existing.navigate(COMPANION_PATH);
-      return existing.focus();
+      existing.postMessage(OPEN_APPROVALS_MESSAGE);
+      await existing.focus();
+      try {
+        return await existing.navigate(COMPANION_PATH);
+      } catch {
+        return existing;
+      }
     }
     return self.clients.openWindow(COMPANION_PATH);
   })());
