@@ -1051,6 +1051,9 @@ function ApprovalDeviceCard({ displayName }) {
 
 function ConnectorMark({ connector, large = false }) {
   const brand = connector?.brand ?? "microsoft";
+  if (connector?.iconDataUrl) {
+    return <span className={`connector-mark uploaded${large ? " large" : ""}`} aria-hidden="true"><img src={connector.iconDataUrl} alt="" /></span>;
+  }
   if (brand === "microsoft") {
     return (
       <span className={`connector-mark microsoft${large ? " large" : ""}`} aria-hidden="true">
@@ -1058,7 +1061,8 @@ function ConnectorMark({ connector, large = false }) {
       </span>
     );
   }
-  const glyph = { notion: "N", linear: "L", atlassian: "A", github: "GH" }[brand] ?? "M";
+  const fallback = connector?.name?.trim().match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? "?";
+  const glyph = { notion: "N", linear: "L", atlassian: "A", github: "GH" }[brand] ?? fallback;
   return <span className={`connector-mark ${brand}${large ? " large" : ""}`} aria-hidden="true">{glyph}</span>;
 }
 
@@ -1126,7 +1130,47 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
   );
 }
 
-function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function ConnectorIconEditor({ connector, busy, onSave }) {
+  const [error, setError] = useState("");
+  const chooseIcon = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setError("");
+    try {
+      await onSave(connector.id, await readConnectorIcon(file));
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+  const removeIcon = async () => {
+    setError("");
+    try {
+      await onSave(connector.id, null);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+  return (
+    <section className="connector-appearance-card" aria-labelledby="connector-icon-heading">
+      <ConnectorMark connector={connector} />
+      <div>
+        <h2 id="connector-icon-heading">Connector icon</h2>
+        <p>Use a square PNG, JPEG, or WebP image up to 256 KB.</p>
+        {error && <span role="alert">{error}</span>}
+      </div>
+      <div className="connector-icon-actions">
+        <label className="secondary-button">
+          {busy ? "Saving" : connector.iconDataUrl ? "Replace icon" : "Upload icon"}
+          <input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseIcon} disabled={busy} />
+        </label>
+        {connector.iconDataUrl && <button className="connection-quiet-button" type="button" onClick={removeIcon} disabled={busy}>Remove</button>}
+      </div>
+    </section>
+  );
+}
+
+function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
   const unavailable = connector?.state === "unavailable";
@@ -1148,7 +1192,7 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
       <header className="connector-detail-header">
         <ConnectorMark connector={connector} large />
         <div>
-          <p>Connected service</p>
+          <p>{connector.source === "custom" ? "Organization connector" : "Connected service"}</p>
           <h1>{connector.name}</h1>
           <span>{connector.shortDescription}</span>
         </div>
@@ -1192,6 +1236,7 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
             ? "Your organization decides which tools each workspace can use."
             : "Once connected, this service and its available tools are added to your workspace agents automatically."}</p>
         </div>
+        {isAdmin && connector.source === "custom" && <ConnectorIconEditor connector={connector} busy={busy} onSave={onIconChange} />}
       </div>}
     </div>
   );
@@ -1317,9 +1362,25 @@ const emptyConnectorDraft = {
   description: "",
   category: "Productivity",
   endpointUrl: "",
+  iconDataUrl: "",
   clientId: "",
   clientSecret: "",
 };
+
+const readConnectorIcon = (file) => new Promise((resolve, reject) => {
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    reject(new Error("Choose a PNG, JPEG, or WebP image."));
+    return;
+  }
+  if (!file.size || file.size > 256 * 1024) {
+    reject(new Error("Connector icons must be 256 KB or smaller."));
+    return;
+  }
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error("The connector icon could not be read."));
+  reader.onload = () => resolve(String(reader.result));
+  reader.readAsDataURL(file);
+});
 
 function AddConnectorDialog({ onCreated, onClose }) {
   const [draft, setDraft] = useState(emptyConnectorDraft);
@@ -1331,8 +1392,19 @@ function AddConnectorDialog({ onCreated, onClose }) {
   const payload = {
     ...draft,
     description: description.length >= 3 ? description : draft.shortDescription.trim(),
+    iconDataUrl: draft.iconDataUrl || undefined,
     clientId: draft.clientId.trim() || undefined,
     clientSecret: draft.clientSecret || undefined,
+  };
+  const chooseIcon = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      update("iconDataUrl", await readConnectorIcon(file));
+    } catch (iconError) {
+      setError(iconError.message);
+    }
   };
   const validationError = !/^https:\/\//i.test(draft.endpointUrl.trim())
     ? "Enter a secure MCP server URL beginning with https://."
@@ -1395,6 +1467,15 @@ function AddConnectorDialog({ onCreated, onClose }) {
         <label><span>Name</span><input name="connector-name" placeholder="Service name" value={draft.name} onChange={(event) => update("name", event.target.value)} disabled={Boolean(busy)} /></label>
         <label><span>Category</span><SelectMenu value={draft.category} onValueChange={(value) => update("category", value)} ariaLabel="Connector category" disabled={Boolean(busy)} options={["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"].map((value) => ({ value, label: value }))} /></label>
         <label className="wide"><span>Card description</span><input name="connector-short-description" placeholder="What people can do with this service" value={draft.shortDescription} onChange={(event) => update("shortDescription", event.target.value)} disabled={Boolean(busy)} /></label>
+        <label className="wide connector-icon-field">
+          <span>Connector icon <em>Optional</em></span>
+          <div>
+            <ConnectorMark connector={{ name: draft.name, brand: "generic", iconDataUrl: draft.iconDataUrl }} />
+            <span className="secondary-button">{draft.iconDataUrl ? "Replace icon" : "Upload icon"}<input name="connector-icon" type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseIcon} disabled={Boolean(busy)} /></span>
+            {draft.iconDataUrl && <button className="connection-quiet-button" type="button" onClick={() => update("iconDataUrl", "")} disabled={Boolean(busy)}>Remove</button>}
+          </div>
+          <small>Square PNG, JPEG, or WebP, up to 256 KB.</small>
+        </label>
         <label className="wide"><span>Connection description <em>Optional</em></span><textarea name="connector-description" rows="3" placeholder="Defaults to the card description" value={draft.description} onChange={(event) => update("description", event.target.value)} disabled={Boolean(busy)} /></label>
       </div>
       {showCredentials && <section className="add-connector-app-credentials" role="alert" aria-labelledby="connector-credentials-title">
@@ -1419,7 +1500,7 @@ function AddConnectorDialog({ onCreated, onClose }) {
   );
 }
 
-function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onAddConnector, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAddConnector, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
@@ -1427,7 +1508,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
-      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
   }
   const categories = ["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"];
@@ -1471,6 +1552,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                       <small>{connector.policySupport === "governed" ? "Approved tools ready" : "Added to workspace agents after connection"}</small>
                     </div>
                     <div className="connector-catalog-action">
+                      {isAdmin && connector.source === "custom" && !connected && <button className="connector-manage-link" type="button" onClick={() => onViewChange(`connector-${connector.id}`)}>Manage</button>}
                       {connected ? (
                         <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
                       ) : (
@@ -2694,6 +2776,22 @@ export function App() {
     }
   };
 
+  const saveConnectorIcon = async (connectorId, iconDataUrl) => {
+    setConnectionBusy(connectorId);
+    setConnectionError("");
+    try {
+      const result = await adminApi.saveConnectorIcon(connectorId, iconDataUrl);
+      setMcpConnections((current) => current.map((item) => item.id === connectorId ? { ...item, ...result.connector } : item));
+      setToast(iconDataUrl ? "Connector icon updated." : "Connector icon removed.");
+      return result.connector;
+    } catch (error) {
+      setConnectionError(error.message);
+      throw error;
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
   const connectorCreated = async (connector) => {
     const catalog = await connectionApi.catalog();
     setMcpConnections(catalog.connections);
@@ -3117,6 +3215,7 @@ export function App() {
             error={connectionError}
             onConnect={connectMcpConnector}
             onDisconnect={disconnectMcpConnector}
+            onIconChange={saveConnectorIcon}
             onAddConnector={() => setConnectorDialogOpen(true)}
             displayName={session.user.displayName}
             isAdmin={session.roles.includes("administrator")}

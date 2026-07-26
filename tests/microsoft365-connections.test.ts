@@ -213,19 +213,34 @@ test("administrators can add a connector without code and connected tools are pr
     services: ["Projects", "Tasks"],
     endpointUrl: "https://mcp.example.com/mcp",
     scopes: ["read", "write"],
+    iconDataUrl: "data:image/png;base64,iVBORw0KGgo=",
   };
+  await assert.rejects(
+    () => service.discoverConnector({ ...input, iconDataUrl: "data:image/svg+xml;base64,PHN2Zy8+" }),
+    { code: "MCP_CONNECTOR_ICON_INVALID" },
+  );
   const discovered = await service.discoverConnector(input);
   const created = await service.createConnector(alpha, "admin-alpha", {
     ...input,
     discoveryToken: discovered.discoveryToken,
   });
   assert.equal(created.id, "acme-projects");
+  assert.equal(created.iconDataUrl, input.iconDataUrl);
   assert.equal(gateway.discoveries, 1);
   assert.equal(gateway.registered[0]?.url, "https://mcp.example.com/mcp");
   assert.equal(gateway.registered[0]?.clientSecret, undefined);
   await assert.rejects(
     () => service.createConnector(alpha, "admin-alpha", { ...input, discoveryToken: discovered.discoveryToken }),
     { code: "MCP_CONNECTOR_DISCOVERY_INVALID" },
+  );
+  assert.equal((await service.updateConnectorIcon(alpha, created.id, null)).iconDataUrl, null);
+  assert.equal(
+    (await service.updateConnectorIcon(alpha, created.id, "data:image/jpeg;base64,/9j/")).iconDataUrl,
+    "data:image/jpeg;base64,/9j/",
+  );
+  await assert.rejects(
+    () => service.updateConnectorIcon(alpha, "microsoft-365", null),
+    { code: "MCP_CONNECTOR_MANAGED" },
   );
   const serverName = gateway.registered[0]!.serverName;
   gateway.statusByServer.set(serverName, connected);

@@ -2910,6 +2910,53 @@ textarea:focus-visible,
   line-height: 1.4;
 }
 
+.connector-icon-field > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.connector-icon-field .secondary-button,
+.connector-icon-actions .secondary-button {
+  position: relative;
+  display: inline-flex;
+  width: auto;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.connector-icon-field input[type="file"],
+.connector-icon-actions input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.connector-appearance-card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.connector-appearance-card h2,
+.connector-appearance-card p { margin: 0; }
+.connector-appearance-card h2 { color: #1d2c40; font-size: 15px; }
+.connector-appearance-card p { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.connector-appearance-card div > span[role="alert"] { display: block; margin-top: 5px; color: #9a2f2a; font-size: 12px; }
+.connector-icon-actions { display: flex; align-items: center; gap: 12px; }
+
 .add-connector-app-credentials {
   margin-top: 18px;
   border: 1px solid #dfe4ea;
@@ -3061,6 +3108,8 @@ textarea:focus-visible,
 .connector-mark.linear { border-color: #252525; background: #252525; color: #fff; font-size: 20px; }
 .connector-mark.atlassian { border-color: #d3e0fa; background: #edf3ff; color: #1868db; font-size: 21px; }
 .connector-mark.github { border-color: #202733; background: #202733; color: #fff; font-size: 13px; }
+.connector-mark.uploaded { overflow: hidden; padding: 5px; background: #fff; }
+.connector-mark.uploaded img { display: block; width: 100%; height: 100%; object-fit: contain; }
 
 .connector-catalog-copy {
   min-width: 0;
@@ -3125,6 +3174,25 @@ textarea:focus-visible,
   padding: 0 13px;
   font-size: 12px;
 }
+
+.connector-catalog-action {
+  display: grid;
+  justify-items: stretch;
+  gap: 7px;
+}
+
+.connector-manage-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #4f647b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.connector-manage-link:hover { color: var(--navy); text-decoration: underline; }
 
 .connector-policy-note {
   display: flex;
@@ -4258,6 +4326,10 @@ textarea:focus-visible,
   .add-connector-fields label.wide {
     grid-column: auto;
   }
+
+  .connector-icon-field > div { flex-wrap: wrap; }
+  .connector-appearance-card { grid-template-columns: 46px minmax(0, 1fr); }
+  .connector-icon-actions { grid-column: 2; flex-wrap: wrap; }
 
   .workspace-overview-heading {
     align-items: start;

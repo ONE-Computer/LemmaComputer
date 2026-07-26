@@ -145,9 +145,14 @@ const createConnectorSchema = z.strictObject({
   services: z.array(z.string().trim().min(1).max(80)).max(16).default([]),
   endpointUrl: z.string().url().max(2048),
   scopes: z.array(z.string().trim().min(1).max(160)).max(64).default([]),
+  iconDataUrl: z.string().max(350000).optional(),
   clientId: z.string().trim().min(1).max(512).optional(),
   clientSecret: z.string().min(1).max(4096).optional(),
   discoveryToken: z.string().min(32).max(256).optional(),
+});
+
+const connectorIconSchema = z.strictObject({
+  iconDataUrl: z.string().max(350000).nullable(),
 });
 
 const envSchema = z.object({
@@ -814,6 +819,11 @@ export function createControlServer(
     const actor = requireAdministrator(request);
     const input = saveMcpToolPolicySchema.parse(request.body ?? {});
     return requireConnections().saveConnectorToolPolicy(actor.identity, request.params.connectorId, input.tools);
+  });
+  app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/icon", async (request) => {
+    const actor = requireAdministrator(request);
+    const input = connectorIconSchema.parse(request.body ?? {});
+    return { connector: await requireConnections().updateConnectorIcon(actor.identity, request.params.connectorId, input.iconDataUrl) };
   });
   app.delete<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId", async (request) => {
     const actor = requireAdministrator(request);

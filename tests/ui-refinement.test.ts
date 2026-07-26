@@ -183,6 +183,22 @@ test("connector checks explain invalid input instead of appearing permanently bu
   assert.match(styles, /\.primary-button\[aria-busy="true"\],[\s\S]*?cursor: progress;/);
 });
 
+test("custom connectors use their own initial and support bounded icon uploads", async () => {
+  const [app, api, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/workspace-api.js"),
+    source("apps/web/src/styles.css"),
+  ]);
+  assert.match(app, /connector\?\.name\?\.trim\(\)\.match\(\/\[\\p\{L\}\\p\{N\}\]\//);
+  assert.doesNotMatch(app, /\[brand\] \?\? "M"/);
+  assert.match(app, /accept="image\/png,image\/jpeg,image\/webp"/);
+  assert.match(app, /Connector icons must be 256 KB or smaller/);
+  assert.match(app, /<ConnectorIconEditor connector=\{connector\}/);
+  assert.match(app, /connector\.source === "custom" && !connected/);
+  assert.match(api, /saveConnectorIcon:/);
+  assert.match(styles, /\.connector-mark\.uploaded img/);
+});
+
 test("remote-only approvals notify desktop without opening its decision drawer", async () => {
   const app = await source("apps/web/src/App.jsx");
   assert.match(app, /approvalContext\.localReady \|\| !approvalContext\.accountStatus\.connected/);

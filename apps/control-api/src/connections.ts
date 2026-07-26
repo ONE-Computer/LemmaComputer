@@ -43,6 +43,7 @@ export type CreateConnectorInput = {
   services: string[];
   endpointUrl: string;
   scopes: string[];
+  iconDataUrl?: string;
   clientId?: string;
   clientSecret?: string;
   discoveryToken?: string;
@@ -57,6 +58,7 @@ const connectorInputDigest = (input: CreateConnectorInput) => createHash("sha256
   services: input.services,
   endpointUrl: new URL(input.endpointUrl).toString(),
   scopes: input.scopes,
+  iconHash: input.iconDataUrl ? createHash("sha256").update(input.iconDataUrl).digest("hex") : null,
   clientId: input.clientId,
   clientSecret: input.clientSecret,
 })).digest("base64url");
@@ -254,6 +256,7 @@ export class McpConnectionService {
       authorizationOrigins: [discovered.authorizationOrigin],
       scopes: input.scopes,
       brand: "generic",
+      iconDataUrl: input.iconDataUrl ?? null,
       policySupport: "automatic" as const,
       source: "custom" as const,
       createdBy,
@@ -285,6 +288,17 @@ export class McpConnectionService {
     if (!deleted) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
     this.invalidateProjection(identity);
     return { deleted: true };
+  }
+
+  async updateConnectorIcon(identity: IdentityContext, connectorId: string, iconDataUrl: string | null) {
+    const connector = await this.connector(identity.tenantId, connectorId);
+    if (connector.source !== "custom") {
+      throw new OneComputerError("MCP_CONNECTOR_MANAGED", "Built-in connector icons cannot be changed", 409);
+    }
+    if (iconDataUrl) this.validateConnectorIcon(iconDataUrl);
+    const saved = await this.registry.updateIcon(identity.tenantId, connectorId, iconDataUrl);
+    if (!saved) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    return this.publicConnector(saved);
   }
 
   async connectorToolPolicy(identity: IdentityContext, connectorId: string) {
@@ -482,6 +496,27 @@ export class McpConnectionService {
     }
     if (input.clientSecret && !input.clientId) {
       throw new OneComputerError("MCP_CONNECTOR_CLIENT_INVALID", "Client ID is required when a client secret is supplied", 400);
+    }
+    if (input.iconDataUrl) this.validateConnectorIcon(input.iconDataUrl);
+  }
+
+  private validateConnectorIcon(iconDataUrl: string) {
+    const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(iconDataUrl);
+    if (!match) {
+      throw new OneComputerError("MCP_CONNECTOR_ICON_INVALID", "Use a PNG, JPEG, or WebP connector icon", 400);
+    }
+    const bytes = Buffer.from(match[2]!, "base64");
+    if (!bytes.length || bytes.length > 256 * 1024) {
+      throw new OneComputerError("MCP_CONNECTOR_ICON_INVALID", "Connector icons must be 256 KB or smaller", 400);
+    }
+    const mediaType = match[1];
+    const validSignature = mediaType === "png"
+      ? bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      : mediaType === "jpeg"
+        ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+        : bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+    if (!validSignature) {
+      throw new OneComputerError("MCP_CONNECTOR_ICON_INVALID", "The connector icon does not match its image format", 400);
     }
   }
 
