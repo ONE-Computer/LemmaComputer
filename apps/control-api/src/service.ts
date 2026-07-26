@@ -386,6 +386,10 @@ export class WorkspaceService {
     return true;
   }
 
+  async revokePolicyGrant(workspaceId: string, policy: RuntimePolicy) {
+    await this.revokeAgentGrants(workspaceId, policy);
+  }
+
   async create(identity: IdentityContext, policy: RuntimePolicy, grantId: string, idempotencyKey: string, correlationId: string) {
     let record = await this.store.createOrGet(identity, grantId, idempotencyKey);
     if (["ready", "open", "provisioning", "restarting"].includes(record.state)) return this.view(record, policy);

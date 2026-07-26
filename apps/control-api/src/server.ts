@@ -4,11 +4,11 @@ import Fastify, { LogController } from "fastify";
 import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
-import { Microsoft365ConnectionService } from "./connections.js";
+import { McpConnectionService } from "./connections.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
 import { EntraAuthenticationService, isAdministrator, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions } from "./mcp-policy.js";
@@ -137,6 +137,19 @@ const optionalEnvString = (minimum = 1) => z.preprocess(
   z.string().min(minimum).optional(),
 );
 
+const createConnectorSchema = z.strictObject({
+  name: z.string().trim().min(2).max(80),
+  shortDescription: z.string().trim().min(3).max(140),
+  description: z.string().trim().min(3).max(600),
+  category: z.enum(["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"]),
+  services: z.array(z.string().trim().min(1).max(80)).max(16).default([]),
+  endpointUrl: z.string().url().max(2048),
+  scopes: z.array(z.string().trim().min(1).max(160)).max(64).default([]),
+  clientId: z.string().trim().min(1).max(512).optional(),
+  clientSecret: z.string().min(1).max(4096).optional(),
+  discoveryToken: z.string().min(32).max(256).optional(),
+});
+
 const envSchema = z.object({
   CONTROL_HOST: z.string().default("127.0.0.1"),
   CONTROL_PORT: z.coerce.number().int().positive().default(4100),
@@ -148,6 +161,7 @@ const envSchema = z.object({
   LITELLM_WORKSPACE_URL: z.string().url().optional(),
   LITELLM_MASTER_KEY: z.string().min(24).optional(),
   LITELLM_CREDENTIAL_SECRET: z.string().min(32).optional(),
+  LITELLM_PUBLIC_URL: z.string().url().default("http://localhost:4000"),
   PUBLIC_WEB_URL: z.string().url().default("http://localhost:4174"),
   M365_AUTHORIZATION_ORIGIN: z.string().url().default("http://localhost:4311"),
   AGENT_BRIDGE_URL: z.string().url().default("http://onecomputer-control:4100"),
@@ -194,7 +208,7 @@ export function createControlServer(
   proxyToken: string,
   gateway?: GatewayClient & Partial<GovernedToolExecutor>,
   fixtureApprovalSecret = "local-test-fixture-approval-secret-32-characters",
-  connectionOptions: { publicWebUrl?: string; authorizationOrigin?: string; agentBridgeUrl?: string } = {},
+  connectionOptions: { publicWebUrl?: string; authorizationOrigin?: string; liteLlmPublicUrl?: string; agentBridgeUrl?: string } = {},
   security: {
     authentication?: AuthenticationBoundary;
     identityPolicyStore?: IdentityPolicyStore;
@@ -207,6 +221,7 @@ export function createControlServer(
     agentChatClient?: AgentChatClient;
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
+    connectorRegistryStore?: ConnectorRegistryStore;
     workspaceIngress?: {
       publicUrl: string;
       authority: WorkspaceIngressAuthority;
@@ -237,7 +252,7 @@ export function createControlServer(
   const app = Fastify({
     logger: { redact: ["req.headers.x-onecomputer-proxy-token", "req.headers.x-onecomputer-mcp-policy-token", "req.headers.authorization", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
-      disableRequestLogging: (request) => request.url.startsWith("/v1/connections/microsoft-365/callback") || request.url.startsWith("/v1/auth/callback"),
+      disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url) || request.url.startsWith("/v1/auth/callback"),
     }),
     bodyLimit: 32 * 1024,
   });
@@ -261,12 +276,14 @@ export function createControlServer(
     && typeof (gateway as Partial<OAuthConnectionGateway>).disconnectUserOAuthConnection === "function"
     ? gateway as GatewayClient & OAuthConnectionGateway
     : undefined;
-  const connections = oauthGateway ? new Microsoft365ConnectionService(oauthGateway, {
+  const connections = oauthGateway ? new McpConnectionService(oauthGateway, {
     publicWebUrl: connectionOptions.publicWebUrl ?? "http://localhost:4174",
     authorizationOrigin: connectionOptions.authorizationOrigin ?? "http://localhost:4311",
+    liteLlmPublicUrl: connectionOptions.liteLlmPublicUrl,
+    registry: security.connectorRegistryStore,
   }) : undefined;
   const requireConnections = () => {
-    if (!connections) throw new OneComputerError("M365_CONNECTION_NOT_CONFIGURED", "Microsoft 365 connections are not configured", 503, true);
+    if (!connections) throw new OneComputerError("MCP_CONNECTIONS_NOT_CONFIGURED", "MCP connections are not configured", 503, true);
     return connections;
   };
   const requireChannelBroker = () => {
@@ -373,19 +390,42 @@ export function createControlServer(
     }) ?? effective?.egressSecurityGroup ?? null
   );
   const policyForGrant = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId = "personal") => {
-    if (!effective) return { principal: value, policy: testRuntimePolicy };
-    const saved = await store.getSandboxSettings?.(value.identity, grantId);
-    const workspaceEgress = await workspaceEgressFor(value, effective, grantId);
-    const document = effective.document as Record<string, unknown>;
-    const availableAgentIds = assignedAgentIds(document);
-    return { principal: value, policy: runtimePolicyFor(
-      effective,
-      saved?.modelAlias,
-      saved?.profileId,
-      saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
-      saved?.applicationIds ?? defaultApplicationIds(document),
-      workspaceEgress,
-    ) };
+    let policy = testRuntimePolicy;
+    if (effective) {
+      const saved = await store.getSandboxSettings?.(value.identity, grantId);
+      const workspaceEgress = await workspaceEgressFor(value, effective, grantId);
+      const document = effective.document as Record<string, unknown>;
+      const availableAgentIds = assignedAgentIds(document);
+      policy = runtimePolicyFor(
+        effective,
+        saved?.modelAlias,
+        saved?.profileId,
+        saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
+        saved?.applicationIds ?? defaultApplicationIds(document),
+        workspaceEgress,
+      );
+    }
+    return {
+      principal: value,
+      policy: connections ? await connections.projectConnectedConnectors(value.identity, policy) : policy,
+    };
+  };
+  const refreshOwnedWorkspaceConnectionGrants = async (value: SessionPrincipal) => {
+    const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;
+    const workspaces = await store.listCurrent(value.identity);
+    const results = await Promise.allSettled(workspaces.map(async (workspace) => {
+      const { policy } = await policyForGrant(value, effective, workspace.grantId);
+      try {
+        return await service.refreshPolicyGrant(value.identity, policy, workspace.grantId);
+      } catch (error) {
+        await service.revokePolicyGrant(workspace.id, policy).catch(() => undefined);
+        throw error;
+      }
+    }));
+    return {
+      refreshed: results.filter((result) => result.status === "fulfilled" && result.value).length,
+      failed: results.filter((result) => result.status === "rejected").length,
+    };
   };
   const requirePolicy = async (request: object) => {
     const { principal: value, effective } = await assignedPolicy(request);
@@ -743,27 +783,60 @@ export function createControlServer(
       },
     };
   });
-  app.get("/v1/connections/microsoft-365", async (request) => requireConnections().status(identity(request)));
-  app.get("/v1/connections/microsoft-365/authorize", async (request, reply) => {
-    const started = await requireConnections().start(identity(request));
+  app.get("/v1/connections", async (request) => requireConnections().list(identity(request)));
+  app.get("/v1/admin/connectors", async (request) => {
+    const actor = requireAdministrator(request);
+    return requireConnections().adminList(actor.identity);
+  });
+  app.post("/v1/admin/connectors/discover", async (request) => {
+    requireAdministrator(request);
+    return requireConnections().discoverConnector(createConnectorSchema.parse(request.body ?? {}));
+  });
+  app.post("/v1/admin/connectors", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const connector = await requireConnections().createConnector(
+      actor.identity,
+      actor.userId,
+      createConnectorSchema.parse(request.body ?? {}),
+    );
+    return reply.code(201).send({ connector });
+  });
+  app.delete<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId", async (request) => {
+    const actor = requireAdministrator(request);
+    const result = await requireConnections().deleteConnector(actor.identity, request.params.connectorId);
+    await refreshOwnedWorkspaceConnectionGrants(actor);
+    return result;
+  });
+  app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId", async (request) => (
+    requireConnections().status(identity(request), request.params.connectorId)
+  ));
+  app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId/authorize", async (request, reply) => {
+    const started = await requireConnections().start(identity(request), request.params.connectorId);
     if (started.cookies.length) reply.header("set-cookie", started.cookies);
     return reply.code(302).header("location", started.location).send();
   });
-  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/connections/microsoft-365/callback", async (request, reply) => {
+  app.get<{ Params: { connectorId: string }; Querystring: { state?: string; code?: string; error?: string } }>("/v1/connections/:connectorId/callback", async (request, reply) => {
     const service = requireConnections();
     try {
-      await service.complete(identity(request), {
+      const actor = principal(request);
+      await service.complete(actor.identity, request.params.connectorId, {
         state: request.query.state,
         code: request.query.code,
         error: request.query.error,
       });
-      return reply.code(303).header("location", service.resultUrl("connected")).send();
+      await refreshOwnedWorkspaceConnectionGrants(actor);
+      return reply.code(303).header("location", service.resultUrl(request.params.connectorId, "connected")).send();
     } catch (error) {
-      const reason = error instanceof OneComputerError ? error.code : "M365_CONNECTION_FAILED";
-      return reply.code(303).header("location", service.resultUrl("error", reason)).send();
+      const reason = error instanceof OneComputerError ? error.code : "MCP_CONNECTION_FAILED";
+      return reply.code(303).header("location", service.resultUrl(request.params.connectorId, "error", reason)).send();
     }
   });
-  app.delete("/v1/connections/microsoft-365", async (request) => requireConnections().disconnect(identity(request)));
+  app.delete<{ Params: { connectorId: string } }>("/v1/connections/:connectorId", async (request) => {
+    const actor = principal(request);
+    const result = await requireConnections().disconnect(actor.identity, request.params.connectorId);
+    await refreshOwnedWorkspaceConnectionGrants(actor);
+    return result;
+  });
   app.get("/v1/credentials", async (request) => {
     await requirePolicy(request);
     return requireChannelBroker().listCredentials(identity(request));
@@ -1285,6 +1358,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const env = envSchema.parse(process.env);
   const store = PostgresWorkspaceStore.fromConnectionString(env.DATABASE_URL);
   await store.migrate();
+  const connectorRegistryStore = PostgresConnectorRegistryStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
@@ -1361,9 +1435,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     env.WEB_PROXY_TOKEN,
     gateway,
     env.FIXTURE_APPROVAL_SECRET,
-    { publicWebUrl: env.PUBLIC_WEB_URL, authorizationOrigin: env.M365_AUTHORIZATION_ORIGIN, agentBridgeUrl: env.AGENT_BRIDGE_URL },
+    { publicWebUrl: env.PUBLIC_WEB_URL, authorizationOrigin: env.M365_AUTHORIZATION_ORIGIN, liteLlmPublicUrl: env.LITELLM_PUBLIC_URL, agentBridgeUrl: env.AGENT_BRIDGE_URL },
     {
       identityPolicyStore,
+      connectorRegistryStore,
       mcpPolicyToken: env.CONTROLLER_INTERNAL_TOKEN,
       authentication: new EntraAuthenticationService(identityPolicyStore, {
         tenantId: env.ENTRA_TENANT_ID,
@@ -1397,6 +1472,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   app.addHook("onClose", async () => {
     if (pushRetryTimer) clearInterval(pushRetryTimer);
     await store.close();
+    await connectorRegistryStore.close();
     await identityPolicyStore.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });

@@ -462,6 +462,12 @@ export const runtimeAgentPolicySchema = z.object({
   modelAlias: z.string().min(1).max(128),
   mcpServer: z.string().min(1).max(128),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
+  mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
+  mcpToolPermissions: z.record(
+    z.string().min(1).max(128),
+    z.array(z.string().min(1).max(128)).min(1).max(512),
+  ).optional(),
+  connectionProjectionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   toolPolicies: z.record(
     z.string().min(1).max(128),
     z.enum(["allow", "approval_required", "deny"]),
@@ -487,6 +493,12 @@ export const runtimePolicySchema = z.object({
   modelAlias: z.string().min(1).max(128),
   mcpServer: z.string().min(1).max(128),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
+  mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
+  mcpToolPermissions: z.record(
+    z.string().min(1).max(128),
+    z.array(z.string().min(1).max(128)).min(1).max(512),
+  ).optional(),
+  connectionProjectionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   toolPolicies: z.record(
     z.string().min(1).max(128),
     z.enum(["allow", "approval_required", "deny"]),

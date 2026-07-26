@@ -916,6 +916,12 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
 }
 
 const connectionReason = {
+  MCP_OAUTH_DENIED: "Access was not granted. You can try again when you’re ready.",
+  MCP_OAUTH_STATE_INVALID: "That connection attempt expired or was already used. Please start again.",
+  MCP_OAUTH_STATE_EXPIRED: "That connection attempt expired. Please start again.",
+  MCP_OAUTH_IDENTITY_MISMATCH: "That connection attempt belongs to another signed-in user.",
+  MCP_OAUTH_CONNECTOR_MISMATCH: "That connection returned to a different connector. Please start again.",
+  MCP_TOKEN_EXCHANGE_FAILED: "The provider could not complete the connection. Please try again.",
   M365_OAUTH_DENIED: "Microsoft 365 access was not granted. You can try again when you’re ready.",
   M365_OAUTH_STATE_INVALID: "That connection attempt expired or was already used. Please start again.",
   M365_OAUTH_STATE_EXPIRED: "That connection attempt expired. Please start again.",
@@ -1039,6 +1045,19 @@ function ApprovalDeviceCard({ displayName }) {
   );
 }
 
+function ConnectorMark({ connector, large = false }) {
+  const brand = connector?.brand ?? "microsoft";
+  if (brand === "microsoft") {
+    return (
+      <span className={`connector-mark microsoft${large ? " large" : ""}`} aria-hidden="true">
+        <i /><i /><i /><i />
+      </span>
+    );
+  }
+  const glyph = { notion: "N", linear: "L", atlassian: "A", github: "GH" }[brand] ?? "M";
+  return <span className={`connector-mark ${brand}${large ? " large" : ""}`} aria-hidden="true">{glyph}</span>;
+}
+
 function Microsoft365AccountMetadata({ account }) {
   const accountId = account?.userPrincipalName || account?.email;
   if (!accountId) return <p className="connection-metadata">Connected account details unavailable</p>;
@@ -1097,9 +1116,76 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
               )}
             </div>
           </section>
-          <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Microsoft tokens stay in the MCP gateway. Your Microsoft credentials are never sent to the workspace.</p></div>
         </div>
       )}
+    </div>
+  );
+}
+
+function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onBack }) {
+  const connected = connector?.state === "connected";
+  const expired = connector?.state === "expired";
+  const unavailable = connector?.state === "unavailable";
+  const connectedAt = connector?.connectedAt
+    ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(connector.connectedAt))
+    : null;
+  const statusLabel = loading
+    ? "Checking"
+    : connected
+      ? "Connected"
+      : expired
+        ? "Reconnect required"
+        : unavailable
+          ? connector?.available ? "Service unavailable" : "Setup required"
+          : "Not connected";
+  return (
+    <div className="secondary-screen connections-screen connector-detail-screen">
+      <button className="connector-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Connections</button>
+      <header className="connector-detail-header">
+        <ConnectorMark connector={connector} large />
+        <div>
+          <p>Connected service</p>
+          <h1>{connector.name}</h1>
+          <span>{connector.shortDescription}</span>
+        </div>
+        <span className={`connection-status ${connected ? "connected" : expired ? "expired" : "disconnected"}`}>{statusLabel}</span>
+      </header>
+
+      <nav className="connector-tabs" aria-label={`${connector.name} settings`}>
+        <button className="active" type="button">Overview</button>
+      </nav>
+
+      <div className="connector-overview">
+        <section className="connector-overview-card">
+          <div>
+            <p>Connection status</p>
+            <h2>{connected ? "Connection ready" : expired ? "Provider access needs attention" : unavailable ? "Administrator setup required" : `Connect ${connector.name}`}</h2>
+            <span>{connected
+              ? "Your account is connected and ready for any tools your organization approves."
+              : unavailable
+                ? "An administrator must finish setting up this service before people can connect it."
+                : connector.description}</span>
+            <div className="connection-services" aria-label="Included services">{connector.services.map((service) => <span key={service}>{service}</span>)}</div>
+            {connectedAt && <p className="connection-metadata">Connected {connectedAt}</p>}
+          </div>
+          <div className="connection-actions">
+            {connected ? (
+              <button className="secondary-button" type="button" onClick={() => onDisconnect(connector)} disabled={busy || loading}>{busy ? "Disconnecting" : "Disconnect"}</button>
+            ) : (
+              <button className="primary-button" type="button" onClick={() => onConnect(connector.id)} disabled={busy || loading || unavailable}>
+                <PlugConnected24Regular aria-hidden="true" />
+                {busy ? `Opening ${connector.name}` : expired ? "Reconnect" : `Connect ${connector.name}`}
+              </button>
+            )}
+          </div>
+        </section>
+        <div className="connector-policy-note">
+          <Info24Regular aria-hidden="true" />
+          <p><strong>{connector.policySupport === "governed" ? "Approved tools available" : "Available to your workspace agents"}</strong>{connector.policySupport === "governed"
+            ? "Your organization decides which tools each workspace can use."
+            : "Once connected, this service and its available tools are added to your workspace agents automatically."}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1218,58 +1304,165 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
   );
 }
 
-function ConnectionsScreen({ connection, loading, busy, error, onConnect, onDisconnect, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
-  const connected = connection?.state === "connected";
-  const expired = connection?.state === "expired";
-  const connectedAt = connection?.connectedAt
-    ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(connection.connectedAt))
-    : null;
+const emptyConnectorDraft = {
+  name: "",
+  shortDescription: "",
+  description: "",
+  category: "Productivity",
+  services: "",
+  endpointUrl: "",
+  scopes: "",
+  clientId: "",
+  clientSecret: "",
+};
+
+function AddConnectorDialog({ onCreated, onClose }) {
+  const [draft, setDraft] = useState(emptyConnectorDraft);
+  const [checked, setChecked] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const payload = {
+    ...draft,
+    services: draft.services.split(",").map((item) => item.trim()).filter(Boolean),
+    scopes: draft.scopes.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean),
+    clientId: draft.clientId.trim() || undefined,
+    clientSecret: draft.clientSecret || undefined,
+  };
+  const valid = draft.name.trim().length >= 2
+    && draft.shortDescription.trim().length >= 3
+    && draft.description.trim().length >= 3
+    && /^https:\/\//i.test(draft.endpointUrl.trim());
+  const update = (field, value) => {
+    setDraft((current) => ({ ...current, [field]: value }));
+    setChecked(null);
+    setError("");
+  };
+  const discover = async () => {
+    setBusy("checking");
+    setError("");
+    try {
+      setChecked(await adminApi.discoverConnector(payload));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy("");
+    }
+  };
+  const create = async () => {
+    setBusy("creating");
+    setError("");
+    try {
+      const result = await adminApi.createConnector({ ...payload, discoveryToken: checked.discoveryToken });
+      await onCreated(result.connector);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <ModalDialog
+      title="Add connector"
+      description="Add a reviewed remote MCP service to the organization catalog. People can connect it without a future deployment."
+      eyebrow="Organization connector"
+      labelledBy="add-connector-title"
+      className="add-connector-dialog"
+      onClose={busy ? () => undefined : onClose}
+    >
+      <div className="add-connector-fields">
+        <label className="wide"><span>MCP server URL</span><input name="connector-endpoint-url" type="url" placeholder="https://service.example.com/mcp" value={draft.endpointUrl} onChange={(event) => update("endpointUrl", event.target.value)} disabled={Boolean(busy)} /></label>
+        <label><span>Name</span><input name="connector-name" placeholder="Service name" value={draft.name} onChange={(event) => update("name", event.target.value)} disabled={Boolean(busy)} /></label>
+        <label><span>Category</span><SelectMenu value={draft.category} onValueChange={(value) => update("category", value)} ariaLabel="Connector category" disabled={Boolean(busy)} options={["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"].map((value) => ({ value, label: value }))} /></label>
+        <label className="wide"><span>Card description</span><input name="connector-short-description" placeholder="What people can do with this service" value={draft.shortDescription} onChange={(event) => update("shortDescription", event.target.value)} disabled={Boolean(busy)} /></label>
+        <label className="wide"><span>Connection description</span><textarea name="connector-description" rows="3" value={draft.description} onChange={(event) => update("description", event.target.value)} disabled={Boolean(busy)} /></label>
+        <label><span>Services</span><input name="connector-services" placeholder="Issues, projects, comments" value={draft.services} onChange={(event) => update("services", event.target.value)} disabled={Boolean(busy)} /><small>Comma-separated labels shown to people.</small></label>
+        <label><span>Requested scopes</span><input name="connector-scopes" placeholder="read write" value={draft.scopes} onChange={(event) => update("scopes", event.target.value)} disabled={Boolean(busy)} /><small>Use the provider’s documented scope names.</small></label>
+      </div>
+      <details className="add-connector-app-credentials">
+        <summary>Provider app credentials <span>Only if required</span></summary>
+        <div>
+          <label><span>Client ID</span><input name="connector-client-id" autoComplete="off" value={draft.clientId} onChange={(event) => update("clientId", event.target.value)} disabled={Boolean(busy)} /></label>
+          <label><span>Client secret</span><input name="connector-client-secret" type="password" autoComplete="new-password" value={draft.clientSecret} onChange={(event) => update("clientSecret", event.target.value)} disabled={Boolean(busy)} /></label>
+        </div>
+      </details>
+      {checked && <div className="connector-discovery-result" role="status"><CheckmarkCircle24Regular aria-hidden="true" /><span><strong>Connection flow verified</strong>{checked.dynamicClientRegistration ? "The provider can create its app registration automatically." : "The supplied provider app is ready to use."}</span></div>}
+      {error && <p className="add-connector-error" role="alert">{error}</p>}
+      <div className="modal-actions">
+        <button className="secondary-button" type="button" onClick={onClose} disabled={Boolean(busy)}>Cancel</button>
+        {!checked
+          ? <button className="primary-button" type="button" onClick={discover} disabled={!valid || Boolean(busy)}>{busy === "checking" ? "Checking server" : "Check server"}</button>
+          : <button className="primary-button" type="button" onClick={create} disabled={Boolean(busy)}>{busy === "creating" ? "Adding connector" : "Add connector"}</button>}
+      </div>
+    </ModalDialog>
+  );
+}
+
+function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onAddConnector, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+  const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
-    return <Microsoft365Detail connection={connection} loading={loading} busy={busy} onConnect={onConnect} onDisconnect={onDisconnect} displayName={displayName} isAdmin={isAdmin} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+    if (view.startsWith("microsoft365-") && microsoft) {
+      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} displayName={displayName} isAdmin={isAdmin} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+    }
+    const selected = connections.find((connector) => view === `connector-${connector.id}`);
+    if (selected) {
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onBack={() => onViewChange("list")} />;
+    }
   }
+  const categories = ["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"];
   return (
     <div className="secondary-screen connections-screen">
-      <header className="page-heading compact">
-        <p>Your connected services</p>
-        <h1>Connections</h1>
-        <span>Connect approved work services here. Official messaging channels are attached separately from each workspace’s configuration.</span>
-      </header>
+      <div className="connections-page-intro">
+        <header className="page-heading compact">
+          <p>Your services</p>
+          <h1>Connections</h1>
+          <span>Connect the work services you want to use. Connected services become available to your workspace agents automatically.</span>
+        </header>
+        {isAdmin && <button className="primary-button connections-add-button" type="button" onClick={onAddConnector}><Add24Regular aria-hidden="true" />Add connector</button>}
+      </div>
 
-      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Microsoft 365 was not connected</strong>{error}</span></div>}
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connection was not updated</strong>{error}</span></div>}
 
-      <section className="connection-card" aria-labelledby="microsoft-365-title">
-        <div className="connection-logo"><PlugConnected24Regular aria-hidden="true" /></div>
-        <div className="connection-copy">
-          <div className="connection-heading">
-            <h2 id="microsoft-365-title">Microsoft 365</h2>
-            <span className={`connection-status ${connected ? "connected" : expired ? "expired" : "disconnected"}`}>
-              {loading ? "Checking" : connected ? "Connected" : expired ? "Reconnect required" : "Not connected"}
-            </span>
-          </div>
-          <p className="connection-service-summary">Outlook Mail, Calendar, OneDrive, and Teams</p>
-          <p className="connection-description">Use approved Microsoft 365 tools through the ONEComputer AI gateway. Protected actions require approval.</p>
-          <div className="connection-services" aria-label="Included services">
-            <span>Outlook Mail</span><span>Calendar</span><span>OneDrive</span><span>Teams</span>
-          </div>
-          {connected && <Microsoft365AccountMetadata account={connection?.account} />}
-          {connectedAt && <p className="connection-metadata">Connected {connectedAt}</p>}
-        </div>
-        <div className="connection-actions">
-          {connected ? (
-            <>
-              <button className="primary-button connection-manage-button" type="button" onClick={() => onViewChange(isAdmin ? "microsoft365-tools" : "microsoft365-overview")}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
-              <button className="connection-quiet-button" type="button" onClick={onDisconnect} disabled={busy || loading}>{busy ? "Disconnecting" : "Disconnect"}</button>
-            </>
-          ) : (
-            <button className="primary-button" type="button" onClick={onConnect} disabled={busy || loading}>
-              <PlugConnected24Regular aria-hidden="true" />
-              {busy ? "Opening Microsoft" : expired ? "Reconnect" : "Connect Microsoft 365"}
-            </button>
-          )}
-        </div>
-      </section>
+      {categories.map((category) => {
+        const categoryConnections = connections.filter((connector) => connector.category === category);
+        if (!categoryConnections.length) return null;
+        return (
+          <section className="connector-catalog-section" aria-labelledby={`connector-category-${category.replace(/\s+/g, "-").toLowerCase()}`} key={category}>
+            <div className="connector-category-heading">
+              <h2 id={`connector-category-${category.replace(/\s+/g, "-").toLowerCase()}`}>{category}</h2>
+              <span>{categoryConnections.filter((connector) => connector.state === "connected").length} connected</span>
+            </div>
+            <div className="connector-grid">
+              {categoryConnections.map((connector) => {
+                const connected = connector.state === "connected";
+                const expired = connector.state === "expired";
+                const unavailable = connector.state === "unavailable";
+                const busy = busyConnectorId === connector.id;
+                return (
+                  <article className={`connector-catalog-card${connected ? " connected" : ""}`} key={connector.id}>
+                    <ConnectorMark connector={connector} />
+                    <div className="connector-catalog-copy">
+                      <div>
+                        <h3>{connector.name}</h3>
+                        <span className={`connector-card-state ${connected ? "connected" : expired ? "expired" : ""}`}>{loading ? "Checking" : connected ? "Connected" : expired ? "Reconnect" : unavailable ? connector.available ? "Gateway unavailable" : "Not registered" : "Available"}</span>
+                      </div>
+                      <p>{connector.shortDescription}</p>
+                      <small>{connector.policySupport === "governed" ? "Approved tools ready" : "Added to workspace agents after connection"}</small>
+                    </div>
+                    <div className="connector-catalog-action">
+                      {connected ? (
+                        <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
+                      ) : (
+                        <button className="secondary-button" type="button" onClick={() => onConnect(connector.id)} disabled={loading || busy || unavailable}>{busy ? "Opening" : expired ? "Reconnect" : "Connect"}</button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
 
-      <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Microsoft tokens stay in LiteLLM. Messaging channels are attached from each workspace’s configuration and remain outside its runtime.</p></div>
     </div>
   );
 }
@@ -1889,10 +2082,11 @@ export function App() {
   const [approvalRequestState, setApprovalRequestState] = useState("idle");
   const [approvalRequestMessage, setApprovalRequestMessage] = useState("");
   const [approvalReload, setApprovalReload] = useState(0);
-  const [m365Connection, setM365Connection] = useState(null);
+  const [mcpConnections, setMcpConnections] = useState([]);
   const [connectionLoading, setConnectionLoading] = useState(true);
-  const [connectionBusy, setConnectionBusy] = useState(false);
+  const [connectionBusy, setConnectionBusy] = useState("");
   const [connectionError, setConnectionError] = useState("");
+  const [connectorDialogOpen, setConnectorDialogOpen] = useState(false);
   const [telegramConnection, setTelegramConnection] = useState(null);
   const [telegramLoading, setTelegramLoading] = useState(false);
   const [telegramBusy, setTelegramBusy] = useState(false);
@@ -2075,8 +2269,8 @@ export function App() {
       .finally(() => setHomeWorkspacesLoading(false));
     operationApi.recent().then(setOperation).catch(showApiError);
     operationApi.list().then((value) => setOperationHistory(value.operations)).catch(showApiError);
-    connectionApi.microsoft365()
-      .then(setM365Connection)
+    connectionApi.catalog()
+      .then((value) => setMcpConnections(value.connections))
       .catch((error) => setConnectionError(error.message))
       .finally(() => setConnectionLoading(false));
     connectionApi.credentials()
@@ -2114,22 +2308,27 @@ export function App() {
     if (!session) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("view") !== "connections") return;
-    const result = params.get("m365");
-    if (!result) return;
+    const legacyResult = params.get("m365");
+    const connectorId = legacyResult ? "microsoft-365" : params.get("connector");
+    const result = legacyResult ?? params.get("connection");
+    if (!connectorId || !result) return;
     setActiveNav("Connections");
-    setConnectionsView("microsoft365-overview");
+    setConnectionsView(connectorId === "microsoft-365" ? "microsoft365-overview" : `connector-${connectorId}`);
     if (result === "connected") {
-      setToast("Microsoft 365 is connected.");
+      const connectorName = mcpConnections.find((connector) => connector.id === connectorId)?.name ?? "The service";
+      setToast(`${connectorName} is connected.`);
       setConnectionLoading(true);
-      connectionApi.microsoft365()
-        .then((status) => { setM365Connection(status); setConnectionError(""); })
+      connectionApi.catalog()
+        .then((value) => { setMcpConnections(value.connections); setConnectionError(""); })
         .catch((error) => setConnectionError(error.message))
         .finally(() => setConnectionLoading(false));
     } else if (result === "error") {
       const reason = params.get("reason");
-      setConnectionError(connectionReason[reason] ?? "Microsoft 365 could not complete the connection. Please try again.");
+      setConnectionError(connectionReason[reason] ?? "The provider could not complete the connection. Please try again.");
     }
     params.delete("m365");
+    params.delete("connector");
+    params.delete("connection");
     params.delete("reason");
     const query = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
@@ -2442,30 +2641,37 @@ export function App() {
     }
   };
 
-  const connectMicrosoft365 = () => {
-    setConnectionBusy(true);
+  const connectMcpConnector = (connectorId) => {
+    setConnectionBusy(connectorId);
     setConnectionError("");
-    window.location.assign(connectionApi.microsoft365AuthorizeUrl);
+    window.location.assign(connectionApi.authorizeUrl(connectorId));
   };
 
-  const disconnectMicrosoft365 = async () => {
+  const disconnectMcpConnector = async (connector) => {
     if (!await requestConfirmation({
-      title: "Disconnect Microsoft 365?",
-      description: "ONEComputer will revoke this connection. Your Microsoft account and Microsoft 365 data will not be deleted.",
+      title: `Disconnect ${connector.name}?`,
+      description: `ONEComputer will revoke this connection. Your ${connector.name} account and provider data will not be deleted.`,
       confirmLabel: "Disconnect",
       danger: true,
     })) return;
-    setConnectionBusy(true);
+    setConnectionBusy(connector.id);
     setConnectionError("");
     try {
-      const status = await connectionApi.disconnectMicrosoft365();
-      setM365Connection(status);
-      setToast("Microsoft 365 was disconnected.");
+      const status = await connectionApi.disconnect(connector.id);
+      setMcpConnections((current) => current.map((item) => item.id === connector.id ? { ...item, ...status } : item));
+      setToast(`${connector.name} was disconnected.`);
     } catch (error) {
       setConnectionError(error.message);
     } finally {
-      setConnectionBusy(false);
+      setConnectionBusy("");
     }
+  };
+
+  const connectorCreated = async (connector) => {
+    const catalog = await connectionApi.catalog();
+    setMcpConnections(catalog.connections);
+    setConnectorDialogOpen(false);
+    setToast(`${connector.name} was added to Connections.`);
   };
 
   const refreshWorkspaceManifest = async () => {
@@ -2871,12 +3077,13 @@ export function App() {
         />}
         {activeNav === "Connections" && (
           <ConnectionsScreen
-            connection={m365Connection}
+            connections={mcpConnections}
             loading={connectionLoading}
-            busy={connectionBusy}
+            busyConnectorId={connectionBusy}
             error={connectionError}
-            onConnect={connectMicrosoft365}
-            onDisconnect={disconnectMicrosoft365}
+            onConnect={connectMcpConnector}
+            onDisconnect={disconnectMcpConnector}
+            onAddConnector={() => setConnectorDialogOpen(true)}
             displayName={session.user.displayName}
             isAdmin={session.roles.includes("administrator")}
             view={connectionsView}
@@ -3057,6 +3264,7 @@ export function App() {
         </Drawer>
       )}
 
+      {connectorDialogOpen && <AddConnectorDialog onCreated={connectorCreated} onClose={() => setConnectorDialogOpen(false)} />}
       {toast && <div className="toast" role="status" aria-live="polite"><CheckmarkCircle24Regular aria-hidden="true" />{toast}</div>}
     </div>
   );

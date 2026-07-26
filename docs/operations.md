@@ -77,6 +77,40 @@ production because it isolates Graph scopes and credential rotation.
 The connector requests only the fixed scope list in `compose.yaml`. Tenant
 administrators should review those scopes against the enabled tool allowlist.
 
+### Hosted MCP connectors
+
+Notion, Linear, and Atlassian use their official hosted MCP endpoints and
+dynamic OAuth client registration. GitHub requires an OAuth app because its
+authorization server does not expose dynamic client registration. Configure
+`ONECOMPUTER_GITHUB_MCP_CLIENT_ID` and
+`ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET`, with the LiteLLM callback
+`${ONECOMPUTER_LITELLM_PUBLIC_URL}/callback` registered in GitHub.
+
+Administrators can add another OAuth-capable remote connector from
+**Connections → Add connector** without changing application code:
+
+1. Enter the public HTTPS MCP endpoint, catalog copy, provider scopes, and any
+   provider app client ID/secret.
+2. **Check server** creates a short-lived LiteLLM discovery session and verifies
+   that the endpoint exposes a compatible OAuth authorization flow.
+3. **Add connector** consumes that one-time check and creates the persistent
+   LiteLLM MCP server. Only non-secret catalog metadata is persisted in
+   `connector_registry`; client settings and per-user OAuth credentials stay in
+   LiteLLM.
+4. When a person connects the service, Control discovers that user's exact
+   server tools and refreshes every workspace grant they own. The aggregate
+   workspace MCP bridge then advertises the newly granted tools to all assigned
+   workspace agents without rebuilding the workspace.
+
+Disconnecting a service invalidates its connection projection and refreshes the
+same grants. If a grant cannot be refreshed, Control revokes it so an agent
+cannot keep stale connector access. Grant renewal also recomputes the projection
+periodically. Identically named tools from different connectors are exposed
+with connector-qualified names and routed back to their original server.
+
+Custom connector deletion removes the LiteLLM server and its catalog metadata.
+Built-in connectors cannot be deleted through the administration API.
+
 ### Model providers
 
 | Variable | Route |

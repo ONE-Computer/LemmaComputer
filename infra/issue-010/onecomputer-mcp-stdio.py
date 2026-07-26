@@ -7,6 +7,7 @@ import base64
 import binascii
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -535,22 +536,44 @@ def discover_tools() -> list[dict]:
         raise RuntimeError("gateway returned an invalid tool list")
     result = []
     TOOLS.clear()
-    for raw in tools:
-        if not isinstance(raw, dict) or not isinstance(raw.get("name"), str):
-            continue
-        TOOLS[raw["name"]] = raw
+    valid_tools = [
+        raw for raw in tools
+        if isinstance(raw, dict) and isinstance(raw.get("name"), str)
+    ]
+    name_counts: dict[str, int] = {}
+    for raw in valid_tools:
+        name_counts[raw["name"]] = name_counts.get(raw["name"], 0) + 1
+    used_names = {WAIT_TOOL_NAME}
+    for raw in valid_tools:
+        upstream_name = raw["name"]
+        visible_name = upstream_name
+        if name_counts[upstream_name] > 1 or upstream_name == WAIT_TOOL_NAME:
+            mcp_info = raw.get("mcp_info") if isinstance(raw.get("mcp_info"), dict) else {}
+            server_label = str(mcp_info.get("server_name") or mcp_info.get("server_id") or "connector")
+            server_label = re.sub(r"[^A-Za-z0-9_-]+", "_", server_label).strip("_")[:32] or "connector"
+            visible_name = f"{server_label}__{upstream_name}"
+        unique_name = visible_name
+        suffix = 2
+        while unique_name in used_names:
+            unique_name = f"{visible_name}_{suffix}"
+            suffix += 1
+        visible_name = unique_name
+        used_names.add(visible_name)
+        selected = dict(raw)
+        selected["_onecomputer_upstream_name"] = upstream_name
+        TOOLS[visible_name] = selected
         input_schema = raw.get("inputSchema", raw.get("input_schema", {"type": "object"}))
-        if raw["name"] == "list-drives":
+        if upstream_name == "list-drives":
             input_schema = LIST_DRIVES_INPUT_SCHEMA
-        elif raw["name"] == "search-onedrive-files":
+        elif upstream_name == "search-onedrive-files":
             input_schema = SEARCH_ONEDRIVE_INPUT_SCHEMA
-        elif raw["name"] == "upload-file-content":
+        elif upstream_name == "upload-file-content":
             input_schema = UPLOAD_ONEDRIVE_INPUT_SCHEMA
-        elif raw["name"] == "list-joined-teams":
+        elif upstream_name == "list-joined-teams":
             input_schema = NO_ARGUMENTS_INPUT_SCHEMA
-        elif raw["name"] in CURATED_WRITE_INPUT_SCHEMAS:
-            input_schema = CURATED_WRITE_INPUT_SCHEMAS[raw["name"]]
-        if raw["name"] in WRITE_TOOLS and isinstance(input_schema, dict):
+        elif upstream_name in CURATED_WRITE_INPUT_SCHEMAS:
+            input_schema = CURATED_WRITE_INPUT_SCHEMAS[upstream_name]
+        if upstream_name in WRITE_TOOLS and isinstance(input_schema, dict):
             # Connector execution flags are Control-owned. Do not advertise
             # them as agent inputs; Control adds them only after approval.
             input_schema = json.loads(json.dumps(input_schema))
@@ -562,20 +585,20 @@ def discover_tools() -> list[dict]:
             required = input_schema.get("required")
             if isinstance(required, list):
                 required = [item for item in required if item not in {"confirm", "excludeResponse", "includeHeaders"}]
-                if raw["name"] == "delete-onedrive-file":
+                if upstream_name == "delete-onedrive-file":
                     required = list(dict.fromkeys(required + ["If-Match"]))
                 input_schema["required"] = required
             input_schema["additionalProperties"] = False
         result.append({
-            "name": raw["name"],
+            "name": visible_name,
             "description": (
-                DELETE_ONEDRIVE_DESCRIPTION if raw["name"] == "delete-onedrive-file"
-                else CALENDAR_VIEW_DESCRIPTION if raw["name"] == "get-calendar-view"
-                else LIST_DRIVES_DESCRIPTION if raw["name"] == "list-drives"
-                else SEARCH_ONEDRIVE_DESCRIPTION if raw["name"] == "search-onedrive-files"
-                else UPLOAD_ONEDRIVE_DESCRIPTION if raw["name"] == "upload-file-content"
-                else LIST_JOINED_TEAMS_DESCRIPTION if raw["name"] == "list-joined-teams"
-                else CURATED_WRITE_DESCRIPTIONS[raw["name"]] if raw["name"] in CURATED_WRITE_DESCRIPTIONS
+                DELETE_ONEDRIVE_DESCRIPTION if upstream_name == "delete-onedrive-file"
+                else CALENDAR_VIEW_DESCRIPTION if upstream_name == "get-calendar-view"
+                else LIST_DRIVES_DESCRIPTION if upstream_name == "list-drives"
+                else SEARCH_ONEDRIVE_DESCRIPTION if upstream_name == "search-onedrive-files"
+                else UPLOAD_ONEDRIVE_DESCRIPTION if upstream_name == "upload-file-content"
+                else LIST_JOINED_TEAMS_DESCRIPTION if upstream_name == "list-joined-teams"
+                else CURATED_WRITE_DESCRIPTIONS[upstream_name] if upstream_name in CURATED_WRITE_DESCRIPTIONS
                 else raw.get("description", "Microsoft 365 tool governed by ONEComputer policy.")
             ),
             "inputSchema": input_schema,
@@ -653,14 +676,15 @@ def call_tool(name: str, arguments: dict) -> dict:
     server_id = (selected or {}).get("mcp_info", {}).get("server_id")
     if not isinstance(server_id, str):
         return error_result("That tool is not assigned to this workspace.")
-    if name in WRITE_TOOLS:
+    upstream_name = (selected or {}).get("_onecomputer_upstream_name", name)
+    if upstream_name in WRITE_TOOLS:
         # Connector execution flags are never accepted from the model. The
         # managed bridge supplies Softeria's confirmation flag, while Control
         # independently decides whether the action is allowed, held for signed
         # approval, or denied before the connector can execute it.
         arguments = {key: value for key, value in arguments.items() if key not in {"confirm", "excludeResponse", "includeHeaders"}}
         arguments["confirm"] = True
-    if name == "upload-file-content":
+    if upstream_name == "upload-file-content":
         try:
             arguments["driveItemId"] = normalize_upload_drive_item_id(arguments.get("driveItemId"))
             validate_upload_body(arguments.get("body"))
@@ -669,14 +693,14 @@ def call_tool(name: str, arguments: dict) -> dict:
                 f"The OneDrive upload was not submitted: {error}. "
                 "Use an opaque item ID, root:/file.txt:, or root:/folder/file.txt: as driveItemId."
             )
-    if name == "delete-onedrive-file":
+    if upstream_name == "delete-onedrive-file":
         if not isinstance(arguments.get("If-Match"), str) or not arguments["If-Match"].strip():
             return error_result(DELETE_ONEDRIVE_MISSING_ETAG)
         arguments["If-Match"] = normalize_graph_etag(arguments["If-Match"])
     try:
         response = request_json("/mcp-rest/tools/call", {
             "server_id": server_id,
-            "name": name,
+            "name": upstream_name,
             "arguments": arguments,
         })
         if not isinstance(response.get("content"), list):

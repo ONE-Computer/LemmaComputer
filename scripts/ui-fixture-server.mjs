@@ -314,6 +314,88 @@ let adminUsers = [
   },
 ];
 let fixtureWorkspaces = [workspace, sandboxWorkspace];
+let fixtureMcpConnections = [
+  {
+    id: "microsoft-365",
+    serverName: "onecomputer_ms365",
+    name: "Microsoft 365",
+    shortDescription: "Mail, calendar, files, and Teams",
+    description: "Use approved Microsoft 365 tools through the ONEComputer AI gateway.",
+    category: "Productivity",
+    services: ["Outlook Mail", "Calendar", "OneDrive", "Teams"],
+    policySupport: "governed",
+    brand: "microsoft",
+    available: true,
+    state: "connected",
+    connectedAt: now,
+    expiresAt: null,
+    account: { displayName: "Mike Sun", email: "mike@metech.dev", userPrincipalName: "mike@metech.dev" },
+  },
+  {
+    id: "notion",
+    serverName: "onecomputer_notion",
+    name: "Notion",
+    shortDescription: "Search and update workspace knowledge",
+    description: "Search and update the pages, databases, and knowledge your Notion account can access.",
+    category: "Productivity",
+    services: ["Pages", "Databases", "Search"],
+    policySupport: "automatic",
+    brand: "notion",
+    available: true,
+    state: "disconnected",
+    connectedAt: null,
+    expiresAt: null,
+    account: null,
+  },
+  {
+    id: "linear",
+    serverName: "onecomputer_linear",
+    name: "Linear",
+    shortDescription: "Plan projects, issues, and product work",
+    description: "Plan and follow product work across the issues, projects, and comments your account can access.",
+    category: "Productivity",
+    services: ["Issues", "Projects", "Comments"],
+    policySupport: "automatic",
+    brand: "linear",
+    available: true,
+    state: "connected",
+    connectedAt: now,
+    expiresAt: null,
+    account: null,
+  },
+  {
+    id: "atlassian",
+    serverName: "onecomputer_atlassian",
+    name: "Atlassian",
+    shortDescription: "Work across Jira and Confluence",
+    description: "Bring approved Jira work and Confluence knowledge into your workspace.",
+    category: "Productivity",
+    services: ["Jira", "Confluence", "Teamwork Graph"],
+    policySupport: "automatic",
+    brand: "atlassian",
+    available: true,
+    state: "disconnected",
+    connectedAt: null,
+    expiresAt: null,
+    account: null,
+  },
+  {
+    id: "github",
+    serverName: "onecomputer_github",
+    name: "GitHub",
+    shortDescription: "Repositories, issues, and pull requests",
+    description: "Work with repositories, issues, and pull requests allowed by your GitHub organization.",
+    category: "Developer tools",
+    services: ["Repositories", "Issues", "Pull requests"],
+    policySupport: "automatic",
+    brand: "github",
+    available: true,
+    state: "disconnected",
+    connectedAt: null,
+    expiresAt: null,
+    account: null,
+  },
+];
 
 const responses = new Map([
   ["GET /v1/auth/session", session],
@@ -330,7 +412,7 @@ const responses = new Map([
       correlationId: "fixture-correlation-id",
     }],
   }],
-  ["GET /v1/connections/microsoft-365", { state: "connected", connectedAt: now, expiresAt: null }],
+  ["GET /v1/connections/microsoft-365", fixtureMcpConnections[0]],
   ["GET /v1/credentials", {
     credentials: [{
       id: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
@@ -372,6 +454,76 @@ const server = http.createServer((request, response) => {
   response.setHeader("cache-control", "no-store");
   if (key === "GET /v1/workspaces") {
     response.end(JSON.stringify({ workspaces: fixtureWorkspaces }));
+    return;
+  }
+  if (key === "GET /v1/connections") {
+    response.end(JSON.stringify({ connections: fixtureMcpConnections }));
+    return;
+  }
+  if (key === "GET /v1/admin/connectors") {
+    response.end(JSON.stringify({ connectors: fixtureMcpConnections }));
+    return;
+  }
+  if (key === "POST /v1/admin/connectors/discover") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      response.end(JSON.stringify({
+        authorizationOrigin: new URL(input.endpointUrl).origin,
+        dynamicClientRegistration: !input.clientId,
+        discoveryToken: "fixture-discovery-token-00000000000000000000",
+      }));
+    });
+    return;
+  }
+  if (key === "POST /v1/admin/connectors") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const id = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const connector = {
+        id,
+        serverName: `onecomputer_${id.replaceAll("-", "_")}`,
+        name: input.name,
+        shortDescription: input.shortDescription,
+        description: input.description,
+        category: input.category,
+        services: input.services,
+        policySupport: "automatic",
+        source: "custom",
+        brand: "generic",
+        available: true,
+        state: "disconnected",
+        connectedAt: null,
+        expiresAt: null,
+        account: null,
+      };
+      fixtureMcpConnections = [...fixtureMcpConnections, connector];
+      response.statusCode = 201;
+      response.end(JSON.stringify({ connector }));
+    });
+    return;
+  }
+  if (request.method === "GET" && /^\/v1\/connections\/[^/]+$/.test(url.pathname)) {
+    const connectorId = url.pathname.split("/").at(-1);
+    const connector = fixtureMcpConnections.find((item) => item.id === connectorId);
+    if (connector) {
+      response.end(JSON.stringify(connector));
+      return;
+    }
+  }
+  if (request.method === "DELETE" && /^\/v1\/connections\/[^/]+$/.test(url.pathname)) {
+    const connectorId = url.pathname.split("/").at(-1);
+    fixtureMcpConnections = fixtureMcpConnections.map((item) => item.id === connectorId ? {
+      ...item,
+      state: "disconnected",
+      connectedAt: null,
+      expiresAt: null,
+      account: null,
+    } : item);
+    response.end(JSON.stringify({ state: "disconnected", connectedAt: null, expiresAt: null, account: null }));
     return;
   }
   if (key === "GET /v1/sandbox-settings") {

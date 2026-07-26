@@ -650,3 +650,75 @@ test("an approved execution failure cannot be reported as an approval rejection"
   assert.match(result.content[0]?.text ?? "", /Microsoft Graph rejected the target path/);
   assert.match(result.content[0]?.text ?? "", /Do not describe this result as rejected, denied, or not approved/);
 });
+
+test("tools with the same upstream name remain advertised and route to the selected connector", async (context) => {
+  const calls: Array<Record<string, unknown>> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [
+        {
+          name: "search",
+          description: "Search Notion",
+          inputSchema: { type: "object" },
+          mcp_info: { server_id: "notion-id", server_name: "onecomputer_notion" },
+        },
+        {
+          name: "search",
+          description: "Search Linear",
+          inputSchema: { type: "object" },
+          mcp_info: { server_id: "linear-id", server_name: "onecomputer_linear" },
+        },
+      ] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      calls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.end(JSON.stringify({ content: [{ type: "text", text: "ok" }], isError: false }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["infra/issue-010/onecomputer-mcp-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const tools = (responses.find((response) => response.id === 1)?.result as { tools: Array<{ name: string }> }).tools;
+  assert.deepEqual(tools.slice(0, 2).map((tool) => tool.name), [
+    "onecomputer_notion__search",
+    "onecomputer_linear__search",
+  ]);
+
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "onecomputer_linear__search", arguments: { query: "roadmap" } },
+  })}\n`);
+  const callDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 2) && Date.now() < callDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.deepEqual(calls, [{
+    server_id: "linear-id",
+    name: "search",
+    arguments: { query: "roadmap" },
+  }]);
+});

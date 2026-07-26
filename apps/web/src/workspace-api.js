@@ -66,6 +66,10 @@ export const operationApi = {
 };
 
 export const connectionApi = {
+  catalog: () => request("/api/v1/connections", { cache: "no-store" }),
+  status: (connectorId) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, { cache: "no-store" }),
+  authorizeUrl: (connectorId) => `/api/v1/connections/${encodeURIComponent(connectorId)}/authorize`,
+  disconnect: (connectorId) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, mutation("DELETE")),
   microsoft365: () => request("/api/v1/connections/microsoft-365"),
   microsoft365AuthorizeUrl: "/api/v1/connections/microsoft-365/authorize",
   disconnectMicrosoft365: () => request("/api/v1/connections/microsoft-365", mutation("DELETE")),
@@ -123,4 +127,8 @@ export const adminApi = {
   egressSecurityGroups: () => request("/api/v1/admin/egress-security-groups"),
   saveEgressSecurityGroup: (document) => request("/api/v1/admin/egress-security-groups", mutation("POST", document)),
   assignWorkspaceEgressSecurityGroup: (grantId, securityGroupVersionId) => request(`/api/v1/admin/workspaces/${encodeURIComponent(grantId)}/egress-security-group`, mutation("POST", { securityGroupVersionId })),
+  connectors: () => request("/api/v1/admin/connectors", { cache: "no-store" }),
+  discoverConnector: (connector) => request("/api/v1/admin/connectors/discover", mutation("POST", connector)),
+  createConnector: (connector) => request("/api/v1/admin/connectors", mutation("POST", connector)),
+  deleteConnector: (connectorId) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}`, mutation("DELETE")),
 };

@@ -254,15 +254,12 @@ os.chmod(path, 0o644)
 os.chown(path, 0, 0)
 PY
 if agent_enabled claude-desktop; then
-python3 - "$ONECOMPUTER_MODEL_ALIAS" "$model_label" "$ONECOMPUTER_ALLOWED_TOOLS" <<'PY'
+python3 - "$ONECOMPUTER_MODEL_ALIAS" "$model_label" <<'PY'
 import json
 import os
 import sys
 
-model, label, allowed_tools = sys.argv[1:]
-tools = [item for item in allowed_tools.split(",") if item]
-tool_policy = {tool: "allow" for tool in tools}
-tool_policy["wait-for-governed-operation"] = "allow"
+model, label = sys.argv[1:]
 document = {
     "inferenceProvider": "gateway",
     "inferenceGatewayBaseUrl": "http://127.0.0.1:4312",
@@ -289,9 +286,6 @@ document = {
         "transport": "stdio",
         "command": "/usr/local/libexec/onecomputer-mcp-stdio",
         "args": [],
-        # Desktop's local prompt layer is pre-approved. ONEComputer Control is
-        # the authoritative allow / signed-approval / deny policy boundary.
-        "toolPolicy": tool_policy,
     }],
     "isLocalDevMcpEnabled": False,
     "isDesktopExtensionEnabled": False,
@@ -307,13 +301,12 @@ fi
 
 if agent_enabled claude-cli; then
   install -d -o 1000 -g 1000 -m 0700 /home/kasm-user/.claude-cli
-  python3 - "$ONECOMPUTER_CLAUDE_CLI_MODEL_ALIAS" "$ONECOMPUTER_CLAUDE_CLI_ALLOWED_TOOLS" <<'PY'
+python3 - "$ONECOMPUTER_CLAUDE_CLI_MODEL_ALIAS" <<'PY'
 import json
 import os
 import sys
 
-model, allowed_tools = sys.argv[1:]
-tools = [item for item in allowed_tools.split(",") if item]
+model = sys.argv[1]
 with open("/home/kasm-user/.claude-cli/onecomputer.env", "w", encoding="utf-8") as output:
     output.write(f"ONECOMPUTER_MODEL_ALIAS={model}\n")
 with open("/home/kasm-user/.claude-cli/mcp.json", "w", encoding="utf-8") as output:
@@ -324,7 +317,6 @@ with open("/home/kasm-user/.claude-cli/mcp.json", "w", encoding="utf-8") as outp
                 "command": "/usr/local/libexec/onecomputer-mcp-stdio",
                 "args": [],
                 "env": {"ONECOMPUTER_MCP_BROKER": "http://127.0.0.1:4315"},
-                "tools": tools + ["wait-for-governed-operation"],
             },
         },
     }, output, separators=(",", ":"))
@@ -369,7 +361,6 @@ enabled = false
 [mcp_servers.onecomputer_ms365]
 command = "/usr/local/libexec/onecomputer-mcp-stdio"
 args = []
-enabled_tools = {json.dumps(tools + ["wait-for-governed-operation"])}
 default_tools_approval_mode = "approve"
 
 [mcp_servers.onecomputer_ms365.env]
@@ -436,7 +427,6 @@ document = {
             "command": "/usr/local/libexec/onecomputer-mcp-stdio",
             "args": [],
             "env": {"ONECOMPUTER_MCP_BROKER": f"http://127.0.0.1:{broker_port}"},
-            "tools": {"include": tools + ["wait-for-governed-operation"]},
         },
     },
     "stt": {"enabled": False},

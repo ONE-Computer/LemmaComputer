@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import type { OAuthConnectionGateway, OAuthConnectionStatus } from "@onecomputer/litellm-adapter";
-import { Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
+import type { IdentityContext, RuntimePolicy } from "@onecomputer/contracts";
+import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus } from "@onecomputer/litellm-adapter";
+import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
 const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "onecomputer-control" };
@@ -16,6 +16,12 @@ const connected: OAuthConnectionStatus = {
 class FakeConnectionGateway implements OAuthConnectionGateway {
   started: Parameters<OAuthConnectionGateway["beginUserOAuthConnection"]>[0][] = [];
   completed: Parameters<OAuthConnectionGateway["completeUserOAuthConnection"]>[0][] = [];
+  statusServers: string[] = [];
+  disconnectedServers: string[] = [];
+  registered: McpConnectorRegistrationInput[] = [];
+  discoveries = 0;
+  statusByServer = new Map<string, OAuthConnectionStatus>();
+  toolsByServer = new Map<string, string[]>();
 
   async beginUserOAuthConnection(input: Parameters<OAuthConnectionGateway["beginUserOAuthConnection"]>[0]) {
     this.started.push(input);
@@ -25,8 +31,26 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
     this.completed.push(input);
     return connected;
   }
-  async userOAuthConnectionStatus() { return { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const; }
-  async disconnectUserOAuthConnection() { return { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const; }
+  async userOAuthConnectionStatus(_identity: IdentityContext, serverName: string) {
+    this.statusServers.push(serverName);
+    return this.statusByServer.get(serverName)
+      ?? { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const;
+  }
+  async disconnectUserOAuthConnection(_identity: IdentityContext, serverName: string) {
+    this.disconnectedServers.push(serverName);
+    return { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const;
+  }
+  async userOAuthConnectionTools(_identity: IdentityContext, serverName: string) {
+    return this.toolsByServer.get(serverName) ?? [];
+  }
+  async discoverOAuthMcpServer() {
+    this.discoveries += 1;
+    return { authorizationOrigin: "https://auth.example.com", dynamicClientRegistration: true };
+  }
+  async registerOAuthMcpServer(input: McpConnectorRegistrationInput) {
+    this.registered.push(input);
+  }
+  async removeMcpServer() {}
 }
 
 test("owned Microsoft 365 flow binds state and PKCE to the initiating ONEComputer identity", async () => {
@@ -60,8 +84,8 @@ test("connection state is one-time and cannot be finished by another user", asyn
   });
   await service.start(alpha);
   const state = gateway.started[0]!.state;
-  await assert.rejects(() => service.complete(beta, { state, code: "authorization-code" }), { code: "M365_OAUTH_IDENTITY_MISMATCH" });
-  await assert.rejects(() => service.complete(alpha, { state, code: "authorization-code" }), { code: "M365_OAUTH_STATE_INVALID" });
+  await assert.rejects(() => service.complete(beta, { state, code: "authorization-code" }), { code: "MCP_OAUTH_IDENTITY_MISMATCH" });
+  await assert.rejects(() => service.complete(alpha, { state, code: "authorization-code" }), { code: "MCP_OAUTH_STATE_INVALID" });
   assert.equal(gateway.completed.length, 0);
 });
 
@@ -77,14 +101,115 @@ test("expired, denied, and malformed callbacks fail before token exchange", asyn
   await service.start(alpha);
   const expired = gateway.started.at(-1)!.state;
   now += 101;
-  await assert.rejects(() => service.complete(alpha, { state: expired, code: "authorization-code" }), { code: "M365_OAUTH_STATE_INVALID" });
+  await assert.rejects(() => service.complete(alpha, { state: expired, code: "authorization-code" }), { code: "MCP_OAUTH_STATE_INVALID" });
 
   await service.start(alpha);
   const denied = gateway.started.at(-1)!.state;
-  await assert.rejects(() => service.complete(alpha, { state: denied, error: "access_denied" }), { code: "M365_OAUTH_DENIED" });
+  await assert.rejects(() => service.complete(alpha, { state: denied, error: "access_denied" }), { code: "MCP_OAUTH_DENIED" });
 
   await service.start(alpha);
   const missingCode = gateway.started.at(-1)!.state;
-  await assert.rejects(() => service.complete(alpha, { state: missingCode }), { code: "M365_OAUTH_CODE_INVALID" });
+  await assert.rejects(() => service.complete(alpha, { state: missingCode }), { code: "MCP_OAUTH_CODE_INVALID" });
   assert.equal(gateway.completed.length, 0);
+});
+
+test("the approved catalog maps every ONEComputer connector to one LiteLLM MCP server", async () => {
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+
+  const catalog = await service.list(alpha);
+  assert.deepEqual(catalog.connections.map((connector) => [connector.id, connector.serverName]), [
+    ["microsoft-365", "onecomputer_ms365"],
+    ["notion", "onecomputer_notion"],
+    ["linear", "onecomputer_linear"],
+    ["atlassian", "onecomputer_atlassian"],
+    ["github", "onecomputer_github"],
+  ]);
+  assert.deepEqual(gateway.statusServers, [
+    "onecomputer_ms365",
+    "onecomputer_notion",
+    "onecomputer_linear",
+    "onecomputer_atlassian",
+    "onecomputer_github",
+  ]);
+  assert.ok(catalog.connections.every((connector) => connector.available));
+  assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));
+});
+
+test("hosted connector OAuth binds the selected catalog entry and refuses cross-connector callbacks", async () => {
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+
+  await service.start(alpha, "linear");
+  const request = gateway.started.at(-1)!;
+  assert.equal(request.serverName, "onecomputer_linear");
+  assert.equal(request.redirectUri, "http://localhost:4174/api/v1/connections/linear/callback");
+  assert.deepEqual(request.authorizationOrigins, ["https://mcp.linear.app"]);
+
+  await assert.rejects(
+    () => service.complete(alpha, "notion", { state: request.state, code: "authorization-code" }),
+    { code: "MCP_OAUTH_CONNECTOR_MISMATCH" },
+  );
+  assert.equal(gateway.completed.length, 0);
+});
+
+test("administrators can add a connector without code and connected tools are projected into agent grants", async () => {
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    liteLlmPublicUrl: "http://localhost:4000",
+  });
+  const input = {
+    name: "Acme Projects",
+    shortDescription: "Plan and follow Acme work",
+    description: "Work with approved Acme projects and tasks.",
+    category: "Productivity",
+    services: ["Projects", "Tasks"],
+    endpointUrl: "https://mcp.example.com/mcp",
+    scopes: ["read", "write"],
+  };
+  const discovered = await service.discoverConnector(input);
+  const created = await service.createConnector(alpha, "admin-alpha", {
+    ...input,
+    discoveryToken: discovered.discoveryToken,
+  });
+  assert.equal(created.id, "acme-projects");
+  assert.equal(gateway.discoveries, 1);
+  assert.equal(gateway.registered[0]?.url, "https://mcp.example.com/mcp");
+  assert.equal(gateway.registered[0]?.clientSecret, undefined);
+  await assert.rejects(
+    () => service.createConnector(alpha, "admin-alpha", { ...input, discoveryToken: discovered.discoveryToken }),
+    { code: "MCP_CONNECTOR_DISCOVERY_INVALID" },
+  );
+  const serverName = gateway.registered[0]!.serverName;
+  gateway.statusByServer.set(serverName, connected);
+  gateway.toolsByServer.set(serverName, ["create_task", "list_tasks"]);
+  const basePolicy: RuntimePolicy = {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: "agent-alpha",
+    agentProfile: "claude-desktop-managed-v1",
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+  const projected = await service.projectConnectedConnectors(alpha, basePolicy);
+  assert.deepEqual(projected.mcpServers, ["onecomputer_ms365", serverName]);
+  assert.deepEqual(projected.mcpToolPermissions?.[serverName], ["create_task", "list_tasks"]);
+  assert.deepEqual(projected.allowedTools, ["create_task", "list-mail-messages", "list_tasks"]);
+  assert.match(projected.connectionProjectionHash ?? "", /^[a-f0-9]{64}$/);
 });

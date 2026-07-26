@@ -150,6 +150,19 @@ test("Trail owns approval-device management while Connections stays focused on s
   assert.doesNotMatch(app, /Replace with this browser|Each account uses one active approval device/);
 });
 
+test("Connections stays employee-facing and uses spacing instead of decorative rules", async () => {
+  const [app, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/styles.css"),
+  ]);
+  const connections = app.slice(app.indexOf("function Microsoft365Detail"), app.indexOf("function ChatPart"));
+  assert.match(connections, /Your services/);
+  assert.match(connections, /Connect the work services you want to use/);
+  assert.doesNotMatch(connections, /LiteLLM|OAuth credentials|refresh tokens|MCP catalog|MCP connector/);
+  assert.match(styles, /\.connections-page-intro > \.page-heading\s*\{[\s\S]*?border-bottom: 0/);
+  assert.match(styles, /\.connector-category-heading\s*\{[\s\S]*?border-bottom: 0/);
+});
+
 test("remote-only approvals notify desktop without opening its decision drawer", async () => {
   const app = await source("apps/web/src/App.jsx");
   assert.match(app, /approvalContext\.localReady \|\| !approvalContext\.accountStatus\.connected/);
