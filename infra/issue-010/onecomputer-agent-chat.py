@@ -49,6 +49,7 @@ MAX_TURN_BODY = 24 * 1024 * 1024
 MAX_DOCUMENT_TEXT = 200_000
 MAX_TOTAL_DOCUMENT_TEXT = 300_000
 MAX_TURN_SECONDS = 15 * 60
+STREAM_HEARTBEAT_SECONDS = 15
 IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 TEXT_TYPES = frozenset({
     "application/json", "application/xml", "application/yaml",
@@ -961,38 +962,63 @@ async def turns(request: Request) -> Response:
                 state="running",
             ))
             terminal_state: str | None = None
-            async for vendor in vendor_events(snapshot, text, attachments, turn_id):
-                kind = vendor["kind"]
-                if kind == "text" and vendor.get("delta"):
-                    raw_delta = str(vendor["delta"])
-                    total_text += len(raw_delta)
-                    if total_text > MAX_TEXT:
-                        raise RuntimeError("agent response exceeded the text limit")
-                    for offset in range(0, len(raw_delta), 16_000):
+            events = vendor_events(snapshot, text, attachments, turn_id).__aiter__()
+            next_event = asyncio.ensure_future(anext(events))
+            try:
+                while True:
+                    ready, _ = await asyncio.wait(
+                        {next_event}, timeout=STREAM_HEARTBEAT_SECONDS
+                    )
+                    if not ready:
                         yield frame(canonical(
-                            "text-delta", textId=f"text-{turn_id}",
-                            delta=raw_delta[offset:offset + 16_000],
+                            "progress", activityId=activity_id,
+                            label=f"{AGENT.replace('-cli', '').replace('-claw', '').title()} is working",
+                            state="running",
                         ))
-                elif kind == "tool":
-                    yield frame(canonical(
-                        "tool",
-                        toolCallId=vendor["id"],
-                        name=vendor["name"],
-                        state=vendor["state"],
-                        **({"summary": vendor["summary"]} if vendor.get("summary") else {}),
-                    ))
-                elif kind == "approval":
-                    yield frame(canonical(
-                        "approval",
-                        approvalId=vendor["id"],
-                        toolCallId=vendor["toolId"],
-                        operationId=vendor["operationId"],
-                        state=vendor["state"],
-                        summary=approval_summary(vendor["state"]),
-                    ))
-                elif kind == "vendor-finish":
-                    vendor_session_id = vendor.get("vendorSessionId")
-                    terminal_state = vendor.get("state", "completed")
+                        continue
+                    try:
+                        vendor = next_event.result()
+                    except StopAsyncIteration:
+                        break
+                    next_event = asyncio.ensure_future(anext(events))
+                    kind = vendor["kind"]
+                    if kind == "text" and vendor.get("delta"):
+                        raw_delta = str(vendor["delta"])
+                        total_text += len(raw_delta)
+                        if total_text > MAX_TEXT:
+                            raise RuntimeError("agent response exceeded the text limit")
+                        for offset in range(0, len(raw_delta), 16_000):
+                            yield frame(canonical(
+                                "text-delta", textId=f"text-{turn_id}",
+                                delta=raw_delta[offset:offset + 16_000],
+                            ))
+                    elif kind == "tool":
+                        yield frame(canonical(
+                            "tool",
+                            toolCallId=vendor["id"],
+                            name=vendor["name"],
+                            state=vendor["state"],
+                            **({"summary": vendor["summary"]} if vendor.get("summary") else {}),
+                        ))
+                    elif kind == "approval":
+                        yield frame(canonical(
+                            "approval",
+                            approvalId=vendor["id"],
+                            toolCallId=vendor["toolId"],
+                            operationId=vendor["operationId"],
+                            state=vendor["state"],
+                            summary=approval_summary(vendor["state"]),
+                        ))
+                    elif kind == "vendor-finish":
+                        vendor_session_id = vendor.get("vendorSessionId")
+                        terminal_state = vendor.get("state", "completed")
+            finally:
+                if not next_event.done():
+                    next_event.cancel()
+                    await asyncio.gather(next_event, return_exceptions=True)
+                close = getattr(events, "aclose", None)
+                if close is not None:
+                    await close()
             if terminal_state is None:
                 raise RuntimeError("agent stream ended without a terminal event")
             yield frame(canonical(

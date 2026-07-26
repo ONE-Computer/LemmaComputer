@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import test from "node:test";
 import type { IdentityContext } from "@onecomputer/contracts";
 import {
   ChannelBrokerService,
   ChannelCredentialVault,
+  HttpChannelControlClient,
   type ChannelControlClient,
   type TelegramBotClient,
   type TelegramMessageOptions,
@@ -89,6 +91,56 @@ class FakeControl implements ChannelControlClient {
     };
   }
 }
+
+test("the channel control client owns a long response timeout instead of inheriting fetch's five-minute header limit", async () => {
+  const server = createServer((_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        sessionId: "932b72c3-220a-465d-96d0-d1ac11270f25",
+        text: "completed",
+        notices: [],
+      }));
+    }, 75);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const input = {
+    connectionId: "29637bba-a710-49b6-8b44-7dac938a6088",
+    identity: alpha,
+    workspaceId: "fcebb39a-df27-4b69-acde-44c9542fca29",
+    agentCatalogId: "hermes-claw" as const,
+    externalSenderId: "10001",
+    updateId: "1",
+    text: "Complete a long-running task.",
+  };
+  try {
+    const patient = new HttpChannelControlClient(
+      `http://127.0.0.1:${address.port}`,
+      "channel-control-test-secret-at-least-32-characters",
+      250,
+    );
+    assert.equal((await patient.turn(input)).text, "completed");
+
+    const impatient = new HttpChannelControlClient(
+      `http://127.0.0.1:${address.port}`,
+      "channel-control-test-secret-at-least-32-characters",
+      20,
+    );
+    await assert.rejects(
+      impatient.turn({ ...input, updateId: "2" }),
+      (error: unknown) => Boolean(
+        error
+        && typeof error === "object"
+        && "code" in error
+        && error.code === "CHANNEL_CONTROL_UNAVAILABLE"
+      ),
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
 
 test("Telegram credentials are encrypted, write-only, and owner scoped", async () => {
   const store = new MemoryChannelStore();

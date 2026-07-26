@@ -6,6 +6,8 @@ import {
   randomBytes,
   randomUUID,
 } from "node:crypto";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import {
   OneComputerError,
   channelRouteSchema,
@@ -63,28 +65,58 @@ export class HttpChannelControlClient implements ChannelControlClient {
   constructor(
     private readonly baseUrl: string,
     private readonly internalToken: string,
-    private readonly fetcher: typeof fetch = fetch,
+    private readonly timeoutMs = 15 * 60_000,
   ) {}
 
   private async post(path: string, input: unknown) {
-    let response: Response;
+    const target = new URL(path, this.baseUrl);
+    if (!["http:", "https:"].includes(target.protocol)) {
+      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
+    }
+    const payload = Buffer.from(JSON.stringify(input));
+    let response: { statusCode: number; body: string };
     try {
-      response = await this.fetcher(`${this.baseUrl}${path}`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-onecomputer-channel-token": this.internalToken,
-        },
-        body: JSON.stringify(input),
-        signal: AbortSignal.timeout(15 * 60_000),
+      response = await new Promise((resolve, reject) => {
+        const request = (target.protocol === "https:" ? httpsRequest : httpRequest)(target, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "content-length": String(payload.length),
+            "x-onecomputer-channel-token": this.internalToken,
+          },
+        }, (upstream) => {
+          const chunks: Buffer[] = [];
+          let size = 0;
+          upstream.on("data", (chunk: Buffer) => {
+            size += chunk.length;
+            if (size > 64 * 1024) {
+              request.destroy(new Error("Control response exceeded its limit"));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          upstream.on("end", () => resolve({
+            statusCode: upstream.statusCode ?? 502,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }));
+          upstream.on("error", reject);
+        });
+        request.setTimeout(this.timeoutMs, () => request.destroy(new Error("Control request timed out")));
+        request.on("error", reject);
+        request.end(payload);
       });
     } catch {
       throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
     }
-    if (!response.ok) {
-      throw new OneComputerError("CHANNEL_ROUTE_REJECTED", "ONEComputer rejected the channel route", response.status, response.status >= 500);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new OneComputerError("CHANNEL_ROUTE_REJECTED", "ONEComputer rejected the channel route", response.statusCode, response.statusCode >= 500);
     }
-    return response.status === 204 ? null : response.json();
+    if (response.statusCode === 204) return null;
+    try {
+      return JSON.parse(response.body) as unknown;
+    } catch {
+      throw new OneComputerError("CHANNEL_CONTROL_INVALID_RESPONSE", "ONEComputer Control returned an invalid response", 502, true);
+    }
   }
 
   async validateRoute(input: ChannelRoute) {

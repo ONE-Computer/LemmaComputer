@@ -171,7 +171,9 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(mcpBridge, /threading\.Thread\(/);
   assert.match(mcpBridge, /RESPONSE_LOCK = threading\.Lock\(\)/);
   assert.match(chatAdapter, /MAX_TURN_SECONDS = 15 \* 60/);
+  assert.match(chatAdapter, /STREAM_HEARTBEAT_SECONDS = 15/);
   assert.match(chatAdapter, /timeout=MAX_TURN_SECONDS/);
+  assert.match(chatAdapter, /asyncio\.wait\(\s*\{next_event\}, timeout=STREAM_HEARTBEAT_SECONDS/);
   assert.match(hermesDesktopLauncher, /HERMES_DESKTOP_HERMES_ROOT=\/opt\/onecomputer\/hermes-agent/);
   assert.match(hermesDesktopLauncher, /Hermes --no-sandbox/);
   assert.match(entrypoint, /ONEComputer-Agent\.desktop/);
