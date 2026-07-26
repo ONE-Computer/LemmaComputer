@@ -301,16 +301,22 @@ let adminUsers = [
     userId: session.user.id,
     email: session.user.email,
     displayName: session.user.displayName,
+    status: "active",
     roles: session.roles,
-    effectivePolicy: { egressSecurityGroup: egressSecurityGroups[0] },
+    effectivePolicy: { version: 7, documentHash: digest, egressSecurityGroup: egressSecurityGroups[0] },
     workspaces: firewallWorkspaces(egressSecurityGroups[0]),
   },
   {
     userId: "hello-metech",
     email: "hello@metech.dev",
     displayName: "METECH",
+    status: "active",
     roles: ["employee"],
-    effectivePolicy: null,
+    effectivePolicy: { version: 7, documentHash: digest, egressSecurityGroup: egressSecurityGroups[0] },
+    workspaces: [{
+      ...firewallWorkspaces(egressSecurityGroups[0])[0],
+      id: "fixture-metech-workspace",
+    }],
   },
 ];
 let fixtureWorkspaces = [workspace, sandboxWorkspace];
@@ -395,7 +401,14 @@ let fixtureMcpConnections = [
     expiresAt: null,
     account: null,
   },
-];
+].map((connector) => ({
+  ...connector,
+  enabled: true,
+  membersCanManage: true,
+  accessPolicyVersion: 1,
+  accessPolicyUpdatedAt: now,
+  canManageConnection: true,
+}));
 
 const responses = new Map([
   ["GET /v1/auth/session", session],
@@ -413,6 +426,26 @@ const responses = new Map([
     }],
   }],
   ["GET /v1/connections/microsoft-365", fixtureMcpConnections[0]],
+  ["GET /v1/admin/mcp-policy", {
+    serverName: "onecomputer_ms365",
+    version: 7,
+    documentHash: digest,
+    tools: [{
+      name: "list-mail-messages",
+      displayName: "List email messages",
+      description: "List messages available to the connected account.",
+      service: "mail",
+      risk: "read",
+      decision: "allow",
+    }, {
+      name: "send-mail",
+      displayName: "Send email",
+      description: "Send a message from the connected account.",
+      service: "mail",
+      risk: "write",
+      decision: "approval_required",
+    }],
+  }],
   ["GET /v1/credentials", {
     credentials: [{
       id: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
@@ -462,6 +495,27 @@ const server = http.createServer((request, response) => {
   }
   if (key === "GET /v1/admin/connectors") {
     response.end(JSON.stringify({ connectors: fixtureMcpConnections }));
+    return;
+  }
+  if (request.method === "PUT" && /^\/v1\/admin\/connectors\/[^/]+\/access-policy$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const connectorId = url.pathname.split("/").at(-2);
+      const input = JSON.parse(body);
+      fixtureMcpConnections = fixtureMcpConnections.map((connector) => connector.id === connectorId ? {
+        ...connector,
+        enabled: input.enabled,
+        membersCanManage: input.membersCanManage,
+        accessPolicyVersion: connector.accessPolicyVersion + 1,
+        accessPolicyUpdatedAt: new Date().toISOString(),
+        canManageConnection: input.enabled,
+      } : connector);
+      response.end(JSON.stringify({
+        connector: fixtureMcpConnections.find((connector) => connector.id === connectorId),
+        workspaceGrants: { refreshed: 2, failed: 0 },
+      }));
+    });
     return;
   }
   if (key === "POST /v1/admin/connectors/discover") {
@@ -615,6 +669,51 @@ const server = http.createServer((request, response) => {
   }
   if (key === "GET /v1/admin/users") {
     response.end(JSON.stringify({ users: adminUsers }));
+    return;
+  }
+  if (request.method === "PATCH" && /^\/v1\/admin\/users\/[^/]+\/status$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const userId = url.pathname.split("/").at(-2);
+      const input = JSON.parse(body);
+      adminUsers = adminUsers.map((user) => user.userId === userId ? { ...user, status: input.status } : user);
+      response.end(JSON.stringify({ status: input.status, revokedSessions: input.status === "disabled" ? 1 : 0 }));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/sessions\/revoke$/.test(url.pathname)) {
+    response.end(JSON.stringify({ revokedSessions: 1 }));
+    return;
+  }
+  if (request.method === "GET" && /^\/v1\/admin\/users\/[^/]+\/sandbox-settings$/.test(url.pathname)) {
+    response.end(JSON.stringify({
+      ...sandboxSettings,
+      grantId: url.searchParams.get("grantId") ?? "personal",
+      securityGroup: sandboxSettings.securityGroup ?? egressSecurityGroups.find((group) => group.isDefault),
+      availableSecurityGroups: egressSecurityGroups,
+    }));
+    return;
+  }
+  if (request.method === "PUT" && /^\/v1\/admin\/users\/[^/]+\/sandbox-settings$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const configuration = JSON.parse(body);
+      sandboxSettings = { ...sandboxSettings, configuration, ...configuration, updatedAt: new Date().toISOString() };
+      response.end(JSON.stringify(sandboxSettings));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const group = egressSecurityGroups.find((candidate) => candidate.id === input.securityGroupVersionId);
+      sandboxSettings = { ...sandboxSettings, securityGroup: group };
+      response.end(JSON.stringify(group));
+    });
     return;
   }
   if (key === "GET /v1/admin/egress-security-groups") {

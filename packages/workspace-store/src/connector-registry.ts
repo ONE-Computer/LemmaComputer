@@ -17,6 +17,11 @@ export type ConnectorRegistryRecord = {
   authorizationOrigins: string[];
   scopes: string[];
   toolPolicies: Record<string, McpToolPolicyDecision>;
+  enabled: boolean;
+  membersCanManage: boolean;
+  accessPolicyVersion: number;
+  accessPolicyUpdatedBy: string | null;
+  accessPolicyUpdatedAt: Date;
   brand: string;
   iconDataUrl: string | null;
   policySupport: "governed" | "automatic";
@@ -26,9 +31,14 @@ export type ConnectorRegistryRecord = {
   updatedAt: Date;
 };
 
-export type SaveConnectorRegistryRecord = Omit<ConnectorRegistryRecord, "createdAt" | "updatedAt" | "toolPolicies" | "iconDataUrl"> & {
+export type SaveConnectorRegistryRecord = Omit<
+  ConnectorRegistryRecord,
+  "createdAt" | "updatedAt" | "toolPolicies" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt"
+> & {
   toolPolicies?: Record<string, McpToolPolicyDecision>;
   iconDataUrl?: string | null;
+  enabled?: boolean;
+  membersCanManage?: boolean;
 };
 
 export interface ConnectorRegistryStore {
@@ -36,6 +46,7 @@ export interface ConnectorRegistryStore {
   listConnectors(tenantId: string): Promise<ConnectorRegistryRecord[]>;
   getConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
   saveConnector(record: SaveConnectorRegistryRecord): Promise<ConnectorRegistryRecord>;
+  updateAccessPolicy(tenantId: string, connectorId: string, input: { enabled: boolean; membersCanManage: boolean; updatedBy: string }): Promise<ConnectorRegistryRecord | null>;
   updateToolPolicies(tenantId: string, connectorId: string, tools: Record<string, McpToolPolicyDecision>): Promise<ConnectorRegistryRecord | null>;
   updateIcon(tenantId: string, connectorId: string, iconDataUrl: string | null): Promise<ConnectorRegistryRecord | null>;
   deleteConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
@@ -57,6 +68,11 @@ const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
   toolPolicies: row.tool_policies && typeof row.tool_policies === "object" && !Array.isArray(row.tool_policies)
     ? row.tool_policies as Record<string, McpToolPolicyDecision>
     : {},
+  enabled: row.enabled !== false,
+  membersCanManage: row.members_can_manage !== false,
+  accessPolicyVersion: Number(row.access_policy_version ?? 1),
+  accessPolicyUpdatedBy: typeof row.access_policy_updated_by === "string" ? row.access_policy_updated_by : null,
+  accessPolicyUpdatedAt: new Date(String(row.access_policy_updated_at ?? row.updated_at)),
   brand: String(row.brand),
   iconDataUrl: typeof row.icon_data_url === "string" ? row.icon_data_url : null,
   policySupport: row.policy_support as ConnectorRegistryRecord["policySupport"],
@@ -152,6 +168,22 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
     return mapRow(result.rows[0]);
   }
 
+  async updateAccessPolicy(tenantId: string, connectorId: string, input: { enabled: boolean; membersCanManage: boolean; updatedBy: string }) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         enabled=$3,
+         members_can_manage=$4,
+         access_policy_version=access_policy_version+1,
+         access_policy_updated_by=$5,
+         access_policy_updated_at=now(),
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId, input.enabled, input.membersCanManage, input.updatedBy],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
   async updateToolPolicies(tenantId: string, connectorId: string, tools: Record<string, McpToolPolicyDecision>) {
     const result = await this.pool.query(
       "UPDATE connector_registry SET tool_policies=$3::jsonb,updated_at=now() WHERE tenant_id=$1 AND id=$2 RETURNING *",
@@ -206,7 +238,36 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
     const key = this.key(record.tenantId, record.id);
     if (this.records.has(key)) throw new Error("Connector already exists");
     const now = new Date();
-    const saved = { ...record, toolPolicies: record.toolPolicies ?? {}, iconDataUrl: record.iconDataUrl ?? null, createdAt: now, updatedAt: now };
+    const saved = {
+      ...record,
+      toolPolicies: record.toolPolicies ?? {},
+      iconDataUrl: record.iconDataUrl ?? null,
+      enabled: record.enabled ?? true,
+      membersCanManage: record.membersCanManage ?? true,
+      accessPolicyVersion: 1,
+      accessPolicyUpdatedBy: null,
+      accessPolicyUpdatedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.records.set(key, saved);
+    return saved;
+  }
+
+  async updateAccessPolicy(tenantId: string, connectorId: string, input: { enabled: boolean; membersCanManage: boolean; updatedBy: string }) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const now = new Date();
+    const saved = {
+      ...record,
+      enabled: input.enabled,
+      membersCanManage: input.membersCanManage,
+      accessPolicyVersion: record.accessPolicyVersion + 1,
+      accessPolicyUpdatedBy: input.updatedBy,
+      accessPolicyUpdatedAt: now,
+      updatedAt: now,
+    };
     this.records.set(key, saved);
     return saved;
   }

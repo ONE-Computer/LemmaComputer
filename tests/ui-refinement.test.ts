@@ -254,6 +254,20 @@ test("the account menu owns Settings, with Gateway and Administration out of pri
   assert.doesNotMatch(app, /admin: "Admin"/);
 });
 
+test("administration exposes member lifecycle, workspace management, and organization connector locks", async () => {
+  const app = await readFile(new URL("../apps/web/src/App.jsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../apps/web/src/workspace-api.js", import.meta.url), "utf8");
+  assert.match(app, /Suspend user/);
+  assert.match(app, /Reactivate/);
+  assert.match(app, /Sign out sessions/);
+  assert.match(app, /Manage \{workspaceName\(workspace\)\}/);
+  assert.match(app, /Members can manage connections/);
+  assert.match(app, /Connector enabled/);
+  assert.match(api, /admin\/users\/.*\/status/);
+  assert.match(api, /admin\/users\/.*\/sandbox-settings/);
+  assert.match(api, /connectors\/.*\/access-policy/);
+});
+
 test("Help is retired from navigation and routing", async () => {
   const app = await source("apps/web/src/App.jsx");
   assert.doesNotMatch(app, /help: "Help"/);

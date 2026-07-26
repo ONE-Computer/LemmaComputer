@@ -198,6 +198,62 @@ test("hosted connector tools default to allow and persist explicit approval rule
   );
 });
 
+test("organization connector access policy locks member changes and removes disabled tools from grants", async () => {
+  const gateway = new FakeConnectionGateway();
+  gateway.statusByServer.set("onecomputer_linear", connected);
+  gateway.toolsByServer.set("onecomputer_linear", ["create_issue", "list_issues"]);
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  await service.saveConnectorToolPolicy(alpha, "linear", {
+    create_issue: "approval_required",
+    list_issues: "deny",
+  });
+  const locked = await service.updateAccessPolicy(alpha, "admin-alpha", "linear", {
+    enabled: true,
+    membersCanManage: false,
+  });
+  assert.equal(locked.membersCanManage, false);
+  const memberCatalog = await service.list(alpha);
+  const memberLinear = memberCatalog.connections.find((connector) => connector.id === "linear")!;
+  assert.equal(memberLinear.canManageConnection, false);
+  assert.equal((await service.list(alpha, true)).connections.find((connector) => connector.id === "linear")?.canManageConnection, true);
+  await assert.rejects(() => service.start(alpha, "linear"), { code: "MCP_CONNECTOR_LOCKED" });
+  await service.start(alpha, "linear", true);
+
+  const basePolicy: RuntimePolicy = {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: "agent-alpha",
+    agentProfile: "claude-desktop-managed-v1",
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+  const projected = await service.projectConnectedConnectors(alpha, basePolicy);
+  assert.deepEqual(projected.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+  assert.equal(projected.toolPolicies.create_issue, "approval_required");
+  assert.equal(projected.toolPolicies.list_issues, undefined);
+
+  await service.updateAccessPolicy(alpha, "admin-alpha", "linear", {
+    enabled: false,
+    membersCanManage: false,
+  });
+  await assert.rejects(() => service.start(alpha, "linear", true), { code: "MCP_CONNECTOR_DISABLED" });
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  const disabledProjection = await service.projectConnectedConnectors(alpha, basePolicy);
+  assert.deepEqual(disabledProjection.mcpServers, ["onecomputer_ms365"]);
+  assert.equal(disabledProjection.toolPolicies.create_issue, undefined);
+});
+
 test("administrators can add a connector without code and connected tools are projected into agent grants", async () => {
   const gateway = new FakeConnectionGateway();
   const service = new McpConnectionService(gateway, {

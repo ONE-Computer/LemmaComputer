@@ -2957,6 +2957,29 @@ textarea:focus-visible,
 .connector-appearance-card div > span[role="alert"] { display: block; margin-top: 5px; color: #9a2f2a; font-size: 12px; }
 .connector-icon-actions { display: flex; align-items: center; gap: 12px; }
 
+.connector-access-policy-card {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.4fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 22px;
+  margin-top: 16px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+.connector-access-policy-card p,
+.connector-access-policy-card h2,
+.connector-access-policy-card > div > span { margin: 0; }
+.connector-access-policy-card p { color: #5e6874; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.connector-access-policy-card h2 { margin: 4px 0; color: #1d2c40; font-size: 16px; }
+.connector-access-policy-card > div > span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.connector-access-policy-card > label { display: flex; align-items: flex-start; gap: 10px; color: #27374b; }
+.connector-access-policy-card > label input { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--navy); }
+.connector-access-policy-card > label span { display: grid; gap: 3px; }
+.connector-access-policy-card > label strong { font-size: 13px; }
+.connector-access-policy-card > label small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+
 .add-connector-app-credentials {
   margin-top: 18px;
   border: 1px solid #dfe4ea;
@@ -4330,6 +4353,7 @@ textarea:focus-visible,
   .connector-icon-field > div { flex-wrap: wrap; }
   .connector-appearance-card { grid-template-columns: 46px minmax(0, 1fr); }
   .connector-icon-actions { grid-column: 2; flex-wrap: wrap; }
+  .connector-access-policy-card { grid-template-columns: 1fr; align-items: stretch; }
 
   .workspace-overview-heading {
     align-items: start;
@@ -4755,9 +4779,15 @@ textarea:focus-visible,
   min-height: 104px;
   border-bottom: 1px solid #dededb;
 }
+.admin-user-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .admin-user-copy span { width: fit-content; padding: 3px 8px; border-radius: 999px; background: #eef3f8; color: #244a73; font-size: 12px; }
+.admin-user-copy span.disabled { background: #fff0ee; color: #9b302a; }
 .admin-policy-copy .select-menu { max-width: 280px; }
 .admin-policy-copy .select-menu-trigger { min-height: 36px; }
+.admin-user-workspaces { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.admin-user-workspaces button { padding: 0; font-size: 12px; text-align: left; }
+.admin-user-actions { display: grid; min-width: 170px; gap: 8px; }
+.admin-user-actions button { min-height: 36px; padding: 0 12px; white-space: nowrap; }
 .compact-button { min-width: 150px; min-height: 44px; }
 
 .firewall-page-heading { display: flex; align-items: end; justify-content: space-between; gap: 32px; }

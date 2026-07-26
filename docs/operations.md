@@ -67,6 +67,13 @@ Administrator email matching is case-insensitive. Keep the allowlist small.
 After identity records and assignments exist, changing bootstrap identifiers
 does not migrate existing rows.
 
+Every user in the configured Entra directory may sign in. Control creates their
+owned user and workspace records just in time and assigns the default employee
+policy on first sign-in. An administrator can later suspend or reactivate the
+user, revoke their active sessions, change their policy assignment, and manage
+their sandbox and egress security-group configuration. A returning user does
+not automatically regain a policy that an administrator revoked.
+
 ### Microsoft 365
 
 `ONECOMPUTER_MS365_TENANT_ID`, `ONECOMPUTER_MS365_CLIENT_ID`, and
@@ -107,6 +114,12 @@ same grants. If a grant cannot be refreshed, Control revokes it so an agent
 cannot keep stale connector access. Grant renewal also recomputes the projection
 periodically. Identically named tools from different connectors are exposed
 with connector-qualified names and routed back to their original server.
+
+Each connector also has an organization-owned access policy. Administrators can
+disable the connector for everyone or prevent members from changing their
+personal connection. Tool decisions remain `allow`, `approval_required`, or
+`deny`; denied tools are removed from workspace grants. These checks are
+enforced by Control and the runtime grant projection, not only by the Web UI.
 
 Custom connector deletion removes the LiteLLM server and its catalog metadata.
 Built-in connectors cannot be deleted through the administration API.

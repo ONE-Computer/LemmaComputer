@@ -479,7 +479,7 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
   );
 }
 
-function AdminScreen({ users, loading, busyUserId, onAssign, onRevoke, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
+function AdminScreen({ users, currentUserId, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
   return (
     <div className="secondary-screen admin-screen">
       <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
@@ -506,17 +506,27 @@ function AdminScreen({ users, loading, busyUserId, onAssign, onRevoke, onVersion
           <article key={item.userId}>
             <div className="admin-user-copy">
               <strong>{item.displayName}</strong><small>{item.email}</small>
-              <span>{item.roles.includes("administrator") ? "Administrator" : "Employee"}</span>
+              <div className="admin-user-badges">
+                <span>{item.roles.includes("administrator") ? "Administrator" : "Employee"}</span>
+                {item.status === "disabled" && <span className="disabled">Suspended</span>}
+              </div>
             </div>
             <div className="admin-policy-copy">
               {item.effectivePolicy ? <>
                 <strong>Version {item.effectivePolicy.version} assigned</strong>
                 <small>Immutable policy {item.effectivePolicy.documentHash.slice(0, 12)}…</small>
               </> : <><strong>No active policy</strong><small>Workspace and agent authority is revoked.</small></>}
+              {item.workspaces?.length ? <div className="admin-user-workspaces">
+                {item.workspaces.map((workspace) => <button className="connection-quiet-button" type="button" key={workspace.id} disabled={busyUserId === item.userId} onClick={() => onManageWorkspace(item, workspace)}>Manage {workspaceName(workspace)}</button>)}
+              </div> : <small>No workspace has been created yet.</small>}
             </div>
-            {item.effectivePolicy
-              ? <button className="secondary-button danger-button" type="button" disabled={busyUserId === item.userId} onClick={() => onRevoke(item.userId)}>Revoke</button>
-              : <button className="primary-button compact-button" type="button" disabled={busyUserId === item.userId} onClick={() => onAssign(item.userId)}>Assign policy</button>}
+            <div className="admin-user-actions">
+              {item.effectivePolicy
+                ? <button className="secondary-button danger-button" type="button" disabled={busyUserId === item.userId} onClick={() => onRevoke(item.userId)}>Revoke policy</button>
+                : <button className="primary-button compact-button" type="button" disabled={busyUserId === item.userId || item.status === "disabled"} onClick={() => onAssign(item.userId)}>Assign policy</button>}
+              <button className="secondary-button" type="button" disabled={busyUserId === item.userId} onClick={() => onRevokeSessions(item.userId)}>Sign out sessions</button>
+              {item.userId !== currentUserId && <button className={`secondary-button${item.status === "disabled" ? "" : " danger-button"}`} type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, item.status === "disabled" ? "active" : "disabled")}>{item.status === "disabled" ? "Reactivate" : "Suspend user"}</button>}
+            </div>
           </article>
         ))}
       </section>
@@ -573,14 +583,43 @@ function CredentialsScreen({ credentials, workspaces, loading, busy, error, onCr
   );
 }
 
-function SettingsScreen({ view, isAdmin, gatewayUrl, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, loading, busyUserId, onAssign, onRevoke, onVersion, mcpPolicy, onConfigureConnector }) {
+function SettingsScreen({ view, isAdmin, currentUserId, gatewayUrl, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
+  if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
+    return <WorkspaceConfigurationScreen
+      settings={adminSandboxSettings}
+      workspaces={adminWorkspaceTarget.user.workspaces}
+      loading={adminSandboxLoading}
+      saving={adminSandboxSaving}
+      error={adminSandboxError}
+      selectedGrantId={adminWorkspaceTarget.workspace.grantId}
+      onBack={onCloseAdminWorkspace}
+      onSave={onSaveAdminSandbox}
+      onAssignSecurityGroup={onAssignAdminSecurityGroup}
+      canManageFirewall
+      telegram={null}
+      credentials={[]}
+      channelLoading={false}
+      channelBusy={false}
+      channelError=""
+      onSaveTelegram={() => undefined}
+      onDisconnectTelegram={() => undefined}
+      onCreateCredential={() => undefined}
+      showChannels={false}
+      ownerName={adminWorkspaceTarget.user.displayName}
+      backLabel="Back to organization users"
+    />;
+  }
   if (view === "admin" && isAdmin) {
     return <AdminScreen
       users={users}
+      currentUserId={currentUserId}
       loading={loading}
       busyUserId={busyUserId}
       onAssign={onAssign}
       onRevoke={onRevoke}
+      onStatusChange={onStatusChange}
+      onRevokeSessions={onRevokeSessions}
+      onManageWorkspace={onManageWorkspace}
       onVersion={onVersion}
       mcpPolicy={mcpPolicy}
       onConfigureConnector={onConfigureConnector}
@@ -776,7 +815,7 @@ const workspaceConfigurationStatus = (state) => ({
   failed: "Needs attention",
 }[state] ?? "Unknown");
 
-function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onAssignSecurityGroup, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential }) {
+function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onAssignSecurityGroup, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState("");
@@ -813,12 +852,12 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
 
   return (
     <div className="secondary-screen sandbox-screen sandbox-detail-screen">
-      <button className="text-button sandbox-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />All workspaces</button>
+      <button className="text-button sandbox-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />{backLabel}</button>
       <header className="sandbox-detail-heading">
         <div>
-          <p>{creatingWorkspace ? "Create workspace" : "Workspace configuration"}</p>
+          <p>{ownerName ? `${ownerName} · Workspace configuration` : creatingWorkspace ? "Create workspace" : "Workspace configuration"}</p>
           <h1>{workspaceName(selectedWorkspace ?? { grantId: selectedGrantId })}</h1>
-          <span>{creatingWorkspace ? "Choose the profile, applications, agents, and model before ONEComputer starts this workspace." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
+          <span>{ownerName ? "Manage this member’s policy-bounded workspace configuration. Profile, application, agent, and model changes apply after the workspace restarts." : creatingWorkspace ? "Choose the profile, applications, agents, and model before ONEComputer starts this workspace." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
         </div>
         <span className={`sandbox-state ${creatingWorkspace ? "not_created" : selectedWorkspace?.state}`}>{creatingWorkspace ? "Not created" : workspaceConfigurationStatus(selectedWorkspace?.state)}</span>
       </header>
@@ -863,7 +902,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             {!agentIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved AI agent.</p>}
           </section>
 
-          <TelegramChannelSection
+          {showChannels && <TelegramChannelSection
             connection={telegram}
             credentials={credentials}
             agents={settings.availableAgents.filter((agent) => agentIds.includes(agent.id))}
@@ -874,7 +913,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             onSave={onSaveTelegram}
             onDisconnect={onDisconnectTelegram}
             onCreateCredential={onCreateCredential}
-          />
+          />}
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">AI model</h2><p>The selected model route is delivered through each agent’s own LiteLLM grant. Provider credentials remain outside the workspace.</p></span></div>
@@ -1077,9 +1116,33 @@ function Microsoft365AccountMetadata({ account }) {
   );
 }
 
-function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect, displayName, isAdmin, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function ConnectorAccessPolicyCard({ connector, busy, onSave }) {
+  const [enabled, setEnabled] = useState(connector.enabled !== false);
+  const [membersCanManage, setMembersCanManage] = useState(connector.membersCanManage !== false);
+  useEffect(() => {
+    setEnabled(connector.enabled !== false);
+    setMembersCanManage(connector.membersCanManage !== false);
+  }, [connector.id, connector.enabled, connector.membersCanManage]);
+  const dirty = enabled !== (connector.enabled !== false) || membersCanManage !== (connector.membersCanManage !== false);
+  return (
+    <section className="connector-access-policy-card" aria-labelledby={`connector-access-${connector.id}`}>
+      <div>
+        <p>Organization access</p>
+        <h2 id={`connector-access-${connector.id}`}>Member connection policy</h2>
+        <span>These controls apply to every ME TECH member and are enforced by Control.</span>
+      </div>
+      <label><input type="checkbox" checked={enabled} disabled={busy} onChange={(event) => setEnabled(event.target.checked)} /><span><strong>Connector enabled</strong><small>Assigned workspaces may use approved tools from this service.</small></span></label>
+      <label><input type="checkbox" checked={membersCanManage} disabled={busy || !enabled} onChange={(event) => setMembersCanManage(event.target.checked)} /><span><strong>Members can manage connections</strong><small>Members may connect and disconnect their own work account.</small></span></label>
+      <button className="primary-button compact-button" type="button" disabled={busy || !dirty} onClick={() => onSave(connector.id, { enabled, membersCanManage })}>{busy ? "Saving policy" : "Save access policy"}</button>
+    </section>
+  );
+}
+
+function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect, onAccessPolicySave, displayName, isAdmin, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connection?.state === "connected";
   const expired = connection?.state === "expired";
+  const organizationDisabled = connection?.enabled === false;
+  const connectionLocked = connection?.canManageConnection === false;
   const connectedAt = connection?.connectedAt
     ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(connection.connectedAt))
     : null;
@@ -1094,7 +1157,7 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
           <span>Outlook Mail, Calendar, OneDrive, and Teams</span>
         </div>
         <span className={`connection-status ${connected ? "connected" : expired ? "expired" : "disconnected"}`}>
-          {loading ? "Checking" : connected ? "Connected" : expired ? "Reconnect required" : "Not connected"}
+          {loading ? "Checking" : organizationDisabled ? "Disabled" : connected ? "Connected" : expired ? "Reconnect required" : "Not connected"}
         </span>
       </header>
 
@@ -1110,20 +1173,21 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
           <section className="connector-overview-card">
             <div>
               <p>Connection status</p>
-              <h2>{connected ? "Ready for assigned workspaces" : expired ? "Microsoft access needs attention" : "Connect your work account"}</h2>
-              <span>{connected ? "Your workspace agent can use the tools your organization has allowed." : "Connect once to make approved Microsoft 365 tools available to your workspace."}</span>
+              <h2>{organizationDisabled ? "Disabled by your organization" : connectionLocked ? "Managed by your administrator" : connected ? "Ready for assigned workspaces" : expired ? "Microsoft access needs attention" : "Connect your work account"}</h2>
+              <span>{organizationDisabled ? "Microsoft 365 tools and new connections are unavailable until an administrator enables this connector." : connectionLocked ? "Your existing connection status is visible, but only an administrator can change it." : connected ? "Your workspace agent can use the tools your organization has allowed." : "Connect once to make approved Microsoft 365 tools available to your workspace."}</span>
               <div className="connection-services" aria-label="Included services"><span>Outlook Mail</span><span>Calendar</span><span>OneDrive</span><span>Teams</span></div>
               {connected && <Microsoft365AccountMetadata account={connection?.account} />}
               {connectedAt && <p className="connection-metadata">Connected {connectedAt}</p>}
             </div>
             <div className="connection-actions">
               {connected ? (
-                <button className="secondary-button" type="button" onClick={onDisconnect} disabled={busy || loading}>{busy ? "Disconnecting" : "Disconnect"}</button>
+                <button className="secondary-button" type="button" onClick={onDisconnect} disabled={busy || loading || organizationDisabled || connectionLocked}>{busy ? "Disconnecting" : "Disconnect"}</button>
               ) : (
-                <button className="primary-button" type="button" onClick={onConnect} disabled={busy || loading}><PlugConnected24Regular aria-hidden="true" />{busy ? "Opening Microsoft" : expired ? "Reconnect" : "Connect Microsoft 365"}</button>
+                <button className="primary-button" type="button" onClick={onConnect} disabled={busy || loading || organizationDisabled || connectionLocked}><PlugConnected24Regular aria-hidden="true" />{busy ? "Opening Microsoft" : expired ? "Reconnect" : "Connect Microsoft 365"}</button>
               )}
             </div>
           </section>
+          {isAdmin && <ConnectorAccessPolicyCard connector={connection} busy={busy} onSave={onAccessPolicySave} />}
         </div>
       )}
     </div>
@@ -1170,16 +1234,20 @@ function ConnectorIconEditor({ connector, busy, onSave }) {
   );
 }
 
-function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
   const unavailable = connector?.state === "unavailable";
+  const organizationDisabled = connector?.enabled === false;
+  const connectionLocked = connector?.canManageConnection === false;
   const connectedAt = connector?.connectedAt
     ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(connector.connectedAt))
     : null;
   const statusLabel = loading
     ? "Checking"
-    : connected
+    : organizationDisabled
+      ? "Disabled"
+      : connected
       ? "Connected"
       : expired
         ? "Reconnect required"
@@ -1210,8 +1278,12 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
         <section className="connector-overview-card">
           <div>
             <p>Connection status</p>
-            <h2>{connected ? "Connection ready" : expired ? "Provider access needs attention" : unavailable ? "Administrator setup required" : `Connect ${connector.name}`}</h2>
-            <span>{connected
+            <h2>{organizationDisabled ? "Disabled by your organization" : connectionLocked ? "Managed by your administrator" : connected ? "Connection ready" : expired ? "Provider access needs attention" : unavailable ? "Administrator setup required" : `Connect ${connector.name}`}</h2>
+            <span>{organizationDisabled
+              ? "This connector and its workspace tools are unavailable until an administrator enables it."
+              : connectionLocked
+                ? "Your existing connection status is visible, but only an administrator can change it."
+                : connected
               ? "Your account is connected and ready for any tools your organization approves."
               : unavailable
                 ? "An administrator must finish setting up this service before people can connect it."
@@ -1221,15 +1293,16 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
           </div>
           <div className="connection-actions">
             {connected ? (
-              <button className="secondary-button" type="button" onClick={() => onDisconnect(connector)} disabled={busy || loading}>{busy ? "Disconnecting" : "Disconnect"}</button>
+              <button className="secondary-button" type="button" onClick={() => onDisconnect(connector)} disabled={busy || loading || organizationDisabled || connectionLocked}>{busy ? "Disconnecting" : "Disconnect"}</button>
             ) : (
-              <button className="primary-button" type="button" onClick={() => onConnect(connector.id)} disabled={busy || loading || unavailable}>
+              <button className="primary-button" type="button" onClick={() => onConnect(connector.id)} disabled={busy || loading || unavailable || organizationDisabled || connectionLocked}>
                 <PlugConnected24Regular aria-hidden="true" />
                 {busy ? `Opening ${connector.name}` : expired ? "Reconnect" : `Connect ${connector.name}`}
               </button>
             )}
           </div>
         </section>
+        {isAdmin && <ConnectorAccessPolicyCard connector={connector} busy={busy} onSave={onAccessPolicySave} />}
         <div className="connector-policy-note">
           <Info24Regular aria-hidden="true" />
           <p><strong>{connector.policySupport === "governed" ? "Approved tools available" : "Available to your workspace agents"}</strong>{connector.policySupport === "governed"
@@ -1500,15 +1573,15 @@ function AddConnectorDialog({ onCreated, onClose }) {
   );
 }
 
-function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAddConnector, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onAddConnector, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
-      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} displayName={displayName} isAdmin={isAdmin} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAccessPolicySave={onAccessPolicySave} displayName={displayName} isAdmin={isAdmin} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
-      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
   }
   const categories = ["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"];
@@ -1539,6 +1612,8 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                 const connected = connector.state === "connected";
                 const expired = connector.state === "expired";
                 const unavailable = connector.state === "unavailable";
+                const organizationDisabled = connector.enabled === false;
+                const connectionLocked = connector.canManageConnection === false;
                 const busy = busyConnectorId === connector.id;
                 return (
                   <article className={`connector-catalog-card${connected ? " connected" : ""}`} key={connector.id}>
@@ -1546,7 +1621,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                     <div className="connector-catalog-copy">
                       <div>
                         <h3>{connector.name}</h3>
-                        <span className={`connector-card-state ${connected ? "connected" : expired ? "expired" : ""}`}>{loading ? "Checking" : connected ? "Connected" : expired ? "Reconnect" : unavailable ? connector.available ? "Gateway unavailable" : "Not registered" : "Available"}</span>
+                        <span className={`connector-card-state ${connected ? "connected" : expired ? "expired" : ""}`}>{loading ? "Checking" : organizationDisabled ? "Disabled" : connected ? "Connected" : expired ? "Reconnect" : unavailable ? connector.available ? "Gateway unavailable" : "Not registered" : connectionLocked ? "Admin managed" : "Available"}</span>
                       </div>
                       <p>{connector.shortDescription}</p>
                       <small>{connector.policySupport === "governed" ? "Approved tools ready" : "Added to workspace agents after connection"}</small>
@@ -1556,7 +1631,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                       {connected ? (
                         <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
                       ) : (
-                        <button className="secondary-button" type="button" onClick={() => onConnect(connector.id)} disabled={loading || busy || unavailable}>{busy ? "Opening" : expired ? "Reconnect" : "Connect"}</button>
+                        <button className="secondary-button" type="button" onClick={() => onConnect(connector.id)} disabled={loading || busy || unavailable || organizationDisabled || connectionLocked}>{busy ? "Opening" : expired ? "Reconnect" : "Connect"}</button>
                       )}
                     </div>
                   </article>
@@ -2210,6 +2285,11 @@ export function App() {
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyUserId, setAdminBusyUserId] = useState("");
+  const [adminWorkspaceTarget, setAdminWorkspaceTarget] = useState(null);
+  const [adminSandboxSettings, setAdminSandboxSettings] = useState(null);
+  const [adminSandboxLoading, setAdminSandboxLoading] = useState(false);
+  const [adminSandboxSaving, setAdminSandboxSaving] = useState(false);
+  const [adminSandboxError, setAdminSandboxError] = useState("");
   const [egressVersions, setEgressVersions] = useState([]);
   const [egressSaving, setEgressSaving] = useState(false);
   const [mcpPolicy, setMcpPolicy] = useState(null);
@@ -2792,6 +2872,26 @@ export function App() {
     }
   };
 
+  const saveConnectorAccessPolicy = async (connectorId, policy) => {
+    setConnectionBusy(connectorId);
+    setConnectionError("");
+    try {
+      const result = await adminApi.saveConnectorAccessPolicy(connectorId, policy);
+      const catalog = await connectionApi.catalog();
+      setMcpConnections(catalog.connections);
+      const failures = result.workspaceGrants?.failed ?? 0;
+      setToast(failures
+        ? `Connector access policy saved. ${failures} workspace grant refreshes failed and will retry automatically.`
+        : "Connector access policy is active for the organization.");
+      return result.connector;
+    } catch (error) {
+      setConnectionError(error.message);
+      throw error;
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
   const connectorCreated = async (connector) => {
     const catalog = await connectionApi.catalog();
     setMcpConnections(catalog.connections);
@@ -3037,6 +3137,101 @@ export function App() {
     catch (error) { showApiError(error); }
     finally { setAdminBusyUserId(""); }
   };
+  const changeUserStatus = async (user, status) => {
+    const suspending = status === "disabled";
+    if (!await requestConfirmation({
+      title: suspending ? `Suspend ${user.displayName}?` : `Reactivate ${user.displayName}?`,
+      description: suspending
+        ? "Their browser sessions and active workspace gateway grants will be revoked immediately. Persistent workspace storage is retained."
+        : "They will be able to sign in again. Workspace access will resume from their existing organization policy.",
+      confirmLabel: suspending ? "Suspend user" : "Reactivate user",
+      danger: suspending,
+    })) return;
+    setAdminBusyUserId(user.userId);
+    try {
+      await adminApi.setUserStatus(user.userId, status);
+      await refreshAdminUsers();
+      setToast(suspending ? `${user.displayName} was suspended.` : `${user.displayName} was reactivated.`);
+    } catch (error) {
+      showApiError(error);
+    } finally {
+      setAdminBusyUserId("");
+    }
+  };
+  const revokeUserSessions = async (userId) => {
+    setAdminBusyUserId(userId);
+    try {
+      const result = await adminApi.revokeUserSessions(userId);
+      setToast(result.revokedSessions
+        ? `${result.revokedSessions} active ${result.revokedSessions === 1 ? "session was" : "sessions were"} signed out.`
+        : "That user had no active sessions.");
+    } catch (error) {
+      showApiError(error);
+    } finally {
+      setAdminBusyUserId("");
+    }
+  };
+  const manageAdminWorkspace = async (user, workspace) => {
+    const target = { user, workspace };
+    setAdminWorkspaceTarget(target);
+    setSettingsView("admin-workspace");
+    setAdminSandboxSettings(null);
+    setAdminSandboxError("");
+    setAdminSandboxLoading(true);
+    try {
+      setAdminSandboxSettings(await adminApi.sandboxSettings(user.userId, workspace.grantId));
+    } catch (error) {
+      setAdminSandboxError(error.message);
+    } finally {
+      setAdminSandboxLoading(false);
+    }
+  };
+  const closeAdminWorkspace = () => {
+    setSettingsView("admin");
+    setAdminWorkspaceTarget(null);
+    setAdminSandboxSettings(null);
+    setAdminSandboxError("");
+  };
+  const saveAdminSandbox = async (configuration) => {
+    if (!adminWorkspaceTarget) return;
+    setAdminSandboxSaving(true);
+    setAdminSandboxError("");
+    try {
+      const { securityGroupVersionId, ...sandboxConfiguration } = configuration;
+      if (securityGroupVersionId && securityGroupVersionId !== adminSandboxSettings?.securityGroup?.id) {
+        await adminApi.assignUserWorkspaceEgressSecurityGroup(
+          adminWorkspaceTarget.user.userId,
+          configuration.grantId,
+          securityGroupVersionId,
+        );
+      }
+      setAdminSandboxSettings(await adminApi.saveSandboxSettings(adminWorkspaceTarget.user.userId, sandboxConfiguration));
+      await refreshAdminUsers();
+      setToast(`${adminWorkspaceTarget.user.displayName}’s workspace configuration was saved. Restart it to apply profile, app, agent, or model changes.`);
+    } catch (error) {
+      setAdminSandboxError(error.message);
+    } finally {
+      setAdminSandboxSaving(false);
+    }
+  };
+  const assignAdminWorkspaceSecurityGroup = async (grantId, securityGroupVersionId) => {
+    if (!adminWorkspaceTarget) return;
+    setAdminSandboxSaving(true);
+    setAdminSandboxError("");
+    try {
+      const assigned = await adminApi.assignUserWorkspaceEgressSecurityGroup(
+        adminWorkspaceTarget.user.userId,
+        grantId,
+        securityGroupVersionId,
+      );
+      setAdminSandboxSettings(await adminApi.sandboxSettings(adminWorkspaceTarget.user.userId, grantId));
+      setToast(`${assigned.name} is now active for ${adminWorkspaceTarget.user.displayName}.`);
+    } catch (error) {
+      setAdminSandboxError(error.message);
+    } finally {
+      setAdminSandboxSaving(false);
+    }
+  };
   const createPolicyVersion = async () => {
     setRevisionPromptOpen(true);
   };
@@ -3216,6 +3411,7 @@ export function App() {
             onConnect={connectMcpConnector}
             onDisconnect={disconnectMcpConnector}
             onIconChange={saveConnectorIcon}
+            onAccessPolicySave={saveConnectorAccessPolicy}
             onAddConnector={() => setConnectorDialogOpen(true)}
             displayName={session.user.displayName}
             isAdmin={session.roles.includes("administrator")}
@@ -3232,6 +3428,7 @@ export function App() {
         {activeNav === "Settings" && <SettingsScreen
           view={settingsView}
           isAdmin={session.roles.includes("administrator")}
+          currentUserId={session.user.id}
           gatewayUrl={gatewayAdminUrl}
           onOpenAdmin={() => setSettingsView("admin")}
           onOpenCredentials={() => setSettingsView("credentials")}
@@ -3249,6 +3446,17 @@ export function App() {
           busyUserId={adminBusyUserId}
           onAssign={assignPolicy}
           onRevoke={revokePolicy}
+          onStatusChange={changeUserStatus}
+          onRevokeSessions={revokeUserSessions}
+          onManageWorkspace={manageAdminWorkspace}
+          adminWorkspaceTarget={adminWorkspaceTarget}
+          adminSandboxSettings={adminSandboxSettings}
+          adminSandboxLoading={adminSandboxLoading}
+          adminSandboxSaving={adminSandboxSaving}
+          adminSandboxError={adminSandboxError}
+          onSaveAdminSandbox={saveAdminSandbox}
+          onAssignAdminSecurityGroup={assignAdminWorkspaceSecurityGroup}
+          onCloseAdminWorkspace={closeAdminWorkspace}
           onVersion={createPolicyVersion}
           mcpPolicy={mcpPolicy}
           onConfigureConnector={configureMicrosoft365}
