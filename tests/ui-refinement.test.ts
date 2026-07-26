@@ -172,6 +172,17 @@ test("Connections stays employee-facing and uses spacing instead of decorative r
   assert.match(connections, /connector-\$\{selected\.id\}-tools/);
 });
 
+test("connector checks explain invalid input instead of appearing permanently busy", async () => {
+  const connections = await source("apps/web/src/App.jsx");
+  const styles = await source("apps/web/src/styles.css");
+  assert.match(connections, /description: description\.length >= 3 \? description : draft\.shortDescription\.trim\(\)/);
+  assert.match(connections, /Connection description <em>Optional<\/em>/);
+  assert.match(connections, /onClick=\{discover\} disabled=\{Boolean\(busy\)\} aria-busy=\{busy === "checking"\}/);
+  assert.match(connections, /if \(validationError\) \{\s+setError\(validationError\);/);
+  assert.match(styles, /\.primary-button:disabled,[\s\S]*?cursor: not-allowed;/);
+  assert.match(styles, /\.primary-button\[aria-busy="true"\],[\s\S]*?cursor: progress;/);
+});
+
 test("remote-only approvals notify desktop without opening its decision drawer", async () => {
   const app = await source("apps/web/src/App.jsx");
   assert.match(app, /approvalContext\.localReady \|\| !approvalContext\.accountStatus\.connected/);

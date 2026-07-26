@@ -2521,8 +2521,13 @@ textarea:focus-visible,
 
 .primary-button:disabled,
 .secondary-button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.58;
+}
+
+.primary-button[aria-busy="true"],
+.secondary-button[aria-busy="true"] {
+  cursor: progress;
 }
 
 .primary-button svg,
@@ -2870,6 +2875,13 @@ textarea:focus-visible,
   color: #26374a;
   font-size: 13px;
   font-weight: 700;
+}
+
+.add-connector-fields label > span em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
 }
 
 .add-connector-fields label.wide {

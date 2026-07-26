@@ -1327,15 +1327,20 @@ function AddConnectorDialog({ onCreated, onClose }) {
   const [showCredentials, setShowCredentials] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const description = draft.description.trim();
   const payload = {
     ...draft,
+    description: description.length >= 3 ? description : draft.shortDescription.trim(),
     clientId: draft.clientId.trim() || undefined,
     clientSecret: draft.clientSecret || undefined,
   };
-  const valid = draft.name.trim().length >= 2
-    && draft.shortDescription.trim().length >= 3
-    && draft.description.trim().length >= 3
-    && /^https:\/\//i.test(draft.endpointUrl.trim());
+  const validationError = !/^https:\/\//i.test(draft.endpointUrl.trim())
+    ? "Enter a secure MCP server URL beginning with https://."
+    : draft.name.trim().length < 2
+      ? "Enter a connector name using at least two characters."
+      : draft.shortDescription.trim().length < 3
+        ? "Enter a card description using at least three characters."
+        : "";
   const update = (field, value) => {
     setDraft((current) => ({ ...current, [field]: value }));
     setChecked(null);
@@ -1343,6 +1348,10 @@ function AddConnectorDialog({ onCreated, onClose }) {
     if (field === "endpointUrl") setShowCredentials(false);
   };
   const discover = async () => {
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     setBusy("checking");
     setError("");
     try {
@@ -1386,7 +1395,7 @@ function AddConnectorDialog({ onCreated, onClose }) {
         <label><span>Name</span><input name="connector-name" placeholder="Service name" value={draft.name} onChange={(event) => update("name", event.target.value)} disabled={Boolean(busy)} /></label>
         <label><span>Category</span><SelectMenu value={draft.category} onValueChange={(value) => update("category", value)} ariaLabel="Connector category" disabled={Boolean(busy)} options={["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"].map((value) => ({ value, label: value }))} /></label>
         <label className="wide"><span>Card description</span><input name="connector-short-description" placeholder="What people can do with this service" value={draft.shortDescription} onChange={(event) => update("shortDescription", event.target.value)} disabled={Boolean(busy)} /></label>
-        <label className="wide"><span>Connection description</span><textarea name="connector-description" rows="3" value={draft.description} onChange={(event) => update("description", event.target.value)} disabled={Boolean(busy)} /></label>
+        <label className="wide"><span>Connection description <em>Optional</em></span><textarea name="connector-description" rows="3" placeholder="Defaults to the card description" value={draft.description} onChange={(event) => update("description", event.target.value)} disabled={Boolean(busy)} /></label>
       </div>
       {showCredentials && <section className="add-connector-app-credentials" role="alert" aria-labelledby="connector-credentials-title">
         <div className="add-connector-app-credentials-heading">
@@ -1403,8 +1412,8 @@ function AddConnectorDialog({ onCreated, onClose }) {
       <div className="modal-actions">
         <button className="secondary-button" type="button" onClick={onClose} disabled={Boolean(busy)}>Cancel</button>
         {!checked
-          ? <button className="primary-button" type="button" onClick={discover} disabled={!valid || Boolean(busy)}>{busy === "checking" ? "Checking server" : "Check server"}</button>
-          : <button className="primary-button" type="button" onClick={create} disabled={Boolean(busy)}>{busy === "creating" ? "Adding connector" : "Add connector"}</button>}
+          ? <button className="primary-button" type="button" onClick={discover} disabled={Boolean(busy)} aria-busy={busy === "checking"}>{busy === "checking" ? "Checking server" : "Check server"}</button>
+          : <button className="primary-button" type="button" onClick={create} disabled={Boolean(busy)} aria-busy={busy === "creating"}>{busy === "creating" ? "Adding connector" : "Add connector"}</button>}
       </div>
     </ModalDialog>
   );
