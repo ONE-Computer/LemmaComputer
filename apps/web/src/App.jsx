@@ -38,7 +38,7 @@ import {
   loadPendingApproval,
   signApprovalDecision,
 } from "./openvtc-browser-agent.js";
-import { ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog } from "./ui.jsx";
+import { ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog, useDismissOnOutside } from "./ui.jsx";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
 const gatewayAdminUrl = import.meta.env.VITE_LITELLM_ADMIN_URL ?? "http://127.0.0.1:4000/ui";
@@ -1885,6 +1885,14 @@ function ChatConversation({
   const fileInputRef = useRef(null);
   const sessionRef = useRef(activeSessionId);
   const loadedSessionRef = useRef("");
+  const chatActionsRef = useRef(null);
+  const contextRef = useRef(null);
+  const chatPopoverRefs = useMemo(() => [chatActionsRef, contextRef], []);
+
+  useDismissOnOutside(chatActionsOpen || contextOpen, () => {
+    setChatActionsOpen(false);
+    setContextOpen(false);
+  }, chatPopoverRefs);
 
   const refreshSessions = () => onRefreshSessions?.();
   const transport = useMemo(() => new DefaultChatTransport({
@@ -2192,7 +2200,7 @@ function ChatConversation({
         />
         {companionComposer ? (
           <div className="companion-chat-composer-row">
-            <div className="companion-chat-composer-control actions-control">
+            <div ref={chatActionsRef} className="companion-chat-composer-control actions-control">
               <button
                 className="chat-attach-button"
                 type="button"
@@ -2252,7 +2260,7 @@ function ChatConversation({
               )}
             </div>
             {messageField}
-            <div className="companion-chat-composer-control context-control">
+            <div ref={contextRef} className="companion-chat-composer-control context-control">
               {composerContext ? (
                 <>
                   <button
@@ -2636,6 +2644,10 @@ export function App() {
   const surfacedApprovalIds = useRef(new Set());
   const mainContentRef = useRef(null);
   const sidebarRef = useRef(null);
+  const profileRef = useRef(null);
+  const profilePopoverRefs = useMemo(() => [profileRef], []);
+
+  useDismissOnOutside(profileOpen, () => setProfileOpen(false), profilePopoverRefs);
 
   const requestConfirmation = (options) => new Promise((resolve) => {
     setConfirmation({ ...options, resolve });
@@ -3720,7 +3732,7 @@ export function App() {
             {chatHistoryHasMore && <button className="sidebar-chat-load-more" type="button" disabled={chatHistoryLoadingMore} onClick={() => setChatHistoryLoadRequest((value) => value + 1)}>{chatHistoryLoadingMore ? "Loading chats…" : "Load older chats"}</button>}
           </div>}
         </nav>
-        <div className="sidebar-account">
+        <div ref={profileRef} className="sidebar-account">
           <button
             className="sidebar-profile"
             type="button"

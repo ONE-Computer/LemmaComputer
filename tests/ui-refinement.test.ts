@@ -109,6 +109,23 @@ test("critical UI paths use owned accessible dialogs, skip targets, live state, 
   assert.doesNotMatch(app, /dateTime="2026-/);
 });
 
+test("transient menus dismiss on outside clicks and Escape without changing modal behavior", async () => {
+  const [app, ui] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/ui.jsx"),
+  ]);
+  assert.match(ui, /export function useDismissOnOutside/);
+  assert.match(ui, /document\.addEventListener\("pointerdown", onPointerDown\)/);
+  assert.match(ui, /event\.key !== "Escape"/);
+  assert.match(app, /useDismissOnOutside\(chatActionsOpen \|\| contextOpen/);
+  assert.match(app, /ref=\{chatActionsRef\}/);
+  assert.match(app, /ref=\{contextRef\}/);
+  assert.match(app, /useDismissOnOutside\(profileOpen, \(\) => setProfileOpen\(false\), profilePopoverRefs\)/);
+  assert.match(app, /ref=\{profileRef\} className="sidebar-account"/);
+  assert.match(ui, /className=\{`modal-card/);
+  assert.match(ui, /onMouseDown=\{onClose\}/);
+});
+
 test("Companion exposes Chat and approvals through the compact top-bar switch", async () => {
   const [app, companion, companionStyles, styles, manifest] = await Promise.all([
     source("apps/web/src/App.jsx"),
@@ -435,7 +452,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
     source("apps/web/src/ui.jsx"),
     source("apps/web/src/ui.css"),
   ]);
-  assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog \}/);
+  assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog, useDismissOnOutside \}/);
   assert.ok((app.match(/<SelectMenu/g) ?? []).length >= 9);
   assert.doesNotMatch(app, /<select/);
   assert.match(ui, /export function SelectMenu/);

@@ -15,6 +15,30 @@ const focusableSelector = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+export function useDismissOnOutside(open, onDismiss, refs) {
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointerDown = (event) => {
+      if (refs.some((ref) => ref.current?.contains(event.target))) return;
+      dismissRef.current();
+    };
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      dismissRef.current();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, refs]);
+}
+
 export function SelectMenu({ value, options, onValueChange, disabled = false, ariaLabel, className = "" }) {
   const triggerRef = useRef(null);
   const popupRef = useRef(null);
