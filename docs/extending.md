@@ -245,9 +245,14 @@ signed request over its authenticated inbox channel.
 
 ## Add a database migration
 
-Add the next zero-padded SQL file to
-`packages/workspace-store/migrations`. Migrations run automatically during
-Control startup.
+Generate a dependency-declared ULID migration with:
+
+```bash
+npm run db:migration:new -- <short-name>
+```
+
+The one-shot migration job applies it before Control starts. Application startup only
+checks schema compatibility. Read [Database migrations](database-migrations.md) before editing SQL.
 
 Guidelines:
 
@@ -258,7 +263,7 @@ Guidelines:
 - encrypt credentials before persistence;
 - keep operation and audit history append-oriented;
 - update the in-memory store used by tests;
-- test both a fresh database and upgrade from the previous schema.
+- run `npm run verify:db` to prove fresh, no-op, concurrent, legacy, mismatch, and checksum behavior.
 
 ## Verification expectations
 

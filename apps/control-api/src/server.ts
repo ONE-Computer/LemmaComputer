@@ -1787,7 +1787,7 @@ export function createControlServer(
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   const env = envSchema.parse(process.env);
   const store = PostgresWorkspaceStore.fromConnectionString(env.DATABASE_URL);
-  await store.migrate();
+  await store.assertSchemaCompatible();
   const connectorRegistryStore = PostgresConnectorRegistryStore.fromConnectionString(env.DATABASE_URL);
   const scheduleStore = PostgresScheduleStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);

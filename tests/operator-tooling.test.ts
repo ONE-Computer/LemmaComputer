@@ -64,6 +64,7 @@ test("compose shutdown refuses to bypass managed workspace lifecycle", () => {
   const calls: Array<{ command: string; args: string[] }> = [];
   let errors = "";
   const status = runComposeDown({
+    projectName: "onecomputer",
     run: (command: string, args: string[]) => {
       calls.push({ command, args });
       const filter = args[args.indexOf("--filter") + 1];

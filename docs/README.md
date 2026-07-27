@@ -1,4 +1,9 @@
 # ONEComputer documentation
+- [Development workflow](development-workflow.md) defines issue dependencies, isolated worktrees, local gates, and controlled promotion.
+- [Database migrations](database-migrations.md) defines the ledger, legacy baseline, expand/migrate/contract policy, and tests.
+- [Demo release runbook](demo-release.md) keeps the demo environment pinned, backed up, and separate from development.
+- [ADR 0001](adr/0001-local-release-gates.md) records why enforcement is local and hosted/self-hosted share one codebase.
+
 
 - [Local deployment and Entra setup](local-deployment.md) is the agent-oriented
   runbook for preparing `.env`, configuring Microsoft Entra, building the

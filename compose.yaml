@@ -1,4 +1,4 @@
-name: onecomputer
+name: ${ONECOMPUTER_COMPOSE_PROJECT_NAME:-onecomputer}
 
 x-control-runtime: &control-runtime
   image: onecomputer/control-runtime:${ONECOMPUTER_IMAGE_TAG:-dev}
@@ -57,7 +57,7 @@ services:
     restart: unless-stopped
 
   ms365-mcp:
-    image: onecomputer/ms365-mcp:0.131.2
+    image: onecomputer/ms365-mcp:${ONECOMPUTER_MS365_IMAGE_TAG:-0.131.2}
     build:
       context: .
       dockerfile: docker/Dockerfile.ms365-mcp
@@ -110,7 +110,7 @@ services:
     restart: unless-stopped
 
   litellm:
-    container_name: onecomputer-litellm
+    container_name: ${ONECOMPUTER_LITELLM_CONTAINER:-onecomputer-litellm}
     image: ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e
     command:
       - --config
@@ -204,9 +204,9 @@ services:
       SANDBOX_DRIVER: ${SANDBOX_DRIVER:-kasm-local}
       DOCKER_SOCKET_PATH: /var/run/docker.sock
       KASM_LOCAL_NETWORK_PREFIX: ${KASM_LOCAL_NETWORK_PREFIX:-onecomputer-workspace}
-      KASM_LOCAL_CONTROL_NETWORK: onecomputer-control
-      KASM_LOCAL_GATEWAY_CONTAINER: onecomputer-litellm
-      KASM_LOCAL_CONTROL_CONTAINER: onecomputer-control-api
+      KASM_LOCAL_CONTROL_NETWORK: ${ONECOMPUTER_CONTROL_NETWORK:-onecomputer-control}
+      KASM_LOCAL_GATEWAY_CONTAINER: ${ONECOMPUTER_LITELLM_CONTAINER:-onecomputer-litellm}
+      KASM_LOCAL_CONTROL_CONTAINER: ${ONECOMPUTER_CONTROL_CONTAINER:-onecomputer-control-api}
       KASM_LOCAL_IMAGE: ${ONECOMPUTER_WORKSPACE_IMAGE:-onecomputer/workspace:dev}
       KASM_LOCAL_RELAY_IMAGE: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
       KASM_LOCAL_EGRESS_PROXY_IMAGE: onecomputer/control-runtime:${ONECOMPUTER_IMAGE_TAG:-dev}
@@ -233,9 +233,24 @@ services:
       timeout: 3s
       retries: 20
 
+  db-migrate:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["npm", "run", "db:migrate"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
+      ONECOMPUTER_APP_VERSION: ${ONECOMPUTER_IMAGE_TAG:-dev}
+      ONECOMPUTER_INSTALLATION_KIND: ${ONECOMPUTER_INSTALLATION_KIND:-customer-managed}
+    networks:
+      - control-private
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   control-api:
     <<: [*control-runtime, *hardened]
-    container_name: onecomputer-control-api
+    container_name: ${ONECOMPUTER_CONTROL_CONTAINER:-onecomputer-control-api}
     user: node
     command: ["npm", "run", "start", "--workspace", "@onecomputer/control-api"]
     environment:
@@ -289,8 +304,8 @@ services:
       - gateway-private
       - identity-egress
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       litellm:
         condition: service_healthy
       openvtc-consent:
@@ -447,7 +462,7 @@ networks:
   web-edge:
     internal: true
   control-private:
-    name: onecomputer-control
+    name: ${ONECOMPUTER_CONTROL_NETWORK:-onecomputer-control}
     internal: true
   consent-private:
     internal: true

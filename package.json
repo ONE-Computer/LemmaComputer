@@ -26,7 +26,15 @@
     "key:policy": "node scripts/generate-policy-signing-key.mjs",
     "key:egress": "node scripts/generate-egress-grant-secret.mjs",
     "key:hermes": "node scripts/generate-hermes-api-secret.mjs",
-    "dev:ui-fixture": "node scripts/ui-fixture-server.mjs"
+    "dev:ui-fixture": "node scripts/ui-fixture-server.mjs",
+    "worktree:init": "node scripts/worktree-init.mjs",
+    "dev:doctor": "node scripts/dev-doctor.mjs",
+    "verify:quick": "node scripts/verify-quick.mjs",
+    "verify:db": "node scripts/verify-db.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "release:promote": "node scripts/release-promote.mjs",
+    "db:migration:new": "node scripts/migration-new.mjs",
+    "db:check": "tsx apps/control-api/src/check-schema.ts"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

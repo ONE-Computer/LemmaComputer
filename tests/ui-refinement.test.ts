@@ -1,3 +1,4 @@
+import { discoverWorkspaceMigrations } from "@onecomputer/workspace-store";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -262,11 +263,11 @@ test("remote-only approvals notify desktop without opening its decision drawer",
 });
 
 test("the consent-task schema is repaired additively for existing installations", async () => {
-  const [store, migration] = await Promise.all([
-    source("packages/workspace-store/src/index.ts"),
+  const [migration, migrations] = await Promise.all([
     source("packages/workspace-store/migrations/017_openvtc_request_proof_hash.sql"),
+    discoverWorkspaceMigrations(),
   ]);
-  assert.match(store, /017_openvtc_request_proof_hash\.sql/);
+  assert.ok(migrations.some((item) => item.fileName === "017_openvtc_request_proof_hash.sql"));
   assert.match(migration, /ADD COLUMN IF NOT EXISTS request_proof_hash/);
   assert.match(migration, /request_proof_hash IS NULL OR length\(request_proof_hash\) = 64/);
   assert.doesNotMatch(migration, /UPDATE[\s\S]+request_proof_hash/i);

@@ -277,7 +277,7 @@ Microsoft consent, active policy assignment, or a built workspace image.
 Common failures:
 
 - **Control stays unhealthy:** inspect required environment validation,
-  database migration, policy key parsing, and OpenVTC profile connection.
+  database schema compatibility or migration-job failure, policy key parsing, and OpenVTC profile connection.
 - **LiteLLM stays unhealthy:** inspect its database, master/salt keys, mounted
   YAML, and custom callback import.
 - **Workspace creation fails with image not found:** run

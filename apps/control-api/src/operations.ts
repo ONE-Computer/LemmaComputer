@@ -350,9 +350,6 @@ const microsoft365ArgumentTarget = (toolName: string, argumentsValue: Record<str
   if (toolName === "forward-mail-message") {
     return emailRecipients(body?.ToRecipients);
   }
-  if (["create-draft-email", "update-mail-message", "create-calendar-event", "update-calendar-event"].includes(toolName)) {
-    return typeof body?.subject === "string" ? body.subject.trim() : "";
-  }
   if (["create-onedrive-folder", "move-rename-onedrive-item", "copy-drive-item"].includes(toolName)) {
     return typeof body?.name === "string" ? body.name.trim() : "";
   }

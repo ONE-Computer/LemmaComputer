@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import pg from "pg";
 import type { AgentCatalogId, ChatAgentCatalogId, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
+import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migrations.js";
 export * from "./identity-policy.js";
 export * from "./connector-registry.js";
+export * from "./migrations.js";
 export * from "./schedules.js";
 
 export type WorkspaceRecord = {
@@ -556,12 +556,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return new PostgresWorkspaceStore(new pg.Pool({ connectionString, max: 10 }));
   }
 
-  async migrate() {
-    for (const migration of ["001_workspaces.sql", "002_governed_operations.sql", "003_persistent_workspaces.sql", "004_identity_policy.sql", "005_mcp_policy.sql", "006_openvtc_approval.sql", "007_openvtc_browser_enrollment.sql", "008_sandbox_settings.sql", "009_operation_policy_binding.sql", "010_egress_security_groups.sql", "011_sandbox_agents.sql", "012_openvtc_companion_push.sql", "013_policy_signing_keys.sql", "014_sandbox_applications.sql", "015_agent_neutral_chat.sql", "016_channel_broker.sql", "017_openvtc_request_proof_hash.sql", "018_governed_operation_failure_summary.sql", "019_disposable_open_profile.sql", "020_workspace_egress_security_groups.sql", "021_workspace_egress_security_group_identity.sql", "022_connector_registry.sql", "023_connector_tool_policies.sql", "024_connector_icons.sql", "025_user_scoped_policy_assignments.sql", "026_connector_access_policy.sql", "027_schedules.sql", "028_channel_delivery_retry.sql"]) {
-      const migrationPath = fileURLToPath(new URL(`../migrations/${migration}`, import.meta.url));
-      await this.pool.query(await readFile(migrationPath, "utf8"));
-    }
-  }
+  async migrate() { return runWorkspaceMigrations(this.pool); }
+
+  async assertSchemaCompatible() { return assertWorkspaceSchemaCompatible(this.pool); }
 
   async close() { await this.pool.end(); }
 

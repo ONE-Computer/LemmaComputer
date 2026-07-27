@@ -121,7 +121,7 @@ flows above.
 
 ### Startup contract
 
-Control validates all environment variables, migrates the database, registers
+Control validates all environment variables, asserts that the explicit migration job has brought the database to the exact compatible schema, registers
 policy verification keys, connects to OpenVTC, constructs the signing
 authority, and starts listening only after its required dependencies are
 usable. Partial configuration of LiteLLM, OpenVTC, Web Push, ingress, or the
@@ -359,13 +359,15 @@ changes.
 The control and gateway databases are deliberately separate.
 
 `postgres` stores owned product and governance state. Migrations in
-`packages/workspace-store/migrations` are run in numeric order by Control and
-recorded in `onecomputer_schema_migrations`.
+`packages/workspace-store/migrations` are dependency-ordered, checksummed, and
+recorded in `onecomputer_schema_migrations` by the explicit one-shot migration job.
+Control startup is read-only with respect to schema and fails closed when the ledger
+is missing, behind, unknown, or changed.
 
 `litellm-postgres` is owned by LiteLLM. Control accesses gateway state only
 through LiteLLM APIs and must not join directly against its schema.
 
-**Extension seam:** add append-only numbered SQL migrations. Update both the
+**Extension seam:** generate an append-only ULID SQL migration with `npm run db:migration:new -- <name>`. Update both the
 PostgreSQL store and its in-memory test implementation where an interface
 changes. Migrations must be restart-safe and must not rewrite signed or hashed
 historical records without an explicit compatibility design.
