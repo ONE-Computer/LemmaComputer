@@ -15,6 +15,15 @@ import { KasmLocalAdapter, KasmDeveloperApiAdapter, type SandboxAdapter } from "
 import { PolicyVerificationError, verifySignedPolicyBundle } from "@onecomputer/policy-integrity";
 import { z } from "zod";
 
+const timeZoneSchema = z.string().trim().min(1).max(100).refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}, "KASM_LOCAL_TIME_ZONE must be a valid IANA timezone");
+
 const envSchema = z.object({
   CONTROLLER_HOST: z.string().default("127.0.0.1"),
   CONTROLLER_PORT: z.coerce.number().int().positive().default(4101),
@@ -38,6 +47,10 @@ const envSchema = z.object({
   KASM_LOCAL_EGRESS_PROXY_IMAGE: z.string().optional(),
   KASM_LOCAL_EGRESS_NETWORK: z.string().default("onecomputer-egress"),
   KASM_PUBLIC_HOST: z.string().default("127.0.0.1"),
+  KASM_LOCAL_TIME_ZONE: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    timeZoneSchema.optional(),
+  ),
   POLICY_VERIFICATION_KEYS_B64: z.string().min(32),
 });
 
@@ -282,6 +295,7 @@ export function adapterFromEnv(env: z.infer<typeof envSchema>): SandboxAdapter {
       egressProxyImage: env.KASM_LOCAL_EGRESS_PROXY_IMAGE,
       egressNetwork: env.KASM_LOCAL_EGRESS_NETWORK,
       publicHost: env.KASM_PUBLIC_HOST,
+      timeZone: env.KASM_LOCAL_TIME_ZONE,
     });
   }
   return new KasmDeveloperApiAdapter({

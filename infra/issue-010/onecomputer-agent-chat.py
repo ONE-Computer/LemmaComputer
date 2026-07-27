@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
 from xml.etree import ElementTree
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import uvicorn
@@ -35,6 +36,7 @@ ALLOWED_TOOLS = tuple(item for item in os.environ["ONECOMPUTER_CHAT_ALLOWED_TOOL
 BROKER = os.environ["ONECOMPUTER_CHAT_BROKER"]
 PORT = int(os.environ["ONECOMPUTER_CHAT_PORT"])
 EXECUTION_MODE = os.environ.get("ONECOMPUTER_EXECUTION_MODE", "managed")
+CONFIGURED_TIME_ZONE = os.environ.get("ONECOMPUTER_TIME_ZONE", "").strip()
 HERMES_URL = os.environ.get("ONECOMPUTER_HERMES_CHAT_URL", "")
 HERMES_KEY = os.environ.get("ONECOMPUTER_HERMES_CHAT_KEY", "")
 HOME = Path("/home/kasm-user")
@@ -61,7 +63,7 @@ OFFICE_TYPES = frozenset({
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 })
 ATTACHMENT_TYPES = IMAGE_TYPES | TEXT_TYPES | OFFICE_TYPES | {"application/pdf"}
-SYSTEM_PROMPT = (
+BASE_SYSTEM_PROMPT = (
     f"You are the selected agent in a ONEComputer {EXECUTION_MODE} workspace. "
     "Complete the employee's requested work with the assigned tools instead of "
     "shifting executable steps back to the employee. Tool descriptions are the "
@@ -96,6 +98,35 @@ SYSTEM_PROMPT = (
         )
     )
 )
+
+try:
+    LOCAL_TIME_ZONE = ZoneInfo(CONFIGURED_TIME_ZONE) if CONFIGURED_TIME_ZONE else None
+except ZoneInfoNotFoundError:
+    raise SystemExit("invalid ONECOMPUTER_TIME_ZONE") from None
+
+
+def system_prompt() -> str:
+    if LOCAL_TIME_ZONE is None:
+        temporal_context = (
+            "No trusted employee timezone is configured. Before a calendar write "
+            "that uses a relative date or a time without an explicit timezone, ask "
+            "the employee which timezone to use. Never infer a timezone from model "
+            "defaults, examples, UTC container clocks, or service locations. "
+        )
+    else:
+        local_time = datetime.now(LOCAL_TIME_ZONE).strftime(
+            "%A, %Y-%m-%d %H:%M:%S %Z (UTC%z)"
+        )
+        temporal_context = (
+            f"The employee's configured IANA timezone is {CONFIGURED_TIME_ZONE}. "
+            f"The current local date and time there is {local_time}. Interpret "
+            "relative dates and times without an explicit timezone in that configured "
+            "timezone. An explicit timezone in the employee's latest request overrides "
+            "the configured default. For Microsoft calendar dateTimeTimeZone values, "
+            "use the configured IANA timezone or its correct Microsoft Windows timezone "
+            "equivalent; never silently substitute a different timezone. "
+        )
+    return f"{BASE_SYSTEM_PROMPT} {temporal_context}"
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 OPERATION_PATTERN = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b"
@@ -525,7 +556,7 @@ async def claude_vendor_events(
     options = ClaudeAgentOptions(
         allowed_tools=tool_names + (local_tools if open_mode else []),
         disallowed_tools=[] if open_mode else local_tools,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt(),
         mcp_servers={
             "onecomputer_connectors": {
                 "type": "stdio",
@@ -642,7 +673,7 @@ async def codex_vendor_events(
         thread = await codex.thread_resume(
             vendor_id,
             approval_mode=ApprovalMode.deny_all,
-            base_instructions=SYSTEM_PROMPT,
+            base_instructions=system_prompt(),
             cwd=str(HOME),
             model=MODEL,
             sandbox=sandbox,
@@ -650,7 +681,7 @@ async def codex_vendor_events(
     else:
         thread = await codex.thread_start(
             approval_mode=ApprovalMode.deny_all,
-            base_instructions=SYSTEM_PROMPT,
+            base_instructions=system_prompt(),
             cwd=str(HOME),
             model=MODEL,
             sandbox=sandbox,
@@ -767,7 +798,7 @@ async def hermes_vendor_events(
     response = await http.post(
         f"{HERMES_URL}/api/sessions/{vendor_session_id}/chat",
         headers={"authorization": f"Bearer {HERMES_KEY}"},
-        json={"message": message, "instructions": SYSTEM_PROMPT},
+        json={"message": message, "instructions": system_prompt()},
         timeout=MAX_TURN_SECONDS,
     )
     response.raise_for_status()

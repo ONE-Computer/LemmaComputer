@@ -176,6 +176,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       relayImage: "sha256:pinned-relay",
       egressProxyImage: "sha256:pinned-egress-proxy",
       egressNetwork: "onecomputer-egress",
+      timeZone: "Asia/Singapore",
       portStart: 16920,
       portEnd: 16920,
     });
@@ -247,6 +248,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=true"));
     assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL=true"));
     assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_MAX_BYTES=65536"));
+    assert.ok(serialized.includes("TZ=Asia/Singapore"));
+    assert.ok(serialized.includes("ONECOMPUTER_TIME_ZONE=Asia/Singapore"));
+    assert.ok(serialized.includes('"com.onecomputer.time-zone":"Asia/Singapore"'));
     assert.ok(serialized.includes("API_SERVER_ENABLED=true"));
     assert.ok(serialized.includes("API_SERVER_HOST=0.0.0.0"));
     assert.ok(serialized.includes("API_SERVER_PORT=8642"));
