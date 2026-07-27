@@ -2,7 +2,7 @@ FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432
 
 WORKDIR /app
 
-COPY infra/issue-008/softeria/package.json infra/issue-008/softeria/package-lock.json ./
+COPY integrations/ms365-mcp/package.json integrations/ms365-mcp/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
   && npm cache clean --force
 

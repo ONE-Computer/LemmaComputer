@@ -14,7 +14,7 @@ test("the workspace image pins cron and installs the persistent scheduling helpe
 });
 
 test("cron is confined to disposable-open workspaces and restored from persistent home", async () => {
-  const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
+  const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
   assert.match(entrypoint, /ONECOMPUTER_EXECUTION_MODE" == "disposable-open"/);
   assert.match(entrypoint, /canonical_crontab="\/home\/kasm-user\/\.onecomputer\/crontab"/);
   assert.match(entrypoint, /\/usr\/bin\/crontab -u kasm-user "\$canonical_crontab"/);
@@ -26,9 +26,9 @@ test("cron is confined to disposable-open workspaces and restored from persisten
 
 test("the cron helper persists updates and the runner bounds time, overlap, and logs", async () => {
   const [crontab, runner, guidance] = await Promise.all([
-    source("infra/issue-014/onecomputer-crontab"),
-    source("infra/issue-014/onecomputer-cron-run"),
-    source("infra/issue-014/SCHEDULING.md"),
+    source("docker/workspace/onecomputer-crontab"),
+    source("docker/workspace/onecomputer-cron-run"),
+    source("docker/workspace/SCHEDULING.md"),
   ]);
   assert.match(crontab, /canonical_file="\$\{canonical_dir\}\/crontab"/);
   assert.match(crontab, /size <= 65536/);

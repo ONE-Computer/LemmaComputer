@@ -13,11 +13,12 @@ as host bindings.
 | Control API | `apps/control-api` | `4100` | Control PostgreSQL |
 | Workspace controller | `apps/workspace-controller` | `4101` | Sandbox provider plus Control records |
 | Channel broker | `apps/channel-broker` | `4102` | Control PostgreSQL |
+| Scheduler worker | `apps/scheduler-worker` | `4103` | Control PostgreSQL leases; no prompt access |
 | Egress proxy | `apps/egress-proxy` | `3128` | Stateless; signed launch projection |
 | Gateway fixture | `apps/gateway-fixture` | `4200` | In-memory, test/qualification only |
 | OpenVTC consent | `apps/openvtc-consent` | `8788` | Stateless executor key |
 | LiteLLM | `config/litellm` and `integrations/litellm` | `4000` | Gateway PostgreSQL |
-| Microsoft 365 MCP | pinned Softeria image | `3000` | OAuth session through gateway integration |
+| Microsoft 365 MCP | `docker/Dockerfile.ms365-mcp` and `integrations/ms365-mcp` | `3000` | OAuth session through gateway integration |
 
 ## Workspace ingress
 
@@ -94,6 +95,7 @@ are:
 - governed-operation creation, consent, execution leases, and receipts;
 - OpenVTC enrollment, inbox, companion push, and decision handling;
 - agent chat routing;
+- encrypted agent scheduling and run dispatch;
 - external-channel credential and route management;
 - administrator egress and MCP policy APIs.
 
@@ -171,8 +173,7 @@ private ingress target separately from the public launch URL.
 
 ## Managed workspace runtime
 
-**Definition:** `docker/Dockerfile.workspace` and the runtime assets copied by
-that image
+**Definition:** `docker/Dockerfile.workspace` and `docker/workspace`
 
 The image contains KasmVNC, Firefox, Chrome, Claude Desktop, Claude CLI, Codex
 CLI, Hermes Agent CLI, and Hermes Desktop. Software and source archives are
@@ -334,6 +335,24 @@ the broker, add owned connection schemas and migrations, require Control route
 validation for every inbound identity, and persist provider delivery IDs for
 idempotency. Provider webhooks need signature verification before parsing
 content.
+
+## Scheduler worker
+
+**Source:** `apps/scheduler-worker`
+
+The scheduler polls Control PostgreSQL for due occurrences, claims each with a
+bounded lease, and asks Control to dispatch the run through the existing
+agent-chat path. It receives schedule and run identifiers plus opaque lease
+tokens; encrypted prompt content is decrypted only inside Control.
+
+The worker has no model-provider credentials, prompt-encryption secret, Docker
+socket, or workspace-network access. Retries use persisted claim state so a
+worker restart does not silently duplicate a completed occurrence.
+
+**Extension seam:** keep scheduling state and lease transitions in the shared
+store, keep prompt decryption and authorization in Control, and add concurrency
+tests for duplicate claims, expired leases, disabled schedules, and policy
+changes.
 
 ## PostgreSQL services
 

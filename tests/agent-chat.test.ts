@@ -27,7 +27,7 @@ const identity: IdentityContext = {
 };
 
 test("Hermes session titles stay in the ONEComputer adapter so duplicate user titles cannot block a new chat", async () => {
-  const adapter = await readFile(new URL("../infra/issue-010/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
   const creation = adapter.slice(adapter.indexOf('if AGENT == "hermes-claw":'), adapter.indexOf("async with state_lock:", adapter.indexOf('if AGENT == "hermes-claw":')));
   assert.match(creation, /json=\{\}/);
   assert.doesNotMatch(creation, /json=\{"title": item\["title"\]\}/);
@@ -38,7 +38,7 @@ test("Hermes session titles stay in the ONEComputer adapter so duplicate user ti
 });
 
 test("agent turns receive a fresh trusted timezone context and require clarification without one", async () => {
-  const adapter = await readFile(new URL("../infra/issue-010/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
   assert.match(adapter, /CONFIGURED_TIME_ZONE = os\.environ\.get\("ONECOMPUTER_TIME_ZONE", ""\)\.strip\(\)/);
   assert.match(adapter, /datetime\.now\(LOCAL_TIME_ZONE\)/);
   assert.match(adapter, /current local date and time/);

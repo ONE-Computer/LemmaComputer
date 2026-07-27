@@ -92,8 +92,8 @@ describe("published OpenVTC browser SDK", () => {
       readFile(new URL("../apps/control-api/src/openvtc-consent-client.ts", import.meta.url), "utf8"),
       readFile(new URL("../apps/openvtc-consent/Cargo.toml", import.meta.url), "utf8"),
       readFile(new URL("../apps/web/package.json", import.meta.url), "utf8"),
-      readFile(new URL("../infra/issue-002/compose.yml", import.meta.url), "utf8"),
-      readFile(new URL("../infra/issue-011/Dockerfile.consent", import.meta.url), "utf8"),
+      readFile(new URL("../compose.yaml", import.meta.url), "utf8"),
+      readFile(new URL("../docker/Dockerfile.openvtc-consent", import.meta.url), "utf8"),
     ]);
     assert.doesNotMatch(`${control}\n${client}`, /base58|canonicalize|DataIntegrityProof|Ed25519/i);
     assert.match(cargo, /trust-tasks-rs = \{ version = "=0\.2\.37"/);
@@ -101,7 +101,7 @@ describe("published OpenVTC browser SDK", () => {
     assert.match(cargo, /affinidi-data-integrity = "=0\.7\.7"/);
     assert.match(cargo, /vta-policy = "=0\.1\.0"/);
     assert.equal(JSON.parse(browserPackage).dependencies["@openvtc/pnm-core"], "0.2.0");
-    assert.match(compose, /openvtc-consent:[\s\S]*?networks: \[consent-private\]/);
+    assert.match(compose, /openvtc-consent:[\s\S]*?networks:\s+- consent-private/);
     assert.match(compose, /consent-private:\n {4}internal: true/);
     assert.match(dockerfile, /FROM rust:1\.95\.0-bookworm@sha256:/);
     await assert.rejects(

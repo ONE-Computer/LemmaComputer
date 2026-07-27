@@ -231,7 +231,7 @@ are excluded from the user-controlled operation fingerprint.
 | --- | --- | --- |
 | `public-edge` | ingress | Yes, for the host-published product origin |
 | `web-edge` | ingress, Web, Control | No |
-| `onecomputer-control` | Control, controller, channel broker, ingress, dynamic relays | No |
+| `onecomputer-control` | Control, controller, channel broker, scheduler worker, ingress, dynamic relays | No |
 | `consent-private` | Control, OpenVTC | No |
 | `gateway-private` | Control, LiteLLM, gateway database, M365 MCP | No |
 | `identity-egress` | Control | Yes, for Entra discovery and token exchange |

@@ -31,6 +31,7 @@ flowchart LR
   Control --> Consent["OpenVTC consent service"]
   Control --> Gateway["LiteLLM gateway"]
   Control --> Broker["Channel broker"]
+  Scheduler["Scheduler worker"] --> Control
 
   Sandbox --> Gateway
   Sandbox --> Control
@@ -75,6 +76,7 @@ network isolation, policy integrity, and the approval protocol.
 | `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | OAuth bridge on `127.0.0.1:4311` |
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |
+| `scheduler-worker` | Claims due schedules and dispatches them through Control without decrypting prompts | Private |
 | `postgres` | ONEComputer identity, policy, workspace, operation, and audit state | Private |
 | `litellm-postgres` | Gateway configuration, virtual keys, and encrypted OAuth state | Private |
 | workspace sidecars | Credential brokers, Kasm relay, and default-deny egress enforcement created per workspace | Dynamic/private |
@@ -84,88 +86,25 @@ interface, state owner, health contract, and extension seam.
 
 ## Run locally
 
-### Prerequisites
-
-- Linux with Docker Engine and Docker Compose
-- Node.js 22 or later
-- An `amd64` host for the current managed workspace image
-- A Microsoft Entra tenant and application for Web sign-in
-- An API key for at least the model route assigned by policy
-- At least 4 GiB available to run one workspace, plus capacity for the control
-  stack and image build
-
-The reference Compose deployment binds all browser-facing ports to loopback. It
-is intended for development and evaluation; see
-[Production considerations](docs/operations.md#production-considerations)
-before exposing it on a network.
-
-### 1. Install dependencies and initialize configuration
+The reference deployment requires Linux on `amd64`, Docker Engine with Compose,
+Node.js 22 or later, a Microsoft Entra tenant, and a model-provider API key. It
+binds browser-facing ports to loopback and is intended for development or
+evaluation.
 
 ```bash
 npm ci
 npm run env:init
-```
-
-`env:init` creates a mode-`0600` `.env` with fresh service credentials,
-encryption keys, an Ed25519 policy-signing key, an OpenVTC executor seed, and
-Web Push keys. It refuses to overwrite an existing file.
-
-Edit `.env` and replace:
-
-- `ONECOMPUTER_OPENAI_API_KEY` for the default model route, or the key for the
-  route you assign;
-- `ONECOMPUTER_ENTRA_TENANT_ID`, `ONECOMPUTER_ENTRA_CLIENT_ID`, and
-  `ONECOMPUTER_ENTRA_CLIENT_SECRET`;
-- `ONECOMPUTER_ADMINISTRATOR_EMAILS`;
-- the Microsoft 365 application values if it uses a separate Entra app;
-- the Web Push contact address.
-
-Register these Web redirect URIs in Entra:
-
-```text
-http://localhost:4174/api/v1/auth/callback
-http://localhost:4000/callback
-```
-
-The second URI is needed when using the Microsoft 365 connector.
-
-### 2. Build the managed workspace image
-
-```bash
+# Edit the generated .env with the Entra, administrator, and provider values.
 npm run image:workspace
-```
-
-This build downloads checksum-pinned desktop applications and can take several
-minutes. It produces the image named by `ONECOMPUTER_WORKSPACE_IMAGE`.
-
-### 3. Validate and start
-
-```bash
 npm run compose:config
 npm run compose:up
 ```
 
-The start command builds the control images, waits for health checks, creates
-the databases and private networks, and runs database migrations from Control.
-Open [http://localhost:4174](http://localhost:4174) and sign in with an address
-listed in `ONECOMPUTER_ADMINISTRATOR_EMAILS`.
-
-Inspect the stack with:
-
-```bash
-docker compose ps
-docker compose logs -f control-api workspace-controller
-```
-
-Stop it without deleting state:
-
-```bash
-npm run compose:down
-```
-
-To remove local database state as well, run `docker compose down --volumes`.
-This is destructive and does not remove persistent per-workspace Docker
-volumes.
+Before editing `.env`, configure the two exact Web redirect URIs and delegated
+Graph permissions in Entra. The
+[local deployment runbook](docs/local-deployment.md) lists every prerequisite,
+environment value, Entra setting, command, and readiness check in setup order.
+Open [http://localhost:4174](http://localhost:4174) after the stack is healthy.
 
 ## Development
 
@@ -191,10 +130,11 @@ configuration lives in `config/` and `integrations/`.
 
 - [Architecture and trust model](docs/architecture.md)
 - [Service reference](docs/services.md)
+- [Local deployment and Entra setup](docs/local-deployment.md)
 - [Extending ONEComputer](docs/extending.md)
 - [Configuration and operations](docs/operations.md)
 - [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
+- [Security policy](docs/SECURITY.md)
 
 ONEComputer is security-sensitive infrastructure. Changes to identity,
 credentials, signed policy, approval binding, egress, or execution leases

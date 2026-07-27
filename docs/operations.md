@@ -6,6 +6,10 @@ snapshots with one validated topology, two managed database volumes, explicit
 network boundaries, health-gated dependencies, and a separate build target for
 the workspace image.
 
+For a first installation, follow the ordered
+[local deployment and Entra setup runbook](local-deployment.md). This page is
+the ongoing configuration, recovery, and production-hardening reference.
+
 ## Configuration lifecycle
 
 Create `.env` once:
@@ -49,7 +53,10 @@ other location.
 | `ONECOMPUTER_M365_AUTHORIZATION_ORIGIN` | `http://localhost:4311` | Browser-facing connector origin |
 
 The three URLs and port mappings must describe the same externally observed
-origins. Changing a URL also requires updating its Entra redirect URI.
+origins. Changing `ONECOMPUTER_PUBLIC_WEB_URL` or
+`ONECOMPUTER_LITELLM_PUBLIC_URL` requires updating the corresponding Entra
+redirect URI. The Microsoft authorization origin must remain reachable by the
+browser but is not itself an Entra redirect URI.
 
 ### Identity and bootstrap
 
@@ -83,6 +90,8 @@ production because it isolates Graph scopes and credential rotation.
 
 The connector requests only the fixed scope list in `compose.yaml`. Tenant
 administrators should review those scopes against the enabled tool allowlist.
+See [Configure Microsoft Entra](local-deployment.md#configure-microsoft-entra)
+for the exact local redirect URIs and delegated permission list.
 
 ### Hosted MCP connectors
 
@@ -145,6 +154,7 @@ These values must remain stable while their dependent state exists:
 - session and workspace-ingress secrets;
 - LiteLLM salt and credential-derivation secret;
 - channel credential encryption secret;
+- schedule-prompt encryption secret;
 - egress grant and agent-chat derivation secrets;
 - Web Push subscription encryption secret.
 
@@ -230,6 +240,7 @@ Expected health endpoints:
 | Control, private | `http://control-api:4100/healthz` |
 | controller, private | `http://workspace-controller:4101/healthz` |
 | channel broker, private | `http://channel-broker:4102/healthz` |
+| scheduler worker, private | `http://scheduler-worker:4103/healthz` |
 | OpenVTC, private | `http://openvtc-consent:8788/healthz` |
 | LiteLLM | `http://localhost:4000/health/liveliness` |
 

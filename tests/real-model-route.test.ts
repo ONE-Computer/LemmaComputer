@@ -39,7 +39,7 @@ test("the local workspace receives an explicit host-seeded IANA timezone", async
     source("compose.yaml"),
     source(".env.example"),
     source("scripts/initialize-env.mjs"),
-    source("infra/issue-010/onecomputer-workspace-entrypoint.sh"),
+    source("docker/workspace/onecomputer-workspace-entrypoint.sh"),
   ]);
   assert.match(example, /^ONECOMPUTER_TIME_ZONE=Etc\/UTC$/m);
   assert.match(initializer, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
@@ -72,7 +72,7 @@ test("the connection account lookup bypass is purpose-bound and exact", async ()
 
 test("human-facing audit context is approval-bound but never forwarded to a connector", async () => {
   const callback = await source("integrations/litellm/onecomputer_policy_callback.py");
-  const bridge = await source("infra/issue-010/onecomputer-connectors-stdio.py");
+  const bridge = await source("docker/workspace/onecomputer-connectors-stdio.py");
   assert.match(callback, /AUDIT_ONLY_ARGUMENTS = \{"onecomputerAudit"\}/);
   assert.match(callback, /key not in AUDIT_ONLY_ARGUMENTS/);
   assert.match(callback, /POLICY_ATTEMPTS = 2/);
@@ -85,8 +85,8 @@ test("human-facing audit context is approval-bound but never forwarded to a conn
 
 test("Claude Desktop is pinned and receives managed gateway policy rather than provider credentials", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
-  const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
-  const proxy = await source("infra/issue-010/onecomputer-gateway-proxy.py");
+  const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
+  const proxy = await source("docker/workspace/onecomputer-gateway-proxy.py");
   assert.match(dockerfile, /CLAUDE_DESKTOP_VERSION=1\.22209\.3/);
   assert.match(dockerfile, /CLAUDE_DESKTOP_SHA256=d427f46a/);
   assert.match(dockerfile, /CLAUDE_CODE_VERSION=2\.1\.215/);
@@ -118,8 +118,8 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
 
 test("the workspace image enforces bounded native text clipboard without content logging", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
-  const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
-  const client = await source("infra/issue-010/onecomputer-kasm-clipboard.js");
+  const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
+  const client = await source("docker/workspace/onecomputer-kasm-clipboard.js");
   assert.match(dockerfile, /onecomputer-kasm-clipboard\.js/);
   assert.match(dockerfile, /COPY .* \/usr\/share\/kasmvnc\/www\/app\/onecomputer-kasm-clipboard\.js/);
   assert.match(dockerfile, /apt-get install -y --no-install-recommends[\s\S]*\n      mousepad \\\n[\s\S]*\n      zstd \\/);
@@ -138,8 +138,8 @@ test("the workspace image enforces bounded native text clipboard without content
 
 test("the workspace image includes a pinned Firefox ESR locked to governed egress", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
-  const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
-  const policies = JSON.parse(await source("infra/issue-010/firefox-policies.json"));
+  const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
+  const policies = JSON.parse(await source("docker/workspace/firefox-policies.json"));
   assert.match(dockerfile, /FIREFOX_VERSION=140\.12\.0esr/);
   assert.match(dockerfile, /FIREFOX_SHA256=3323ee13/);
   assert.match(dockerfile, /firefox-\$\{FIREFOX_VERSION\}\.tar\.xz/);
@@ -160,15 +160,15 @@ test("the workspace image includes a pinned Firefox ESR locked to governed egres
 
 test("optional browser and agent artifacts are pinned and launch-gated", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
-  const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
-  const gatewayProxy = await source("infra/issue-010/onecomputer-gateway-proxy.py");
-  const mcpBridge = await source("infra/issue-010/onecomputer-connectors-stdio.py");
-  const chatAdapter = await source("infra/issue-010/onecomputer-agent-chat.py");
-  const chatRequirements = await source("infra/issue-010/agent-chat-requirements.txt");
-  const chromePolicies = JSON.parse(await source("infra/issue-010/google-chrome-policies.json"));
-  const claudeLauncher = await source("infra/issue-010/onecomputer-claude");
-  const codexLauncher = await source("infra/issue-010/onecomputer-codex");
-  const hermesDesktopLauncher = await source("infra/issue-010/onecomputer-hermes-desktop");
+  const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
+  const gatewayProxy = await source("docker/workspace/onecomputer-gateway-proxy.py");
+  const mcpBridge = await source("docker/workspace/onecomputer-connectors-stdio.py");
+  const chatAdapter = await source("docker/workspace/onecomputer-agent-chat.py");
+  const chatRequirements = await source("docker/workspace/agent-chat-requirements.txt");
+  const chromePolicies = JSON.parse(await source("docker/workspace/google-chrome-policies.json"));
+  const claudeLauncher = await source("docker/workspace/onecomputer-claude");
+  const codexLauncher = await source("docker/workspace/onecomputer-codex");
+  const hermesDesktopLauncher = await source("docker/workspace/onecomputer-hermes-desktop");
 
   assert.match(dockerfile, /GOOGLE_CHROME_VERSION=150\.0\.7871\.186-1/);
   assert.match(dockerfile, /GOOGLE_CHROME_SHA256=4193e00b/);
@@ -239,8 +239,8 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
 
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
-  const entrypoint = await source("infra/issue-010/onecomputer-workspace-entrypoint.sh");
-  const profileConfig = await source("infra/issue-010/onecomputer-hermes-config.py");
+  const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
+  const profileConfig = await source("docker/workspace/onecomputer-hermes-config.py");
   assert.match(dockerfile, /aiohttp==3\.14\.1/);
   assert.match(dockerfile, /import aiohttp/);
   assert.match(dockerfile, /uv pip install[\s\S]*mcp==1\.26\.0[\s\S]*starlette==1\.0\.1/);

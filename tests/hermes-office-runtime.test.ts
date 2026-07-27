@@ -7,9 +7,9 @@ const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url)
 test("the workspace image pins the Hermes Office skills and their native runtimes", async () => {
   const [dockerfile, requirements, nodePackage, nodeLock] = await Promise.all([
     source("docker/Dockerfile.workspace"),
-    source("infra/issue-010/hermes-office-requirements.txt"),
-    source("infra/issue-010/hermes-office-node/package.json"),
-    source("infra/issue-010/hermes-office-node/package-lock.json"),
+    source("docker/workspace/hermes-office-requirements.txt"),
+    source("docker/workspace/hermes-office-node/package.json"),
+    source("docker/workspace/hermes-office-node/package-lock.json"),
   ]);
 
   assert.match(dockerfile, /HERMES_OFFICE_SKILLS_COMMIT=a606d24cf2a9d1137d77fd92e7da459c89947fbd/);
@@ -80,11 +80,11 @@ test("the workspace image pins the Hermes Office skills and their native runtime
 
 test("selected Hermes profiles seed only Office skills by default and expose the mode-appropriate tools", async () => {
   const [entrypoint, profileConfig, cliLauncher, desktopLauncher, chatAdapter] = await Promise.all([
-    source("infra/issue-010/onecomputer-workspace-entrypoint.sh"),
-    source("infra/issue-010/onecomputer-hermes-config.py"),
-    source("infra/issue-010/onecomputer-hermes"),
-    source("infra/issue-010/onecomputer-hermes-desktop"),
-    source("infra/issue-010/onecomputer-agent-chat.py"),
+    source("docker/workspace/onecomputer-workspace-entrypoint.sh"),
+    source("docker/workspace/onecomputer-hermes-config.py"),
+    source("docker/workspace/onecomputer-hermes"),
+    source("docker/workspace/onecomputer-hermes-desktop"),
+    source("docker/workspace/onecomputer-agent-chat.py"),
   ]);
 
   assert.match(entrypoint, /sync_hermes_skills\(\)/);
@@ -129,8 +129,8 @@ test("selected Hermes profiles seed only Office skills by default and expose the
 
 test("governed OneDrive deletion carries the resolved filename into approval metadata", async () => {
   const [bridge, broker, control] = await Promise.all([
-    source("infra/issue-010/onecomputer-connectors-stdio.py"),
-    source("infra/issue-010/onecomputer-gateway-proxy.py"),
+    source("docker/workspace/onecomputer-connectors-stdio.py"),
+    source("docker/workspace/onecomputer-gateway-proxy.py"),
     source("apps/control-api/src/server.ts"),
   ]);
 

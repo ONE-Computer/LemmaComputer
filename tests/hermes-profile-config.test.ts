@@ -8,7 +8,7 @@ import test from "node:test";
 
 const execute = promisify(execFile);
 const root = path.resolve(import.meta.dirname, "..");
-const configurator = path.join(root, "infra/issue-010/onecomputer-hermes-config.py");
+const configurator = path.join(root, "docker/workspace/onecomputer-hermes-config.py");
 const officeSkills = ["docx", "ocr-and-documents", "pdf", "powerpoint", "xlsx"];
 
 const installSkill = async (bundle: string, name: string) => {

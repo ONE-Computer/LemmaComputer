@@ -6,18 +6,18 @@ const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url)
 
 test("Telegram credential authority exists only in the trusted channel broker", async () => {
   const [compose, entrypoint, kasm, controller, contracts] = await Promise.all([
-    source("infra/issue-002/compose.yml"),
-    source("infra/issue-010/onecomputer-workspace-entrypoint.sh"),
+    source("compose.yaml"),
+    source("docker/workspace/onecomputer-workspace-entrypoint.sh"),
     source("packages/kasm-adapter/src/index.ts"),
     source("apps/workspace-controller/src/server.ts"),
     source("packages/contracts/src/index.ts"),
   ]);
-  const broker = compose.slice(compose.indexOf("  channel-broker:"), compose.indexOf("  control-api:"));
-  const control = compose.slice(compose.indexOf("  control-api:"), compose.indexOf("  web:"));
-  const workspaceController = compose.slice(compose.indexOf("  workspace-controller:"), compose.indexOf("  channel-broker:"));
+  const broker = compose.slice(compose.indexOf("  channel-broker:"), compose.indexOf("  scheduler-worker:"));
+  const control = compose.slice(compose.indexOf("  control-api:"), compose.indexOf("  channel-broker:"));
+  const workspaceController = compose.slice(compose.indexOf("  workspace-controller:"), compose.indexOf("  control-api:"));
 
   assert.match(broker, /CHANNEL_CREDENTIAL_SECRET:/);
-  assert.match(broker, /networks: \[control-private, channel-egress\]/);
+  assert.match(broker, /networks:\s+- control-private\s+- channel-egress/);
   assert.doesNotMatch(broker, /gateway-private|docker\.sock/);
   assert.doesNotMatch(control, /CHANNEL_CREDENTIAL_SECRET/);
   assert.doesNotMatch(workspaceController, /CHANNEL_CREDENTIAL_SECRET|CHANNEL_BROKER_INTERNAL_TOKEN/);

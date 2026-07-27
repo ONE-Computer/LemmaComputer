@@ -47,7 +47,7 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -148,7 +148,7 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -226,7 +226,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -310,7 +310,7 @@ test("Claude Desktop bridge supplies Softeria confirmation for an allowed calend
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -367,7 +367,7 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -439,7 +439,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -587,7 +587,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -676,7 +676,7 @@ test("an approved execution failure cannot be reported as an approval rejection"
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -742,7 +742,7 @@ test("tools with the same upstream name remain advertised and route to the selec
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -814,7 +814,7 @@ test("Microsoft 365 and Linear tools are always connector-prefixed and retain up
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["infra/issue-010/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });

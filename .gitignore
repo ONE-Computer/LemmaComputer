@@ -13,6 +13,3 @@ coverage/
 .artifacts/
 *.log
 .DS_Store
-
-# Local plans are intentionally tracked. Active plans and archived milestones
-# remain with the feature branch for product and verification traceability.

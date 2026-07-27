@@ -78,4 +78,4 @@ ensure their output contains no secrets or protected content.
 ## Reporting vulnerabilities
 
 Do not open a public issue for a suspected vulnerability. Follow
-[SECURITY.md](SECURITY.md).
+[the security policy](docs/SECURITY.md).

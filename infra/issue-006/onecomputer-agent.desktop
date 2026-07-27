@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=ONEComputer Agent
-Comment=Use your assigned models and Microsoft 365 tools
-Exec=xfce4-terminal --title="ONEComputer Agent" --command="onecomputer-agent shell"
-Icon=utilities-terminal
-Terminal=false
-Categories=Utility;
