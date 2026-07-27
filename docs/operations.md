@@ -38,6 +38,26 @@ docker compose --env-file /absolute/path/to/onecomputer.env config --quiet
 Compose automatically loads only a root `.env`. Pass `--env-file` for any
 other location.
 
+After updating the checkout, compare the existing environment with the current
+template before starting services:
+
+```bash
+npm run env:check
+```
+
+Safely merge newly introduced variables without rotating existing values:
+
+```bash
+npm run env:update
+npm run env:check
+```
+
+The updater maps supported renamed or previously implicit variables, generates
+only missing local secrets, and preserves unknown variables in a review section.
+It refuses duplicate variables and incomplete coupled signing or Web Push key
+groups. Review preserved extra variable names manually; the commands never
+print their values.
+
 ## Environment variable groups
 
 ### Public routing
@@ -193,6 +213,7 @@ adapter.
 Validate interpolation and schema before any mutation:
 
 ```bash
+npm run env:check
 npm run compose:config
 ```
 
@@ -206,11 +227,17 @@ The workspace build is intentionally not part of normal `up`; it is a build
 profile and not a service. Rebuild it explicitly after changing its Dockerfile
 or assets.
 
-Stop containers while retaining state:
+Stop every active workspace through ONEComputer before stopping the control
+stack. Then stop Compose containers while retaining state:
 
 ```bash
 npm run compose:down
 ```
+
+The npm command checks for sandbox, relay, and egress runtime containers and
+refuses shutdown if any remain. This prevents Compose from disappearing while a
+workspace still depends on the control network and ensures workspace state and
+runtime grants are updated through the product lifecycle.
 
 Pull pinned upstream images and rebuild owned images:
 
@@ -281,10 +308,11 @@ List owned workspace volumes:
 docker volume ls --filter label=com.onecomputer.runtime=workspace-home
 ```
 
-Normal `docker compose down` retains all state. `docker compose down --volumes`
-deletes both database volumes but still leaves workspace home volumes. Purge a
-workspace through the product/API so Control and provider state remain
-consistent.
+Normal `npm run compose:down` retains all state.
+`npm run compose:down -- --volumes` deletes both database volumes but still
+leaves workspace home volumes. Both commands require all workspaces to be
+stopped first. Purge a workspace through the product/API so Control and provider
+state remain consistent.
 
 ## Backup and restore
 

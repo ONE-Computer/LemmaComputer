@@ -191,6 +191,26 @@ Do not run `npm run env:init -- --force` on an initialized deployment unless
 the intent is to invalidate existing sessions, signed policies, approvals,
 encrypted credentials, and service trust. Do not commit `.env`.
 
+For an existing checkout, check whether `.env.example` introduced variables
+after the environment was created:
+
+```bash
+npm run env:check
+```
+
+If the check reports missing variables, merge the current template safely:
+
+```bash
+npm run env:update
+npm run env:check
+```
+
+The updater preserves existing values, maps supported renamed or previously
+implicit values, generates only missing local secrets, and keeps unrecognized
+variables in a clearly marked review section. It refuses duplicate variables
+or a partially configured policy-signing or Web Push key pair. Review any
+preserved extra variable names after the update; their values are never printed.
+
 ### Values the operator must set
 
 Edit `.env` without printing it to shared logs. Replace these placeholders:
@@ -230,6 +250,7 @@ Use the quiet form because non-quiet `docker compose config` renders
 interpolated secret values:
 
 ```bash
+npm run env:check
 npm run compose:config
 ```
 
@@ -323,11 +344,21 @@ assignment, or workspace-image availability; complete the browser checks.
 
 ## Stop, restart, and reset
 
-Stop services while retaining databases and workspace volumes:
+Before stopping the control stack, stop every active workspace through the
+ONEComputer UI. The product stop action removes its sandbox, relay, and egress
+containers, revokes runtime grants, and updates Control state while retaining
+the workspace home volume.
+
+Then stop Compose services while retaining databases and workspace volumes:
 
 ```bash
 npm run compose:down
 ```
+
+The command refuses to continue while any local workspace runtime container
+still exists. Do not bypass the guard with a direct `docker compose down`;
+doing so can leave workspace containers running without their control services
+and can keep the control network in use.
 
 Restart with the same `.env`:
 
@@ -338,7 +369,7 @@ npm run compose:up
 Delete only the two Compose-managed database volumes:
 
 ```bash
-docker compose down --volumes
+npm run compose:down -- --volumes
 ```
 
 The last command is destructive. It does not delete the separately managed
