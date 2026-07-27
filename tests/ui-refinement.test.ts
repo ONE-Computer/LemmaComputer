@@ -360,7 +360,9 @@ test("Chat is last in navigation, with recent threads in the sidebar and a focus
   assert.match(app, /ReactMarkdown/);
   assert.match(app, /remarkGfm/);
   assert.match(chatScreen, /status === "submitted"/);
-  assert.match(chatScreen, /Got it — I’m starting on that\./);
+  assert.match(chatScreen, /Message received\./);
+  assert.match(chatScreen, /metadata\?\.state === "needs_input"/);
+  assert.doesNotMatch(chatScreen, /aria-label=\{`\$\{agentName\} acknowledged/);
   assert.doesNotMatch(chatScreen, /chatApi\.send/);
   assert.match(styles, /\.chat-composer\s*\{[\s\S]*?border-radius: 26px/);
   assert.match(styles, /\.chat-message\s*\{\s*width: 100%;\s*max-width: 860px/);

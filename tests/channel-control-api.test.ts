@@ -389,6 +389,10 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
           notice: "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
         },
         {
+          type: "text-delta",
+          delta: "Hello from Hermes",
+        },
+        {
           type: "result",
           response: {
             sessionId: "telegram-session-hermes",
@@ -396,6 +400,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
             notices: [
               "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
             ],
+            state: "completed",
           },
         },
       ],

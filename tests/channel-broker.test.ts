@@ -29,6 +29,7 @@ const secondToken = "987654321:telegram-token-for-the-second-workspace";
 class FakeTelegram implements TelegramBotClient {
   updates: TelegramUpdate[] = [];
   sent: Array<{ token: string; chatId: string; text: string; options?: TelegramMessageOptions }> = [];
+  edits: Array<{ token: string; chatId: string; messageId: string; text: string }> = [];
   chatActions: Array<{ token: string; chatId: string; action: "typing" }> = [];
   answeredCallbacks: Array<{ token: string; callbackQueryId: string; text?: string }> = [];
   sendFailuresRemaining = 0;
@@ -52,6 +53,11 @@ class FakeTelegram implements TelegramBotClient {
       throw new Error("temporary Telegram outage");
     }
     this.sent.push({ token: received, chatId, text, options });
+    return String(this.sent.length);
+  }
+
+  async editMessage(received: string, chatId: string, messageId: string, text: string) {
+    this.edits.push({ token: received, chatId, messageId, text });
   }
 
   async sendChatAction(received: string, chatId: string, action: "typing") {
@@ -67,6 +73,8 @@ class FakeControl implements ChannelControlClient {
   turnDelayMs = 0;
   notice: string | undefined;
   failAfterNotice = false;
+  textDeltas: string[] = [];
+  state: "needs_input" | "completed" | "cancelled" | "failed" = "completed";
   turns: Array<{
     workspaceId: string;
     agentCatalogId: string;
@@ -87,17 +95,19 @@ class FakeControl implements ChannelControlClient {
     externalSenderId: string;
     sessionId?: string;
     text: string;
-  }, onNotice?: (notice: string) => Promise<void>) {
+  }, onNotice?: (notice: string) => Promise<void>, onTextDelta?: (delta: string) => Promise<void>) {
     this.turns.push(input);
     if (this.notice) await onNotice?.(this.notice);
+    for (const delta of this.textDeltas) await onTextDelta?.(delta);
     if (this.turnDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, this.turnDelayMs));
     }
     if (this.failAfterNotice) throw new Error("turn failed after approval");
     return {
       sessionId: input.sessionId ?? `session-${input.agentCatalogId}`,
-      text: `${input.agentCatalogId}: ${input.text}`,
+      text: this.textDeltas.join("") || `${input.agentCatalogId}: ${input.text}`,
       notices: [],
+      state: this.state,
     };
   }
 }
@@ -109,13 +119,18 @@ test("the channel control client owns a long response timeout instead of inherit
       type: "notice",
       notice: "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
     })}\n`);
+    response.write(`${JSON.stringify({
+      type: "text-delta",
+      delta: "Working on it. ",
+    })}\n`);
     setTimeout(() => {
       response.end(`${JSON.stringify({
         type: "result",
         response: {
           sessionId: "932b72c3-220a-465d-96d0-d1ac11270f25",
-          text: "completed",
+          text: "Working on it. Completed.",
           notices: ["Approval needed: Send Teams chat message. Open ONEComputer to review this protected action."],
+          state: "completed",
         },
       })}\n`);
     }, 75);
@@ -139,17 +154,24 @@ test("the channel control client owns a long response timeout instead of inherit
       250,
     );
     const notices: string[] = [];
+    const deltas: string[] = [];
     let completed = false;
-    const patientTurn = patient.turn(input, async (notice) => { notices.push(notice); })
+    const patientTurn = patient.turn(
+      input,
+      async (notice) => { notices.push(notice); },
+      async (delta) => { deltas.push(delta); },
+    )
       .finally(() => { completed = true; });
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.deepEqual(notices, [
       "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
     ]);
+    assert.deepEqual(deltas, ["Working on it. "]);
     assert.equal(completed, false);
     const result = await patientTurn;
-    assert.equal(result.text, "completed");
+    assert.equal(result.text, "Working on it. Completed.");
     assert.deepEqual(result.notices, []);
+    assert.equal(result.state, "completed");
 
     const impatient = new HttpChannelControlClient(
       `http://127.0.0.1:${address.port}`,
@@ -434,9 +456,54 @@ test("the broker acknowledges an accepted Telegram task before the agent finishe
   const polling = service.pollOnce().finally(() => { completed = true; });
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(completed, false);
-  assert.equal(telegram.sent[0]?.text, "Got it — I’m starting on that now.");
+  assert.equal(telegram.sent[0]?.text, "Message received.");
+  assert.equal(telegram.sent[0]?.options?.disableNotification, true);
   await polling;
   assert.equal(telegram.sent.at(-1)?.text, "hermes-claw: send the deck");
+});
+
+test("the broker streams native agent text by editing one Telegram message and resumes needs_input sessions", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  control.textDeltas = [
+    "Which workspace should I use",
+    " for the quarterly report?",
+  ];
+  control.state = "needs_input";
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-streaming-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: false,
+  });
+
+  telegram.updates = [
+    { updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "Prepare the report" },
+  ];
+  await service.pollOnce();
+
+  assert.deepEqual(telegram.sent.map((message) => message.text), [
+    "Message received.",
+    "Which workspace should I use",
+  ]);
+  assert.equal(telegram.edits.at(-1)?.text, "Which workspace should I use for the quarterly report?");
+  assert.equal(control.turns[0]?.sessionId, undefined);
+
+  telegram.updates = [
+    { updateId: "2", chatId: "10001", senderId: "10001", chatType: "private", text: "Use Finance" },
+  ];
+  await service.pollOnce();
+  assert.equal(control.turns[1]?.sessionId, "session-hermes-claw");
 });
 
 test("the broker durably retries a completed response without rerunning the agent", async () => {
@@ -466,13 +533,13 @@ test("the broker durably retries a completed response without rerunning the agen
 
   await service.pollOnce();
   assert.deepEqual(telegram.sent.map((message) => message.text), [
-    "Got it — I’m starting on that now.",
+    "Message received.",
   ]);
   assert.equal(control.turns.length, 1);
 
   await service.pollOnce();
   assert.deepEqual(telegram.sent.map((message) => message.text), [
-    "Got it — I’m starting on that now.",
+    "Message received.",
     "hermes-claw: send the deck",
   ]);
   assert.equal(control.turns.length, 1);
@@ -506,7 +573,7 @@ test("the broker forwards approval notices during a turn and keeps a later failu
   await service.pollOnce();
 
   assert.deepEqual(telegram.sent.map((message) => message.text), [
-    "Got it — I’m starting on that now.",
+    "Message received.",
     "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
     "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.",
   ]);

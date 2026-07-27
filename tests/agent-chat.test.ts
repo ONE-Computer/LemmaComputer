@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
+  chatTurnStateSchema,
   sendChatTurnSchema,
   type IdentityContext,
   type Launch,
@@ -31,6 +32,9 @@ test("Hermes session titles stay in the ONEComputer adapter so duplicate user ti
   assert.match(creation, /json=\{\}/);
   assert.doesNotMatch(creation, /json=\{"title": item\["title"\]\}/);
   assert.match(adapter, /nextCursor/);
+  assert.match(adapter, /NEEDS_INPUT_MARKER = "\[ONECOMPUTER_NEEDS_INPUT\]"/);
+  assert.match(adapter, /terminal_state = "needs_input"/);
+  assert.equal(chatTurnStateSchema.safeParse("needs_input").success, true);
 });
 
 test("chat accepts bounded inline image and document parts but rejects media mismatches", () => {
@@ -330,7 +334,11 @@ test("terminal and repeated-tool updates keep stable owned UI part identifiers f
     assert.equal("id" in running[0]! ? running[0].id : undefined, "tool-1");
     assert.equal("id" in completed[0]! ? completed[0].id : undefined, "tool-1");
 
-    for (const [state, finishReason] of [["cancelled", "other"], ["failed", "error"]] as const) {
+    for (const [state, finishReason] of [
+      ["needs_input", "stop"],
+      ["cancelled", "other"],
+      ["failed", "error"],
+    ] as const) {
       const terminal = mapper.chunks({
         ...base,
         sequence: 3,

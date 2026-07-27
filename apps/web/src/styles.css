@@ -2095,6 +2095,14 @@ textarea:focus-visible,
   min-height: 48px;
 }
 
+.chat-message.system {
+  color: #526276;
+}
+
+.chat-message.system > span {
+  color: #66758a;
+}
+
 .chat-file-part {
   display: flex;
   max-width: 360px;
@@ -2258,6 +2266,12 @@ textarea:focus-visible,
   border-color: #d3d7dc;
   background: #f5f6f7;
   color: #555f6b;
+}
+
+.chat-terminal.needs_input {
+  border-color: #c9d8ea;
+  background: #f3f7fc;
+  color: #244f7d;
 }
 
 .chat-composer {

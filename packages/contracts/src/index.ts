@@ -714,7 +714,7 @@ export const createChatSessionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
 }).strict();
 
-export const chatTurnStateSchema = z.enum(["streaming", "completed", "cancelled", "failed"]);
+export const chatTurnStateSchema = z.enum(["streaming", "needs_input", "completed", "cancelled", "failed"]);
 export const chatToolStateSchema = z.enum(["running", "completed", "failed"]);
 export const chatApprovalStateSchema = z.enum([
   "approval_required",
@@ -907,10 +907,15 @@ export const channelTurnResponseSchema = z.object({
   sessionId: chatSessionIdSchema,
   text: z.string().max(16_000),
   notices: z.array(z.string().trim().min(1).max(500)).max(16),
+  state: chatTurnStateSchema.exclude(["streaming"]),
 }).strict();
 export const channelTurnStreamEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("heartbeat"),
+  }).strict(),
+  z.object({
+    type: z.literal("text-delta"),
+    delta: z.string().min(1).max(16_000),
   }).strict(),
   z.object({
     type: z.literal("notice"),

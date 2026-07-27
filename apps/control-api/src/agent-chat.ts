@@ -465,7 +465,9 @@ export class AgentUiStreamMapper {
       },
       {
         type: "finish",
-        finishReason: event.state === "completed" ? "stop" : event.state === "cancelled" ? "other" : "error",
+        finishReason: ["completed", "needs_input"].includes(event.state)
+          ? "stop"
+          : event.state === "cancelled" ? "other" : "error",
         messageMetadata: {
           agentCatalogId: this.catalogId,
           turnId: event.turnId,

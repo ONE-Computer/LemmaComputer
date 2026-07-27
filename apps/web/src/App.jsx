@@ -1850,6 +1850,13 @@ function ChatPart({ part, markdown = false }) {
     );
   }
   if (part.type === "data-terminal" && part.data.state !== "completed") {
+    if (part.data.state === "needs_input") {
+      return (
+        <div className="chat-terminal needs_input" role="status">
+          Waiting for your reply. Your next message will continue this conversation.
+        </div>
+      );
+    }
     return <div className={`chat-terminal ${part.data.state}`} role="status">{part.data.message || `Turn ${part.data.state}`}</div>;
   }
   return null;
@@ -2093,6 +2100,9 @@ function ChatConversation({
 
   const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
   const awaitingAssistant = status === "submitted" && visibleMessages.at(-1)?.role === "user";
+  const needsInput = !busy
+    && visibleMessages.at(-1)?.role === "assistant"
+    && visibleMessages.at(-1)?.metadata?.state === "needs_input";
   const messageField = (
     <>
       <label className="sr-only" htmlFor="chat-message">Message {agentName}</label>
@@ -2120,7 +2130,7 @@ function ChatConversation({
             event.currentTarget.form?.requestSubmit();
           }
         }}
-        placeholder={`Message ${agentName}`}
+        placeholder={needsInput ? `Reply to ${agentName}` : `Message ${agentName}`}
         rows="1"
         maxLength="16000"
         disabled={historyState === "loading"}
@@ -2150,11 +2160,11 @@ function ChatConversation({
           </article>
         ))}
         {awaitingAssistant && (
-          <article className="chat-message assistant chat-acknowledgement" aria-label={`${agentName} acknowledged your message`}>
-            <span>{agentName}</span>
+          <article className="chat-message system chat-acknowledgement" aria-label="ONEComputer received your message">
+            <span>ONEComputer</span>
             <div className="chat-activity progress running" role="status">
               <span aria-hidden="true" />
-              <p>Got it — I’m starting on that.</p>
+              <p>Message received.</p>
             </div>
           </article>
         )}

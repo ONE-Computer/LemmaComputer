@@ -786,20 +786,26 @@ const server = http.createServer((request, response) => {
       const turnId = `fixture-turn-${Date.now()}`;
       const messageId = `fixture-message-${Date.now()}`;
       const createdAt = new Date().toISOString();
-      const chunks = [
+      const openingChunks = [
         { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
-        { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Got it — I’m working on that.", state: "running" } },
         { type: "text-start", id: `${turnId}-text` },
-        { type: "text-delta", id: `${turnId}-text`, delta: "**Acknowledged.** I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations" },
+        { type: "text-delta", id: `${turnId}-text`, delta: "I’ll check the workspace context first, then summarize what I can do.\n\n" },
+      ];
+      const closingChunks = [
+        { type: "text-delta", id: `${turnId}-text`, delta: "I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations" },
         { type: "text-end", id: `${turnId}-text` },
-        { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Work complete", state: "completed" } },
         { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
         { type: "finish", finishReason: "stop", messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt } },
       ];
       chatMessages = [...chatMessages, input.message];
       response.setHeader("content-type", "text/event-stream");
       response.setHeader("x-vercel-ai-ui-message-stream", "v1");
-      response.end(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
+      setTimeout(() => {
+        response.write(openingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(""));
+      }, 600);
+      setTimeout(() => {
+        response.end(`${closingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
+      }, 1_000);
     });
     return;
   }

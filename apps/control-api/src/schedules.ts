@@ -259,7 +259,7 @@ export class ScheduleService {
           text: this.vault.unprotect(identity, schedule.id, schedule.promptCiphertext),
         }],
       };
-      let terminal: "completed" | "cancelled" | "failed" | null = null;
+      let terminal: "needs_input" | "completed" | "cancelled" | "failed" | null = null;
       let terminalMessage: string | undefined;
       for await (const event of this.agentChat.streamTurn(access, session.id, message)) {
         if (event.type === "turn-finish") {
@@ -269,10 +269,16 @@ export class ScheduleService {
       }
       if (terminal !== "completed") {
         throw new OneComputerError(
-          terminal === "cancelled" ? "SCHEDULE_TURN_CANCELLED" : "SCHEDULE_TURN_FAILED",
-          terminalMessage ?? "The scheduled agent turn did not complete",
+          terminal === "cancelled"
+            ? "SCHEDULE_TURN_CANCELLED"
+            : terminal === "needs_input" ? "SCHEDULE_NEEDS_INPUT" : "SCHEDULE_TURN_FAILED",
+          terminalMessage ?? (
+            terminal === "needs_input"
+              ? "The scheduled agent needs input before it can continue"
+              : "The scheduled agent turn did not complete"
+          ),
           502,
-          terminal !== "cancelled",
+          terminal !== "cancelled" && terminal !== "needs_input",
         );
       }
       const completed = await this.store.finishScheduleRun(run.id, {

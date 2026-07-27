@@ -61,6 +61,7 @@ OFFICE_TYPES = frozenset({
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 })
 ATTACHMENT_TYPES = IMAGE_TYPES | TEXT_TYPES | OFFICE_TYPES | {"application/pdf"}
+NEEDS_INPUT_MARKER = "[ONECOMPUTER_NEEDS_INPUT]"
 SYSTEM_PROMPT = (
     f"You are the selected agent in a ONEComputer {EXECUTION_MODE} workspace. "
     "Complete the employee's requested work with the assigned tools instead of "
@@ -78,7 +79,13 @@ SYSTEM_PROMPT = (
     "ONEComputer Control is the authority for tool policy and signed approvals. "
     "If a protected operation is pending, use wait-for-governed-operation and "
     "report the final result accurately. Never claim an operation completed until "
-    "the tool confirms it. Treat greetings, acknowledgements, small talk, and "
+    "the tool confirms it. Before using any tool, briefly tell the employee what "
+    "you understood and what you will do next. If you cannot proceed without a "
+    "missing detail or employee choice, do not call tools. Ask one concise question "
+    f"and begin that response with the exact marker {NEEDS_INPUT_MARKER}; "
+    "ONEComputer removes the marker and keeps the conversation ready for their reply. "
+    "Never use that marker when you can proceed safely. "
+    "Treat greetings, acknowledgements, small talk, and "
     "underspecified messages with no concrete task as ordinary conversation. "
     "Do not load or invoke a skill for those messages. Load a skill only when the "
     "employee's concrete task clearly matches that skill's documented scope. "
@@ -479,6 +486,7 @@ def apply_event(message: dict[str, Any], event: dict[str, Any]) -> None:
                 part["data"]["state"] = "completed"
                 part["data"]["label"] = {
                     "completed": "Work complete",
+                    "needs_input": "Waiting for your reply",
                     "cancelled": "Work stopped",
                     "failed": "Work failed",
                 }[event["state"]]
@@ -747,7 +755,7 @@ async def hermes_vendor_events(
     item: dict[str, Any],
     text: str,
     attachments: list[dict[str, Any]],
-    _: str,
+    turn_id: str,
 ) -> AsyncIterator[dict[str, Any]]:
     assert http is not None
     vendor_session_id = item.get("vendorSessionId")
@@ -764,24 +772,99 @@ async def hermes_vendor_events(
                 "image_url": {"url": attachment["url"]},
             } for attachment in images),
         ]
-    response = await http.post(
-        f"{HERMES_URL}/api/sessions/{vendor_session_id}/chat",
-        headers={"authorization": f"Bearer {HERMES_KEY}"},
+    streamed_text = False
+    final_text = ""
+    completed = False
+    tool_ids: dict[str, str] = {}
+    async with http.stream(
+        "POST",
+        f"{HERMES_URL}/api/sessions/{vendor_session_id}/chat/stream",
+        headers={
+            "authorization": f"Bearer {HERMES_KEY}",
+            "accept": "text/event-stream",
+        },
         json={"message": message, "instructions": SYSTEM_PROMPT},
         timeout=MAX_TURN_SECONDS,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    message = payload.get("message") if isinstance(payload, dict) else None
-    reply = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(reply, str) or not reply:
+    ) as response:
+        response.raise_for_status()
+        if not response.headers.get("content-type", "").startswith("text/event-stream"):
+            raise RuntimeError("Hermes returned an invalid event stream")
+        event_name = ""
+        data_lines: list[str] = []
+        async for line in response.aiter_lines():
+            if line:
+                if line.startswith("event:"):
+                    event_name = line[6:].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line[5:].lstrip())
+                continue
+            if not data_lines:
+                event_name = ""
+                continue
+            try:
+                payload = json.loads("\n".join(data_lines))
+            except json.JSONDecodeError:
+                raise RuntimeError("Hermes returned an invalid event") from None
+            data_lines = []
+            name = event_name
+            event_name = ""
+            if not isinstance(payload, dict):
+                raise RuntimeError("Hermes returned an invalid event")
+            if name == "assistant.delta":
+                delta = payload.get("delta")
+                if isinstance(delta, str) and delta:
+                    streamed_text = True
+                    yield {"kind": "text", "delta": delta}
+            elif name in {"tool.started", "tool.completed", "tool.failed"}:
+                tool_name = safe_tool_name(payload.get("tool_name") or payload.get("tool"))
+                raw_id = str(payload.get("tool_call_id") or payload.get("toolCallId") or tool_name)
+                tool_id = tool_ids.setdefault(
+                    raw_id,
+                    safe_identifier("tool", turn_id, raw_id),
+                )
+                state = (
+                    "running" if name == "tool.started"
+                    else "failed" if name == "tool.failed"
+                    else "completed"
+                )
+                yield {
+                    "kind": "tool",
+                    "id": tool_id,
+                    "name": tool_name,
+                    "state": state,
+                    **({
+                        "summary": (
+                            safe_summary(payload.get("preview"), "Tool failed")
+                            if state == "failed"
+                            else "Tool completed"
+                        )
+                    } if state != "running" else {}),
+                }
+            elif name == "assistant.completed":
+                candidate = payload.get("content")
+                if isinstance(candidate, str):
+                    final_text = candidate
+                effective_session_id = payload.get("session_id")
+                if isinstance(effective_session_id, str) and effective_session_id:
+                    vendor_session_id = effective_session_id
+            elif name == "run.completed":
+                completed = payload.get("completed") is True
+                effective_session_id = payload.get("session_id")
+                if isinstance(effective_session_id, str) and effective_session_id:
+                    vendor_session_id = effective_session_id
+            elif name == "error":
+                raise RuntimeError("Hermes could not complete the request")
+        if data_lines:
+            raise RuntimeError("Hermes event stream ended mid-frame")
+    if not completed:
+        raise RuntimeError("Hermes event stream ended without completion")
+    if re.match(r"^API call failed after \d+ retries:", final_text.strip(), re.IGNORECASE):
         raise RuntimeError("Hermes could not complete the request")
-    if re.match(r"^API call failed after \d+ retries:", reply.strip(), re.IGNORECASE):
-        raise RuntimeError("Hermes could not complete the request")
-    yield {"kind": "text", "delta": reply}
+    if not streamed_text and final_text:
+        yield {"kind": "text", "delta": final_text}
     yield {
         "kind": "vendor-finish",
-        "vendorSessionId": str(payload.get("session_id") or vendor_session_id),
+        "vendorSessionId": vendor_session_id,
         "state": "completed",
     }
 
@@ -939,6 +1022,9 @@ async def turns(request: Request) -> Response:
     async def stream() -> AsyncIterator[bytes]:
         sequence = 0
         total_text = 0
+        pending_initial_text = ""
+        text_state_known = False
+        needs_input = False
         vendor_session_id = snapshot.get("vendorSessionId")
 
         def canonical(event_type: str, **values: Any) -> dict[str, Any]:
@@ -962,11 +1048,7 @@ async def turns(request: Request) -> Response:
         try:
             yield frame(canonical("turn-start", messageId=assistant_id, createdAt=created_at))
             activity_id = safe_identifier("progress", turn_id, "agent")
-            yield frame(canonical(
-                "progress", activityId=activity_id,
-                label="Got it — I’m working on that.",
-                state="running",
-            ))
+            progress_started = False
             terminal_state: str | None = None
             events = vendor_events(snapshot, text, attachments, turn_id).__aiter__()
             next_event = asyncio.ensure_future(anext(events))
@@ -976,9 +1058,10 @@ async def turns(request: Request) -> Response:
                         {next_event}, timeout=STREAM_HEARTBEAT_SECONDS
                     )
                     if not ready:
+                        progress_started = True
                         yield frame(canonical(
                             "progress", activityId=activity_id,
-                            label="Got it — I’m still working on that.",
+                            label="Still working…",
                             state="running",
                         ))
                         continue
@@ -990,6 +1073,20 @@ async def turns(request: Request) -> Response:
                     kind = vendor["kind"]
                     if kind == "text" and vendor.get("delta"):
                         raw_delta = str(vendor["delta"])
+                        if not text_state_known:
+                            pending_initial_text += raw_delta
+                            stripped = pending_initial_text.lstrip()
+                            if stripped.startswith(NEEDS_INPUT_MARKER):
+                                needs_input = True
+                                raw_delta = stripped[len(NEEDS_INPUT_MARKER):].lstrip()
+                            elif NEEDS_INPUT_MARKER.startswith(stripped):
+                                continue
+                            else:
+                                raw_delta = pending_initial_text
+                            pending_initial_text = ""
+                            text_state_known = True
+                        if not raw_delta:
+                            continue
                         total_text += len(raw_delta)
                         if total_text > MAX_TEXT:
                             raise RuntimeError("agent response exceeded the text limit")
@@ -1027,9 +1124,26 @@ async def turns(request: Request) -> Response:
                     await close()
             if terminal_state is None:
                 raise RuntimeError("agent stream ended without a terminal event")
-            yield frame(canonical(
-                "progress", activityId=activity_id, label="Work complete", state="completed"
-            ))
+            if pending_initial_text:
+                raw_delta = pending_initial_text
+                pending_initial_text = ""
+                text_state_known = True
+                total_text += len(raw_delta)
+                if total_text > MAX_TEXT:
+                    raise RuntimeError("agent response exceeded the text limit")
+                for offset in range(0, len(raw_delta), 16_000):
+                    yield frame(canonical(
+                        "text-delta", textId=f"text-{turn_id}",
+                        delta=raw_delta[offset:offset + 16_000],
+                    ))
+            if needs_input and terminal_state == "completed":
+                terminal_state = "needs_input"
+            if progress_started:
+                yield frame(canonical(
+                    "progress", activityId=activity_id,
+                    label="Waiting for your reply" if terminal_state == "needs_input" else "Work complete",
+                    state="completed",
+                ))
             completed_at = now()
             yield frame(canonical(
                 "turn-finish", state=terminal_state, completedAt=completed_at,

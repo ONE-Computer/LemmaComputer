@@ -613,6 +613,7 @@ export function createControlServer(
     const stream = async function*() {
       let text = "";
       const notices: string[] = [];
+      let state: "needs_input" | "completed" | "cancelled" | "failed" = "failed";
       try {
         for await (const event of agentChat.streamTurn(access, session.id, message)) {
           if (event.type === "progress") {
@@ -623,6 +624,7 @@ export function createControlServer(
             if (text.length > 16_000) {
               throw new OneComputerError("CHANNEL_RESPONSE_TOO_LARGE", "The channel response exceeded its limit", 502);
             }
+            yield frame({ type: "text-delta", delta: event.delta });
           }
           if (event.type === "approval") {
             let summary = event.summary;
@@ -638,19 +640,22 @@ export function createControlServer(
               yield frame({ type: "notice", notice });
             }
           }
-          if (event.type === "turn-finish" && event.state === "failed" && !text) {
-            yield frame({
-              type: "error",
-              code: "CHANNEL_TURN_FAILED",
-              message: event.message ?? "The agent could not complete the message",
-              retryable: true,
-            });
-            return;
+          if (event.type === "turn-finish") {
+            state = event.state;
+            if (event.state === "failed" && !text) {
+              yield frame({
+                type: "error",
+                code: "CHANNEL_TURN_FAILED",
+                message: event.message ?? "The agent could not complete the message",
+                retryable: true,
+              });
+              return;
+            }
           }
         }
         yield frame({
           type: "result",
-          response: channelTurnResponseSchema.parse({ sessionId: session.id, text, notices }),
+          response: channelTurnResponseSchema.parse({ sessionId: session.id, text, notices, state }),
         });
       } catch (error) {
         const owned = error instanceof OneComputerError ? error : undefined;

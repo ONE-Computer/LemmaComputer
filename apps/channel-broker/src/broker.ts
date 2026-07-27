@@ -52,19 +52,25 @@ export type TelegramInlineButton = {
 
 export type TelegramMessageOptions = {
   inlineKeyboard?: readonly (readonly TelegramInlineButton[])[];
+  disableNotification?: boolean;
 };
 
 export interface TelegramBotClient {
   validate(token: string): Promise<{ botId: string; username: string | null }>;
   getUpdates(token: string, offset: string): Promise<TelegramUpdate[]>;
-  sendMessage(token: string, chatId: string, text: string, options?: TelegramMessageOptions): Promise<void>;
+  sendMessage(token: string, chatId: string, text: string, options?: TelegramMessageOptions): Promise<string>;
+  editMessage(token: string, chatId: string, messageId: string, text: string): Promise<void>;
   sendChatAction(token: string, chatId: string, action: "typing"): Promise<void>;
   answerCallbackQuery(token: string, callbackQueryId: string, text?: string): Promise<void>;
 }
 
 export interface ChannelControlClient {
   validateRoute(input: ChannelRoute): Promise<void>;
-  turn(input: ChannelTurnRequest, onNotice?: (notice: string) => Promise<void>): Promise<ChannelTurnResponse>;
+  turn(
+    input: ChannelTurnRequest,
+    onNotice?: (notice: string) => Promise<void>,
+    onTextDelta?: (delta: string) => Promise<void>,
+  ): Promise<ChannelTurnResponse>;
 }
 
 export class HttpChannelControlClient implements ChannelControlClient {
@@ -129,6 +135,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
     path: string,
     input: unknown,
     onNotice?: (notice: string) => Promise<void>,
+    onTextDelta?: (delta: string) => Promise<void>,
   ): Promise<ChannelTurnResponse> {
     const target = new URL(path, this.baseUrl);
     if (!["http:", "https:"].includes(target.protocol)) {
@@ -192,6 +199,16 @@ export class HttpChannelControlClient implements ChannelControlClient {
                 if (!line) continue;
                 const event = channelTurnStreamEventSchema.parse(JSON.parse(line));
                 if (event.type === "heartbeat") continue;
+                if (event.type === "text-delta") {
+                  if (onTextDelta) {
+                    try {
+                      await onTextDelta(event.delta);
+                    } catch {
+                      // The final result retains the complete text for durable fallback delivery.
+                    }
+                  }
+                  continue;
+                }
                 if (event.type === "notice") {
                   if (onNotice && !deliveredNotices.has(event.notice)) {
                     try {
@@ -258,11 +275,16 @@ export class HttpChannelControlClient implements ChannelControlClient {
     await this.post("/internal/v1/channels/routes/validate", channelRouteSchema.parse(input));
   }
 
-  async turn(input: ChannelTurnRequest, onNotice?: (notice: string) => Promise<void>) {
+  async turn(
+    input: ChannelTurnRequest,
+    onNotice?: (notice: string) => Promise<void>,
+    onTextDelta?: (delta: string) => Promise<void>,
+  ) {
     return this.streamTurn(
       "/internal/v1/channels/turns",
       channelTurnRequestSchema.parse(input),
       onNotice,
+      onTextDelta,
     );
   }
 }
@@ -411,10 +433,11 @@ export class TelegramBotApiClient implements TelegramBotClient {
   }
 
   async sendMessage(token: string, chatId: string, text: string, options: TelegramMessageOptions = {}) {
-    await this.request(token, "sendMessage", {
+    const result = botResponseSchema.object(await this.request(token, "sendMessage", {
       chat_id: chatId,
       text,
       disable_web_page_preview: true,
+      ...(options.disableNotification ? { disable_notification: true } : {}),
       ...(options.inlineKeyboard ? {
         reply_markup: {
           inline_keyboard: options.inlineKeyboard.map((row) => row.map((button) => ({
@@ -423,6 +446,19 @@ export class TelegramBotApiClient implements TelegramBotClient {
           }))),
         },
       } : {}),
+    }));
+    if (!Number.isSafeInteger(result.message_id)) {
+      throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid message", 502, true);
+    }
+    return String(result.message_id);
+  }
+
+  async editMessage(token: string, chatId: string, messageId: string, text: string) {
+    await this.request(token, "editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      disable_web_page_preview: true,
     });
   }
 
@@ -476,11 +512,67 @@ const displayNames: Readonly<Record<ChatAgentCatalogId, string>> = Object.freeze
   "codex-cli": "Codex CLI",
 });
 
-const acknowledgementMessage = "Got it — I’m starting on that now.";
+const acknowledgementMessage = "Message received.";
 const safeFailureMessage = "I started the task, but the agent could not complete it. Try again, or use /agent to select another available agent.";
 const approvalFailureMessage = "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.";
 const telegramAgentCallbackPrefix = "onecomputer:agent:";
 const switchableAgentIds = ["hermes-claw", "claude-cli", "codex-cli"] as const;
+const telegramMessageLimit = 4_000;
+const telegramStreamStartCharacters = 24;
+const telegramStreamEditCharacters = 160;
+const telegramStreamEditMs = 900;
+
+class TelegramResponseStream {
+  private text = "";
+  private published = "";
+  private messageId: string | undefined;
+  private publishedAt = 0;
+  private streamed = false;
+
+  constructor(
+    private readonly telegram: TelegramBotClient,
+    private readonly token: string,
+    private readonly chatId: string,
+  ) {}
+
+  async append(delta: string) {
+    this.streamed = true;
+    this.text += delta;
+    const textLength = [...this.text].length;
+    const publishedLength = [...this.published].length;
+    if (
+      !this.messageId
+        ? textLength >= telegramStreamStartCharacters || this.text.includes("\n")
+        : Date.now() - this.publishedAt >= telegramStreamEditMs
+          || textLength - publishedLength >= telegramStreamEditCharacters
+    ) {
+      await this.publish();
+    }
+  }
+
+  async finish(text: string) {
+    this.text = text;
+    if (!this.streamed) return 0;
+    await this.publish();
+    return text.startsWith(this.published) ? [...this.published].length : 0;
+  }
+
+  private async publish() {
+    const preview = [...this.text].slice(0, telegramMessageLimit).join("");
+    if (!preview.trim() || preview === this.published) return;
+    try {
+      if (this.messageId) {
+        await this.telegram.editMessage(this.token, this.chatId, this.messageId, preview);
+      } else {
+        this.messageId = await this.telegram.sendMessage(this.token, this.chatId, preview);
+      }
+      this.published = preview;
+      this.publishedAt = Date.now();
+    } catch {
+      // The complete final response is durably staged after the turn.
+    }
+  }
+}
 
 const agentFromCallback = (value: string | undefined): ChatAgentCatalogId | undefined => {
   if (!value?.startsWith(telegramAgentCallbackPrefix)) return undefined;
@@ -790,7 +882,10 @@ export class ChannelBrokerService {
     }
 
     const sessionId = await this.store.getChannelSession(connection.id, update.senderId, agentCatalogId);
-    await this.telegram.sendMessage(token, update.chatId, acknowledgementMessage).catch(() => undefined);
+    await this.telegram.sendMessage(token, update.chatId, acknowledgementMessage, {
+      disableNotification: true,
+    }).catch(() => undefined);
+    const responseStream = new TelegramResponseStream(this.telegram, token, update.chatId);
     let approvalNoticeSent = false;
     let responseStaged = false;
     try {
@@ -808,19 +903,39 @@ export class ChannelBrokerService {
             await this.telegram.sendMessage(token, update.chatId, notice);
             approvalNoticeSent = true;
           },
+          async (delta) => responseStream.append(delta),
         ),
       ));
       await this.store.saveChannelSession(connection.id, update.senderId, agentCatalogId, response.sessionId);
-      const rendered = [response.text, ...response.notices].filter(Boolean).join("\n\n") || "The agent completed without a text response.";
-      await this.store.stageChannelResponse(
-        connection.id,
-        update.updateId,
-        update.chatId,
-        rendered,
-        "delivered",
-      );
-      responseStaged = true;
-      await this.deliverPendingResponses(connection.id, token);
+      const streamedCharacters = await responseStream.finish(response.text);
+      const remainingText = [...response.text].slice(streamedCharacters).join("");
+      const fallback = response.state === "needs_input"
+        ? "The agent needs more information. Reply to continue this conversation."
+        : "The agent completed without a text response.";
+      const rendered = [remainingText, ...response.notices].filter(Boolean).join("\n\n")
+        || (streamedCharacters ? "" : fallback);
+      const delivered = ["completed", "needs_input"].includes(response.state);
+      const failureCode = response.state === "cancelled" ? "CHANNEL_TURN_CANCELLED" : "CHANNEL_TURN_FAILED";
+      if (rendered) {
+        await this.store.stageChannelResponse(
+          connection.id,
+          update.updateId,
+          update.chatId,
+          rendered,
+          delivered ? "delivered" : "failed",
+          delivered ? undefined : failureCode,
+        );
+        responseStaged = true;
+        await this.deliverPendingResponses(connection.id, token);
+      } else {
+        await this.store.finishChannelUpdate(
+          connection.id,
+          update.updateId,
+          delivered ? "delivered" : "failed",
+          delivered ? undefined : failureCode,
+        );
+        responseStaged = true;
+      }
     } catch (error) {
       if (responseStaged) return;
       const failureCode = error instanceof OneComputerError ? error.code : "CHANNEL_TURN_FAILED";

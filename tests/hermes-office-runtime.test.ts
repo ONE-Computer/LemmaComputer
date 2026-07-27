@@ -120,7 +120,9 @@ test("selected Hermes profiles seed only Office skills by default and expose the
   assert.match(chatAdapter, /Treat greetings, acknowledgements, small talk/);
   assert.match(chatAdapter, /Do not load or invoke a skill for those messages/);
   assert.match(chatAdapter, /concrete task clearly matches that skill's documented scope/);
-  assert.match(chatAdapter, /Got it — I’m working on that\./);
+  assert.match(chatAdapter, /Before using any tool, briefly tell the employee/);
+  assert.match(chatAdapter, /\/chat\/stream/);
+  assert.doesNotMatch(chatAdapter, /Got it — I’m working on that\./);
 });
 
 test("governed OneDrive deletion carries the resolved filename into approval metadata", async () => {
