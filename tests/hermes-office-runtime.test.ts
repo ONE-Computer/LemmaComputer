@@ -123,6 +123,8 @@ test("selected Hermes profiles seed only Office skills by default and expose the
   assert.match(chatAdapter, /Before using any tool, briefly tell the employee/);
   assert.match(chatAdapter, /\/chat\/stream/);
   assert.doesNotMatch(chatAdapter, /Got it — I’m working on that\./);
+  assert.match(chatAdapter, /configured IANA timezone/);
+  assert.match(chatAdapter, /Before a calendar write/);
 });
 
 test("governed OneDrive deletion carries the resolved filename into approval metadata", async () => {

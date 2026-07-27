@@ -41,6 +41,7 @@ for (const name of [
 replace("ONECOMPUTER_LITELLM_MASTER_KEY", `sk-${randomSecret()}`);
 replace("ONECOMPUTER_OPENVTC_EXECUTOR_SEED_B64", randomBytes(32).toString("base64"));
 replace("ONECOMPUTER_WORKSPACE_IMAGE", "onecomputer/workspace:dev");
+replace("ONECOMPUTER_TIME_ZONE", Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC");
 
 const vapid = webPush.generateVAPIDKeys();
 replace("ONECOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY", vapid.publicKey);

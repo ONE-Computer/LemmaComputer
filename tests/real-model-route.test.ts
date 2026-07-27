@@ -34,6 +34,19 @@ test("the provider credential is injected only into LiteLLM", async () => {
   assert.doesNotMatch(everythingElse, /ONECOMPUTER_(?:OPENAI|CLAUDE|GLM)_API_KEY/);
 });
 
+test("the local workspace receives an explicit host-seeded IANA timezone", async () => {
+  const [compose, example, initializer, entrypoint] = await Promise.all([
+    source("compose.yaml"),
+    source(".env.example"),
+    source("scripts/initialize-env.mjs"),
+    source("infra/issue-010/onecomputer-workspace-entrypoint.sh"),
+  ]);
+  assert.match(example, /^ONECOMPUTER_TIME_ZONE=Etc\/UTC$/m);
+  assert.match(initializer, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
+  assert.match(compose, /KASM_LOCAL_TIME_ZONE: \$\{ONECOMPUTER_TIME_ZONE:-\}/);
+  assert.match(entrypoint, /ONECOMPUTER_TIME_ZONE="\$ONECOMPUTER_TIME_ZONE"/);
+});
+
 test("LiteLLM rejects image input when the selected deployment does not advertise vision", async () => {
   const callback = await source("integrations/litellm/onecomputer_policy_callback.py");
   assert.match(callback, /async_pre_call_deployment_hook/);
@@ -182,7 +195,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(chatAdapter, /"type": "image"/);
   assert.match(chatAdapter, /ImageInput\(attachment\["url"\]\)/);
   assert.match(chatAdapter, /"type": "image_url"/);
-  assert.match(chatAdapter, /"instructions": SYSTEM_PROMPT/);
+  assert.match(chatAdapter, /"instructions": system_prompt\(\)/);
   assert.match(chatAdapter, /human identifier such as a filename/);
   assert.match(chatAdapter, /Invoke an assigned MCP tool directly/);
   assert.match(chatAdapter, /never wrap.*MCP call.*terminal.*execute_code/s);

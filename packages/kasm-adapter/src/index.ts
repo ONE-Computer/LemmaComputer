@@ -267,6 +267,7 @@ type KasmLocalConfig = {
   egressProxyImage?: string;
   egressNetwork?: string;
   publicHost?: string;
+  timeZone?: string;
   portStart?: number;
   portEnd?: number;
 };
@@ -333,6 +334,9 @@ export class KasmLocalAdapter implements SandboxAdapter {
         "com.onecomputer.execution-mode": input.policy.executionMode,
         "com.onecomputer.egress-mode": input.policy.egressMode,
         "com.onecomputer.model-alias": input.policy.modelAlias,
+        ...(this.config.timeZone ? {
+          "com.onecomputer.time-zone": this.config.timeZone,
+        } : {}),
         "com.onecomputer.enabled-agents": enabledAgents.join(","),
         "com.onecomputer.enabled-applications": enabledApplications.join(","),
         "com.onecomputer.chat-runtime-agents": input.chatRuntimes?.map((runtime) => runtime.catalogId).join(",") ?? "",
@@ -351,6 +355,10 @@ export class KasmLocalAdapter implements SandboxAdapter {
         "VNC_PW=onecomputer",
         "VNC_RESOLUTION=1440x900",
         "VNCOPTIONS=-DisableBasicAuth=1",
+        ...(this.config.timeZone ? [
+          `TZ=${this.config.timeZone}`,
+          `ONECOMPUTER_TIME_ZONE=${this.config.timeZone}`,
+        ] : []),
         `ONECOMPUTER_CLIPBOARD_ENABLED=${clipboard.enabled}`,
         `ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=${clipboard.localToWorkspace}`,
         `ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL=${clipboard.workspaceToLocal}`,

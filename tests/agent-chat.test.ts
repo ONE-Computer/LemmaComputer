@@ -37,6 +37,17 @@ test("Hermes session titles stay in the ONEComputer adapter so duplicate user ti
   assert.equal(chatTurnStateSchema.safeParse("needs_input").success, true);
 });
 
+test("agent turns receive a fresh trusted timezone context and require clarification without one", async () => {
+  const adapter = await readFile(new URL("../infra/issue-010/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  assert.match(adapter, /CONFIGURED_TIME_ZONE = os\.environ\.get\("ONECOMPUTER_TIME_ZONE", ""\)\.strip\(\)/);
+  assert.match(adapter, /datetime\.now\(LOCAL_TIME_ZONE\)/);
+  assert.match(adapter, /current local date and time/);
+  assert.match(adapter, /explicit timezone in the employee's latest request overrides/);
+  assert.match(adapter, /Before a calendar write.*ask/s);
+  assert.match(adapter, /never silently substitute a different timezone/);
+  assert.match(adapter, /"instructions": system_prompt\(\)/);
+});
+
 test("chat accepts bounded inline image and document parts but rejects media mismatches", () => {
   const message = {
     id: "user-message-with-files",

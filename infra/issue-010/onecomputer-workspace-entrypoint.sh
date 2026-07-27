@@ -5,6 +5,7 @@ set -euo pipefail
 : "${ONECOMPUTER_ENABLED_APPLICATIONS:=firefox}"
 : "${ONECOMPUTER_EXECUTION_MODE:=managed}"
 : "${ONECOMPUTER_EGRESS_MODE:=restricted}"
+: "${ONECOMPUTER_TIME_ZONE:=}"
 : "${ONECOMPUTER_CLIPBOARD_ENABLED:=true}"
 : "${ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE:=true}"
 : "${ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL:=true}"
@@ -565,6 +566,8 @@ if agent_enabled hermes-claw; then
       HERMES_HOME=/home/kasm-user/.hermes \
       HERMES_BUNDLED_SKILLS=/opt/onecomputer/hermes-agent/skills \
       NODE_PATH=/opt/onecomputer/hermes-office-node/node_modules \
+      TZ="${TZ:-Etc/UTC}" \
+      ONECOMPUTER_TIME_ZONE="$ONECOMPUTER_TIME_ZONE" \
       OPENAI_API_KEY=onecomputer-loopback-broker \
       ONECOMPUTER_CONNECTORS_BROKER=http://127.0.0.1:4314 \
       API_SERVER_ENABLED=true \
@@ -609,6 +612,8 @@ start_sdk_chat_adapter() {
       ONECOMPUTER_CHAT_MODEL_ALIAS="$model" \
       ONECOMPUTER_CHAT_ALLOWED_TOOLS="$allowed_tools" \
       ONECOMPUTER_EXECUTION_MODE="$ONECOMPUTER_EXECUTION_MODE" \
+      TZ="${TZ:-Etc/UTC}" \
+      ONECOMPUTER_TIME_ZONE="$ONECOMPUTER_TIME_ZONE" \
       ONECOMPUTER_CHAT_BROKER="http://127.0.0.1:${broker_port}" \
       ONECOMPUTER_CHAT_PORT="$port" \
       ONECOMPUTER_HERMES_CHAT_URL="$hermes_url" \
