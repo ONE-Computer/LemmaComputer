@@ -26,6 +26,13 @@ const waitFor = (child) => new Promise((resolve, reject) => {
   child.once("error", reject);
   child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`concurrent migrator exited ${code}`)));
 });
+const migrationFiles = (await readdir("packages/workspace-store/migrations")).filter((name) => name.endsWith(".sql")).sort();
+const legacyMigrationIds = new Set(Array.from({ length: 28 }, (_, index) => String(index + 1).padStart(3, "0")));
+const legacyMigrationFiles = migrationFiles.filter((name) => legacyMigrationIds.has(name.slice(0, 3)));
+if (legacyMigrationFiles.length !== legacyMigrationIds.size) {
+  throw new Error("the immutable 001-028 legacy migration chain is incomplete");
+}
+const expectedMigrationCount = migrationFiles.length;
 let hostPort;
 try {
   must("docker", ["run", "--rm", "-d", "--name", container, "-e", `POSTGRES_PASSWORD=${password}`, "-p", "127.0.0.1::5432", image]);
@@ -38,16 +45,31 @@ try {
 
   const first = migrate("postgres");
   if (!first.includes("Applied migrations")) throw new Error("fresh database did not report applied migrations");
-  if (sql("postgres", "SELECT count(*) FROM onecomputer_schema_migrations") !== "28") throw new Error("fresh migration ledger does not contain 28 entries");
+  if (sql("postgres", "SELECT count(*) FROM onecomputer_schema_migrations") !== String(expectedMigrationCount)) {
+    throw new Error("fresh migration ledger does not contain every discovered migration");
+  }
   const schemaCheck = exec("npm", ["run", "db:check"], { env: { ...process.env, DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/postgres` } });
   if (schemaCheck.status !== 0 || !schemaCheck.stdout.includes("schema is compatible")) throw new Error(schemaCheck.stderr || "schema compatibility check failed");
   if (!migrate("postgres").includes("no migrations applied")) throw new Error("second migration run was not a no-op");
   const postgresUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+  sql("postgres", "CREATE DATABASE migration_ledger_legacy");
+  sql("postgres", "CREATE DATABASE migration_ledger_fresh");
+  const migrationLedgerLegacyUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/migration_ledger_legacy`;
+  const migrationLedgerFreshUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/migration_ledger_fresh`;
   const featureTests = exec(process.execPath, [
     "--import", "tsx", "--test",
     "tests/schedules-postgres.test.ts",
     "tests/openvtc-companion-push-postgres.test.ts",
-  ], { env: { ...process.env, SCHEDULE_TEST_DATABASE_URL: postgresUrl, OPENVTC_PUSH_TEST_DATABASE_URL: postgresUrl } });
+    "tests/migration-ledger-baseline-postgres.test.ts",
+  ], {
+    env: {
+      ...process.env,
+      SCHEDULE_TEST_DATABASE_URL: postgresUrl,
+      OPENVTC_PUSH_TEST_DATABASE_URL: postgresUrl,
+      MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL: migrationLedgerLegacyUrl,
+      MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL: migrationLedgerFreshUrl,
+    },
+  });
   if (featureTests.status !== 0) throw new Error(featureTests.stderr || featureTests.stdout || "PostgreSQL feature tests failed");
 
   sql("postgres", "CREATE DATABASE concurrent");
@@ -57,15 +79,19 @@ try {
     stdio: ["ignore", "pipe", "pipe"],
   }));
   await Promise.all(children.map(waitFor));
-  if (sql("concurrent", "SELECT count(*) FROM onecomputer_schema_migrations") !== "28") throw new Error("concurrent migration ledger is invalid");
+  if (sql("concurrent", "SELECT count(*) FROM onecomputer_schema_migrations") !== String(expectedMigrationCount)) {
+    throw new Error("concurrent migration ledger does not contain every discovered migration");
+  }
 
   sql("postgres", "CREATE DATABASE legacy");
-  const migrationFiles = (await readdir("packages/workspace-store/migrations")).filter((name) => name.endsWith(".sql")).sort();
-  const legacySql = (await Promise.all(migrationFiles.map((name) => readFile(`packages/workspace-store/migrations/${name}`, "utf8")))).join("\n");
+  const legacySql = (await Promise.all(legacyMigrationFiles.map((name) => readFile(`packages/workspace-store/migrations/${name}`, "utf8")))).join("\n");
   must("docker", ["exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "legacy"], { input: legacySql });
   if (!migrate("legacy").includes("baselined legacy schema")) throw new Error("legacy schema was not verified and baselined");
-  if (sql("legacy", "SELECT count(*) FROM onecomputer_schema_migrations WHERE installation_kind='verified-legacy-baseline'") !== "28") {
+  if (sql("legacy", "SELECT count(*) FROM onecomputer_schema_migrations WHERE installation_kind='verified-legacy-baseline'") !== String(legacyMigrationIds.size)) {
     throw new Error("legacy baseline ledger is invalid");
+  }
+  if (sql("legacy", "SELECT count(*) FROM onecomputer_schema_migrations") !== String(expectedMigrationCount)) {
+    throw new Error("legacy cutover did not apply every later migration");
   }
 
   sql("postgres", "CREATE DATABASE incompatible");

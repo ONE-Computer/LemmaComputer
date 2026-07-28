@@ -5,6 +5,8 @@ import type pg from "pg";
 const migrationFile = /^((?:\d{3})|(?:[0-9A-HJKMNP-TV-Z]{26}))_([a-z0-9][a-z0-9_-]*)\.sql$/;
 const ledgerTable = "onecomputer_schema_migrations";
 const lockKeys: [number, number] = [1_326_843_779, 1];
+const legacyMigrationIds = Array.from({ length: 28 }, (_, index) => String(index + 1).padStart(3, "0"));
+const legacyMigrationIdSet = new Set(legacyMigrationIds);
 
 const requiredLegacyTables = [
   "agent_identities", "browser_sessions", "capabilities", "capability_assignments", "channel_connections",
@@ -48,8 +50,10 @@ type AppliedMigration = { id: string; name: string; checksum_sha256: string; dep
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const metadata = (sql: string, key: string) => sql.match(new RegExp(`^--\\s*${key}:\\s*(.+?)\\s*$`, "mi"))?.[1]?.trim();
 
-export async function discoverWorkspaceMigrations(): Promise<WorkspaceMigration[]> {
-  const fileNames = (await readdir(new URL("../migrations/", import.meta.url)))
+export async function discoverWorkspaceMigrations(
+  directory: URL = new URL("../migrations/", import.meta.url),
+): Promise<WorkspaceMigration[]> {
+  const fileNames = (await readdir(directory))
     .filter((fileName) => fileName.endsWith(".sql"))
     .sort((left, right) => {
       const leftLegacy = /^\d{3}_/.test(left);
@@ -60,7 +64,7 @@ export async function discoverWorkspaceMigrations(): Promise<WorkspaceMigration[
   for (const fileName of fileNames) {
     const match = fileName.match(migrationFile);
     if (!match) throw new Error(`Invalid migration filename "${fileName}"; use NNN_name.sql or ULID_name.sql`);
-    const sql = await readFile(new URL(`../migrations/${fileName}`, import.meta.url), "utf8");
+    const sql = await readFile(new URL(fileName, directory), "utf8");
     const id = metadata(sql, "id") ?? match[1]!;
     if (id !== match[1]) throw new Error(`Migration ${fileName} declares id ${id}, which does not match its filename`);
     const dependencyMetadata = metadata(sql, "depends-on");
@@ -129,6 +133,14 @@ async function verifyLegacySchema(client: pg.PoolClient) {
   ].join("\n"));
 }
 
+const legacyBaselineMigrations = (migrations: WorkspaceMigration[]) => {
+  const baseline = migrations.filter((migration) => legacyMigrationIdSet.has(migration.id));
+  if (baseline.length !== legacyMigrationIds.length || baseline.some((migration, index) => migration.id !== legacyMigrationIds[index])) {
+    throw new Error("The immutable legacy migration chain 001–028 is incomplete or reordered");
+  }
+  return baseline;
+};
+
 async function initializeLedger(client: pg.PoolClient, migrations: WorkspaceMigration[], appVersion: string) {
   await client.query("BEGIN");
   try {
@@ -143,7 +155,7 @@ async function initializeLedger(client: pg.PoolClient, migrations: WorkspaceMigr
     if (hasExistingSchema) await verifyLegacySchema(client);
     await client.query(createLedgerSql);
     if (hasExistingSchema) {
-      for (const migration of migrations) await client.query(
+      for (const migration of legacyBaselineMigrations(migrations)) await client.query(
         `INSERT INTO ${ledgerTable} (id,name,checksum_sha256,depends_on,duration_ms,app_version,installation_kind)
          VALUES ($1,$2,$3,$4,0,$5,'verified-legacy-baseline')`,
         [migration.id, migration.name, migration.checksumSha256, migration.dependsOn, appVersion],
@@ -185,9 +197,9 @@ function validateApplied(migrations: WorkspaceMigration[], applied: AppliedMigra
 
 export async function runWorkspaceMigrations(
   pool: pg.Pool,
-  options: { appVersion?: string; installationKind?: string } = {},
+  options: { appVersion?: string; installationKind?: string; migrationDirectory?: URL } = {},
 ): Promise<MigrationRunReport> {
-  const migrations = await discoverWorkspaceMigrations();
+  const migrations = await discoverWorkspaceMigrations(options.migrationDirectory);
   const appVersion = options.appVersion ?? process.env.ONECOMPUTER_APP_VERSION ?? "development";
   const installationKind = options.installationKind ?? process.env.ONECOMPUTER_INSTALLATION_KIND ?? "managed";
   const client = await pool.connect();
@@ -230,8 +242,8 @@ export async function runWorkspaceMigrations(
   }
 }
 
-export async function assertWorkspaceSchemaCompatible(pool: pg.Pool) {
-  const migrations = await discoverWorkspaceMigrations();
+export async function assertWorkspaceSchemaCompatible(pool: pg.Pool, options: { migrationDirectory?: URL } = {}) {
+  const migrations = await discoverWorkspaceMigrations(options.migrationDirectory);
   const client = await pool.connect();
   try {
     if (!(await relationExists(client, ledgerTable))) {
