@@ -71,8 +71,12 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     const apiKey = input.apiKey.trim();
     if (!apiKey) throw new OneComputerError("PROVIDER_KEY_REQUIRED", "A provider API key is required", 400);
     const models = managedProviderModels[input.provider];
+    const expectedModelIds = models.map((model) => tenantModelId(input.tenantId, input.provider, model.alias));
     const existing = [...new Set(input.existingModelIds)];
-    if (existing.length > 0 && existing.length !== models.length) {
+    if (existing.length > 0 && (
+      existing.length !== models.length
+      || expectedModelIds.some((id) => !existing.includes(id))
+    )) {
       throw new OneComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The existing provider route cannot be safely rotated", 409);
     }
     await this.ensureRetiringAliasesAreGone(input.provider);
@@ -98,7 +102,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       if (existing.length === models.length) {
         await this.probe(models[0]!.alias, tenantManagedModelAccessGroup(input.tenantId, models[0]!.alias));
         await this.replaceCredential(credentialName, input.provider, apiKey);
-        return { modelIds: existing, credentialFingerprint: this.fingerprint(apiKey) };
+        return { modelIds: expectedModelIds, credentialFingerprint: this.fingerprint(apiKey) };
       }
       let stableCredentialCreated = false;
       const createdModelIds: string[] = [];
@@ -137,10 +141,12 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     if (!model || input.existingModelIds.length !== managedProviderModels[input.provider].length) {
       throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
+    await this.ensureRetiringAliasesAreGone(input.provider);
     await this.probe(model.alias, tenantManagedModelAccessGroup(input.tenantId, model.alias));
   }
 
   async deleteManagedProvider(input: Pick<ManagedProviderConfiguration, "tenantId" | "provider" | "existingModelIds">) {
+    await this.ensureRetiringAliasesAreGone(input.provider);
     for (const id of [...new Set(input.existingModelIds)]) await this.deleteModel(id);
     await this.deleteCredential(tenantCredentialName(input.tenantId, input.provider));
   }

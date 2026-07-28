@@ -8,7 +8,10 @@ CREATE TABLE provider_settings (
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   provider TEXT NOT NULL CHECK (provider IN ('openai', 'anthropic')),
   model_ids JSONB NOT NULL DEFAULT '[]'::jsonb
-    CHECK (jsonb_typeof(model_ids) = 'array' AND jsonb_array_length(model_ids) <= 8),
+    CHECK (CASE
+      WHEN jsonb_typeof(model_ids) = 'array' THEN jsonb_array_length(model_ids) <= 8
+      ELSE false
+    END),
   state TEXT NOT NULL CHECK (state IN ('active', 'disabled')),
   credential_fingerprint TEXT NULL CHECK (credential_fingerprint ~ '^fp_[a-zA-Z0-9_-]{8,92}$'),
   last_tested_at TIMESTAMPTZ NULL,
