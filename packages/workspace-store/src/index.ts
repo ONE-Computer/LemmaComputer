@@ -5,6 +5,7 @@ import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migra
 export * from "./identity-policy.js";
 export * from "./connector-registry.js";
 export * from "./migrations.js";
+export * from "./provider-settings.js";
 export * from "./schedules.js";
 
 export type WorkspaceRecord = {

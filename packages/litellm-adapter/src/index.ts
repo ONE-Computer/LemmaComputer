@@ -10,6 +10,8 @@ import {
   type OwnedJson,
   type RuntimePolicy,
 } from "@onecomputer/contracts";
+import { managedProviderForAlias, managedProviderModels, tenantManagedModelAccessGroup } from "./provider-settings.js";
+export * from "./provider-settings.js";
 
 export type GatewayGrant = {
   baseUrl: string;
@@ -220,7 +222,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   private readonly workspaceGrantTtlMs: number;
   private readonly workspaceGrantRenewalMs: number;
   private readonly connectionGrantTtlMs: number;
-  private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string }>();
+  private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string; modelAlias: string }>();
   private readonly modelCapabilityStates = new Map<string, { expiresAt: number; capabilities: GatewayModelCapabilities }>();
   private readonly oauthClientRegistrationStates = new Map<string, Promise<string>>();
 
@@ -690,7 +692,10 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async ensureGrant(input: { workspaceId: string; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant> {
     const agentId = input.policy?.agentId ?? input.agentId;
     const modelAlias = input.policy?.modelAlias ?? this.modelAlias;
-    const gatewayModelAlias = desktopModelAlias(modelAlias, input.policy);
+    const clientModelAlias = desktopModelAlias(modelAlias, input.policy);
+    const managedProvider = managedProviderForAlias(clientModelAlias);
+    const providerAccessGroup = managedProvider ? tenantManagedModelAccessGroup(input.identity.tenantId, clientModelAlias) : null;
+    const grantModels = providerAccessGroup ? [providerAccessGroup] : [clientModelAlias];
     const mcpServer = input.policy?.mcpServer ?? this.mcpServer;
     const allowedTools = input.policy?.allowedTools ?? this.allowedTools;
     const mcpServers = input.policy?.mcpServers ?? [mcpServer];
@@ -698,7 +703,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const projection = JSON.stringify({
       agentId,
       modelAlias,
-      gatewayModelAlias,
+      clientModelAlias,
+      grantModels,
       mcpServer,
       allowedTools,
       mcpServers,
@@ -712,7 +718,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const gatewayAgentId = this.agentIdFor(input.workspaceId, agentId);
     const cached = this.workspaceGrantStates.get(credential);
     if (cached && cached.projection === projection && cached.expiresAt > Date.now() + this.workspaceGrantRenewalMs) {
-      return { baseUrl: this.workspaceUrl, credential, modelAlias: gatewayModelAlias, expiresAt: new Date(cached.expiresAt).toISOString() };
+      return { baseUrl: this.workspaceUrl, credential, modelAlias: cached.modelAlias, expiresAt: new Date(cached.expiresAt).toISOString() };
     }
     const expiresAt = new Date(Date.now() + this.workspaceGrantTtlMs);
     const durationSeconds = Math.max(60, Math.ceil(this.workspaceGrantTtlMs / 1_000));
@@ -723,7 +729,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       user_id: gatewayUserId,
       agent_id: gatewayAgentId,
       duration: `${durationSeconds}s`,
-      models: [gatewayModelAlias],
+      models: grantModels,
       rpm_limit: WORKSPACE_RPM_LIMIT,
       tpm_limit: WORKSPACE_TPM_LIMIT,
       max_parallel_requests: WORKSPACE_MAX_PARALLEL_REQUESTS,
@@ -733,7 +739,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         onecomputer_subject_id: input.identity.subjectId,
         onecomputer_agent_id: agentId ?? `workspace-default:${input.workspaceId}`,
         onecomputer_policy_model_alias: modelAlias,
-        onecomputer_client_model_alias: gatewayModelAlias,
+        onecomputer_client_model_alias: clientModelAlias,
+        onecomputer_provider_access_group: providerAccessGroup,
         ...(input.policy ? {
           onecomputer_policy_version_id: input.policy.policyVersionId,
           onecomputer_policy_version: input.policy.policyVersion,
@@ -784,16 +791,16 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         reconciled.payload,
       );
     }
-    this.workspaceGrantStates.set(credential, { expiresAt: expiresAt.getTime(), projection });
-    return { baseUrl: this.workspaceUrl, credential, modelAlias: gatewayModelAlias, expiresAt: expiresAt.toISOString() };
+    this.workspaceGrantStates.set(credential, { expiresAt: expiresAt.getTime(), projection, modelAlias: clientModelAlias });
+    return { baseUrl: this.workspaceUrl, credential, modelAlias: clientModelAlias, expiresAt: expiresAt.toISOString() };
   }
 
   async readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayReadiness> {
     const effectiveAgentId = policy?.agentId ?? agentId;
     const modelAlias = policy?.modelAlias ?? this.modelAlias;
-    const gatewayModelAlias = desktopModelAlias(modelAlias, policy);
     const allowedTools = policy?.allowedTools ?? this.allowedTools;
     const credential = this.credentialFor(workspaceId, effectiveAgentId);
+    const gatewayModelAlias = this.workspaceGrantStates.get(credential)?.modelAlias ?? desktopModelAlias(modelAlias, policy);
     const [models, tools, modelRoute] = await Promise.all([
       this.dataCall("/v1/models", credential),
       this.dataCall("/mcp-rest/tools/list", credential),
@@ -819,6 +826,13 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async modelCapabilities(modelAlias: string): Promise<GatewayModelCapabilities> {
     const cached = this.modelCapabilityStates.get(modelAlias);
     if (cached && cached.expiresAt > Date.now()) return cached.capabilities;
+    const managedProvider = managedProviderForAlias(modelAlias);
+    const managedModel = managedProvider && managedProviderModels[managedProvider].find((model) => model.alias === modelAlias);
+    if (managedModel) {
+      const capabilities = { vision: managedModel.vision };
+      this.modelCapabilityStates.set(modelAlias, { expiresAt: Date.now() + 60_000, capabilities });
+      return capabilities;
+    }
     const result = await this.adminCall("/model/info", { method: "GET" });
     const models = Array.isArray(asObject(result.payload).data)
       ? asObject(result.payload).data as unknown[]
