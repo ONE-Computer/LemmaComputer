@@ -2,6 +2,15 @@ import type { ConnectorRegistryRecord, SaveConnectorRegistryRecord } from "@onec
 
 export type ConnectorDefinition = ConnectorRegistryRecord;
 
+export type ConnectorActivationReadiness = "ready" | "setup_required" | "request_access";
+export type ConnectorActivationAction = "connect" | "view_setup" | "view_requirements";
+
+export type ConnectorActivation = {
+  readiness: ConnectorActivationReadiness;
+  action: ConnectorActivationAction;
+  message: string;
+};
+
 type CatalogConnector = Omit<SaveConnectorRegistryRecord, "tenantId">;
 
 const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "createdBy">): CatalogConnector => ({
@@ -10,6 +19,34 @@ const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "
   source: "built-in",
   createdBy: "onecomputer",
 });
+
+const readyActivation: ConnectorActivation = { readiness: "ready", action: "connect", message: "This approved service is ready to connect." };
+const setupRequiredActivation: ConnectorActivation = { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." };
+const requestAccessActivation: ConnectorActivation = { readiness: "request_access", action: "view_requirements", message: "This service needs provider approval or organization access before people can connect." };
+
+// An entry is direct-connect only when ONEComputer has an approved provider
+// flow. Unknown entries default to request access rather than inviting a
+// misleading OAuth attempt.
+const builtInActivation: Record<string, ConnectorActivation> = {
+  "microsoft-365": readyActivation,
+  notion: readyActivation,
+  linear: readyActivation,
+  atlassian: readyActivation,
+  figma: readyActivation,
+  supabase: readyActivation,
+  github: setupRequiredActivation,
+  vercel: setupRequiredActivation,
+  hubspot: setupRequiredActivation,
+  asana: requestAccessActivation,
+  box: requestAccessActivation,
+  intercom: requestAccessActivation,
+  stripe: requestAccessActivation,
+};
+
+export const connectorActivation = (connector: Pick<ConnectorDefinition, "id" | "source">): ConnectorActivation => {
+  if (connector.source === "custom") return { ...readyActivation };
+  return { ...(builtInActivation[connector.id] ?? requestAccessActivation) };
+};
 
 // These are provider-hosted remote MCP endpoints, not a tool allowlist. The
 // Connections screen may display the full catalog without registering every
@@ -188,7 +225,7 @@ const remoteCatalog: CatalogConnector[] = [
     name: "HubSpot",
     shortDescription: "Search CRM records and customer work",
     description: "Use the CRM records and permissions your HubSpot account authorizes.",
-    category: "Communication",
+    category: "Business",
     services: ["Contacts", "Companies", "Deals"],
     endpointUrl: "https://mcp.hubspot.com",
     authorizationOrigins: ["https://mcp.hubspot.com", "https://app.hubspot.com"],
@@ -202,7 +239,7 @@ const remoteCatalog: CatalogConnector[] = [
     name: "Intercom",
     shortDescription: "Use customer conversations and contacts",
     description: "Use Intercom conversations and data available to your authorized account.",
-    category: "Communication",
+    category: "Business",
     services: ["Conversations", "Contacts", "Help Center"],
     endpointUrl: "https://mcp.intercom.com/mcp",
     authorizationOrigins: ["https://mcp.intercom.com", "https://app.intercom.com"],
@@ -258,7 +295,7 @@ const remoteCatalog: CatalogConnector[] = [
     name: "Stripe",
     shortDescription: "Work with payments and billing data",
     description: "Use the Stripe account permissions you grant through Stripe's official MCP server.",
-    category: "Other",
+    category: "Business",
     services: ["Payments", "Customers", "Subscriptions"],
     endpointUrl: "https://mcp.stripe.com",
     authorizationOrigins: ["https://mcp.stripe.com", "https://dashboard.stripe.com"],

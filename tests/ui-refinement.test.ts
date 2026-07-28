@@ -469,3 +469,30 @@ test("Select controls use the shared accessible menu instead of browser-native d
   assert.match(app, /ariaLabel="Security group"/);
   assert.match(await source("apps/web/src/styles.css"), /@media \(max-width: 1180px\)[\s\S]*?\.firewall-page-heading[\s\S]*?flex-direction: column/);
 });
+
+test("Connections refreshes safely on navigation, history, detail return, and OAuth return", async () => {
+  const [app, api] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/workspace-api.js"),
+  ]);
+  const refreshEffect = app.slice(app.indexOf('if (!session || activeNav !== "Connections")'), app.indexOf('if (!session || activeNav !== "Settings"'));
+  const popState = app.slice(app.indexOf("const onPopState"), app.indexOf('window.addEventListener("popstate"'));
+  const selectNav = app.slice(app.indexOf("const selectNav"), app.indexOf("const saveSchedule"));
+  const oauthReturn = app.slice(app.indexOf('if (params.get("view") !== "connections")'), app.indexOf('params.delete("m365")'));
+  const connections = app.slice(app.indexOf("function HostedConnectorDetail"), app.indexOf("function ChatPart"));
+
+  assert.match(refreshEffect, /new AbortController/);
+  assert.match(refreshEffect, /connectionApi\.catalog\(\{ signal: controller\.signal \}\)/);
+  assert.match(refreshEffect, /\[activeNav, connectionsView, connectionCatalogRefresh, session\?\.user\.id\]/);
+  assert.match(refreshEffect, /controller\.abort\(\)/);
+  assert.match(popState, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
+  assert.match(selectNav, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
+  assert.match(oauthReturn, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
+  assert.match(api, /catalog: \(options = \{\}\) => request\("\/api\/v1\/connections", \{ cache: "no-store", \.\.\.options \}\)/);
+  assert.match(connections, /const activation = activationFor\(connector\);/);
+  assert.match(connections, /const canConnect = activation\.action === "connect";/);
+  assert.match(connections, /activationActionLabel\(activation\)/);
+  assert.doesNotMatch(connections, /connector\.available|state === "unavailable"/);
+  assert.match(app, /activation\.action === "view_setup" \? "View setup"/);
+  assert.match(app, /const categories = \["Productivity", "Developer tools", "Business"/);
+});

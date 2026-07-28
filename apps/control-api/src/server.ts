@@ -145,7 +145,7 @@ const createConnectorSchema = z.strictObject({
   name: z.string().trim().min(2).max(80),
   shortDescription: z.string().trim().min(3).max(140),
   description: z.string().trim().min(3).max(600),
-  category: z.enum(["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"]),
+  category: z.enum(["Productivity", "Developer tools", "Business", "Communication", "Data and analytics", "Other"]),
   services: z.array(z.string().trim().min(1).max(80)).max(16).default([]),
   endpointUrl: z.string().url().max(2048),
   scopes: z.array(z.string().trim().min(1).max(160)).max(64).default([]),
@@ -1193,7 +1193,6 @@ export function createControlServer(
   app.get("/v1/connections", async (request) => {
     const actor = principal(request);
     const catalog = await requireConnections().list(actor.identity, isAdministrator(actor));
-    await refreshOwnedWorkspaceConnectionGrants(actor);
     return catalog;
   });
   app.get("/v1/admin/connectors", async (request) => {

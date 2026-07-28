@@ -19,6 +19,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
   const completions: string[] = [];
   const startedServers: string[] = [];
   const completedServers: string[] = [];
+  let providerStatusCalls = 0;
   const disconnects: IdentityContext[] = [];
   const gateway: GatewayClient & OAuthConnectionGateway & Pick<McpConnectorAdministrationGateway, "ensureOAuthMcpServers"> = {
     ensureGrant: async () => ({ baseUrl: "http://gateway", credential: "scoped-test-credential-000001", modelAlias: "test", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
@@ -48,12 +49,15 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
         account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
       };
     },
-    userOAuthConnectionStatus: async () => ({
+    userOAuthConnectionStatus: async () => {
+      providerStatusCalls += 1;
+      return {
       state: "connected",
       connectedAt: "2026-07-20T01:02:03Z",
       expiresAt: "2026-07-20T02:02:03Z",
       account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
-    }),
+      };
+    },
     disconnectUserOAuthConnection: async (identity) => {
       disconnects.push(identity);
       return { state: "disconnected", connectedAt: null, expiresAt: null, account: null };
@@ -82,15 +86,17 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       ["figma", "onecomputer_figma"],
     ]);
     assert.ok(connectorCards.some((connector) => connector.id === "stripe"));
+    assert.equal(providerStatusCalls, 0, "catalog browsing must not probe a provider connection");
 
     const status = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(status.statusCode, 200);
     assert.deepEqual(status.json(), {
-      state: "connected",
-      connectedAt: "2026-07-20T01:02:03Z",
-      expiresAt: "2026-07-20T02:02:03Z",
-      account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
+      state: "disconnected",
+      connectedAt: null,
+      expiresAt: null,
+      account: null,
     });
+    assert.equal(providerStatusCalls, 0, "an unconnected status read must remain local");
 
     const start = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365/authorize", headers: headersFor(alpha) });
     assert.equal(start.statusCode, 302);
@@ -109,6 +115,14 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.deepEqual(completions, [callbackCode]);
     assert.deepEqual(startedServers, ["onecomputer_ms365"]);
     assert.deepEqual(completedServers, ["onecomputer_ms365"]);
+
+    const connectedCatalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
+    assert.equal(connectedCatalog.statusCode, 200);
+    const connectedMicrosoft = (connectedCatalog.json().connections as Array<{ id: string; state: string; account: unknown }>)
+      .find((connector) => connector.id === "microsoft-365");
+    assert.equal(connectedMicrosoft?.state, "connected");
+    assert.equal(connectedMicrosoft?.account, null);
+    assert.equal(providerStatusCalls, 0, "catalog cards read the durable safe marker instead of provider credentials");
 
     const replay = await app.inject({
       method: "GET",

@@ -61,6 +61,17 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   async removeMcpServer() {}
 }
 
+const completeFixtureConnection = async (
+  service: McpConnectionService,
+  gateway: FakeConnectionGateway,
+  identity: IdentityContext,
+  connectorId: string,
+) => {
+  await service.start(identity, connectorId);
+  const request = gateway.started.at(-1)!;
+  return service.complete(identity, connectorId, { state: request.state, code: "fixture-authorization-code" });
+};
+
 test("owned Microsoft 365 flow binds state and PKCE to the initiating ONEComputer identity", async () => {
   const gateway = new FakeConnectionGateway();
   const service = new Microsoft365ConnectionService(gateway, {
@@ -139,7 +150,8 @@ test("the default catalog exposes 20 cards and registers a remote server only on
     ["asana", "onecomputer_asana"],
     ["figma", "onecomputer_figma"],
   ]);
-  assert.deepEqual(gateway.statusServers, defaultCards.map(([, serverName]) => serverName));
+  assert.deepEqual(gateway.statusServers, [], "browsing cards must not mint connection grants");
+  assert.deepEqual(gateway.toolServers, [], "browsing cards must not discover provider tools");
   assert.equal(gateway.ensured.length, 0, "listing the catalog must not register remote MCP servers");
   await service.start(alpha, "figma");
   assert.deepEqual(gateway.ensured.map((connectors) => connectors.map((connector) => connector.serverName)), [
@@ -147,6 +159,39 @@ test("the default catalog exposes 20 cards and registers a remote server only on
   ]);
   assert.ok(catalog.connections.every((connector) => connector.available));
   assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));
+  const github = catalog.connections.find((connector) => connector.id === "github")!;
+  assert.deepEqual(github.activation, { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." });
+  const asana = catalog.connections.find((connector) => connector.id === "asana")!;
+  assert.deepEqual(asana.activation, { readiness: "request_access", action: "view_requirements", message: "This service needs provider approval or organization access before people can connect." });
+  assert.ok(catalog.connections.some((connector) => connector.category === "Business"));
+});
+
+test("setup and request catalog actions never start a misleading provider OAuth flow", async () => {
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  await assert.rejects(() => service.start(alpha, "github"), { code: "MCP_CONNECTOR_SETUP_REQUIRED" });
+  await assert.rejects(() => service.start(alpha, "asana"), { code: "MCP_CONNECTOR_REQUEST_REQUIRED" });
+  assert.deepEqual(gateway.started, []);
+  assert.deepEqual(gateway.ensured, []);
+});
+
+test("unconnected connector policy inspection never probes provider grants or tools", async () => {
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+
+  await assert.rejects(
+    () => service.connectorToolPolicy(alpha, "linear"),
+    { code: "MCP_CONNECTOR_NOT_CONNECTED" },
+  );
+
+  assert.deepEqual(gateway.statusServers, []);
+  assert.deepEqual(gateway.toolServers, []);
 });
 
 test("only explicitly connected catalog services contribute workspace tools", async () => {
@@ -158,6 +203,7 @@ test("only explicitly connected catalog services contribute workspace tools", as
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
+  await completeFixtureConnection(service, gateway, alpha, "figma");
   const basePolicy: RuntimePolicy = {
     schemaVersion: 1,
     policyVersionId: "policy-v1",
@@ -181,6 +227,7 @@ test("only explicitly connected catalog services contribute workspace tools", as
   assert.deepEqual(projected.mcpToolPermissions?.onecomputer_figma, ["get_design_context"]);
   assert.equal(projected.mcpToolPermissions?.onecomputer_asana, undefined);
   assert.deepEqual(gateway.toolServers, ["onecomputer_figma"]);
+  assert.deepEqual(gateway.statusServers, ["onecomputer_figma"]);
 });
 
 test("hosted connector OAuth binds the selected catalog entry and refuses cross-connector callbacks", async () => {
@@ -211,6 +258,7 @@ test("hosted connector tools default to allow and persist explicit approval rule
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
+  await completeFixtureConnection(service, gateway, alpha, "linear");
 
   const initial = await service.connectorToolPolicy(alpha, "linear");
   assert.deepEqual(initial.tools.map((tool) => [tool.name, tool.decision]), [
@@ -241,6 +289,7 @@ test("organization connector access policy locks member changes and removes disa
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
+  await completeFixtureConnection(service, gateway, alpha, "linear");
   await service.saveConnectorToolPolicy(alpha, "linear", {
     create_issue: "approval_required",
     list_issues: "deny",
@@ -336,6 +385,7 @@ test("administrators can add a connector without code and connected tools are pr
   const serverName = gateway.registered[0]!.serverName;
   gateway.statusByServer.set(serverName, connected);
   gateway.toolsByServer.set(serverName, ["create_task", "list_tasks"]);
+  await completeFixtureConnection(service, gateway, alpha, created.id);
   const basePolicy: RuntimePolicy = {
     schemaVersion: 1,
     policyVersionId: "policy-v1",
@@ -379,6 +429,7 @@ test("expired connections share one safe renewal and re-read the connected state
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
+  await completeFixtureConnection(service, gateway, alpha, "linear");
 
   const first = service.status(alpha, "linear");
   await discoveryStarted;
@@ -399,6 +450,7 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
+  await completeFixtureConnection(service, gateway, alpha, "linear");
   const policy: RuntimePolicy = {
     schemaVersion: 1,
     policyVersionId: "policy-v1",

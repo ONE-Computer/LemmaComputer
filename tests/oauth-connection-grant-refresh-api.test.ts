@@ -33,6 +33,7 @@ test("a failed silent connector renewal reissues an existing workspace grant wit
   let linearState: OAuthConnectionStatus["state"] = "connected";
   let renewalFails = false;
   let renewalAttempts = 0;
+  let oauthState = "";
   const gateway: GatewayClient & OAuthConnectionGateway & Pick<McpConnectorAdministrationGateway, "ensureOAuthMcpServers"> = {
     ensureGrant: async (input) => {
       assert.ok(input.policy);
@@ -72,7 +73,10 @@ test("a failed silent connector renewal reissues an existing workspace grant wit
     }),
     revoke: async () => undefined,
     ensureOAuthMcpServers: async () => undefined,
-    beginUserOAuthConnection: async () => ({ location: "http://provider/authorize", cookies: [] }),
+    beginUserOAuthConnection: async (input) => {
+      oauthState = input.state;
+      return { location: "http://provider/authorize", cookies: [] };
+    },
     completeUserOAuthConnection: async () => connected(),
     userOAuthConnectionStatus: async (_identity, serverName) => {
       if (serverName === "onecomputer_linear") return linearState === "connected" ? connected() : expired();
@@ -108,6 +112,19 @@ test("a failed silent connector renewal reissues an existing workspace grant wit
   );
 
   try {
+    const authorize = await app.inject({
+      method: "GET",
+      url: "/v1/connections/linear/authorize",
+      headers,
+    });
+    assert.equal(authorize.statusCode, 302);
+    const callback = await app.inject({
+      method: "GET",
+      url: `/v1/connections/linear/callback?state=${encodeURIComponent(oauthState)}&code=fixture-authorization-code`,
+      headers,
+    });
+    assert.equal(callback.statusCode, 303);
+
     const created = await app.inject({
       method: "POST",
       url: "/v1/workspaces",
@@ -118,6 +135,10 @@ test("a failed silent connector renewal reissues an existing workspace grant wit
     assert.equal(issuedPolicies.length, 1);
     assert.deepEqual(issuedPolicies[0]!.mcpServers, ["onecomputer_fixture", "onecomputer_linear"]);
     assert.deepEqual(issuedPolicies[0]!.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+
+    const browsed = await app.inject({ method: "GET", url: "/v1/connections", headers });
+    assert.equal(browsed.statusCode, 200);
+    assert.equal(issuedPolicies.length, 1, "browsing the catalog must not issue or refresh a workspace grant");
 
     linearState = "expired";
     renewalFails = true;

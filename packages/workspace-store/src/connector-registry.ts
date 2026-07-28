@@ -1,7 +1,24 @@
 import pg from "pg";
 import type { McpToolPolicyDecision } from "@onecomputer/contracts";
 
-export type ConnectorCategory = "Productivity" | "Developer tools" | "Communication" | "Data and analytics" | "Other";
+export type ConnectorCategory = "Productivity" | "Developer tools" | "Business" | "Communication" | "Data and analytics" | "Other";
+
+/**
+ * Safe per-person connection metadata. OAuth credentials remain in LiteLLM.
+ */
+export type ConnectorConnectionState = "connected" | "expired";
+
+export type ConnectorConnectionStateRecord = {
+  tenantId: string;
+  subjectId: string;
+  connectorId: string;
+  state: ConnectorConnectionState;
+  connectedAt: Date | null;
+  expiresAt: Date | null;
+  updatedAt: Date;
+};
+
+export type SaveConnectorConnectionStateRecord = Omit<ConnectorConnectionStateRecord, "updatedAt">;
 
 export type ConnectorRegistryRecord = {
   tenantId: string;
@@ -45,6 +62,10 @@ export interface ConnectorRegistryStore {
   seedConnectors(tenantId: string, connectors: SaveConnectorRegistryRecord[]): Promise<void>;
   listConnectors(tenantId: string): Promise<ConnectorRegistryRecord[]>;
   getConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
+  listConnectionStates(tenantId: string, subjectId: string): Promise<ConnectorConnectionStateRecord[]>;
+  getConnectionState(tenantId: string, subjectId: string, connectorId: string): Promise<ConnectorConnectionStateRecord | null>;
+  saveConnectionState(record: SaveConnectorConnectionStateRecord): Promise<ConnectorConnectionStateRecord>;
+  deleteConnectionState(tenantId: string, subjectId: string, connectorId: string): Promise<boolean>;
   saveConnector(record: SaveConnectorRegistryRecord): Promise<ConnectorRegistryRecord>;
   updateAccessPolicy(tenantId: string, connectorId: string, input: { enabled: boolean; membersCanManage: boolean; updatedBy: string }): Promise<ConnectorRegistryRecord | null>;
   updateToolPolicies(tenantId: string, connectorId: string, tools: Record<string, McpToolPolicyDecision>): Promise<ConnectorRegistryRecord | null>;
@@ -79,6 +100,16 @@ const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
   source: row.source as ConnectorRegistryRecord["source"],
   createdBy: String(row.created_by),
   createdAt: new Date(String(row.created_at)),
+  updatedAt: new Date(String(row.updated_at)),
+});
+
+const mapConnectionStateRow = (row: Record<string, unknown>): ConnectorConnectionStateRecord => ({
+  tenantId: String(row.tenant_id),
+  subjectId: String(row.subject_id),
+  connectorId: String(row.connector_id),
+  state: row.state as ConnectorConnectionState,
+  connectedAt: row.connected_at ? new Date(String(row.connected_at)) : null,
+  expiresAt: row.expires_at ? new Date(String(row.expires_at)) : null,
   updatedAt: new Date(String(row.updated_at)),
 });
 
@@ -156,6 +187,45 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
     return result.rowCount ? mapRow(result.rows[0]) : null;
   }
 
+  async listConnectionStates(tenantId: string, subjectId: string) {
+    const result = await this.pool.query(
+      "SELECT * FROM connector_connection_state WHERE tenant_id=$1 AND subject_id=$2 ORDER BY connector_id",
+      [tenantId, subjectId],
+    );
+    return result.rows.map(mapConnectionStateRow);
+  }
+
+  async getConnectionState(tenantId: string, subjectId: string, connectorId: string) {
+    const result = await this.pool.query(
+      "SELECT * FROM connector_connection_state WHERE tenant_id=$1 AND subject_id=$2 AND connector_id=$3",
+      [tenantId, subjectId, connectorId],
+    );
+    return result.rowCount ? mapConnectionStateRow(result.rows[0]) : null;
+  }
+
+  async saveConnectionState(record: SaveConnectorConnectionStateRecord) {
+    const result = await this.pool.query(
+      `INSERT INTO connector_connection_state (tenant_id,subject_id,connector_id,state,connected_at,expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (tenant_id,subject_id,connector_id) DO UPDATE SET
+         state=EXCLUDED.state,
+         connected_at=EXCLUDED.connected_at,
+         expires_at=EXCLUDED.expires_at,
+         updated_at=now()
+       RETURNING *`,
+      [record.tenantId, record.subjectId, record.connectorId, record.state, record.connectedAt, record.expiresAt],
+    );
+    return mapConnectionStateRow(result.rows[0]);
+  }
+
+  async deleteConnectionState(tenantId: string, subjectId: string, connectorId: string) {
+    const result = await this.pool.query(
+      "DELETE FROM connector_connection_state WHERE tenant_id=$1 AND subject_id=$2 AND connector_id=$3",
+      [tenantId, subjectId, connectorId],
+    );
+    return Boolean(result.rowCount);
+  }
+
   async saveConnector(record: SaveConnectorRegistryRecord) {
     const result = await this.pool.query(
       `INSERT INTO connector_registry (
@@ -211,7 +281,9 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
 
 export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
   private readonly records = new Map<string, ConnectorRegistryRecord>();
+  private readonly connectionStates = new Map<string, ConnectorConnectionStateRecord>();
   private key(tenantId: string, connectorId: string) { return `${tenantId}:${connectorId}`; }
+  private connectionStateKey(tenantId: string, subjectId: string, connectorId: string) { return `${tenantId}\u0000${subjectId}\u0000${connectorId}`; }
 
   async seedConnectors(_tenantId: string, connectors: SaveConnectorRegistryRecord[]) {
     for (const connector of connectors) {
@@ -232,6 +304,28 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
 
   async getConnector(tenantId: string, connectorId: string) {
     return this.records.get(this.key(tenantId, connectorId)) ?? null;
+  }
+
+  async listConnectionStates(tenantId: string, subjectId: string) {
+    return [...this.connectionStates.values()]
+      .filter((record) => record.tenantId === tenantId && record.subjectId === subjectId)
+      .sort((left, right) => left.connectorId.localeCompare(right.connectorId));
+  }
+
+  async getConnectionState(tenantId: string, subjectId: string, connectorId: string) {
+    return this.connectionStates.get(this.connectionStateKey(tenantId, subjectId, connectorId)) ?? null;
+  }
+
+  async saveConnectionState(record: SaveConnectorConnectionStateRecord) {
+    if (!this.records.has(this.key(record.tenantId, record.connectorId))) throw new Error("Connector does not exist");
+    const now = new Date();
+    const saved = { ...record, updatedAt: now };
+    this.connectionStates.set(this.connectionStateKey(record.tenantId, record.subjectId, record.connectorId), saved);
+    return saved;
+  }
+
+  async deleteConnectionState(tenantId: string, subjectId: string, connectorId: string) {
+    return this.connectionStates.delete(this.connectionStateKey(tenantId, subjectId, connectorId));
   }
 
   async saveConnector(record: SaveConnectorRegistryRecord) {
@@ -295,6 +389,9 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
     const record = this.records.get(key);
     if (!record || record.source !== "custom") return null;
     this.records.delete(key);
+    for (const [stateKey, state] of this.connectionStates) {
+      if (state.tenantId === tenantId && state.connectorId === connectorId) this.connectionStates.delete(stateKey);
+    }
     return record;
   }
 }

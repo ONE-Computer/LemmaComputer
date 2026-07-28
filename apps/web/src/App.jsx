@@ -1176,6 +1176,8 @@ const connectionReason = {
   MCP_OAUTH_STATE_EXPIRED: "That connection attempt expired. Please start again.",
   MCP_OAUTH_IDENTITY_MISMATCH: "That connection attempt belongs to another signed-in user.",
   MCP_OAUTH_CONNECTOR_MISMATCH: "That connection returned to a different connector. Please start again.",
+  MCP_CONNECTOR_SETUP_REQUIRED: "This service needs organization setup before it can be connected.",
+  MCP_CONNECTOR_REQUEST_REQUIRED: "This service needs provider approval or organization access before it can be connected.",
   MCP_TOKEN_EXCHANGE_FAILED: "The provider could not complete the connection. Please try again.",
   M365_OAUTH_DENIED: "Microsoft 365 access was not granted. You can try again when you’re ready.",
   M365_OAUTH_STATE_INVALID: "That connection attempt expired or was already used. Please start again.",
@@ -1183,6 +1185,16 @@ const connectionReason = {
   M365_OAUTH_IDENTITY_MISMATCH: "That connection attempt belongs to another signed-in user.",
   M365_TOKEN_EXCHANGE_FAILED: "Microsoft 365 could not complete the connection. Please try again.",
 };
+
+const defaultConnectorActivation = {
+  readiness: "request_access",
+  action: "view_requirements",
+  message: "This service needs provider approval or organization access before people can connect.",
+};
+const activationFor = (connector) => connector?.activation ?? defaultConnectorActivation;
+const activationActionLabel = (activation) => (
+  activation.action === "view_setup" ? "View setup" : activation.action === "view_requirements" ? "View requirements" : "Connect"
+);
 
 const getApprovalDeviceContext = async () => {
   const local = await getBrowserApproverIdentity();
@@ -1449,7 +1461,10 @@ function ConnectorIconEditor({ connector, busy, onSave }) {
 function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
-  const unavailable = connector?.state === "unavailable";
+  const activation = activationFor(connector);
+  const canConnect = activation.action === "connect";
+  const setupRequired = activation.readiness === "setup_required";
+  const accessRequired = activation.readiness === "request_access";
   const organizationDisabled = connector?.enabled === false;
   const connectionLocked = connector?.canManageConnection === false;
   const connectedAt = connector?.connectedAt
@@ -1463,9 +1478,11 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
       ? "Connected"
       : expired
         ? "Reconnect required"
-        : unavailable
-          ? connector?.available ? "Service unavailable" : "Setup required"
-          : "Not connected";
+        : setupRequired
+          ? "Setup required"
+          : accessRequired
+            ? "Access required"
+            : "Not connected";
   return (
     <div className="secondary-screen connections-screen connector-detail-screen">
       <button className="connector-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Connections</button>
@@ -1490,27 +1507,36 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
         <section className="connector-overview-card">
           <div>
             <p>Connection status</p>
-            <h2>{organizationDisabled ? "Disabled by your organization" : connectionLocked ? "Managed by your administrator" : connected ? "Connection ready" : expired ? "Provider access needs attention" : unavailable ? "Administrator setup required" : `Connect ${connector.name}`}</h2>
+            <h2>{organizationDisabled
+              ? "Disabled by your organization"
+              : connectionLocked ? "Managed by your administrator" : connected ? "Connection ready" : expired ? "Provider access needs attention"
+                : setupRequired ? "Organization setup required"
+                  : accessRequired ? "Provider approval or access required"
+                    : `Connect ${connector.name}`}</h2>
             <span>{organizationDisabled
               ? "This connector and its workspace tools are unavailable until an administrator enables it."
               : connectionLocked
                 ? "Your existing connection status is visible, but only an administrator can change it."
                 : connected
               ? "Your account is connected and ready for any tools your organization approves."
-              : unavailable
-                ? "An administrator must finish setting up this service before people can connect it."
-                : connector.description}</span>
+              : expired
+                ? "Provider access needs attention. Reconnect to restore it."
+                : canConnect
+                  ? connector.description
+                  : activation.message}</span>
             {connector.services.length > 0 && <div className="connection-services" aria-label="Included services">{connector.services.map((service) => <span key={service}>{service}</span>)}</div>}
             {connectedAt && <p className="connection-metadata">Connected {connectedAt}</p>}
           </div>
           <div className="connection-actions">
             {connected ? (
               <button className="secondary-button" type="button" onClick={() => onDisconnect(connector)} disabled={busy || loading || organizationDisabled || connectionLocked}>{busy ? "Disconnecting" : "Disconnect"}</button>
-            ) : (
-              <button className="primary-button" type="button" onClick={() => onConnect(connector.id)} disabled={busy || loading || unavailable || organizationDisabled || connectionLocked}>
+            ) : canConnect ? (
+              <button className="primary-button" type="button" onClick={() => onConnect(connector.id)} disabled={busy || loading || organizationDisabled || connectionLocked}>
                 <PlugConnected24Regular aria-hidden="true" />
                 {busy ? `Opening ${connector.name}` : expired ? "Reconnect" : `Connect ${connector.name}`}
               </button>
+            ) : (
+              <div className="connection-privacy-note" role="status"><Info24Regular aria-hidden="true" /><p><strong>{activationActionLabel(activation)}</strong>{activation.message}</p></div>
             )}
           </div>
         </section>
@@ -1750,7 +1776,7 @@ function AddConnectorDialog({ onCreated, onClose }) {
       <div className="add-connector-fields">
         <label className="wide"><span>MCP server URL</span><input name="connector-endpoint-url" type="url" placeholder="https://service.example.com/mcp" value={draft.endpointUrl} onChange={(event) => update("endpointUrl", event.target.value)} disabled={Boolean(busy)} /></label>
         <label><span>Name</span><input name="connector-name" placeholder="Service name" value={draft.name} onChange={(event) => update("name", event.target.value)} disabled={Boolean(busy)} /></label>
-        <label><span>Category</span><SelectMenu value={draft.category} onValueChange={(value) => update("category", value)} ariaLabel="Connector category" disabled={Boolean(busy)} options={["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"].map((value) => ({ value, label: value }))} /></label>
+        <label><span>Category</span><SelectMenu value={draft.category} onValueChange={(value) => update("category", value)} ariaLabel="Connector category" disabled={Boolean(busy)} options={["Productivity", "Developer tools", "Business", "Communication", "Data and analytics", "Other"].map((value) => ({ value, label: value }))} /></label>
         <label className="wide"><span>Card description</span><input name="connector-short-description" placeholder="What people can do with this service" value={draft.shortDescription} onChange={(event) => update("shortDescription", event.target.value)} disabled={Boolean(busy)} /></label>
         <label className="wide connector-icon-field">
           <span>Connector icon <em>Optional</em></span>
@@ -1796,7 +1822,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
       return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
   }
-  const categories = ["Productivity", "Developer tools", "Communication", "Data and analytics", "Other"];
+  const categories = ["Productivity", "Developer tools", "Business", "Communication", "Data and analytics", "Other"];
   return (
     <div className="secondary-screen connections-screen">
       <div className="connections-page-intro">
@@ -1823,7 +1849,10 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
               {categoryConnections.map((connector) => {
                 const connected = connector.state === "connected";
                 const expired = connector.state === "expired";
-                const unavailable = connector.state === "unavailable";
+                const activation = activationFor(connector);
+                const canConnect = activation.action === "connect";
+                const setupRequired = activation.readiness === "setup_required";
+                const accessRequired = activation.readiness === "request_access";
                 const organizationDisabled = connector.enabled === false;
                 const connectionLocked = connector.canManageConnection === false;
                 const busy = busyConnectorId === connector.id;
@@ -1833,7 +1862,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                     <div className="connector-catalog-copy">
                       <div>
                         <h3>{connector.name}</h3>
-                        <span className={`connector-card-state ${connected ? "connected" : expired ? "expired" : ""}`}>{loading ? "Checking" : organizationDisabled ? "Disabled" : connected ? "Connected" : expired ? "Reconnect" : unavailable ? connector.available ? "Gateway unavailable" : "Not registered" : connectionLocked ? "Admin managed" : "Available"}</span>
+                        <span className={`connector-card-state ${connected ? "connected" : expired ? "expired" : ""}`}>{loading ? "Checking" : organizationDisabled ? "Disabled" : connected ? "Connected" : expired ? "Reconnect" : connectionLocked ? "Admin managed" : setupRequired ? "Setup required" : accessRequired ? "Access required" : "Available"}</span>
                       </div>
                       <p>{connector.shortDescription}</p>
                       <small>{connector.policySupport === "governed" ? "Approved tools ready" : "Added to workspace agents after connection"}</small>
@@ -1842,8 +1871,10 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                       {isAdmin && connector.source === "custom" && !connected && <button className="connector-manage-link" type="button" onClick={() => onViewChange(`connector-${connector.id}`)}>Manage</button>}
                       {connected ? (
                         <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
+                      ) : canConnect ? (
+                        <button className="secondary-button" type="button" onClick={() => onConnect(connector.id)} disabled={loading || busy || organizationDisabled || connectionLocked}>{busy ? "Opening" : expired ? "Reconnect" : "Connect"}</button>
                       ) : (
-                        <button className="secondary-button" type="button" onClick={() => onConnect(connector.id)} disabled={loading || busy || unavailable || organizationDisabled || connectionLocked}>{busy ? "Opening" : expired ? "Reconnect" : "Connect"}</button>
+                        <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)} disabled={loading}>{activationActionLabel(activation)}<ChevronRight16Regular aria-hidden="true" /></button>
                       )}
                     </div>
                   </article>
@@ -2662,6 +2693,7 @@ export function App() {
   const [connectionLoading, setConnectionLoading] = useState(true);
   const [connectionBusy, setConnectionBusy] = useState("");
   const [connectionError, setConnectionError] = useState("");
+  const [connectionCatalogRefresh, setConnectionCatalogRefresh] = useState(0);
   const [connectorDialogOpen, setConnectorDialogOpen] = useState(false);
   const [telegramConnection, setTelegramConnection] = useState(null);
   const [telegramLoading, setTelegramLoading] = useState(false);
@@ -2747,7 +2779,10 @@ export function App() {
       const name = navFromLocation();
       setActiveNav(name);
       setActiveChatSessionId(chatSessionFromLocation());
-      if (name === "Connections") setConnectionsView("list");
+      if (name === "Connections") {
+        setConnectionsView("list");
+        setConnectionCatalogRefresh((current) => current + 1);
+      }
       if (name === "Settings") setSettingsView("overview");
       if (name === "Workspace") {
         setSelectedSandboxGrantId(null);
@@ -2858,14 +2893,35 @@ export function App() {
       .finally(() => setHomeWorkspacesLoading(false));
     operationApi.recent().then(setOperation).catch(showApiError);
     operationApi.list().then((value) => setOperationHistory(value.operations)).catch(showApiError);
-    connectionApi.catalog()
-      .then((value) => setMcpConnections(value.connections))
-      .catch((error) => setConnectionError(error.message))
-      .finally(() => setConnectionLoading(false));
     connectionApi.credentials()
       .then((value) => setCredentials(value.credentials))
       .catch((error) => setCredentialsError(error.message));
   }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session || activeNav !== "Connections") return undefined;
+    const controller = new AbortController();
+    let active = true;
+    setConnectionLoading(true);
+    setConnectionError("");
+    connectionApi.catalog({ signal: controller.signal })
+      .then((value) => {
+        if (!active) return;
+        setMcpConnections(value.connections);
+        setConnectionError("");
+      })
+      .catch((error) => {
+        if (!active || error?.name === "AbortError") return;
+        setConnectionError(error.message);
+      })
+      .finally(() => {
+        if (active) setConnectionLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [activeNav, connectionsView, connectionCatalogRefresh, session?.user.id]);
 
   useEffect(() => {
     if (!session || activeNav !== "Settings" || settingsView !== "credentials") return;
@@ -2936,11 +2992,7 @@ export function App() {
     if (result === "connected") {
       const connectorName = mcpConnections.find((connector) => connector.id === connectorId)?.name ?? "The service";
       setToast(`${connectorName} is connected.`);
-      setConnectionLoading(true);
-      connectionApi.catalog()
-        .then((value) => { setMcpConnections(value.connections); setConnectionError(""); })
-        .catch((error) => setConnectionError(error.message))
-        .finally(() => setConnectionLoading(false));
+      setConnectionCatalogRefresh((current) => current + 1);
     } else if (result === "error") {
       const reason = params.get("reason");
       setConnectionError(connectionReason[reason] ?? "The provider could not complete the connection. Please try again.");
@@ -3580,7 +3632,10 @@ export function App() {
     else if (nextLocation !== `${window.location.pathname}${window.location.search}`) {
       window.history.pushState({}, "", nextLocation);
     }
-    if (name === "Connections") setConnectionsView("list");
+    if (name === "Connections") {
+      setConnectionsView("list");
+      setConnectionCatalogRefresh((current) => current + 1);
+    }
     if (name === "Settings") setSettingsView("overview");
     if (name === "Workspace") { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }
     setProfileOpen(false);

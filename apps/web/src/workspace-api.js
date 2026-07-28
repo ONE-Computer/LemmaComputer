@@ -76,7 +76,7 @@ export const operationApi = {
 };
 
 export const connectionApi = {
-  catalog: () => request("/api/v1/connections", { cache: "no-store" }),
+  catalog: (options = {}) => request("/api/v1/connections", { cache: "no-store", ...options }),
   status: (connectorId) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, { cache: "no-store" }),
   authorizeUrl: (connectorId) => `/api/v1/connections/${encodeURIComponent(connectorId)}/authorize`,
   disconnect: (connectorId) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, mutation("DELETE")),
