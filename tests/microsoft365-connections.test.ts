@@ -121,7 +121,7 @@ test("expired, denied, and malformed callbacks fail before token exchange", asyn
   assert.equal(gateway.completed.length, 0);
 });
 
-test("the approved catalog maps every ONEComputer connector to one LiteLLM MCP server", async () => {
+test("the default catalog exposes 20 cards and registers a remote server only on Connect", async () => {
   const gateway = new FakeConnectionGateway();
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
@@ -129,27 +129,58 @@ test("the approved catalog maps every ONEComputer connector to one LiteLLM MCP s
   });
 
   const catalog = await service.list(alpha);
-  assert.deepEqual(catalog.connections.map((connector) => [connector.id, connector.serverName]), [
+  const defaultCards = catalog.connections.map((connector) => [connector.id, connector.serverName]);
+  assert.equal(defaultCards.length, 20);
+  assert.deepEqual(defaultCards.slice(0, 6), [
     ["microsoft-365", "onecomputer_ms365"],
     ["notion", "onecomputer_notion"],
     ["linear", "onecomputer_linear"],
     ["atlassian", "onecomputer_atlassian"],
-    ["github", "onecomputer_github"],
+    ["asana", "onecomputer_asana"],
+    ["figma", "onecomputer_figma"],
   ]);
-  assert.deepEqual(gateway.statusServers, [
-    "onecomputer_ms365",
-    "onecomputer_notion",
-    "onecomputer_linear",
-    "onecomputer_atlassian",
-    "onecomputer_github",
-  ]);
-  assert.deepEqual(gateway.ensured[0]?.map((connector) => connector.serverName), [
-    "onecomputer_notion",
-    "onecomputer_linear",
-    "onecomputer_atlassian",
+  assert.deepEqual(gateway.statusServers, defaultCards.map(([, serverName]) => serverName));
+  assert.equal(gateway.ensured.length, 0, "listing the catalog must not register remote MCP servers");
+  await service.start(alpha, "figma");
+  assert.deepEqual(gateway.ensured.map((connectors) => connectors.map((connector) => connector.serverName)), [
+    ["onecomputer_figma"],
   ]);
   assert.ok(catalog.connections.every((connector) => connector.available));
   assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));
+});
+
+test("only explicitly connected catalog services contribute workspace tools", async () => {
+  const gateway = new FakeConnectionGateway();
+  gateway.statusByServer.set("onecomputer_figma", connected);
+  gateway.toolsByServer.set("onecomputer_figma", ["get_design_context"]);
+  gateway.toolsByServer.set("onecomputer_asana", ["create_task"]);
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  const basePolicy: RuntimePolicy = {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: "agent-alpha",
+    agentProfile: "claude-desktop-managed-v1",
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+
+  const projected = await service.projectConnectedConnectors(alpha, basePolicy);
+
+  assert.deepEqual(projected.mcpServers, ["onecomputer_ms365", "onecomputer_figma"]);
+  assert.deepEqual(projected.mcpToolPermissions?.onecomputer_figma, ["get_design_context"]);
+  assert.equal(projected.mcpToolPermissions?.onecomputer_asana, undefined);
+  assert.deepEqual(gateway.toolServers, ["onecomputer_figma"]);
 });
 
 test("hosted connector OAuth binds the selected catalog entry and refuses cross-connector callbacks", async () => {

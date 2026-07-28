@@ -115,12 +115,26 @@ for the exact local redirect URIs and delegated permission list.
 
 ### Hosted MCP connectors
 
+The unified **Connections** screen includes a built-in catalog of official,
+provider-hosted remote MCP servers. Listing this catalog only seeds non-secret
+metadata; it does not register every server with LiteLLM or expose its tools to
+an agent. Selecting **Connect** registers and checks only that selected
+connector, then starts its per-user OAuth flow.
+
 Notion, Linear, and Atlassian use their official hosted MCP endpoints and
 dynamic OAuth client registration. GitHub requires an OAuth app because its
 authorization server does not expose dynamic client registration. Configure
 `ONECOMPUTER_GITHUB_MCP_CLIENT_ID` and
 `ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET`, with the LiteLLM callback
-`${ONECOMPUTER_LITELLM_PUBLIC_URL}/callback` registered in GitHub.
+`${ONECOMPUTER_LITELLM_PUBLIC_URL}/callback` registered in GitHub. Other
+providers can impose their own OAuth-app approval or allow-list requirements;
+an unsuccessful registration or authorization leaves the catalog card
+disconnected and contributes no tools.
+
+After a person successfully connects a service, Control discovers that
+person's available tools and projects only those explicitly connected tools
+into that person's workspace grant. Cards that are visible but disconnected,
+disabled, or unavailable are never injected into the agent tool set.
 
 Administrators can add another OAuth-capable remote connector from
 **Connections → Add connector** without changing application code:

@@ -71,13 +71,17 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
   try {
     const catalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
     assert.equal(catalog.statusCode, 200);
-    assert.deepEqual(catalog.json().connections.map((connector: { id: string; serverName: string }) => [connector.id, connector.serverName]), [
+    const connectorCards = catalog.json().connections as Array<{ id: string; serverName: string }>;
+    assert.equal(connectorCards.length, 20);
+    assert.deepEqual(connectorCards.slice(0, 6).map((connector) => [connector.id, connector.serverName]), [
       ["microsoft-365", "onecomputer_ms365"],
       ["notion", "onecomputer_notion"],
       ["linear", "onecomputer_linear"],
       ["atlassian", "onecomputer_atlassian"],
-      ["github", "onecomputer_github"],
+      ["asana", "onecomputer_asana"],
+      ["figma", "onecomputer_figma"],
     ]);
+    assert.ok(connectorCards.some((connector) => connector.id === "stripe"));
 
     const status = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(status.statusCode, 200);

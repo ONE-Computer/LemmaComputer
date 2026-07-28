@@ -112,10 +112,11 @@ export class McpConnectionService {
       } catch (error) {
         const unavailable = error instanceof OneComputerError
           && ["MCP_CONNECTION_NOT_REGISTERED", "M365_MCP_NOT_REGISTERED"].includes(error.code);
+        const notYetActivated = unavailable && this.isOnDemandConnector(connector);
         return {
           ...publicConnector,
-          available: !unavailable,
-          state: "unavailable" as const,
+          available: notYetActivated || !unavailable,
+          state: notYetActivated ? "disconnected" as const : "unavailable" as const,
           connectedAt: null,
           expiresAt: null,
           account: null,
@@ -129,6 +130,7 @@ export class McpConnectionService {
     const connector = await this.connector(identity.tenantId, connectorId);
     this.requireConnectionManagement(connector, isAdministrator);
     this.pruneExpired();
+    await this.ensureManagedConnectorServers([connector]);
     const state = randomBytes(32).toString("base64url");
     const codeVerifier = randomBytes(48).toString("base64url");
     const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
@@ -495,7 +497,6 @@ export class McpConnectionService {
   private async connectors(tenantId: string) {
     const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
     await this.registry.seedConnectors(tenantId, seeded);
-    await this.ensureManagedConnectorServers(seeded).catch(() => undefined);
     const order = new Map(seeded.map((connector, index) => [connector.id, index]));
     return (await this.registry.listConnectors(tenantId)).sort((left, right) => (
       (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
@@ -509,16 +510,15 @@ export class McpConnectionService {
     await this.registry.seedConnectors(tenantId, seeded);
     const connector = await this.registry.getConnector(tenantId, connectorId);
     if (!connector) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "That connector is not in the approved catalog", 404);
-    await this.ensureManagedConnectorServers([connector]);
     return connector;
   }
 
   private async ensureManagedConnectorServers(connectors: Array<Pick<
     ConnectorDefinition,
-    "id" | "serverId" | "serverName" | "name" | "description" | "endpointUrl" | "scopes"
+    "id" | "serverId" | "serverName" | "name" | "description" | "endpointUrl" | "scopes" | "source"
   >>) {
     const managed = connectors
-      .filter((connector) => ["notion", "linear", "atlassian"].includes(connector.id))
+      .filter((connector) => this.isOnDemandConnector(connector))
       .map((connector) => ({
         serverId: connector.serverId,
         serverName: connector.serverName,
@@ -532,6 +532,10 @@ export class McpConnectionService {
       throw new OneComputerError("MCP_ADMINISTRATION_NOT_CONFIGURED", "Managed connector registration is unavailable", 503, true);
     }
     await this.gateway.ensureOAuthMcpServers(managed);
+  }
+
+  private isOnDemandConnector(connector: Pick<ConnectorDefinition, "id" | "source">) {
+    return connector.source === "built-in" && connector.id !== "microsoft-365";
   }
 
   private publicConnector(connector: ConnectorDefinition) {
