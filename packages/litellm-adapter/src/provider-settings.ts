@@ -196,7 +196,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
           temperature: 0,
         },
       });
-      if (!result.ok) throw this.providerFailure(result.status);
+      if (!result.ok) throw this.providerFailure(result.status, "credential");
     } finally {
       if (accessGroup) await this.call("/key/delete", { method: "POST", body: { keys: [credential] } }).catch(() => undefined);
     }
@@ -212,7 +212,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       const alias = deployment.model_name;
       const info = asObject(deployment.model_info);
       return typeof alias === "string" && aliases.has(alias)
-        && !(typeof info.id === "string" && info.id.startsWith("onecomputer-provider-") && Array.isArray(info.access_groups) && info.access_groups.every((group) => typeof group === "string" && group.startsWith("ocp-")));
+        && !(typeof info.id === "string" && info.id.startsWith("onecomputer-provider-") && Array.isArray(info.access_groups) && info.access_groups.length > 0 && info.access_groups.every((group) => typeof group === "string" && group.startsWith("ocp-")));
     });
     if (retiring) throw new OneComputerError("PROVIDER_STATIC_CUTOVER_REQUIRED", "Restart the installation with retired provider routes removed before configuring this provider", 409);
   }
@@ -266,7 +266,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
 
   private fingerprint(apiKey: string) {
     const digest = createHmac("sha256", this.credentialSecret)
-      .update(apiKey)
+      .update(`onecomputer:provider-fingerprint:${apiKey}`)
       .digest("base64url")
       .slice(0, 20);
     return `fp_${digest}`;
@@ -289,8 +289,8 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     }
   }
 
-  private providerFailure(status: number) {
-    if (status >= 400 && status < 500) {
+  private providerFailure(status: number, kind: "credential" | "route" = "route") {
+    if (kind === "credential" && status >= 400 && status < 500) {
       return new OneComputerError("PROVIDER_CREDENTIAL_REJECTED", "The provider API key or approved model access was rejected", 422);
     }
     return new OneComputerError("PROVIDER_ROUTE_FAILED", "The provider route could not be configured", 502, true);

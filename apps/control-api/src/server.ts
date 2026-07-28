@@ -2,13 +2,14 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
-import { LiteLLMGatewayAdapter, type GatewayClient, type GovernedToolExecutor, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
+import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
+import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
 import { EntraAuthenticationService, isAdministrator, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
@@ -157,6 +158,10 @@ const createConnectorSchema = z.strictObject({
 const connectorIconSchema = z.strictObject({
   iconDataUrl: z.string().max(350000).nullable(),
 });
+const providerNameSchema = z.enum(["openai", "anthropic"]);
+const saveProviderApiKeySchema = z.strictObject({
+  apiKey: z.string().trim().min(8).max(4096),
+});
 
 const envSchema = z.object({
   CONTROL_HOST: z.string().default("127.0.0.1"),
@@ -235,6 +240,8 @@ export function createControlServer(
     schedulerInternalToken?: string;
     schedulePromptSecret?: string;
     connectorRegistryStore?: ConnectorRegistryStore;
+    providerSettingsStore?: ProviderSettingsStore;
+    providerAdministration?: ProviderAdministrationGateway;
     workspaceIngress?: {
       publicUrl: string;
       authority: WorkspaceIngressAuthority;
@@ -294,6 +301,12 @@ export function createControlServer(
     liteLlmPublicUrl: connectionOptions.liteLlmPublicUrl,
     registry: security.connectorRegistryStore,
   }) : undefined;
+  if (Boolean(security.providerSettingsStore) !== Boolean(security.providerAdministration)) {
+    throw new Error("Provider settings dependencies must be configured together");
+  }
+  const providerSettings = security.providerSettingsStore && security.providerAdministration
+    ? new ProviderSettingsService(security.providerSettingsStore, security.providerAdministration)
+    : undefined;
   const mcpPolicy = security.identityPolicyStore ? new McpPolicyService(
     security.identityPolicyStore,
     store,
@@ -303,6 +316,16 @@ export function createControlServer(
   const requireConnections = () => {
     if (!connections) throw new OneComputerError("MCP_CONNECTIONS_NOT_CONFIGURED", "MCP connections are not configured", 503, true);
     return connections;
+  };
+  const requireProviderSettings = () => {
+    if (!providerSettings) throw new OneComputerError("PROVIDER_SETTINGS_NOT_CONFIGURED", "Provider settings are not configured", 503, true);
+    return providerSettings;
+  };
+  const assertProviderConfiguration = async (actor: SessionPrincipal, policy: RuntimePolicy) => {
+    if (!providerSettings) return;
+    for (const modelAlias of new Set([policy.modelAlias, ...(policy.agents?.map((agent) => agent.modelAlias) ?? [])])) {
+      await providerSettings.assertConfigured(actor, modelAlias);
+    }
   };
   const requireChannelBroker = () => {
     if (!channelBroker) throw new OneComputerError("CHANNEL_BROKER_NOT_CONFIGURED", "Messaging connections are not configured", 503, true);
@@ -474,6 +497,38 @@ export function createControlServer(
         failed: summary.failed + result.value.failed,
       };
     }, { refreshed: 0, failed: 0 });
+  };
+  const usesManagedProvider = (policy: RuntimePolicy, provider: ManagedProviderName) => (
+    [policy.modelAlias, ...(policy.agents?.map((agent) => agent.modelAlias) ?? [])]
+      .some((modelAlias) => managedProviderForAlias(modelAlias) === provider)
+  );
+  const revokeTenantProviderWorkspaceGrants = async (tenantId: string, provider: ManagedProviderName) => {
+    if (!security.identityPolicyStore || !gateway) return { revoked: 0, failed: 0 };
+    const users = await security.identityPolicyStore.listUsers(tenantId);
+    const usersResult = await Promise.allSettled(users.map(async (user) => {
+      if (user.status === "disabled") return { revoked: 0, failed: 0 };
+      const owner = await security.identityPolicyStore!.getPrincipal(user.userId);
+      const effective = owner ? await security.identityPolicyStore!.getEffectivePolicy(user.userId) : null;
+      if (!owner || owner.tenantId !== tenantId || !effective) return { revoked: 0, failed: 0 };
+      const workspaces = await store.listCurrent(owner.identity);
+      const results = await Promise.allSettled(workspaces.map(async (workspace) => {
+        const { policy } = await policyForGrant(owner, effective, workspace.grantId);
+        if (!usesManagedProvider(policy, provider)) return false;
+        await service.revokePolicyGrant(workspace.id, policy);
+        return true;
+      }));
+      return {
+        revoked: results.filter((result) => result.status === "fulfilled" && result.value).length,
+        failed: results.filter((result) => result.status === "rejected").length,
+      };
+    }));
+    return usersResult.reduce((summary, result) => {
+      if (result.status === "rejected") return { ...summary, failed: summary.failed + 1 };
+      return {
+        revoked: summary.revoked + result.value.revoked,
+        failed: summary.failed + result.value.failed,
+      };
+    }, { revoked: 0, failed: 0 });
   };
   const requirePolicy = async (request: object) => {
     const { principal: value, effective } = await assignedPolicy(request);
@@ -1098,6 +1153,43 @@ export function createControlServer(
       },
     };
   });
+  app.get("/v1/admin/provider-settings", async (request) => {
+    const actor = requireAdministrator(request);
+    return requireProviderSettings().list(actor);
+  });
+  app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
+    const actor = requireAdministrator(request);
+    const provider = providerNameSchema.parse(request.params.provider);
+    const input = saveProviderApiKeySchema.parse(request.body ?? {});
+    return { provider: await requireProviderSettings().configure(actor, provider, input.apiKey) };
+  });
+  app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/test", async (request) => {
+    const actor = requireAdministrator(request);
+    const provider = providerNameSchema.parse(request.params.provider);
+    return { provider: await requireProviderSettings().test(actor, provider) };
+  });
+  app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/disable", async (request) => {
+    const actor = requireAdministrator(request);
+    const provider = providerNameSchema.parse(request.params.provider);
+    const saved = await requireProviderSettings().disable(actor, provider);
+    const workspaceGrants = await revokeTenantProviderWorkspaceGrants(actor.tenantId, provider);
+    return {
+      provider: saved,
+      workspaceGrants,
+      restartRequired: workspaceGrants.revoked > 0 || workspaceGrants.failed > 0,
+    };
+  });
+  app.delete<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
+    const actor = requireAdministrator(request);
+    const provider = providerNameSchema.parse(request.params.provider);
+    await requireProviderSettings().remove(actor, provider);
+    const workspaceGrants = await revokeTenantProviderWorkspaceGrants(actor.tenantId, provider);
+    return {
+      deleted: true,
+      workspaceGrants,
+      restartRequired: workspaceGrants.revoked > 0 || workspaceGrants.failed > 0,
+    };
+  });
   app.get("/v1/connections", async (request) => {
     const actor = principal(request);
     const catalog = await requireConnections().list(actor.identity, isAdministrator(actor));
@@ -1503,13 +1595,29 @@ export function createControlServer(
     const input = createWorkspaceSchema.parse(request.body ?? {});
     const { principal: actor, effective } = await assignedPolicy(request);
     const { policy } = await policyForGrant(actor, effective, input.grantId);
+    await assertProviderConfiguration(actor, policy);
     const workspace = await service.create(identity(request), policy, input.grantId, idempotency(request.headers), request.id);
     return reply.code(201).send(workspace);
   });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/open", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.open(identity(request), policy, request.params.workspaceId); });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/restart", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.restart(identity(request), policy, request.params.workspaceId, request.id); });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/open", async (request) => {
+    const actor = principal(request);
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    await assertProviderConfiguration(actor, policy);
+    return service.open(actor.identity, policy, request.params.workspaceId);
+  });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/restart", async (request) => {
+    const actor = principal(request);
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    await assertProviderConfiguration(actor, policy);
+    return service.restart(actor.identity, policy, request.params.workspaceId, request.id);
+  });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/stop", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.stop(identity(request), policy, request.params.workspaceId); });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/gateway/test", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.testGateway(identity(request), policy, request.params.workspaceId); });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/gateway/test", async (request) => {
+    const actor = principal(request);
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    await assertProviderConfiguration(actor, policy);
+    return service.testGateway(actor.identity, policy, request.params.workspaceId);
+  });
   app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/agents", async (request, reply) => {
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const assigned = await service.agentChatAgents(identity(request), policy, request.params.workspaceId);
@@ -1795,6 +1903,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const store = PostgresWorkspaceStore.fromConnectionString(env.DATABASE_URL);
   await store.assertSchemaCompatible();
   const connectorRegistryStore = PostgresConnectorRegistryStore.fromConnectionString(env.DATABASE_URL);
+  const providerSettingsStore = PostgresProviderSettingsStore.fromConnectionString(env.DATABASE_URL);
   const scheduleStore = PostgresScheduleStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
@@ -1804,6 +1913,13 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     ? new LiteLLMGatewayAdapter({
         adminUrl: env.LITELLM_ADMIN_URL,
         workspaceUrl: env.LITELLM_WORKSPACE_URL,
+        masterKey: env.LITELLM_MASTER_KEY,
+        credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
+      })
+    : undefined;
+  const providerAdministration = env.LITELLM_ADMIN_URL && env.LITELLM_MASTER_KEY && env.LITELLM_CREDENTIAL_SECRET
+    ? new LiteLLMProviderAdministration({
+        adminUrl: env.LITELLM_ADMIN_URL,
         masterKey: env.LITELLM_MASTER_KEY,
         credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
       })
@@ -1876,6 +1992,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     {
       identityPolicyStore,
       connectorRegistryStore,
+      providerSettingsStore,
+      providerAdministration,
       mcpPolicyToken: env.CONTROLLER_INTERNAL_TOKEN,
       authentication: new EntraAuthenticationService(identityPolicyStore, {
         tenantId: env.ENTRA_TENANT_ID,
@@ -1913,6 +2031,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     if (pushRetryTimer) clearInterval(pushRetryTimer);
     await store.close();
     await connectorRegistryStore.close();
+    await providerSettingsStore.close();
     await scheduleStore.close();
     await identityPolicyStore.close();
   });
