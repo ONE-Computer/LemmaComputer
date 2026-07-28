@@ -1,0 +1,91 @@
+name: ${ONECOMPUTER_OAUTH_QUALIFICATION_PROJECT:?set an isolated qualification project name}
+
+services:
+  litellm-postgres:
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${ONECOMPUTER_OAUTH_QUALIFICATION_POSTGRES_PASSWORD:?set an isolated qualification database password}
+    networks:
+      - oauth-qualification
+    volumes:
+      - oauth-qualification-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  gateway-fixture:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.node
+    command: ["npm", "run", "start", "--workspace", "@onecomputer/gateway-fixture"]
+    environment:
+      FIXTURE_HOST: 0.0.0.0
+      FIXTURE_PORT: "4200"
+      # Keep this above LiteLLM's 60-second expiry skew. A shorter fixture
+      # lifetime lets its compatibility and v2 resolver paths refresh once each.
+      FIXTURE_OAUTH_REFRESH_EXPIRES_IN: "65"
+    networks:
+      - oauth-qualification
+    ports:
+      - "127.0.0.1:${ONECOMPUTER_OAUTH_QUALIFICATION_FIXTURE_PORT:?set an isolated qualification fixture port}:4200"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e
+    command:
+      - --config
+      - /app/oauth-qualification.yaml
+      - --port
+      - "4000"
+      - --num_workers
+      - "1"
+    environment:
+      LITELLM_MASTER_KEY: ${ONECOMPUTER_OAUTH_QUALIFICATION_MASTER_KEY:?set an isolated qualification master key}
+      LITELLM_SALT_KEY: ${ONECOMPUTER_OAUTH_QUALIFICATION_SALT_KEY:?set an isolated qualification salt key}
+      DATABASE_URL: postgres://litellm:${ONECOMPUTER_OAUTH_QUALIFICATION_POSTGRES_PASSWORD}@litellm-postgres:5432/litellm
+      DISABLE_ADMIN_UI: "true"
+      PROXY_BASE_URL: http://127.0.0.1:${ONECOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT}
+    networks:
+      - oauth-qualification
+    ports:
+      - "127.0.0.1:${ONECOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT:?set an isolated qualification LiteLLM port}:4000"
+    volumes:
+      - ./config/litellm/oauth-qualification.yaml:/app/oauth-qualification.yaml:ro
+    depends_on:
+      litellm-postgres:
+        condition: service_healthy
+      gateway-fixture:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+networks:
+  oauth-qualification:
+    # The runner reaches only loopback-published health and API ports. Keeping
+    # this network non-internal is required for Docker to publish those ports;
+    # the Compose project name still gives every qualification its own network.
+    internal: false
+
+volumes:
+  oauth-qualification-data:

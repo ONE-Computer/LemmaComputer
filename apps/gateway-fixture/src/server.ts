@@ -7,6 +7,7 @@ import { z } from "zod";
 const envSchema = z.object({
   FIXTURE_HOST: z.string().default("127.0.0.1"),
   FIXTURE_PORT: z.coerce.number().int().positive().default(4200),
+  FIXTURE_OAUTH_REFRESH_EXPIRES_IN: z.coerce.number().int().nonnegative().default(3600),
 });
 
 export type FixtureCounters = {
@@ -21,6 +22,7 @@ export type FixtureCounters = {
 };
 
 export function createGatewayFixture() {
+  const env = envSchema.parse(process.env);
   const counters: FixtureCounters = {
     model: 0,
     toolsList: 0,
@@ -31,7 +33,8 @@ export function createGatewayFixture() {
     oauthTokenRefresh: 0,
     oauthCredentialFingerprints: [],
   };
-  const app = Fastify({ logger: true, bodyLimit: 64 * 1024 });
+  const revokedOAuthCredentialSuffixes = new Set<string>();
+  const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
 
   app.get("/healthz", async () => ({ status: "ok" }));
   app.get("/counters", async () => ({ ...counters }));
@@ -44,6 +47,7 @@ export function createGatewayFixture() {
     counters.oauthToolCall = 0;
     counters.oauthTokenRefresh = 0;
     counters.oauthCredentialFingerprints = [];
+    revokedOAuthCredentialSuffixes.clear();
     return { ...counters };
   });
 
@@ -167,19 +171,51 @@ export function createGatewayFixture() {
 
   app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => done(null, body));
 
+  app.post("/oauth/qualification/revoke/:credentialSuffix", async (request, reply) => {
+    const credentialSuffix = (request.params as { credentialSuffix?: string }).credentialSuffix;
+    if (!credentialSuffix || !/^[a-f0-9]{24}$/.test(credentialSuffix)) {
+      return reply.code(400).send({ error: "invalid_qualification_credential" });
+    }
+    revokedOAuthCredentialSuffixes.add(credentialSuffix);
+    return { revoked: true };
+  });
+
   app.post("/oauth/token", async (request, reply) => {
     const form = new URLSearchParams(typeof request.body === "string" ? request.body : "");
+    const grantType = form.get("grant_type");
+    if (grantType === "authorization_code") {
+      const code = form.get("code");
+      if (!code) {
+        return reply.code(400).send({ error: "missing_fixture_code" });
+      }
+      const tokenSuffix = createHash("sha256").update(code).digest("hex").slice(0, 24);
+      const revoked = code.startsWith("revoked-");
+      return {
+        access_token: `ocq-expired-${tokenSuffix}`,
+        refresh_token: `${revoked ? "ocq-revoked" : "ocq-refresh"}-${tokenSuffix}`,
+        token_type: "Bearer",
+        // Qualifiers must exercise the LiteLLM stored-token refresh path,
+        // rather than rely on a local timer or an upstream MCP tool call.
+        expires_in: 0,
+        scope: "fixture.read",
+      };
+    }
+
     const refreshToken = form.get("refresh_token");
-    if (form.get("grant_type") !== "refresh_token" || !refreshToken) {
+    if (grantType !== "refresh_token" || !refreshToken) {
       return reply.code(400).send({ error: "unsupported_fixture_grant" });
     }
     counters.oauthTokenRefresh += 1;
+    const credentialSuffix = refreshToken.slice(refreshToken.lastIndexOf("-") + 1);
+    if (refreshToken.startsWith("ocq-revoked-") || revokedOAuthCredentialSuffixes.has(credentialSuffix)) {
+      return reply.code(400).send({ error: "invalid_grant" });
+    }
     const accessToken = `ocq-refreshed-${createHash("sha256").update(refreshToken).digest("hex").slice(0, 24)}`;
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
       token_type: "Bearer",
-      expires_in: 3_600,
+      expires_in: env.FIXTURE_OAUTH_REFRESH_EXPIRES_IN,
       scope: "fixture.read",
     };
   });

@@ -21,6 +21,8 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   registered: McpConnectorRegistrationInput[] = [];
   ensured: McpConnectorRegistrationInput[][] = [];
   discoveries = 0;
+  toolServers: string[] = [];
+  onTools?: (identity: IdentityContext, serverName: string) => string[] | Promise<string[]>;
   statusByServer = new Map<string, OAuthConnectionStatus>();
   toolsByServer = new Map<string, string[]>();
 
@@ -41,7 +43,9 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
     this.disconnectedServers.push(serverName);
     return { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const;
   }
-  async userOAuthConnectionTools(_identity: IdentityContext, serverName: string) {
+  async userOAuthConnectionTools(identity: IdentityContext, serverName: string) {
+    this.toolServers.push(serverName);
+    if (this.onTools) return this.onTools(identity, serverName);
     return this.toolsByServer.get(serverName) ?? [];
   }
   async discoverOAuthMcpServer() {
@@ -322,4 +326,76 @@ test("administrators can add a connector without code and connected tools are pr
   assert.deepEqual(projected.mcpToolPermissions?.[serverName], ["create_task", "list_tasks"]);
   assert.deepEqual(projected.allowedTools, ["create_task", "list-mail-messages", "list_tasks"]);
   assert.match(projected.connectionProjectionHash ?? "", /^[a-f0-9]{64}$/);
+});
+
+test("expired connections share one safe renewal and re-read the connected state", async () => {
+  const gateway = new FakeConnectionGateway();
+  const expired: OAuthConnectionStatus = { state: "expired", connectedAt: connected.connectedAt, expiresAt: connected.expiresAt, account: null };
+  gateway.statusByServer.set("onecomputer_linear", expired);
+  let startDiscovery: () => void = () => undefined;
+  const discoveryStarted = new Promise<void>((resolve) => { startDiscovery = resolve; });
+  let releaseDiscovery: () => void = () => undefined;
+  const discoveryReleased = new Promise<void>((resolve) => { releaseDiscovery = resolve; });
+  gateway.onTools = async (identity, serverName) => {
+    assert.equal(identity, alpha);
+    assert.equal(serverName, "onecomputer_linear");
+    startDiscovery();
+    await discoveryReleased;
+    gateway.statusByServer.set(serverName, connected);
+    return ["create_issue"];
+  };
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+
+  const first = service.status(alpha, "linear");
+  await discoveryStarted;
+  const second = service.status(alpha, "linear");
+  releaseDiscovery();
+  const statuses = await Promise.all([first, second]);
+  assert.deepEqual(statuses, [connected, connected]);
+  assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
+  assert.equal(gateway.statusServers.filter((serverName) => serverName === "onecomputer_linear").length, 2);
+});
+
+test("failed silent renewal exposes reconnect state and removes stale connector tools", async () => {
+  const gateway = new FakeConnectionGateway();
+  const expired: OAuthConnectionStatus = { state: "expired", connectedAt: connected.connectedAt, expiresAt: connected.expiresAt, account: null };
+  gateway.statusByServer.set("onecomputer_linear", connected);
+  gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  const policy: RuntimePolicy = {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: "agent-alpha",
+    agentProfile: "claude-desktop-managed-v1",
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+  const initial = await service.projectConnectedConnectors(alpha, policy);
+  assert.deepEqual(initial.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+
+  gateway.statusByServer.set("onecomputer_linear", expired);
+  gateway.onTools = () => {
+    throw new Error("fixture refresh denied");
+  };
+  const after = await service.projectConnectedConnectors(alpha, policy);
+  assert.deepEqual(after.mcpServers, ["onecomputer_ms365"]);
+  assert.equal(after.mcpToolPermissions?.onecomputer_linear, undefined);
+  const catalog = await service.list(alpha);
+  const linear = catalog.connections.find((connector) => connector.id === "linear")!;
+  assert.equal(linear.state, "expired");
+  assert.ok(gateway.toolServers.every((serverName) => serverName === "onecomputer_linear"));
 });

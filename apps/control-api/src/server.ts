@@ -1100,7 +1100,9 @@ export function createControlServer(
   });
   app.get("/v1/connections", async (request) => {
     const actor = principal(request);
-    return requireConnections().list(actor.identity, isAdministrator(actor));
+    const catalog = await requireConnections().list(actor.identity, isAdministrator(actor));
+    await refreshOwnedWorkspaceConnectionGrants(actor);
+    return catalog;
   });
   app.get("/v1/admin/connectors", async (request) => {
     const actor = requireAdministrator(request);
@@ -1154,9 +1156,12 @@ export function createControlServer(
     await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
     return result;
   });
-  app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId", async (request) => (
-    requireConnections().status(identity(request), request.params.connectorId)
-  ));
+  app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId", async (request) => {
+    const actor = principal(request);
+    const status = await requireConnections().status(actor.identity, request.params.connectorId);
+    await refreshOwnedWorkspaceConnectionGrants(actor);
+    return status;
+  });
   app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId/authorize", async (request, reply) => {
     const actor = principal(request);
     const started = await requireConnections().start(actor.identity, request.params.connectorId, isAdministrator(actor));

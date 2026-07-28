@@ -144,6 +144,53 @@ cannot keep stale connector access. Grant renewal also recomputes the projection
 periodically. Identically named tools from different connectors are exposed
 with connector-qualified names and routed back to their original server.
 
+#### OAuth credential renewal and recovery
+
+Connection-status checks do not invoke a connector tool or perform a provider
+business action. When LiteLLM reports a person's OAuth connection as expired,
+Control can make one serialized, scoped **safe discovery** request: it asks
+LiteLLM only for that person's enabled tool list for that connector. LiteLLM
+may use its stored refresh credential and rotate it during this discovery;
+Control then reads the connection status again. OAuth access and refresh tokens
+are never returned to Control, included in the tool projection, or suitable for
+operator log inspection.
+
+The pinned qualification fixture returns a renewed token lasting 65 seconds:
+LiteLLM treats tokens within its 60-second expiry skew as stale, and a shorter
+fixture lifetime can cause its compatibility and v2 resolver paths to refresh
+the same connection twice. The release qualifier therefore asserts exactly one
+successful refresh request and one Control safe discovery. A denied renewal may
+be retried by LiteLLM's resolver, but it must never reach a connector tool.
+
+If the second status is connected, the connector's explicitly allowed tools
+remain eligible for workspace grants. If renewal fails or the status remains
+expired, Control fails closed: it drops the cached connector projection and
+recomputes affected workspace grants without that connector. Agents therefore
+cannot receive stale tools while the Web UI directs the person to reconnect.
+
+To recover, the affected person should reconnect the service from
+**Connections** and complete the provider's browser OAuth flow again. Do not
+export, copy, paste, or manually replace tokens in LiteLLM or application
+configuration. After reconnecting, confirm the connection is shown as connected
+and that only its policy-approved tools reappear in a newly refreshed workspace
+grant. If it does not, an administrator should verify that the connector is
+enabled and its configured scopes and provider client settings still match the
+provider registration.
+
+For a suspected renewal regression, first disable the affected connector or
+its access policy to keep it out of new workspace grants. Roll back application
+and gateway images only to the preceding verified immutable release, following
+[the demo release rollback procedure](demo-release.md#rollback). Do not edit
+LiteLLM OAuth records, reverse migrations, or try to restore individual
+credentials; after a compatible rollback, invalidate/recompute connector grants
+and have affected people reconnect.
+
+Run `npm run qualify:oauth` before accepting a LiteLLM version or OAuth gateway
+configuration change. It starts an isolated pinned LiteLLM, PostgreSQL, and
+fixture stack to qualify renewal, restart persistence, identity isolation, and
+fail-closed recovery without printing token material. `npm run verify:release`
+includes this qualification as a required release gate.
+
 Each connector also has an organization-owned access policy. Administrators can
 disable the connector for everyone or prevent members from changing their
 personal connection. Tool decisions remain `allow`, `approval_required`, or

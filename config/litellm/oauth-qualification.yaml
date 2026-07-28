@@ -1,0 +1,31 @@
+# Isolated release qualification for persisted user OAuth refresh. This is not
+# mounted by the product deployment; `qualify:oauth` is its only consumer.
+model_list: []
+
+mcp_servers:
+  onecomputer_oauth_fixture:
+    transport: http
+    url: http://gateway-fixture:4200/oauth-mcp
+    description: Isolated OAuth renewal qualification fixture
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    client_id: onecomputer-oauth-qualification
+    authorization_url: http://gateway-fixture:4200/oauth/authorize
+    token_url: http://gateway-fixture:4200/oauth/token
+    scopes:
+      - fixture.read
+    allowed_tools:
+      - credential_identity
+      - credential_secondary
+    allow_all_keys: false
+    available_on_public_internet: false
+    delegate_auth_to_upstream: false
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  store_model_in_db: true
+
+litellm_settings:
+  set_verbose: false
+  turn_off_message_logging: true
+  log_raw_request_response: false

@@ -379,7 +379,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     code: string;
     codeVerifier: string;
   }): Promise<OAuthConnectionStatus> {
-    const grant = await this.ensureConnectionGrant(input.identity, input.serverName);
+    const grant = await this.ensureConnectionGrant(input.identity, input.serverName, { accountLookup: true });
     try {
       const form = new URLSearchParams({
         grant_type: "authorization_code",
@@ -404,7 +404,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       if (!response.ok) {
         throw new OneComputerError("MCP_TOKEN_EXCHANGE_FAILED", "The connector did not complete the connection", 502, true);
       }
-      return await this.readConnectionStatus(grant.credential, grant.serverId, input.serverName);
+      return await this.readConnectionStatus(grant.credential, grant.serverId, input.serverName, { includeAccount: true });
     } finally {
       await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }
@@ -434,9 +434,18 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const grant = await this.ensureConnectionGrant(identity, serverName);
     try {
       const status = await this.readConnectionStatus(grant.credential, grant.serverId, serverName);
-      if (status.state !== "connected") return [];
+      // LiteLLM performs the stored OAuth refresh while resolving a workspace
+      // credential for this safe discovery endpoint. Never execute an MCP tool
+      // merely to renew a credential.
+      if (status.state === "disconnected") return [];
       const result = await this.dataCall("/mcp-rest/tools/list", grant.credential);
-      if (!result.ok) throw this.upstreamError("MCP_TOOL_DISCOVERY_FAILED", result.status, result.payload);
+      if (!result.ok) throw this.upstreamError("MCP_TOOL_DISCOVERY_FAILED", result.status, result.payload, "The connector could not refresh its saved credentials. Reconnect and try again.");
+      const refreshedStatus = status.state === "expired"
+        ? await this.readConnectionStatus(grant.credential, grant.serverId, serverName)
+        : status;
+      // Fail closed if LiteLLM could not silently renew the connection. Callers
+      // must not project stale tools into a new workspace grant.
+      if (refreshedStatus.state !== "connected") return [];
       const tools = Array.isArray(asObject(result.payload).tools) ? asObject(result.payload).tools as unknown[] : [];
       return [...new Set(tools.map(asObject)
         .filter((tool) => {
@@ -565,7 +574,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return serverId;
   }
 
-  private async ensureConnectionGrant(identity: IdentityContext, serverName: string) {
+  private async ensureConnectionGrant(identity: IdentityContext, serverName: string, options: { accountLookup?: boolean } = {}) {
     const serverId = await this.resolveMcpServer(serverName);
     const grantNonce = randomBytes(12).toString("base64url");
     const credential = this.connectionCredentialFor(identity, serverName, grantNonce);
@@ -573,7 +582,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const serverDigest = createHash("sha256").update(serverName).digest("base64url").slice(0, 12);
     const keyAlias = `onecomputer-connection-${userId}-${serverDigest}-${grantNonce}`;
     const credentialRoute = `/v1/mcp/server/${serverId}/oauth-user-credential`;
-    const accountLookup = serverName === "onecomputer_ms365";
+    const accountLookup = options.accountLookup === true && serverName === "onecomputer_ms365";
     const allowedRoutes = [
       `/v1/mcp/server/oauth/${serverId}/authorize`,
       `/v1/mcp/server/oauth/${serverId}/token`,
@@ -610,14 +619,14 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return { credential, serverId, keyAlias };
   }
 
-  private async readConnectionStatus(credential: string, serverId: string, serverName: string): Promise<OAuthConnectionStatus> {
+  private async readConnectionStatus(credential: string, serverId: string, serverName: string, options: { includeAccount?: boolean } = {}): Promise<OAuthConnectionStatus> {
     const result = await this.dataCall(`/v1/mcp/server/${encodeURIComponent(serverId)}/oauth-user-credential/status`, credential);
-    if (!result.ok) throw this.upstreamError("MCP_CONNECTION_STATUS_FAILED", result.status, result.payload);
+    if (!result.ok) throw this.upstreamError("MCP_CONNECTION_STATUS_FAILED", result.status, result.payload, "The connector connection status is unavailable. Reconnect and try again.");
     const payload = asObject(result.payload);
     const hasCredential = payload.has_credential === true;
     const isExpired = payload.is_expired === true;
     const state = !hasCredential ? "disconnected" : isExpired ? "expired" : "connected";
-    const account = state === "connected" && serverName === "onecomputer_ms365"
+    const account = options.includeAccount === true && state === "connected" && serverName === "onecomputer_ms365"
       ? await this.readConnectionAccount(credential, serverId).catch(() => null)
       : null;
     return {
@@ -1206,14 +1215,14 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     }
   }
 
-  private upstreamError(code: string, status: number, payload: unknown) {
+  private upstreamError(code: string, status: number, payload: unknown, safeMessage?: string) {
     const detail = asObject(asObject(payload).detail);
     const error = asObject(payload).error;
-    const message = typeof error === "string"
+    const message = safeMessage ?? (typeof error === "string"
       ? error
       : typeof detail.error === "string"
         ? detail.error
-        : "The model gateway rejected the request";
+        : "The model gateway rejected the request");
     return new OneComputerError(code, message, status >= 500 ? 502 : status, status >= 500);
   }
 }

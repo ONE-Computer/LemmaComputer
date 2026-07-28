@@ -10,6 +10,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "tsx --test tests/**/*.test.ts",
+    "qualify:oauth": "tsx scripts/qualify-oauth-renewal.mts",
     "env:init": "node scripts/initialize-env.mjs",
     "env:check": "node scripts/update-env.mjs --check",
     "env:update": "node scripts/update-env.mjs --write",

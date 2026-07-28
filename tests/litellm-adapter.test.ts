@@ -101,6 +101,76 @@ test("concurrent connection reads use independent temporary grants and revoke ea
   }
 });
 
+test("expired Microsoft 365 connection discovery re-reads status without a tool call", async () => {
+  const marker = "oauth-token-must-not-escape";
+  const requests: Array<{ url: string; authorization: string }> = [];
+  let statusReads = 0;
+  let failDiscovery = false;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain request bodies so the local HTTP connection can be reused.
+    }
+    requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? "") });
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "onecomputer_ms365" }]));
+      return;
+    }
+    if (request.url === "/v1/mcp/server/ms365-server-id/oauth-user-credential/status") {
+      statusReads += 1;
+      response.end(JSON.stringify(statusReads === 1
+        ? { has_credential: true, is_expired: true, access_token: marker }
+        : { has_credential: true, is_expired: false, access_token: marker }));
+      return;
+    }
+    if (request.url === "/mcp-rest/tools/list") {
+      if (failDiscovery) {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ error: marker }));
+        return;
+      }
+      response.end(JSON.stringify({
+        tools: [
+          { name: "list_issues", mcp_info: { server_id: "ms365-server-id" } },
+          { name: "foreign_tool", mcp_info: { server_id: "other-server-id" } },
+        ],
+      }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const tools = await liveAdapter.userOAuthConnectionTools(identity, "onecomputer_ms365");
+    assert.deepEqual(tools, ["list_issues"]);
+    assert.equal(statusReads, 2);
+    assert.equal(requests.filter(({ url }) => url === "/mcp-rest/tools/list").length, 1);
+    assert.equal(requests.filter(({ url }) => url === "/mcp-rest/tools/call").length, 0);
+    assert.ok(requests.filter(({ url }) => url === "/mcp-rest/tools/list").every(({ authorization }) => authorization !== "Bearer sk-master-test-not-used-00001"));
+    assert.equal(JSON.stringify(tools).includes(marker), false);
+    failDiscovery = true;
+    await assert.rejects(
+      () => liveAdapter.userOAuthConnectionTools(identity, "onecomputer_ms365"),
+      (error: unknown) => {
+        const failure = error as { code?: unknown; message?: unknown };
+        assert.equal(failure.code, "MCP_TOOL_DISCOVERY_FAILED");
+        assert.equal(failure.message, "The connector could not refresh its saved credentials. Reconnect and try again.");
+        assert.equal(JSON.stringify(error).includes(marker), false);
+        return true;
+      },
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("connector discovery and registration keep provider credentials inside LiteLLM payloads", async () => {
   const requests: Array<{ method: string; url: string; authorization: string; body: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {
@@ -324,11 +394,11 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
     assert.equal("max_budget" in grant.body, false);
     assert.equal(
       (grant.body.metadata as Record<string, unknown>).onecomputer_connection_account_lookup,
-      true,
+      false,
     );
     assert.deepEqual(grant.body.object_permission, {
       mcp_servers: ["onecomputer_ms365"],
-      mcp_tool_permissions: { onecomputer_ms365: ["get-current-user"] },
+      mcp_tool_permissions: { onecomputer_ms365: [] },
     });
     assert.deepEqual(grant.body.allowed_routes, [
       "/v1/mcp/server/oauth/ms365-server-id/authorize",
@@ -336,7 +406,6 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
       "/v1/mcp/server/ms365-server-id/oauth-user-credential",
       "/v1/mcp/server/ms365-server-id/oauth-user-credential/status",
       "/mcp-rest/tools/list",
-      "/mcp-rest/tools/call",
     ]);
     assert.notEqual(authorize.authorization, "Bearer sk-master-test-not-used-00001");
     assert.match(authorize.authorization, /^Bearer sk-occ-/);

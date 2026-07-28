@@ -65,7 +65,7 @@ test("the connection account lookup bypass is purpose-bound and exact", async ()
   assert.match(callback, /payload\.get\("toolName"\) == MS365_ACCOUNT_LOOKUP_TOOL/);
   assert.match(callback, /payload\.get\("arguments"\) == MS365_ACCOUNT_LOOKUP_ARGUMENTS/);
   assert.match(callback, /\{\s*"\$select": "displayName,mail,userPrincipalName",?\s*\}/);
-  assert.match(adapter, /const accountLookup = serverName === "onecomputer_ms365"/);
+  assert.match(adapter, /const accountLookup = options\.accountLookup === true && serverName === "onecomputer_ms365"/);
   assert.match(adapter, /onecomputer_connection_account_lookup: accountLookup/);
   assert.match(adapter, /mcp_tool_permissions: \{ \[serverName\]: accountLookup \? \["get-current-user"\] : \[\] \}/);
 });

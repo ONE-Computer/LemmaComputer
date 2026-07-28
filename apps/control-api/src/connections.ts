@@ -71,6 +71,7 @@ export class McpConnectionService {
   private readonly microsoftAuthorizationOrigin: string;
   private readonly registry: ConnectorRegistryStore;
   private readonly projectionCache = new Map<string, { expiresAt: number; policy: RuntimePolicy }>();
+  private readonly connectionStatusStates = new Map<string, Promise<OAuthConnectionStatus>>();
   private readonly sessionTtlMs: number;
   private readonly now: () => number;
 
@@ -106,7 +107,7 @@ export class McpConnectionService {
         };
       }
       try {
-        const status = await this.gateway.userOAuthConnectionStatus(identity, connector.serverName);
+        const status = await this.connectionStatus(identity, connector.serverName);
         return { ...publicConnector, available: true, ...status };
       } catch (error) {
         const unavailable = error instanceof OneComputerError
@@ -188,7 +189,8 @@ export class McpConnectionService {
   }
 
   async status(identity: IdentityContext, connectorId = "microsoft-365") {
-    return this.gateway.userOAuthConnectionStatus(identity, (await this.connector(identity.tenantId, connectorId)).serverName);
+    const connector = await this.connector(identity.tenantId, connectorId);
+    return this.connectionStatus(identity, connector.serverName);
   }
 
   async disconnect(identity: IdentityContext, connectorId = "microsoft-365", isAdministrator = false) {
@@ -337,7 +339,7 @@ export class McpConnectionService {
     if (connector.id === "microsoft-365") {
       throw new OneComputerError("MCP_CONNECTOR_POLICY_MANAGED", "Use the Microsoft 365 tool policy", 409);
     }
-    const status = await this.gateway.userOAuthConnectionStatus(identity, connector.serverName);
+    const status = await this.connectionStatus(identity, connector.serverName);
     if (status.state !== "connected") {
       throw new OneComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
     }
@@ -392,10 +394,31 @@ export class McpConnectionService {
   }
 
   async projectConnectedConnectors(identity: IdentityContext, policy: RuntimePolicy) {
+    const connectors = await this.connectors(identity.tenantId);
+    const statusStates = new Map<string, Promise<OAuthConnectionStatus>>();
+    const currentStatus = (serverName: string) => {
+      const existing = statusStates.get(serverName);
+      if (existing) return existing;
+      const status = this.connectionStatus(identity, serverName);
+      statusStates.set(serverName, status);
+      return status;
+    };
     const cacheKey = `${identity.tenantId}:${identity.subjectId}:${policy.policyHash}:${policy.agentId}`;
     const cached = this.projectionCache.get(cacheKey);
-    if (cached && cached.expiresAt > this.now()) return cached.policy;
-    const connectors = await this.connectors(identity.tenantId);
+    if (cached && cached.expiresAt > this.now()) {
+      const cachedServers = [...new Set((cached.policy.mcpServers ?? [policy.mcpServer]).filter((serverName) => serverName !== policy.mcpServer))];
+      const fresh = await Promise.all(cachedServers.map(async (serverName) => {
+        const connector = connectors.find((candidate) => candidate.enabled && candidate.serverName === serverName);
+        if (!connector) return false;
+        try {
+          return (await currentStatus(serverName)).state === "connected";
+        } catch {
+          return false;
+        }
+      }));
+      if (fresh.every(Boolean)) return cached.policy;
+      this.invalidateProjection(identity);
+    }
     const primaryConnector = connectors.find((connector) => connector.serverName === policy.mcpServer);
     const primaryToolPolicies = primaryConnector?.enabled === false
       ? Object.fromEntries(policy.allowedTools.map((tool) => [tool, "deny" as const]))
@@ -404,7 +427,7 @@ export class McpConnectionService {
       .filter((connector) => connector.enabled && connector.serverName !== policy.mcpServer)
       .map(async (connector) => {
         try {
-          const status = await this.gateway.userOAuthConnectionStatus(identity, connector.serverName);
+          const status = await currentStatus(connector.serverName);
           if (status.state !== "connected") return null;
           const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
           const tools = discoveredTools.filter((tool) => (connector.toolPolicies[tool] ?? "allow") !== "deny");
@@ -441,6 +464,32 @@ export class McpConnectionService {
     });
     this.projectionCache.set(cacheKey, { expiresAt: this.now() + 15_000, policy: projected });
     return projected;
+  }
+
+  private async connectionStatus(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus> {
+    const key = JSON.stringify([identity.tenantId, identity.subjectId, serverName]);
+    const pending = this.connectionStatusStates.get(key);
+    if (pending) return pending;
+
+    const resolution = (async () => {
+      const current = await this.gateway.userOAuthConnectionStatus(identity, serverName);
+      if (current.state !== "expired") return current;
+      try {
+        await this.gateway.userOAuthConnectionTools(identity, serverName);
+        const refreshed = await this.gateway.userOAuthConnectionStatus(identity, serverName);
+        if (refreshed.state !== "connected") this.invalidateProjection(identity);
+        return refreshed;
+      } catch {
+        this.invalidateProjection(identity);
+        return current;
+      }
+    })();
+    this.connectionStatusStates.set(key, resolution);
+    try {
+      return await resolution;
+    } finally {
+      if (this.connectionStatusStates.get(key) === resolution) this.connectionStatusStates.delete(key);
+    }
   }
 
   private async connectors(tenantId: string) {
