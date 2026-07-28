@@ -41,21 +41,43 @@ policy versions.
    `packages/contracts/src/index.ts`.
 2. Add its employee-facing name and provider to the model catalog in
    `apps/control-api/src/server.ts`.
-3. Add the alias and deployment to `config/litellm/config.yaml`.
-4. Add the provider credential to `compose.yaml` and `.env.example`. Keep it in
-   the `litellm` service only.
-5. Add the alias to the initial policy document in
+3. If an existing persisted setting has a model-alias check constraint, generate
+   a forward-only migration that expands it. Do not edit an applied migration.
+4. Choose one deployment path:
+   - a static route in `config/litellm/config.yaml` with a LiteLLM-only
+     environment credential; or
+   - a reviewed dynamic API-key route. The Control service sends the key once
+     to LiteLLM's private `/credentials` API, then creates or updates a
+     database-managed model that refers only to the credential name.
+5. Do not add a dynamic-route provider key to `compose.yaml` or
+   `.env.example`. LiteLLM's encrypted credential table is the demo secret
+   store; the LiteLLM encryption root remains a deployment secret.
+6. Add the alias to the initial policy document in
    `packages/workspace-store/src/identity-policy.ts` if it should be assignable
    by default.
-6. If a managed client validates model names locally, add an explicit transport
+7. If a managed client validates model names locally, add an explicit transport
    mapping in `packages/litellm-adapter/src/index.ts` and a matching LiteLLM
    transport alias. Preserve the policy alias in key metadata.
-7. Set accurate capability metadata such as `supports_vision`. The gateway
-   callback rejects image input when the selected deployment lacks it.
-8. Extend route, capability, signed-policy, and negative tests.
+8. Set accurate capability, context-limit, retry, and pricing metadata. The
+   gateway callback rejects image input when the selected deployment lacks it.
+9. Extend route, capability, signed-policy, secret-boundary, and negative tests.
 
 Do not configure cross-provider fallback for a governed alias unless policy and
 audit semantics explicitly represent every possible destination.
+
+### Dynamic Bedrock API-key route
+
+`onecomputer-bedrock` is a narrow dynamic route for the reviewed global Claude
+Sonnet 4.5 Bedrock Converse inference profile. It accepts only the approved
+region/profile combinations in `packages/contracts/src/index.ts`; it does not
+accept AWS access-key pairs, IAM role parameters, arbitrary model IDs, or
+arbitrary endpoint URLs.
+
+The raw Bedrock API key is write-only. Control sends it only to LiteLLM's
+private credential API, whose pinned implementation encrypts credential values
+in its database. The LiteLLM model record stores only
+`litellm_credential_name`, region, and reviewed capability/pricing metadata.
+Workspace virtual keys receive only the stable public alias.
 
 ## Add an MCP connector
 

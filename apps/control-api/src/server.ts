@@ -82,6 +82,7 @@ const sandboxModels = [
   { alias: "onecomputer-claude", displayName: "Claude", provider: "Anthropic" },
   { alias: "onecomputer-openai", displayName: "OpenAI", provider: "OpenAI" },
   { alias: "onecomputer-glm", displayName: "GLM", provider: "Z.ai" },
+  { alias: "onecomputer-bedrock", displayName: "Claude Sonnet 4.5", provider: "Amazon Bedrock" },
   { alias: "onecomputer-assistant", displayName: "Standard route (legacy)", provider: "OpenAI" },
 ] as const;
 

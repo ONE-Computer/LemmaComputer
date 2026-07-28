@@ -65,9 +65,90 @@ export const sandboxApplicationSchema = z.object({
 }).strict();
 export type SandboxApplication = z.infer<typeof sandboxApplicationSchema>;
 
-export const sandboxModelAliases = ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm", "onecomputer-assistant"] as const;
+// A policy always refers to a stable ONEComputer alias. Provider Settings can
+// replace the private deployment behind this alias without rewriting signed
+// workspace policy documents.
+export const bedrockApiKeyRouteAlias = "onecomputer-bedrock" as const;
+
+export const sandboxModelAliases = ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm", "onecomputer-assistant", bedrockApiKeyRouteAlias] as const;
 export const sandboxModelAliasSchema = z.enum(sandboxModelAliases);
 export type SandboxModelAlias = z.infer<typeof sandboxModelAliasSchema>;
+
+// This demo route intentionally has a small, reviewed allow-list. It is not
+// an arbitrary Bedrock pass-through: the only private deployment is a global
+// Claude Sonnet 4.5 inference profile routed through LiteLLM's Bedrock
+// Converse provider. The supported regions are the demo's explicitly checked
+// global-profile endpoints, including Singapore.
+export const bedrockApiKeyRegions = ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"] as const;
+export const bedrockApiKeyRegionSchema = z.enum(bedrockApiKeyRegions);
+export type BedrockApiKeyRegion = z.infer<typeof bedrockApiKeyRegionSchema>;
+
+export const bedrockApiKeyModelProfileIds = ["claude-sonnet-4-5-global"] as const;
+export const bedrockApiKeyModelProfileIdSchema = z.enum(bedrockApiKeyModelProfileIds);
+export type BedrockApiKeyModelProfileId = z.infer<typeof bedrockApiKeyModelProfileIdSchema>;
+
+export const bedrockApiKeyModelProfileSchema = z.object({
+  id: bedrockApiKeyModelProfileIdSchema,
+  litellmModel: z.string().regex(/^bedrock\/converse\//),
+  regions: z.array(bedrockApiKeyRegionSchema).min(1),
+  capabilities: z.object({
+    vision: z.boolean(),
+    streaming: z.boolean(),
+    toolCalls: z.boolean(),
+    structuredOutput: z.boolean(),
+    computerUse: z.boolean(),
+  }).strict(),
+  limits: z.object({
+    contextWindowTokens: z.number().int().positive(),
+    maxOutputTokens: z.number().int().positive(),
+  }).strict(),
+  pricing: z.object({
+    inputUsdPerMillionTokens: z.number().positive(),
+    outputUsdPerMillionTokens: z.number().positive(),
+  }).strict(),
+}).strict();
+export type BedrockApiKeyModelProfile = z.infer<typeof bedrockApiKeyModelProfileSchema>;
+
+export const approvedBedrockApiKeyModelProfiles: readonly BedrockApiKeyModelProfile[] = Object.freeze([
+  bedrockApiKeyModelProfileSchema.parse({
+    id: "claude-sonnet-4-5-global",
+    litellmModel: "bedrock/converse/global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    regions: bedrockApiKeyRegions,
+    capabilities: {
+      vision: true,
+      streaming: true,
+      toolCalls: true,
+      structuredOutput: true,
+      computerUse: true,
+    },
+    limits: {
+      contextWindowTokens: 200_000,
+      maxOutputTokens: 64_000,
+    },
+    pricing: {
+      inputUsdPerMillionTokens: 3,
+      outputUsdPerMillionTokens: 15,
+    },
+  }),
+]);
+
+export const bedrockApiKeyRouteConfigurationSchema = z.object({
+  // This value is accepted once by a private Control-to-LiteLLM request. It
+  // must never appear in a read model, trace, activity event, or workspace.
+  apiKey: z.string().trim().min(16).max(4_096),
+  region: bedrockApiKeyRegionSchema,
+  modelProfileId: bedrockApiKeyModelProfileIdSchema,
+}).strict().superRefine((value, context) => {
+  const profile = approvedBedrockApiKeyModelProfiles.find((candidate) => candidate.id === value.modelProfileId);
+  if (!profile || !profile.regions.includes(value.region)) {
+    context.addIssue({
+      code: "custom",
+      path: ["region"],
+      message: "The selected Bedrock inference profile is not approved in that region",
+    });
+  }
+});
+export type BedrockApiKeyRouteConfiguration = z.infer<typeof bedrockApiKeyRouteConfigurationSchema>;
 
 export const sandboxProfileSchema = z.object({
   id: sandboxProfileIdSchema,

@@ -5,16 +5,28 @@ import { discoverWorkspaceMigrations } from "@onecomputer/workspace-store";
 
 const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("the migration plan discovers every immutable legacy migration in dependency order", async () => {
+test("the migration plan preserves the immutable legacy chain and accepts later generated migrations", async () => {
   const migrations = await discoverWorkspaceMigrations();
-  assert.equal(migrations.length, 28);
-  assert.deepEqual(migrations.map((migration) => migration.id),
-    Array.from({ length: 28 }, (_, index) => String(index + 1).padStart(3, "0")));
-  assert.equal(migrations[0]?.dependsOn.length, 0);
-  for (let index = 1; index < migrations.length; index += 1) {
-    assert.deepEqual(migrations[index]?.dependsOn, [migrations[index - 1]?.id]);
+  const legacyIds = Array.from({ length: 28 }, (_, index) => String(index + 1).padStart(3, "0"));
+  assert.ok(migrations.length >= legacyIds.length);
+  assert.deepEqual(migrations.slice(0, legacyIds.length).map((migration) => migration.id), legacyIds);
+
+  const discoveredIds = new Set<string>();
+  for (const [index, migration] of migrations.entries()) {
+    assert.match(migration.checksumSha256, /^[0-9a-f]{64}$/);
+    if (index === 0) {
+      assert.deepEqual(migration.dependsOn, []);
+    } else if (index < legacyIds.length) {
+      assert.deepEqual(migration.dependsOn, [migrations[index - 1]?.id]);
+    } else {
+      assert.match(migration.id, /^[0-9A-HJKMNP-TV-Z]{26}$/);
+      assert.ok(migration.dependsOn.length > 0);
+      for (const dependency of migration.dependsOn) {
+        assert.ok(discoveredIds.has(dependency), `${migration.id} must only depend on an earlier migration`);
+      }
+    }
+    discoveredIds.add(migration.id);
   }
-  for (const migration of migrations) assert.match(migration.checksumSha256, /^[0-9a-f]{64}$/);
 });
 
 test("service startup only checks schema and Compose owns the migration job", async () => {
