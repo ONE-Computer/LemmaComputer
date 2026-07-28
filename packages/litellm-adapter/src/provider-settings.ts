@@ -31,6 +31,30 @@ export type ManagedProviderModel = {
   bedrock?: { region: BedrockApiKeyRegion; profile: BedrockApiKeyModelProfile };
 };
 
+export type ManagedProviderDisplayMetadata = {
+  primaryAlias: string;
+  upstreamModelDisplayName: string;
+};
+
+export const managedProviderDisplayMetadata: Record<ManagedProviderName, ManagedProviderDisplayMetadata> = {
+  openai: {
+    primaryAlias: "onecomputer-openai",
+    upstreamModelDisplayName: "OpenAI GPT-5.6 Luna",
+  },
+  anthropic: {
+    primaryAlias: "onecomputer-claude",
+    upstreamModelDisplayName: "Anthropic Claude Sonnet 4.6",
+  },
+  glm: {
+    primaryAlias: "onecomputer-glm",
+    upstreamModelDisplayName: "Z.ai GLM-5",
+  },
+  bedrock: {
+    primaryAlias: bedrockApiKeyRouteAlias,
+    upstreamModelDisplayName: "Amazon Bedrock Claude Sonnet 4.5",
+  },
+};
+
 export const managedProviderModels: Record<ManagedProviderName, readonly ManagedProviderModel[]> = {
   openai: [
     { alias: "onecomputer-assistant", model: "openai/gpt-5.6-luna", vision: true },

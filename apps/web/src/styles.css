@@ -3522,6 +3522,8 @@ textarea:focus-visible,
 .connector-mark.github { border-color: #202733; background: #202733; color: #fff; font-size: 13px; }
 .connector-mark.uploaded { overflow: hidden; padding: 5px; background: #fff; }
 .connector-mark.uploaded img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.connector-mark.branded { overflow: hidden; padding: 5px; background: #fff; }
+.connector-mark.branded img { display: block; width: 100%; height: 100%; object-fit: contain; }
 
 .connector-catalog-copy {
   min-width: 0;

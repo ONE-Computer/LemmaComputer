@@ -360,6 +360,10 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
       response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "onecomputer_ms365" }]));
       return;
     }
+    if (request.url === "/v1/mcp/server/oauth/ms365-server-id/register") {
+      response.end(JSON.stringify({ client_id: "ms365-server-id", client_secret: "dummy" }));
+      return;
+    }
     if (request.url?.startsWith("/v1/mcp/server/oauth/ms365-server-id/authorize?")) {
       response.statusCode = 307;
       response.setHeader("location", "http://localhost:3001/authorize?opaque=upstream-state");
@@ -389,7 +393,7 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
     assert.equal(started.location, "http://localhost:3001/authorize?opaque=upstream-state");
     assert.equal(started.cookies.length, 1);
     const grant = requests.find((item) => item.url === "/key/generate")!;
-    const authorize = requests.find((item) => item.url.startsWith("/v1/mcp/server/oauth/"))!;
+    const authorize = requests.find((item) => item.url.includes("/authorize?"))!;
     assert.equal(grant.body.user_id, liveAdapter.userIdFor(identity));
     assert.equal("max_budget" in grant.body, false);
     assert.equal(
@@ -469,6 +473,7 @@ test("owned OAuth registers and retries a persistent MCP server when LiteLLM rep
     assert.equal(authorizeAttempts, 2);
     const registration = requests.find((request) => request.url.endsWith("/register"))!;
     assert.equal(registration.authorization, "Bearer sk-master-test-not-used-00001");
+    assert.ok(requests.indexOf(registration) < requests.findIndex((request) => request.url.includes("/authorize?")));
     const authorizeRequests = requests.filter((request) => request.url.includes("/authorize?"));
     assert.ok(authorizeRequests.every((request) => request.authorization.startsWith("Bearer sk-occ-")));
   } finally {

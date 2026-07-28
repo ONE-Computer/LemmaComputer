@@ -1,5 +1,5 @@
 import { OneComputerError, providerSettingMetadataSchema, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion } from "@onecomputer/contracts";
-import { managedProviderForAlias, managedProviderModels, managedProviderNames, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
+import { managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModels, managedProviderNames, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import type { ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
 
 export type ProviderSettingInput =
@@ -11,6 +11,8 @@ type BedrockSelection = { region: BedrockApiKeyRegion; modelProfileId: BedrockAp
 export type ProviderSettingView = {
   provider: ManagedProviderName;
   aliases: string[];
+  primaryAlias: string;
+  upstreamModelDisplayName: string;
   state: "active" | "disabled" | "not-configured" | "needs-reconfiguration";
   fingerprint: string | null;
   region: BedrockApiKeyRegion | null;
@@ -33,6 +35,8 @@ const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | n
   return {
     provider,
     aliases: managedProviderModels[provider].map((model) => model.alias),
+    primaryAlias: managedProviderDisplayMetadata[provider].primaryAlias,
+    upstreamModelDisplayName: managedProviderDisplayMetadata[provider].upstreamModelDisplayName,
     state: !record ? "not-configured" : needsReconfiguration ? "needs-reconfiguration" : record.state,
     fingerprint: record?.credentialFingerprint ?? null,
     region: selection?.region ?? null,

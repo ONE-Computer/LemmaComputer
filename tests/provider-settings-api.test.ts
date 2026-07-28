@@ -176,6 +176,25 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
       headers: testHeaders,
     });
     assert.deepEqual(listed.json().providers.map((provider: { provider: string }) => provider.provider), ["openai", "anthropic", "glm", "bedrock"]);
+    assert.deepEqual(
+      listed.json().providers.map((provider: {
+        provider: string;
+        primaryAlias: string;
+        upstreamModelDisplayName: string;
+      }) => ({
+        provider: provider.provider,
+        primaryAlias: provider.primaryAlias,
+        upstreamModelDisplayName: provider.upstreamModelDisplayName,
+      })),
+      [
+        { provider: "openai", primaryAlias: "onecomputer-openai", upstreamModelDisplayName: "OpenAI GPT-5.6 Luna" },
+        { provider: "anthropic", primaryAlias: "onecomputer-claude", upstreamModelDisplayName: "Anthropic Claude Sonnet 4.6" },
+        { provider: "glm", primaryAlias: "onecomputer-glm", upstreamModelDisplayName: "Z.ai GLM-5" },
+        { provider: "bedrock", primaryAlias: "onecomputer-bedrock", upstreamModelDisplayName: "Amazon Bedrock Claude Sonnet 4.5" },
+      ],
+    );
+    const listedGlm = listed.json().providers.find((provider: { provider: string }) => provider.provider === "glm");
+    assert.deepEqual(listedGlm.aliases, ["onecomputer-glm", "claude-sonnet-4-5"]);
 
     const configuredGlm = await app.inject({
       method: "PUT",
@@ -186,6 +205,8 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configuredGlm.statusCode, 200);
     assert.equal(configuredGlm.json().provider.provider, "glm");
     assert.equal(configuredGlm.json().provider.state, "active");
+    assert.equal(configuredGlm.json().provider.primaryAlias, "onecomputer-glm");
+    assert.equal(configuredGlm.json().provider.upstreamModelDisplayName, "Z.ai GLM-5");
     assert.equal(JSON.stringify(configuredGlm.json()).includes(rawGlmKey), false);
     assert.equal(providerAdministration.configured[1]!.provider, "glm");
     assert.equal(providerAdministration.configured[1]!.apiKey, rawGlmKey);

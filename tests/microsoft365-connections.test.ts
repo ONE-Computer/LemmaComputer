@@ -144,7 +144,11 @@ test("the default catalog covers the required categories and registers a remote 
 
   const catalog = await service.list(alpha);
   const defaultCards = catalog.connections.map((connector) => [connector.id, connector.serverName]);
-  assert.equal(defaultCards.length, 21);
+  assert.equal(defaultCards.length, 22);
+  const neon = catalog.connections.find((connector) => connector.id === "neon");
+  assert.equal(neon?.serverName, "onecomputer_neon");
+  assert.equal(neon?.brand, "neon");
+  assert.equal(neon?.source, "built-in");
   assert.deepEqual(defaultCards.slice(0, 6), [
     ["microsoft-365", "onecomputer_ms365"],
     ["notion", "onecomputer_notion"],

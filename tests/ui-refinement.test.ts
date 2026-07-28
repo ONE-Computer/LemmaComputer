@@ -303,12 +303,28 @@ test("the account menu owns Settings, with Provider settings and Administration 
   assert.match(app, /settings: "Settings"/);
   assert.match(app, /function SettingsScreen/);
   assert.match(app, /<strong>Provider settings<\/strong>/);
+  assert.match(app, /provider\.primaryAlias} · {provider\.upstreamModelDisplayName/);
+  assert.doesNotMatch(app, /provider\.aliases\.join/);
   assert.match(app, /<strong>Administration<\/strong>/);
   assert.doesNotMatch(primaryNav, /label="Admin"|label="Gateway"/);
   assert.match(accountMenu, /selectNav\("Settings"\)/);
   assert.match(accountMenu, /Log out/);
   assert.doesNotMatch(app, /admin: "Admin"/);
 });
+
+test("built-in connectors use locally served branded icons", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  const brands = [
+    "asana", "atlassian", "box", "cloudflare", "figma", "github", "hubspot", "intercom",
+    "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
+  ];
+  assert.match(app, /connectorIconBrands/);
+  assert.match(app, /\/connector-icons\/\$\{iconBrand\}\.svg/);
+  await Promise.all(brands.map(async (brand) => {
+    assert.match(await source("apps/web/public/connector-icons/" + brand + ".svg"), /<svg/);
+  }));
+});
+
 
 test("administration exposes member lifecycle, workspace management, and organization connector locks", async () => {
   const app = await readFile(new URL("../apps/web/src/App.jsx", import.meta.url), "utf8");

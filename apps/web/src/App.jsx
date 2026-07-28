@@ -799,7 +799,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
               <span className="connection-logo compact"><Bot24Regular aria-hidden="true" /></span>
               <div className="credential-copy">
                 <strong>{providerTitle(provider.provider)}</strong>
-                <small>{provider.aliases.join(" · ")}</small>
+                <small>{provider.primaryAlias} · {provider.upstreamModelDisplayName}</small>
                 <span>{stateLabel}{provider.fingerprint ? <> · {provider.fingerprint}</> : null}</span>
                 {provider.provider === "bedrock" && provider.region && <span>Region {provider.region} · Profile {provider.modelProfileId}</span>}
                 {provider.lastTestedAt && <span>Last tested {new Date(provider.lastTestedAt).toLocaleString()}</span>}
@@ -1347,17 +1347,19 @@ function ApprovalDeviceCard({ displayName }) {
   );
 }
 
+const connectorIconBrands = new Set([
+  "asana", "atlassian", "box", "cloudflare", "figma", "github", "hubspot", "intercom",
+  "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
+]);
+
 function ConnectorMark({ connector, large = false }) {
   const brand = connector?.brand ?? "microsoft";
   if (connector?.iconDataUrl) {
     return <span className={`connector-mark uploaded${large ? " large" : ""}`} aria-hidden="true"><img src={connector.iconDataUrl} alt="" /></span>;
   }
-  if (brand === "microsoft") {
-    return (
-      <span className={`connector-mark microsoft${large ? " large" : ""}`} aria-hidden="true">
-        <i /><i /><i /><i />
-      </span>
-    );
+  const iconBrand = connectorIconBrands.has(brand) ? brand : connectorIconBrands.has(connector?.id) ? connector.id : null;
+  if (iconBrand) {
+    return <span className={`connector-mark branded ${iconBrand}${large ? " large" : ""}`} aria-hidden="true"><img src={`/connector-icons/${iconBrand}.svg`} alt="" /></span>;
   }
   const fallback = connector?.name?.trim().match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? "?";
   const glyph = { notion: "N", linear: "L", atlassian: "A", github: "GH" }[brand] ?? fallback;

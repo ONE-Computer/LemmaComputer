@@ -225,7 +225,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   private readonly connectionGrantTtlMs: number;
   private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string; modelAlias: string }>();
   private readonly modelCapabilityStates = new Map<string, { expiresAt: number; capabilities: GatewayModelCapabilities }>();
-  private readonly oauthClientRegistrationStates = new Map<string, Promise<string>>();
+  private readonly oauthClientRegistrationStates = new Map<string, Promise<string | null>>();
 
   constructor(private readonly config: LiteLLMConfig) {
     this.adminUrl = config.adminUrl.replace(/\/$/, "");
@@ -299,10 +299,21 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
         }
       };
+      // LiteLLM persists dynamic OAuth registrations. Reconcile it before every
+      // browser redirect so a changed public proxy origin replaces a client that
+      // was registered for an old callback. Static provider clients return the
+      // documented dummy result and continue through their existing credentials.
+      const reconciledClientId = await this.registerDynamicOAuthClient(grant.serverId);
       let response = await authorize();
       if (await this.missingOAuthClient(response)) {
         await response.body?.cancel().catch(() => undefined);
-        await this.registerDynamicOAuthClient(grant.serverId);
+        if (!reconciledClientId) {
+          throw new OneComputerError(
+            "MCP_OAUTH_CLIENT_REQUIRED",
+            "This connector requires provider app credentials",
+            400,
+          );
+        }
         response = await authorize();
       }
       if (response.status < 300 || response.status >= 400) {
@@ -354,16 +365,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       if (!result.ok) throw this.upstreamError("MCP_OAUTH_REGISTRATION_FAILED", result.status, result.payload);
       const registrationPayload = asObject(result.payload);
       const clientId = registrationPayload.client_id;
-      if (typeof clientId !== "string" || !clientId) {
-        throw new OneComputerError("MCP_OAUTH_REGISTRATION_FAILED", "The connector did not register an OAuth client", 502, true);
-      }
-      if (clientId === serverId && registrationPayload.client_secret === "dummy") {
-        throw new OneComputerError(
-          "MCP_OAUTH_CLIENT_REQUIRED",
-          "This connector requires provider app credentials",
-          400,
-        );
-      }
+      if (typeof clientId !== "string" || !clientId) return null;
+      if (clientId === serverId && registrationPayload.client_secret === "dummy") return null;
       return clientId;
     })();
     this.oauthClientRegistrationStates.set(serverId, registration);
@@ -472,6 +475,13 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const created = await this.adminCall("/v1/mcp/server/oauth/session", { method: "POST", body: payload }, true);
     if (!created.ok) throw this.upstreamError("MCP_DISCOVERY_FAILED", created.status, created.payload);
     const dynamicClientId = input.clientId ? undefined : await this.registerDynamicOAuthClient(temporaryId);
+    if (!input.clientId && !dynamicClientId) {
+      throw new OneComputerError(
+        "MCP_OAUTH_CLIENT_REQUIRED",
+        "This connector requires provider app credentials",
+        400,
+      );
+    }
     const query = new URLSearchParams({
       redirect_uri: input.callbackUrl,
       state: "onecomputer-discovery",
