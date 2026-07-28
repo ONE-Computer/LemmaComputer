@@ -230,7 +230,7 @@ Administrator email comparison is case-insensitive. Keep the bootstrap list
 small. Every user in the configured Entra tenant may authenticate, but only the
 listed addresses bootstrap as administrators.
 
-OpenAI and Anthropic keys are configured only after the stack is healthy:
+OpenAI, Anthropic, GLM (Z.ai), and Bedrock keys are configured only after the stack is healthy:
 sign in as a listed administrator, open **Settings → Provider settings**, save the
 write-only key, and run the route test before creating a workspace. When
 updating an older environment, `npm run env:check` reports retired provider
@@ -242,7 +242,6 @@ the managed-provider cutover.
 | Variables | Set when |
 | --- | --- |
 | `ONECOMPUTER_MS365_TENANT_ID`, `ONECOMPUTER_MS365_CLIENT_ID`, `ONECOMPUTER_MS365_CLIENT_SECRET` | A separate Microsoft 365 app registration is used |
-| `ONECOMPUTER_GLM_API_KEY` | A policy assigns the GLM route |
 | `ONECOMPUTER_GITHUB_MCP_CLIENT_ID`, `ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET` | The built-in GitHub connector is enabled |
 | `ONECOMPUTER_BOOTSTRAP_TENANT_ID`, `ONECOMPUTER_BOOTSTRAP_USER_ID`, `ONECOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
 | Public URL and port variables | The deployment is intentionally using origins other than the localhost defaults |

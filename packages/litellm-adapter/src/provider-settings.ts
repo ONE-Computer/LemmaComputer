@@ -11,11 +11,11 @@ import {
   type ProviderSettingMetadata,
 } from "@onecomputer/contracts";
 
-export const managedProviderNames = ["openai", "anthropic", "bedrock"] as const;
+export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock"] as const;
 export type ManagedProviderName = typeof managedProviderNames[number];
 export type ManagedProviderOperation = { tenantId: string; provider: ManagedProviderName; existingModelIds: string[] };
 export type ManagedProviderConfiguration =
-  | (ManagedProviderOperation & { provider: "openai" | "anthropic"; apiKey: string })
+  | (ManagedProviderOperation & { provider: "openai" | "anthropic" | "glm"; apiKey: string })
   | (ManagedProviderOperation & { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId });
 export type ManagedProviderRoute = { modelIds: string[]; credentialFingerprint: string; configuration: ProviderSettingMetadata };
 export interface ProviderAdministrationGateway {
@@ -40,6 +40,10 @@ export const managedProviderModels: Record<ManagedProviderName, readonly Managed
   anthropic: [
     { alias: "onecomputer-claude", model: "anthropic/claude-sonnet-4-6", vision: true },
     { alias: "claude-sonnet-4-6", model: "anthropic/claude-sonnet-4-6", vision: true },
+  ],
+  glm: [
+    { alias: "onecomputer-glm", model: "zai/glm-5", vision: false },
+    { alias: "claude-sonnet-4-5", model: "zai/glm-5", vision: false },
   ],
   bedrock: [
     { alias: bedrockApiKeyRouteAlias, model: approvedBedrockApiKeyModelProfiles[0]!.litellmModel, vision: true },

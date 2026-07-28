@@ -244,8 +244,12 @@ const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-deskto
 const mvpDefaultAgentIds = ["claude-desktop", "hermes-claw"] as const;
 const mvpApplicationIds = ["firefox", "google-chrome"] as const;
 const mvpDefaultApplicationIds = ["firefox"] as const;
-const mvpDefaultModelAliases = ["onecomputer-claude", "onecomputer-openai", "onecomputer-bedrock"] as const;
-const legacyMvpDefaultModelAliases = ["onecomputer-claude", "onecomputer-openai"] as const;
+const mvpDefaultModelAliases = ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm", "onecomputer-bedrock"] as const;
+const historicMvpDefaultModelAliasSets = [
+  ["onecomputer-claude", "onecomputer-openai"],
+  ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm"],
+  ["onecomputer-claude", "onecomputer-openai", "onecomputer-bedrock"],
+] as const;
 
 const applyMvpSandboxCatalog = (document: Record<string, OwnedJson>) => {
   document.workspaceProfile = "claude-desktop-standard-v1";
@@ -304,9 +308,12 @@ export const mvpPolicyDocument = (
   },
 }) satisfies OwnedJson;
 
-// Only this exact historic default is upgraded. Customer-created policy
-// versions remain opt-in and are never broadened by the demo adoption path.
-const legacyMvpPolicyDocument = () => mvpPolicyDocument("Initial MVP policy", legacyMvpDefaultModelAliases);
+// Only exact historic defaults are upgraded. Customer-created policy versions
+// remain opt-in and are never broadened by the demo adoption path.
+const historicMvpPolicyDocuments = () => [
+  ...historicMvpDefaultModelAliasSets.map((aliases) => mvpPolicyDocument("Initial MVP policy", aliases)),
+  mvpPolicyDocument("Enabled Bedrock for the historic default MVP policy", historicMvpDefaultModelAliasSets[2]),
+];
 
 const stableJson = (value: OwnedJson): string => {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -316,8 +323,9 @@ const stableJson = (value: OwnedJson): string => {
 
 const policyHash = (document: OwnedJson) => createHash("sha256").update(stableJson(document)).digest("hex");
 export const upgradeHistoricMvpPolicyDocument = (document: OwnedJson): OwnedJson | null => {
-  if (policyHash(document) !== policyHash(legacyMvpPolicyDocument())) return null;
-  return mvpPolicyDocument("Enabled Bedrock for the historic default MVP policy");
+  const documentHash = policyHash(document);
+  if (!historicMvpPolicyDocuments().some((historic) => policyHash(historic) === documentHash)) return null;
+  return mvpPolicyDocument("Enabled managed GLM and Bedrock for the demo default policy");
 };
 const mvpPolicyBundleId = (tenantId: string) => `mvp-standard:${tenantId}`;
 const defaultEgressSecurityGroupId = (tenantId: string) => `esg_${createHash("sha256").update(`egress:${tenantId}`).digest("hex").slice(0, 24)}`;
@@ -421,9 +429,9 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
        )
        AND (
          NOT COALESCE(pv.document->'workspaceProfiles', '[]'::jsonb) @> '["disposable-open-v1"]'::jsonb
-         OR pv.document_hash=$1
+         OR pv.document_hash = ANY($1::text[])
        )`,
-      [policyHash(legacyMvpPolicyDocument())],
+      [historicMvpPolicyDocuments().map(policyHash)],
     );
     let upgradedAssignments = 0;
     for (const candidate of candidates.rows) {

@@ -21,33 +21,13 @@ const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "
 });
 
 const readyActivation: ConnectorActivation = { readiness: "ready", action: "connect", message: "This approved service is ready to connect." };
-const setupRequiredActivation: ConnectorActivation = { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." };
-const requestAccessActivation: ConnectorActivation = { readiness: "request_access", action: "view_requirements", message: "This service needs provider approval or organization access before people can connect." };
-
-// An entry is direct-connect only when ONEComputer has an approved provider
-// flow. Unknown entries default to request access rather than inviting a
-// misleading OAuth attempt.
-const builtInActivation: Record<string, ConnectorActivation> = {
-  "microsoft-365": readyActivation,
-  notion: readyActivation,
-  linear: readyActivation,
-  atlassian: readyActivation,
-  figma: setupRequiredActivation,
-  supabase: readyActivation,
-  github: setupRequiredActivation,
-  vercel: setupRequiredActivation,
-  hubspot: setupRequiredActivation,
-  slack: setupRequiredActivation,
-  asana: requestAccessActivation,
-  box: requestAccessActivation,
-  intercom: requestAccessActivation,
-  stripe: requestAccessActivation,
-};
-
-export const connectorActivation = (connector: Pick<ConnectorDefinition, "id" | "source">): ConnectorActivation => {
-  if (connector.source === "custom") return { ...readyActivation };
-  return { ...(builtInActivation[connector.id] ?? requestAccessActivation) };
-};
+// Catalog entries are approved remote MCP endpoints. Discovery and any
+// provider-specific OAuth requirements are intentionally attempted only after
+// the user selects Connect. A failed attempt remains disconnected, so no tools
+// are projected into the workspace until authorization succeeds.
+export const connectorActivation = (_connector: Pick<ConnectorDefinition, "id" | "source">): ConnectorActivation => ({
+  ...readyActivation,
+});
 
 // These are provider-hosted remote MCP endpoints, not a tool allowlist. The
 // Connections screen may display the full catalog without registering every

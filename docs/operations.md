@@ -219,7 +219,7 @@ Built-in connectors cannot be deleted through the administration API.
 
 ### Managed model providers
 
-OpenAI and Anthropic are configured by an organization administrator in
+OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock are configured by an organization administrator in
 **Settings → Provider settings**, not in `.env`. Control passes the submitted
 write-only key directly to LiteLLM's private credential API. LiteLLM encrypts
 the credential in its own database; ONEComputer stores only tenant-scoped route
@@ -232,10 +232,9 @@ deployment. Only explicitly granted model aliases are issued to a workspace.
 
 | Credential source | Route |
 | --- | --- |
-| Administrator Provider settings | OpenAI: `onecomputer-assistant`, `onecomputer-openai`, `claude-opus-4-6`; Anthropic: `onecomputer-claude`, `claude-sonnet-4-6` |
-| `ONECOMPUTER_GLM_API_KEY` | Legacy customer-managed Z.ai compatibility route: `onecomputer-glm`, `claude-sonnet-4-5`; excluded from the default demo policy |
+| Administrator Provider settings | OpenAI: `onecomputer-assistant`, `onecomputer-openai`, `claude-opus-4-6`; Anthropic: `onecomputer-claude`, `claude-sonnet-4-6`; GLM: `onecomputer-glm`, `claude-sonnet-4-5`; Bedrock: `onecomputer-bedrock` |
 
-The static OpenAI and Anthropic YAML routes and environment variables are
+The static OpenAI, Anthropic, and GLM YAML routes and provider environment variables are
 retired. During the cutover, keep the LiteLLM salt and credential secret stable,
 back up both databases, deploy the new configuration, then sign in as an
 administrator to configure and test each provider. A stale static route makes

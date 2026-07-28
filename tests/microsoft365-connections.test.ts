@@ -162,31 +162,32 @@ test("the default catalog covers the required categories and registers a remote 
   ]);
   assert.ok(catalog.connections.every((connector) => connector.available));
   assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));
-  const github = catalog.connections.find((connector) => connector.id === "github")!;
-  assert.deepEqual(github.activation, { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." });
-  const asana = catalog.connections.find((connector) => connector.id === "asana")!;
-  assert.deepEqual(asana.activation, { readiness: "request_access", action: "view_requirements", message: "This service needs provider approval or organization access before people can connect." });
-  const figma = catalog.connections.find((connector) => connector.id === "figma")!;
-  assert.deepEqual(figma.activation, { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." });
-  const slack = catalog.connections.find((connector) => connector.id === "slack")!;
-  assert.deepEqual(slack.activation, { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." });
+  assert.ok(catalog.connections.every((connector) => connector.activation.readiness === "ready"));
+  assert.ok(catalog.connections.every((connector) => connector.activation.action === "connect"));
   for (const category of ["Productivity", "Developer tools", "Business", "Communication", "Data and analytics"]) {
     assert.ok(catalog.connections.some((connector) => connector.category === category), `catalog includes ${category}`);
   }
 });
 
-test("setup and request catalog actions never start a misleading provider OAuth flow", async () => {
+test("every approved remote MCP card lazily starts its provider flow only after Connect", async () => {
   const gateway = new FakeConnectionGateway();
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
-  await assert.rejects(() => service.start(alpha, "github"), { code: "MCP_CONNECTOR_SETUP_REQUIRED" });
-  await assert.rejects(() => service.start(alpha, "figma"), { code: "MCP_CONNECTOR_SETUP_REQUIRED" });
-  await assert.rejects(() => service.start(alpha, "slack"), { code: "MCP_CONNECTOR_SETUP_REQUIRED" });
-  await assert.rejects(() => service.start(alpha, "asana"), { code: "MCP_CONNECTOR_REQUEST_REQUIRED" });
-  assert.deepEqual(gateway.started, []);
-  assert.deepEqual(gateway.ensured, []);
+  for (const connectorId of ["github", "figma", "slack", "asana"]) await service.start(alpha, connectorId);
+  assert.deepEqual(gateway.started.map((request) => request.serverName), [
+    "onecomputer_github",
+    "onecomputer_figma",
+    "onecomputer_slack",
+    "onecomputer_asana",
+  ]);
+  assert.deepEqual(gateway.ensured.map((connectors) => connectors[0]?.serverName), [
+    "onecomputer_github",
+    "onecomputer_figma",
+    "onecomputer_slack",
+    "onecomputer_asana",
+  ]);
 });
 
 test("unconnected connector policy inspection never probes provider grants or tools", async () => {

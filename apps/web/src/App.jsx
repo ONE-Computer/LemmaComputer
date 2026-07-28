@@ -44,6 +44,7 @@ const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]
 const providerTitle = (provider) => ({
   openai: "OpenAI",
   anthropic: "Anthropic",
+  glm: "GLM (Z.ai)",
   bedrock: "Amazon Bedrock",
 }[provider] ?? provider);
 const bedrockRegionOptions = [

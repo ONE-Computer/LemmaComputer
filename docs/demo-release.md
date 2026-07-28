@@ -35,7 +35,7 @@ Application startup never performs a migration. If the migration job fails, reta
 ## Managed-provider cutover
 
 Use this procedure when promoting the release that replaces static OpenAI and
-Anthropic routes with Provider settings:
+Anthropic, GLM, and Bedrock routes with Provider settings:
 
 1. Capture a restore-tested, coordinated snapshot of Control PostgreSQL,
    LiteLLM PostgreSQL, workspace volumes, image digests, and the stable

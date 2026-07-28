@@ -1,23 +1,7 @@
-model_list:
-  # OpenAI and Anthropic routes are tenant-scoped LiteLLM database records
-  # created by Control's Provider settings. They intentionally do not use
-  # deployment environment API keys or static YAML aliases.
-  - model_name: onecomputer-glm
-    litellm_params:
-      model: zai/glm-5
-      api_key: os.environ/ZAI_API_KEY
-    model_info:
-      supports_vision: false
-
-  # Claude Desktop validates model identifiers against its own catalog before
-  # sending a gateway request. The Z.ai compatibility alias below remains a
-  # legacy static exception until it receives a managed-provider implementation.
-  - model_name: claude-sonnet-4-5
-    litellm_params:
-      model: zai/glm-5
-      api_key: os.environ/ZAI_API_KEY
-    model_info:
-      supports_vision: false
+model_list: []
+# OpenAI, Anthropic, GLM, and Bedrock routes are tenant-scoped LiteLLM
+# database records created by Control's Provider settings. Provider API keys
+# are never supplied through deployment environment variables or static YAML.
 
 mcp_servers:
   onecomputer_ms365:

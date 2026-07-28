@@ -21,6 +21,7 @@ import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "provider-settings-proxy-token-at-least-24-characters";
 const rawOpenAiKey = "sk-control-openai-never-returned-000000001";
+const rawGlmKey = "sk-control-glm-never-returned-000000000002";
 const rawRejectedKey = "sk-control-rejected-never-returned-000002";
 
 const identity: IdentityContext = {
@@ -168,6 +169,26 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configured.json().provider.fingerprint, "fp_acme_openai");
     assert.equal(JSON.stringify(configured.json()).includes(rawOpenAiKey), false);
     assert.equal(providerAdministration.configured[0]!.apiKey, rawOpenAiKey);
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/admin/provider-settings",
+      headers: testHeaders,
+    });
+    assert.deepEqual(listed.json().providers.map((provider: { provider: string }) => provider.provider), ["openai", "anthropic", "glm", "bedrock"]);
+
+    const configuredGlm = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/glm",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-configure-glm-0001" },
+      payload: { apiKey: rawGlmKey },
+    });
+    assert.equal(configuredGlm.statusCode, 200);
+    assert.equal(configuredGlm.json().provider.provider, "glm");
+    assert.equal(configuredGlm.json().provider.state, "active");
+    assert.equal(JSON.stringify(configuredGlm.json()).includes(rawGlmKey), false);
+    assert.equal(providerAdministration.configured[1]!.provider, "glm");
+    assert.equal(providerAdministration.configured[1]!.apiKey, rawGlmKey);
 
     const stored = await settingsStore.getProviderSetting(identity.tenantId, "openai");
     assert.ok(stored);

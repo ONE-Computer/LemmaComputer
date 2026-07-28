@@ -13,7 +13,7 @@ if (check === write) throw new Error("Choose exactly one of --check or --write")
 const template = await readFile(".env.example", "utf8");
 const current = await readFile(destination, "utf8");
 const parity = environmentParity(template, current);
-const retiredSensitiveVariableNames = new Set(["ONECOMPUTER_OPENAI_API_KEY", "ONECOMPUTER_CLAUDE_API_KEY", "ONECOMPUTER_LITELLM_UI_PASSWORD"]);
+const retiredSensitiveVariableNames = new Set(["ONECOMPUTER_OPENAI_API_KEY", "ONECOMPUTER_CLAUDE_API_KEY", "ONECOMPUTER_GLM_API_KEY", "ONECOMPUTER_LITELLM_UI_PASSWORD"]);
 const retiredSensitive = parity.extra.filter((name) => retiredSensitiveVariableNames.has(name));
 
 if (check) {

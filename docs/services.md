@@ -257,7 +257,7 @@ is unavailable or returns malformed data, the callback fails closed.
 Raw prompt/response logging is disabled. Uvicorn access logging is suppressed
 for OAuth callback safety.
 
-OpenAI and Anthropic are managed providers. An administrator supplies a key
+OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock are managed providers. An administrator supplies a key
 write-only through Control; LiteLLM encrypts it in its credential store and
 holds tenant-scoped model records that reference only the credential name.
 Control stores no raw key, checks a candidate route before activation, and

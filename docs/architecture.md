@@ -20,7 +20,7 @@ scoped key. User applications authenticate to the local broker with a
 non-authoritative local credential.
 
 OAuth tokens for Microsoft 365 are held in the gateway boundary and persisted
-by LiteLLM using its stable salt key. OpenAI and Anthropic keys are write-only
+by LiteLLM using its stable salt key. OpenAI, Anthropic, GLM, and Bedrock keys are write-only
 administrator input: Control sends them directly to LiteLLM's private credential
 API, which encrypts them in the gateway database. Control persists only
 tenant-scoped route identifiers, lifecycle metadata, and a safe fingerprint—not

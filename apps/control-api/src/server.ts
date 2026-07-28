@@ -158,7 +158,7 @@ const createConnectorSchema = z.strictObject({
 const connectorIconSchema = z.strictObject({
   iconDataUrl: z.string().max(350000).nullable(),
 });
-const providerNameSchema = z.enum(["openai", "anthropic", "bedrock"]);
+const providerNameSchema = z.enum(["openai", "anthropic", "glm", "bedrock"]);
 const saveProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096),
 });

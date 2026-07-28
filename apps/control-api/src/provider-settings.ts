@@ -3,7 +3,7 @@ import { managedProviderForAlias, managedProviderModels, managedProviderNames, t
 import type { ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
 
 export type ProviderSettingInput =
-  | { provider: "openai" | "anthropic"; apiKey: string }
+  | { provider: "openai" | "anthropic" | "glm"; apiKey: string }
   | { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
 
 type BedrockSelection = { region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
