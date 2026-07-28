@@ -203,6 +203,7 @@ const desktopTransportAliases: Record<string, string> = {
   "onecomputer-claude": "claude-sonnet-4-6",
   "onecomputer-openai": "claude-opus-4-6",
   "onecomputer-glm": "claude-sonnet-4-5",
+  [bedrockApiKeyRouteAlias]: bedrockApiKeyRouteAlias,
 };
 
 const desktopModelAlias = (modelAlias: string, policy?: RuntimePolicy) => {

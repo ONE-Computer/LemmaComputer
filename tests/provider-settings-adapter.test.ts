@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { OneComputerError } from "@onecomputer/contracts";
-import { LiteLLMProviderAdministration } from "@onecomputer/litellm-adapter";
+import { LiteLLMProviderAdministration, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
 
 const alphaKey = "sk-provider-alpha-never-log-000000000001";
 const betaKey = "sk-provider-beta-never-log-000000000002";
@@ -237,6 +237,159 @@ test("managed provider configuration isolates tenants, validates candidates, and
       },
     );
     assert.deepEqual(requests.slice(staticStart).map((request) => request.url), ["/model/info"]);
+  } finally {
+    await close(server);
+  }
+});
+
+test("Bedrock managed provider routes are tenant-scoped, write-only, and reject replacement before stable cutover", async () => {
+  const requests: GatewayRequest[] = [];
+  let rejectCandidate = false;
+  const server = createServer(async (request, response) => {
+    const item: GatewayRequest = {
+      method: request.method ?? "",
+      url: request.url ?? "",
+      authorization: String(request.headers.authorization ?? ""),
+      body: await readBody(request),
+    };
+    requests.push(item);
+    response.setHeader("content-type", "application/json");
+
+    if (item.method === "GET" && item.url === "/model/info") {
+      response.end(JSON.stringify({ data: [] }));
+      return;
+    }
+    if (item.method === "PATCH" && item.url.startsWith("/model/")) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({}));
+      return;
+    }
+    if (item.method === "PATCH" && item.url.startsWith("/credentials/")) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({}));
+      return;
+    }
+    if (item.method === "POST" && item.url === "/credentials") {
+      response.end(JSON.stringify({ success: true }));
+      return;
+    }
+    if (item.method === "DELETE" && item.url.startsWith("/credentials/")) {
+      response.end(JSON.stringify({ success: true }));
+      return;
+    }
+    if (item.method === "POST" && item.url === "/model/new") {
+      response.end(JSON.stringify({ model_info: { id: (item.body.model_info as Record<string, unknown>).id } }));
+      return;
+    }
+    if (item.method === "POST" && ["/model/delete", "/key/generate", "/key/delete"].includes(item.url)) {
+      response.end(JSON.stringify({ success: true }));
+      return;
+    }
+    if (item.method === "POST" && item.url === "/chat/completions") {
+      if (rejectCandidate && item.authorization.includes("sk-provider-admin-key")) {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ error: { message: "Authentication failed for " + rejectedKey } }));
+        return;
+      }
+      response.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "OK" } }] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: { message: "Unexpected route" } }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const gateway = gatewayFor(address.port);
+  const selection = { region: "ap-southeast-1" as const, modelProfileId: "claude-sonnet-4-5-global" as const };
+
+  try {
+    const route = await gateway.configureManagedProvider({
+      tenantId: "tenant-bedrock",
+      provider: "bedrock",
+      apiKey: alphaKey,
+      ...selection,
+      existingModelIds: [],
+    });
+    assert.equal(route.modelIds.length, 1);
+    assert.deepEqual(route.configuration, selection);
+
+    const stableModel = requests
+      .filter((request) => request.url === "/model/new")
+      .map(modelDocument)
+      .find((document) => document.model_name === "onecomputer-bedrock" && (document.model_info.access_groups as unknown[]).length > 0);
+    assert.ok(stableModel);
+    assert.equal(stableModel.litellm_params.model, "bedrock/converse/global.anthropic.claude-sonnet-4-5-20250929-v1:0");
+    assert.equal(stableModel.litellm_params.aws_region_name, selection.region);
+    assert.equal(stableModel.litellm_params.timeout, 60);
+    assert.equal(stableModel.litellm_params.max_retries, 2);
+    for (const key of ["api_key", "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "aws_role_name"]) {
+      assert.equal(key in stableModel.litellm_params, false);
+    }
+    assert.deepEqual(stableModel.model_info.access_groups, [tenantManagedModelAccessGroup("tenant-bedrock", "onecomputer-bedrock")]);
+    assert.equal(stableModel.model_info.supports_vision, true);
+    assert.equal(stableModel.model_info.supports_function_calling, true);
+    assert.equal(stableModel.model_info.supports_response_schema, true);
+    assert.equal(stableModel.model_info.supports_streaming, true);
+
+    const stableCredential = requests
+      .filter((request) => request.method === "POST" && request.url === "/credentials")
+      .find((request) => !String(request.body.credential_name).includes("-candidate-"));
+    assert.ok(stableCredential);
+    assert.deepEqual(stableCredential.body.credential_info, {
+      provider: "bedrock",
+      managed_by: "onecomputer",
+      route_alias: "onecomputer-bedrock",
+      region: selection.region,
+      model_profile_id: selection.modelProfileId,
+    });
+    assert.deepEqual(stableCredential.body.credential_values, { api_key: alphaKey });
+    for (const request of requests.filter((request) => !request.url.startsWith("/credentials"))) {
+      assert.equal((JSON.stringify(request.body) + request.authorization).includes(alphaKey), false);
+    }
+
+    await gateway.testManagedProvider({
+      tenantId: "tenant-bedrock",
+      provider: "bedrock",
+      existingModelIds: route.modelIds,
+    });
+
+    const rotationStart = requests.length;
+    rejectCandidate = true;
+    await assert.rejects(
+      gateway.configureManagedProvider({
+        tenantId: "tenant-bedrock",
+        provider: "bedrock",
+        apiKey: rejectedKey,
+        ...selection,
+        existingModelIds: route.modelIds,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof OneComputerError);
+        assert.equal(error.code, "BEDROCK_API_KEY_INVALID");
+        assert.equal(error.message.includes(rejectedKey), false);
+        return true;
+      },
+    );
+    const rejectedRotation = requests.slice(rotationStart);
+    assert.equal(rejectedRotation.filter((request) => request.method === "PATCH" && request.url.startsWith("/credentials/")).length, 0);
+    assert.equal(rejectedRotation
+      .filter((request) => request.url === "/model/new")
+      .map(modelDocument)
+      .filter((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length > 0).length, 0);
+    for (const request of rejectedRotation.filter((request) => !request.url.startsWith("/credentials"))) {
+      assert.equal((JSON.stringify(request.body) + request.authorization).includes(rejectedKey), false);
+    }
+
+    rejectCandidate = false;
+    const deleteStart = requests.length;
+    await gateway.deleteManagedProvider({
+      tenantId: "tenant-bedrock",
+      provider: "bedrock",
+      existingModelIds: route.modelIds,
+    });
+    const deleted = requests.slice(deleteStart);
+    assert.ok(deleted.some((request) => request.url === "/model/delete" && request.body.id === route.modelIds[0]));
+    assert.ok(deleted.some((request) => request.method === "DELETE" && request.url.startsWith("/credentials/") && !request.url.includes("-candidate-")));
   } finally {
     await close(server);
   }

@@ -150,6 +150,18 @@ export const bedrockApiKeyRouteConfigurationSchema = z.object({
 });
 export type BedrockApiKeyRouteConfiguration = z.infer<typeof bedrockApiKeyRouteConfigurationSchema>;
 
+// Provider Settings persists only this read-safe selection metadata. The API
+// key itself is deliberately absent: LiteLLM owns its encrypted credential
+// record and Control only needs the reviewed Bedrock route selection.
+export const providerSettingMetadataSchema = z.strictObject({
+  region: bedrockApiKeyRegionSchema.optional(),
+  modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
+}).refine(
+  (value) => (value.region === undefined) === (value.modelProfileId === undefined),
+  "Bedrock provider metadata must include both region and model profile",
+);
+export type ProviderSettingMetadata = z.infer<typeof providerSettingMetadataSchema>;
+
 export const sandboxProfileSchema = z.object({
   id: sandboxProfileIdSchema,
   version: z.literal(1),

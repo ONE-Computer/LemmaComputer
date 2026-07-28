@@ -244,6 +244,8 @@ const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-deskto
 const mvpDefaultAgentIds = ["claude-desktop", "hermes-claw"] as const;
 const mvpApplicationIds = ["firefox", "google-chrome"] as const;
 const mvpDefaultApplicationIds = ["firefox"] as const;
+const mvpDefaultModelAliases = ["onecomputer-claude", "onecomputer-openai", "onecomputer-bedrock"] as const;
+const legacyMvpDefaultModelAliases = ["onecomputer-claude", "onecomputer-openai"] as const;
 
 const applyMvpSandboxCatalog = (document: Record<string, OwnedJson>) => {
   document.workspaceProfile = "claude-desktop-standard-v1";
@@ -270,7 +272,10 @@ export const withOpenWorkspaceProfile = (document: OwnedJson): OwnedJson | null 
   };
 };
 
-const mvpPolicyDocument = (revisionNote = "Initial MVP policy") => ({
+export const mvpPolicyDocument = (
+  revisionNote = "Initial MVP policy",
+  modelAliases: readonly string[] = mvpDefaultModelAliases,
+) => ({
   schemaVersion: 1,
   revisionNote,
   workspaceProfile: "claude-desktop-standard-v1",
@@ -281,7 +286,7 @@ const mvpPolicyDocument = (revisionNote = "Initial MVP policy") => ({
   applications: [...mvpApplicationIds],
   defaultApplications: [...mvpDefaultApplicationIds],
   // The demo bootstrap uses only routes managed by Provider settings.
-  modelAliases: ["onecomputer-claude", "onecomputer-openai"],
+  modelAliases: [...modelAliases],
   networkProfile: "controlled-egress-v1",
   clipboard: defaultClipboardPolicy,
   mcp: {
@@ -299,6 +304,10 @@ const mvpPolicyDocument = (revisionNote = "Initial MVP policy") => ({
   },
 }) satisfies OwnedJson;
 
+// Only this exact historic default is upgraded. Customer-created policy
+// versions remain opt-in and are never broadened by the demo adoption path.
+const legacyMvpPolicyDocument = () => mvpPolicyDocument("Initial MVP policy", legacyMvpDefaultModelAliases);
+
 const stableJson = (value: OwnedJson): string => {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -306,6 +315,10 @@ const stableJson = (value: OwnedJson): string => {
 };
 
 const policyHash = (document: OwnedJson) => createHash("sha256").update(stableJson(document)).digest("hex");
+export const upgradeHistoricMvpPolicyDocument = (document: OwnedJson): OwnedJson | null => {
+  if (policyHash(document) !== policyHash(legacyMvpPolicyDocument())) return null;
+  return mvpPolicyDocument("Enabled Bedrock for the historic default MVP policy");
+};
 const mvpPolicyBundleId = (tenantId: string) => `mvp-standard:${tenantId}`;
 const defaultEgressSecurityGroupId = (tenantId: string) => `esg_${createHash("sha256").update(`egress:${tenantId}`).digest("hex").slice(0, 24)}`;
 const defaultEgressSecurityGroupVersionId = (tenantId: string) => `egv_${createHash("sha256").update(`egress:${tenantId}`).digest("hex").slice(0, 24)}_v1`;
@@ -406,7 +419,11 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
          pv.document->>'workspaceProfile'='claude-desktop-standard-v1'
          OR pv.document->'workspaceProfiles' @> '["claude-desktop-standard-v1"]'::jsonb
        )
-       AND NOT COALESCE(pv.document->'workspaceProfiles', '[]'::jsonb) @> '["disposable-open-v1"]'::jsonb`,
+       AND (
+         NOT COALESCE(pv.document->'workspaceProfiles', '[]'::jsonb) @> '["disposable-open-v1"]'::jsonb
+         OR pv.document_hash=$1
+       )`,
+      [policyHash(legacyMvpPolicyDocument())],
     );
     let upgradedAssignments = 0;
     for (const candidate of candidates.rows) {
@@ -425,7 +442,10 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
           await client.query("COMMIT");
           continue;
         }
-        const document = withOpenWorkspaceProfile(candidate.document as OwnedJson);
+        const profileDocument = withOpenWorkspaceProfile(candidate.document as OwnedJson);
+        const document = profileDocument
+          ? upgradeHistoricMvpPolicyDocument(profileDocument) ?? profileDocument
+          : upgradeHistoricMvpPolicyDocument(candidate.document as OwnedJson);
         if (!document) {
           await client.query("COMMIT");
           continue;

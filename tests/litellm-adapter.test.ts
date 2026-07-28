@@ -767,21 +767,23 @@ test("workspace grant preserves the Control alias while scoping a managed-provid
   }
 });
 
-test("Claude Desktop receives a Claude-compatible client alias while policy retains the actual provider route", async () => {
-  let grantBody: Record<string, unknown> = {};
+test("managed Claude Desktop and CLI Bedrock policies receive only their scoped Bedrock route", async () => {
+  const grantBodies: Array<Record<string, unknown>> = [];
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    grantBody = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const body = (chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}) as Record<string, unknown>;
+    if (request.url === "/key/generate") grantBodies.push(body);
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ ok: true }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as AddressInfo;
+  const masterKey = "sk-master-test-not-exposed-00001";
   const liveAdapter = new LiteLLMGatewayAdapter({
     adminUrl: `http://127.0.0.1:${address.port}`,
     workspaceUrl: `http://127.0.0.1:${address.port}`,
-    masterKey: "sk-master-test-not-used-00001",
+    masterKey,
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   const policy = {
@@ -793,17 +795,33 @@ test("Claude Desktop receives a Claude-compatible client alias while policy reta
     agentId: "desktop-agent",
     agentProfile: "claude-desktop-managed-v1" as const,
     networkProfile: "controlled-egress-v1" as const,
-    modelAlias: "onecomputer-glm",
+    modelAlias: "onecomputer-bedrock" as const,
     mcpServer: "onecomputer_ms365",
     allowedTools: ["list-drives"],
   };
   try {
-    const grant = await liveAdapter.ensureGrant({ workspaceId: "workspace-desktop", identity, policy });
-    assert.equal(grant.modelAlias, "claude-sonnet-4-5");
-    assert.deepEqual(grantBody.models, ["claude-sonnet-4-5"]);
-    const metadata = grantBody.metadata as Record<string, unknown>;
-    assert.equal(metadata.onecomputer_policy_model_alias, "onecomputer-glm");
-    assert.equal(metadata.onecomputer_client_model_alias, "claude-sonnet-4-5");
+    for (const agentProfile of ["claude-desktop-managed-v1", "claude-cli-managed-v1"] as const) {
+      const workspaceId = `workspace-bedrock-${agentProfile}`;
+      const grant = await liveAdapter.ensureGrant({
+        workspaceId,
+        identity,
+        policy: { ...policy, agentProfile },
+      });
+      assert.equal(grant.modelAlias, "onecomputer-bedrock");
+      assert.notEqual(grant.credential, masterKey);
+      assert.match(grant.credential, /^sk-ocw-[A-Za-z0-9_-]+$/);
+    }
+    assert.equal(grantBodies.length, 2);
+    for (const grantBody of grantBodies) {
+      assert.deepEqual(grantBody.models, [tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-bedrock")]);
+      assert.equal(JSON.stringify(grantBody).includes(masterKey), false);
+      assert.equal(JSON.stringify(grantBody).includes("api_key"), false);
+      assert.equal(JSON.stringify(grantBody).includes("aws_access_key_id"), false);
+      const metadata = grantBody.metadata as Record<string, unknown>;
+      assert.equal(metadata.onecomputer_policy_model_alias, "onecomputer-bedrock");
+      assert.equal(metadata.onecomputer_client_model_alias, "onecomputer-bedrock");
+      assert.equal(metadata.onecomputer_provider_access_group, tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-bedrock"));
+    }
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { mvpPolicyDocument, upgradeHistoricMvpPolicyDocument } from "@onecomputer/workspace-store";
 
 const root = path.resolve(import.meta.dirname, "..");
 const source = (relativePath: string) => readFile(path.join(root, relativePath), "utf8");
@@ -24,8 +25,26 @@ test("OpenAI and Anthropic routes are database-managed, while only legacy Z.ai a
   assert.doesNotMatch(config, /fallbacks:/);
   assert.match(config, /turn_off_message_logging: true/);
   assert.match(config, /log_raw_request_response: false/);
-  assert.match(bootstrapPolicy, /modelAliases: \["onecomputer-claude", "onecomputer-openai"\]/);
+  assert.match(bootstrapPolicy, /mvpDefaultModelAliases = \["onecomputer-claude", "onecomputer-openai", "onecomputer-bedrock"\]/);
+  assert.match(bootstrapPolicy, /modelAliases: \[\.\.\.modelAliases\]/);
   assert.doesNotMatch(bootstrapPolicy, /modelAliases: \[[^\]]*onecomputer-glm/);
+});
+
+test("the exact historic MVP default gains Bedrock while a customer policy remains unchanged", async () => {
+  const historic = mvpPolicyDocument("Initial MVP policy", ["onecomputer-claude", "onecomputer-openai"]);
+  const upgraded = upgradeHistoricMvpPolicyDocument(historic);
+  assert.ok(upgraded && typeof upgraded === "object" && !Array.isArray(upgraded));
+  assert.deepEqual((upgraded as Record<string, unknown>).modelAliases, [
+    "onecomputer-claude",
+    "onecomputer-openai",
+    "onecomputer-bedrock",
+  ]);
+  assert.equal(
+    upgradeHistoricMvpPolicyDocument({ ...historic, revisionNote: "Customer-restricted model policy" }),
+    null,
+  );
+  const bootstrapPolicy = await source("packages/workspace-store/src/identity-policy.ts");
+  assert.match(bootstrapPolicy, /pv\.document_hash=\$1/);
 });
 
 test("provider setup uses Control and LiteLLM credentials, never deprecated environment keys or the LiteLLM admin UI", async () => {

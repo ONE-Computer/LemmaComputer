@@ -1,26 +1,47 @@
-import { OneComputerError } from "@onecomputer/contracts";
+import { OneComputerError, providerSettingMetadataSchema, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion } from "@onecomputer/contracts";
 import { managedProviderForAlias, managedProviderModels, managedProviderNames, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import type { ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
+
+export type ProviderSettingInput =
+  | { provider: "openai" | "anthropic"; apiKey: string }
+  | { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
+
+type BedrockSelection = { region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
 
 export type ProviderSettingView = {
   provider: ManagedProviderName;
   aliases: string[];
-  state: "active" | "disabled" | "not-configured";
+  state: "active" | "disabled" | "not-configured" | "needs-reconfiguration";
   fingerprint: string | null;
+  region: BedrockApiKeyRegion | null;
+  modelProfileId: BedrockApiKeyModelProfileId | null;
   lastTestedAt: string | null;
   lastErrorCode: string | null;
   updatedAt: string | null;
 };
 
-const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | null): ProviderSettingView => ({
-  provider,
-  aliases: managedProviderModels[provider].map((model) => model.alias),
-  state: record?.state ?? "not-configured",
-  fingerprint: record?.credentialFingerprint ?? null,
-  lastTestedAt: record?.lastTestedAt?.toISOString() ?? null,
-  lastErrorCode: record?.lastErrorCode ?? null,
-  updatedAt: record?.updatedAt.toISOString() ?? null,
-});
+const bedrockSelection = (provider: ManagedProviderName, record: ProviderSettingRecord | null): BedrockSelection | null => {
+  if (provider !== "bedrock" || !record) return null;
+  const parsed = providerSettingMetadataSchema.safeParse(record.configuration);
+  if (!parsed.success || !parsed.data.region || !parsed.data.modelProfileId) return null;
+  return { region: parsed.data.region, modelProfileId: parsed.data.modelProfileId };
+};
+
+const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | null): ProviderSettingView => {
+  const selection = bedrockSelection(provider, record);
+  const needsReconfiguration = provider === "bedrock" && record?.state === "active" && !selection;
+  return {
+    provider,
+    aliases: managedProviderModels[provider].map((model) => model.alias),
+    state: !record ? "not-configured" : needsReconfiguration ? "needs-reconfiguration" : record.state,
+    fingerprint: record?.credentialFingerprint ?? null,
+    region: selection?.region ?? null,
+    modelProfileId: selection?.modelProfileId ?? null,
+    lastTestedAt: record?.lastTestedAt?.toISOString() ?? null,
+    lastErrorCode: needsReconfiguration ? "PROVIDER_CONFIGURATION_INVALID" : record?.lastErrorCode ?? null,
+    updatedAt: record?.updatedAt.toISOString() ?? null,
+  };
+};
 const safeProviderErrorCodes = new Set([
   "PROVIDER_KEY_REQUIRED",
   "PROVIDER_ROUTE_INTEGRITY_FAILED",
@@ -31,6 +52,17 @@ const safeProviderErrorCodes = new Set([
   "PROVIDER_GATEWAY_UNAVAILABLE",
   "PROVIDER_CONFIGURATION_FAILED",
   "PROVIDER_TEST_FAILED",
+  "PROVIDER_CONFIGURATION_INVALID",
+  "BEDROCK_ROUTE_UNAPPROVED",
+  "BEDROCK_ROUTE_RECONFIGURATION_REQUIRED",
+  "BEDROCK_API_KEY_INVALID",
+  "BEDROCK_MODEL_ACCESS_REQUIRED",
+  "BEDROCK_REGION_UNSUPPORTED",
+  "BEDROCK_ACCESS_DENIED",
+  "BEDROCK_THROTTLED",
+  "BEDROCK_TIMEOUT",
+  "BEDROCK_ROUTE_UNAVAILABLE",
+  "BEDROCK_ROUTE_REJECTED",
 ]);
 
 const safeProviderMessage = (code: string, fallback: string) => ({
@@ -43,6 +75,17 @@ const safeProviderMessage = (code: string, fallback: string) => ({
   PROVIDER_GATEWAY_UNAVAILABLE: "The provider gateway is unavailable",
   PROVIDER_CONFIGURATION_FAILED: "The provider configuration could not be validated",
   PROVIDER_TEST_FAILED: "The provider test could not be completed",
+  PROVIDER_CONFIGURATION_INVALID: "The Bedrock selection metadata is invalid; disable and reconnect the provider",
+  BEDROCK_ROUTE_UNAPPROVED: "The selected Bedrock region or inference profile is not approved",
+  BEDROCK_ROUTE_RECONFIGURATION_REQUIRED: "Disable and reconnect Bedrock to change its approved region or inference profile",
+  BEDROCK_API_KEY_INVALID: "Bedrock rejected the API key",
+  BEDROCK_MODEL_ACCESS_REQUIRED: "Enable the approved model and accept its applicable Bedrock terms before retrying",
+  BEDROCK_REGION_UNSUPPORTED: "The approved Bedrock inference profile is not available in that region",
+  BEDROCK_ACCESS_DENIED: "Bedrock denied access to the approved route",
+  BEDROCK_THROTTLED: "Bedrock is throttling this route; retry shortly",
+  BEDROCK_TIMEOUT: "Bedrock did not respond before the route timeout",
+  BEDROCK_ROUTE_UNAVAILABLE: "The Bedrock route is temporarily unavailable",
+  BEDROCK_ROUTE_REJECTED: "Bedrock rejected the route configuration or test request",
 }[code] ?? fallback);
 
 const safeProviderError = (
@@ -83,29 +126,40 @@ export class ProviderSettingsService {
   async assertConfigured(actor: Pick<SessionPrincipal, "tenantId">, modelAlias: string) {
     const provider = managedProviderForAlias(modelAlias);
     if (!provider) return;
-    const record = await this.store.getProviderSetting(actor.tenantId, provider);
-    if (
-      record?.state !== "active"
-      || record.modelIds.length !== managedProviderModels[provider].length
-    ) {
-      throw new OneComputerError(
-        "PROVIDER_NOT_CONFIGURED",
-        "The selected model provider is not configured for this organization",
-        409,
-      );
-    }
+    await this.activeRecord(actor, provider);
   }
 
-  async configure(actor: SessionPrincipal, provider: ManagedProviderName, apiKey: string) {
+  async configure(actor: SessionPrincipal, input: ProviderSettingInput) {
+    const provider = input.provider;
     const current = await this.store.getProviderSetting(actor.tenantId, provider);
+    if (input.provider === "bedrock" && current?.state === "active") {
+      const existing = this.requireBedrockSelection(current);
+      if (existing.region !== input.region || existing.modelProfileId !== input.modelProfileId) {
+        throw new OneComputerError(
+          "BEDROCK_ROUTE_RECONFIGURATION_REQUIRED",
+          "Disable and reconnect Bedrock to change its approved region or inference profile",
+          409,
+        );
+      }
+    }
+    const existingModelIds = current?.state === "active" ? current.modelIds : [];
     let route;
     try {
-      route = await this.gateway.configureManagedProvider({
-        tenantId: actor.tenantId,
-        provider,
-        apiKey,
-        existingModelIds: current?.state === "active" ? current.modelIds : [],
-      });
+      route = await this.gateway.configureManagedProvider(input.provider === "bedrock"
+        ? {
+          tenantId: actor.tenantId,
+          provider: input.provider,
+          apiKey: input.apiKey,
+          region: input.region,
+          modelProfileId: input.modelProfileId,
+          existingModelIds,
+        }
+        : {
+          tenantId: actor.tenantId,
+          provider: input.provider,
+          apiKey: input.apiKey,
+          existingModelIds,
+        });
     } catch (error) {
       throw safeProviderError(error, "PROVIDER_CONFIGURATION_FAILED", "The provider configuration could not be validated");
     }
@@ -115,6 +169,7 @@ export class ProviderSettingsService {
         tenantId: actor.tenantId,
         provider,
         modelIds: route.modelIds,
+        configuration: route.configuration,
         state: "active",
         credentialFingerprint: route.credentialFingerprint,
         lastTestedAt: new Date(),
@@ -153,6 +208,7 @@ export class ProviderSettingsService {
         tenantId: current.tenantId,
         provider,
         modelIds: current.modelIds,
+        configuration: current.configuration,
         state: current.state,
         credentialFingerprint: current.credentialFingerprint,
         lastTestedAt: current.lastTestedAt,
@@ -167,6 +223,7 @@ export class ProviderSettingsService {
         tenantId: current.tenantId,
         provider,
         modelIds: current.modelIds,
+        configuration: current.configuration,
         state: current.state,
         credentialFingerprint: current.credentialFingerprint,
         lastTestedAt: new Date(),
@@ -185,7 +242,7 @@ export class ProviderSettingsService {
   }
 
   async disable(actor: SessionPrincipal, provider: ManagedProviderName) {
-    const current = await this.activeRecord(actor, provider);
+    const current = await this.activeRecord(actor, provider, false);
     try {
       await this.gateway.deleteManagedProvider({
         tenantId: actor.tenantId,
@@ -200,6 +257,7 @@ export class ProviderSettingsService {
         tenantId: current.tenantId,
         provider,
         modelIds: [],
+        configuration: current.configuration,
         state: "disabled",
         credentialFingerprint: null,
         lastTestedAt: current.lastTestedAt,
@@ -242,7 +300,17 @@ export class ProviderSettingsService {
     }
   }
 
-  private async activeRecord(actor: SessionPrincipal, provider: ManagedProviderName) {
+  private requireBedrockSelection(record: ProviderSettingRecord): BedrockSelection {
+    const selection = bedrockSelection(record.provider, record);
+    if (selection) return selection;
+    throw new OneComputerError(
+      "PROVIDER_CONFIGURATION_INVALID",
+      "The Bedrock selection metadata is invalid; disable and reconnect the provider",
+      409,
+    );
+  }
+
+  private async activeRecord(actor: Pick<SessionPrincipal, "tenantId">, provider: ManagedProviderName, requireValidBedrock = true) {
     const current = await this.store.getProviderSetting(actor.tenantId, provider);
     if (
       current?.state !== "active"
@@ -250,6 +318,7 @@ export class ProviderSettingsService {
     ) {
       throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
+    if (requireValidBedrock && provider === "bedrock") this.requireBedrockSelection(current);
     return current;
   }
 }

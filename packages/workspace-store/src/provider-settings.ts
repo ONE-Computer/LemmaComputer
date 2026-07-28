@@ -1,6 +1,7 @@
+import { providerSettingMetadataSchema, type ProviderSettingMetadata } from "@onecomputer/contracts";
 import pg from "pg";
 
-export const managedProviderNames = ["openai", "anthropic"] as const;
+export const managedProviderNames = ["openai", "anthropic", "bedrock"] as const;
 export type ManagedProviderName = typeof managedProviderNames[number];
 export type ProviderSettingState = "active" | "disabled";
 
@@ -8,6 +9,7 @@ export type ProviderSettingRecord = {
   tenantId: string;
   provider: ManagedProviderName;
   modelIds: string[];
+  configuration: ProviderSettingMetadata;
   state: ProviderSettingState;
   credentialFingerprint: string | null;
   lastTestedAt: Date | null;
@@ -30,10 +32,16 @@ const asStringArray = (value: unknown): string[] => Array.isArray(value)
   ? value.filter((item): item is string => typeof item === "string")
   : [];
 
+const asConfiguration = (value: unknown): ProviderSettingMetadata => {
+  const parsed = providerSettingMetadataSchema.safeParse(value);
+  return parsed.success ? parsed.data : {};
+};
+
 const mapRow = (row: Record<string, unknown>): ProviderSettingRecord => ({
   tenantId: String(row.tenant_id),
   provider: row.provider as ManagedProviderName,
   modelIds: asStringArray(row.model_ids),
+  configuration: asConfiguration(row.configuration),
   state: row.state as ProviderSettingState,
   credentialFingerprint: typeof row.credential_fingerprint === "string" ? row.credential_fingerprint : null,
   lastTestedAt: row.last_tested_at ? new Date(String(row.last_tested_at)) : null,
@@ -47,6 +55,7 @@ const values = (record: SaveProviderSetting) => [
   record.tenantId,
   record.provider,
   JSON.stringify(record.modelIds),
+  JSON.stringify(record.configuration),
   record.state,
   record.credentialFingerprint,
   record.lastTestedAt,
@@ -82,10 +91,11 @@ export class PostgresProviderSettingsStore implements ProviderSettingsStore {
   async saveProviderSetting(record: SaveProviderSetting) {
     const result = await this.pool.query(
       `INSERT INTO provider_settings (
-         tenant_id,provider,model_ids,state,credential_fingerprint,last_tested_at,last_error_code,updated_by
-       ) VALUES ($1,$2,$3::jsonb,$4,$5,$6,$7,$8)
+         tenant_id,provider,model_ids,configuration,state,credential_fingerprint,last_tested_at,last_error_code,updated_by
+       ) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,$6,$7,$8,$9)
        ON CONFLICT (tenant_id,provider) DO UPDATE SET
          model_ids=EXCLUDED.model_ids,
+         configuration=EXCLUDED.configuration,
          state=EXCLUDED.state,
          credential_fingerprint=EXCLUDED.credential_fingerprint,
          last_tested_at=EXCLUDED.last_tested_at,
@@ -131,6 +141,7 @@ export class MemoryProviderSettingsStore implements ProviderSettingsStore {
     const saved: ProviderSettingRecord = {
       ...record,
       modelIds: [...record.modelIds],
+      configuration: { ...record.configuration },
       createdAt: current?.createdAt ?? now,
       updatedAt: now,
     };

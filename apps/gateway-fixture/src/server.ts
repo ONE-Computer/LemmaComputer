@@ -12,6 +12,7 @@ const envSchema = z.object({
 
 export type FixtureCounters = {
   model: number;
+  bedrockModel: number;
   toolsList: number;
   searchFiles: number;
   deleteFile: number;
@@ -25,6 +26,7 @@ export function createGatewayFixture() {
   const env = envSchema.parse(process.env);
   const counters: FixtureCounters = {
     model: 0,
+    bedrockModel: 0,
     toolsList: 0,
     searchFiles: 0,
     deleteFile: 0,
@@ -40,6 +42,7 @@ export function createGatewayFixture() {
   app.get("/counters", async () => ({ ...counters }));
   app.post("/counters/reset", async () => {
     counters.model = 0;
+    counters.bedrockModel = 0;
     counters.toolsList = 0;
     counters.searchFiles = 0;
     counters.deleteFile = 0;
@@ -51,12 +54,18 @@ export function createGatewayFixture() {
     return { ...counters };
   });
 
+  const rejectedProviderCredential = (request: { headers: { authorization?: unknown; "x-amzn-bedrock-api-key"?: unknown; "x-api-key"?: unknown } }) => [
+    request.headers.authorization,
+    request.headers["x-amzn-bedrock-api-key"],
+    request.headers["x-api-key"],
+  ].some((value) => String(value ?? "").includes("provider-qualification-rejected"));
+
   app.post("/v1/chat/completions", async (request, reply) => {
     counters.model += 1;
     // The Provider Settings qualification submits a generated replacement key
     // with this marker. Reject it locally so the real pinned LiteLLM image
     // exercises candidate validation and rollback without contacting OpenAI.
-    if (String(request.headers.authorization ?? "").includes("provider-qualification-rejected")) {
+    if (rejectedProviderCredential(request)) {
       return reply.code(401).send({ error: { message: "fixture rejected the submitted provider credential" } });
     }
     const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
@@ -96,6 +105,36 @@ export function createGatewayFixture() {
         finish_reason: "stop",
       }],
       usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+    };
+  });
+
+  app.post("/model/:modelId/invoke", async (request, reply) => {
+    counters.model += 1;
+    counters.bedrockModel += 1;
+    if (rejectedProviderCredential(request)) {
+      return reply.code(401).send({ error: { message: "fixture rejected the submitted Bedrock API key" } });
+    }
+    return reply
+      .header("x-amzn-bedrock-input-token-count", "10")
+      .header("x-amzn-bedrock-output-token-count", "1")
+      .send({
+        content: [{ type: "text", text: "OK" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 1 },
+      });
+  });
+
+  app.post("/model/:modelId/converse", async (request, reply) => {
+    counters.model += 1;
+    counters.bedrockModel += 1;
+    if (rejectedProviderCredential(request)) {
+      return reply.code(401).send({ error: { message: "fixture rejected the submitted Bedrock API key" } });
+    }
+    return {
+      output: { message: { role: "assistant", content: [{ text: "OK" }] } },
+      stopReason: "end_turn",
+      usage: { inputTokens: 10, outputTokens: 1, totalTokens: 11 },
+      metrics: { latencyMs: 1 },
     };
   });
 

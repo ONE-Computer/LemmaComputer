@@ -4,6 +4,9 @@ import { OneComputerError, type IdentityContext } from "@onecomputer/contracts";
 import {
   managedProviderModels,
   type GatewayClient,
+  type ManagedProviderConfiguration,
+  type ManagedProviderOperation,
+  type ManagedProviderRoute,
   type ProviderAdministrationGateway,
 } from "@onecomputer/litellm-adapter";
 import {
@@ -93,23 +96,29 @@ const authentication = (principal: SessionPrincipal) => ({
 });
 
 class FakeProviderAdministration implements ProviderAdministrationGateway {
-  configured: Array<{ tenantId: string; provider: string; apiKey: string }> = [];
+  configured: ManagedProviderConfiguration[] = [];
   deleted: Array<{ tenantId: string; provider: string; modelIds: string[] }> = [];
+  tested: ManagedProviderOperation[] = [];
   failure: Error | null = null;
 
-  async configureManagedProvider(input: { tenantId: string; provider: "openai" | "anthropic"; apiKey: string }) {
+  async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
     if (this.failure) throw this.failure;
     this.configured.push(input);
     return {
       modelIds: managedProviderModels[input.provider].map((model) => input.tenantId + "-" + input.provider + "-" + model.alias),
       credentialFingerprint: "fp_" + input.tenantId + "_" + input.provider,
+      configuration: input.provider === "bedrock"
+        ? { region: input.region, modelProfileId: input.modelProfileId }
+        : {},
     };
   }
 
-  async testManagedProvider() {}
+  async testManagedProvider(input: ManagedProviderOperation) {
+    this.tested.push({ ...input, existingModelIds: [...input.existingModelIds] });
+  }
 
-  async deleteManagedProvider(input: { tenantId: string; provider: "openai" | "anthropic"; existingModelIds: string[] }) {
-    this.deleted.push({ ...input, modelIds: input.existingModelIds });
+  async deleteManagedProvider(input: ManagedProviderOperation) {
+    this.deleted.push({ tenantId: input.tenantId, provider: input.provider, modelIds: [...input.existingModelIds] });
   }
 }
 
@@ -210,6 +219,146 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(rejected.json().error.code, "PROVIDER_CREDENTIAL_REJECTED");
     assert.equal(JSON.stringify(rejected.json()).includes(rawRejectedKey), false);
     assert.match(rejected.json().error.message, /provider API key or approved model access was rejected/);
+  } finally {
+    await app.close();
+  }
+});
+
+test("Bedrock provider settings persist only approved selection metadata and fail closed when it is malformed", async () => {
+  const settingsStore = new MemoryProviderSettingsStore();
+  const providerAdministration = new FakeProviderAdministration();
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    proxyToken,
+    undefined,
+    undefined,
+    {},
+    {
+      testIdentityMode: true,
+      identityPolicyStore: identityPolicies(),
+      providerSettingsStore: settingsStore,
+      providerAdministration,
+    },
+  );
+  const rawBedrockKey = "bedrock-control-key-never-returned-00000001";
+  const rawRejectedBedrockKey = "bedrock-control-rejected-never-returned-0002";
+  const selection = { region: "ap-southeast-1", modelProfileId: "claude-sonnet-4-5-global" };
+
+  try {
+    const invalidSelection = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/bedrock",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "bedrock-invalid-selection-0001" },
+      payload: { apiKey: rawBedrockKey, region: "us-east-2", modelProfileId: selection.modelProfileId },
+    });
+    assert.equal(invalidSelection.statusCode, 400);
+    assert.equal(JSON.stringify(invalidSelection.json()).includes(rawBedrockKey), false);
+
+    const configured = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/bedrock",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "bedrock-configure-0001" },
+      payload: { apiKey: rawBedrockKey, ...selection },
+    });
+    assert.equal(configured.statusCode, 200);
+    assert.equal(configured.json().provider.provider, "bedrock");
+    assert.equal(configured.json().provider.state, "active");
+    assert.equal(configured.json().provider.region, selection.region);
+    assert.equal(configured.json().provider.modelProfileId, selection.modelProfileId);
+    assert.equal(JSON.stringify(configured.json()).includes(rawBedrockKey), false);
+    assert.equal(providerAdministration.configured[0]!.apiKey, rawBedrockKey);
+
+    const stored = await settingsStore.getProviderSetting(identity.tenantId, "bedrock");
+    assert.ok(stored);
+    assert.deepEqual(stored.configuration, selection);
+    assert.equal(JSON.stringify(stored).includes(rawBedrockKey), false);
+
+    const tested = await app.inject({
+      method: "POST",
+      url: "/v1/admin/provider-settings/bedrock/test",
+      headers: { ...testHeaders, "idempotency-key": "bedrock-test-0001" },
+    });
+    assert.equal(tested.statusCode, 200);
+    assert.equal(providerAdministration.tested[0]!.provider, "bedrock");
+
+    const beforeRejectedRotation = await settingsStore.getProviderSetting(identity.tenantId, "bedrock");
+    assert.ok(beforeRejectedRotation);
+    providerAdministration.failure = new OneComputerError(
+      "BEDROCK_API_KEY_INVALID",
+      "upstream reflected " + rawRejectedBedrockKey,
+      422,
+    );
+    const rejectedRotation = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/bedrock",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "bedrock-rotation-rejected-0001" },
+      payload: { apiKey: rawRejectedBedrockKey, ...selection },
+    });
+    assert.equal(rejectedRotation.statusCode, 422);
+    assert.equal(rejectedRotation.json().error.code, "BEDROCK_API_KEY_INVALID");
+    assert.equal(JSON.stringify(rejectedRotation.json()).includes(rawRejectedBedrockKey), false);
+    const afterRejectedRotation = await settingsStore.getProviderSetting(identity.tenantId, "bedrock");
+    assert.ok(afterRejectedRotation);
+    assert.deepEqual(afterRejectedRotation.modelIds, beforeRejectedRotation.modelIds);
+    assert.deepEqual(afterRejectedRotation.configuration, beforeRejectedRotation.configuration);
+    assert.equal(afterRejectedRotation.credentialFingerprint, beforeRejectedRotation.credentialFingerprint);
+    providerAdministration.failure = null;
+
+    const disabled = await app.inject({
+      method: "POST",
+      url: "/v1/admin/provider-settings/bedrock/disable",
+      headers: { ...testHeaders, "idempotency-key": "bedrock-disable-0001" },
+    });
+    assert.equal(disabled.statusCode, 200);
+    assert.equal(disabled.json().provider.state, "disabled");
+    assert.equal(disabled.json().provider.region, selection.region);
+    assert.equal(disabled.json().provider.modelProfileId, selection.modelProfileId);
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: "/v1/admin/provider-settings/bedrock",
+      headers: { ...testHeaders, "idempotency-key": "bedrock-delete-0001" },
+    });
+    assert.equal(deleted.statusCode, 200);
+    assert.equal(await settingsStore.getProviderSetting(identity.tenantId, "bedrock"), null);
+
+    await settingsStore.saveProviderSetting({
+      tenantId: identity.tenantId,
+      provider: "bedrock",
+      modelIds: managedProviderModels.bedrock.map((model) => identity.tenantId + "-bedrock-" + model.alias),
+      configuration: {},
+      state: "active",
+      credentialFingerprint: "fp_malformed_bedrock",
+      lastTestedAt: null,
+      lastErrorCode: null,
+      updatedBy: administrator.userId,
+    });
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/admin/provider-settings",
+      headers: testHeaders,
+    });
+    const malformedView = listed.json().providers.find((provider: { provider: string }) => provider.provider === "bedrock");
+    assert.equal(malformedView.state, "needs-reconfiguration");
+    assert.equal(malformedView.region, null);
+    assert.equal(malformedView.modelProfileId, null);
+
+    const malformedTest = await app.inject({
+      method: "POST",
+      url: "/v1/admin/provider-settings/bedrock/test",
+      headers: { ...testHeaders, "idempotency-key": "bedrock-malformed-test-0001" },
+    });
+    assert.equal(malformedTest.statusCode, 409);
+    assert.equal(malformedTest.json().error.code, "PROVIDER_CONFIGURATION_INVALID");
+
+    const recovered = await app.inject({
+      method: "POST",
+      url: "/v1/admin/provider-settings/bedrock/disable",
+      headers: { ...testHeaders, "idempotency-key": "bedrock-malformed-disable-0001" },
+    });
+    assert.equal(recovered.statusCode, 200);
+    assert.equal(recovered.json().provider.state, "disabled");
   } finally {
     await app.close();
   }

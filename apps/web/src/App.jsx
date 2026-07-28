@@ -41,6 +41,20 @@ import {
 import { ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog, useDismissOnOutside } from "./ui.jsx";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
+const providerTitle = (provider) => ({
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  bedrock: "Amazon Bedrock",
+}[provider] ?? provider);
+const bedrockRegionOptions = [
+  { value: "ap-southeast-1", label: "Asia Pacific (Singapore) · ap-southeast-1" },
+  { value: "us-east-1", label: "US East (N. Virginia) · us-east-1" },
+  { value: "us-west-2", label: "US West (Oregon) · us-west-2" },
+  { value: "eu-west-1", label: "Europe (Ireland) · eu-west-1" },
+];
+const bedrockProfileOptions = [
+  { value: "claude-sonnet-4-5-global", label: "Claude Sonnet 4.5 · Global inference profile" },
+];
 const operationStateLabels = {
   approval_required: "waiting for approval",
   approved: "approved",
@@ -746,12 +760,23 @@ function CredentialsScreen({ credentials, workspaces, loading, busy, error, onCr
 function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTest, onDisable, onDelete, onBack }) {
   const [editor, setEditor] = useState(null);
   const [apiKey, setApiKey] = useState("");
-  const titleFor = (provider) => provider === "openai" ? "OpenAI" : "Anthropic";
+  const closeEditor = () => { setApiKey(""); setEditor(null); };
+  const openEditor = (provider) => {
+    setApiKey("");
+    setEditor({
+      ...provider,
+      region: provider.region ?? "ap-southeast-1",
+      modelProfileId: provider.modelProfileId ?? "claude-sonnet-4-5-global",
+    });
+  };
   const save = async () => {
     const submitted = apiKey.trim();
     if (!editor || !submitted) return;
     setApiKey("");
-    const saved = await onSave(editor.provider, submitted);
+    const input = editor.provider === "bedrock"
+      ? { apiKey: submitted, region: editor.region, modelProfileId: editor.modelProfileId }
+      : { apiKey: submitted };
+    const saved = await onSave(editor.provider, input);
     if (saved) setEditor(null);
   };
   return (
@@ -760,33 +785,42 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
       <header className="page-heading compact">
         <p>Model access</p>
         <h1>Provider settings</h1>
-        <span>Add an approved provider key once. LiteLLM encrypts it in its own credential store; ONEComputer shows only a safe fingerprint and test status.</span>
+        <span>Add an approved provider key once. LiteLLM encrypts it in its own credential store; ONEComputer shows only a safe fingerprint, approved Bedrock selection, and test status.</span>
       </header>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Provider operation failed</strong>{error}</span></div>}
       <section className="credential-inventory provider-settings-inventory" aria-labelledby="provider-settings-heading">
         <div className="credential-inventory-heading"><div><p>Organization routes</p><h2 id="provider-settings-heading">Managed providers</h2></div><span>{providers.length}</span></div>
-        {loading ? <p className="credential-empty">Loading provider settings…</p> : providers.map((provider) => (
-          <article key={provider.provider}>
-            <span className="connection-logo compact"><Bot24Regular aria-hidden="true" /></span>
-            <div className="credential-copy">
-              <strong>{titleFor(provider.provider)}</strong>
-              <small>{provider.aliases.join(" · ")}</small>
-              <span>{provider.state === "active" ? "Active" : provider.state === "disabled" ? "Disabled" : "Not configured"}{provider.fingerprint ? <> · {provider.fingerprint}</> : null}</span>
-              {provider.lastTestedAt && <span>Last tested {new Date(provider.lastTestedAt).toLocaleString()}</span>}
-              {provider.lastErrorCode && <span>Last safe error: {provider.lastErrorCode}</span>}
-            </div>
-            <div className="credential-actions">
-              <button className="secondary-button" type="button" disabled={busy} onClick={() => { setApiKey(""); setEditor(provider); }}>{provider.state === "active" ? "Rotate" : "Connect"}</button>
-              {provider.state === "active" && <button className="secondary-button" type="button" disabled={busy} onClick={() => onTest(provider.provider)}>Test</button>}
-              {provider.state === "active" && <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDisable(provider.provider)}>Disable</button>}
-              {provider.state !== "not-configured" && <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDelete(provider.provider)}>Delete</button>}
-            </div>
-          </article>
-        ))}
+        {loading ? <p className="credential-empty">Loading provider settings…</p> : providers.map((provider) => {
+          const needsRecovery = provider.state === "needs-reconfiguration";
+          const stateLabel = provider.state === "active" ? "Active" : provider.state === "disabled" ? "Disabled" : needsRecovery ? "Needs reconfiguration" : "Not configured";
+          return (
+            <article key={provider.provider}>
+              <span className="connection-logo compact"><Bot24Regular aria-hidden="true" /></span>
+              <div className="credential-copy">
+                <strong>{providerTitle(provider.provider)}</strong>
+                <small>{provider.aliases.join(" · ")}</small>
+                <span>{stateLabel}{provider.fingerprint ? <> · {provider.fingerprint}</> : null}</span>
+                {provider.provider === "bedrock" && provider.region && <span>Region {provider.region} · Profile {provider.modelProfileId}</span>}
+                {provider.lastTestedAt && <span>Last tested {new Date(provider.lastTestedAt).toLocaleString()}</span>}
+                {provider.lastErrorCode && <span>Last safe error: {provider.lastErrorCode}</span>}
+              </div>
+              <div className="credential-actions">
+                {!needsRecovery && <button className="secondary-button" type="button" disabled={busy} onClick={() => openEditor(provider)}>{provider.state === "active" ? "Rotate" : "Connect"}</button>}
+                {provider.state === "active" && <button className="secondary-button" type="button" disabled={busy} onClick={() => onTest(provider.provider)}>Test</button>}
+                {(provider.state === "active" || needsRecovery) && <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDisable(provider.provider)}>Disable</button>}
+                {provider.state !== "not-configured" && <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDelete(provider.provider)}>Delete</button>}
+              </div>
+            </article>
+          );
+        })}
       </section>
-      {editor && <ModalDialog title={(editor.state === "active" ? "Rotate " : "Connect ") + titleFor(editor.provider)} description="The key is submitted once to Control and stored encrypted by LiteLLM. It is never displayed again." eyebrow="Write-only provider key" labelledBy="provider-key-title" onClose={busy ? () => undefined : () => { setApiKey(""); setEditor(null); }}>
-        <label className="modal-field"><span>{titleFor(editor.provider)} API key</span><input name="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste the provider API key" disabled={busy} /></label>
-        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => { setApiKey(""); setEditor(null); }}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim()} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Rotate key" : "Connect provider"}</button></div>
+      {editor && <ModalDialog title={(editor.state === "active" ? "Rotate " : "Connect ") + providerTitle(editor.provider)} description={editor.provider === "bedrock" ? "Choose an approved Bedrock region and inference profile. The API key is submitted once to Control, encrypted by LiteLLM, and never displayed again." : "The key is submitted once to Control and stored encrypted by LiteLLM. It is never displayed again."} eyebrow="Write-only provider key" labelledBy="provider-key-title" onClose={busy ? () => undefined : closeEditor}>
+        {editor.provider === "bedrock" && <>
+          <label className="modal-field"><span>Approved region</span><SelectMenu value={editor.region} options={bedrockRegionOptions} ariaLabel="Approved Bedrock region" disabled={busy || editor.state === "active"} onValueChange={(region) => setEditor((current) => ({ ...current, region }))} /></label>
+          <label className="modal-field"><span>Approved inference profile</span><SelectMenu value={editor.modelProfileId} options={bedrockProfileOptions} ariaLabel="Approved Bedrock inference profile" disabled={busy || editor.state === "active"} onValueChange={(modelProfileId) => setEditor((current) => ({ ...current, modelProfileId }))} /></label>
+        </>}
+        <label className="modal-field"><span>{providerTitle(editor.provider)} API key</span><input name="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste the provider API key" disabled={busy} /></label>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={closeEditor}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim()} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Rotate key" : "Connect provider"}</button></div>
       </ModalDialog>}
     </div>
   );
@@ -3535,19 +3569,19 @@ export function App() {
     }
   };
 
-  const saveProviderSetting = (provider, apiKey) => runProviderAction(
-    () => adminApi.saveProviderSetting(provider, apiKey),
-    () => setToast(`${provider === "openai" ? "OpenAI" : "Anthropic"} provider key saved.`),
+  const saveProviderSetting = (provider, input) => runProviderAction(
+    () => adminApi.saveProviderSetting(provider, input),
+    () => setToast(providerTitle(provider) + " provider key saved."),
   );
 
   const testProviderSetting = (provider) => runProviderAction(
     () => adminApi.testProviderSetting(provider),
-    () => setToast(`${provider === "openai" ? "OpenAI" : "Anthropic"} route passed its test.`),
+    () => setToast(providerTitle(provider) + " route passed its test."),
   );
 
   const disableProviderSetting = async (provider) => {
     if (!await requestConfirmation({
-      title: `Disable ${provider === "openai" ? "OpenAI" : "Anthropic"}?`,
+      title: "Disable " + providerTitle(provider) + "?",
       description: "The provider route will be removed and active workspace grants for that model will be revoked. Affected workspaces must restart before they can use it again.",
       confirmLabel: "Disable provider",
       danger: true,
@@ -3562,7 +3596,7 @@ export function App() {
 
   const deleteProviderSetting = async (provider) => {
     if (!await requestConfirmation({
-      title: `Delete ${provider === "openai" ? "OpenAI" : "Anthropic"} key?`,
+      title: "Delete " + providerTitle(provider) + " key?",
       description: "The encrypted LiteLLM credential and all routes for this provider will be removed. Active workspace grants for that model will be revoked.",
       confirmLabel: "Delete provider key",
       danger: true,

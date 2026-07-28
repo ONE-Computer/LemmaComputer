@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { assignEgressSecurityGroupSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
@@ -158,9 +158,14 @@ const createConnectorSchema = z.strictObject({
 const connectorIconSchema = z.strictObject({
   iconDataUrl: z.string().max(350000).nullable(),
 });
-const providerNameSchema = z.enum(["openai", "anthropic"]);
+const providerNameSchema = z.enum(["openai", "anthropic", "bedrock"]);
 const saveProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096),
+});
+const saveBedrockProviderApiKeySchema = z.strictObject({
+  apiKey: z.string().trim().min(8).max(4096),
+  region: bedrockApiKeyRegionSchema,
+  modelProfileId: bedrockApiKeyModelProfileIdSchema,
 });
 
 const envSchema = z.object({
@@ -1136,8 +1141,10 @@ export function createControlServer(
   app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
     const actor = requireAdministrator(request);
     const provider = providerNameSchema.parse(request.params.provider);
-    const input = saveProviderApiKeySchema.parse(request.body ?? {});
-    return { provider: await requireProviderSettings().configure(actor, provider, input.apiKey) };
+    const input = provider === "bedrock"
+      ? { provider, ...saveBedrockProviderApiKeySchema.parse(request.body ?? {}) }
+      : { provider, ...saveProviderApiKeySchema.parse(request.body ?? {}) };
+    return { provider: await requireProviderSettings().configure(actor, input) };
   });
   app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/test", async (request) => {
     const actor = requireAdministrator(request);
