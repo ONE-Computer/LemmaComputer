@@ -15,6 +15,7 @@ const capture = (command, args) => {
 if (capture("git", ["status", "--porcelain"])) throw new Error("Release verification requires a clean committed worktree");
 const sha = capture("git", ["rev-parse", "HEAD"]);
 const originMain = capture("git", ["rev-parse", "origin/main"]);
+run("npm", ["run", "qualify:providers"]);
 run("npm", ["run", "qualify:oauth"]);
 run(process.execPath, ["scripts/verify-quick.mjs"]);
 run(process.execPath, ["scripts/verify-db.mjs"]);
@@ -43,7 +44,7 @@ const attestation = {
   sha,
   originMain,
   verifiedAt: new Date().toISOString(),
-  gates: ["pinned-litellm-oauth-renewal-qualification", "verify:quick", "verify:db", "isolated-compose-smoke"],
+  gates: ["pinned-litellm-provider-settings-qualification", "pinned-litellm-oauth-renewal-qualification", "verify:quick", "verify:db", "isolated-compose-smoke"],
   migrations,
 };
 await mkdir(".artifacts/release-verification", { recursive: true });

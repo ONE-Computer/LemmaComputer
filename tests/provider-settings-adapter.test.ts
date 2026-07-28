@@ -7,6 +7,7 @@ import { LiteLLMProviderAdministration } from "@onecomputer/litellm-adapter";
 
 const alphaKey = "sk-provider-alpha-never-log-000000000001";
 const betaKey = "sk-provider-beta-never-log-000000000002";
+const rotatedKey = "sk-provider-alpha-rotated-never-log-000003";
 const rejectedKey = "sk-provider-rejected-never-log-000000003";
 
 type GatewayRequest = {
@@ -42,6 +43,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
   const requests: GatewayRequest[] = [];
   let rejectCandidate = false;
   let staticOpenAi = false;
+  const semanticCredentialPatchFailure = true;
   const server = createServer(async (request, response) => {
     const item: GatewayRequest = {
       method: request.method ?? "",
@@ -58,7 +60,22 @@ test("managed provider configuration isolates tenants, validates candidates, and
       }));
       return;
     }
-    if (item.method === "PATCH" && (item.url.startsWith("/credentials/") || /^\/model\/[^/]+\/update$/.test(item.url))) {
+    if (item.method === "PATCH" && item.url.startsWith("/credentials/")) {
+      if (semanticCredentialPatchFailure) {
+        response.end(JSON.stringify({
+          message: "Credential record was not found",
+          type: "internal_server_error",
+          param: null,
+          openai_code: 404,
+          code: "404",
+        }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end(JSON.stringify({}));
+      return;
+    }
+    if (item.method === "PATCH" && /^\/model\/[^/]+\/update$/.test(item.url)) {
       response.statusCode = 404;
       response.end(JSON.stringify({}));
       return;
@@ -138,6 +155,8 @@ test("managed provider configuration isolates tenants, validates candidates, and
     const credentials = requests.filter((request) => request.url === "/credentials");
     assert.ok(credentials.some((request) => (request.body.credential_values as Record<string, unknown>).api_key === alphaKey));
     assert.ok(credentials.some((request) => (request.body.credential_values as Record<string, unknown>).api_key === betaKey));
+    assert.equal(requests.filter((request) => request.method === "PATCH" && request.url.startsWith("/credentials/")).length, 0, "First-use provider setup must create its stable credential instead of PATCHing a missing record");
+    assert.equal(credentials.filter((request) => !String(request.body.credential_name).includes("-candidate-")).length, 2, "First-use provider setup must create one stable credential per tenant");
     const grants = requests.filter((request) => request.url === "/key/generate");
     assert.equal(grants.length, 2);
     for (const grant of grants) {
@@ -182,6 +201,26 @@ test("managed provider configuration isolates tenants, validates candidates, and
     }
 
     rejectCandidate = false;
+    const rotationStart = requests.length;
+    await assert.rejects(
+      gateway.configureManagedProvider({
+        tenantId: "tenant-alpha",
+        provider: "openai",
+        apiKey: rotatedKey,
+        existingModelIds: alpha.modelIds,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof OneComputerError);
+        assert.equal(error.code, "PROVIDER_ROUTE_FAILED");
+        assert.equal(error.message.includes(rotatedKey), false);
+        return true;
+      },
+    );
+    const rotationRequests = requests.slice(rotationStart);
+    assert.equal(rotationRequests.filter((request) => request.method === "PATCH" && request.url.startsWith("/credentials/")).length, 1, "Rotation must attempt a single stable credential PATCH");
+    assert.equal(rotationRequests.filter((request) => request.url === "/credentials" && !String(request.body.credential_name).includes("-candidate-")).length, 0, "A semantically failed stable credential PATCH must fail closed instead of creating a replacement route");
+    assert.equal(rotationRequests.filter((request) => request.url === "/model/new").map(modelDocument).filter((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length > 0).length, 0, "A semantically failed stable credential PATCH must not alter stable model routes");
+
     staticOpenAi = true;
     const staticStart = requests.length;
     await assert.rejects(

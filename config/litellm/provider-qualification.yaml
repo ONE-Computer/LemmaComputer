@@ -1,0 +1,13 @@
+# Isolated release qualification for dynamic Provider Settings. The product
+# deployment never mounts this file; only `qualify:providers` does.
+model_list: []
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  store_model_in_db: true
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  turn_off_message_logging: true
+  log_raw_request_response: false

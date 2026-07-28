@@ -44,7 +44,7 @@ const tenantModelId = (tenantId: string, provider: ManagedProviderName, alias: s
 
 export type LiteLLMProviderAdministrationConfig = { adminUrl: string; masterKey: string; credentialSecret: string; requestTimeoutMs?: number };
 type JsonObject = Record<string, unknown>;
-type GatewayResult = { ok: boolean; status: number; payload: unknown };
+type GatewayResult = { ok: boolean; status: number; payload: unknown; embeddedError: boolean };
 const asObject = (value: unknown): JsonObject => value && typeof value === "object" ? value as JsonObject : {};
 type ProviderModelDeployment = {
   id: string;
@@ -107,7 +107,8 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       let stableCredentialCreated = false;
       const createdModelIds: string[] = [];
       try {
-        stableCredentialCreated = await this.replaceCredential(credentialName, input.provider, apiKey);
+        await this.createCredential(credentialName, input.provider, apiKey);
+        stableCredentialCreated = true;
         const modelIds: string[] = [];
         for (const model of models) {
           const deployment = await this.upsertModel({
@@ -162,7 +163,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   private async upsertModel(deployment: ProviderModelDeployment) {
     const updated = await this.call(`/model/${encodeURIComponent(deployment.id)}/update`, { method: "PATCH", body: this.modelDocument(deployment) });
     if (updated.ok) return { id: deployment.id, created: false };
-    if (updated.status !== 404) throw this.providerFailure(updated.status);
+    if (updated.status !== 404 || updated.embeddedError) throw this.providerFailure(updated.status);
     return { id: await this.createModel(deployment), created: true };
   }
 
@@ -225,7 +226,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   private async replaceCredential(name: string, provider: ManagedProviderName, apiKey: string) {
     const result = await this.call(`/credentials/${encodeURIComponent(name)}`, { method: "PATCH", body: this.credentialDocument(name, provider, apiKey) });
     if (result.ok) return false;
-    if (result.status !== 404) throw this.providerFailure(result.status);
+    if (result.status !== 404 || result.embeddedError) throw this.providerFailure(result.status);
     await this.createCredential(name, provider, apiKey);
     return true;
   }
@@ -283,10 +284,36 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         ...(input.body ? { body: JSON.stringify(input.body) } : {}),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
-      return { ok: response.ok, status: response.status, payload: await response.json().catch(() => ({})) };
+      const payload = await response.json().catch(() => ({}));
+      // LiteLLM v1.93.0's credential update endpoint can encode a not-found
+      // error as a JSON OpenAI error document while retaining HTTP 200. Treat
+      // its embedded numeric status as authoritative, rather than treating a
+      // semantically failed administration request as successful.
+      const embeddedStatus = response.ok ? this.embeddedErrorStatus(payload) : undefined;
+      return {
+        ok: response.ok && embeddedStatus === undefined,
+        status: embeddedStatus ?? response.status,
+        payload,
+        embeddedError: embeddedStatus !== undefined,
+      };
     } catch {
       throw new OneComputerError("PROVIDER_GATEWAY_UNAVAILABLE", "The provider gateway is unavailable", 503, true);
     }
+  }
+
+  private embeddedErrorStatus(payload: unknown) {
+    const document = asObject(payload);
+    for (const candidate of [document.openai_code, document.status_code, document.code]) {
+      const value = typeof candidate === "number" ? candidate : typeof candidate === "string" ? Number(candidate) : NaN;
+      if (Number.isInteger(value) && value >= 400 && value < 600) return value;
+    }
+    if (Object.keys(asObject(document.error)).length > 0) return 502;
+    if (typeof document.message === "string" && (
+      typeof document.type === "string"
+      || Object.prototype.hasOwnProperty.call(document, "param")
+      || Object.prototype.hasOwnProperty.call(document, "code")
+    )) return 502;
+    return undefined;
   }
 
   private providerFailure(status: number, kind: "credential" | "route" = "route") {

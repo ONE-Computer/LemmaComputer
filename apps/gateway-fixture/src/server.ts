@@ -53,6 +53,12 @@ export function createGatewayFixture() {
 
   app.post("/v1/chat/completions", async (request, reply) => {
     counters.model += 1;
+    // The Provider Settings qualification submits a generated replacement key
+    // with this marker. Reject it locally so the real pinned LiteLLM image
+    // exercises candidate validation and rollback without contacting OpenAI.
+    if (String(request.headers.authorization ?? "").includes("provider-qualification-rejected")) {
+      return reply.code(401).send({ error: { message: "fixture rejected the submitted provider credential" } });
+    }
     const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
     if (body.stream === true) {
       const id = `chatcmpl-${randomUUID()}`;
