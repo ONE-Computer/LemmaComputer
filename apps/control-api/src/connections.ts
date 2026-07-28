@@ -95,6 +95,26 @@ export class McpConnectionService {
     const connectionStates = new Map(
       (await this.registry.listConnectionStates(identity.tenantId, identity.subjectId)).map((state) => [state.connectorId, state]),
     );
+    // Catalog re-entry may revalidate only a durable, explicit marker. Visible
+    // cards without one remain completely local: no status probe, registration,
+    // workspace-grant refresh, or tool projection.
+    const refreshedStates = new Map<string, OAuthConnectionStatus>();
+    let connectionProjectionChanged = false;
+    await Promise.all(connectors.map(async (connector) => {
+      const stored = connectionStates.get(connector.id);
+      if (!connector.enabled || !stored) return;
+      try {
+        const refreshed = await this.connectionStatus(identity, connector);
+        refreshedStates.set(connector.id, { ...refreshed, account: null });
+        if (refreshed.state !== stored.state || refreshed.state === "expired") connectionProjectionChanged = true;
+      } catch {
+        // Keep the durable safe state visible when the provider is temporarily
+        // unavailable. A later re-entry can retry this explicit marker.
+        refreshedStates.set(connector.id, this.statusFromStoredState(stored));
+        if (stored.state === "expired") connectionProjectionChanged = true;
+      }
+    }));
+    if (connectionProjectionChanged) this.invalidateProjection(identity);
     const connections = connectors.map((connector) => {
       const publicConnector = {
         ...this.publicConnector(connector),
@@ -113,10 +133,10 @@ export class McpConnectionService {
       return {
         ...publicConnector,
         available: true,
-        ...this.statusFromStoredState(connectionStates.get(connector.id)),
+        ...(refreshedStates.get(connector.id) ?? this.statusFromStoredState(connectionStates.get(connector.id))),
       };
     });
-    return { connections };
+    return { connections, connectionProjectionChanged };
   }
 
   async start(identity: IdentityContext, connectorId = "microsoft-365", isAdministrator = false) {
@@ -384,6 +404,17 @@ export class McpConnectionService {
     const connector = (await this.connectors(identity.tenantId))
       .find((candidate) => candidate.enabled && candidate.serverName === serverName && candidate.id !== "microsoft-365");
     if (!connector) return null;
+    const stored = await this.registry.getConnectionState(identity.tenantId, identity.subjectId, connector.id);
+    if (!stored) return null;
+    const decision = (connector.toolPolicies[toolName] ?? "allow") as McpToolPolicyDecision;
+    try {
+      if ((await this.connectionStatus(identity, connector)).state !== "connected") return null;
+      const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
+      if (!discoveredTools.includes(toolName)) return null;
+      if (decision === "deny") return null;
+    } catch {
+      return null;
+    }
     return {
       connectorId: connector.id,
       connectorName: connector.name,
@@ -391,7 +422,7 @@ export class McpConnectionService {
       serverName: connector.serverName,
       toolName,
       displayName: this.toolDisplayName(toolName),
-      decision: (connector.toolPolicies[toolName] ?? "allow") as McpToolPolicyDecision,
+      decision,
     };
   }
 

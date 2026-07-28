@@ -483,6 +483,7 @@ test("Connections refreshes safely on navigation, history, detail return, and OA
 
   assert.match(refreshEffect, /new AbortController/);
   assert.match(refreshEffect, /connectionApi\.catalog\(\{ signal: controller\.signal \}\)/);
+  assert.doesNotMatch(refreshEffect, /connectionApi\.status\(/);
   assert.match(refreshEffect, /\[activeNav, connectionsView, connectionCatalogRefresh, session\?\.user\.id\]/);
   assert.match(refreshEffect, /controller\.abort\(\)/);
   assert.match(popState, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
@@ -494,5 +495,5 @@ test("Connections refreshes safely on navigation, history, detail return, and OA
   assert.match(connections, /activationActionLabel\(activation\)/);
   assert.doesNotMatch(connections, /connector\.available|state === "unavailable"/);
   assert.match(app, /activation\.action === "view_setup" \? "View setup"/);
-  assert.match(app, /const categories = \["Productivity", "Developer tools", "Business"/);
+  assert.match(app, /const categories = \["Productivity", "Developer tools", "Business", "Communication", "Data and analytics", "Other"\]/);
 });

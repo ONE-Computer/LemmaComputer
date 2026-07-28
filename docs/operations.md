@@ -116,10 +116,13 @@ for the exact local redirect URIs and delegated permission list.
 ### Hosted MCP connectors
 
 The unified **Connections** screen includes a built-in catalog of official,
-provider-hosted remote MCP servers. Listing this catalog only seeds non-secret
-metadata; it does not register every server with LiteLLM or expose its tools to
-an agent. Selecting **Connect** registers and checks only that selected
-connector, then starts its per-user OAuth flow.
+provider-hosted remote MCP servers. Listing a card without an existing
+connection marker only seeds non-secret metadata; it does not register the
+server with LiteLLM, refresh a workspace grant, or expose its tools to an
+agent. On a later Connections entry, Control can revalidate only that person's
+explicit markers and reconciles the workspace grant only when a marker's
+resolved state changes or remains expired. Selecting **Connect** registers and
+checks only that selected connector, then starts its per-user OAuth flow.
 
 Notion, Linear, and Atlassian use their official hosted MCP endpoints and
 dynamic OAuth client registration. GitHub requires an OAuth app because its

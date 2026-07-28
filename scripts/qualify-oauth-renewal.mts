@@ -62,6 +62,11 @@ const readCounters = async (fixtureUrl: string): Promise<FixtureCounters> => {
 };
 
 const credentialSuffix = (code: string) => createHash("sha256").update(code).digest("hex").slice(0, 24);
+const parseConnectionTimestamp = (value: string | null) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
 
 const tokenMarkers = (code: string) => {
   const suffix = credentialSuffix(code);
@@ -184,6 +189,14 @@ const main = async () => {
       codeVerifier: randomBytes(48).toString("base64url"),
     });
     assert.equal(status.state, "expired", "the qualification provider must issue an expired access token");
+    await registry.saveConnectionState({
+      tenantId: identity.tenantId,
+      subjectId: identity.subjectId,
+      connectorId: "oauth-qualification",
+      state: status.state,
+      connectedAt: parseConnectionTimestamp(status.connectedAt),
+      expiresAt: parseConnectionTimestamp(status.expiresAt),
+    });
   };
   const serviceStatus = (identity: IdentityContext) => connectionService.status(identity, "oauth-qualification");
   const safeCall = async (identity: IdentityContext) => {

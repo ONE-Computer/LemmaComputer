@@ -1123,34 +1123,10 @@ export function createControlServer(
     const expected = Object.keys(m365CapabilityDefinitions).sort();
     if (Object.keys(input.tools).sort().join("\0") !== expected.join("\0")) throw new OneComputerError("INVALID_TOOL_POLICY", "A decision is required for every assigned Microsoft 365 tool", 400);
     const savedPolicy = await security.identityPolicyStore.updateMvpToolPolicy({ tenantId: actor.tenantId, updatedBy: actor.userId, tools: input.tools });
-    const users = await security.identityPolicyStore.listUsers(actor.tenantId);
-    const refreshes = await Promise.allSettled(users.map(async (user) => {
-      if (!user.effectivePolicy) return false;
-      const userIdentity = identityContextSchema.parse({
-        tenantId: actor.tenantId,
-        subjectId: user.userId,
-        audience: "onecomputer-control",
-      });
-      const settings = await store.getSandboxSettings?.(userIdentity, "personal");
-      const document = user.effectivePolicy.document as Record<string, unknown>;
-      const availableAgentIds = assignedAgentIds(document);
-      return service.refreshPolicyGrant(
-        userIdentity,
-        runtimePolicyFor(
-          user.effectivePolicy,
-          settings?.modelAlias,
-          settings?.profileId,
-          settings?.agentIds ?? defaultAgentIds(document, availableAgentIds),
-          settings?.applicationIds ?? defaultApplicationIds(document),
-        ),
-      );
-    }));
+    const workspaceGrants = await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
     return {
       ...savedPolicy,
-      workspaceGrants: {
-        refreshed: refreshes.filter((result) => result.status === "fulfilled" && result.value).length,
-        failed: refreshes.filter((result) => result.status === "rejected").length,
-      },
+      workspaceGrants,
     };
   });
   app.get("/v1/admin/provider-settings", async (request) => {
@@ -1192,8 +1168,9 @@ export function createControlServer(
   });
   app.get("/v1/connections", async (request) => {
     const actor = principal(request);
-    const catalog = await requireConnections().list(actor.identity, isAdministrator(actor));
-    return catalog;
+    const { connections: catalog, connectionProjectionChanged } = await requireConnections().list(actor.identity, isAdministrator(actor));
+    if (connectionProjectionChanged) await refreshOwnedWorkspaceConnectionGrants(actor);
+    return { connections: catalog };
   });
   app.get("/v1/admin/connectors", async (request) => {
     const actor = requireAdministrator(request);

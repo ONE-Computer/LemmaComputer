@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { IdentityContext, RuntimePolicy } from "@onecomputer/contracts";
 import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus } from "@onecomputer/litellm-adapter";
+import { MemoryConnectorRegistryStore } from "@onecomputer/workspace-store";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
@@ -22,6 +23,7 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   ensured: McpConnectorRegistrationInput[][] = [];
   discoveries = 0;
   toolServers: string[] = [];
+  onStatus?: (identity: IdentityContext, serverName: string) => OAuthConnectionStatus | Promise<OAuthConnectionStatus>;
   onTools?: (identity: IdentityContext, serverName: string) => string[] | Promise<string[]>;
   statusByServer = new Map<string, OAuthConnectionStatus>();
   toolsByServer = new Map<string, string[]>();
@@ -34,8 +36,9 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
     this.completed.push(input);
     return connected;
   }
-  async userOAuthConnectionStatus(_identity: IdentityContext, serverName: string) {
+  async userOAuthConnectionStatus(identity: IdentityContext, serverName: string) {
     this.statusServers.push(serverName);
+    if (this.onStatus) return this.onStatus(identity, serverName);
     return this.statusByServer.get(serverName)
       ?? { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const;
   }
@@ -132,7 +135,7 @@ test("expired, denied, and malformed callbacks fail before token exchange", asyn
   assert.equal(gateway.completed.length, 0);
 });
 
-test("the default catalog exposes 20 cards and registers a remote server only on Connect", async () => {
+test("the default catalog covers the required categories and registers a remote server only on Connect", async () => {
   const gateway = new FakeConnectionGateway();
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
@@ -141,7 +144,7 @@ test("the default catalog exposes 20 cards and registers a remote server only on
 
   const catalog = await service.list(alpha);
   const defaultCards = catalog.connections.map((connector) => [connector.id, connector.serverName]);
-  assert.equal(defaultCards.length, 20);
+  assert.equal(defaultCards.length, 21);
   assert.deepEqual(defaultCards.slice(0, 6), [
     ["microsoft-365", "onecomputer_ms365"],
     ["notion", "onecomputer_notion"],
@@ -150,12 +153,12 @@ test("the default catalog exposes 20 cards and registers a remote server only on
     ["asana", "onecomputer_asana"],
     ["figma", "onecomputer_figma"],
   ]);
-  assert.deepEqual(gateway.statusServers, [], "browsing cards must not mint connection grants");
+  assert.deepEqual(gateway.statusServers, [], "browsing cards without a marker must not probe a provider");
   assert.deepEqual(gateway.toolServers, [], "browsing cards must not discover provider tools");
   assert.equal(gateway.ensured.length, 0, "listing the catalog must not register remote MCP servers");
-  await service.start(alpha, "figma");
+  await service.start(alpha, "notion");
   assert.deepEqual(gateway.ensured.map((connectors) => connectors.map((connector) => connector.serverName)), [
-    ["onecomputer_figma"],
+    ["onecomputer_notion"],
   ]);
   assert.ok(catalog.connections.every((connector) => connector.available));
   assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));
@@ -163,7 +166,13 @@ test("the default catalog exposes 20 cards and registers a remote server only on
   assert.deepEqual(github.activation, { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." });
   const asana = catalog.connections.find((connector) => connector.id === "asana")!;
   assert.deepEqual(asana.activation, { readiness: "request_access", action: "view_requirements", message: "This service needs provider approval or organization access before people can connect." });
-  assert.ok(catalog.connections.some((connector) => connector.category === "Business"));
+  const figma = catalog.connections.find((connector) => connector.id === "figma")!;
+  assert.deepEqual(figma.activation, { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." });
+  const slack = catalog.connections.find((connector) => connector.id === "slack")!;
+  assert.deepEqual(slack.activation, { readiness: "setup_required", action: "view_setup", message: "This service needs organization setup before people can connect." });
+  for (const category of ["Productivity", "Developer tools", "Business", "Communication", "Data and analytics"]) {
+    assert.ok(catalog.connections.some((connector) => connector.category === category), `catalog includes ${category}`);
+  }
 });
 
 test("setup and request catalog actions never start a misleading provider OAuth flow", async () => {
@@ -173,6 +182,8 @@ test("setup and request catalog actions never start a misleading provider OAuth 
     authorizationOrigin: "http://localhost:3001",
   });
   await assert.rejects(() => service.start(alpha, "github"), { code: "MCP_CONNECTOR_SETUP_REQUIRED" });
+  await assert.rejects(() => service.start(alpha, "figma"), { code: "MCP_CONNECTOR_SETUP_REQUIRED" });
+  await assert.rejects(() => service.start(alpha, "slack"), { code: "MCP_CONNECTOR_SETUP_REQUIRED" });
   await assert.rejects(() => service.start(alpha, "asana"), { code: "MCP_CONNECTOR_REQUEST_REQUIRED" });
   assert.deepEqual(gateway.started, []);
   assert.deepEqual(gateway.ensured, []);
@@ -190,20 +201,114 @@ test("unconnected connector policy inspection never probes provider grants or to
     { code: "MCP_CONNECTOR_NOT_CONNECTED" },
   );
 
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.deepEqual(gateway.statusServers, []);
+  assert.deepEqual(gateway.toolServers, []);
+});
+
+test("catalog re-entry probes only durable markers and flags a changed connector projection", async () => {
+  const gateway = new FakeConnectionGateway();
+  const registry = new MemoryConnectorRegistryStore();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry,
+  });
+
+  await service.list(alpha);
+  assert.deepEqual(gateway.statusServers, []);
+  assert.deepEqual(gateway.toolServers, []);
+  await registry.saveConnectionState({
+    tenantId: alpha.tenantId,
+    subjectId: alpha.subjectId,
+    connectorId: "linear",
+    state: "expired",
+    connectedAt: new Date("2026-07-20T01:02:03Z"),
+    expiresAt: new Date("2026-07-20T02:02:03Z"),
+  });
+  const expired: OAuthConnectionStatus = { state: "expired", connectedAt: connected.connectedAt, expiresAt: connected.expiresAt, account: null };
+  gateway.statusByServer.set("onecomputer_linear", expired);
+  gateway.onTools = (_identity, serverName) => {
+    assert.equal(serverName, "onecomputer_linear");
+    gateway.statusByServer.set(serverName, connected);
+    return ["create_issue"];
+  };
+
+  const renewed = await service.list(alpha);
+  const linear = renewed.connections.find((connector) => connector.id === "linear")!;
+  assert.equal(linear.state, "connected");
+  assert.equal(renewed.connectionProjectionChanged, true);
+  assert.equal(linear.account, null);
+  assert.deepEqual(gateway.statusServers, ["onecomputer_linear", "onecomputer_linear"]);
+  assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
+  assert.equal((await registry.getConnectionState(alpha.tenantId, alpha.subjectId, "linear"))?.state, "connected");
+
+  gateway.statusServers.length = 0;
+  gateway.toolServers.length = 0;
+  const stable = await service.list(alpha);
+  assert.equal(stable.connectionProjectionChanged, false);
+  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
+  assert.deepEqual(gateway.toolServers, []);
+  await registry.saveConnectionState({
+    tenantId: alpha.tenantId,
+    subjectId: alpha.subjectId,
+    connectorId: "linear",
+    state: "expired",
+    connectedAt: new Date("2026-07-20T01:02:03Z"),
+    expiresAt: new Date("2026-07-20T02:02:03Z"),
+  });
+  gateway.statusServers.length = 0;
+  gateway.toolServers.length = 0;
+  gateway.onStatus = () => { throw new Error("fixture status unavailable"); };
+
+  const unavailable = await service.list(alpha);
+  const unavailableLinear = unavailable.connections.find((connector) => connector.id === "linear")!;
+  assert.equal(unavailableLinear.state, "expired");
+  assert.equal(unavailableLinear.account, null);
+  assert.equal(unavailable.connectionProjectionChanged, true);
+  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
+});
+
+test("hosted tool policy requires a current explicit connection", async () => {
+  const gateway = new FakeConnectionGateway();
+  gateway.statusByServer.set("onecomputer_linear", connected);
+  gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  await completeFixtureConnection(service, gateway, alpha, "linear");
+
+  gateway.statusServers.length = 0;
+  gateway.toolServers.length = 0;
+  assert.equal((await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"))?.decision, "allow");
+  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
+  assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
+
+  gateway.statusByServer.set("onecomputer_linear", { state: "disconnected", connectedAt: null, expiresAt: null, account: null });
+  gateway.statusServers.length = 0;
+  gateway.toolServers.length = 0;
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
+  assert.deepEqual(gateway.toolServers, []);
+
+  gateway.statusServers.length = 0;
+  gateway.toolServers.length = 0;
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
   assert.deepEqual(gateway.statusServers, []);
   assert.deepEqual(gateway.toolServers, []);
 });
 
 test("only explicitly connected catalog services contribute workspace tools", async () => {
   const gateway = new FakeConnectionGateway();
-  gateway.statusByServer.set("onecomputer_figma", connected);
-  gateway.toolsByServer.set("onecomputer_figma", ["get_design_context"]);
+  gateway.statusByServer.set("onecomputer_linear", connected);
+  gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
   gateway.toolsByServer.set("onecomputer_asana", ["create_task"]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
-  await completeFixtureConnection(service, gateway, alpha, "figma");
+  await completeFixtureConnection(service, gateway, alpha, "linear");
   const basePolicy: RuntimePolicy = {
     schemaVersion: 1,
     policyVersionId: "policy-v1",
@@ -223,11 +328,11 @@ test("only explicitly connected catalog services contribute workspace tools", as
 
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
 
-  assert.deepEqual(projected.mcpServers, ["onecomputer_ms365", "onecomputer_figma"]);
-  assert.deepEqual(projected.mcpToolPermissions?.onecomputer_figma, ["get_design_context"]);
+  assert.deepEqual(projected.mcpServers, ["onecomputer_ms365", "onecomputer_linear"]);
+  assert.deepEqual(projected.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
   assert.equal(projected.mcpToolPermissions?.onecomputer_asana, undefined);
-  assert.deepEqual(gateway.toolServers, ["onecomputer_figma"]);
-  assert.deepEqual(gateway.statusServers, ["onecomputer_figma"]);
+  assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
+  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
 });
 
 test("hosted connector OAuth binds the selected catalog entry and refuses cross-connector callbacks", async () => {
@@ -274,6 +379,8 @@ test("hosted connector tools default to allow and persist explicit approval rule
     ["create_issue", "approval_required"],
     ["list_issues", "deny"],
   ]);
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "list_issues"), null);
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "delete_issue"), null);
   assert.equal((await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"))?.decision, "approval_required");
   await assert.rejects(
     () => service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }),
@@ -481,4 +588,5 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
   const linear = catalog.connections.find((connector) => connector.id === "linear")!;
   assert.equal(linear.state, "expired");
   assert.ok(gateway.toolServers.every((serverName) => serverName === "onecomputer_linear"));
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
 });

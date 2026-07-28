@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { m365ToolCatalog, type EgressSecurityGroupVersion, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@onecomputer/contracts";
 import type { GatewayClient } from "@onecomputer/litellm-adapter";
-import { MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@onecomputer/workspace-store";
+import { MemoryConnectorRegistryStore, MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -138,7 +138,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     documentHash: "a".repeat(64), assignedBy: "alpha", assignedAt: new Date().toISOString(), agentId: "agent-1",
     vendorUserId: "oc-user-test", document: { schemaVersion: 1 },
   };
-  let assigned = false;
+  let assigned = true;
   let revoked = false;
   let betaStatus: "active" | "disabled" = "active";
   let revokedSessionCount = 0;
@@ -212,11 +212,13 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     },
   });
   await workspaceStore.update(activeWorkspace.id, { state: "ready" });
+  await workspaceStore.update(openWorkspace.id, { state: "ready" });
   const identityPolicyStore = {
     listUsers: async (tenantId) => tenantId === "acme" ? [
       { userId: "alpha", email: principal.email, displayName: principal.displayName, status: "active" as const, roles: principal.roles, effectivePolicy: revoked ? null : effectivePolicy },
       { userId: "beta", email: "beta@metech.dev", displayName: "Beta User", status: betaStatus, roles: ["employee"] as const, effectivePolicy },
     ] : [],
+    getPrincipal: async (userId: string) => userId === "alpha" ? administrator : null,
     setUserStatus: async ({ status }: { status: "active" | "disabled" }) => {
       betaStatus = status;
       return { status, revokedSessions: status === "disabled" ? 2 : 0 };
@@ -261,9 +263,28 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       return { baseUrl: "http://litellm:4000", credential: `sk-${workspaceId}-at-least-24-characters`, modelAlias: "claude-sonnet-4-5", expiresAt: new Date(Date.now() + 60_000).toISOString() };
     },
     revoke: async (workspaceId, agentId) => { revokedKeys.push(`${workspaceId}:${agentId ?? "default"}`); },
+    beginUserOAuthConnection: async () => ({ location: "http://provider/authorize", cookies: [] }),
+    completeUserOAuthConnection: async () => ({
+      state: "connected" as const,
+      connectedAt: "2026-07-28T00:00:00.000Z",
+      expiresAt: "2026-07-28T01:00:00.000Z",
+      account: null,
+    }),
+    disconnectUserOAuthConnection: async () => ({ state: "disconnected" as const, connectedAt: null, expiresAt: null, account: null }),
+    ensureOAuthMcpServers: async () => undefined,
+    userOAuthConnectionStatus: async (_identity: IdentityContext, serverName: string) => serverName === "onecomputer_linear"
+      ? {
+          state: "connected" as const,
+          connectedAt: "2026-07-28T00:00:00.000Z",
+          expiresAt: "2026-07-28T01:00:00.000Z",
+          account: null,
+        }
+      : { state: "disconnected" as const, connectedAt: null, expiresAt: null, account: null },
+    userOAuthConnectionTools: async (_identity: IdentityContext, serverName: string) => serverName === "onecomputer_linear" ? ["create_issue"] : [],
   } as unknown as GatewayClient;
+  const connectorRegistry = new MemoryConnectorRegistryStore();
   const app = createControlServer(workspaceStore, {} as ControllerClient, proxyToken, gateway, undefined, {}, {
-    authentication: authentication(administrator), identityPolicyStore,
+    authentication: authentication(administrator), identityPolicyStore, connectorRegistryStore: connectorRegistry,
   });
   const headers = { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid" };
   try {
@@ -273,6 +294,18 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     assert.equal(openFirewall.executionMode, "disposable-open");
     assert.equal(openFirewall.egress.mode, "full-web");
     assert.equal(openFirewall.egress.defaultAction, "allow-public-http-https");
+
+    const connectorCatalog = await app.inject({ method: "GET", url: "/v1/connections", headers });
+    assert.equal(connectorCatalog.statusCode, 200);
+    await connectorRegistry.saveConnectionState({
+      tenantId: alpha.tenantId,
+      subjectId: alpha.subjectId,
+      connectorId: "linear",
+      state: "connected",
+      connectedAt: new Date("2026-07-28T00:00:00.000Z"),
+      expiresAt: new Date("2026-07-28T01:00:00.000Z"),
+    });
+    assert.equal(refreshedPolicies.length, 0, "a no-marker catalog entry must not refresh workspace grants");
 
     const policy = await app.inject({ method: "GET", url: "/v1/admin/mcp-policy", headers });
     assert.equal(policy.statusCode, 200);
@@ -291,16 +324,21 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     });
     assert.equal(savedPolicy.statusCode, 200);
     assert.equal(savedPolicy.json().version, 2);
-    assert.deepEqual(savedPolicy.json().workspaceGrants, { refreshed: 1, failed: 0 });
+    assert.deepEqual(savedPolicy.json().workspaceGrants, { refreshed: 2, failed: 0 });
     assert.equal(savedToolPolicy?.["list-calendars"], "deny");
-    assert.equal(refreshedPolicies.length, 1);
+    assert.equal(refreshedPolicies.length, 2);
     assert.deepEqual(refreshedPolicies.map((runtime) => runtime.agentProfile).sort(), [
+      "claude-desktop-managed-v1",
       "claude-desktop-managed-v1",
     ]);
     assert.equal(new Set(refreshedPolicies.map((runtime) => runtime.agentId)).size, 1);
     assert.ok(refreshedPolicies.every((runtime) => runtime.policyVersionId === "version-2"));
     assert.ok(refreshedPolicies.every((runtime) => runtime.toolPolicies["list-calendars"] === "deny"));
 
+    for (const runtime of refreshedPolicies) {
+      assert.ok(runtime.mcpServers?.includes("onecomputer_linear"));
+      assert.deepEqual(runtime.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+    }
     const firewalls = await app.inject({ method: "GET", url: "/v1/admin/egress-security-groups", headers });
     assert.equal(firewalls.statusCode, 200);
     assert.equal(firewalls.json().securityGroups[0].rules[0].host, "downloads.claude.ai");

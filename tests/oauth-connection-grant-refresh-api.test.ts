@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { IdentityContext, RuntimePolicy } from "@onecomputer/contracts";
 import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway, OAuthConnectionStatus } from "@onecomputer/litellm-adapter";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import { MemoryConnectorRegistryStore, MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -28,12 +28,14 @@ const expired = (): OAuthConnectionStatus => ({
 });
 const disconnected = (): OAuthConnectionStatus => ({ state: "disconnected", connectedAt: null, expiresAt: null, account: null });
 
-test("a failed silent connector renewal reissues an existing workspace grant without that connector", async () => {
+test("catalog re-entry reconciles only explicit marker transitions and removes stale remote projections", async () => {
   const issuedPolicies: RuntimePolicy[] = [];
   let linearState: OAuthConnectionStatus["state"] = "connected";
   let renewalFails = false;
   let renewalAttempts = 0;
   let oauthState = "";
+  const statusServers: string[] = [];
+  const toolServers: string[] = [];
   const gateway: GatewayClient & OAuthConnectionGateway & Pick<McpConnectorAdministrationGateway, "ensureOAuthMcpServers"> = {
     ensureGrant: async (input) => {
       assert.ok(input.policy);
@@ -79,10 +81,15 @@ test("a failed silent connector renewal reissues an existing workspace grant wit
     },
     completeUserOAuthConnection: async () => connected(),
     userOAuthConnectionStatus: async (_identity, serverName) => {
-      if (serverName === "onecomputer_linear") return linearState === "connected" ? connected() : expired();
+      statusServers.push(serverName);
+      if (serverName === "onecomputer_linear") {
+        if (linearState === "connected") return connected();
+        if (linearState === "expired") return expired();
+      }
       return disconnected();
     },
     userOAuthConnectionTools: async (_identity, serverName) => {
+      toolServers.push(serverName);
       if (serverName !== "onecomputer_linear") return [];
       if (linearState === "expired") {
         renewalAttempts += 1;
@@ -101,17 +108,36 @@ test("a failed silent connector renewal reissues an existing workspace grant wit
     destroy: async () => undefined,
     purgeWorkspace: async () => undefined,
   };
+  const workspaceStore = new MemoryWorkspaceStore();
+  const connectorRegistry = new MemoryConnectorRegistryStore();
   const app = createControlServer(
-    new MemoryWorkspaceStore(),
+    workspaceStore,
     controller,
     proxyToken,
     gateway,
     "api-fixture-approval-secret-at-least-32-characters",
     {},
-    { testIdentityMode: true },
+    { testIdentityMode: true, connectorRegistryStore: connectorRegistry },
   );
 
   try {
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers: { ...headers, "idempotency-key": "oauth-grant-refresh-create-001" },
+      payload: { grantId: "personal" },
+    });
+    assert.equal(created.statusCode, 201);
+    assert.equal(issuedPolicies.length, 1);
+    assert.deepEqual(issuedPolicies[0]!.mcpServers, ["onecomputer_fixture"]);
+    assert.equal(issuedPolicies[0]!.mcpToolPermissions?.onecomputer_linear, undefined);
+
+    const unconnected = await app.inject({ method: "GET", url: "/v1/connections", headers });
+    assert.equal(unconnected.statusCode, 200);
+    assert.equal(issuedPolicies.length, 1, "an unconnected catalog card must not refresh a workspace grant");
+    assert.deepEqual(statusServers, []);
+    assert.deepEqual(toolServers, []);
+
     const authorize = await app.inject({
       method: "GET",
       url: "/v1/connections/linear/authorize",
@@ -124,34 +150,83 @@ test("a failed silent connector renewal reissues an existing workspace grant wit
       headers,
     });
     assert.equal(callback.statusCode, 303);
+    assert.equal(issuedPolicies.length, 2);
+    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["onecomputer_fixture", "onecomputer_linear"]);
+    assert.deepEqual(issuedPolicies.at(-1)!.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
 
-    const created = await app.inject({
-      method: "POST",
-      url: "/v1/workspaces",
-      headers: { ...headers, "idempotency-key": "oauth-grant-refresh-create-001" },
-      payload: { grantId: "personal" },
-    });
-    assert.equal(created.statusCode, 201);
-    assert.equal(issuedPolicies.length, 1);
-    assert.deepEqual(issuedPolicies[0]!.mcpServers, ["onecomputer_fixture", "onecomputer_linear"]);
-    assert.deepEqual(issuedPolicies[0]!.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
-
-    const browsed = await app.inject({ method: "GET", url: "/v1/connections", headers });
-    assert.equal(browsed.statusCode, 200);
-    assert.equal(issuedPolicies.length, 1, "browsing the catalog must not issue or refresh a workspace grant");
+    statusServers.length = 0;
+    toolServers.length = 0;
+    const stable = await app.inject({ method: "GET", url: "/v1/connections", headers });
+    assert.equal(stable.statusCode, 200);
+    assert.equal(issuedPolicies.length, 2, "a stable connected marker must not reissue a workspace grant");
+    const stableLinear = stable.json().connections.find((connector: { id: string }) => connector.id === "linear");
+    assert.equal(stableLinear.state, "connected");
+    assert.deepEqual(statusServers, ["onecomputer_linear"]);
+    assert.deepEqual(toolServers, []);
 
     linearState = "expired";
     renewalFails = true;
-    const status = await app.inject({ method: "GET", url: "/v1/connections/linear", headers });
-
-    assert.equal(status.statusCode, 200);
-    assert.equal(status.json().state, "expired");
+    await connectorRegistry.saveConnectionState({
+      tenantId: identity.tenantId,
+      subjectId: identity.subjectId,
+      connectorId: "linear",
+      state: "expired",
+      connectedAt: new Date("2026-07-28T00:00:00.000Z"),
+      expiresAt: new Date("2026-07-28T00:30:00.000Z"),
+    });
+    statusServers.length = 0;
+    toolServers.length = 0;
+    const stale = await app.inject({ method: "GET", url: "/v1/connections", headers });
+    assert.equal(stale.statusCode, 200);
+    const staleLinear = stale.json().connections.find((connector: { id: string }) => connector.id === "linear");
+    assert.equal(staleLinear.state, "expired");
     assert.ok(renewalAttempts >= 1);
-    assert.equal(issuedPolicies.length, 2, "the existing workspace grant is reconciled after failed renewal");
-    const replacement = issuedPolicies.at(-1)!;
-    assert.ok(!replacement.mcpServers?.includes("onecomputer_linear"));
-    assert.equal(replacement.mcpToolPermissions?.onecomputer_linear, undefined);
-    assert.ok(!replacement.allowedTools.includes("create_issue"));
+    assert.equal(issuedPolicies.length, 3, "an expired durable marker must remove its stale remote projection");
+    const staleReplacement = issuedPolicies.at(-1)!;
+    assert.ok(!staleReplacement.mcpServers?.includes("onecomputer_linear"));
+    assert.equal(staleReplacement.mcpToolPermissions?.onecomputer_linear, undefined);
+    assert.ok(!staleReplacement.allowedTools.includes("create_issue"));
+    assert.ok(statusServers.every((serverName) => serverName === "onecomputer_linear"));
+    assert.ok(toolServers.every((serverName) => serverName === "onecomputer_linear"));
+
+    renewalFails = false;
+    statusServers.length = 0;
+    toolServers.length = 0;
+    const recovered = await app.inject({ method: "GET", url: "/v1/connections", headers });
+    assert.equal(recovered.statusCode, 200);
+    const recoveredLinear = recovered.json().connections.find((connector: { id: string }) => connector.id === "linear");
+    assert.equal(recoveredLinear.state, "connected");
+    assert.equal(issuedPolicies.length, 4, "a renewed marker must restore its remote projection");
+    const restored = issuedPolicies.at(-1)!;
+    assert.ok(restored.mcpServers?.includes("onecomputer_linear"));
+    assert.deepEqual(restored.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+    assert.ok(statusServers.every((serverName) => serverName === "onecomputer_linear"));
+    assert.ok(toolServers.every((serverName) => serverName === "onecomputer_linear"));
+
+    linearState = "disconnected";
+    statusServers.length = 0;
+    toolServers.length = 0;
+    const revoked = await app.inject({ method: "GET", url: "/v1/connections", headers });
+    assert.equal(revoked.statusCode, 200);
+    const revokedLinear = revoked.json().connections.find((connector: { id: string }) => connector.id === "linear");
+    assert.equal(revokedLinear.state, "disconnected");
+    assert.equal(issuedPolicies.length, 5, "a revoked marker must remove its remote projection");
+    const revokedReplacement = issuedPolicies.at(-1)!;
+    assert.ok(!revokedReplacement.mcpServers?.includes("onecomputer_linear"));
+    assert.equal(revokedReplacement.mcpToolPermissions?.onecomputer_linear, undefined);
+    assert.ok(!revokedReplacement.allowedTools.includes("create_issue"));
+    assert.equal(await connectorRegistry.getConnectionState(identity.tenantId, identity.subjectId, "linear"), null);
+    assert.ok(statusServers.every((serverName) => serverName === "onecomputer_linear"));
+    assert.deepEqual(toolServers, []);
+
+    statusServers.length = 0;
+    toolServers.length = 0;
+    const noMarkerAgain = await app.inject({ method: "GET", url: "/v1/connections", headers });
+    assert.equal(noMarkerAgain.statusCode, 200);
+    assert.equal(issuedPolicies.length, 5, "a removed marker must leave catalog re-entry local");
+    assert.deepEqual(statusServers, []);
+    assert.deepEqual(toolServers, []);
+
   } finally {
     await app.close();
   }

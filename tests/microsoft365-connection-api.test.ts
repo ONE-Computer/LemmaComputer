@@ -76,7 +76,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     const catalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
     assert.equal(catalog.statusCode, 200);
     const connectorCards = catalog.json().connections as Array<{ id: string; serverName: string }>;
-    assert.equal(connectorCards.length, 20);
+    assert.equal(connectorCards.length, 21);
     assert.deepEqual(connectorCards.slice(0, 6).map((connector) => [connector.id, connector.serverName]), [
       ["microsoft-365", "onecomputer_ms365"],
       ["notion", "onecomputer_notion"],
@@ -86,6 +86,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       ["figma", "onecomputer_figma"],
     ]);
     assert.ok(connectorCards.some((connector) => connector.id === "stripe"));
+    assert.ok(connectorCards.some((connector) => connector.id === "slack"));
     assert.equal(providerStatusCalls, 0, "catalog browsing must not probe a provider connection");
 
     const status = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
@@ -122,7 +123,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       .find((connector) => connector.id === "microsoft-365");
     assert.equal(connectedMicrosoft?.state, "connected");
     assert.equal(connectedMicrosoft?.account, null);
-    assert.equal(providerStatusCalls, 0, "catalog cards read the durable safe marker instead of provider credentials");
+    assert.equal(providerStatusCalls, 1, "catalog re-entry revalidates the explicit durable marker once");
 
     const replay = await app.inject({
       method: "GET",
