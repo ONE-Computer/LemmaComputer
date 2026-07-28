@@ -33,8 +33,10 @@ A setup is complete when:
 - A Microsoft Entra tenant in which an app registration can be created.
 - An Entra administrator who can grant the requested delegated Microsoft Graph
   permissions.
-- A provider key for at least one model route. The default bootstrap policy
-  expects the OpenAI-backed `onecomputer-assistant` route.
+- Provider keys for every dynamically managed model alias assigned by the demo
+  policy. Keep them out of `.env`: after the first administrator sign-in,
+  configure and test both Anthropic and OpenAI in **Settings → Provider
+  settings** before creating a workspace.
 - At least 4 GiB of memory for one running workspace, plus capacity for the
   control stack. Allow substantial disk space and time for the desktop image
   build.
@@ -213,7 +215,8 @@ preserved extra variable names after the update; their values are never printed.
 
 ### Values the operator must set
 
-Edit `.env` without printing it to shared logs. Replace these placeholders:
+Edit `.env` without printing it to shared logs. Do not add OpenAI or Anthropic
+provider keys there; replace these placeholders instead:
 
 | Variable | Required for the reference path | Value |
 | --- | --- | --- |
@@ -221,19 +224,24 @@ Edit `.env` without printing it to shared logs. Replace these placeholders:
 | `ONECOMPUTER_ENTRA_CLIENT_ID` | Yes | Entra Application (client) ID |
 | `ONECOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Entra client secret **Value** |
 | `ONECOMPUTER_ADMINISTRATOR_EMAILS` | Yes | Comma-separated Entra email addresses that bootstrap as administrators |
-| `ONECOMPUTER_OPENAI_API_KEY` | Yes for the default policy | Provider key for `onecomputer-assistant` and `onecomputer-openai` |
 | `ONECOMPUTER_WEB_PUSH_VAPID_SUBJECT` | Recommended | A monitored `mailto:` security/contact address |
 
 Administrator email comparison is case-insensitive. Keep the bootstrap list
 small. Every user in the configured Entra tenant may authenticate, but only the
 listed addresses bootstrap as administrators.
 
+OpenAI and Anthropic keys are configured only after the stack is healthy:
+sign in as a listed administrator, open **Settings → Provider settings**, save the
+write-only key, and run the route test before creating a workspace. When
+updating an older environment, `npm run env:check` reports retired provider
+variable *names* only; it preserves their values, so remove them manually after
+the managed-provider cutover.
+
 ### Optional values
 
 | Variables | Set when |
 | --- | --- |
 | `ONECOMPUTER_MS365_TENANT_ID`, `ONECOMPUTER_MS365_CLIENT_ID`, `ONECOMPUTER_MS365_CLIENT_SECRET` | A separate Microsoft 365 app registration is used |
-| `ONECOMPUTER_CLAUDE_API_KEY` | A policy assigns the Anthropic route |
 | `ONECOMPUTER_GLM_API_KEY` | A policy assigns the GLM route |
 | `ONECOMPUTER_GITHUB_MCP_CLIENT_ID`, `ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET` | The built-in GitHub connector is enabled |
 | `ONECOMPUTER_BOOTSTRAP_TENANT_ID`, `ONECOMPUTER_BOOTSTRAP_USER_ID`, `ONECOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
@@ -333,10 +341,13 @@ Then:
 2. Sign in with an address listed in
    `ONECOMPUTER_ADMINISTRATOR_EMAILS`.
 3. Verify the account has administrator navigation.
-4. Open **Connections**, connect Microsoft 365, and complete the delegated
+4. Open **Settings → Provider settings**, save the key for every provider
+   referenced by the policy, and confirm its route test passes. The key must not
+   appear again in the UI, browser storage, or logs.
+5. Open **Connections**, connect Microsoft 365, and complete the delegated
    consent flow.
-5. Create a workspace and open it.
-6. Send a harmless model prompt and exercise a read-only Microsoft 365 tool
+6. Create a workspace and open it.
+7. Send a harmless model prompt and exercise a read-only Microsoft 365 tool
    that is allowed by the assigned policy.
 
 A healthy process does not prove provider access, Microsoft consent, policy
@@ -415,9 +426,10 @@ and role assignment rather than changing bootstrap identifiers blindly.
 
 ### The stack is healthy but model calls fail
 
-Confirm the provider key for the assigned route is set. The default bootstrap
-route uses `ONECOMPUTER_OPENAI_API_KEY`; optional routes remain unusable until
-their matching key is configured.
+Open **Settings → Provider settings** as an administrator and confirm that the
+assigned provider is Active and its in-product route test passes. The default
+demo policy uses dynamic Anthropic and OpenAI routes; it does not read provider
+keys from `.env`.
 
 ### Workspace creation reports image not found
 

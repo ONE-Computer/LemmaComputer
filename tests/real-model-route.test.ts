@@ -6,32 +6,44 @@ import test from "node:test";
 const root = path.resolve(import.meta.dirname, "..");
 const source = (relativePath: string) => readFile(path.join(root, relativePath), "utf8");
 
-test("the approved model aliases have pinned real routes and no fallback", async () => {
-  const config = await source("config/litellm/config.yaml");
-  for (const alias of ["onecomputer-assistant", "onecomputer-claude", "onecomputer-openai", "onecomputer-glm"]) {
-    assert.equal((config.match(new RegExp(`model_name: ${alias}`, "g")) ?? []).length, 1);
+test("OpenAI and Anthropic routes are database-managed, while only legacy Z.ai aliases remain static", async () => {
+  const [config, providerSettings, bootstrapPolicy] = await Promise.all([
+    source("config/litellm/config.yaml"),
+    source("packages/litellm-adapter/src/provider-settings.ts"),
+    source("packages/workspace-store/src/identity-policy.ts"),
+  ]);
+  for (const alias of ["onecomputer-assistant", "onecomputer-claude", "onecomputer-openai", "claude-sonnet-4-6", "claude-opus-4-6"]) {
+    assert.doesNotMatch(config, new RegExp(`model_name: ${alias}`));
   }
-  assert.match(config, /model: anthropic\/claude-sonnet-4-6/);
-  assert.match(config, /model: openai\/gpt-5\.6-luna/);
-  assert.match(config, /model: zai\/glm-5/);
-  assert.match(config, /model_name: claude-sonnet-4-6\s+litellm_params:\s+model: anthropic\/claude-sonnet-4-6/);
-  assert.match(config, /model_name: claude-opus-4-6\s+litellm_params:\s+model: openai\/gpt-5\.6-luna/);
-  assert.match(config, /model_name: claude-sonnet-4-5\s+litellm_params:\s+model: zai\/glm-5/);
-  assert.match(config, /model_name: onecomputer-glm[\s\S]*?supports_vision: false/);
-  assert.match(config, /model_name: onecomputer-openai[\s\S]*?supports_vision: true/);
+  assert.doesNotMatch(config, /api_key: os\.environ\/(?:OPENAI|ANTHROPIC)_API_KEY/);
+  assert.match(config, /model_name: onecomputer-glm[\s\S]*?model: zai\/glm-5/);
+  assert.match(config, /model_name: claude-sonnet-4-5[\s\S]*?model: zai\/glm-5/);
+  assert.match(providerSettings, /managedProviderModels/);
+  assert.match(providerSettings, /litellm_credential_name/);
+  assert.match(providerSettings, /tenantManagedModelAccessGroup/);
   assert.doesNotMatch(config, /fallbacks:/);
   assert.match(config, /turn_off_message_logging: true/);
   assert.match(config, /log_raw_request_response: false/);
+  assert.match(bootstrapPolicy, /modelAliases: \["onecomputer-claude", "onecomputer-openai"\]/);
+  assert.doesNotMatch(bootstrapPolicy, /modelAliases: \[[^\]]*onecomputer-glm/);
 });
 
-test("the provider credential is injected only into LiteLLM", async () => {
-  const compose = await source("compose.yaml");
+test("provider setup uses Control and LiteLLM credentials, never deprecated environment keys or the LiteLLM admin UI", async () => {
+  const [compose, example, web] = await Promise.all([
+    source("compose.yaml"),
+    source(".env.example"),
+    source("apps/web/src/App.jsx"),
+  ]);
   const litellm = compose.split("  litellm:")[1]?.split("\n  openvtc-consent:")[0] ?? "";
   const everythingElse = compose.replace(litellm, "");
-  assert.match(litellm, /OPENAI_API_KEY: \$\{ONECOMPUTER_OPENAI_API_KEY:/);
-  assert.match(litellm, /ANTHROPIC_API_KEY: \$\{ONECOMPUTER_CLAUDE_API_KEY:/);
+  assert.doesNotMatch(litellm, /(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|UI_USERNAME|UI_PASSWORD)/);
   assert.match(litellm, /ZAI_API_KEY: \$\{ONECOMPUTER_GLM_API_KEY:/);
-  assert.doesNotMatch(everythingElse, /ONECOMPUTER_(?:OPENAI|CLAUDE|GLM)_API_KEY/);
+  assert.match(litellm, /DISABLE_ADMIN_UI: "true"/);
+  assert.doesNotMatch(everythingElse, /ONECOMPUTER_(?:OPENAI|CLAUDE)_API_KEY/);
+  assert.doesNotMatch(example, /ONECOMPUTER_(?:OPENAI|CLAUDE)_API_KEY/);
+  assert.match(web, /Provider settings/);
+  assert.match(web, /name="provider-api-key" type="password"/);
+  assert.doesNotMatch(web, /gatewayAdminUrl/);
 });
 
 test("the local workspace receives an explicit host-seeded IANA timezone", async () => {

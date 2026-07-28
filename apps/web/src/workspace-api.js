@@ -154,4 +154,9 @@ export const adminApi = {
   saveConnectorToolPolicy: (connectorId, tools) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/tool-policy`, mutation("PUT", { tools })),
   saveConnectorAccessPolicy: (connectorId, policy) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/access-policy`, mutation("PUT", policy)),
   deleteConnector: (connectorId) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}`, mutation("DELETE")),
+  providerSettings: () => request("/api/v1/admin/provider-settings", { cache: "no-store" }),
+  saveProviderSetting: (provider, apiKey) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}`, mutation("PUT", { apiKey })),
+  testProviderSetting: (provider) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/test`, mutation()),
+  disableProviderSetting: (provider) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/disable`, mutation()),
+  deleteProviderSetting: (provider) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}`, mutation("DELETE")),
 };

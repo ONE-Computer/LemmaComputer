@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { LiteLLMGatewayAdapter } from "@onecomputer/litellm-adapter";
+import { LiteLLMGatewayAdapter, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
 
 const identity = { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" as const };
 
@@ -706,7 +706,7 @@ test("workspace grants bind LiteLLM user and agent identities without making eit
   }
 });
 
-test("workspace grant materializes the exact Control policy rather than adapter defaults", async () => {
+test("workspace grant preserves the Control alias while scoping a managed-provider route to its tenant", async () => {
   let grantBody: Record<string, unknown> = {};
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -743,7 +743,7 @@ test("workspace grant materializes the exact Control policy rather than adapter 
   };
   try {
     await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy });
-    assert.deepEqual(grantBody.models, ["onecomputer-assistant"]);
+    assert.deepEqual(grantBody.models, [tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-assistant")]);
     assert.equal("max_budget" in grantBody, false);
     assert.equal("budget_duration" in grantBody, false);
     assert.equal(grantBody.rpm_limit, 30);
@@ -759,6 +759,8 @@ test("workspace grant materializes the exact Control policy rather than adapter 
     assert.equal(grantBody.agent_id, liveAdapter.agentIdFor("workspace-a", "persisted-agent-id"));
     const metadata = grantBody.metadata as Record<string, unknown>;
     assert.equal(metadata.onecomputer_policy_version_id, "policy-version-6");
+    assert.equal(metadata.onecomputer_policy_model_alias, "onecomputer-assistant");
+    assert.equal(metadata.onecomputer_client_model_alias, "onecomputer-assistant");
     assert.equal(metadata.onecomputer_policy_hash, "b".repeat(64));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

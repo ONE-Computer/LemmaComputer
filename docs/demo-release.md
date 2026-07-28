@@ -31,6 +31,36 @@ The first command performs the local equivalent of required CI and records `.art
 
 Application startup never performs a migration. If the migration job fails, retain the previous application deployment, inspect the transaction error, and restore only if an external/nontransactional operation changed state.
 
+
+## Managed-provider cutover
+
+Use this procedure when promoting the release that replaces static OpenAI and
+Anthropic routes with Provider settings:
+
+1. Capture a restore-tested, coordinated snapshot of Control PostgreSQL,
+   LiteLLM PostgreSQL, workspace volumes, image digests, and the stable
+   `ONECOMPUTER_LITELLM_SALT_KEY` and
+   `ONECOMPUTER_LITELLM_CREDENTIAL_SECRET` values.
+2. Stop active demo workspaces. Their existing scoped model grants are
+   intentionally not reused across the route replacement.
+3. Run the normal one-shot Control migration, deploy the promoted image and
+   static configuration, and restart LiteLLM and Control. Do not preserve the
+   retired OpenAI/Anthropic static YAML routes.
+4. Remove the retired provider-key values from the demo environment only after
+   the new stack is healthy. `npm run env:check` reports their names without
+   printing values; `env:update` intentionally preserves them.
+5. Sign in as a demo administrator, open **Settings → Provider settings**, add
+   a key for every provider referenced by the demo policy, and run the
+   in-product route test. A `PROVIDER_STATIC_CUTOVER_REQUIRED` response means
+   an old static route is still present; remove it and restart LiteLLM.
+6. Create or restart a workspace and run one harmless prompt through every
+   demo-critical model alias. Disabling or deleting a provider must revoke
+   affected workspace grants and require a restart.
+
+Rollback is a coordinated restore of both databases and the matching LiteLLM
+encryption secrets before starting the older image. Do not roll back the image
+alone: it may not understand the managed model records or encrypted credential
+state.
 ## Rollback
 
 Application rollback is permitted only while the previous version is compatible with the expanded schema. Roll back images by immutable digest/tag; do not reverse migration files. After a contract migration crosses the documented irreversible point, recovery is restore plus forward repair, not an ad-hoc down migration.

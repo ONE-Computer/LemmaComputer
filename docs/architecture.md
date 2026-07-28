@@ -20,8 +20,12 @@ scoped key. User applications authenticate to the local broker with a
 non-authoritative local credential.
 
 OAuth tokens for Microsoft 365 are held in the gateway boundary and persisted
-by LiteLLM using its stable salt key. Telegram bot credentials are encrypted by
-the out-of-workspace channel broker before storage.
+by LiteLLM using its stable salt key. OpenAI and Anthropic keys are write-only
+administrator input: Control sends them directly to LiteLLM's private credential
+API, which encrypts them in the gateway database. Control persists only
+tenant-scoped route identifiers, lifecycle metadata, and a safe fingerprint—not
+the raw provider key. Telegram bot credentials are encrypted by the
+out-of-workspace channel broker before storage.
 
 ### Policy is projected, signed, and re-verified
 
@@ -75,7 +79,7 @@ flowchart TB
   subgraph Public["Browser-facing boundary"]
     Browser["Employee browser"]
     Ingress["Workspace ingress :4174"]
-    GatewayUI["LiteLLM UI/OAuth callback :4000"]
+    GatewayOAuth["LiteLLM OAuth callback :4000"]
     M365Bridge["M365 authorization bridge :4311"]
   end
 
@@ -105,7 +109,7 @@ flowchart TB
   end
 
   Browser --> Ingress --> Web --> Control
-  Browser --> GatewayUI --> LiteLLM
+  Browser --> GatewayOAuth --> LiteLLM
   Browser --> M365Bridge --> M365
   Control --> ControlDB
   Control --> Controller
@@ -126,7 +130,7 @@ The three loopback-published ports in the reference deployment are different
 security surfaces:
 
 - `4174` is the product origin and authenticated workspace ingress.
-- `4000` is the gateway administrator/OAuth callback surface.
+- `4000` is the gateway OAuth callback surface; LiteLLM's administrator UI is disabled.
 - `4311` is a local browser bridge for the Microsoft connector.
 
 They require authenticated reverse proxies, TLS, and an intentional routing
@@ -257,10 +261,11 @@ prompt, re-evaluates current ownership and policy, and dispatches through the
 existing agent-chat bridge. The worker has no Docker socket, provider
 credential, prompt key, or direct workspace-network access.
 
-LiteLLM PostgreSQL owns gateway keys, model configuration stored by LiteLLM,
-and user OAuth state. Per-workspace home directories are Docker volumes for the
-local sandbox driver. These three state classes must be backed up and restored
-consistently for disaster recovery.
+LiteLLM PostgreSQL owns gateway keys, encrypted provider credentials, model
+configuration stored by LiteLLM, and user OAuth state. Control PostgreSQL owns
+the tenant-scoped provider route metadata needed to govern those records.
+Per-workspace home directories are Docker volumes for the local sandbox driver.
+These state classes must be backed up and restored consistently for disaster recovery.
 
 Operation transitions and execution claims use database concurrency controls.
 An interrupted execution lease can be recovered, but a completed dispatch

@@ -257,11 +257,19 @@ is unavailable or returns malformed data, the callback fails closed.
 Raw prompt/response logging is disabled. Uvicorn access logging is suppressed
 for OAuth callback safety.
 
-**Extension seam:** stable policy aliases belong in the model list. Adding a
-provider also requires the contract model catalog, Control display catalog,
-bootstrap policy, and possibly a managed-client transport alias. Adding an MCP
-server requires a callback binding and Control capability policy; a LiteLLM
-configuration entry alone is not sufficient.
+OpenAI and Anthropic are managed providers. An administrator supplies a key
+write-only through Control; LiteLLM encrypts it in its credential store and
+holds tenant-scoped model records that reference only the credential name.
+Control stores no raw key, checks a candidate route before activation, and
+issues workspace keys only for that tenant's stable aliases and access groups.
+The static YAML contains only gateway policy and explicit legacy routes.
+
+**Extension seam:** adding a managed provider requires the contract model
+catalog, Provider settings lifecycle, tenant-safe LiteLLM route projection,
+Control display catalog, bootstrap policy, and possibly a managed-client
+transport alias. Do not reintroduce a managed-provider key in Compose or
+static YAML. Adding an MCP server requires a callback binding and Control
+capability policy; a LiteLLM configuration entry alone is not sufficient.
 
 ## Microsoft 365 MCP
 

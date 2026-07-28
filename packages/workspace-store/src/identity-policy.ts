@@ -280,7 +280,8 @@ const mvpPolicyDocument = (revisionNote = "Initial MVP policy") => ({
   defaultAgents: [...mvpDefaultAgentIds],
   applications: [...mvpApplicationIds],
   defaultApplications: [...mvpDefaultApplicationIds],
-  modelAliases: ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm"],
+  // The demo bootstrap uses only routes managed by Provider settings.
+  modelAliases: ["onecomputer-claude", "onecomputer-openai"],
   networkProfile: "controlled-egress-v1",
   clipboard: defaultClipboardPolicy,
   mcp: {

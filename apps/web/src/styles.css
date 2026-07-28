@@ -4011,7 +4011,8 @@ textarea:focus-visible,
 .telegram-empty-workspace svg { flex: 0 0 auto; width: 20px; height: 20px; }
 .telegram-empty-workspace span { display: grid !important; gap: 3px; margin: 0 !important; color: inherit !important; font-size: 13px !important; }
 
-.credentials-screen { max-width: 1040px; }
+.credentials-screen,
+.provider-settings-screen { max-width: 1040px; }
 .credential-create-card,
 .credential-inventory {
   margin-top: 22px;
@@ -4036,7 +4037,8 @@ textarea:focus-visible,
 .credential-create-card > div > span { display: block; margin-top: 7px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .credential-create-card label { display: grid; gap: 7px; color: #304057; font-size: 13px; font-weight: 650; }
 .credential-create-card input,
-.credentials-screen .modal-field input {
+.credentials-screen .modal-field input,
+.provider-settings-screen .modal-field input {
   min-height: 40px;
   box-sizing: border-box;
   border: 1px solid #bcc8d5;

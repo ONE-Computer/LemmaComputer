@@ -200,17 +200,41 @@ enforced by Control and the runtime grant projection, not only by the Web UI.
 Custom connector deletion removes the LiteLLM server and its catalog metadata.
 Built-in connectors cannot be deleted through the administration API.
 
-### Model providers
+### Managed model providers
 
-| Variable | Route |
+OpenAI and Anthropic are configured by an organization administrator in
+**Settings → Provider settings**, not in `.env`. Control passes the submitted
+write-only key directly to LiteLLM's private credential API. LiteLLM encrypts
+the credential in its own database; ONEComputer stores only tenant-scoped route
+IDs, lifecycle state, timestamps, and a safe HMAC fingerprint.
+
+The dynamic routes retain the stable public aliases required by signed policy
+and managed clients. Each tenant's route is bound to a tenant-specific LiteLLM
+access group, so a virtual workspace key cannot select another organization’s
+deployment. Only explicitly granted model aliases are issued to a workspace.
+
+| Credential source | Route |
 | --- | --- |
-| `ONECOMPUTER_OPENAI_API_KEY` | `onecomputer-assistant`, `onecomputer-openai` |
-| `ONECOMPUTER_CLAUDE_API_KEY` | `onecomputer-claude` |
-| `ONECOMPUTER_GLM_API_KEY` | `onecomputer-glm` |
+| Administrator Provider settings | OpenAI: `onecomputer-assistant`, `onecomputer-openai`, `claude-opus-4-6`; Anthropic: `onecomputer-claude`, `claude-sonnet-4-6` |
+| `ONECOMPUTER_GLM_API_KEY` | Legacy customer-managed Z.ai compatibility route: `onecomputer-glm`, `claude-sonnet-4-5`; excluded from the default demo policy |
 
-Only LiteLLM receives these variables. A route can remain unconfigured until
-policy assigns it, but the default bootstrap policy expects configured model
-routes. Remove unlicensed routes from both policy and gateway configuration.
+The static OpenAI and Anthropic YAML routes and environment variables are
+retired. During the cutover, keep the LiteLLM salt and credential secret stable,
+back up both databases, deploy the new configuration, then sign in as an
+administrator to configure and test each provider. A stale static route makes
+Control fail closed with `PROVIDER_STATIC_CUTOVER_REQUIRED`; remove it and
+restart LiteLLM rather than attempting to mix static and managed routes.
+
+A candidate key is tested through temporary LiteLLM credentials and routes
+before the stable route changes. Rotation validates the current tenant route
+before replacing the encrypted credential. Disabling or deleting a provider
+removes its routes, revokes affected workspace grants, and requires affected
+workspaces to restart.
+
+For rollback, restore the Control database, LiteLLM database, and the matching
+LiteLLM encryption secrets as one set. Rolling back only an image can leave
+dynamic model records or encrypted credentials incompatible with the old static
+configuration.
 
 ### Stable cryptographic material
 

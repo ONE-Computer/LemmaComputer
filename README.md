@@ -94,11 +94,15 @@ evaluation.
 ```bash
 npm ci
 npm run env:init
-# Edit the generated .env with the Entra, administrator, and provider values.
+# Edit the generated .env with the Entra and administrator values.
 npm run image:workspace
 npm run compose:config
 npm run compose:up
 ```
+
+After the stack is healthy, sign in as an administrator and use **Settings →
+Provider settings** to add and test each write-only model-provider key. Do not
+put OpenAI or Anthropic keys in `.env`.
 
 Before editing `.env`, configure the two exact Web redirect URIs and delegated
 Graph permissions in Entra. The

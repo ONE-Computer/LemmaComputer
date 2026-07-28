@@ -33,12 +33,31 @@ const safeProviderErrorCodes = new Set([
   "PROVIDER_TEST_FAILED",
 ]);
 
+const safeProviderMessage = (code: string, fallback: string) => ({
+  PROVIDER_KEY_REQUIRED: "A provider API key is required",
+  PROVIDER_ROUTE_INTEGRITY_FAILED: "The existing provider route cannot be safely rotated",
+  PROVIDER_STATIC_CUTOVER_REQUIRED: "Restart the installation with retired provider routes removed before configuring this provider",
+  PROVIDER_NOT_CONFIGURED: "That provider is not configured",
+  PROVIDER_CREDENTIAL_REJECTED: "The provider API key or approved model access was rejected",
+  PROVIDER_ROUTE_FAILED: "The provider route could not be configured",
+  PROVIDER_GATEWAY_UNAVAILABLE: "The provider gateway is unavailable",
+  PROVIDER_CONFIGURATION_FAILED: "The provider configuration could not be validated",
+  PROVIDER_TEST_FAILED: "The provider test could not be completed",
+}[code] ?? fallback);
+
 const safeProviderError = (
   error: unknown,
   fallbackCode: "PROVIDER_CONFIGURATION_FAILED" | "PROVIDER_TEST_FAILED",
   message: string,
 ) => {
-  if (error instanceof OneComputerError && safeProviderErrorCodes.has(error.code)) return error;
+  if (error instanceof OneComputerError && safeProviderErrorCodes.has(error.code)) {
+    return new OneComputerError(
+      error.code,
+      safeProviderMessage(error.code, message),
+      error.statusCode,
+      error.retryable,
+    );
+  }
   return new OneComputerError(fallbackCode, message, 502, true);
 };
 

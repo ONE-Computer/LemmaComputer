@@ -41,7 +41,6 @@ import {
 import { ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog, useDismissOnOutside } from "./ui.jsx";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
-const gatewayAdminUrl = import.meta.env.VITE_LITELLM_ADMIN_URL ?? "http://127.0.0.1:4000/ui";
 const operationStateLabels = {
   approval_required: "waiting for approval",
   approved: "approved",
@@ -744,7 +743,56 @@ function CredentialsScreen({ credentials, workspaces, loading, busy, error, onCr
   );
 }
 
-function SettingsScreen({ view, isAdmin, currentUserId, gatewayUrl, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
+function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTest, onDisable, onDelete, onBack }) {
+  const [editor, setEditor] = useState(null);
+  const [apiKey, setApiKey] = useState("");
+  const titleFor = (provider) => provider === "openai" ? "OpenAI" : "Anthropic";
+  const save = async () => {
+    const submitted = apiKey.trim();
+    if (!editor || !submitted) return;
+    setApiKey("");
+    const saved = await onSave(editor.provider, submitted);
+    if (saved) setEditor(null);
+  };
+  return (
+    <div className="secondary-screen settings-screen provider-settings-screen">
+      <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
+      <header className="page-heading compact">
+        <p>Model access</p>
+        <h1>Provider settings</h1>
+        <span>Add an approved provider key once. LiteLLM encrypts it in its own credential store; ONEComputer shows only a safe fingerprint and test status.</span>
+      </header>
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Provider operation failed</strong>{error}</span></div>}
+      <section className="credential-inventory provider-settings-inventory" aria-labelledby="provider-settings-heading">
+        <div className="credential-inventory-heading"><div><p>Organization routes</p><h2 id="provider-settings-heading">Managed providers</h2></div><span>{providers.length}</span></div>
+        {loading ? <p className="credential-empty">Loading provider settings…</p> : providers.map((provider) => (
+          <article key={provider.provider}>
+            <span className="connection-logo compact"><Bot24Regular aria-hidden="true" /></span>
+            <div className="credential-copy">
+              <strong>{titleFor(provider.provider)}</strong>
+              <small>{provider.aliases.join(" · ")}</small>
+              <span>{provider.state === "active" ? "Active" : provider.state === "disabled" ? "Disabled" : "Not configured"}{provider.fingerprint ? <> · {provider.fingerprint}</> : null}</span>
+              {provider.lastTestedAt && <span>Last tested {new Date(provider.lastTestedAt).toLocaleString()}</span>}
+              {provider.lastErrorCode && <span>Last safe error: {provider.lastErrorCode}</span>}
+            </div>
+            <div className="credential-actions">
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => { setApiKey(""); setEditor(provider); }}>{provider.state === "active" ? "Rotate" : "Connect"}</button>
+              {provider.state === "active" && <button className="secondary-button" type="button" disabled={busy} onClick={() => onTest(provider.provider)}>Test</button>}
+              {provider.state === "active" && <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDisable(provider.provider)}>Disable</button>}
+              {provider.state !== "not-configured" && <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDelete(provider.provider)}>Delete</button>}
+            </div>
+          </article>
+        ))}
+      </section>
+      {editor && <ModalDialog title={(editor.state === "active" ? "Rotate " : "Connect ") + titleFor(editor.provider)} description="The key is submitted once to Control and stored encrypted by LiteLLM. It is never displayed again." eyebrow="Write-only provider key" labelledBy="provider-key-title" onClose={busy ? () => undefined : () => { setApiKey(""); setEditor(null); }}>
+        <label className="modal-field"><span>{titleFor(editor.provider)} API key</span><input name="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste the provider API key" disabled={busy} /></label>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => { setApiKey(""); setEditor(null); }}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim()} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Rotate key" : "Connect provider"}</button></div>
+      </ModalDialog>}
+    </div>
+  );
+}
+
+function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onOpenProviderSettings, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, providerSettings, providerSettingsLoading, providerSettingsBusy, providerSettingsError, onSaveProviderSetting, onTestProviderSetting, onDisableProviderSetting, onDeleteProviderSetting, users, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
   if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
     return <WorkspaceConfigurationScreen
       settings={adminSandboxSettings}
@@ -790,6 +838,9 @@ function SettingsScreen({ view, isAdmin, currentUserId, gatewayUrl, onOpenAdmin,
   if (view === "credentials") {
     return <CredentialsScreen credentials={credentials} workspaces={workspaces} loading={credentialsLoading} busy={credentialsBusy} error={credentialsError} onCreate={onCreateCredential} onRotate={onRotateCredential} onDelete={onDeleteCredential} onBack={onBack} />;
   }
+  if (view === "provider-settings" && isAdmin) {
+    return <ProviderSettingsScreen providers={providerSettings} loading={providerSettingsLoading} busy={providerSettingsBusy} error={providerSettingsError} onSave={onSaveProviderSetting} onTest={onTestProviderSetting} onDisable={onDisableProviderSetting} onDelete={onDeleteProviderSetting} onBack={onBack} />;
+  }
 
   return (
     <div className="secondary-screen settings-screen">
@@ -804,11 +855,11 @@ function SettingsScreen({ view, isAdmin, currentUserId, gatewayUrl, onOpenAdmin,
           <span className="settings-item-copy"><strong>Credentials</strong><small>Manage write-only credentials for official workspace channels.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
         </button>
-        <a className="settings-item" href={gatewayUrl} target="_blank" rel="noreferrer">
+        {isAdmin && <button className="settings-item" type="button" onClick={onOpenProviderSettings}>
           <span className="settings-item-icon"><Bot24Regular aria-hidden="true" /></span>
-          <span className="settings-item-copy"><strong>Gateway</strong><small>Open the local gateway control surface in a separate tab.</small></span>
-          <Open24Regular aria-hidden="true" />
-        </a>
+          <span className="settings-item-copy"><strong>Provider settings</strong><small>Configure encrypted organization model-provider keys and verify their routes.</small></span>
+          <ChevronRight16Regular aria-hidden="true" />
+        </button>}
         {isAdmin && <button className="settings-item" type="button" onClick={onOpenAdmin}>
           <span className="settings-item-icon"><Settings24Regular aria-hidden="true" /></span>
           <span className="settings-item-copy"><strong>Administration</strong><small>Manage workspace policy versions, assignments, and organization controls.</small></span>
@@ -2620,6 +2671,10 @@ export function App() {
   const [credentialsLoading, setCredentialsLoading] = useState(false);
   const [credentialsBusy, setCredentialsBusy] = useState(false);
   const [credentialsError, setCredentialsError] = useState("");
+  const [providerSettings, setProviderSettings] = useState([]);
+  const [providerSettingsLoading, setProviderSettingsLoading] = useState(false);
+  const [providerSettingsBusy, setProviderSettingsBusy] = useState(false);
+  const [providerSettingsError, setProviderSettingsError] = useState("");
   const [connectionsView, setConnectionsView] = useState("list");
   const [settingsView, setSettingsView] = useState("overview");
   const [chatSessions, setChatSessions] = useState([]);
@@ -2819,6 +2874,17 @@ export function App() {
       .then((value) => { setCredentials(value.credentials); setCredentialsError(""); })
       .catch((error) => setCredentialsError(error.message))
       .finally(() => setCredentialsLoading(false));
+  }, [activeNav, settingsView, session?.user.id]);
+
+  useEffect(() => {
+    if (!session || activeNav !== "Settings" || settingsView !== "provider-settings" || !session.roles.includes("administrator")) return undefined;
+    let active = true;
+    setProviderSettingsLoading(true);
+    adminApi.providerSettings()
+      .then((value) => { if (active) { setProviderSettings(value.providers); setProviderSettingsError(""); } })
+      .catch((error) => { if (active) setProviderSettingsError(error.message); })
+      .finally(() => { if (active) setProviderSettingsLoading(false); });
+    return () => { active = false; };
   }, [activeNav, settingsView, session?.user.id]);
 
   useEffect(() => {
@@ -3386,6 +3452,78 @@ export function App() {
     }
   };
 
+  const updateProviderSetting = (provider) => {
+    setProviderSettings((current) => {
+      const existing = current.find((item) => item.provider === provider.provider);
+      return existing
+        ? current.map((item) => item.provider === provider.provider ? provider : item)
+        : [...current, provider];
+    });
+  };
+
+  const refreshProviderSettings = async () => {
+    const value = await adminApi.providerSettings();
+    setProviderSettings(value.providers);
+    return value.providers;
+  };
+
+  const runProviderAction = async (action, onSuccess) => {
+    setProviderSettingsBusy(true);
+    setProviderSettingsError("");
+    try {
+      const result = await action();
+      if (result.provider) updateProviderSetting(result.provider);
+      onSuccess(result);
+      return result;
+    } catch (error) {
+      setProviderSettingsError(error.message);
+      return null;
+    } finally {
+      setProviderSettingsBusy(false);
+    }
+  };
+
+  const saveProviderSetting = (provider, apiKey) => runProviderAction(
+    () => adminApi.saveProviderSetting(provider, apiKey),
+    () => setToast(`${provider === "openai" ? "OpenAI" : "Anthropic"} provider key saved.`),
+  );
+
+  const testProviderSetting = (provider) => runProviderAction(
+    () => adminApi.testProviderSetting(provider),
+    () => setToast(`${provider === "openai" ? "OpenAI" : "Anthropic"} route passed its test.`),
+  );
+
+  const disableProviderSetting = async (provider) => {
+    if (!await requestConfirmation({
+      title: `Disable ${provider === "openai" ? "OpenAI" : "Anthropic"}?`,
+      description: "The provider route will be removed and active workspace grants for that model will be revoked. Affected workspaces must restart before they can use it again.",
+      confirmLabel: "Disable provider",
+      danger: true,
+    })) return null;
+    return runProviderAction(
+      () => adminApi.disableProviderSetting(provider),
+      (result) => setToast(result.restartRequired
+        ? "Provider disabled. Affected workspace access was revoked; restart those workspaces."
+        : "Provider disabled."),
+    );
+  };
+
+  const deleteProviderSetting = async (provider) => {
+    if (!await requestConfirmation({
+      title: `Delete ${provider === "openai" ? "OpenAI" : "Anthropic"} key?`,
+      description: "The encrypted LiteLLM credential and all routes for this provider will be removed. Active workspace grants for that model will be revoked.",
+      confirmLabel: "Delete provider key",
+      danger: true,
+    })) return null;
+    return runProviderAction(async () => {
+      const result = await adminApi.deleteProviderSetting(provider);
+      const providers = await refreshProviderSettings();
+      return { ...result, provider: providers.find((item) => item.provider === provider) };
+    }, (result) => setToast(result.restartRequired
+      ? "Provider key deleted. Affected workspace access was revoked; restart those workspaces."
+      : "Provider key deleted."));
+  };
+
   const saveWorkspaceSettings = async (configuration) => {
     setSandboxSaving(true);
     setSandboxError("");
@@ -3875,9 +4013,9 @@ export function App() {
           view={settingsView}
           isAdmin={session.roles.includes("administrator")}
           currentUserId={session.user.id}
-          gatewayUrl={gatewayAdminUrl}
           onOpenAdmin={() => setSettingsView("admin")}
           onOpenCredentials={() => setSettingsView("credentials")}
+          onOpenProviderSettings={() => setSettingsView("provider-settings")}
           onBack={() => setSettingsView("overview")}
           credentials={credentials}
           workspaces={homeWorkspaces}
@@ -3887,6 +4025,14 @@ export function App() {
           onCreateCredential={createTelegramCredential}
           onRotateCredential={rotateTelegramCredential}
           onDeleteCredential={deleteTelegramCredential}
+          providerSettings={providerSettings}
+          providerSettingsLoading={providerSettingsLoading}
+          providerSettingsBusy={providerSettingsBusy}
+          providerSettingsError={providerSettingsError}
+          onSaveProviderSetting={saveProviderSetting}
+          onTestProviderSetting={testProviderSetting}
+          onDisableProviderSetting={disableProviderSetting}
+          onDeleteProviderSetting={deleteProviderSetting}
           users={adminUsers}
           loading={adminLoading}
           busyUserId={adminBusyUserId}

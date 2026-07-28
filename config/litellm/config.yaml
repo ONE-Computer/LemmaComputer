@@ -1,24 +1,7 @@
 model_list:
-  # Policy-facing aliases. Keep these stable when changing the underlying
-  # provider deployment so existing signed policies remain meaningful.
-  - model_name: onecomputer-assistant
-    litellm_params:
-      model: openai/gpt-5.6-luna
-      api_key: os.environ/OPENAI_API_KEY
-    model_info:
-      supports_vision: true
-  - model_name: onecomputer-claude
-    litellm_params:
-      model: anthropic/claude-sonnet-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
-    model_info:
-      supports_vision: true
-  - model_name: onecomputer-openai
-    litellm_params:
-      model: openai/gpt-5.6-luna
-      api_key: os.environ/OPENAI_API_KEY
-    model_info:
-      supports_vision: true
+  # OpenAI and Anthropic routes are tenant-scoped LiteLLM database records
+  # created by Control's Provider settings. They intentionally do not use
+  # deployment environment API keys or static YAML aliases.
   - model_name: onecomputer-glm
     litellm_params:
       model: zai/glm-5
@@ -27,20 +10,8 @@ model_list:
       supports_vision: false
 
   # Claude Desktop validates model identifiers against its own catalog before
-  # sending a gateway request. These transport aliases project an approved
-  # policy route onto identifiers accepted by the managed desktop client.
-  - model_name: claude-sonnet-4-6
-    litellm_params:
-      model: anthropic/claude-sonnet-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
-    model_info:
-      supports_vision: true
-  - model_name: claude-opus-4-6
-    litellm_params:
-      model: openai/gpt-5.6-luna
-      api_key: os.environ/OPENAI_API_KEY
-    model_info:
-      supports_vision: true
+  # sending a gateway request. The Z.ai compatibility alias below remains a
+  # legacy static exception until it receives a managed-provider implementation.
   - model_name: claude-sonnet-4-5
     litellm_params:
       model: zai/glm-5
