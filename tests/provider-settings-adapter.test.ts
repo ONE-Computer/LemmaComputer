@@ -272,7 +272,9 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.ok(stableUpdates.every((document) => document.litellm_params.model === "openai/gpt-5.6-luna"));
     assert.ok(stableUpdates.every((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length === 1));
     assert.ok(switchRequests.filter((request) => request.url === "/chat/completions")
-      .every((request) => request.body.max_tokens === 256));
+      .every((request) => !Object.hasOwn(request.body, "max_tokens")));
+    assert.ok(switchRequests.filter((request) => request.url === "/key/generate")
+      .every((request) => !Object.hasOwn(request.body, "tpm_limit")));
 
     staticOpenAi = true;
     const staticStart = requests.length;

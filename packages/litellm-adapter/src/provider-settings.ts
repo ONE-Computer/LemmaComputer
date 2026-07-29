@@ -356,7 +356,6 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
             duration: "60s",
             models: [accessGroup],
             rpm_limit: 2,
-            tpm_limit: 4_096,
             max_parallel_requests: 1,
             metadata: { onecomputer_purpose: "provider-route-test" },
           },
@@ -369,7 +368,6 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         body: {
           model,
           messages: [{ role: "user", content: "Reply with OK." }],
-          max_tokens: 256,
         },
       });
       if (!result.ok) throw this.providerFailure(result.status, "credential", provider, result.payload);

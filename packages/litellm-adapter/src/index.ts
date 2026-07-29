@@ -37,7 +37,7 @@ export type GatewayModelRoute = {
   capabilities: GatewayModelCapabilities;
   limits: {
     requestsPerMinute: number;
-    tokensPerMinute: number;
+    tokensPerMinute: number | null;
     maxParallelRequests: number;
   };
 };
@@ -183,9 +183,6 @@ type JsonObject = Record<string, unknown>;
 
 const asObject = (value: unknown): JsonObject => value && typeof value === "object" ? value as JsonObject : {};
 const WORKSPACE_RPM_LIMIT = 30;
-// Claude Desktop can submit a large managed-system prompt before the user's
-// first message. Allow that context while bounding request volume.
-const WORKSPACE_TPM_LIMIT = 500_000;
 // Claude Desktop overlaps its streaming model request, managed MCP calls, and
 // short-lived background work. A limit of four caused healthy agent sessions
 // to deadlock into LiteLLM's retry loop. Keep the 30 RPM control while allowing
@@ -743,7 +740,6 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       duration: `${durationSeconds}s`,
       models: grantModels,
       rpm_limit: WORKSPACE_RPM_LIMIT,
-      tpm_limit: WORKSPACE_TPM_LIMIT,
       max_parallel_requests: WORKSPACE_MAX_PARALLEL_REQUESTS,
       metadata: {
         onecomputer_workspace_id: input.workspaceId,
@@ -778,6 +774,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       && current?.agent_id === gatewayAgentId
       && current?.max_budget == null
       && current?.budget_duration == null
+      && current?.tpm_limit == null
       && metadata.onecomputer_tenant_id === input.identity.tenantId
       && metadata.onecomputer_subject_id === input.identity.subjectId
       && metadata.onecomputer_workspace_id === input.workspaceId
@@ -1096,6 +1093,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const key = keys.map(asObject).find((item) => item.token === tokenHash);
     if (!key) throw new OneComputerError("GATEWAY_USAGE_UNAVAILABLE", "The model route usage state is unavailable", 502, true);
     const numberOr = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
+    const positiveNumberOrNull = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
     return {
       alias: modelAlias,
       status: "ready",
@@ -1103,7 +1101,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       capabilities,
       limits: {
         requestsPerMinute: numberOr(key.rpm_limit, WORKSPACE_RPM_LIMIT),
-        tokensPerMinute: numberOr(key.tpm_limit, WORKSPACE_TPM_LIMIT),
+        tokensPerMinute: positiveNumberOrNull(key.tpm_limit),
         maxParallelRequests: numberOr(key.max_parallel_requests, WORKSPACE_MAX_PARALLEL_REQUESTS),
       },
     };

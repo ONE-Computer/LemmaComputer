@@ -34,7 +34,7 @@ export const modelRouteSchema = z.object({
   }).strict(),
   limits: z.object({
     requestsPerMinute: z.number().int().positive(),
-    tokensPerMinute: z.number().int().positive(),
+    tokensPerMinute: z.number().int().positive().nullable(),
     maxParallelRequests: z.number().int().positive(),
   }),
 });

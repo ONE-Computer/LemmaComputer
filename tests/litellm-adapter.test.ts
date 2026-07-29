@@ -764,7 +764,7 @@ test("workspace grant preserves the Control alias while scoping a managed-provid
     assert.equal("max_budget" in grantBody, false);
     assert.equal("budget_duration" in grantBody, false);
     assert.equal(grantBody.rpm_limit, 30);
-    assert.equal(grantBody.tpm_limit, 500_000);
+    assert.equal("tpm_limit" in grantBody, false);
     assert.equal(grantBody.max_parallel_requests, 30);
     assert.deepEqual(grantBody.object_permission, {
       mcp_servers: ["onecomputer_ms365", "onecomputer_notion"],
@@ -955,6 +955,65 @@ test("a matching existing workspace key is updated without a duplicate generatio
   }
 });
 
+test("a legacy token-capped workspace key is replaced so the allowance cannot survive reconciliation", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: "http://unused",
+    workspaceUrl: "http://unused",
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const credential = liveAdapter.credentialFor("workspace-a");
+  const gatewayUserId = liveAdapter.userIdFor(identity);
+  const gatewayAgentId = liveAdapter.agentIdFor("workspace-a");
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({
+      url: request.url ?? "",
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {},
+    });
+    response.setHeader("content-type", "application/json");
+    if (request.url?.startsWith("/key/list?")) {
+      response.end(JSON.stringify({
+        keys: [{
+          token: createHash("sha256").update(credential).digest("hex"),
+          user_id: gatewayUserId,
+          agent_id: gatewayAgentId,
+          tpm_limit: 500_000,
+          metadata: {
+            onecomputer_tenant_id: identity.tenantId,
+            onecomputer_subject_id: identity.subjectId,
+            onecomputer_workspace_id: "workspace-a",
+            onecomputer_agent_id: "workspace-default:workspace-a",
+          },
+        }],
+      }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const routedAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
+    assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
+      key_aliases: [`onecomputer-agent-${routedAdapter.agentIdFor("workspace-a")}`],
+    });
+    const generated = requests.find(({ url }) => url === "/key/generate")?.body ?? {};
+    assert.equal("tpm_limit" in generated, false);
+    assert.ok(!requests.some(({ url }) => url === "/key/update"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("a legacy budgeted workspace key is replaced so the cap cannot survive reconciliation", async () => {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const liveAdapter = new LiteLLMGatewayAdapter({
@@ -1008,6 +1067,7 @@ test("a legacy budgeted workspace key is replaced so the cap cannot survive reco
     const generated = requests.find(({ url }) => url === "/key/generate")?.body ?? {};
     assert.equal("max_budget" in generated, false);
     assert.equal("budget_duration" in generated, false);
+    assert.equal("tpm_limit" in generated, false);
     assert.ok(!requests.some(({ url }) => url === "/key/update"));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -1053,7 +1113,6 @@ test("availability check exposes safe route usage without sending a prompt", asy
         keys: [{
           token: createHash("sha256").update(credential).digest("hex"),
           rpm_limit: 30,
-          tpm_limit: 500_000,
           max_parallel_requests: 30,
         }],
       }));
@@ -1075,7 +1134,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
     assert.equal(result.model, "onecomputer-assistant");
     assert.equal(result.modelRoute.fallback, "none");
     assert.equal(result.modelRoute.capabilities.vision, true);
-    assert.equal(result.modelRoute.limits.tokensPerMinute, 500_000);
+    assert.equal(result.modelRoute.limits.tokensPerMinute, null);
     assert.equal(result.tools.length, 2);
     assert.ok(!requests.includes("/v1/chat/completions"));
     assert.ok(!JSON.stringify(result).includes("gpt-"));

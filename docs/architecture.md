@@ -181,7 +181,8 @@ need host Docker authority.
 2. The broker restricts paths and forwards the request with its
    workspace-and-agent LiteLLM key.
 3. LiteLLM validates key expiry, model allowlist, identity metadata,
-   concurrency, RPM, and TPM limits.
+   concurrency, and RPM limits. Token usage is metered without a
+   ONEComputer-imposed per-minute allowance.
 4. LiteLLM selects the single configured provider deployment. Cross-provider
    fallback is deliberately disabled.
 5. Raw prompts and responses are not written by the configured gateway
