@@ -39,6 +39,7 @@ import {
   signApprovalDecision,
 } from "./openvtc-browser-agent.js";
 import { ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog, useDismissOnOutside } from "./ui.jsx";
+import { ActivityPanel, ActivityToggle } from "./ActivityPanel.jsx";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
 const providerTitle = (provider) => ({
@@ -2013,7 +2014,10 @@ function ChatConversation({
   const loadedSessionRef = useRef("");
   const chatActionsRef = useRef(null);
   const contextRef = useRef(null);
+  const activityToggleRef = useRef(null);
   const chatPopoverRefs = useMemo(() => [chatActionsRef, contextRef], []);
+  const [activityOpen, setActivityOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1181px)").matches);
+  const [selectedActivityTurnId, setSelectedActivityTurnId] = useState("");
 
   useDismissOnOutside(chatActionsOpen || contextOpen, () => {
     setChatActionsOpen(false);
@@ -2055,12 +2059,21 @@ function ChatConversation({
     .map((part) => part.data.operationId)
     .sort()
     .join(":");
+  const activityTurns = messages
+    .filter((message) => message.role === "assistant" && message.metadata?.turnId)
+    .map((message) => message.metadata.turnId);
+  const latestActivityTurnId = activityTurns.at(-1) ?? "";
+
+  useEffect(() => {
+    if (latestActivityTurnId) setSelectedActivityTurnId(latestActivityTurnId);
+  }, [latestActivityTurnId]);
 
   useEffect(() => {
     sessionRef.current = activeSessionId;
     if (!activeSessionId) {
       loadedSessionRef.current = "";
       setMessages([]);
+      setSelectedActivityTurnId("");
       setAttachments([]);
       setAttachmentError("");
       setHistoryState("ready");
@@ -2072,6 +2085,7 @@ function ChatConversation({
     let active = true;
     setHistoryState("loading");
     setHistoryError("");
+    setSelectedActivityTurnId("");
     setMessages([]);
     chatApi.messages(workspaceId, agentId, activeSessionId)
       .then((result) => {
@@ -2257,7 +2271,16 @@ function ChatConversation({
     </>
   );
   return (
+    <div className={`chat-stage${activityOpen ? " activity-open" : ""}`}>
     <section className={`chat-conversation${visibleMessages.length === 0 ? " is-empty" : ""}`} aria-label="Current conversation">
+      <ActivityToggle
+        open={activityOpen}
+        buttonRef={activityToggleRef}
+        onClick={() => {
+          if (!selectedActivityTurnId && latestActivityTurnId) setSelectedActivityTurnId(latestActivityTurnId);
+          setActivityOpen((open) => !open);
+        }}
+      />
       <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy || historyState === "loading"}>
         {visibleMessages.length === 0 ? (
           <div className="chat-welcome">
@@ -2266,7 +2289,22 @@ function ChatConversation({
           </div>
         ) : visibleMessages.map((message) => (
           <article className={`chat-message ${message.role}`} key={message.id}>
-            <span>{message.role === "assistant" ? agentName : "You"}</span>
+            <div className="chat-message-heading">
+              <span>{message.role === "assistant" ? agentName : "You"}</span>
+              {message.role === "assistant" && message.metadata?.turnId && (
+                <button
+                  type="button"
+                  aria-label={`View activity for this ${agentName} response`}
+                  aria-pressed={activityOpen && selectedActivityTurnId === message.metadata.turnId}
+                  onClick={() => {
+                    setSelectedActivityTurnId(message.metadata.turnId);
+                    setActivityOpen(true);
+                  }}
+                >
+                  View activity
+                </button>
+              )}
+            </div>
             <div className="chat-message-parts">
               {message.parts.map((part, index) => (
                 <ChatPart
@@ -2436,6 +2474,16 @@ function ChatConversation({
         )}
       </form>
     </section>
+      <ActivityPanel
+        open={activityOpen}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        sessionId={activeSessionId}
+        turnId={selectedActivityTurnId || latestActivityTurnId}
+        onClose={() => setActivityOpen(false)}
+        returnFocusRef={activityToggleRef}
+      />
+    </div>
   );
 }
 

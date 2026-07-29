@@ -8,6 +8,7 @@ async function request(path, options = {}) {
     const error = new Error(payload?.error?.message ?? "ONEComputer could not complete the request.");
     error.code = payload?.error?.code ?? "REQUEST_FAILED";
     error.retryable = payload?.error?.retryable ?? false;
+    error.status = response.status;
     throw error;
   }
   return payload;
@@ -45,6 +46,13 @@ export const chatApi = {
   messages: (workspaceId, catalogId, sessionId) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
     { cache: "no-store" },
+  ),
+  activity: (workspaceId, catalogId, sessionId, turnId, after = -1) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/activity?${new URLSearchParams({ after: String(after), limit: "500" })}`,
+    { cache: "no-store" },
+  ),
+  activityStreamUrl: (workspaceId, catalogId, sessionId, turnId, after = -1) => (
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/activity/stream?${new URLSearchParams({ after: String(after) })}`
   ),
 };
 

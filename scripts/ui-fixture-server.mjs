@@ -255,6 +255,51 @@ let chatMessages = [
   },
 ];
 
+const activityTurnId = "fixture-turn-1";
+const activityEvent = (turnId, sequence, kind, state, provenance, payload) => ({
+  version: 1,
+  eventId: crypto.randomUUID(),
+  turnId,
+  sequence,
+  timestamp: new Date(Date.now() - (11 - sequence) * 15_000).toISOString(),
+  kind,
+  state,
+  provenance,
+  visibility: "user",
+  payload,
+});
+const activityEvents = [
+  activityEvent(activityTurnId, 0, "plan", "running", "deterministic_system", { title: "Review the requested workspace change", summary: "Check the file, confirm policy, then request approval." }),
+  activityEvent(activityTurnId, 1, "progress", "completed", "deterministic_system", { activityId: "fixture-progress-1", label: "Workspace context checked" }),
+  activityEvent(activityTurnId, 2, "provider_summary", "completed", "provider_generated", { summary: "The requested draft is disposable, but deleting it still requires approval.", provider: "Hermes" }),
+  activityEvent(activityTurnId, 3, "tool", "completed", "tool", { toolCallId: "fixture-tool-1", name: "get-drive-item", summary: "File metadata checked" }),
+  activityEvent(activityTurnId, 4, "web_action", "completed", "tool", { action: "search", label: "Searched approved workspace sources", url: "https://example.com/search?q=planning" }),
+  activityEvent(activityTurnId, 5, "source", "completed", "provider_generated", { title: "Workspace retention guide", url: "https://example.com/retention", citation: "[1]" }),
+  activityEvent(activityTurnId, 6, "approval", "requires_action", "tool", { approvalId: "fixture-approval-1", toolCallId: "fixture-tool-2", operationId: "00000000-0000-4000-8000-000000000001", summary: "Approval needed to delete planning-draft.docx" }),
+  activityEvent(activityTurnId, 7, "computer_action", "completed", "tool", { actionId: "fixture-computer-1", label: "Opened the managed workspace", viewerRef: "fixture-viewer-1" }),
+  activityEvent(activityTurnId, 8, "notice", "completed", "deterministic_system", { message: "The file remains unchanged while approval is pending." }),
+  activityEvent(activityTurnId, 9, "error", "failed", "deterministic_system", { code: "SOURCE_REFRESH_FAILED", message: "One optional source could not refresh.", retryable: true }),
+  activityEvent(activityTurnId, 10, "terminal", "completed", "deterministic_system", { turnState: "completed", message: "Visible activity recorded" }),
+];
+const activityByTurn = new Map([[activityTurnId, activityEvents]]);
+const activitySubscribers = new Map();
+const disconnectActivityOnce = new Set();
+const appendActivity = (turnId, event) => {
+  const events = [...(activityByTurn.get(turnId) ?? []), event];
+  activityByTurn.set(turnId, events);
+  for (const subscriber of activitySubscribers.get(turnId) ?? []) {
+    if (event.sequence <= subscriber.cursor) continue;
+    subscriber.cursor = event.sequence;
+    subscriber.response.write(`id: ${event.sequence}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`);
+    if (disconnectActivityOnce.has(turnId) && event.sequence === 2) {
+      disconnectActivityOnce.delete(turnId);
+      subscriber.response.end();
+    } else if (event.kind === "terminal") {
+      subscriber.response.end();
+    }
+  }
+};
+
 let fixtureSchedules = [{
   id: "5c536c1f-6a31-427d-af8f-dbb0c63f8d71",
   title: "Weekday project summary",
@@ -543,6 +588,42 @@ const server = http.createServer((request, response) => {
   const key = `${request.method} ${url.pathname}`;
   response.setHeader("content-type", "application/json");
   response.setHeader("cache-control", "no-store");
+  const activityMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/([^/]+)\/sessions\/([^/]+)\/turns\/([^/]+)\/activity(\/stream)?$/);
+  if (request.method === "GET" && activityMatch) {
+    const [, requestedWorkspaceId, requestedAgentId, requestedSessionId, requestedTurnId, streamPath] = activityMatch.map((value) => value ? decodeURIComponent(value) : value);
+    const owned = requestedWorkspaceId === workspaceId
+      && requestedAgentId === "hermes-claw"
+      && requestedSessionId === chatSession.id;
+    const events = owned ? activityByTurn.get(requestedTurnId) : undefined;
+    if (!events) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "ACTIVITY_TURN_NOT_FOUND", message: "Activity turn not found", retryable: false } }));
+      return;
+    }
+    const after = Number(url.searchParams.get("after") ?? -1);
+    const replay = events.filter((event) => event.sequence > after);
+    if (streamPath) {
+      response.setHeader("content-type", "text/event-stream; charset=utf-8");
+      response.setHeader("x-accel-buffering", "no");
+      response.write(replay.map((event) => `id: ${event.sequence}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`).join(""));
+      if (events.some((event) => event.kind === "terminal")) {
+        response.end();
+        return;
+      }
+      const subscriber = { response, cursor: replay.at(-1)?.sequence ?? after };
+      const subscribers = activitySubscribers.get(requestedTurnId) ?? new Set();
+      subscribers.add(subscriber);
+      activitySubscribers.set(requestedTurnId, subscribers);
+      response.once("close", () => subscribers.delete(subscriber));
+      return;
+    }
+    response.end(JSON.stringify({
+      events: replay,
+      nextAfterSequence: replay.at(-1)?.sequence ?? null,
+      terminal: after >= events.at(-1).sequence || replay.some((event) => event.kind === "terminal"),
+    }));
+    return;
+  }
   if (key === "GET /v1/workspaces") {
     response.end(JSON.stringify({ workspaces: fixtureWorkspaces }));
     return;
@@ -786,6 +867,12 @@ const server = http.createServer((request, response) => {
       const turnId = `fixture-turn-${Date.now()}`;
       const messageId = `fixture-message-${Date.now()}`;
       const createdAt = new Date().toISOString();
+      activityByTurn.set(turnId, [activityEvent(turnId, 0, "plan", "running", "deterministic_system", { title: "Understand the request" })]);
+      disconnectActivityOnce.add(turnId);
+      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 1, "progress", "running", "deterministic_system", { activityId: `${turnId}-progress`, label: "Checking workspace context" })), 650);
+      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 2, "tool", "completed", "tool", { toolCallId: `${turnId}-tool`, name: "workspace-context", summary: "Context checked" })), 760);
+      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 3, "provider_summary", "completed", "provider_generated", { summary: "The workspace context is ready for the response.", provider: "Hermes" })), 900);
+      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 4, "terminal", "completed", "deterministic_system", { turnState: "completed" })), 1_000);
       const openingChunks = [
         { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
         { type: "text-start", id: `${turnId}-text` },
@@ -797,13 +884,22 @@ const server = http.createServer((request, response) => {
         { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
         { type: "finish", finishReason: "stop", messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt } },
       ];
-      chatMessages = [...chatMessages, input.message];
+      chatMessages.push(input.message);
       response.setHeader("content-type", "text/event-stream");
       response.setHeader("x-vercel-ai-ui-message-stream", "v1");
       setTimeout(() => {
         response.write(openingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(""));
       }, 600);
       setTimeout(() => {
+        chatMessages.push({
+          id: messageId,
+          role: "assistant",
+          metadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt },
+          parts: [
+            { type: "text", text: "I’ll check the workspace context first, then summarize what I can do.\n\nI’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations", state: "done" },
+            { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
+          ],
+        });
         response.end(`${closingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
       }, 1_000);
     });
