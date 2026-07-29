@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
-import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderModels, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
+import { defaultManagedProviderModelIds, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderModels, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
 import { MemoryWorkspaceStore, PostgresProviderSettingsStore, PostgresWorkspaceStore } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 
@@ -140,7 +140,7 @@ const main = async () => {
       method: "PUT",
       url: "/v1/admin/provider-settings/openai",
       headers: headersFor(tenantId, operation, true),
-      payload: { apiKey },
+      payload: { apiKey, modelId: defaultManagedProviderModelIds.openai },
     });
     return { statusCode: result.statusCode, payload: result.json() as JsonObject };
   };
