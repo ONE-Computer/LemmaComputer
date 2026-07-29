@@ -29,6 +29,7 @@ const envSchema = z.object({
   CONTROLLER_PORT: z.coerce.number().int().positive().default(4101),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
   SANDBOX_DRIVER: z.enum(["kasm", "kasm-local"]).default("kasm-local"),
+  ONECOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
   KASM_BASE_URL: z.preprocess(
     (value) => value === "" ? undefined : value,
     z.string().url().optional(),
@@ -298,6 +299,7 @@ export function adapterFromEnv(env: z.infer<typeof envSchema>): SandboxAdapter {
       publicHost: env.KASM_PUBLIC_HOST,
       timeZone: env.KASM_LOCAL_TIME_ZONE,
       kvmEnabled: env.KASM_LOCAL_KVM_ENABLED,
+      installationKind: env.ONECOMPUTER_INSTALLATION_KIND,
     });
   }
   return new KasmDeveloperApiAdapter({

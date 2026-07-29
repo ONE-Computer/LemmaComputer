@@ -282,20 +282,25 @@ npm run image:workspace
 deployments should use an immutable digest.
 
 Claude Cowork local execution requires hardware virtualization. On every Docker
-or Kasm Agent host, verify that `/dev/kvm` is a character device and that the
-host has at least 8 GB of RAM and approximately 25 GB of free disk space. For
-the local driver, opt in with:
+or Kasm Agent host, verify that `/dev/kvm` and `/dev/vhost-vsock` are character
+devices and that the host has at least 8 GB of RAM and approximately 25 GB of
+free disk space. The local driver gives Cowork workspaces an 8 GiB memory limit;
+allow additional host memory for Docker and the ONEComputer services. Opt in
+with:
 
 ```text
 KASM_LOCAL_KVM_ENABLED=true
 ```
 
-The adapter maps only `/dev/kvm` into workspaces that include Claude Desktop;
-it does not make the container privileged or restore the dropped capabilities.
-At startup, the image adds `kasm-user` to the numeric group that owns the mapped
-device, so the Kasm Agent host and image do not need matching `kvm` group IDs.
-Changing this setting causes the workspace container to be recreated on its
-next launch while preserving its workspace volume.
+The local driver accepts this setting for customer-managed installations and
+isolated development worktrees. Hosted multi-tenant installations fail closed
+with `COWORK_HOST_ISOLATION_REQUIRED`. The adapter
+maps only `/dev/kvm` and `/dev/vhost-vsock` into workspaces that include Claude
+Desktop; it does not make the container privileged or restore dropped
+capabilities. At startup, the image adds `kasm-user` to the numeric groups that
+own the mapped devices, so host and image group IDs do not need to match.
+Changing this setting recreates the workspace container on its next launch
+while preserving its workspace volume.
 
 For an external Kasm installation, configure the ONEComputer Workspace image's
 Docker Run Config Override in Kasm:
@@ -303,14 +308,20 @@ Docker Run Config Override in Kasm:
 ```json
 {
   "user": "root",
-  "devices": ["/dev/kvm:/dev/kvm:rwm"],
+  "devices": [
+    "/dev/kvm:/dev/kvm:rwm",
+    "/dev/vhost-vsock:/dev/vhost-vsock:rwm"
+  ],
+  "memory": 8589934592,
   "environment": {"ONECOMPUTER_COWORK_ENABLED": "true"}
 }
 ```
 
-Every Kasm Agent eligible to run this Workspace must expose `/dev/kvm`.
-Mapping KVM gives the workspace access to the host virtualization interface, so
-keep the override limited to the Claude Desktop Workspace image.
+Every Kasm Agent eligible to run this Workspace must expose both devices.
+Mapping KVM and vhost-vsock gives the workspace access to host virtualization
+interfaces, so keep the override limited to the Claude Desktop Workspace image.
+Use dedicated, single-tenant Kasm Agents and enforce that placement in the Kasm
+scheduler; do not place this override on a shared multi-tenant agent.
 
 For an external Kasm installation, set:
 

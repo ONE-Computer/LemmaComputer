@@ -82,6 +82,30 @@ application_enabled() {
   [[ ",${ONECOMPUTER_ENABLED_APPLICATIONS}," == *",$1,"* ]]
 }
 
+grant_cowork_device_access() {
+  local device_path="$1"
+  local fallback_group="$2"
+  [[ -c "$device_path" ]] || {
+    echo "Cowork requires the virtualization device at ${device_path}" >&2
+    exit 78
+  }
+
+  local device_gid
+  local device_group
+  device_gid="$(stat -c '%g' "$device_path")"
+  device_group="$(getent group "$device_gid" | cut -d: -f1 || true)"
+  if [[ -z "$device_group" ]]; then
+    device_group="$fallback_group"
+    groupadd --system --gid "$device_gid" "$device_group"
+  fi
+  usermod -aG "$device_group" kasm-user
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    /bin/bash -c '[[ -r "$1" && -w "$1" ]]' _ "$device_path" || {
+      echo "Cowork cannot access ${device_path} as kasm-user" >&2
+      exit 78
+    }
+}
+
 [[ "$ONECOMPUTER_COWORK_ENABLED" == "true" || "$ONECOMPUTER_COWORK_ENABLED" == "false" ]] || {
   echo "invalid Cowork capability setting" >&2
   exit 78
@@ -91,22 +115,8 @@ if [[ "$ONECOMPUTER_COWORK_ENABLED" == "true" ]]; then
     echo "Cowork requires the Claude Desktop agent" >&2
     exit 78
   }
-  [[ -c /dev/kvm ]] || {
-    echo "Cowork requires the KVM device at /dev/kvm" >&2
-    exit 78
-  }
-  kvm_gid="$(stat -c '%g' /dev/kvm)"
-  kvm_group="$(getent group "$kvm_gid" | cut -d: -f1 || true)"
-  if [[ -z "$kvm_group" ]]; then
-    kvm_group="onecomputer-kvm"
-    groupadd --system --gid "$kvm_gid" "$kvm_group"
-  fi
-  usermod -aG "$kvm_group" kasm-user
-  setpriv --reuid=1000 --regid=1000 --init-groups \
-    /bin/bash -c '[[ -r /dev/kvm && -w /dev/kvm ]]' || {
-      echo "Cowork cannot access /dev/kvm as kasm-user" >&2
-      exit 78
-    }
+  grant_cowork_device_access /dev/kvm onecomputer-kvm
+  grant_cowork_device_access /dev/vhost-vsock onecomputer-vhost-vsock
 fi
 
 remove_stale_chrome_singletons() {
@@ -307,6 +317,8 @@ document = {
     "chatAdvancedFileAnalysisEnabled": False,
     "isClaudeCodeForDesktopEnabled": False,
     "coworkTabEnabled": cowork_enabled == "true",
+    "secureVmFeaturesEnabled": cowork_enabled == "true",
+    "allowedWorkspaceFolders": ["/home/kasm-user"],
     "disableBundledSkills": True,
     "autoModeEnabled": False,
     "toolSearchEnabled": False,

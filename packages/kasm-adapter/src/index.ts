@@ -269,6 +269,7 @@ type KasmLocalConfig = {
   publicHost?: string;
   timeZone?: string;
   kvmEnabled?: boolean;
+  installationKind: "customer-managed" | "hosted" | "worktree";
   portStart?: number;
   portEnd?: number;
 };
@@ -276,6 +277,13 @@ type KasmLocalConfig = {
 export class KasmLocalAdapter implements SandboxAdapter {
   private readonly socketPath: string;
   constructor(private readonly config: KasmLocalConfig) {
+    if (config.kvmEnabled && config.installationKind === "hosted") {
+      throw new OneComputerError(
+        "COWORK_HOST_ISOLATION_REQUIRED",
+        "Local Cowork virtualization is not permitted on hosted multi-tenant nodes",
+        503,
+      );
+    }
     this.socketPath = config.socketPath ?? "/var/run/docker.sock";
   }
 
@@ -408,17 +416,24 @@ export class KasmLocalAdapter implements SandboxAdapter {
         RestartPolicy: { Name: "unless-stopped" },
         ShmSize: 536_870_912,
         PidsLimit: 1024,
-        Memory: 4_294_967_296,
+        Memory: coworkEnabled ? 8_589_934_592 : 4_294_967_296,
         NanoCpus: 2_000_000_000,
         CapDrop: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
         SecurityOpt: ["no-new-privileges"],
         Mounts: [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }],
         ...(coworkEnabled ? {
-          Devices: [{
-            PathOnHost: "/dev/kvm",
-            PathInContainer: "/dev/kvm",
-            CgroupPermissions: "rwm",
-          }],
+          Devices: [
+            {
+              PathOnHost: "/dev/kvm",
+              PathInContainer: "/dev/kvm",
+              CgroupPermissions: "rwm",
+            },
+            {
+              PathOnHost: "/dev/vhost-vsock",
+              PathInContainer: "/dev/vhost-vsock",
+              CgroupPermissions: "rwm",
+            },
+          ],
         } : {}),
       },
     });
@@ -710,10 +725,17 @@ export class KasmLocalAdapter implements SandboxAdapter {
   }
 
   private async disconnectContainer(network: string, container: string) {
+    if (!(await this.networkContainsContainer(network, container))) return;
     try {
       await this.request("POST", `/networks/${encodeURIComponent(network)}/disconnect`, { Container: container, Force: true });
     } catch (error) {
-      if (!(error instanceof OneComputerError && [404, 409].includes(error.statusCode))) throw error;
+      if (error instanceof OneComputerError && [404, 409].includes(error.statusCode)) return;
+      // Docker can return 500 when Compose replaces a governed service after
+      // the membership check but before disconnect. Treat that race as an
+      // idempotent success only when a fresh inspection confirms the endpoint
+      // is already absent; preserve every genuine Docker failure.
+      if (!(await this.networkContainsContainer(network, container))) return;
+      throw error;
     }
   }
 
