@@ -127,6 +127,19 @@ test("selected Hermes profiles seed only Office skills by default and expose the
   assert.match(chatAdapter, /Before a calendar write/);
 });
 
+test("governed Calendar discovery advertises only argument shapes Control allows", async () => {
+  const bridge = await source("docker/workspace/onecomputer-connectors-stdio.py");
+  const schemas = bridge.slice(bridge.indexOf("BOUNDED_LIST_INPUT_PROPERTIES"), bridge.indexOf("LIST_DRIVES_INPUT_SCHEMA"));
+
+  assert.match(schemas, /CALENDAR_VIEW_INPUT_SCHEMA/);
+  assert.match(schemas, /LIST_CALENDAR_EVENTS_INPUT_SCHEMA/);
+  assert.match(schemas, /"additionalProperties": False/);
+  assert.doesNotMatch(schemas, /fetchAllPages|includeHeaders|expandExtendedProperties|"expand"/);
+  assert.match(schemas, /"required": \["startDateTime", "endDateTime"\]/);
+  assert.match(bridge, /if upstream_name == "get-calendar-view":\n            input_schema = CALENDAR_VIEW_INPUT_SCHEMA/);
+  assert.match(bridge, /elif upstream_name == "list-calendar-events":\n            input_schema = LIST_CALENDAR_EVENTS_INPUT_SCHEMA/);
+});
+
 test("governed OneDrive deletion carries the resolved filename into approval metadata", async () => {
   const [bridge, broker, control] = await Promise.all([
     source("docker/workspace/onecomputer-connectors-stdio.py"),
