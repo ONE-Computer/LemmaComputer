@@ -218,7 +218,7 @@ test("Connections stays employee-facing and uses spacing instead of decorative r
   assert.doesNotMatch(connections, /LiteLLM|OAuth credentials|refresh tokens|MCP catalog|MCP connector/);
   assert.match(styles, /\.connections-page-intro > \.page-heading\s*\{[\s\S]*?border-bottom: 0/);
   assert.match(styles, /\.connector-category-heading\s*\{[\s\S]*?border-bottom: 0/);
-  assert.match(styles, /\.connector-mark\.microsoft\s*\{[\s\S]*?place-content: center/);
+  assert.match(styles, /\.connector-mark\.microsoft:not\(\.branded\)\s*\{[\s\S]*?place-content: center/);
   assert.match(connections, /const \[showCredentials, setShowCredentials\] = useState\(false\)/);
   assert.match(connections, /\{showCredentials && <section className="add-connector-app-credentials"/);
   assert.match(connections, /Connection setup is automatic\. No provider credentials are needed\./);
@@ -313,7 +313,10 @@ test("the account menu owns Settings, with Provider settings and Administration 
 });
 
 test("built-in connectors use locally served branded icons", async () => {
-  const app = await source("apps/web/src/App.jsx");
+  const [app, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/styles.css"),
+  ]);
   const brands = [
     "asana", "atlassian", "box", "cloudflare", "figma", "github", "hubspot", "intercom",
     "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
@@ -323,6 +326,8 @@ test("built-in connectors use locally served branded icons", async () => {
   await Promise.all(brands.map(async (brand) => {
     assert.match(await source("apps/web/public/connector-icons/" + brand + ".svg"), /<svg/);
   }));
+  assert.match(styles, /\.connector-mark\.microsoft:not\(\.branded\)/);
+  assert.match(styles, /\.connector-mark\.branded img \{ display: block; width: 100%; height: 100%; object-fit: contain; \}/);
 });
 
 

@@ -3498,24 +3498,24 @@ textarea:focus-visible,
   height: 64px;
 }
 
-.connector-mark.microsoft {
+.connector-mark.microsoft:not(.branded) {
   grid-template-columns: repeat(2, 13px);
   grid-template-rows: repeat(2, 13px);
   place-content: center;
   gap: 3px;
 }
 
-.connector-mark.microsoft.large {
+.connector-mark.microsoft.large:not(.branded) {
   grid-template-columns: repeat(2, 16px);
   grid-template-rows: repeat(2, 16px);
   gap: 4px;
 }
 
-.connector-mark.microsoft i { width: 100%; height: 100%; }
-.connector-mark.microsoft i:nth-child(1) { background: #f25022; }
-.connector-mark.microsoft i:nth-child(2) { background: #7fba00; }
-.connector-mark.microsoft i:nth-child(3) { background: #00a4ef; }
-.connector-mark.microsoft i:nth-child(4) { background: #ffb900; }
+.connector-mark.microsoft:not(.branded) i { width: 100%; height: 100%; }
+.connector-mark.microsoft:not(.branded) i:nth-child(1) { background: #f25022; }
+.connector-mark.microsoft:not(.branded) i:nth-child(2) { background: #7fba00; }
+.connector-mark.microsoft:not(.branded) i:nth-child(3) { background: #00a4ef; }
+.connector-mark.microsoft:not(.branded) i:nth-child(4) { background: #ffb900; }
 .connector-mark.notion { border-color: #cfd3d8; font-family: Georgia, serif; font-size: 25px; }
 .connector-mark.linear { border-color: #252525; background: #252525; color: #fff; font-size: 20px; }
 .connector-mark.atlassian { border-color: #d3e0fa; background: #edf3ff; color: #1868db; font-size: 21px; }
