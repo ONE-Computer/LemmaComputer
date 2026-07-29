@@ -6,6 +6,14 @@ Before making substantial visual changes, use the Product Design plugin's `get-c
 
 When implementing from a selected generated mock, treat that image as the source of truth for layout, component anatomy, density, spacing, color, typography, visible content, and hierarchy.
 
+## Browser verification
+
+- Use the repository's Playwright Test dependency and its managed Chromium for repeatable browser checks. Playwright does not require a browser MCP server or desktop browser plugin.
+- On a Linux development environment where the managed browser is not installed yet, run `npx playwright install chromium`. Do not use `--with-deps` unless system package installation is explicitly required and approved.
+- Run `npm run test:activity:e2e` for Activity panel changes. Run `npm run test:e2e` when a change affects multiple covered web flows, shared navigation, or common browser behavior.
+- Add or extend the smallest Playwright scenario that proves new user-visible behavior, accessibility behavior, security boundary, or reconnect behavior. Keep tests on the isolated fixture and ports configured in `playwright.config.ts`; never point browser tests at the demo deployment or its data.
+- Update visual snapshots only for intentional, reviewed visual changes. Inspect the rendered result before accepting a new baseline, and report the exact Playwright command and outcome at handoff.
+
 ## Durable product direction
 
 - ONEComputer supports two deployment profiles from one codebase: the current ME TECH customer-managed profile is single-tenant, while the hosted profile is multi-organization. In the ME TECH profile, every user in the configured Entra tenant may sign in and receives the default employee policy on first sign-in; `mike@metech.dev` is the bootstrap administrator. Never leak organization state across tenant boundaries in either profile.
