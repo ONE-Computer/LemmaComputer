@@ -75,6 +75,7 @@ test("the local workspace receives an explicit host-seeded IANA timezone", async
   assert.match(initializer, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
   assert.match(compose, /KASM_LOCAL_TIME_ZONE: \$\{ONECOMPUTER_TIME_ZONE:-\}/);
   assert.match(compose, /KASM_LOCAL_KVM_ENABLED: \$\{KASM_LOCAL_KVM_ENABLED:-false\}/);
+  assert.match(compose, /ONECOMPUTER_INSTALLATION_KIND: \$\{ONECOMPUTER_INSTALLATION_KIND:-customer-managed\}/);
   assert.match(entrypoint, /ONECOMPUTER_TIME_ZONE="\$ONECOMPUTER_TIME_ZONE"/);
 });
 
@@ -134,8 +135,12 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.doesNotMatch(entrypoint, /inferenceGatewayBaseUrl[^\n]+4312\/v1/);
   assert.match(entrypoint, /"disableDeploymentModeChooser": True/);
   assert.match(entrypoint, /"coworkTabEnabled": cowork_enabled == "true"/);
-  assert.match(entrypoint, /groupadd --system --gid "\$kvm_gid" "\$kvm_group"/);
-  assert.match(entrypoint, /setpriv --reuid=1000 --regid=1000 --init-groups[\s\S]*\[\[ -r \/dev\/kvm && -w \/dev\/kvm \]\]/);
+  assert.match(entrypoint, /"secureVmFeaturesEnabled": cowork_enabled == "true"/);
+  assert.match(entrypoint, /"allowedWorkspaceFolders": \["\/home\/kasm-user"\]/);
+  assert.match(entrypoint, /grant_cowork_device_access \/dev\/kvm onecomputer-kvm/);
+  assert.match(entrypoint, /grant_cowork_device_access \/dev\/vhost-vsock onecomputer-vhost-vsock/);
+  assert.match(entrypoint, /groupadd --system --gid "\$device_gid" "\$device_group"/);
+  assert.match(entrypoint, /setpriv --reuid=1000 --regid=1000 --init-groups[\s\S]*\[\[ -r "\$1" && -w "\$1" \]\]/);
   assert.match(entrypoint, /"isLocalDevMcpEnabled": False/);
   assert.match(entrypoint, /"isDesktopExtensionEnabled": False/);
   assert.match(entrypoint, /claude-sonnet-4-5/);

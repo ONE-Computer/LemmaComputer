@@ -121,6 +121,7 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
     });
     await assert.doesNotReject(adapter.destroy("sandbox-id"));
     assert.equal(networkRemoved, true);
+      installationKind: "customer-managed",
     assert.equal(
       requests.some((item) => (
         item.path === `/networks/${workspaceNetwork}/disconnect`
@@ -133,6 +134,28 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("local Cowork virtualization is rejected on hosted multi-tenant nodes", () => {
+  assert.throws(
+    () => new KasmLocalAdapter({
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      controlContainer: "onecomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "hosted",
+      kvmEnabled: true,
+    }),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: string }).code,
+        "COWORK_HOST_ISOLATION_REQUIRED",
+      );
+      return true;
+    },
+  );
 });
 
 test("local Kasm creates a hardened internal network and reconciles governed service attachments", async () => {
@@ -256,6 +279,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       gatewayContainer: "onecomputer-litellm",
       controlContainer: "onecomputer-control-api",
       relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
       egressProxyImage: "sha256:pinned-egress-proxy",
       egressNetwork: "onecomputer-egress",
       timeZone: "Asia/Singapore",
@@ -263,7 +287,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       portStart: 16920,
       portEnd: 16920,
     });
-    await adapter.create({
+    const createInput: Parameters<KasmLocalAdapter["create"]>[0] = {
       workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
       policy,
       policyBundle: signedPolicy.bundle,
@@ -297,7 +321,8 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
         catalogId: "hermes-claw",
         key: "workspace-specific-hermes-api-key-at-least-32-characters",
       }],
-    });
+    };
+    await adapter.create(createInput);
     const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
     const networkCreate = requests.find((item) => item.path === "/networks/create" && item.body.Name === workspaceNetwork)!;
     assert.equal(networkCreate.body.Internal, true);
@@ -309,13 +334,17 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const sandboxCreate = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=onecomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"))!;
     const host = sandboxCreate.body.HostConfig as Record<string, unknown>;
     assert.equal(host.NetworkMode, workspaceNetwork);
-    assert.equal(host.Memory, 4_294_967_296);
+    assert.equal(host.Memory, 8_589_934_592);
     assert.equal(host.NanoCpus, 2_000_000_000);
     assert.deepEqual(host.CapDrop, ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]);
     assert.deepEqual(host.SecurityOpt, ["no-new-privileges"]);
     assert.deepEqual(host.Devices, [{
       PathOnHost: "/dev/kvm",
       PathInContainer: "/dev/kvm",
+      CgroupPermissions: "rwm",
+    }, {
+      PathOnHost: "/dev/vhost-vsock",
+      PathInContainer: "/dev/vhost-vsock",
       CgroupPermissions: "rwm",
     }]);
     const workspaceVolume = "onecomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
@@ -419,6 +448,28 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       host: "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
       port: 16_920,
     });
+    const standardAdapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      controlContainer: "onecomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+      egressProxyImage: "sha256:pinned-egress-proxy",
+      egressNetwork: "onecomputer-egress",
+      kvmEnabled: false,
+      portStart: 16920,
+      portEnd: 16920,
+    });
+    await standardAdapter.create(createInput);
+    const sandboxCreates = requests.filter((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=onecomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"));
+    const standardHost = sandboxCreates.at(-1)!.body.HostConfig as Record<string, unknown>;
+    assert.equal(standardHost.Memory, 4_294_967_296);
+    assert.equal(standardHost.Devices, undefined);
+    assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("ONECOMPUTER_COWORK_ENABLED=false"));
+
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
     assert.ok(requests.some((item) => item.method === "DELETE" && item.path === `/volumes/${workspaceVolume}?force=true`));
   } finally {
