@@ -5,6 +5,7 @@ import { chatAttachmentMaxBytes, type ChannelTurnRequest, type IdentityContext }
 import {
   ChannelBrokerService,
   ChannelCredentialVault,
+  groupTelegramUpdates,
   HttpChannelControlClient,
   TelegramBotApiClient,
   type ChannelControlClient,
@@ -37,6 +38,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1_000) {
 
 class FakeTelegram implements TelegramBotClient {
   updates: TelegramUpdate[] = [];
+  updateRequests: Array<{ token: string; offset: string; timeoutSeconds?: number }> = [];
   sent: Array<{ token: string; chatId: string; text: string; options?: TelegramMessageOptions }> = [];
   edits: Array<{ token: string; chatId: string; messageId: string; text: string }> = [];
   chatActions: Array<{ token: string; chatId: string; action: "typing" }> = [];
@@ -53,8 +55,9 @@ class FakeTelegram implements TelegramBotClient {
       : { botId: "987654321", username: "onecomputer_second_bot" };
   }
 
-  async getUpdates(received: string, offset: string) {
+  async getUpdates(received: string, offset: string, timeoutSeconds?: number) {
     assert.ok(received === token || received === secondToken);
+    this.updateRequests.push({ token: received, offset, timeoutSeconds });
     return this.updates.filter((update) => BigInt(update.updateId) >= BigInt(offset));
   }
 
@@ -229,6 +232,7 @@ test("Telegram parses document captions and largest photos, then downloads throu
             message: {
               from: { id: 10001 },
               chat: { id: 10001, type: "private" },
+              media_group_id: "album-1",
               photo: [
                 { file_id: "small-photo", file_unique_id: "small", width: 90, height: 90, file_size: 100 },
                 { file_id: "large-photo", file_unique_id: "large", width: 1280, height: 720, file_size: 500 },
@@ -273,6 +277,7 @@ test("Telegram parses document captions and largest photos, then downloads throu
   });
   assert.equal(updates[1]?.attachment?.fileId, "large-photo");
   assert.equal(updates[1]?.attachment?.mediaType, "image/jpeg");
+  assert.equal(updates[1]?.mediaGroupId, "album-1");
   assert.deepEqual(await client.downloadFile(token, "deck-file-id", chatAttachmentMaxBytes), deck);
   assert.equal(calls.at(-1)?.url.includes("documents/Quarterly%20deck.pptx"), true);
   assert.equal(calls.at(-1)?.init?.redirect, "error");
@@ -284,6 +289,80 @@ test("Telegram parses document captions and largest photos, then downloads throu
     client.downloadFile(token, "traversal", chatAttachmentMaxBytes),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "TELEGRAM_INVALID_RESPONSE"),
   );
+});
+
+test("Telegram groups adjacent text, files, and media albums without merging unrelated messages or commands", () => {
+  const text = { updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "Review this" };
+  const file = {
+    updateId: "2", chatId: "10001", senderId: "10001", chatType: "private",
+    attachment: { fileId: "deck", filename: "deck.pptx", mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+  };
+  const photo = {
+    updateId: "3", chatId: "10001", senderId: "10001", chatType: "private", mediaGroupId: "album-1",
+    attachment: { fileId: "photo-1", filename: "photo-1.jpg", mediaType: "image/jpeg" },
+  };
+  const secondPhoto = {
+    updateId: "4", chatId: "10001", senderId: "10001", chatType: "private", mediaGroupId: "album-1",
+    attachment: { fileId: "photo-2", filename: "photo-2.jpg", mediaType: "image/jpeg" },
+  };
+  assert.deepEqual(groupTelegramUpdates([text, file]).map((group) => group.map((item) => item.updateId)), [["1", "2"]]);
+  assert.deepEqual(groupTelegramUpdates([file, text]).map((group) => group.map((item) => item.updateId)), [["2", "1"]]);
+  assert.deepEqual(groupTelegramUpdates([photo, secondPhoto]).map((group) => group.map((item) => item.updateId)), [["3", "4"]]);
+  assert.deepEqual(groupTelegramUpdates([
+    text,
+    { ...text, updateId: "5", text: "A separate thought" },
+    { ...text, updateId: "6", text: "/new" },
+  ]).map((group) => group.map((item) => item.updateId)), [["1"], ["5"], ["6"]]);
+});
+
+test("Telegram waits briefly for a companion file, then sends one acknowledgement and one agent turn", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+    5,
+    25,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-composition-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: false,
+  });
+  const deck = Buffer.from("presentation-bytes");
+  telegram.downloads.set("deck-file", deck);
+  telegram.updates = [{
+    updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "Summarize this deck",
+  }];
+  const polling = service.pollOnce();
+  setTimeout(() => telegram.updates.push({
+    updateId: "2",
+    chatId: "10001",
+    senderId: "10001",
+    chatType: "private",
+    attachment: {
+      fileId: "deck-file",
+      filename: "Business-Overview.pptx",
+      mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      fileSize: deck.length,
+    },
+  }), 5);
+  await polling;
+
+  assert.equal(control.turns.length, 1);
+  assert.equal(control.turns[0]?.text, "Summarize this deck");
+  assert.equal(control.turns[0]?.attachments?.[0]?.filename, "Business-Overview.pptx");
+  assert.equal(telegram.sent.filter((message) => message.text === "Message received.").length, 1);
+  assert.equal(telegram.updateRequests.some((request) => request.timeoutSeconds === 0), true);
+  await service.pollOnce();
+  assert.equal(control.turns.length, 1);
 });
 
 test("Telegram forwards bounded files and images while rejecting unsupported or oversized attachments", async () => {

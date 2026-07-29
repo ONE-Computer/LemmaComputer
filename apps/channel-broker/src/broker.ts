@@ -16,6 +16,7 @@ import {
   channelTurnStreamEventSchema,
   chatAgentCatalogIdSchema,
   chatAttachmentMaxBytes,
+  chatAttachmentMaxTotalBytes,
   chatAttachmentMediaTypes,
   chatFilePartSchema,
   saveTelegramChannelConnectionSchema,
@@ -54,6 +55,7 @@ export type TelegramUpdate = {
   chatType: string;
   text?: string;
   attachment?: TelegramAttachment;
+  mediaGroupId?: string;
   callbackData?: string;
   callbackQueryId?: string;
 };
@@ -70,7 +72,7 @@ export type TelegramMessageOptions = {
 
 export interface TelegramBotClient {
   validate(token: string): Promise<{ botId: string; username: string | null }>;
-  getUpdates(token: string, offset: string): Promise<TelegramUpdate[]>;
+  getUpdates(token: string, offset: string, timeoutSeconds?: number): Promise<TelegramUpdate[]>;
   downloadFile(token: string, fileId: string, maxBytes: number): Promise<Buffer>;
   sendMessage(token: string, chatId: string, text: string, options?: TelegramMessageOptions): Promise<string>;
   editMessage(token: string, chatId: string, messageId: string, text: string): Promise<void>;
@@ -445,10 +447,10 @@ export class TelegramBotApiClient implements TelegramBotClient {
     };
   }
 
-  async getUpdates(token: string, offset: string) {
+  async getUpdates(token: string, offset: string, timeoutSeconds = 20) {
     const result = await this.request(token, "getUpdates", {
       offset,
-      timeout: 20,
+      timeout: Math.max(0, Math.min(30, Math.trunc(timeoutSeconds))),
       allowed_updates: ["message", "callback_query"],
     });
     if (!Array.isArray(result)) throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned invalid updates", 502, true);
@@ -520,6 +522,7 @@ export class TelegramBotApiClient implements TelegramBotClient {
         chatType: chat!.type as string,
         ...(text === undefined ? {} : { text }),
         ...(attachment ? { attachment } : {}),
+        ...(typeof message?.media_group_id === "string" ? { mediaGroupId: message.media_group_id } : {}),
         ...(typeof callback?.data === "string" ? { callbackData: callback.data } : {}),
         ...(typeof callback?.id === "string" ? { callbackQueryId: callback.id } : {}),
       }];
@@ -678,6 +681,48 @@ const telegramMessageLimit = 4_000;
 const telegramStreamStartCharacters = 24;
 const telegramStreamEditCharacters = 160;
 const telegramStreamEditMs = 900;
+const telegramCommandPattern = /^\/(?:agent|new)(?:@\w+)?(?:\s|$)/;
+
+const immediateTelegramUpdate = (update: TelegramUpdate) => Boolean(
+  update.callbackData || (update.text && !update.attachment && telegramCommandPattern.test(update.text)),
+);
+
+const groupedText = (updates: TelegramUpdate[]) => updates
+  .flatMap((update) => update.text?.trim() ? [update.text.trim()] : [])
+  .join("\n\n");
+
+const canAppendTelegramUpdate = (group: TelegramUpdate[], candidate: TelegramUpdate) => {
+  const first = group[0];
+  if (
+    !first
+    || immediateTelegramUpdate(first)
+    || immediateTelegramUpdate(candidate)
+    || candidate.chatId !== first.chatId
+    || candidate.senderId !== first.senderId
+    || candidate.chatType !== first.chatType
+  ) return false;
+  const attachmentCount = group.filter((update) => update.attachment).length;
+  if (attachmentCount + Number(Boolean(candidate.attachment)) > 4) return false;
+  if (groupedText([...group, candidate]).length > 4_096) return false;
+  if (first.mediaGroupId && candidate.mediaGroupId === first.mediaGroupId) return true;
+  const hasText = group.some((update) => Boolean(update.text?.trim()));
+  const hasAttachment = attachmentCount > 0;
+  return (
+    (hasText && Boolean(candidate.attachment))
+    || (hasAttachment && Boolean(candidate.text?.trim()))
+    || (hasAttachment && Boolean(candidate.attachment))
+  );
+};
+
+export const groupTelegramUpdates = (updates: TelegramUpdate[]) => {
+  const groups: TelegramUpdate[][] = [];
+  for (const update of updates) {
+    const current = groups.at(-1);
+    if (current && canAppendTelegramUpdate(current, update)) current.push(update);
+    else groups.push([update]);
+  }
+  return groups;
+};
 
 class TelegramResponseStream {
   private text = "";
@@ -744,6 +789,7 @@ export class ChannelBrokerService {
     private readonly telegram: TelegramBotClient,
     private readonly control: ChannelControlClient,
     private readonly typingRefreshMs = 4_000,
+    private readonly compositionWindowMs = 0,
   ) {}
 
   private async withTypingIndicator<T>(token: string, chatId: string, turn: () => Promise<T>) {
@@ -889,13 +935,27 @@ export class ChannelBrokerService {
     };
     const token = this.vault.unprotect(identity, connection.credentialId, connection.credentialCiphertext);
     await this.deliverPendingResponses(connection.id, token);
-    const updates = (await this.telegram.getUpdates(token, connection.telegramUpdateOffset))
+    let updates = (await this.telegram.getUpdates(token, connection.telegramUpdateOffset))
       .sort((left, right) => Number(BigInt(left.updateId) - BigInt(right.updateId)));
+    if (this.compositionWindowMs > 0 && updates.some((update) => !immediateTelegramUpdate(update))) {
+      await new Promise((resolve) => setTimeout(resolve, this.compositionWindowMs));
+      const nextOffset = updates.length
+        ? String(BigInt(updates.at(-1)!.updateId) + 1n)
+        : connection.telegramUpdateOffset;
+      const followUps = await this.telegram.getUpdates(token, nextOffset, 0);
+      const byId = new Map(updates.map((update) => [update.updateId, update]));
+      for (const update of followUps) byId.set(update.updateId, update);
+      updates = [...byId.values()]
+        .sort((left, right) => Number(BigInt(left.updateId) - BigInt(right.updateId)));
+    }
     const current = await this.store.getOwnedChannelConnection(identity, "telegram", connection.workspaceId);
     if (!current || current.id !== connection.id || current.tokenVersion !== connection.tokenVersion) return;
-    for (const update of updates) {
-      await this.processUpdate(current, identity, token, update);
-      await this.store.advanceTelegramUpdateOffset(connection.id, String(BigInt(update.updateId) + 1n));
+    for (const group of groupTelegramUpdates(updates)) {
+      await this.processUpdates(current, identity, token, group);
+      await this.store.advanceTelegramUpdateOffset(
+        connection.id,
+        String(BigInt(group.at(-1)!.updateId) + 1n),
+      );
     }
   }
 
@@ -978,7 +1038,7 @@ export class ChannelBrokerService {
     return true;
   }
 
-  private async attachmentPart(token: string, attachment: TelegramAttachment): Promise<ChatFilePart> {
+  private async attachmentPart(token: string, attachment: TelegramAttachment): Promise<{ part: ChatFilePart; byteLength: number }> {
     if (!attachment.mediaType || !telegramAttachmentTypes.has(attachment.mediaType)) {
       throw new OneComputerError("CHANNEL_ATTACHMENT_UNSUPPORTED", "The Telegram attachment type is not supported", 400);
     }
@@ -986,33 +1046,56 @@ export class ChannelBrokerService {
       throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
     }
     const data = await this.telegram.downloadFile(token, attachment.fileId, chatAttachmentMaxBytes);
-    return chatFilePartSchema.parse({
-      type: "file",
-      mediaType: attachment.mediaType,
-      filename: safeTelegramFilename(attachment.filename, "telegram-file"),
-      url: `data:${attachment.mediaType};base64,${data.toString("base64")}`,
-    });
+    return {
+      part: chatFilePartSchema.parse({
+        type: "file",
+        mediaType: attachment.mediaType,
+        filename: safeTelegramFilename(attachment.filename, "telegram-file"),
+        url: `data:${attachment.mediaType};base64,${data.toString("base64")}`,
+      }),
+      byteLength: data.length,
+    };
   }
 
-  private async processUpdate(
+  private async processUpdates(
     connection: ChannelConnectionRecord,
     identity: IdentityContext,
     token: string,
-    update: TelegramUpdate,
+    candidates: TelegramUpdate[],
   ) {
-    if (!await this.store.reserveChannelUpdate(connection.id, update.updateId, update.senderId)) return;
+    const updates: TelegramUpdate[] = [];
+    for (const candidate of candidates) {
+      if (await this.store.reserveChannelUpdate(connection.id, candidate.updateId, candidate.senderId)) {
+        updates.push(candidate);
+      }
+    }
+    if (!updates.length) return;
+    const update = updates[0]!;
+    const updateIds = updates.map((item) => item.updateId);
+    const text = groupedText(updates);
+    const telegramAttachments = updates.flatMap((item) => item.attachment ? [item.attachment] : []);
+    const finishUpdates = async (
+      state: "delivered" | "rejected" | "failed",
+      failureCode?: string,
+      includePrimary = true,
+    ) => {
+      const selected = includePrimary ? updateIds : updateIds.slice(1);
+      await Promise.all(selected.map((updateId) => (
+        this.store.finishChannelUpdate(connection.id, updateId, state, failureCode)
+      )));
+    };
     if (
       update.chatType !== "private"
       || !connection.allowedUserIds.includes(update.senderId)
       || update.chatId !== update.senderId
-      || (!update.text && !update.attachment && !agentFromCallback(update.callbackData))
-      || (update.text?.length ?? 0) > 4_096
+      || (!text && !telegramAttachments.length && !agentFromCallback(update.callbackData))
+      || text.length > 4_096
     ) {
-      await this.store.finishChannelUpdate(connection.id, update.updateId, "rejected", "CHANNEL_INPUT_REJECTED");
+      await finishUpdates("rejected", "CHANNEL_INPUT_REJECTED");
       return;
     }
 
-    const agentCommand = !update.attachment && update.text ? /^\/agent(?:@\w+)?(?:\s+(\S+))?\s*$/.exec(update.text) : null;
+    const agentCommand = !telegramAttachments.length && text ? /^\/agent(?:@\w+)?(?:\s+(\S+))?\s*$/.exec(text) : null;
     const selectedFromButton = agentFromCallback(update.callbackData);
     if (agentCommand || selectedFromButton) {
       try {
@@ -1029,20 +1112,20 @@ export class ChannelBrokerService {
             chatAgentCatalogIdSchema.parse(requestedAgent === "hermes-agent" ? "hermes-claw" : requestedAgent),
           )
           : await this.showAgentChoices(connection, identity, token, update);
-        await this.store.finishChannelUpdate(connection.id, update.updateId, delivered ? "delivered" : "rejected", delivered ? undefined : "CHANNEL_AGENT_UNAVAILABLE");
+        await finishUpdates(delivered ? "delivered" : "rejected", delivered ? undefined : "CHANNEL_AGENT_UNAVAILABLE");
       } catch {
         if (update.callbackQueryId) {
           await this.telegram.answerCallbackQuery(token, update.callbackQueryId, "That agent is not available.").catch(() => undefined);
         }
         await this.telegram.sendMessage(token, update.chatId, "That agent is not available for this workspace.");
-        await this.store.finishChannelUpdate(connection.id, update.updateId, "rejected", "CHANNEL_AGENT_UNAVAILABLE");
+        await finishUpdates("rejected", "CHANNEL_AGENT_UNAVAILABLE");
       }
       return;
     }
 
     const agentCatalogId = await this.store.getChannelSenderAgent(connection.id, update.senderId)
       ?? connection.defaultAgentId;
-    const newChatCommand = !update.attachment && update.text ? /^\/new(?:@\w+)?\s*$/.test(update.text) : false;
+    const newChatCommand = !telegramAttachments.length && text ? /^\/new(?:@\w+)?\s*$/.test(text) : false;
     if (newChatCommand) {
       await this.store.clearChannelSession(connection.id, update.senderId, agentCatalogId);
       await this.telegram.sendMessage(
@@ -1050,21 +1133,29 @@ export class ChannelBrokerService {
         update.chatId,
         `New chat started with ${displayNames[agentCatalogId]}. Send a message when you are ready.`,
       );
-      await this.store.finishChannelUpdate(connection.id, update.updateId, "delivered");
+      await finishUpdates("delivered");
       return;
     }
 
     let attachments: ChatFilePart[] = [];
-    if (update.attachment) {
+    if (telegramAttachments.length) {
       try {
-        attachments = [await this.attachmentPart(token, update.attachment)];
+        let totalBytes = 0;
+        for (const attachment of telegramAttachments) {
+          const downloaded = await this.attachmentPart(token, attachment);
+          totalBytes += downloaded.byteLength;
+          if (totalBytes > chatAttachmentMaxTotalBytes) {
+            throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachments exceed their total size limit", 400);
+          }
+          attachments.push(downloaded.part);
+        }
       } catch (error) {
         const code = error instanceof OneComputerError ? error.code : "TELEGRAM_FILE_UNAVAILABLE";
         const message = code === "CHANNEL_ATTACHMENT_UNSUPPORTED"
           ? unsupportedAttachmentMessage
           : code === "CHANNEL_ATTACHMENT_TOO_LARGE" ? oversizedAttachmentMessage : unavailableAttachmentMessage;
         await this.telegram.sendMessage(token, update.chatId, message).catch(() => undefined);
-        await this.store.finishChannelUpdate(connection.id, update.updateId, "rejected", code);
+        await finishUpdates("rejected", code);
         return;
       }
     }
@@ -1085,7 +1176,7 @@ export class ChannelBrokerService {
             ...this.route(connection, identity, update.senderId, agentCatalogId),
             updateId: update.updateId,
             ...(sessionId ? { sessionId } : {}),
-            ...(update.text ? { text: update.text } : {}),
+            ...(text ? { text } : {}),
             ...(attachments.length ? { attachments } : {}),
           }),
           async (notice) => {
@@ -1114,15 +1205,11 @@ export class ChannelBrokerService {
           delivered ? "delivered" : "failed",
           delivered ? undefined : failureCode,
         );
+        await finishUpdates(delivered ? "delivered" : "failed", delivered ? undefined : failureCode, false);
         responseStaged = true;
         await this.deliverPendingResponses(connection.id, token);
       } else {
-        await this.store.finishChannelUpdate(
-          connection.id,
-          update.updateId,
-          delivered ? "delivered" : "failed",
-          delivered ? undefined : failureCode,
-        );
+        await finishUpdates(delivered ? "delivered" : "failed", delivered ? undefined : failureCode);
         responseStaged = true;
       }
     } catch (error) {
@@ -1136,6 +1223,7 @@ export class ChannelBrokerService {
         "failed",
         failureCode,
       );
+      await finishUpdates("failed", failureCode, false);
       await this.deliverPendingResponses(connection.id, token).catch(() => undefined);
     }
   }

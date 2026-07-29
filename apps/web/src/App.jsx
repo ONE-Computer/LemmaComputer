@@ -1937,14 +1937,15 @@ function ChatPart({ part, markdown = false }) {
       ? <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown></div>
       : <p className="chat-message-text">{part.text}</p>;
   }
-  if (part.type === "file") {
-    const image = part.mediaType.startsWith("image/");
+  if (part.type === "file" || part.type === "data-file-reference") {
+    const file = part.type === "file" ? part : part.data;
+    const image = part.type === "file" && file.mediaType.startsWith("image/");
     return (
       <div className={`chat-file-part${image ? " image" : ""}`}>
         {image
-          ? <img src={part.url} alt={part.filename || "Attached image"} />
+          ? <img src={part.url} alt={file.filename || "Attached image"} />
           : <Document24Regular aria-hidden="true" />}
-        <span>{part.filename || "Attached file"}</span>
+        <span>{file.filename || "Attached file"}</span>
       </div>
     );
   }

@@ -398,6 +398,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
         url: "data:image/jpeg;base64,/9j/2Q==",
       },
     ]);
+    assert.equal(chat.messages[0]?.metadata.source, "telegram");
     assert.deepEqual(
       accepted.body.trim().split("\n").map((line) => JSON.parse(line)),
       [
