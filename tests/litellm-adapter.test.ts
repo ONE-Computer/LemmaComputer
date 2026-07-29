@@ -593,6 +593,11 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
         userPrincipalName: "alex@acme.example",
       },
     });
+    assert.deepEqual(
+      await liveAdapter.userOAuthConnectionStatus(identity, "onecomputer_ms365"),
+      status,
+      "a post-redirect detail status check must retain the safe account label",
+    );
     assert.ok(!JSON.stringify(status).includes(markerAccessToken));
     assert.ok(!JSON.stringify(status).includes(markerRefreshToken));
     const exchange = requests.find((item) => item.url.endsWith("/token"))!;
@@ -606,6 +611,13 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
       name: "get-current-user",
       arguments: { $select: "displayName,mail,userPrincipalName" },
     });
+    const accountLookups = requests.filter((item) => item.url === "/mcp-rest/tools/call");
+    assert.equal(accountLookups.length, 2);
+    const connectionGrants = requests
+      .filter((item) => item.url === "/key/generate")
+      .map((item) => JSON.parse(item.body));
+    assert.ok(connectionGrants.every((grant) => grant.metadata.onecomputer_connection_account_lookup === true));
+    assert.ok(connectionGrants.every((grant) => grant.allowed_routes.includes("/mcp-rest/tools/call")));
     assert.equal(requests.at(-1)?.url, "/key/delete");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

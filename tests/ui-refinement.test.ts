@@ -499,13 +499,16 @@ test("Connections refreshes safely on navigation, history, detail return, and OA
 
   assert.match(refreshEffect, /new AbortController/);
   assert.match(refreshEffect, /connectionApi\.catalog\(\{ signal: controller\.signal \}\)/);
-  assert.doesNotMatch(refreshEffect, /connectionApi\.status\(/);
+  assert.match(refreshEffect, /connectionsView\.startsWith\("microsoft365-"\)/);
+  assert.match(refreshEffect, /connectionApi\.status\("microsoft-365", \{ signal: controller\.signal \}\)/);
+  assert.match(refreshEffect, /connector\.id === "microsoft-365" \? \{ \.\.\.connector, \.\.\.status \} : connector/);
   assert.match(refreshEffect, /\[activeNav, connectionsView, connectionCatalogRefresh, session\?\.user\.id\]/);
   assert.match(refreshEffect, /controller\.abort\(\)/);
   assert.match(popState, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
   assert.match(selectNav, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
   assert.match(oauthReturn, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
   assert.match(api, /catalog: \(options = \{\}\) => request\("\/api\/v1\/connections", \{ cache: "no-store", \.\.\.options \}\)/);
+  assert.match(api, /status: \(connectorId, options = \{\}\) => request\(`\/api\/v1\/connections\/\$\{encodeURIComponent\(connectorId\)\}`/);
   assert.match(connections, /const activation = activationFor\(connector\);/);
   assert.match(connections, /const canConnect = activation\.action === "connect";/);
   assert.match(connections, /activationActionLabel\(activation\)/);
