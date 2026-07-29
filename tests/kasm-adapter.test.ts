@@ -53,6 +53,88 @@ test("Kasm operational states map to the canonical sandbox contract", () => {
   assert.equal(mapKasmState("error"), "failed");
 });
 
+test("local Kasm destroy tolerates a governed endpoint disappearing during disconnect", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
+  let gatewayConnected = true;
+  let networkRemoved = false;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const path = request.url?.replace(/^\/v1\.47/, "") ?? "";
+    requests.push({ method: request.method ?? "", path, body });
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path === "/containers/sandbox-id/json") {
+      response.end(JSON.stringify({
+        Config: {
+          Labels: {
+            "com.onecomputer.workspace-network": workspaceNetwork,
+            "com.onecomputer.gateway-attached": "true",
+            "com.onecomputer.control-attached": "true",
+          },
+          Env: [],
+        },
+        Name: "/onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+      }));
+      return;
+    }
+    if (request.method === "GET" && path === `/networks/${workspaceNetwork}`) {
+      response.end(JSON.stringify({
+        Containers: gatewayConnected
+          ? { "gateway-container-id": { Name: "onecomputer-litellm" } }
+          : {},
+      }));
+      return;
+    }
+    if (
+      request.method === "POST"
+      && path === `/networks/${workspaceNetwork}/disconnect`
+      && body.Container === "onecomputer-litellm"
+    ) {
+      // Reproduce Docker's observed race: Compose drops the endpoint after
+      // inspection, then Docker reports "not connected" as a 500 response.
+      gatewayConnected = false;
+      response.statusCode = 500;
+      response.end(JSON.stringify({
+        message: "container gateway-container-id is not connected to network onecomputer-workspace",
+      }));
+      return;
+    }
+    if (request.method === "DELETE" && path === `/networks/${workspaceNetwork}`) {
+      networkRemoved = true;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      controlContainer: "onecomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+    });
+    await assert.doesNotReject(adapter.destroy("sandbox-id"));
+    assert.equal(networkRemoved, true);
+    assert.equal(
+      requests.some((item) => (
+        item.path === `/networks/${workspaceNetwork}/disconnect`
+        && item.body.Container === "onecomputer-control-api"
+      )),
+      false,
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("local Kasm creates a hardened internal network and reconciles governed service attachments", async () => {
   const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");

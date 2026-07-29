@@ -710,10 +710,17 @@ export class KasmLocalAdapter implements SandboxAdapter {
   }
 
   private async disconnectContainer(network: string, container: string) {
+    if (!(await this.networkContainsContainer(network, container))) return;
     try {
       await this.request("POST", `/networks/${encodeURIComponent(network)}/disconnect`, { Container: container, Force: true });
     } catch (error) {
-      if (!(error instanceof OneComputerError && [404, 409].includes(error.statusCode))) throw error;
+      if (error instanceof OneComputerError && [404, 409].includes(error.statusCode)) return;
+      // Docker can return 500 when Compose replaces a governed service after
+      // the membership check but before disconnect. Treat that race as an
+      // idempotent success only when a fresh inspection confirms the endpoint
+      // is already absent; preserve every genuine Docker failure.
+      if (!(await this.networkContainsContainer(network, container))) return;
+      throw error;
     }
   }
 
