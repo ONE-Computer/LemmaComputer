@@ -417,9 +417,10 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   }
 
   async userOAuthConnectionStatus(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus> {
-    const grant = await this.ensureConnectionGrant(identity, serverName);
+    const includeAccount = serverName === "onecomputer_ms365";
+    const grant = await this.ensureConnectionGrant(identity, serverName, { accountLookup: includeAccount });
     try {
-      return await this.readConnectionStatus(grant.credential, grant.serverId, serverName);
+      return await this.readConnectionStatus(grant.credential, grant.serverId, serverName, { includeAccount });
     } finally {
       await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }

@@ -2941,10 +2941,21 @@ export function App() {
     let active = true;
     setConnectionLoading(true);
     setConnectionError("");
-    connectionApi.catalog({ signal: controller.signal })
-      .then((value) => {
+    const refresh = async () => {
+      const value = await connectionApi.catalog({ signal: controller.signal });
+      let connections = value.connections;
+      if (connectionsView.startsWith("microsoft365-")) {
+        const status = await connectionApi.status("microsoft-365", { signal: controller.signal });
+        connections = connections.map((connector) => (
+          connector.id === "microsoft-365" ? { ...connector, ...status } : connector
+        ));
+      }
+      return connections;
+    };
+    refresh()
+      .then((connections) => {
         if (!active) return;
-        setMcpConnections(value.connections);
+        setMcpConnections(connections);
         setConnectionError("");
       })
       .catch((error) => {

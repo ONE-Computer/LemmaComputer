@@ -77,7 +77,7 @@ export const operationApi = {
 
 export const connectionApi = {
   catalog: (options = {}) => request("/api/v1/connections", { cache: "no-store", ...options }),
-  status: (connectorId) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, { cache: "no-store" }),
+  status: (connectorId, options = {}) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, { cache: "no-store", ...options }),
   authorizeUrl: (connectorId) => `/api/v1/connections/${encodeURIComponent(connectorId)}/authorize`,
   disconnect: (connectorId) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, mutation("DELETE")),
   microsoft365: () => request("/api/v1/connections/microsoft-365"),
