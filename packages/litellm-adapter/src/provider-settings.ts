@@ -4,12 +4,14 @@ import {
   bedrockApiKeyModelProfileIdSchema,
   bedrockApiKeyRegionSchema,
   bedrockApiKeyRouteAlias,
-  openAiProviderModelIdSchema,
   OneComputerError,
+  type AnthropicProviderModelId,
   type BedrockApiKeyModelProfile,
   type BedrockApiKeyModelProfileId,
   type BedrockApiKeyRegion,
+  type GlmProviderModelId,
   type OpenAiProviderModelId,
+  type ProviderModelId,
   type ProviderSettingMetadata,
 } from "@onecomputer/contracts";
 
@@ -23,7 +25,8 @@ export type ManagedProviderOperation = {
 };
 export type ManagedProviderConfiguration =
   | (ManagedProviderOperation & { provider: "openai"; apiKey: string; modelId: OpenAiProviderModelId })
-  | (ManagedProviderOperation & { provider: "anthropic" | "glm"; apiKey: string })
+  | (ManagedProviderOperation & { provider: "anthropic"; apiKey: string; modelId: AnthropicProviderModelId })
+  | (ManagedProviderOperation & { provider: "glm"; apiKey: string; modelId: GlmProviderModelId })
   | (ManagedProviderOperation & { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId });
 export type ManagedProviderRoute = { modelIds: string[]; credentialFingerprint: string; configuration: ProviderSettingMetadata };
 export interface ProviderAdministrationGateway {
@@ -44,34 +47,49 @@ export type ManagedProviderDisplayMetadata = {
   upstreamModelDisplayName: string;
 };
 
-export const defaultOpenAiProviderModelId: OpenAiProviderModelId = "gpt-5.6-luna";
-export const approvedOpenAiProviderModels = Object.freeze([
-  { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", model: "openai/gpt-5.6-sol", vision: true },
-  { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", model: "openai/gpt-5.6-terra", vision: true },
-  { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", model: "openai/gpt-5.6-luna", vision: true },
-] satisfies ReadonlyArray<{ id: OpenAiProviderModelId; displayName: string; model: string; vision: boolean }>);
+type SelectableProviderName = Exclude<ManagedProviderName, "bedrock">;
+type ProviderModelProfile = { id: ProviderModelId; displayName: string; model: string; vision: boolean };
 
-export const openAiProviderModelOptions = approvedOpenAiProviderModels.map(({ id, displayName }) => ({ id, displayName }));
+export const managedProviderModelProfiles = Object.freeze({
+  openai: Object.freeze([
+    { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", model: "openai/gpt-5.6-sol", vision: true },
+    { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", model: "openai/gpt-5.6-terra", vision: true },
+    { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", model: "openai/gpt-5.6-luna", vision: true },
+  ]),
+  anthropic: Object.freeze([
+    { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6", model: "anthropic/claude-sonnet-4-6", vision: true },
+    { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8", model: "anthropic/claude-opus-4-8", vision: true },
+  ]),
+  glm: Object.freeze([
+    { id: "glm-5", displayName: "Z.ai GLM-5", model: "zai/glm-5", vision: false },
+    { id: "glm-5.2", displayName: "Z.ai GLM-5.2", model: "zai/glm-5.2", vision: false },
+  ]),
+} satisfies Record<SelectableProviderName, ReadonlyArray<ProviderModelProfile>>);
 
-export const openAiProviderModel = (modelId: unknown) => {
-  const parsed = openAiProviderModelIdSchema.safeParse(modelId);
-  return parsed.success
-    ? approvedOpenAiProviderModels.find((candidate) => candidate.id === parsed.data) ?? null
-    : null;
-};
+export const defaultManagedProviderModelIds = Object.freeze({
+  openai: "gpt-5.6-luna",
+  anthropic: "claude-sonnet-4-6",
+  glm: "glm-5",
+} satisfies Record<SelectableProviderName, ProviderModelId>);
+
+export const managedProviderModelOptions = (provider: SelectableProviderName) =>
+  managedProviderModelProfiles[provider].map(({ id, displayName }) => ({ id, displayName }));
+
+export const managedProviderModel = (provider: SelectableProviderName, modelId: unknown) =>
+  managedProviderModelProfiles[provider].find((candidate) => candidate.id === modelId) ?? null;
 
 export const managedProviderDisplayMetadata: Record<ManagedProviderName, ManagedProviderDisplayMetadata> = {
   openai: {
     primaryAlias: "onecomputer-openai",
-    upstreamModelDisplayName: openAiProviderModel(defaultOpenAiProviderModelId)!.displayName,
+    upstreamModelDisplayName: managedProviderModel("openai", defaultManagedProviderModelIds.openai)!.displayName,
   },
   anthropic: {
     primaryAlias: "onecomputer-claude",
-    upstreamModelDisplayName: "Anthropic Claude Sonnet 4.6",
+    upstreamModelDisplayName: managedProviderModel("anthropic", defaultManagedProviderModelIds.anthropic)!.displayName,
   },
   glm: {
     primaryAlias: "onecomputer-glm",
-    upstreamModelDisplayName: "Z.ai GLM-5",
+    upstreamModelDisplayName: managedProviderModel("glm", defaultManagedProviderModelIds.glm)!.displayName,
   },
   bedrock: {
     primaryAlias: bedrockApiKeyRouteAlias,
@@ -177,8 +195,38 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       }
       await this.probe(candidates[0]!.alias, undefined, input.provider);
       if (existing.length === models.length) {
-        await this.probe(models[0]!.alias, tenantManagedModelAccessGroup(input.tenantId, models[0]!.alias), input.provider);
         await this.replaceCredential(credentialName, input, apiKey);
+        const previousModels = input.provider === "bedrock"
+          ? models
+          : this.selectableModels(
+            input.provider,
+            input.configuration?.modelId ?? defaultManagedProviderModelIds[input.provider],
+          );
+        try {
+          for (const model of models) {
+            await this.upsertModel({
+              id: tenantModelId(input.tenantId, input.provider, model.alias),
+              provider: input.provider,
+              alias: model.alias,
+              model,
+              credentialName,
+              accessGroups: [tenantManagedModelAccessGroup(input.tenantId, model.alias)],
+            });
+          }
+          await this.probe(models[0]!.alias, tenantManagedModelAccessGroup(input.tenantId, models[0]!.alias), input.provider);
+        } catch (error) {
+          for (const model of previousModels) {
+            await this.upsertModel({
+              id: tenantModelId(input.tenantId, input.provider, model.alias),
+              provider: input.provider,
+              alias: model.alias,
+              model,
+              credentialName,
+              accessGroups: [tenantManagedModelAccessGroup(input.tenantId, model.alias)],
+            }).catch(() => undefined);
+          }
+          throw error;
+        }
         return {
           modelIds: expectedModelIds,
           credentialFingerprint: this.fingerprint(apiKey),
@@ -224,9 +272,12 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   async testManagedProvider(input: ManagedProviderOperation) {
-    const models = input.provider === "openai"
-      ? this.openAiModels(input.configuration?.modelId ?? defaultOpenAiProviderModelId)
-      : managedProviderModels[input.provider];
+    const models = input.provider === "bedrock"
+      ? managedProviderModels.bedrock
+      : this.selectableModels(
+        input.provider,
+        input.configuration?.modelId ?? defaultManagedProviderModelIds[input.provider],
+      );
     const model = models[0];
     if (!model || input.existingModelIds.length !== models.length) {
       throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
@@ -242,8 +293,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   private modelsFor(input: ManagedProviderConfiguration): readonly ManagedProviderModel[] {
-    if (input.provider === "openai") return this.openAiModels(input.modelId);
-    if (input.provider !== "bedrock") return managedProviderModels[input.provider];
+    if (input.provider !== "bedrock") return this.selectableModels(input.provider, input.modelId);
     const region = bedrockApiKeyRegionSchema.safeParse(input.region);
     const modelProfileId = bedrockApiKeyModelProfileIdSchema.safeParse(input.modelProfileId);
     if (!region.success || !modelProfileId.success) {
@@ -261,12 +311,12 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     }];
   }
 
-  private openAiModels(modelId: unknown): readonly ManagedProviderModel[] {
-    const profile = openAiProviderModel(modelId);
+  private selectableModels(provider: SelectableProviderName, modelId: unknown): readonly ManagedProviderModel[] {
+    const profile = managedProviderModel(provider, modelId);
     if (!profile) {
-      throw new OneComputerError("OPENAI_MODEL_UNAPPROVED", "The selected OpenAI model is not approved", 400);
+      throw new OneComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider model is not approved", 400);
     }
-    return managedProviderModels.openai.map((model) => ({
+    return managedProviderModels[provider].map((model) => ({
       ...model,
       model: profile.model,
       vision: profile.vision,
@@ -275,8 +325,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
 
   private configurationFor(input: ManagedProviderConfiguration): ProviderSettingMetadata {
     if (input.provider === "bedrock") return { region: input.region, modelProfileId: input.modelProfileId };
-    if (input.provider === "openai") return { modelId: input.modelId };
-    return {};
+    return { modelId: input.modelId };
   }
 
   private async createModel(deployment: ProviderModelDeployment) {
@@ -320,7 +369,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         body: {
           model,
           messages: [{ role: "user", content: "Reply with OK." }],
-          max_tokens: 1,
+          max_tokens: 256,
         },
       });
       if (!result.ok) throw this.providerFailure(result.status, "credential", provider, result.payload);

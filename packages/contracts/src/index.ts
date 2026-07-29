@@ -154,13 +154,29 @@ export const openAiProviderModelIds = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-
 export const openAiProviderModelIdSchema = z.enum(openAiProviderModelIds);
 export type OpenAiProviderModelId = z.infer<typeof openAiProviderModelIdSchema>;
 
+export const anthropicProviderModelIds = ["claude-sonnet-4-6", "claude-opus-4-8"] as const;
+export const anthropicProviderModelIdSchema = z.enum(anthropicProviderModelIds);
+export type AnthropicProviderModelId = z.infer<typeof anthropicProviderModelIdSchema>;
+
+export const glmProviderModelIds = ["glm-5", "glm-5.2"] as const;
+export const glmProviderModelIdSchema = z.enum(glmProviderModelIds);
+export type GlmProviderModelId = z.infer<typeof glmProviderModelIdSchema>;
+
+export const providerModelIds = [
+  ...openAiProviderModelIds,
+  ...anthropicProviderModelIds,
+  ...glmProviderModelIds,
+] as const;
+export const providerModelIdSchema = z.enum(providerModelIds);
+export type ProviderModelId = z.infer<typeof providerModelIdSchema>;
+
 // Provider Settings persists only read-safe route selection metadata. The API
 // key itself is deliberately absent: LiteLLM owns its encrypted credential
 // record and Control stores only approved model/region choices.
 export const providerSettingMetadataSchema = z.strictObject({
   region: bedrockApiKeyRegionSchema.optional(),
   modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
-  modelId: openAiProviderModelIdSchema.optional(),
+  modelId: providerModelIdSchema.optional(),
 }).refine(
   (value) => {
     const hasBedrockSelection = value.region !== undefined || value.modelProfileId !== undefined;

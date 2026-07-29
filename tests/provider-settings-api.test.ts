@@ -21,6 +21,7 @@ import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "provider-settings-proxy-token-at-least-24-characters";
 const rawOpenAiKey = "sk-control-openai-never-returned-000000001";
+const rawAnthropicKey = "sk-control-anthropic-never-returned-00001";
 const rawGlmKey = "sk-control-glm-never-returned-000000000002";
 const rawRejectedKey = "sk-control-rejected-never-returned-000002";
 
@@ -110,9 +111,7 @@ class FakeProviderAdministration implements ProviderAdministrationGateway {
       credentialFingerprint: "fp_" + input.tenantId + "_" + input.provider,
       configuration: input.provider === "bedrock"
         ? { region: input.region, modelProfileId: input.modelProfileId }
-        : input.provider === "openai"
-        ? { modelId: input.modelId }
-        : {},
+        : { modelId: input.modelId },
     };
   }
 
@@ -208,16 +207,36 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
       method: "PUT",
       url: "/v1/admin/provider-settings/glm",
       headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-configure-glm-0001" },
-      payload: { apiKey: rawGlmKey },
+      payload: { apiKey: rawGlmKey, modelId: "glm-5.2" },
     });
     assert.equal(configuredGlm.statusCode, 200);
     assert.equal(configuredGlm.json().provider.provider, "glm");
     assert.equal(configuredGlm.json().provider.state, "active");
     assert.equal(configuredGlm.json().provider.primaryAlias, "onecomputer-glm");
-    assert.equal(configuredGlm.json().provider.upstreamModelDisplayName, "Z.ai GLM-5");
+    assert.equal(configuredGlm.json().provider.upstreamModelDisplayName, "Z.ai GLM-5.2");
+    assert.equal(configuredGlm.json().provider.modelId, "glm-5.2");
+    assert.deepEqual(configuredGlm.json().provider.modelOptions, [
+      { id: "glm-5", displayName: "Z.ai GLM-5" },
+      { id: "glm-5.2", displayName: "Z.ai GLM-5.2" },
+    ]);
     assert.equal(JSON.stringify(configuredGlm.json()).includes(rawGlmKey), false);
     assert.equal(providerAdministration.configured[1]!.provider, "glm");
     assert.equal(providerAdministration.configured[1]!.apiKey, rawGlmKey);
+
+    const configuredAnthropic = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/anthropic",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-configure-anthropic-0001" },
+      payload: { apiKey: rawAnthropicKey, modelId: "claude-opus-4-8" },
+    });
+    assert.equal(configuredAnthropic.statusCode, 200);
+    assert.equal(configuredAnthropic.json().provider.modelId, "claude-opus-4-8");
+    assert.equal(configuredAnthropic.json().provider.upstreamModelDisplayName, "Anthropic Claude Opus 4.8");
+    assert.deepEqual(configuredAnthropic.json().provider.modelOptions, [
+      { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6" },
+      { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8" },
+    ]);
+    assert.equal(JSON.stringify(configuredAnthropic.json()).includes(rawAnthropicKey), false);
 
     const stored = await settingsStore.getProviderSetting(identity.tenantId, "openai");
     assert.ok(stored);
@@ -235,14 +254,16 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.ok(tested.json().provider.lastTestedAt);
     assert.deepEqual(providerAdministration.tested[0]!.configuration, { modelId: "gpt-5.6-terra" });
 
-    const rejectedModelChange = await app.inject({
+    const changedModel = await app.inject({
       method: "PUT",
       url: "/v1/admin/provider-settings/openai",
       headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-model-change-0001" },
       payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-sol" },
     });
-    assert.equal(rejectedModelChange.statusCode, 409);
-    assert.equal(rejectedModelChange.json().error.code, "PROVIDER_MODEL_RECONFIGURATION_REQUIRED");
+    assert.equal(changedModel.statusCode, 200);
+    assert.equal(changedModel.json().provider.modelId, "gpt-5.6-sol");
+    assert.equal(changedModel.json().provider.upstreamModelDisplayName, "OpenAI GPT-5.6 Sol");
+    assert.deepEqual(providerAdministration.configured.at(-1)!.configuration, { modelId: "gpt-5.6-terra" });
 
     const disabled = await app.inject({
       method: "POST",
@@ -274,12 +295,12 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
       method: "PUT",
       url: "/v1/admin/provider-settings/anthropic",
       headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-configure-0002" },
-      payload: { apiKey: rawRejectedKey },
+      payload: { apiKey: rawRejectedKey, modelId: "claude-opus-4-8" },
     });
     assert.equal(rejected.statusCode, 422);
     assert.equal(rejected.json().error.code, "PROVIDER_CREDENTIAL_REJECTED");
     assert.equal(JSON.stringify(rejected.json()).includes(rawRejectedKey), false);
-    assert.match(rejected.json().error.message, /provider API key or approved model access was rejected/);
+    assert.match(rejected.json().error.message, /provider rejected the API key or selected upstream model/);
   } finally {
     await app.close();
   }

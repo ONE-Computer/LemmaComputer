@@ -777,7 +777,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
     setApiKey("");
     const input = editor.provider === "bedrock"
       ? { apiKey: submitted, region: editor.region, modelProfileId: editor.modelProfileId }
-      : editor.provider === "openai"
+      : editor.modelOptions?.length
       ? { apiKey: submitted, modelId: editor.modelId }
       : { apiKey: submitted };
     const saved = await onSave(editor.provider, input);
@@ -789,7 +789,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
       <header className="page-heading compact">
         <p>Model access</p>
         <h1>Provider settings</h1>
-        <span>Add an approved provider key once. LiteLLM encrypts it in its own credential store; ONEComputer shows only a safe fingerprint, approved model selection, and test status.</span>
+        <span>Connect a provider key and choose the upstream model routed by LiteLLM. ONEComputer stores only a safe fingerprint, route selection, and test status.</span>
       </header>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Provider operation failed</strong>{error}</span></div>}
       <section className="credential-inventory provider-settings-inventory" aria-labelledby="provider-settings-heading">
@@ -809,7 +809,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
                 {provider.lastErrorCode && <span>Last safe error: {provider.lastErrorCode}</span>}
               </div>
               <div className="credential-actions">
-                {!needsRecovery && <button className="secondary-button" type="button" disabled={busy} onClick={() => openEditor(provider)}>{provider.state === "active" ? "Rotate" : "Connect"}</button>}
+                {!needsRecovery && <button className="secondary-button" type="button" disabled={busy} onClick={() => openEditor(provider)}>{provider.state === "active" ? "Configure" : "Connect"}</button>}
                 {provider.state === "active" && <button className="secondary-button" type="button" disabled={busy} onClick={() => onTest(provider.provider)}>Test</button>}
                 {(provider.state === "active" || needsRecovery) && <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDisable(provider.provider)}>Disable</button>}
                 {provider.state !== "not-configured" && <button className="connection-quiet-button" type="button" disabled={busy} onClick={() => onDelete(provider.provider)}>Delete</button>}
@@ -818,14 +818,14 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
           );
         })}
       </section>
-      {editor && <ModalDialog title={(editor.state === "active" ? "Rotate " : "Connect ") + providerTitle(editor.provider)} description={editor.provider === "bedrock" ? "Choose an approved Bedrock region and inference profile. The API key is submitted once to Control, encrypted by LiteLLM, and never displayed again." : editor.provider === "openai" ? editor.state === "active" ? "Rotate the write-only key for the selected model. Disable and reconnect OpenAI to change models." : "Choose an approved OpenAI model. The key is stored encrypted by LiteLLM and never displayed again." : "The key is submitted once to Control and stored encrypted by LiteLLM. It is never displayed again."} eyebrow="Write-only provider key" labelledBy="provider-key-title" onClose={busy ? () => undefined : closeEditor}>
-        {editor.provider === "openai" && <label className="modal-field"><span>Approved model</span><SelectMenu value={editor.modelId} options={editor.modelOptions.map((option) => ({ value: option.id, label: option.displayName }))} ariaLabel="Approved OpenAI model" disabled={busy || editor.state === "active"} onValueChange={(modelId) => setEditor((current) => ({ ...current, modelId }))} /></label>}
+      {editor && <ModalDialog title={(editor.state === "active" ? "Configure " : "Connect ") + providerTitle(editor.provider)} description={editor.provider === "bedrock" ? "Choose an approved Bedrock region and inference profile. The API key is submitted once to Control, encrypted by LiteLLM, and never displayed again." : "Choose the upstream model LiteLLM should route for this provider. Re-enter the provider key to validate and apply the route; the key is never displayed again."} eyebrow="Write-only provider key" labelledBy="provider-key-title" onClose={busy ? () => undefined : closeEditor}>
+        {editor.modelOptions?.length > 0 && <label className="modal-field"><span>Upstream model</span><SelectMenu value={editor.modelId} options={editor.modelOptions.map((option) => ({ value: option.id, label: option.displayName }))} ariaLabel={`${providerTitle(editor.provider)} upstream model`} disabled={busy} onValueChange={(modelId) => setEditor((current) => ({ ...current, modelId }))} /></label>}
         {editor.provider === "bedrock" && <>
           <label className="modal-field"><span>Approved region</span><SelectMenu value={editor.region} options={bedrockRegionOptions} ariaLabel="Approved Bedrock region" disabled={busy || editor.state === "active"} onValueChange={(region) => setEditor((current) => ({ ...current, region }))} /></label>
           <label className="modal-field"><span>Approved inference profile</span><SelectMenu value={editor.modelProfileId} options={bedrockProfileOptions} ariaLabel="Approved Bedrock inference profile" disabled={busy || editor.state === "active"} onValueChange={(modelProfileId) => setEditor((current) => ({ ...current, modelProfileId }))} /></label>
         </>}
         <label className="modal-field"><span>{providerTitle(editor.provider)} API key</span><input name="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste the provider API key" disabled={busy} /></label>
-        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={closeEditor}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim()} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Rotate key" : "Connect provider"}</button></div>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={closeEditor}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim()} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Apply configuration" : "Connect provider"}</button></div>
       </ModalDialog>}
     </div>
   );

@@ -7,6 +7,8 @@ import { LiteLLMProviderAdministration, tenantManagedModelAccessGroup } from "@o
 
 const alphaKey = "sk-provider-alpha-never-log-000000000001";
 const betaKey = "sk-provider-beta-never-log-000000000002";
+const anthropicKey = "sk-provider-anthropic-never-log-000000003";
+const glmKey = "sk-provider-glm-never-log-00000000000004";
 const rotatedKey = "sk-provider-alpha-rotated-never-log-000003";
 const rejectedKey = "sk-provider-rejected-never-log-000000003";
 
@@ -43,7 +45,8 @@ test("managed provider configuration isolates tenants, validates candidates, and
   const requests: GatewayRequest[] = [];
   let rejectCandidate = false;
   let staticOpenAi = false;
-  const semanticCredentialPatchFailure = true;
+  let semanticCredentialPatchFailure = true;
+  let stableModelUpdatesExist = false;
   const server = createServer(async (request, response) => {
     const item: GatewayRequest = {
       method: request.method ?? "",
@@ -71,13 +74,12 @@ test("managed provider configuration isolates tenants, validates candidates, and
         }));
         return;
       }
-      response.statusCode = 404;
-      response.end(JSON.stringify({}));
+      response.end(JSON.stringify({ success: true }));
       return;
     }
     if (item.method === "PATCH" && /^\/model\/[^/]+\/update$/.test(item.url)) {
-      response.statusCode = 404;
-      response.end(JSON.stringify({}));
+      response.statusCode = stableModelUpdatesExist ? 200 : 404;
+      response.end(JSON.stringify(stableModelUpdatesExist ? { success: true } : {}));
       return;
     }
     if (item.method === "POST" && item.url === "/credentials") {
@@ -127,21 +129,39 @@ test("managed provider configuration isolates tenants, validates candidates, and
       modelId: "gpt-5.6-terra",
       existingModelIds: [],
     });
+    const anthropic = await gateway.configureManagedProvider({
+      tenantId: "tenant-anthropic",
+      provider: "anthropic",
+      apiKey: anthropicKey,
+      modelId: "claude-opus-4-8",
+      existingModelIds: [],
+    });
+    const glm = await gateway.configureManagedProvider({
+      tenantId: "tenant-glm",
+      provider: "glm",
+      apiKey: glmKey,
+      modelId: "glm-5.2",
+      existingModelIds: [],
+    });
 
     assert.equal(alpha.modelIds.length, 3);
     assert.equal(beta.modelIds.length, 3);
     assert.notDeepEqual(alpha.modelIds, beta.modelIds);
     assert.notEqual(alpha.credentialFingerprint, beta.credentialFingerprint);
+    assert.deepEqual(anthropic.configuration, { modelId: "claude-opus-4-8" });
+    assert.deepEqual(glm.configuration, { modelId: "glm-5.2" });
 
     const stableModels = requests
       .filter((request) => request.url === "/model/new")
       .map(modelDocument)
       .filter((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length > 0);
-    assert.equal(stableModels.length, 6);
+    assert.equal(stableModels.length, 10);
     assert.equal(stableModels.filter((document) => document.litellm_params.model === "openai/gpt-5.6-sol").length, 3);
     assert.equal(stableModels.filter((document) => document.litellm_params.model === "openai/gpt-5.6-terra").length, 3);
+    assert.equal(stableModels.filter((document) => document.litellm_params.model === "anthropic/claude-opus-4-8").length, 2);
+    assert.equal(stableModels.filter((document) => document.litellm_params.model === "zai/glm-5.2").length, 2);
     for (const document of stableModels) {
-      assert.ok(["onecomputer-assistant", "onecomputer-openai", "claude-opus-4-6"].includes(document.model_name));
+      assert.ok(["onecomputer-assistant", "onecomputer-openai", "claude-opus-4-6", "onecomputer-claude", "claude-sonnet-4-6", "onecomputer-glm", "claude-sonnet-4-5"].includes(document.model_name));
       assert.equal("api_key" in document.litellm_params, false);
       assert.match(String(document.litellm_params.litellm_credential_name), /^onecomputer-provider-/);
       const groups = document.model_info.access_groups as unknown[];
@@ -160,18 +180,18 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.ok(credentials.some((request) => (request.body.credential_values as Record<string, unknown>).api_key === alphaKey));
     assert.ok(credentials.some((request) => (request.body.credential_values as Record<string, unknown>).api_key === betaKey));
     assert.equal(requests.filter((request) => request.method === "PATCH" && request.url.startsWith("/credentials/")).length, 0, "First-use provider setup must create its stable credential instead of PATCHing a missing record");
-    assert.equal(credentials.filter((request) => !String(request.body.credential_name).includes("-candidate-")).length, 2, "First-use provider setup must create one stable credential per tenant");
+    assert.equal(credentials.filter((request) => !String(request.body.credential_name).includes("-candidate-")).length, 4, "First-use provider setup must create one stable credential per tenant");
     const grants = requests.filter((request) => request.url === "/key/generate");
-    assert.equal(grants.length, 2);
+    assert.equal(grants.length, 4);
     for (const grant of grants) {
       assert.match(String((grant.body.models as unknown[])[0]), /^ocp-/);
       assert.match(grant.authorization, /^Bearer sk-provider-admin-/);
     }
     const stableProbes = requests.filter((request) => (
       request.url === "/chat/completions"
-      && ["onecomputer-assistant", "onecomputer-openai", "claude-opus-4-6"].includes(String(request.body.model))
+      && ["onecomputer-assistant", "onecomputer-claude", "onecomputer-glm"].includes(String(request.body.model))
     ));
-    assert.equal(stableProbes.length, 2);
+    assert.equal(stableProbes.length, 4);
     for (const probe of stableProbes) assert.match(probe.authorization, /^Bearer sk-ocp-/);
     for (const probe of requests.filter((request) => request.url === "/chat/completions")) {
       assert.equal("temperature" in probe.body, false, "Provider probes must use the model's default temperature");
@@ -179,6 +199,8 @@ test("managed provider configuration isolates tenants, validates candidates, and
     for (const request of requests.filter((request) => !request.url.startsWith("/credentials"))) {
       assert.equal(JSON.stringify(request.body).includes(alphaKey), false);
       assert.equal(JSON.stringify(request.body).includes(betaKey), false);
+      assert.equal(JSON.stringify(request.body).includes(anthropicKey), false);
+      assert.equal(JSON.stringify(request.body).includes(glmKey), false);
     }
 
     const candidateStart = requests.length;
@@ -188,6 +210,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
         tenantId: "tenant-rejected",
         provider: "anthropic",
         apiKey: rejectedKey,
+        modelId: "claude-sonnet-4-6",
         existingModelIds: [],
       }),
       (error: unknown) => {
@@ -228,6 +251,28 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.equal(rotationRequests.filter((request) => request.method === "PATCH" && request.url.startsWith("/credentials/")).length, 1, "Rotation must attempt a single stable credential PATCH");
     assert.equal(rotationRequests.filter((request) => request.url === "/credentials" && !String(request.body.credential_name).includes("-candidate-")).length, 0, "A semantically failed stable credential PATCH must fail closed instead of creating a replacement route");
     assert.equal(rotationRequests.filter((request) => request.url === "/model/new").map(modelDocument).filter((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length > 0).length, 0, "A semantically failed stable credential PATCH must not alter stable model routes");
+
+    semanticCredentialPatchFailure = false;
+    stableModelUpdatesExist = true;
+    const switchStart = requests.length;
+    const switched = await gateway.configureManagedProvider({
+      tenantId: "tenant-alpha",
+      provider: "openai",
+      apiKey: rotatedKey,
+      modelId: "gpt-5.6-luna",
+      existingModelIds: alpha.modelIds,
+      configuration: alpha.configuration,
+    });
+    assert.deepEqual(switched.configuration, { modelId: "gpt-5.6-luna" });
+    const switchRequests = requests.slice(switchStart);
+    const stableUpdates = switchRequests
+      .filter((request) => request.method === "PATCH" && request.url.startsWith("/model/"))
+      .map(modelDocument);
+    assert.equal(stableUpdates.length, 3);
+    assert.ok(stableUpdates.every((document) => document.litellm_params.model === "openai/gpt-5.6-luna"));
+    assert.ok(stableUpdates.every((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length === 1));
+    assert.ok(switchRequests.filter((request) => request.url === "/chat/completions")
+      .every((request) => request.body.max_tokens === 256));
 
     staticOpenAi = true;
     const staticStart = requests.length;

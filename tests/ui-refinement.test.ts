@@ -304,8 +304,9 @@ test("the account menu owns Settings, with Provider settings and Administration 
   assert.match(app, /function SettingsScreen/);
   assert.match(app, /<strong>Provider settings<\/strong>/);
   assert.match(app, /provider\.primaryAlias} · {provider\.upstreamModelDisplayName/);
-  assert.match(app, /<span>Approved model<\/span><SelectMenu/);
-  assert.match(app, /ariaLabel="Approved OpenAI model"/);
+  assert.match(app, /<span>Upstream model<\/span><SelectMenu/);
+  assert.match(app, /ariaLabel={`\$\{providerTitle\(editor\.provider\)\} upstream model`} disabled={busy}/);
+  assert.match(app, /editor\.modelOptions\?\.length > 0/);
   assert.doesNotMatch(app, /provider\.aliases\.join/);
   assert.match(app, /<strong>Administration<\/strong>/);
   assert.doesNotMatch(primaryNav, /label="Admin"|label="Gateway"/);
