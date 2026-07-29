@@ -849,6 +849,7 @@ export const chatMessageMetadataSchema = z.object({
   turnId: chatPartIdSchema.optional(),
   state: chatTurnStateSchema,
   createdAt: z.iso.datetime(),
+  source: z.enum(["web", "telegram"]).optional(),
 }).strict();
 export const chatProgressDataSchema = z.object({
   activityId: chatPartIdSchema,
@@ -907,6 +908,11 @@ export const chatFilePartSchema = z.object({
   }
 });
 export type ChatFilePart = z.infer<typeof chatFilePartSchema>;
+export const chatFileReferenceDataSchema = z.object({
+  mediaType: z.enum(chatAttachmentMediaTypes),
+  filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
+  storage: z.literal("workspace"),
+}).strict();
 
 export const chatUiMessagePartSchema = z.discriminatedUnion("type", [
   z.object({
@@ -915,6 +921,7 @@ export const chatUiMessagePartSchema = z.discriminatedUnion("type", [
     state: z.enum(["streaming", "done"]).optional(),
   }).strict(),
   chatFilePartSchema,
+  z.object({ type: z.literal("data-file-reference"), id: chatPartIdSchema, data: chatFileReferenceDataSchema }).strict(),
   z.object({ type: z.literal("data-progress"), id: chatPartIdSchema, data: chatProgressDataSchema }).strict(),
   z.object({ type: z.literal("data-tool"), id: chatPartIdSchema, data: chatToolDataSchema }).strict(),
   z.object({ type: z.literal("data-approval"), id: chatPartIdSchema, data: chatApprovalDataSchema }).strict(),

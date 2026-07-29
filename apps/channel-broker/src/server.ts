@@ -25,6 +25,7 @@ const envSchema = z.object({
   CONTROL_URL: z.string().url().default("http://127.0.0.1:4100"),
   DATABASE_URL: z.string().min(1),
   POLL_INTERVAL_MS: z.coerce.number().int().min(250).max(60_000).default(1_000),
+  COMPOSITION_WINDOW_MS: z.coerce.number().int().min(0).max(5_000).default(1_500),
 });
 
 const sameSecret = (received: string | string[] | undefined, expected: string) => {
@@ -125,6 +126,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     new ChannelCredentialVault(env.CHANNEL_CREDENTIAL_SECRET),
     new TelegramBotApiClient(),
     new HttpChannelControlClient(env.CONTROL_URL, env.CHANNEL_BROKER_INTERNAL_TOKEN),
+    4_000,
+    env.COMPOSITION_WINDOW_MS,
   );
   const app = createChannelBrokerServer(service, env.CHANNEL_BROKER_INTERNAL_TOKEN);
   let polling = false;

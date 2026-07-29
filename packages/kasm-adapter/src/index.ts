@@ -268,6 +268,7 @@ type KasmLocalConfig = {
   egressNetwork?: string;
   publicHost?: string;
   timeZone?: string;
+  chatAttachmentRetentionDays?: number;
   kvmEnabled?: boolean;
   portStart?: number;
   portEnd?: number;
@@ -361,6 +362,9 @@ export class KasmLocalAdapter implements SandboxAdapter {
         ...(this.config.timeZone ? [
           `TZ=${this.config.timeZone}`,
           `ONECOMPUTER_TIME_ZONE=${this.config.timeZone}`,
+        ] : []),
+        ...(this.config.chatAttachmentRetentionDays ? [
+          `ONECOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS=${this.config.chatAttachmentRetentionDays}`,
         ] : []),
         `ONECOMPUTER_CLIPBOARD_ENABLED=${clipboard.enabled}`,
         `ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=${clipboard.localToWorkspace}`,
