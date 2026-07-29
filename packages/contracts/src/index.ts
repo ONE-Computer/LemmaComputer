@@ -906,6 +906,7 @@ export const chatFilePartSchema = z.object({
     context.addIssue({ code: "custom", path: ["url"], message: "Attachment must be an inline base64 data URL matching its media type" });
   }
 });
+export type ChatFilePart = z.infer<typeof chatFilePartSchema>;
 
 export const chatUiMessagePartSchema = z.discriminatedUnion("type", [
   z.object({
@@ -1020,8 +1021,21 @@ export const channelRouteSchema = z.object({
 export const channelTurnRequestSchema = channelRouteSchema.extend({
   updateId: z.string().regex(/^\d{1,20}$/),
   sessionId: chatSessionIdSchema.optional(),
-  text: z.string().trim().min(1).max(4_096),
-}).strict();
+  text: z.string().trim().max(4_096).optional(),
+  attachments: z.array(chatFilePartSchema).max(chatAttachmentMaxFiles).optional(),
+}).strict().superRefine((value, context) => {
+  const attachments = value.attachments ?? [];
+  const encodedSize = attachments.reduce((total, attachment) => total + attachment.url.length, 0);
+  if (
+    (!value.text && attachments.length === 0)
+    || encodedSize > Math.ceil(chatAttachmentMaxTotalBytes / 3) * 4 + (attachments.length * 128)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "A channel turn requires text or bounded inline attachments",
+    });
+  }
+});
 export const channelTurnResponseSchema = z.object({
   sessionId: chatSessionIdSchema,
   text: z.string().max(16_000),

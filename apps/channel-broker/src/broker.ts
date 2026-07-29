@@ -15,6 +15,9 @@ import {
   channelTurnResponseSchema,
   channelTurnStreamEventSchema,
   chatAgentCatalogIdSchema,
+  chatAttachmentMaxBytes,
+  chatAttachmentMediaTypes,
+  chatFilePartSchema,
   saveTelegramChannelConnectionSchema,
   saveTelegramCredentialSchema,
   telegramChannelConnectionStatusSchema,
@@ -24,6 +27,7 @@ import {
   type ChannelTurnRequest,
   type ChannelTurnResponse,
   type ChatAgentCatalogId,
+  type ChatFilePart,
   type IdentityContext,
   type TelegramChannelConnectionStatus,
   type TelegramCredentialStatus,
@@ -35,12 +39,21 @@ import type {
   ChannelStore,
 } from "./store.js";
 
+export type TelegramAttachment = {
+  fileId: string;
+  fileUniqueId?: string;
+  filename: string;
+  mediaType?: string;
+  fileSize?: number;
+};
+
 export type TelegramUpdate = {
   updateId: string;
   chatId: string;
   senderId: string;
   chatType: string;
   text?: string;
+  attachment?: TelegramAttachment;
   callbackData?: string;
   callbackQueryId?: string;
 };
@@ -58,6 +71,7 @@ export type TelegramMessageOptions = {
 export interface TelegramBotClient {
   validate(token: string): Promise<{ botId: string; username: string | null }>;
   getUpdates(token: string, offset: string): Promise<TelegramUpdate[]>;
+  downloadFile(token: string, fileId: string, maxBytes: number): Promise<Buffer>;
   sendMessage(token: string, chatId: string, text: string, options?: TelegramMessageOptions): Promise<string>;
   editMessage(token: string, chatId: string, messageId: string, text: string): Promise<void>;
   sendChatAction(token: string, chatId: string, action: "typing"): Promise<void>;
@@ -344,6 +358,44 @@ export class ChannelCredentialVault {
   }
 }
 
+const telegramAttachmentTypes = new Set<string>(chatAttachmentMediaTypes);
+const telegramMediaTypesByExtension: Readonly<Record<string, (typeof chatAttachmentMediaTypes)[number]>> = Object.freeze({
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  pdf: "application/pdf",
+  json: "application/json",
+  xml: "application/xml",
+  yaml: "application/yaml",
+  yml: "application/yaml",
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+});
+
+const telegramMediaType = (value: unknown, filename: string) => {
+  const claimed = typeof value === "string" ? value.split(";", 1)[0]!.trim().toLowerCase() : "";
+  if (telegramAttachmentTypes.has(claimed)) return claimed;
+  const extension = /\.([A-Za-z0-9]{1,10})$/.exec(filename)?.[1]?.toLowerCase();
+  return extension ? telegramMediaTypesByExtension[extension] : undefined;
+};
+
+const safeTelegramFilename = (value: unknown, fallback: string) => {
+  const candidate = typeof value === "string"
+    ? value.normalize("NFKC").trim().replace(/[\u0000-\u001f/\\]/g, "_").slice(0, 180)
+    : "";
+  return candidate && candidate !== "." && candidate !== ".." ? candidate : fallback;
+};
+
+const optionalTelegramFileSize = (value: unknown) => (
+  Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined
+);
+
 const botResponseSchema = {
   object(value: unknown) {
     if (!value || typeof value !== "object") throw new Error("invalid Telegram response");
@@ -420,16 +472,118 @@ export class TelegramBotApiClient implements TelegramBotClient {
         || !Number.isSafeInteger(chat?.id)
         || typeof chat?.type !== "string"
       ) return [];
+
+      const document = message?.document && typeof message.document === "object"
+        ? message.document as Record<string, unknown>
+        : null;
+      const photos = Array.isArray(message?.photo)
+        ? message.photo.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+        : [];
+      const photo = photos
+        .filter((item) => typeof item.file_id === "string")
+        .sort((left, right) => (
+          Number(left.width ?? 0) * Number(left.height ?? 0)
+          - Number(right.width ?? 0) * Number(right.height ?? 0)
+        ))
+        .at(-1);
+      let attachment: TelegramAttachment | undefined;
+      if (document && typeof document.file_id === "string") {
+        const fallback = `document-${String(update.update_id)}`;
+        const filename = safeTelegramFilename(document.file_name, fallback);
+        const mediaType = telegramMediaType(document.mime_type, filename);
+        const fileSize = optionalTelegramFileSize(document.file_size);
+        attachment = {
+          fileId: document.file_id,
+          ...(typeof document.file_unique_id === "string" ? { fileUniqueId: document.file_unique_id } : {}),
+          filename,
+          ...(mediaType ? { mediaType } : {}),
+          ...(fileSize === undefined ? {} : { fileSize }),
+        };
+      } else if (photo && typeof photo.file_id === "string") {
+        const fileSize = optionalTelegramFileSize(photo.file_size);
+        attachment = {
+          fileId: photo.file_id,
+          ...(typeof photo.file_unique_id === "string" ? { fileUniqueId: photo.file_unique_id } : {}),
+          filename: `photo-${String(update.update_id)}.jpg`,
+          mediaType: "image/jpeg",
+          ...(fileSize === undefined ? {} : { fileSize }),
+        };
+      }
+
+      const text = typeof message?.text === "string"
+        ? message.text
+        : typeof message?.caption === "string" ? message.caption : undefined;
       return [{
         updateId: String(update.update_id),
         senderId: String(sender!.id),
         chatId: String(chat!.id),
         chatType: chat!.type as string,
-        ...(typeof message?.text === "string" ? { text: message.text } : {}),
+        ...(text === undefined ? {} : { text }),
+        ...(attachment ? { attachment } : {}),
         ...(typeof callback?.data === "string" ? { callbackData: callback.data } : {}),
         ...(typeof callback?.id === "string" ? { callbackQueryId: callback.id } : {}),
       }];
     });
+  }
+
+  async downloadFile(token: string, fileId: string, maxBytes: number) {
+    const result = botResponseSchema.object(await this.request(token, "getFile", { file_id: fileId }));
+    const filePath = typeof result.file_path === "string" ? result.file_path : "";
+    const pathSegments = filePath.split("/");
+    if (
+      !filePath
+      || filePath.length > 512
+      || filePath.startsWith("/")
+      || pathSegments.some((segment) => !segment || segment === "." || segment === ".." || segment.includes("\\"))
+    ) {
+      throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid file path", 502, true);
+    }
+    const reportedSize = optionalTelegramFileSize(result.file_size);
+    if (reportedSize !== undefined && reportedSize > maxBytes) {
+      throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
+    }
+    const encodedPath = pathSegments.map((segment) => encodeURIComponent(segment)).join("/");
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.apiOrigin}/file/bot${token}/${encodedPath}`, {
+        method: "GET",
+        redirect: "error",
+        signal: AbortSignal.timeout(35_000),
+      });
+    } catch {
+      throw new OneComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
+    }
+    if (!response.ok || !response.body) {
+      throw new OneComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
+    }
+    const contentLengthHeader = response.headers.get("content-length");
+    const contentLength = contentLengthHeader === null ? undefined : Number(contentLengthHeader);
+    if (contentLength !== undefined && Number.isFinite(contentLength) && contentLength > maxBytes) {
+      await response.body.cancel().catch(() => undefined);
+      throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
+    }
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } catch (error) {
+      if (error instanceof OneComputerError) throw error;
+      throw new OneComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
+    } finally {
+      reader.releaseLock();
+    }
+    if (!size) throw new OneComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram returned an empty attachment", 502, true);
+    return Buffer.concat(chunks, size);
   }
 
   async sendMessage(token: string, chatId: string, text: string, options: TelegramMessageOptions = {}) {
@@ -513,6 +667,9 @@ const displayNames: Readonly<Record<ChatAgentCatalogId, string>> = Object.freeze
 });
 
 const acknowledgementMessage = "Message received.";
+const unsupportedAttachmentMessage = "I can receive images, PDF, text, Word, Excel, and PowerPoint files. This attachment type is not supported.";
+const oversizedAttachmentMessage = "Telegram attachments must be 8 MB or smaller. Please send a smaller file.";
+const unavailableAttachmentMessage = "I could not download that Telegram attachment. Please send it again.";
 const safeFailureMessage = "I started the task, but the agent could not complete it. Try again, or use /agent to select another available agent.";
 const approvalFailureMessage = "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.";
 const telegramAgentCallbackPrefix = "onecomputer:agent:";
@@ -821,6 +978,22 @@ export class ChannelBrokerService {
     return true;
   }
 
+  private async attachmentPart(token: string, attachment: TelegramAttachment): Promise<ChatFilePart> {
+    if (!attachment.mediaType || !telegramAttachmentTypes.has(attachment.mediaType)) {
+      throw new OneComputerError("CHANNEL_ATTACHMENT_UNSUPPORTED", "The Telegram attachment type is not supported", 400);
+    }
+    if (attachment.fileSize !== undefined && attachment.fileSize > chatAttachmentMaxBytes) {
+      throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
+    }
+    const data = await this.telegram.downloadFile(token, attachment.fileId, chatAttachmentMaxBytes);
+    return chatFilePartSchema.parse({
+      type: "file",
+      mediaType: attachment.mediaType,
+      filename: safeTelegramFilename(attachment.filename, "telegram-file"),
+      url: `data:${attachment.mediaType};base64,${data.toString("base64")}`,
+    });
+  }
+
   private async processUpdate(
     connection: ChannelConnectionRecord,
     identity: IdentityContext,
@@ -832,14 +1005,14 @@ export class ChannelBrokerService {
       update.chatType !== "private"
       || !connection.allowedUserIds.includes(update.senderId)
       || update.chatId !== update.senderId
-      || (!update.text && !agentFromCallback(update.callbackData))
+      || (!update.text && !update.attachment && !agentFromCallback(update.callbackData))
       || (update.text?.length ?? 0) > 4_096
     ) {
       await this.store.finishChannelUpdate(connection.id, update.updateId, "rejected", "CHANNEL_INPUT_REJECTED");
       return;
     }
 
-    const agentCommand = update.text ? /^\/agent(?:@\w+)?(?:\s+(\S+))?\s*$/.exec(update.text) : null;
+    const agentCommand = !update.attachment && update.text ? /^\/agent(?:@\w+)?(?:\s+(\S+))?\s*$/.exec(update.text) : null;
     const selectedFromButton = agentFromCallback(update.callbackData);
     if (agentCommand || selectedFromButton) {
       try {
@@ -869,7 +1042,7 @@ export class ChannelBrokerService {
 
     const agentCatalogId = await this.store.getChannelSenderAgent(connection.id, update.senderId)
       ?? connection.defaultAgentId;
-    const newChatCommand = update.text ? /^\/new(?:@\w+)?\s*$/.test(update.text) : false;
+    const newChatCommand = !update.attachment && update.text ? /^\/new(?:@\w+)?\s*$/.test(update.text) : false;
     if (newChatCommand) {
       await this.store.clearChannelSession(connection.id, update.senderId, agentCatalogId);
       await this.telegram.sendMessage(
@@ -879,6 +1052,21 @@ export class ChannelBrokerService {
       );
       await this.store.finishChannelUpdate(connection.id, update.updateId, "delivered");
       return;
+    }
+
+    let attachments: ChatFilePart[] = [];
+    if (update.attachment) {
+      try {
+        attachments = [await this.attachmentPart(token, update.attachment)];
+      } catch (error) {
+        const code = error instanceof OneComputerError ? error.code : "TELEGRAM_FILE_UNAVAILABLE";
+        const message = code === "CHANNEL_ATTACHMENT_UNSUPPORTED"
+          ? unsupportedAttachmentMessage
+          : code === "CHANNEL_ATTACHMENT_TOO_LARGE" ? oversizedAttachmentMessage : unavailableAttachmentMessage;
+        await this.telegram.sendMessage(token, update.chatId, message).catch(() => undefined);
+        await this.store.finishChannelUpdate(connection.id, update.updateId, "rejected", code);
+        return;
+      }
     }
 
     const sessionId = await this.store.getChannelSession(connection.id, update.senderId, agentCatalogId);
@@ -897,7 +1085,8 @@ export class ChannelBrokerService {
             ...this.route(connection, identity, update.senderId, agentCatalogId),
             updateId: update.updateId,
             ...(sessionId ? { sessionId } : {}),
-            text: update.text,
+            ...(update.text ? { text: update.text } : {}),
+            ...(attachments.length ? { attachments } : {}),
           }),
           async (notice) => {
             await this.telegram.sendMessage(token, update.chatId, notice);
