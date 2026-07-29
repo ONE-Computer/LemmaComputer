@@ -494,6 +494,27 @@ const responses = new Map([
       decision: "approval_required",
     }],
   }],
+  ["GET /v1/admin/provider-settings", {
+    providers: [{
+      provider: "openai",
+      aliases: ["onecomputer-assistant", "onecomputer-openai", "claude-opus-4-6"],
+      primaryAlias: "onecomputer-openai",
+      upstreamModelDisplayName: "OpenAI GPT-5.6 Luna",
+      state: "not-configured",
+      fingerprint: null,
+      modelId: "gpt-5.6-luna",
+      modelOptions: [
+        { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol" },
+        { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra" },
+        { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna" },
+      ],
+      region: null,
+      modelProfileId: null,
+      lastTestedAt: null,
+      lastErrorCode: null,
+      updatedAt: null,
+    }],
+  }],
   ["GET /v1/credentials", {
     credentials: [{
       id: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",

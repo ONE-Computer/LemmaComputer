@@ -110,6 +110,8 @@ class FakeProviderAdministration implements ProviderAdministrationGateway {
       credentialFingerprint: "fp_" + input.tenantId + "_" + input.provider,
       configuration: input.provider === "bedrock"
         ? { region: input.region, modelProfileId: input.modelProfileId }
+        : input.provider === "openai"
+        ? { modelId: input.modelId }
         : {},
     };
   }
@@ -162,11 +164,17 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
       method: "PUT",
       url: "/v1/admin/provider-settings/openai",
       headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-configure-0001" },
-      payload: { apiKey: rawOpenAiKey },
+      payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-terra" },
     });
     assert.equal(configured.statusCode, 200);
     assert.equal(configured.json().provider.state, "active");
     assert.equal(configured.json().provider.fingerprint, "fp_acme_openai");
+    assert.equal(configured.json().provider.modelId, "gpt-5.6-terra");
+    assert.deepEqual(configured.json().provider.modelOptions, [
+      { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol" },
+      { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra" },
+      { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna" },
+    ]);
     assert.equal(JSON.stringify(configured.json()).includes(rawOpenAiKey), false);
     assert.equal(providerAdministration.configured[0]!.apiKey, rawOpenAiKey);
 
@@ -187,7 +195,7 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
         upstreamModelDisplayName: provider.upstreamModelDisplayName,
       })),
       [
-        { provider: "openai", primaryAlias: "onecomputer-openai", upstreamModelDisplayName: "OpenAI GPT-5.6 Luna" },
+        { provider: "openai", primaryAlias: "onecomputer-openai", upstreamModelDisplayName: "OpenAI GPT-5.6 Terra" },
         { provider: "anthropic", primaryAlias: "onecomputer-claude", upstreamModelDisplayName: "Anthropic Claude Sonnet 4.6" },
         { provider: "glm", primaryAlias: "onecomputer-glm", upstreamModelDisplayName: "Z.ai GLM-5" },
         { provider: "bedrock", primaryAlias: "onecomputer-bedrock", upstreamModelDisplayName: "Amazon Bedrock Claude Sonnet 4.5" },
@@ -213,6 +221,7 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
 
     const stored = await settingsStore.getProviderSetting(identity.tenantId, "openai");
     assert.ok(stored);
+    assert.deepEqual(stored.configuration, { modelId: "gpt-5.6-terra" });
     assert.equal(JSON.stringify(stored).includes(rawOpenAiKey), false);
     assert.equal("apiKey" in stored, false);
 
@@ -224,6 +233,16 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(tested.statusCode, 200);
     assert.equal(tested.json().provider.lastErrorCode, null);
     assert.ok(tested.json().provider.lastTestedAt);
+    assert.deepEqual(providerAdministration.tested[0]!.configuration, { modelId: "gpt-5.6-terra" });
+
+    const rejectedModelChange = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/openai",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-model-change-0001" },
+      payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-sol" },
+    });
+    assert.equal(rejectedModelChange.statusCode, 409);
+    assert.equal(rejectedModelChange.json().error.code, "PROVIDER_MODEL_RECONFIGURATION_REQUIRED");
 
     const disabled = await app.inject({
       method: "POST",

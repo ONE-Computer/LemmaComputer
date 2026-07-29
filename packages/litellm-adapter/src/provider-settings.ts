@@ -4,18 +4,26 @@ import {
   bedrockApiKeyModelProfileIdSchema,
   bedrockApiKeyRegionSchema,
   bedrockApiKeyRouteAlias,
+  openAiProviderModelIdSchema,
   OneComputerError,
   type BedrockApiKeyModelProfile,
   type BedrockApiKeyModelProfileId,
   type BedrockApiKeyRegion,
+  type OpenAiProviderModelId,
   type ProviderSettingMetadata,
 } from "@onecomputer/contracts";
 
 export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock"] as const;
 export type ManagedProviderName = typeof managedProviderNames[number];
-export type ManagedProviderOperation = { tenantId: string; provider: ManagedProviderName; existingModelIds: string[] };
+export type ManagedProviderOperation = {
+  tenantId: string;
+  provider: ManagedProviderName;
+  existingModelIds: string[];
+  configuration?: ProviderSettingMetadata;
+};
 export type ManagedProviderConfiguration =
-  | (ManagedProviderOperation & { provider: "openai" | "anthropic" | "glm"; apiKey: string })
+  | (ManagedProviderOperation & { provider: "openai"; apiKey: string; modelId: OpenAiProviderModelId })
+  | (ManagedProviderOperation & { provider: "anthropic" | "glm"; apiKey: string })
   | (ManagedProviderOperation & { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId });
 export type ManagedProviderRoute = { modelIds: string[]; credentialFingerprint: string; configuration: ProviderSettingMetadata };
 export interface ProviderAdministrationGateway {
@@ -36,10 +44,26 @@ export type ManagedProviderDisplayMetadata = {
   upstreamModelDisplayName: string;
 };
 
+export const defaultOpenAiProviderModelId: OpenAiProviderModelId = "gpt-5.6-luna";
+export const approvedOpenAiProviderModels = Object.freeze([
+  { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", model: "openai/gpt-5.6-sol", vision: true },
+  { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", model: "openai/gpt-5.6-terra", vision: true },
+  { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", model: "openai/gpt-5.6-luna", vision: true },
+] satisfies ReadonlyArray<{ id: OpenAiProviderModelId; displayName: string; model: string; vision: boolean }>);
+
+export const openAiProviderModelOptions = approvedOpenAiProviderModels.map(({ id, displayName }) => ({ id, displayName }));
+
+export const openAiProviderModel = (modelId: unknown) => {
+  const parsed = openAiProviderModelIdSchema.safeParse(modelId);
+  return parsed.success
+    ? approvedOpenAiProviderModels.find((candidate) => candidate.id === parsed.data) ?? null
+    : null;
+};
+
 export const managedProviderDisplayMetadata: Record<ManagedProviderName, ManagedProviderDisplayMetadata> = {
   openai: {
     primaryAlias: "onecomputer-openai",
-    upstreamModelDisplayName: "OpenAI GPT-5.6 Luna",
+    upstreamModelDisplayName: openAiProviderModel(defaultOpenAiProviderModelId)!.displayName,
   },
   anthropic: {
     primaryAlias: "onecomputer-claude",
@@ -200,8 +224,11 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   async testManagedProvider(input: ManagedProviderOperation) {
-    const model = managedProviderModels[input.provider][0];
-    if (!model || input.existingModelIds.length !== managedProviderModels[input.provider].length) {
+    const models = input.provider === "openai"
+      ? this.openAiModels(input.configuration?.modelId ?? defaultOpenAiProviderModelId)
+      : managedProviderModels[input.provider];
+    const model = models[0];
+    if (!model || input.existingModelIds.length !== models.length) {
       throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
     await this.ensureRetiringAliasesAreGone(input.provider);
@@ -215,6 +242,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   private modelsFor(input: ManagedProviderConfiguration): readonly ManagedProviderModel[] {
+    if (input.provider === "openai") return this.openAiModels(input.modelId);
     if (input.provider !== "bedrock") return managedProviderModels[input.provider];
     const region = bedrockApiKeyRegionSchema.safeParse(input.region);
     const modelProfileId = bedrockApiKeyModelProfileIdSchema.safeParse(input.modelProfileId);
@@ -233,10 +261,22 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     }];
   }
 
+  private openAiModels(modelId: unknown): readonly ManagedProviderModel[] {
+    const profile = openAiProviderModel(modelId);
+    if (!profile) {
+      throw new OneComputerError("OPENAI_MODEL_UNAPPROVED", "The selected OpenAI model is not approved", 400);
+    }
+    return managedProviderModels.openai.map((model) => ({
+      ...model,
+      model: profile.model,
+      vision: profile.vision,
+    }));
+  }
+
   private configurationFor(input: ManagedProviderConfiguration): ProviderSettingMetadata {
-    return input.provider === "bedrock"
-      ? { region: input.region, modelProfileId: input.modelProfileId }
-      : {};
+    if (input.provider === "bedrock") return { region: input.region, modelProfileId: input.modelProfileId };
+    if (input.provider === "openai") return { modelId: input.modelId };
+    return {};
   }
 
   private async createModel(deployment: ProviderModelDeployment) {
@@ -281,7 +321,6 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
           model,
           messages: [{ role: "user", content: "Reply with OK." }],
           max_tokens: 1,
-          temperature: 0,
         },
       });
       if (!result.ok) throw this.providerFailure(result.status, "credential", provider, result.payload);
@@ -436,8 +475,14 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     payload?: unknown,
   ) {
     if (provider === "bedrock") return this.bedrockFailure(status, payload);
-    if (kind === "credential" && status >= 400 && status < 500) {
+    if (kind === "credential" && [401, 403, 404].includes(status)) {
       return new OneComputerError("PROVIDER_CREDENTIAL_REJECTED", "The provider API key or approved model access was rejected", 422);
+    }
+    if (kind === "credential" && status === 429) {
+      return new OneComputerError("PROVIDER_THROTTLED", "The provider throttled the route test; retry shortly", 429, true);
+    }
+    if (kind === "credential" && status >= 400 && status < 500) {
+      return new OneComputerError("PROVIDER_TEST_REQUEST_REJECTED", "The provider rejected the route test request", 422);
     }
     return new OneComputerError("PROVIDER_ROUTE_FAILED", "The provider route could not be configured", 502, true);
   }

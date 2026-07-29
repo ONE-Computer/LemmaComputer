@@ -1,9 +1,10 @@
-import { OneComputerError, providerSettingMetadataSchema, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion } from "@onecomputer/contracts";
-import { managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModels, managedProviderNames, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
+import { OneComputerError, providerSettingMetadataSchema, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type OpenAiProviderModelId } from "@onecomputer/contracts";
+import { defaultOpenAiProviderModelId, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModels, managedProviderNames, openAiProviderModel, openAiProviderModelOptions, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import type { ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
 
 export type ProviderSettingInput =
-  | { provider: "openai" | "anthropic" | "glm"; apiKey: string }
+  | { provider: "openai"; apiKey: string; modelId: OpenAiProviderModelId }
+  | { provider: "anthropic" | "glm"; apiKey: string }
   | { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
 
 type BedrockSelection = { region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
@@ -15,6 +16,8 @@ export type ProviderSettingView = {
   upstreamModelDisplayName: string;
   state: "active" | "disabled" | "not-configured" | "needs-reconfiguration";
   fingerprint: string | null;
+  modelId: OpenAiProviderModelId | null;
+  modelOptions: Array<{ id: OpenAiProviderModelId; displayName: string }>;
   region: BedrockApiKeyRegion | null;
   modelProfileId: BedrockApiKeyModelProfileId | null;
   lastTestedAt: string | null;
@@ -29,16 +32,28 @@ const bedrockSelection = (provider: ManagedProviderName, record: ProviderSetting
   return { region: parsed.data.region, modelProfileId: parsed.data.modelProfileId };
 };
 
+const openAiSelection = (provider: ManagedProviderName, record: ProviderSettingRecord | null): OpenAiProviderModelId | null => {
+  if (provider !== "openai") return null;
+  const parsed = providerSettingMetadataSchema.safeParse(record?.configuration ?? {});
+  return parsed.success && parsed.data.modelId
+    ? parsed.data.modelId
+    : defaultOpenAiProviderModelId;
+};
+
 const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | null): ProviderSettingView => {
   const selection = bedrockSelection(provider, record);
+  const modelId = openAiSelection(provider, record);
+  const openAiModel = modelId ? openAiProviderModel(modelId) : null;
   const needsReconfiguration = provider === "bedrock" && record?.state === "active" && !selection;
   return {
     provider,
     aliases: managedProviderModels[provider].map((model) => model.alias),
     primaryAlias: managedProviderDisplayMetadata[provider].primaryAlias,
-    upstreamModelDisplayName: managedProviderDisplayMetadata[provider].upstreamModelDisplayName,
+    upstreamModelDisplayName: openAiModel?.displayName ?? managedProviderDisplayMetadata[provider].upstreamModelDisplayName,
     state: !record ? "not-configured" : needsReconfiguration ? "needs-reconfiguration" : record.state,
     fingerprint: record?.credentialFingerprint ?? null,
+    modelId,
+    modelOptions: provider === "openai" ? [...openAiProviderModelOptions] : [],
     region: selection?.region ?? null,
     modelProfileId: selection?.modelProfileId ?? null,
     lastTestedAt: record?.lastTestedAt?.toISOString() ?? null,
@@ -52,6 +67,10 @@ const safeProviderErrorCodes = new Set([
   "PROVIDER_STATIC_CUTOVER_REQUIRED",
   "PROVIDER_NOT_CONFIGURED",
   "PROVIDER_CREDENTIAL_REJECTED",
+  "PROVIDER_MODEL_RECONFIGURATION_REQUIRED",
+  "PROVIDER_TEST_REQUEST_REJECTED",
+  "PROVIDER_THROTTLED",
+  "OPENAI_MODEL_UNAPPROVED",
   "PROVIDER_ROUTE_FAILED",
   "PROVIDER_GATEWAY_UNAVAILABLE",
   "PROVIDER_CONFIGURATION_FAILED",
@@ -75,6 +94,10 @@ const safeProviderMessage = (code: string, fallback: string) => ({
   PROVIDER_STATIC_CUTOVER_REQUIRED: "Restart the installation with retired provider routes removed before configuring this provider",
   PROVIDER_NOT_CONFIGURED: "That provider is not configured",
   PROVIDER_CREDENTIAL_REJECTED: "The provider API key or approved model access was rejected",
+  PROVIDER_MODEL_RECONFIGURATION_REQUIRED: "Disable and reconnect the provider to change its approved model",
+  PROVIDER_TEST_REQUEST_REJECTED: "The provider rejected the route test request",
+  PROVIDER_THROTTLED: "The provider throttled the route test; retry shortly",
+  OPENAI_MODEL_UNAPPROVED: "The selected OpenAI model is not approved",
   PROVIDER_ROUTE_FAILED: "The provider route could not be configured",
   PROVIDER_GATEWAY_UNAVAILABLE: "The provider gateway is unavailable",
   PROVIDER_CONFIGURATION_FAILED: "The provider configuration could not be validated",
@@ -136,6 +159,16 @@ export class ProviderSettingsService {
   async configure(actor: SessionPrincipal, input: ProviderSettingInput) {
     const provider = input.provider;
     const current = await this.store.getProviderSetting(actor.tenantId, provider);
+    if (input.provider === "openai" && current?.state === "active") {
+      const existingModelId = openAiSelection(input.provider, current);
+      if (existingModelId !== input.modelId) {
+        throw new OneComputerError(
+          "PROVIDER_MODEL_RECONFIGURATION_REQUIRED",
+          "Disable and reconnect the provider to change its approved model",
+          409,
+        );
+      }
+    }
     if (input.provider === "bedrock" && current?.state === "active") {
       const existing = this.requireBedrockSelection(current);
       if (existing.region !== input.region || existing.modelProfileId !== input.modelProfileId) {
@@ -156,6 +189,14 @@ export class ProviderSettingsService {
           apiKey: input.apiKey,
           region: input.region,
           modelProfileId: input.modelProfileId,
+          existingModelIds,
+        }
+        : input.provider === "openai"
+        ? {
+          tenantId: actor.tenantId,
+          provider: input.provider,
+          apiKey: input.apiKey,
+          modelId: input.modelId,
           existingModelIds,
         }
         : {
@@ -205,6 +246,7 @@ export class ProviderSettingsService {
         tenantId: actor.tenantId,
         provider,
         existingModelIds: current.modelIds,
+        configuration: current.configuration,
       });
     } catch (error) {
       const normalized = safeProviderError(error, "PROVIDER_TEST_FAILED", "The provider test could not be completed");

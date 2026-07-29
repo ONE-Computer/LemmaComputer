@@ -150,15 +150,25 @@ export const bedrockApiKeyRouteConfigurationSchema = z.object({
 });
 export type BedrockApiKeyRouteConfiguration = z.infer<typeof bedrockApiKeyRouteConfigurationSchema>;
 
-// Provider Settings persists only this read-safe selection metadata. The API
+export const openAiProviderModelIds = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const;
+export const openAiProviderModelIdSchema = z.enum(openAiProviderModelIds);
+export type OpenAiProviderModelId = z.infer<typeof openAiProviderModelIdSchema>;
+
+// Provider Settings persists only read-safe route selection metadata. The API
 // key itself is deliberately absent: LiteLLM owns its encrypted credential
-// record and Control only needs the reviewed Bedrock route selection.
+// record and Control stores only approved model/region choices.
 export const providerSettingMetadataSchema = z.strictObject({
   region: bedrockApiKeyRegionSchema.optional(),
   modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
+  modelId: openAiProviderModelIdSchema.optional(),
 }).refine(
-  (value) => (value.region === undefined) === (value.modelProfileId === undefined),
-  "Bedrock provider metadata must include both region and model profile",
+  (value) => {
+    const hasBedrockSelection = value.region !== undefined || value.modelProfileId !== undefined;
+    return hasBedrockSelection
+      ? value.region !== undefined && value.modelProfileId !== undefined && value.modelId === undefined
+      : true;
+  },
+  "Provider metadata must contain either an OpenAI model or a complete Bedrock selection",
 );
 export type ProviderSettingMetadata = z.infer<typeof providerSettingMetadataSchema>;
 

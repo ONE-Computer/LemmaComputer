@@ -117,12 +117,14 @@ test("managed provider configuration isolates tenants, validates candidates, and
       tenantId: "tenant-alpha",
       provider: "openai",
       apiKey: alphaKey,
+      modelId: "gpt-5.6-sol",
       existingModelIds: [],
     });
     const beta = await gateway.configureManagedProvider({
       tenantId: "tenant-beta",
       provider: "openai",
       apiKey: betaKey,
+      modelId: "gpt-5.6-terra",
       existingModelIds: [],
     });
 
@@ -136,6 +138,8 @@ test("managed provider configuration isolates tenants, validates candidates, and
       .map(modelDocument)
       .filter((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length > 0);
     assert.equal(stableModels.length, 6);
+    assert.equal(stableModels.filter((document) => document.litellm_params.model === "openai/gpt-5.6-sol").length, 3);
+    assert.equal(stableModels.filter((document) => document.litellm_params.model === "openai/gpt-5.6-terra").length, 3);
     for (const document of stableModels) {
       assert.ok(["onecomputer-assistant", "onecomputer-openai", "claude-opus-4-6"].includes(document.model_name));
       assert.equal("api_key" in document.litellm_params, false);
@@ -169,6 +173,9 @@ test("managed provider configuration isolates tenants, validates candidates, and
     ));
     assert.equal(stableProbes.length, 2);
     for (const probe of stableProbes) assert.match(probe.authorization, /^Bearer sk-ocp-/);
+    for (const probe of requests.filter((request) => request.url === "/chat/completions")) {
+      assert.equal("temperature" in probe.body, false, "Provider probes must use the model's default temperature");
+    }
     for (const request of requests.filter((request) => !request.url.startsWith("/credentials"))) {
       assert.equal(JSON.stringify(request.body).includes(alphaKey), false);
       assert.equal(JSON.stringify(request.body).includes(betaKey), false);
@@ -207,6 +214,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
         tenantId: "tenant-alpha",
         provider: "openai",
         apiKey: rotatedKey,
+        modelId: "gpt-5.6-sol",
         existingModelIds: alpha.modelIds,
       }),
       (error: unknown) => {
@@ -228,6 +236,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
         tenantId: "tenant-static",
         provider: "openai",
         apiKey: alphaKey,
+        modelId: "gpt-5.6-luna",
         existingModelIds: [],
       }),
       (error: unknown) => {

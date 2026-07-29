@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
@@ -161,6 +161,9 @@ const connectorIconSchema = z.strictObject({
 const providerNameSchema = z.enum(["openai", "anthropic", "glm", "bedrock"]);
 const saveProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096),
+});
+const saveOpenAiProviderApiKeySchema = saveProviderApiKeySchema.extend({
+  modelId: openAiProviderModelIdSchema,
 });
 const saveBedrockProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096),
@@ -1143,6 +1146,8 @@ export function createControlServer(
     const provider = providerNameSchema.parse(request.params.provider);
     const input = provider === "bedrock"
       ? { provider, ...saveBedrockProviderApiKeySchema.parse(request.body ?? {}) }
+      : provider === "openai"
+      ? { provider, ...saveOpenAiProviderApiKeySchema.parse(request.body ?? {}) }
       : { provider, ...saveProviderApiKeySchema.parse(request.body ?? {}) };
     return { provider: await requireProviderSettings().configure(actor, input) };
   });
