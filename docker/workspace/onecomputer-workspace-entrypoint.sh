@@ -10,6 +10,7 @@ set -euo pipefail
 : "${ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE:=true}"
 : "${ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL:=true}"
 : "${ONECOMPUTER_CLIPBOARD_MAX_BYTES:=65536}"
+: "${ONECOMPUTER_COWORK_ENABLED:=false}"
 : "${ONECOMPUTER_SIGNED_POLICY_B64:?Signed ONEComputer policy projection is required}"
 : "${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?Policy verification keys are required}"
 
@@ -80,6 +81,33 @@ done
 application_enabled() {
   [[ ",${ONECOMPUTER_ENABLED_APPLICATIONS}," == *",$1,"* ]]
 }
+
+[[ "$ONECOMPUTER_COWORK_ENABLED" == "true" || "$ONECOMPUTER_COWORK_ENABLED" == "false" ]] || {
+  echo "invalid Cowork capability setting" >&2
+  exit 78
+}
+if [[ "$ONECOMPUTER_COWORK_ENABLED" == "true" ]]; then
+  agent_enabled claude-desktop || {
+    echo "Cowork requires the Claude Desktop agent" >&2
+    exit 78
+  }
+  [[ -c /dev/kvm ]] || {
+    echo "Cowork requires the KVM device at /dev/kvm" >&2
+    exit 78
+  }
+  kvm_gid="$(stat -c '%g' /dev/kvm)"
+  kvm_group="$(getent group "$kvm_gid" | cut -d: -f1 || true)"
+  if [[ -z "$kvm_group" ]]; then
+    kvm_group="onecomputer-kvm"
+    groupadd --system --gid "$kvm_gid" "$kvm_group"
+  fi
+  usermod -aG "$kvm_group" kasm-user
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    /bin/bash -c '[[ -r /dev/kvm && -w /dev/kvm ]]' || {
+      echo "Cowork cannot access /dev/kvm as kasm-user" >&2
+      exit 78
+    }
+fi
 
 remove_stale_chrome_singletons() {
   local chrome_profile="/home/kasm-user/.config/google-chrome"
@@ -255,12 +283,12 @@ os.chmod(path, 0o644)
 os.chown(path, 0, 0)
 PY
 if agent_enabled claude-desktop; then
-python3 - "$ONECOMPUTER_MODEL_ALIAS" "$model_label" <<'PY'
+python3 - "$ONECOMPUTER_MODEL_ALIAS" "$model_label" "$ONECOMPUTER_COWORK_ENABLED" <<'PY'
 import json
 import os
 import sys
 
-model, label = sys.argv[1:]
+model, label, cowork_enabled = sys.argv[1:]
 document = {
     "inferenceProvider": "gateway",
     "inferenceGatewayBaseUrl": "http://127.0.0.1:4312",
@@ -278,7 +306,7 @@ document = {
     "chatTabEnabled": True,
     "chatAdvancedFileAnalysisEnabled": False,
     "isClaudeCodeForDesktopEnabled": False,
-    "coworkTabEnabled": False,
+    "coworkTabEnabled": cowork_enabled == "true",
     "disableBundledSkills": True,
     "autoModeEnabled": False,
     "toolSearchEnabled": False,

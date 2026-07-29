@@ -281,6 +281,37 @@ npm run image:workspace
 `ONECOMPUTER_WORKSPACE_IMAGE` may be a local tag for development. Production
 deployments should use an immutable digest.
 
+Claude Cowork local execution requires hardware virtualization. On every Docker
+or Kasm Agent host, verify that `/dev/kvm` is a character device and that the
+host has at least 8 GB of RAM and approximately 25 GB of free disk space. For
+the local driver, opt in with:
+
+```text
+KASM_LOCAL_KVM_ENABLED=true
+```
+
+The adapter maps only `/dev/kvm` into workspaces that include Claude Desktop;
+it does not make the container privileged or restore the dropped capabilities.
+At startup, the image adds `kasm-user` to the numeric group that owns the mapped
+device, so the Kasm Agent host and image do not need matching `kvm` group IDs.
+Changing this setting causes the workspace container to be recreated on its
+next launch while preserving its workspace volume.
+
+For an external Kasm installation, configure the ONEComputer Workspace image's
+Docker Run Config Override in Kasm:
+
+```json
+{
+  "user": "root",
+  "devices": ["/dev/kvm:/dev/kvm:rwm"],
+  "environment": {"ONECOMPUTER_COWORK_ENABLED": "true"}
+}
+```
+
+Every Kasm Agent eligible to run this Workspace must expose `/dev/kvm`.
+Mapping KVM gives the workspace access to the host virtualization interface, so
+keep the override limited to the Claude Desktop Workspace image.
+
 For an external Kasm installation, set:
 
 ```text

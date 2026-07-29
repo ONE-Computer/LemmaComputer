@@ -177,6 +177,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       egressProxyImage: "sha256:pinned-egress-proxy",
       egressNetwork: "onecomputer-egress",
       timeZone: "Asia/Singapore",
+      kvmEnabled: true,
       portStart: 16920,
       portEnd: 16920,
     });
@@ -230,6 +231,11 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.equal(host.NanoCpus, 2_000_000_000);
     assert.deepEqual(host.CapDrop, ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]);
     assert.deepEqual(host.SecurityOpt, ["no-new-privileges"]);
+    assert.deepEqual(host.Devices, [{
+      PathOnHost: "/dev/kvm",
+      PathInContainer: "/dev/kvm",
+      CgroupPermissions: "rwm",
+    }]);
     const workspaceVolume = "onecomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
     assert.deepEqual(host.Mounts, [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }]);
     const volumeCreate = requests.find((item) => item.path === "/volumes/create")!;
@@ -250,6 +256,8 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_MAX_BYTES=65536"));
     assert.ok(serialized.includes("TZ=Asia/Singapore"));
     assert.ok(serialized.includes("ONECOMPUTER_TIME_ZONE=Asia/Singapore"));
+    assert.ok(serialized.includes("ONECOMPUTER_COWORK_ENABLED=true"));
+    assert.ok(serialized.includes('"com.onecomputer.cowork-enabled":"true"'));
     assert.ok(serialized.includes('"com.onecomputer.time-zone":"Asia/Singapore"'));
     assert.ok(serialized.includes("API_SERVER_ENABLED=true"));
     assert.ok(serialized.includes("API_SERVER_HOST=0.0.0.0"));

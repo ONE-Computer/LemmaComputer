@@ -74,6 +74,7 @@ test("the local workspace receives an explicit host-seeded IANA timezone", async
   assert.match(example, /^ONECOMPUTER_TIME_ZONE=Etc\/UTC$/m);
   assert.match(initializer, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
   assert.match(compose, /KASM_LOCAL_TIME_ZONE: \$\{ONECOMPUTER_TIME_ZONE:-\}/);
+  assert.match(compose, /KASM_LOCAL_KVM_ENABLED: \$\{KASM_LOCAL_KVM_ENABLED:-false\}/);
   assert.match(entrypoint, /ONECOMPUTER_TIME_ZONE="\$ONECOMPUTER_TIME_ZONE"/);
 });
 
@@ -123,12 +124,18 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(dockerfile, /CLAUDE_CODE_SHA256=7ff9594e/);
   assert.match(dockerfile, /claude-code-releases\/\$\{CLAUDE_CODE_VERSION\}\/linux-x64\/claude\.zst/);
   assert.match(dockerfile, /claude --version/);
+  assert.match(dockerfile, /qemu-system-x86/);
+  assert.match(dockerfile, /\n      ovmf \\/);
+  assert.match(dockerfile, /\/usr\/lib\/claude-desktop\/resources\/virtiofsd/);
   assert.match(entrypoint, /Claude-3p\/claude-code\/\$\{claude_code_version\}/);
   assert.match(entrypoint, /\.verified/);
   assert.match(entrypoint, /\/etc\/claude-desktop\/managed-settings\.json/);
   assert.match(entrypoint, /"inferenceGatewayBaseUrl": "http:\/\/127\.0\.0\.1:4312"/);
   assert.doesNotMatch(entrypoint, /inferenceGatewayBaseUrl[^\n]+4312\/v1/);
   assert.match(entrypoint, /"disableDeploymentModeChooser": True/);
+  assert.match(entrypoint, /"coworkTabEnabled": cowork_enabled == "true"/);
+  assert.match(entrypoint, /groupadd --system --gid "\$kvm_gid" "\$kvm_group"/);
+  assert.match(entrypoint, /setpriv --reuid=1000 --regid=1000 --init-groups[\s\S]*\[\[ -r \/dev\/kvm && -w \/dev\/kvm \]\]/);
   assert.match(entrypoint, /"isLocalDevMcpEnabled": False/);
   assert.match(entrypoint, /"isDesktopExtensionEnabled": False/);
   assert.match(entrypoint, /claude-sonnet-4-5/);

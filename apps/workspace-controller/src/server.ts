@@ -47,6 +47,7 @@ const envSchema = z.object({
   KASM_LOCAL_EGRESS_PROXY_IMAGE: z.string().optional(),
   KASM_LOCAL_EGRESS_NETWORK: z.string().default("onecomputer-egress"),
   KASM_PUBLIC_HOST: z.string().default("127.0.0.1"),
+  KASM_LOCAL_KVM_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   KASM_LOCAL_TIME_ZONE: z.preprocess(
     (value) => value === "" ? undefined : value,
     timeZoneSchema.optional(),
@@ -296,6 +297,7 @@ export function adapterFromEnv(env: z.infer<typeof envSchema>): SandboxAdapter {
       egressNetwork: env.KASM_LOCAL_EGRESS_NETWORK,
       publicHost: env.KASM_PUBLIC_HOST,
       timeZone: env.KASM_LOCAL_TIME_ZONE,
+      kvmEnabled: env.KASM_LOCAL_KVM_ENABLED,
     });
   }
   return new KasmDeveloperApiAdapter({

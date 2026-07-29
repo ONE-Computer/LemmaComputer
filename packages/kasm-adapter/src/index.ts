@@ -268,6 +268,7 @@ type KasmLocalConfig = {
   egressNetwork?: string;
   publicHost?: string;
   timeZone?: string;
+  kvmEnabled?: boolean;
   portStart?: number;
   portEnd?: number;
 };
@@ -300,13 +301,6 @@ export class KasmLocalAdapter implements SandboxAdapter {
     if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
     if ((input.agentBridge || input.chatRuntimes?.length) && this.config.controlContainer) await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
     const name = `onecomputer-sandbox-${input.workspaceId}`;
-    const existing = await this.inspectByName(name);
-    if (existing?.running) {
-      await this.ensureRelay(name, existing.id, existing.port ?? await this.allocatePort(), workspaceNetwork);
-      return { providerId: existing.id, workspaceId: input.workspaceId, state: "ready", failureCode: null };
-    }
-    if (existing) await this.destroy(existing.id);
-    const port = await this.allocatePort();
     const fallbackAgent = ({
       "claude-desktop-managed-v1": "claude-desktop",
       "claude-cli-managed-v1": "claude-cli",
@@ -316,6 +310,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
     } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";
     const enabledAgents = input.agentGrants?.map((grant) => grant.catalogId) ?? [fallbackAgent];
     const enabledApplications = input.policy.applications ?? ["firefox"];
+    const coworkEnabled = this.config.kvmEnabled === true && enabledAgents.includes("claude-desktop");
+    const existing = await this.inspectByName(name);
+    if (existing?.running && existing.coworkEnabled === coworkEnabled) {
+      await this.ensureRelay(name, existing.id, existing.port ?? await this.allocatePort(), workspaceNetwork);
+      return { providerId: existing.id, workspaceId: input.workspaceId, state: "ready", failureCode: null };
+    }
+    if (existing) await this.destroy(existing.id);
+    const port = await this.allocatePort();
     const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(name)}`, {
       Image: this.config.image,
       Labels: {
@@ -339,6 +341,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         } : {}),
         "com.onecomputer.enabled-agents": enabledAgents.join(","),
         "com.onecomputer.enabled-applications": enabledApplications.join(","),
+        "com.onecomputer.cowork-enabled": String(coworkEnabled),
         "com.onecomputer.chat-runtime-agents": input.chatRuntimes?.map((runtime) => runtime.catalogId).join(",") ?? "",
         "com.onecomputer.desktop-port": String(port),
         "com.onecomputer.clipboard-enabled": String(clipboard.enabled),
@@ -365,6 +368,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         `ONECOMPUTER_CLIPBOARD_MAX_BYTES=${clipboard.maxBytes}`,
         `ONECOMPUTER_ENABLED_AGENTS=${enabledAgents.join(",")}`,
         `ONECOMPUTER_ENABLED_APPLICATIONS=${enabledApplications.join(",")}`,
+        `ONECOMPUTER_COWORK_ENABLED=${coworkEnabled}`,
         `ONECOMPUTER_EXECUTION_MODE=${input.policy.executionMode}`,
         `ONECOMPUTER_EGRESS_MODE=${input.policy.egressMode}`,
         `ONECOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
@@ -409,6 +413,13 @@ export class KasmLocalAdapter implements SandboxAdapter {
         CapDrop: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
         SecurityOpt: ["no-new-privileges"],
         Mounts: [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }],
+        ...(coworkEnabled ? {
+          Devices: [{
+            PathOnHost: "/dev/kvm",
+            PathInContainer: "/dev/kvm",
+            CgroupPermissions: "rwm",
+          }],
+        } : {}),
       },
     });
     const providerId = textValue(created, "Id");
@@ -724,6 +735,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         id: String(inspected.Id),
         running: state.Running === true && state.Restarting !== true && state.Paused !== true,
         port: typeof rawPort === "string" ? Number(rawPort) : undefined,
+        coworkEnabled: labels["com.onecomputer.cowork-enabled"] === "true",
       };
     } catch (error) {
       if (error instanceof OneComputerError && error.statusCode === 404) return null;
