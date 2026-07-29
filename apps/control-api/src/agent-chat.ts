@@ -451,6 +451,7 @@ export class AgentUiStreamMapper {
         },
       }];
     }
+    if (event.type !== "turn-finish") return [];
 
     return [
       ...[...this.textIds].map((textId): InferUIMessageChunk<ChatUiMessage> => ({ type: "text-end", id: textId })),

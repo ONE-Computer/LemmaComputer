@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import type { AgentCatalogId, ChatAgentCatalogId, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
+import { activityEventSchema } from "@onecomputer/contracts";
+import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
 import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migrations.js";
 export * from "./identity-policy.js";
 export * from "./connector-registry.js";
@@ -355,6 +356,30 @@ export interface GovernanceStore {
   }>>;
 }
 
+export type ActivityEventScope = {
+  workspaceId: string;
+  agentCatalogId: ChatAgentCatalogId;
+  sessionId: string;
+  turnId: string;
+};
+
+export type AppendActivityEventInput = ActivityEventScope & {
+  identity: IdentityContext;
+  dedupeKey: string;
+  occurredAt: Date;
+  draft: ActivityEventDraft;
+};
+
+export interface ActivityStore {
+  appendActivityEvent(input: AppendActivityEventInput): Promise<ActivityEventV1 | null>;
+  replayActivityEvents(
+    identity: IdentityContext,
+    scope: ActivityEventScope,
+    afterSequence: number,
+    limit: number,
+  ): Promise<{ found: boolean; events: ActivityEventV1[]; terminalSequence: number | null }>;
+}
+
 export interface WorkspaceStore {
   getCurrent(identity: IdentityContext, grantId: string): Promise<WorkspaceRecord | null>;
   listCurrent(identity: IdentityContext): Promise<WorkspaceRecord[]>;
@@ -442,6 +467,23 @@ const operationSelect = `
   FROM governed_operations o
   LEFT JOIN governed_approvals a ON a.operation_id=o.id
   LEFT JOIN governed_receipts r ON r.operation_id=o.id`;
+
+const activityEventSelect = `
+  SELECT event_id,turn_id,sequence,occurred_at,kind,state,provenance,visibility,payload
+  FROM activity_events`;
+
+const mapActivityEventRow = (row: Record<string, unknown>): ActivityEventV1 => activityEventSchema.parse({
+  version: 1,
+  eventId: String(row.event_id),
+  turnId: String(row.turn_id),
+  sequence: Number(row.sequence),
+  timestamp: new Date(String(row.occurred_at)).toISOString(),
+  kind: String(row.kind),
+  state: String(row.state),
+  provenance: String(row.provenance),
+  visibility: String(row.visibility),
+  payload: row.payload,
+});
 
 const mapOperationRow = (row: Record<string, unknown>): GovernedOperationRecord => ({
   id: String(row.id),
@@ -550,7 +592,7 @@ const mapOpenVtcCompanionSubscriptionRow = (row: Record<string, unknown>): OpenV
   lastFailureCode: row.last_failure_code ? String(row.last_failure_code) : null,
 });
 
-export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore {
+export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore, ActivityStore {
   constructor(private readonly pool: pg.Pool) {}
 
   static fromConnectionString(connectionString: string) {
@@ -562,6 +604,128 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   async assertSchemaCompatible() { return assertWorkspaceSchemaCompatible(this.pool); }
 
   async close() { await this.pool.end(); }
+
+  async appendActivityEvent(input: AppendActivityEventInput) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const scopeKey = [
+        input.identity.tenantId,
+        input.identity.subjectId,
+        input.workspaceId,
+        input.agentCatalogId,
+        input.sessionId,
+        input.turnId,
+      ].join(":");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`activity:${scopeKey}`]);
+      const workspace = await client.query(
+        "SELECT id FROM workspaces WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
+        [input.workspaceId, input.identity.tenantId, input.identity.subjectId],
+      );
+      if (!workspace.rowCount) {
+        await client.query("COMMIT");
+        return null;
+      }
+      const values = [
+        input.identity.tenantId,
+        input.identity.subjectId,
+        input.workspaceId,
+        input.agentCatalogId,
+        input.sessionId,
+        input.turnId,
+      ];
+      const existing = await client.query(
+        `${activityEventSelect}
+         WHERE tenant_id=$1 AND subject_id=$2 AND workspace_id=$3 AND agent_catalog_id=$4
+           AND session_id=$5 AND turn_id=$6 AND dedupe_key=$7`,
+        [...values, input.dedupeKey],
+      );
+      if (existing.rowCount) {
+        await client.query("COMMIT");
+        return mapActivityEventRow(existing.rows[0]);
+      }
+      const next = await client.query<{ sequence: number }>(
+        `SELECT COALESCE(MAX(sequence), -1) + 1 AS sequence FROM activity_events
+         WHERE tenant_id=$1 AND subject_id=$2 AND workspace_id=$3 AND agent_catalog_id=$4
+           AND session_id=$5 AND turn_id=$6`,
+        values,
+      );
+      if (input.draft.turnId !== input.turnId) throw new Error("Activity event turn scope does not match its draft");
+      const { turnId: _draftTurnId, ...draft } = input.draft;
+      const event = activityEventSchema.parse({
+        version: 1,
+        eventId: randomUUID(),
+        turnId: input.turnId,
+        sequence: Number(next.rows[0]?.sequence ?? 0),
+        timestamp: input.occurredAt.toISOString(),
+        ...draft,
+      });
+      await client.query(
+        `INSERT INTO activity_events (
+           event_id,tenant_id,subject_id,workspace_id,agent_catalog_id,session_id,turn_id,
+           sequence,dedupe_key,occurred_at,kind,state,provenance,visibility,payload
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)`,
+        [
+          event.eventId,
+          ...values,
+          event.sequence,
+          input.dedupeKey,
+          event.timestamp,
+          event.kind,
+          event.state,
+          event.provenance,
+          event.visibility,
+          JSON.stringify(event.payload),
+        ],
+      );
+      await client.query("COMMIT");
+      return event;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async replayActivityEvents(
+    identity: IdentityContext,
+    scope: ActivityEventScope,
+    afterSequence: number,
+    limit: number,
+  ) {
+    const values = [
+      identity.tenantId,
+      identity.subjectId,
+      scope.workspaceId,
+      scope.agentCatalogId,
+      scope.sessionId,
+      scope.turnId,
+    ];
+    const summary = await this.pool.query<{ count: string; terminal_sequence: number | null }>(
+      `SELECT COUNT(*)::text AS count,
+         MIN(sequence) FILTER (WHERE kind='terminal') AS terminal_sequence
+       FROM activity_events
+       WHERE tenant_id=$1 AND subject_id=$2 AND workspace_id=$3 AND agent_catalog_id=$4
+         AND session_id=$5 AND turn_id=$6`,
+      values,
+    );
+    if (Number(summary.rows[0]?.count ?? 0) === 0) return { found: false, events: [], terminalSequence: null };
+    const result = await this.pool.query(
+      `${activityEventSelect}
+       WHERE tenant_id=$1 AND subject_id=$2 AND workspace_id=$3 AND agent_catalog_id=$4
+         AND session_id=$5 AND turn_id=$6 AND sequence>$7
+       ORDER BY sequence ASC LIMIT $8`,
+      [...values, afterSequence, Math.min(500, Math.max(1, limit))],
+    );
+    return {
+      found: true,
+      events: result.rows.map(mapActivityEventRow),
+      terminalSequence: summary.rows[0]?.terminal_sequence === null
+        ? null
+        : Number(summary.rows[0]?.terminal_sequence),
+    };
+  }
 
   async registerPolicyVerificationKeys(keys: PolicyVerificationKey[]) {
     const client = await this.pool.connect();
@@ -1642,7 +1806,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   }
 }
 
-export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore {
+export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore, ActivityStore {
   private records = new Map<string, WorkspaceRecord>();
   private channelConnections = new Map<string, ChannelConnectionRecord>();
   private channelCredentials = new Map<string, ChannelCredentialRecord>();
@@ -1668,6 +1832,78 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     attemptCount: number;
     availableAt: Date;
   }>();
+  private activityEvents: Array<{
+    tenantId: string;
+    subjectId: string;
+    workspaceId: string;
+    agentCatalogId: ChatAgentCatalogId;
+    sessionId: string;
+    turnId: string;
+    dedupeKey: string;
+    event: ActivityEventV1;
+  }> = [];
+
+  async appendActivityEvent(input: AppendActivityEventInput) {
+    if (!await this.getOwned(input.identity, input.workspaceId)) return null;
+    const matchesScope = (record: typeof this.activityEvents[number]) => (
+      record.tenantId === input.identity.tenantId
+      && record.subjectId === input.identity.subjectId
+      && record.workspaceId === input.workspaceId
+      && record.agentCatalogId === input.agentCatalogId
+      && record.sessionId === input.sessionId
+      && record.turnId === input.turnId
+    );
+    const existing = this.activityEvents.find((record) => matchesScope(record) && record.dedupeKey === input.dedupeKey);
+    if (existing) return existing.event;
+    const scoped = this.activityEvents.filter(matchesScope);
+    const sequence = scoped.length ? Math.max(...scoped.map((record) => record.event.sequence)) + 1 : 0;
+    if (input.draft.turnId !== input.turnId) throw new Error("Activity event turn scope does not match its draft");
+    const { turnId: _draftTurnId, ...draft } = input.draft;
+    const event = activityEventSchema.parse({
+      version: 1,
+      eventId: randomUUID(),
+      turnId: input.turnId,
+      sequence,
+      timestamp: input.occurredAt.toISOString(),
+      ...draft,
+    });
+    this.activityEvents.push({
+      tenantId: input.identity.tenantId,
+      subjectId: input.identity.subjectId,
+      workspaceId: input.workspaceId,
+      agentCatalogId: input.agentCatalogId,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      dedupeKey: input.dedupeKey,
+      event,
+    });
+    return event;
+  }
+
+  async replayActivityEvents(
+    identity: IdentityContext,
+    scope: ActivityEventScope,
+    afterSequence: number,
+    limit: number,
+  ) {
+    const scoped = this.activityEvents.filter((record) => (
+      record.tenantId === identity.tenantId
+      && record.subjectId === identity.subjectId
+      && record.workspaceId === scope.workspaceId
+      && record.agentCatalogId === scope.agentCatalogId
+      && record.sessionId === scope.sessionId
+      && record.turnId === scope.turnId
+    ));
+    return {
+      found: scoped.length > 0,
+      events: scoped
+        .map((record) => record.event)
+        .filter((event) => event.sequence > afterSequence)
+        .sort((left, right) => left.sequence - right.sequence)
+        .slice(0, Math.min(500, Math.max(1, limit))),
+      terminalSequence: scoped.find((record) => record.event.kind === "terminal")?.event.sequence ?? null,
+    };
+  }
 
   async getCurrent(identity: IdentityContext, grantId: string) {
     return [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId) ?? null;
@@ -1711,6 +1947,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     for (const [operationId, operation] of this.operations) {
       if (operation.workspaceId === workspaceId) this.operations.delete(operationId);
     }
+    this.activityEvents = this.activityEvents.filter((event) => event.workspaceId !== workspaceId);
     return this.records.delete(workspaceId);
   }
 

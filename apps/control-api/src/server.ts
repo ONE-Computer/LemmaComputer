@@ -1,10 +1,10 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
@@ -29,6 +29,7 @@ import {
 } from "./agent-chat.js";
 import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient } from "./channel-broker.js";
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
+import { ActivityEventService, activitySseFrame } from "./activity.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -232,7 +233,7 @@ const sameSecret = (received: string | undefined, expected: string) => {
 };
 
 export function createControlServer(
-  store: WorkspaceStore & GovernanceStore & Partial<ChannelStore>,
+  store: WorkspaceStore & GovernanceStore & ActivityStore & Partial<ChannelStore>,
   controller: ControllerClient,
   proxyToken: string,
   gateway?: GatewayClient & Partial<GovernedToolExecutor>,
@@ -293,6 +294,7 @@ export function createControlServer(
   const agentBridgeAuthority = new AgentBridgeAuthority(security.mcpPolicyToken ?? proxyToken);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
+  const activityEvents = new ActivityEventService(store);
   const channelBroker = security.channelBrokerClient;
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
@@ -1724,6 +1726,63 @@ export function createControlServer(
     );
     return reply.header("cache-control", "no-store").send({ messages });
   });
+  const activityScope = async (request: {
+    params: { workspaceId: string; catalogId: string; sessionId: string; turnId: string };
+  }) => {
+    const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
+    const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
+    const turnId = chatPartIdSchema.parse(request.params.turnId);
+    const owner = identity(request);
+    await requireWorkspacePolicy(request, request.params.workspaceId);
+    const scope: ActivityEventScope = {
+      workspaceId: request.params.workspaceId,
+      agentCatalogId: catalogId,
+      sessionId,
+      turnId,
+    };
+    return { owner, scope };
+  };
+  app.get<{
+    Params: { workspaceId: string; catalogId: string; sessionId: string; turnId: string };
+    Querystring: { after?: string; limit?: string };
+  }>(
+    "/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/turns/:turnId/activity",
+    async (request, reply) => {
+      const { owner, scope } = await activityScope(request);
+      const after = z.coerce.number().int().min(-1).max(100_000).catch(-1).parse(request.query.after);
+      const limit = z.coerce.number().int().min(1).max(500).catch(200).parse(request.query.limit);
+      return reply.header("cache-control", "no-store").send(await activityEvents.replay(owner, scope, after, limit));
+    },
+  );
+  app.get<{
+    Params: { workspaceId: string; catalogId: string; sessionId: string; turnId: string };
+    Querystring: { after?: string };
+  }>(
+    "/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/turns/:turnId/activity/stream",
+    async (request, reply) => {
+      const { owner, scope } = await activityScope(request);
+      const lastEventId = Array.isArray(request.headers["last-event-id"])
+        ? request.headers["last-event-id"][0]
+        : request.headers["last-event-id"];
+      const after = z.coerce.number().int().min(-1).max(100_000).catch(-1).parse(request.query.after ?? lastEventId);
+      await activityEvents.replay(owner, scope, after, 1);
+      const abort = new AbortController();
+      request.raw.once("aborted", () => abort.abort("browser-disconnected"));
+      reply.raw.once("close", () => {
+        if (!reply.raw.writableFinished) abort.abort("browser-disconnected");
+      });
+      async function* frames() {
+        for await (const event of activityEvents.subscribe(owner, scope, after, abort.signal)) {
+          yield activitySseFrame(event);
+        }
+      }
+      return reply
+        .header("cache-control", "no-store")
+        .header("content-type", "text/event-stream; charset=utf-8")
+        .header("x-accel-buffering", "no")
+        .send(Readable.from(frames()));
+    },
+  );
   app.post<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>(
     "/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages",
     { bodyLimit: 24 * 1024 * 1024 },
@@ -1767,20 +1826,57 @@ export function createControlServer(
     const mapper = new AgentUiStreamMapper(catalogId);
     const stream = createUIMessageStream<ChatUiMessage>({
       execute: async ({ writer }) => {
-        for await (const event of agentChat.streamTurn(access, sessionId, input.message, abort.signal)) {
-          let projected = event;
-          if (event.type === "approval") {
-            try {
-              const operation = await operations.get(owner, event.operationId);
-              projected = {
-                ...event,
-                summary: chatApprovalSummary(event.state, operation.safeSummary),
-              };
-            } catch (error) {
-              if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
+        let lastEvent: AgentChatEvent | undefined;
+        try {
+          for await (const event of agentChat.streamTurn(access, sessionId, input.message, abort.signal)) {
+            let projected = event;
+            if (event.type === "approval") {
+              try {
+                const operation = await operations.get(owner, event.operationId);
+                projected = {
+                  ...event,
+                  summary: chatApprovalSummary(event.state, operation.safeSummary),
+                };
+              } catch (error) {
+                if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
+              }
             }
+            await activityEvents.recordAgentEvent({
+              identity: owner,
+              workspaceId: request.params.workspaceId,
+              agentCatalogId: catalogId,
+              sessionId,
+              displayName: access.displayName,
+              event: projected,
+            });
+            lastEvent = projected;
+            for (const chunk of mapper.chunks(projected)) writer.write(chunk);
           }
-          for (const chunk of mapper.chunks(projected)) writer.write(chunk);
+        } catch (error) {
+          if (lastEvent && lastEvent.type !== "turn-finish") {
+            const completedAt = new Date().toISOString();
+            const terminal = {
+              version: 1 as const,
+              sequence: lastEvent.sequence + 1,
+              sessionId,
+              turnId: lastEvent.turnId,
+              type: "turn-finish" as const,
+              state: abort.signal.aborted ? "cancelled" as const : "failed" as const,
+              message: abort.signal.aborted
+                ? "The connection ended before the agent finished"
+                : "The agent stream ended before completion",
+              completedAt,
+            };
+            await activityEvents.recordAgentEvent({
+              identity: owner,
+              workspaceId: request.params.workspaceId,
+              agentCatalogId: catalogId,
+              sessionId,
+              displayName: access.displayName,
+              event: terminal,
+            });
+          }
+          throw error;
         }
       },
       onError: (error) => error instanceof OneComputerError
