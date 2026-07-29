@@ -647,7 +647,7 @@ export function createControlServer(
     await agentChat.health(access);
     return reply.code(204).send();
   });
-  app.post("/internal/v1/channels/turns", async (request, reply) => {
+  app.post("/internal/v1/channels/turns", { bodyLimit: 24 * 1024 * 1024 }, async (request, reply) => {
     const input = channelTurnRequestSchema.parse(request.body ?? {});
     const { access } = await verifiedChannelRoute(input, true);
     if (!store.claimChannelUpdate || !await store.claimChannelUpdate(
@@ -660,16 +660,21 @@ export function createControlServer(
     const session = input.sessionId
       ? { id: input.sessionId }
       : await agentChat.createSession(access, `Telegram ${input.externalSenderId}`);
-    const message: ChatUiMessage = {
-      id: randomUUID(),
-      role: "user",
-      metadata: {
-        agentCatalogId: input.agentCatalogId,
-        state: "completed",
-        createdAt: new Date().toISOString(),
+    const message = sendChatTurnSchema.parse({
+      message: {
+        id: randomUUID(),
+        role: "user",
+        metadata: {
+          agentCatalogId: input.agentCatalogId,
+          state: "completed",
+          createdAt: new Date().toISOString(),
+        },
+        parts: [
+          ...(input.text ? [{ type: "text" as const, text: input.text }] : []),
+          ...(input.attachments ?? []),
+        ],
       },
-      parts: [{ type: "text", text: input.text }],
-    };
+    }).message;
     const frame = (event: unknown) => `${JSON.stringify(channelTurnStreamEventSchema.parse(event))}\n`;
     const stream = async function*() {
       let text = "";

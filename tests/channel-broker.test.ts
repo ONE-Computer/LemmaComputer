@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
+import { chatAttachmentMaxBytes, type ChannelTurnRequest, type IdentityContext } from "@onecomputer/contracts";
 import {
   ChannelBrokerService,
   ChannelCredentialVault,
   HttpChannelControlClient,
+  TelegramBotApiClient,
   type ChannelControlClient,
   type TelegramBotClient,
   type TelegramMessageOptions,
@@ -40,6 +41,8 @@ class FakeTelegram implements TelegramBotClient {
   edits: Array<{ token: string; chatId: string; messageId: string; text: string }> = [];
   chatActions: Array<{ token: string; chatId: string; action: "typing" }> = [];
   answeredCallbacks: Array<{ token: string; callbackQueryId: string; text?: string }> = [];
+  downloads = new Map<string, Buffer>();
+  downloadRequests: Array<{ token: string; fileId: string; maxBytes: number }> = [];
   sendFailuresRemaining = 0;
   sendFailureMatch = "";
 
@@ -53,6 +56,14 @@ class FakeTelegram implements TelegramBotClient {
   async getUpdates(received: string, offset: string) {
     assert.ok(received === token || received === secondToken);
     return this.updates.filter((update) => BigInt(update.updateId) >= BigInt(offset));
+  }
+
+  async downloadFile(received: string, fileId: string, maxBytes: number) {
+    this.downloadRequests.push({ token: received, fileId, maxBytes });
+    const data = this.downloads.get(fileId);
+    if (!data) throw new Error("missing fake Telegram file");
+    if (data.length > maxBytes) throw new Error("fake Telegram file exceeds limit");
+    return data;
   }
 
   async sendMessage(received: string, chatId: string, text: string, options?: TelegramMessageOptions) {
@@ -83,13 +94,7 @@ class FakeControl implements ChannelControlClient {
   failAfterNotice = false;
   textDeltas: string[] = [];
   state: "needs_input" | "completed" | "cancelled" | "failed" = "completed";
-  turns: Array<{
-    workspaceId: string;
-    agentCatalogId: string;
-    externalSenderId: string;
-    sessionId?: string;
-    text: string;
-  }> = [];
+  turns: ChannelTurnRequest[] = [];
 
   async validateRoute(input: { agentCatalogId: string }) {
     if (!["hermes-claw", "claude-cli", "codex-cli"].includes(input.agentCatalogId)) {
@@ -97,13 +102,7 @@ class FakeControl implements ChannelControlClient {
     }
   }
 
-  async turn(input: {
-    workspaceId: string;
-    agentCatalogId: string;
-    externalSenderId: string;
-    sessionId?: string;
-    text: string;
-  }, onNotice?: (notice: string) => Promise<void>, onTextDelta?: (delta: string) => Promise<void>) {
+  async turn(input: ChannelTurnRequest, onNotice?: (notice: string) => Promise<void>, onTextDelta?: (delta: string) => Promise<void>) {
     this.turns.push(input);
     if (this.notice) await onNotice?.(this.notice);
     for (const delta of this.textDeltas) await onTextDelta?.(delta);
@@ -113,7 +112,7 @@ class FakeControl implements ChannelControlClient {
     if (this.failAfterNotice) throw new Error("turn failed after approval");
     return {
       sessionId: input.sessionId ?? `session-${input.agentCatalogId}`,
-      text: this.textDeltas.join("") || `${input.agentCatalogId}: ${input.text}`,
+      text: this.textDeltas.join("") || `${input.agentCatalogId}: ${input.text ?? "Analyze the attached file."}`,
       notices: [],
       state: this.state,
     };
@@ -198,6 +197,174 @@ test("the channel control client owns a long response timeout instead of inherit
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
+});
+
+test("Telegram parses document captions and largest photos, then downloads through a bounded getFile URL", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const deck = Buffer.from("telegram-presentation-bytes");
+  const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, init });
+    if (url.endsWith("/getUpdates")) {
+      return Response.json({
+        ok: true,
+        result: [
+          {
+            update_id: 10,
+            message: {
+              from: { id: 10001 },
+              chat: { id: 10001, type: "private" },
+              caption: "Save this in OneDrive",
+              document: {
+                file_id: "deck-file-id",
+                file_unique_id: "deck-unique-id",
+                file_name: "ONEComputer-Architecture.pptx",
+                mime_type: "application/octet-stream",
+                file_size: deck.length,
+              },
+            },
+          },
+          {
+            update_id: 11,
+            message: {
+              from: { id: 10001 },
+              chat: { id: 10001, type: "private" },
+              photo: [
+                { file_id: "small-photo", file_unique_id: "small", width: 90, height: 90, file_size: 100 },
+                { file_id: "large-photo", file_unique_id: "large", width: 1280, height: 720, file_size: 500 },
+              ],
+            },
+          },
+        ],
+      });
+    }
+    if (url.endsWith("/getFile")) {
+      const fileId = JSON.parse(String(init?.body)).file_id;
+      return Response.json({
+        ok: true,
+        result: fileId === "too-large"
+          ? { file_path: "documents/large.bin", file_size: chatAttachmentMaxBytes + 1 }
+          : fileId === "traversal"
+            ? { file_path: "documents/../secret", file_size: deck.length }
+            : { file_path: "documents/Quarterly deck.pptx", file_size: deck.length },
+      });
+    }
+    if (url.includes("/file/bot")) {
+      return new Response(deck, { headers: { "content-length": String(deck.length) } });
+    }
+    throw new Error(`Unexpected Telegram URL: ${url}`);
+  }) as typeof fetch;
+  const client = new TelegramBotApiClient(fetcher);
+
+  const updates = await client.getUpdates(token, "0");
+  assert.deepEqual(updates[0], {
+    updateId: "10",
+    senderId: "10001",
+    chatId: "10001",
+    chatType: "private",
+    text: "Save this in OneDrive",
+    attachment: {
+      fileId: "deck-file-id",
+      fileUniqueId: "deck-unique-id",
+      filename: "ONEComputer-Architecture.pptx",
+      mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      fileSize: deck.length,
+    },
+  });
+  assert.equal(updates[1]?.attachment?.fileId, "large-photo");
+  assert.equal(updates[1]?.attachment?.mediaType, "image/jpeg");
+  assert.deepEqual(await client.downloadFile(token, "deck-file-id", chatAttachmentMaxBytes), deck);
+  assert.equal(calls.at(-1)?.url.includes("documents/Quarterly%20deck.pptx"), true);
+  assert.equal(calls.at(-1)?.init?.redirect, "error");
+  await assert.rejects(
+    client.downloadFile(token, "too-large", chatAttachmentMaxBytes),
+    (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "CHANNEL_ATTACHMENT_TOO_LARGE"),
+  );
+  await assert.rejects(
+    client.downloadFile(token, "traversal", chatAttachmentMaxBytes),
+    (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "TELEGRAM_INVALID_RESPONSE"),
+  );
+});
+
+test("Telegram forwards bounded files and images while rejecting unsupported or oversized attachments", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-attachment-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: false,
+  });
+  const deck = Buffer.from("presentation-bytes");
+  const photo = Buffer.from([0xff, 0xd8, 0xff, 0xdb]);
+  telegram.downloads.set("deck-file", deck);
+  telegram.downloads.set("photo-file", photo);
+
+  telegram.updates = [{
+    updateId: "1",
+    chatId: "10001",
+    senderId: "10001",
+    chatType: "private",
+    text: "Save this in OneDrive",
+    attachment: {
+      fileId: "deck-file",
+      filename: "Architecture.pptx",
+      mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      fileSize: deck.length,
+    },
+  }];
+  await service.pollOnce();
+  assert.equal(control.turns[0]?.text, "Save this in OneDrive");
+  assert.deepEqual(control.turns[0]?.attachments, [{
+    type: "file",
+    filename: "Architecture.pptx",
+    mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    url: `data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,${deck.toString("base64")}`,
+  }]);
+
+  telegram.updates = [{
+    updateId: "2",
+    chatId: "10001",
+    senderId: "10001",
+    chatType: "private",
+    attachment: { fileId: "photo-file", filename: "photo.jpg", mediaType: "image/jpeg", fileSize: photo.length },
+  }];
+  await service.pollOnce();
+  assert.equal(control.turns[1]?.text, undefined);
+  assert.equal(control.turns[1]?.attachments?.[0]?.mediaType, "image/jpeg");
+
+  telegram.updates = [{
+    updateId: "3",
+    chatId: "10001",
+    senderId: "10001",
+    chatType: "private",
+    attachment: { fileId: "zip-file", filename: "archive.zip", mediaType: "application/zip", fileSize: 100 },
+  }];
+  await service.pollOnce();
+  assert.equal(control.turns.length, 2);
+  assert.equal(telegram.sent.at(-1)?.text.includes("not supported"), true);
+
+  telegram.updates = [{
+    updateId: "4",
+    chatId: "10001",
+    senderId: "10001",
+    chatType: "private",
+    attachment: { fileId: "large-file", filename: "large.pdf", mediaType: "application/pdf", fileSize: chatAttachmentMaxBytes + 1 },
+  }];
+  await service.pollOnce();
+  assert.equal(control.turns.length, 2);
+  assert.equal(telegram.sent.at(-1)?.text.includes("8 MB or smaller"), true);
+  assert.deepEqual(telegram.downloadRequests.map((request) => request.fileId), ["deck-file", "photo-file"]);
 });
 
 test("Telegram credentials are encrypted, write-only, and owner scoped", async () => {

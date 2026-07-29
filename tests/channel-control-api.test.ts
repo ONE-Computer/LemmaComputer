@@ -173,6 +173,7 @@ test("credential APIs keep Telegram tokens write-only across create, rotate, lis
 
 class FakeAgentChat implements AgentChatClient {
   turns: ChannelTurnRequest[] = [];
+  messages: Array<{ parts: Array<{ type: string; text?: string; filename?: string; mediaType?: string; url?: string }> }> = [];
   approvalSummary: string | undefined;
   async health() {}
   async listSessions() { return { sessions: [], nextCursor: null }; }
@@ -180,7 +181,8 @@ class FakeAgentChat implements AgentChatClient {
     return { id: "telegram-session-hermes", title: "Telegram", createdAt: null, updatedAt: null };
   }
   async listMessages() { return []; }
-  async *streamTurn(access: { catalogId: string }, sessionId: string, message: { parts: Array<{ type: string; text?: string }> }): AsyncIterable<AgentChatEvent> {
+  async *streamTurn(access: { catalogId: string }, sessionId: string, message: { parts: Array<{ type: string; text?: string; filename?: string; mediaType?: string; url?: string }> }): AsyncIterable<AgentChatEvent> {
+    this.messages.push(message);
     this.turns.push({
       connectionId: "92b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
       identity: alpha,
@@ -363,6 +365,12 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     externalSenderId: "10001",
     updateId: "1",
     text: "hello",
+    attachments: [{
+      type: "file",
+      filename: "telegram-photo.jpg",
+      mediaType: "image/jpeg",
+      url: "data:image/jpeg;base64,/9j/2Q==",
+    }],
   };
   await store.reserveChannelUpdate(connectionId, "1", "10001");
   try {
@@ -381,6 +389,15 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     });
     assert.equal(accepted.statusCode, 200);
     assert.match(accepted.headers["content-type"] ?? "", /^application\/x-ndjson/);
+    assert.deepEqual(chat.messages[0]?.parts, [
+      { type: "text", text: "hello" },
+      {
+        type: "file",
+        filename: "telegram-photo.jpg",
+        mediaType: "image/jpeg",
+        url: "data:image/jpeg;base64,/9j/2Q==",
+      },
+    ]);
     assert.deepEqual(
       accepted.body.trim().split("\n").map((line) => JSON.parse(line)),
       [
