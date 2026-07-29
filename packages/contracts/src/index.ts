@@ -1030,6 +1030,21 @@ export type ChannelTurnRequest = z.infer<typeof channelTurnRequestSchema>;
 export type ChannelTurnResponse = z.infer<typeof channelTurnResponseSchema>;
 export type ChannelTurnStreamEvent = z.infer<typeof channelTurnStreamEventSchema>;
 
+const agentActivityHttpUrlSchema = z.string().max(2_048).refine((value) => {
+  try {
+    const parsed = new URL(value);
+    return ["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}, "Agent activity links must use HTTP(S) and must not contain URL credentials");
+
+export const activityHttpUrlSchema = agentActivityHttpUrlSchema.refine((value) => {
+  const parsed = new URL(value);
+  const sensitiveQueryKey = /^(?:access_token|api[_-]?key|awsaccesskeyid|code|credential|key|password|refresh_token|sig|signature|token|x-amz-.+|x-goog-.+)$/i;
+  return !parsed.hash && ![...parsed.searchParams.keys()].some((key) => sensitiveQueryKey.test(key));
+}, "Persisted Activity links must not contain fragments, signatures, or credential query parameters");
+
 const agentChatEventBaseSchema = z.object({
   version: z.literal(1),
   sequence: z.number().int().nonnegative().max(100_000),
@@ -1047,6 +1062,16 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
     activityId: chatPartIdSchema,
     label: z.string().trim().min(1).max(240),
     state: z.enum(["running", "completed"]),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("plan"),
+    title: z.string().trim().min(1).max(240),
+    summary: z.string().trim().min(1).max(500).optional(),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("provider-summary"),
+    summary: z.string().trim().min(1).max(500),
+    provider: z.string().trim().min(1).max(80).optional(),
   }).strict(),
   agentChatEventBaseSchema.extend({
     type: z.literal("text-delta"),
@@ -1069,6 +1094,35 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
     summary: z.string().trim().min(1).max(500),
   }).strict(),
   agentChatEventBaseSchema.extend({
+    type: z.literal("web-action"),
+    action: z.enum(["search", "open", "find"]),
+    label: z.string().trim().min(1).max(240),
+    url: agentActivityHttpUrlSchema.optional(),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("source"),
+    title: z.string().trim().min(1).max(240),
+    url: agentActivityHttpUrlSchema,
+    citation: z.string().trim().min(1).max(80).optional(),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("computer-action"),
+    actionId: chatPartIdSchema,
+    label: z.string().trim().min(1).max(240),
+    viewerRef: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/).optional(),
+    state: z.enum(["running", "completed", "failed"]),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("notice"),
+    message: z.string().trim().min(1).max(500),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("error"),
+    code: z.string().regex(/^[A-Z][A-Z0-9_]{2,63}$/),
+    message: z.string().trim().min(1).max(500),
+    retryable: z.boolean(),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
     type: z.literal("turn-finish"),
     state: chatTurnStateSchema.exclude(["streaming"]),
     message: z.string().trim().min(1).max(500).optional(),
@@ -1076,6 +1130,133 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
   }).strict(),
 ]);
 export type AgentChatEvent = z.infer<typeof agentChatEventSchema>;
+
+export const activityEventStateSchema = z.enum([
+  "pending",
+  "running",
+  "requires_action",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export const activityEventProvenanceSchema = z.enum([
+  "deterministic_system",
+  "provider_generated",
+  "tool",
+]);
+export const activityEventVisibilitySchema = z.literal("user");
+
+const activityEventBaseSchema = z.object({
+  version: z.literal(1),
+  eventId: z.uuid(),
+  turnId: chatPartIdSchema,
+  sequence: z.number().int().nonnegative().max(100_000),
+  timestamp: z.iso.datetime(),
+  state: activityEventStateSchema,
+  provenance: activityEventProvenanceSchema,
+  visibility: activityEventVisibilitySchema,
+});
+
+export const activityEventSchema = z.discriminatedUnion("kind", [
+  activityEventBaseSchema.extend({
+    kind: z.literal("plan"),
+    payload: z.object({
+      title: z.string().trim().min(1).max(240),
+      summary: z.string().trim().min(1).max(500).optional(),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("progress"),
+    payload: z.object({
+      activityId: chatPartIdSchema,
+      label: z.string().trim().min(1).max(240),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("provider_summary"),
+    provenance: z.literal("provider_generated"),
+    payload: z.object({
+      summary: z.string().trim().min(1).max(500),
+      provider: z.string().trim().min(1).max(80).optional(),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("tool"),
+    provenance: z.literal("tool"),
+    payload: z.object({
+      toolCallId: chatPartIdSchema,
+      name: z.string().trim().regex(/^[A-Za-z0-9_.:-]{1,160}$/),
+      summary: z.string().trim().min(1).max(500).optional(),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("web_action"),
+    provenance: z.literal("tool"),
+    payload: z.object({
+      action: z.enum(["search", "open", "find"]),
+      label: z.string().trim().min(1).max(240),
+      url: activityHttpUrlSchema.optional(),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("source"),
+    payload: z.object({
+      title: z.string().trim().min(1).max(240),
+      url: activityHttpUrlSchema,
+      citation: z.string().trim().min(1).max(80).optional(),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("approval"),
+    provenance: z.literal("tool"),
+    payload: z.object({
+      approvalId: chatPartIdSchema,
+      toolCallId: chatPartIdSchema,
+      operationId: z.uuid(),
+      summary: z.string().trim().min(1).max(500),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("computer_action"),
+    provenance: z.literal("tool"),
+    payload: z.object({
+      actionId: chatPartIdSchema,
+      label: z.string().trim().min(1).max(240),
+      viewerRef: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/).optional(),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("notice"),
+    payload: z.object({
+      message: z.string().trim().min(1).max(500),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("error"),
+    payload: z.object({
+      code: z.string().regex(/^[A-Z][A-Z0-9_]{2,63}$/),
+      message: z.string().trim().min(1).max(500),
+      retryable: z.boolean(),
+    }).strict(),
+  }).strict(),
+  activityEventBaseSchema.extend({
+    kind: z.literal("terminal"),
+    provenance: z.literal("deterministic_system"),
+    payload: z.object({
+      turnState: chatTurnStateSchema.exclude(["streaming"]),
+      message: z.string().trim().min(1).max(500).optional(),
+    }).strict(),
+  }).strict(),
+]);
+export type ActivityEventV1 = z.infer<typeof activityEventSchema>;
+export type ActivityEventDraft = Omit<ActivityEventV1, "version" | "eventId" | "sequence" | "timestamp">;
+
+export const activityEventReplaySchema = z.object({
+  events: z.array(activityEventSchema).max(500),
+  nextAfterSequence: z.number().int().nonnegative().max(100_000).nullable(),
+  terminal: z.boolean(),
+}).strict();
+export type ActivityEventReplay = z.infer<typeof activityEventReplaySchema>;
 
 export const sandboxSchema = z.object({
   providerId: z.string().min(1),
