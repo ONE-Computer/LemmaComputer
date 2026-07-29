@@ -26,6 +26,14 @@ const bravo: IdentityContext = {
 const token = "123456789:telegram-token-that-must-remain-write-only";
 const secondToken = "987654321:telegram-token-for-the-second-workspace";
 
+async function waitUntil(predicate: () => boolean, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for asynchronous test condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 class FakeTelegram implements TelegramBotClient {
   updates: TelegramUpdate[] = [];
   sent: Array<{ token: string; chatId: string; text: string; options?: TelegramMessageOptions }> = [];
@@ -162,7 +170,7 @@ test("the channel control client owns a long response timeout instead of inherit
       async (delta) => { deltas.push(delta); },
     )
       .finally(() => { completed = true; });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitUntil(() => notices.length === 1 && deltas.length === 1);
     assert.deepEqual(notices, [
       "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
     ]);
