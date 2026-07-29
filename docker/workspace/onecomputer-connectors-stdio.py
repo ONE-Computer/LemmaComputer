@@ -83,6 +83,32 @@ TEAMS_TOOL_DESCRIPTIONS = {
     "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Set onecomputerAudit to the exact team and channel display names. Put the reply in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before posting.",
 }
 
+BOUNDED_LIST_INPUT_PROPERTIES = {
+    "top": {"type": "integer", "minimum": 1, "maximum": 25},
+    "skip": {"type": "integer", "minimum": 0, "maximum": 1000},
+    "select": {"type": "string", "minLength": 1, "maxLength": 256},
+    "filter": {"type": "string", "minLength": 1, "maxLength": 512},
+    "search": {"type": "string", "minLength": 1, "maxLength": 256},
+    "orderby": {"type": "string", "minLength": 1, "maxLength": 128},
+    "count": {"type": "boolean"},
+}
+CALENDAR_VIEW_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        **BOUNDED_LIST_INPUT_PROPERTIES,
+        "startDateTime": {"type": "string", "format": "date-time", "description": "ISO 8601 date-time with UTC or a numeric offset, for example 2026-07-29T00:00:00+08:00."},
+        "endDateTime": {"type": "string", "format": "date-time", "description": "ISO 8601 date-time with UTC or a numeric offset, no more than 93 days after startDateTime."},
+        "timezone": {"type": "string", "minLength": 1, "maxLength": 64},
+    },
+    "required": ["startDateTime", "endDateTime"],
+    "additionalProperties": False,
+}
+LIST_CALENDAR_EVENTS_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {**BOUNDED_LIST_INPUT_PROPERTIES, "timezone": {"type": "string", "minLength": 1, "maxLength": 64}},
+    "additionalProperties": False,
+}
+
 LIST_DRIVES_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -649,7 +675,11 @@ def discover_tools() -> list[dict]:
         selected["_onecomputer_upstream_name"] = upstream_name
         TOOLS[visible_name] = selected
         input_schema = raw.get("inputSchema", raw.get("input_schema", {"type": "object"}))
-        if upstream_name == "list-drives":
+        if upstream_name == "get-calendar-view":
+            input_schema = CALENDAR_VIEW_INPUT_SCHEMA
+        elif upstream_name == "list-calendar-events":
+            input_schema = LIST_CALENDAR_EVENTS_INPUT_SCHEMA
+        elif upstream_name == "list-drives":
             input_schema = LIST_DRIVES_INPUT_SCHEMA
         elif upstream_name == "search-onedrive-files":
             input_schema = SEARCH_ONEDRIVE_INPUT_SCHEMA
