@@ -56,6 +56,16 @@ export const chatApi = {
   ),
 };
 
+export const skillApi = {
+  list: () => request("/api/v1/skills", { cache: "no-store" }),
+};
+
+export const siteApi = {
+  list: () => request("/api/v1/sites", { cache: "no-store" }),
+  preview: (id) => request(`/api/v1/sites/${encodeURIComponent(id)}/preview`, { cache: "no-store" }),
+  delete: (id) => request(`/api/v1/sites/${encodeURIComponent(id)}`, mutation("DELETE")),
+};
+
 export const scheduleApi = {
   list: () => request("/api/v1/schedules", { cache: "no-store" }),
   create: (input) => request("/api/v1/schedules", mutation("POST", input)),

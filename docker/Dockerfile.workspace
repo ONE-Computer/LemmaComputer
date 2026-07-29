@@ -211,6 +211,9 @@ RUN python -c \
 COPY --from=hermes_desktop_builder /src/apps/desktop/release/linux-unpacked /opt/onecomputer/hermes-desktop
 COPY --from=hermes_desktop_builder /src/apps/desktop/assets/icon.png /opt/onecomputer/hermes-desktop-icon.png
 COPY docker/workspace/onecomputer-gateway-proxy.py /usr/local/libexec/onecomputer-gateway-proxy
+COPY docker/workspace/onecomputer-sites.py /usr/local/bin/onecomputer-sites
+COPY skills/make-a-site /opt/onecomputer/skills/make-a-site
+COPY skills/make-a-site /opt/onecomputer/hermes-agent/skills/onecomputer/make-a-site
 COPY docker/workspace/onecomputer-egress-broker.py /usr/local/libexec/onecomputer-egress-broker
 COPY docker/workspace/onecomputer-connectors-stdio.py /usr/local/libexec/onecomputer-connectors-stdio
 COPY docker/workspace/onecomputer-agent-chat.py /usr/local/libexec/onecomputer-agent-chat
@@ -245,6 +248,7 @@ RUN chmod 0755 \
       /usr/local/bin/onecomputer-codex \
       /usr/local/bin/onecomputer-hermes \
       /usr/local/bin/onecomputer-hermes-desktop \
+      /usr/local/bin/onecomputer-sites \
       /usr/local/bin/onecomputer-crontab \
       /usr/local/bin/onecomputer-cron-run \
       /usr/local/share/onecomputer/applications/onecomputer-claude-desktop.desktop \
@@ -254,6 +258,8 @@ RUN chmod 0755 \
       /usr/local/share/onecomputer/applications/onecomputer-google-chrome.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-hermes-agent-cli.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-hermes-desktop.desktop \
+    && test -f /opt/onecomputer/skills/make-a-site/SKILL.md \
+    && test -f /opt/onecomputer/hermes-agent/skills/onecomputer/make-a-site/SKILL.md \
     && chmod 0644 /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js /opt/firefox/distribution/policies.json /etc/opt/chrome/policies/managed/onecomputer.json /usr/local/share/onecomputer/SCHEDULING.md \
     && test "$(dpkg-query -W -f='${Version}' cron)" = "3.0pl1-137ubuntu3" \
     && grep -q 'dist/style.bundle.js' /usr/share/kasmvnc/www/index.html \

@@ -19,6 +19,7 @@ OFFICE_DEFAULT_SKILLS = frozenset({
     "powerpoint",
     "xlsx",
 })
+REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS | frozenset({"make-a-site"})
 SKILL_DEFAULTS_VERSION = 1
 SKILL_STATE_FILE = ".onecomputer-skill-defaults.json"
 
@@ -103,9 +104,9 @@ def main() -> None:
     bundled_root = Path(bundled_raw)
     home.mkdir(parents=True, exist_ok=True)
     current_bundled = bundled_skill_names(bundled_root)
-    missing_office = OFFICE_DEFAULT_SKILLS - current_bundled
-    if missing_office:
-        raise SystemExit(f"missing required Office skills: {','.join(sorted(missing_office))}")
+    missing_required = REVIEWED_DEFAULT_SKILLS - current_bundled
+    if missing_required:
+        raise SystemExit(f"missing required reviewed skills: {','.join(sorted(missing_required))}")
 
     config_path = home / "config.yaml"
     existing = load_mapping(config_path)
@@ -120,7 +121,7 @@ def main() -> None:
         if initialized
         else current_bundled
     )
-    disabled.update(skills_to_default_off - OFFICE_DEFAULT_SKILLS)
+    disabled.update(skills_to_default_off - REVIEWED_DEFAULT_SKILLS)
     skills_config["disabled"] = sorted(disabled)
 
     managed_office_toolsets = ["file", "skills", "terminal", "vision"]

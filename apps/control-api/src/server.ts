@@ -1,10 +1,10 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
@@ -30,6 +30,7 @@ import {
 import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient } from "./channel-broker.js";
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
+import { SitesService } from "./sites.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -252,6 +253,7 @@ export function createControlServer(
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
     scheduleStore?: ScheduleStore;
+    siteStore?: SiteStore;
     schedulerInternalToken?: string;
     schedulePromptSecret?: string;
     connectorRegistryStore?: ConnectorRegistryStore;
@@ -295,6 +297,11 @@ export function createControlServer(
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
   const activityEvents = new ActivityEventService(store);
+  const sites = security.siteStore ? new SitesService(security.siteStore) : undefined;
+  const requireSites = () => {
+    if (!sites) throw new OneComputerError("SITES_NOT_CONFIGURED", "Sites are unavailable", 503, true);
+    return sites;
+  };
   const channelBroker = security.channelBrokerClient;
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
@@ -408,6 +415,7 @@ export function createControlServer(
       request.url.startsWith("/internal/v1/agent/operations/")
       || request.url.startsWith("/internal/v1/agent/uploads")
       || request.url.startsWith("/internal/v1/agent/deletions")
+      || request.url.startsWith("/internal/v1/agent/sites")
     ) {
       const authorization = request.headers.authorization;
       const value = Array.isArray(authorization) ? authorization[0] : authorization;
@@ -753,6 +761,24 @@ export function createControlServer(
     const input = executeScheduleRunSchema.parse(request.body ?? {});
     return requireSchedules().executeClaimed(input.runId, input.leaseToken);
   });
+  app.post("/internal/v1/agent/sites", { bodyLimit: 800 * 1024 }, async (request, reply) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" as const };
+    const { policy } = await channelPolicy(owner, actor.workspaceId);
+    const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
+    if (actor.policyHash !== policy.policyHash || !allowedAgentIds.has(actor.agentId)) {
+      throw new OneComputerError("SITE_POLICY_BINDING_MISMATCH", "Publishing is not assigned to this workspace agent", 403);
+    }
+    const input = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
+    const site = await requireSites().publish(owner, {
+      ...input,
+      sourceWorkspaceId: actor.workspaceId,
+      sourceAgentId: actor.agentId,
+    });
+    return reply.code(201).send(site);
+  });
+
   app.get<{ Params: { operationId: string } }>("/internal/v1/agent/operations/:operationId", async (request) => {
     const actor = agentPrincipals.get(request);
     if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
@@ -1893,6 +1919,23 @@ export function createControlServer(
     await service.delete(identity(request), policy, request.params.workspaceId);
     return reply.code(204).send();
   });
+  app.get("/v1/skills", async (request, reply) => {
+    await requirePolicy(request);
+    return reply.header("cache-control", "no-store").send({ skills: reviewedAgentSkillCatalog });
+  });
+  app.get("/v1/sites", async (request, reply) => {
+    await requirePolicy(request);
+    return reply.header("cache-control", "no-store").send(await requireSites().list(identity(request)));
+  });
+  app.get<{ Params: { siteId: string } }>("/v1/sites/:siteId/preview", async (request, reply) => {
+    await requirePolicy(request);
+    return reply.header("cache-control", "no-store").send(await requireSites().preview(identity(request), request.params.siteId));
+  });
+  app.delete<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request, reply) => {
+    await requirePolicy(request);
+    await requireSites().delete(identity(request), request.params.siteId);
+    return reply.code(204).send();
+  });
   app.get("/v1/schedules", async (request) => {
     await assignedPolicy(request);
     return requireSchedules().list(identity(request));
@@ -2002,6 +2045,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const connectorRegistryStore = PostgresConnectorRegistryStore.fromConnectionString(env.DATABASE_URL);
   const providerSettingsStore = PostgresProviderSettingsStore.fromConnectionString(env.DATABASE_URL);
   const scheduleStore = PostgresScheduleStore.fromConnectionString(env.DATABASE_URL);
+  const siteStore = PostgresSiteStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
@@ -2110,6 +2154,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
       scheduleStore,
+      siteStore,
       schedulerInternalToken: env.SCHEDULER_INTERNAL_TOKEN,
       schedulePromptSecret: env.SCHEDULE_PROMPT_SECRET,
       workspaceIngress,
@@ -2130,6 +2175,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await connectorRegistryStore.close();
     await providerSettingsStore.close();
     await scheduleStore.close();
+    await siteStore.close();
     await identityPolicyStore.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });

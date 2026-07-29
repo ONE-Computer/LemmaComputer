@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import http.client
 import json
 import os
+import re
 import sys
 import threading
 import urllib.error
@@ -61,11 +63,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/onecomputer/deletions":
             self.create_onedrive_deletion()
             return
+        if self.path == "/onecomputer/sites":
+            self.publish_site()
+            return
         self.forward()
 
-    def read_json(self) -> dict:
+    def read_json(self, max_bytes: int = 16 * 1024) -> dict:
         length = int(self.headers.get("content-length", "0"))
-        if length <= 0 or length > 16 * 1024:
+        if length <= 0 or length > max_bytes:
             raise ValueError("invalid request body")
         value = json.loads(self.rfile.read(length))
         if not isinstance(value, dict):
@@ -147,6 +152,39 @@ class Handler(BaseHTTPRequestHandler):
                 UPLOAD_KEYS[key] = operation["id"]
                 UPLOAD_JOBS[operation["id"]] = job
             self.send_json(201, {"operation": operation})
+        except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+            self.send_json(400, {"error": str(error)[:240]})
+
+    def publish_site(self) -> None:
+        try:
+            value = self.read_json(800 * 1024)
+            name = value.get("name")
+            slug = value.get("slug")
+            html_base64 = value.get("htmlBase64")
+            artifact_sha256 = value.get("artifactSha256")
+            if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
+                raise ValueError("name must contain 1 to 80 characters")
+            if not isinstance(slug, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug) or not 2 <= len(slug) <= 80:
+                raise ValueError("slug must be 2 to 80 lowercase hyphenated characters")
+            if not isinstance(html_base64, str) or len(html_base64) > 750_000:
+                raise ValueError("htmlBase64 is required")
+            if not isinstance(artifact_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", artifact_sha256):
+                raise ValueError("artifactSha256 is required")
+            try:
+                content = base64.b64decode(html_base64, validate=True)
+            except (ValueError, base64.binascii.Error):
+                raise ValueError("htmlBase64 is invalid") from None
+            if not content or len(content) > 512 * 1024:
+                raise ValueError("site artifact must be between 1 byte and 512 KB")
+            if hashlib.sha256(content).hexdigest() != artifact_sha256:
+                raise ValueError("site artifact digest does not match")
+            site = self.control_json("/internal/v1/agent/sites", {
+                "name": name.strip(),
+                "slug": slug,
+                "htmlBase64": html_base64,
+                "artifactSha256": artifact_sha256,
+            })
+            self.send_json(201, site)
         except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
             self.send_json(400, {"error": str(error)[:240]})
 

@@ -20,7 +20,7 @@ const installSkill = async (bundle: string, name: string) => {
   );
 };
 
-test("Hermes defaults only Office skills on and preserves later employee toggles", async (context) => {
+test("Hermes enables reviewed default skills and preserves later employee toggles", async (context) => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "onecomputer-hermes-profile-"));
   context.after(() => rm(temporary, { recursive: true, force: true }));
   const home = path.join(temporary, "profile");
@@ -31,7 +31,7 @@ test("Hermes defaults only Office skills on and preserves later employee toggles
     path.join(modules, "toolsets.py"),
     "TOOLSETS = {}\ndef resolve_toolset(name):\n    return {name}\n",
   );
-  for (const skill of [...officeSkills, "teams-meeting-pipeline"]) {
+  for (const skill of [...officeSkills, "make-a-site", "teams-meeting-pipeline"]) {
     await installSkill(bundle, skill);
   }
 
@@ -50,7 +50,7 @@ test("Hermes defaults only Office skills on and preserves later employee toggles
   await configure();
   const first = JSON.parse(await readFile(path.join(home, "config.yaml"), "utf8"));
   assert.deepEqual(first.skills.disabled, ["teams-meeting-pipeline"]);
-  for (const skill of officeSkills) {
+  for (const skill of [...officeSkills, "make-a-site"]) {
     assert.ok(!first.skills.disabled.includes(skill));
   }
 

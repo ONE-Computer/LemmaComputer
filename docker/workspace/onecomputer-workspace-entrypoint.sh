@@ -408,6 +408,27 @@ if agent_enabled codex-cli; then
   configure_codex /home/kasm-user/.codex-chat-sdk "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS" "$ONECOMPUTER_EXECUTION_MODE"
 fi
 
+install_agent_skill() {
+  local home="$1"
+  local target="$home/skills/make-a-site"
+  install -d -o 1000 -g 1000 -m 0700 "$home/skills"
+  rm -rf -- "$target"
+  cp -a /opt/onecomputer/skills/make-a-site "$target"
+  chown -R 1000:1000 "$target"
+}
+
+if agent_enabled claude-desktop; then
+  install_agent_skill /home/kasm-user/.claude
+fi
+if agent_enabled claude-cli; then
+  install_agent_skill /home/kasm-user/.claude-cli
+  install_agent_skill /home/kasm-user/.claude-chat-sdk
+fi
+if agent_enabled codex-cli; then
+  install_agent_skill /home/kasm-user/.codex-cli
+  install_agent_skill /home/kasm-user/.codex-chat-sdk
+fi
+
 configure_hermes() {
   local home="$1"
   local model="$2"
@@ -598,6 +619,7 @@ if agent_enabled hermes-claw; then
       ONECOMPUTER_TIME_ZONE="$ONECOMPUTER_TIME_ZONE" \
       OPENAI_API_KEY=onecomputer-loopback-broker \
       ONECOMPUTER_CONNECTORS_BROKER=http://127.0.0.1:4314 \
+      ONECOMPUTER_SITES_BROKER=http://127.0.0.1:4314 \
       API_SERVER_ENABLED=true \
       API_SERVER_HOST=127.0.0.1 \
       API_SERVER_PORT=8652 \
@@ -643,6 +665,7 @@ start_sdk_chat_adapter() {
       TZ="${TZ:-Etc/UTC}" \
       ONECOMPUTER_TIME_ZONE="$ONECOMPUTER_TIME_ZONE" \
       ONECOMPUTER_CHAT_BROKER="http://127.0.0.1:${broker_port}" \
+      ONECOMPUTER_SITES_BROKER="http://127.0.0.1:${broker_port}" \
       ONECOMPUTER_CHAT_PORT="$port" \
       ONECOMPUTER_HERMES_CHAT_URL="$hermes_url" \
       ONECOMPUTER_HERMES_CHAT_KEY="$hermes_key" \

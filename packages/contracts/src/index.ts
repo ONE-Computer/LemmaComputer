@@ -356,6 +356,23 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
   }),
 ]);
 
+export const reviewedAgentSkillSchema = z.object({
+  id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  displayName: z.string().min(1).max(80),
+  description: z.string().min(1).max(180),
+  defaultPrompt: z.string().min(1).max(240),
+}).strict();
+export type ReviewedAgentSkill = z.infer<typeof reviewedAgentSkillSchema>;
+
+export const reviewedAgentSkillCatalog: readonly ReviewedAgentSkill[] = Object.freeze([
+  reviewedAgentSkillSchema.parse({
+    id: "make-a-site",
+    displayName: "Make a site",
+    description: "Build and publish a simple owner-only Vite site.",
+    defaultPrompt: "Use $make-a-site to build and publish a simple site.",
+  }),
+]);
+
 export const clipboardPolicySchema = z.object({
   enabled: z.boolean(),
   localToWorkspace: z.boolean(),

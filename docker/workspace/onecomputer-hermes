@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export ONECOMPUTER_SITES_BROKER=http://127.0.0.1:4314
 
 export HERMES_HOME=/home/kasm-user/.hermes
 export HERMES_BUNDLED_SKILLS=/opt/onecomputer/hermes-agent/skills

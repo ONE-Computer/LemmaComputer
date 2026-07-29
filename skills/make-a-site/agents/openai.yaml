@@ -1,0 +1,4 @@
+interface:
+  display_name: "Make a site"
+  short_description: "Build and publish a simple Vite site"
+  default_prompt: "Use $make-a-site to build and publish a simple site."
