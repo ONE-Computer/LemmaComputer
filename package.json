@@ -34,7 +34,7 @@
     "verify:quick": "node scripts/verify-quick.mjs",
     "verify:db": "node scripts/verify-db.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "release:promote": "node scripts/release-promote.mjs",
+    "release:tag": "node scripts/release-tag.mjs",
     "db:migration:new": "node scripts/migration-new.mjs",
     "db:check": "tsx apps/control-api/src/check-schema.ts"
   },

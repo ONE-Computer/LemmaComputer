@@ -13,27 +13,26 @@ Do not fork a separate self-hosted codebase. Keep deployment-specific behavior b
 
 ## Before changing code
 
-1. Read the GitHub issue, its definition of success, and its native `blocked by` relationships.
-2. Work only when every blocker is closed. Recheck the `dev` project after each merged dependency; start any newly unblocked issue without waiting for an artificial wave boundary.
-3. Use one issue per branch and one branch per worktree. Never develop on `main`.
-4. Run `npm run worktree:init` once in a new worktree, then `npm run dev:doctor` at the start of each work session.
-5. Keep changes inside the issue scope. Record newly discovered work as a separate issue with explicit dependencies.
+1. Treat the user's request as the task contract. If a GitHub issue exists, also read its definition of success and unresolved `blocked by` relationships.
+2. Use one task per branch and one branch per worktree. Do not develop directly on `main`.
+3. Run `npm run worktree:init` once in a new worktree, then `npm run dev:doctor` at the start of each work session.
+4. Keep changes inside the task scope. Record substantial follow-up work separately instead of expanding the task silently.
 
-Branch names should use `codex/<issue>-<short-name>` for agent work. Parallel worktrees must never share `.env`, Compose project names, container names, ports, networks, images, volumes, or databases.
+Branch names should use `codex/<issue>-<short-name>` when an issue exists and `codex/<short-name>` otherwise. Parallel worktrees must never share `.env`, Compose project names, container names, ports, networks, images, volumes, or databases.
 
-## Main and demo safety
+## Integration and demo releases
 
-`main` is the demo-candidate branch. It must remain runnable at all times.
+`main` is the integration branch. The running demo is a separate deployment pinned to an immutable `demo-*` tag, so ordinary changes to `main` do not change the demo.
 
-- Never edit, merge into, or push `main` directly.
-- There is deliberately no GitHub Actions or paid branch-protection dependency. Local gates and the pre-push hook are the enforcement mechanism.
-- Before handoff, run `npm run verify:quick`.
-- Database or migration changes also require `npm run verify:db`.
-- Only a clean committed SHA that passed `npm run verify:release` may be promoted.
-- `npm run release:promote -- --sha=<sha> --push` is the only supported main push. It performs a non-force, atomic fast-forward and immutable demo tag.
-- The demo deployment follows an immutable `demo-*` tag, never a moving worktree or unverified `main` checkout.
+- Feature work happens in isolated branches/worktrees and is merged into `main` after `npm run verify:quick`.
+- Database or migration changes also require `npm run verify:db` before integration.
+- The integration owner may merge and push `main`; there is no GitHub Actions, paid branch protection, or blocking local hook.
+- A demo release requires a clean pushed commit on `main` or `release/*`, `npm run verify:release`, then `npm run release:tag -- --push`.
+- `release:tag` pushes only a new immutable tag. It never moves a branch or reuses a tag.
+- Create a temporary `release/*` branch only when demo stabilization must continue while new work lands on `main`. Merge its fixes back into `main`.
+- Deploy the exact demo tag and image digest, never a moving branch or dirty checkout.
 
-A hook is accident prevention, not a security boundary. Do not bypass it.
+Local command output is the verification record. Do not claim a check ran when it did not.
 
 ## Database rules
 

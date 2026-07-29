@@ -1,6 +1,6 @@
 # ADR 0001: Local release gates and one product codebase
 
-- Status: accepted
+- Status: superseded by [ADR 0002](0002-simplified-integration-and-demo-tags.md)
 - Date: 2026-07-27
 
 ## Context

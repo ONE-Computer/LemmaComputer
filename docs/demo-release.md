@@ -11,15 +11,18 @@ The demo is a protected operational profile even without GitHub branch protectio
 
 ## Candidate qualification
 
-On a clean candidate commit:
+Usually release from a clean, already-pushed `main`. A temporary `release/*` branch is also allowed when the demo needs stabilization while development continues.
 
 ```bash
+git pull --ff-only
 npm run verify:release
-npm run release:promote -- --sha=<candidate-sha>
-npm run release:promote -- --sha=<candidate-sha> --push
+npm run release:tag
+npm run release:tag -- --push
 ```
 
-The first command performs the local equivalent of required CI and records `.artifacts/release-verification/<sha>.json`. The preview command proves eligibility without external changes. The final command is the explicit promotion action and atomically advances `main` plus an immutable demo tag.
+The first command performs the local release checks and records `.artifacts/release-verification/<sha>.json`. The preview command validates the candidate and prints the tag without changing GitHub. The final command pushes only the new immutable tag; it never advances a branch.
+
+Deploy the exact tag and image digest. Creating a newer tag is the only way to release a newer commit. Never move or reuse an existing demo tag.
 
 ## Database promotion
 

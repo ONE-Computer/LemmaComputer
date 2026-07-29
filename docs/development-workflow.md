@@ -1,12 +1,12 @@
 # Development workflow
 
-This repository optimizes for parallel issue worktrees while keeping `main` continuously demoable. GitHub Actions and paid branch protection are intentionally not required; the equivalent gates run locally.
+This repository uses isolated worktrees for concurrent development and immutable tags for demo deployments. The running demo is not tied to `main`. GitHub Actions and paid branch protection are intentionally not required; checks run explicitly on the machine doing the work.
 
 ## Scheduling work
 
-GitHub issue relationships are the scheduling source of truth. An issue is runnable when it has a testable definition of success and every native `blocked by` issue is closed. “Waves” are planning snapshots, not barriers: after any dependency closes, rescan the `dev` project and start every newly unblocked issue that fits available worktree capacity.
+The user's request is the task contract. When a GitHub issue exists, its definition of success and native `blocked by` relationships add to that contract. A task with a known unresolved blocker is not runnable; otherwise it may start whenever worktree capacity is available. No artificial wave boundary is required.
 
-One agent owns one issue, one branch, and one worktree. Avoid broad shared foundation branches. When two issues need the same new contract, make that contract a small blocking issue, land it first, and let both consumers rebase onto the verified commit.
+One agent owns one task, one branch, and one worktree. Avoid broad shared foundation branches. When two tasks require the same contract, land the contract first and let both consumers update from `main`.
 
 ## New worktree
 
@@ -20,36 +20,48 @@ npm run worktree:init
 npm run dev:doctor
 ```
 
-`worktree:init` refuses `main`, creates fresh local secrets, assigns unique Compose/container/network/image names and ports, installs the local pre-push hook, and installs or safely reuses dependencies. Fill only the provider and Entra placeholders needed by the issue. Never copy the demo `.env`.
+`worktree:init` refuses `main`, creates fresh local secrets, assigns unique Compose/container/network/image names and ports, and installs or safely reuses dependencies. Fill only the provider and Entra placeholders needed by the task. Never copy the demo `.env`.
 
 Use normal Compose commands inside the worktree. Its generated `.env` keeps volumes and databases separate. `npm run compose:down` preserves its volumes unless `-- --volumes` is intentionally supplied.
 
 ## Local gates
 
-- `npm run dev:doctor`: branch, environment, hook, dependency, and Docker-context safety.
+- `npm run dev:doctor`: environment, dependency, and Docker-context safety.
 - `npm run verify:quick`: doctor, environment parity, Compose parsing, TypeScript builds, and the full non-database test suite.
 - `npm run verify:db`: disposable PostgreSQL migration qualification.
 - `npm run verify:release`: quick and DB gates plus an isolated built-Compose health smoke; writes a SHA-bound local attestation.
 
-Run `verify:quick` before handoff. Run `verify:db` whenever persistence, migration, startup ordering, backup compatibility, or tenant scoping changes. The integration owner rebases the issue branch on the current `origin/main`, reruns the applicable gates, commits, and runs `verify:release` on a clean SHA.
+Run `verify:quick` before handoff or integration. Run `verify:db` whenever persistence, migration, startup ordering, backup compatibility, or tenant scoping changes. Update the task branch from current `main` when needed, resolve conflicts there, and rerun the applicable gates before merging.
 
-## Promotion without branch protection
+## Integration
 
-Preview eligibility without changing GitHub:
-
-```bash
-npm run release:promote -- --sha=<verified-commit-sha>
-```
-
-Actual promotion is an explicit important action:
+The integration owner reviews the task scope and reported checks, then merges the feature branch into `main`. `main` should remain buildable, but it is not the deployed demo and ordinary integration does not require the full release gate.
 
 ```bash
-npm run release:promote -- --sha=<verified-commit-sha> --push
+git switch main
+git pull --ff-only
+git merge --no-ff <feature-branch>
+git push origin main
 ```
 
-The promotion command requires a recent exact-SHA attestation, unchanged migration hashes, an unchanged `origin/main`, a clean worktree, and a fast-forward relationship. It acquires a local release lock and atomically pushes the SHA to `main` and an immutable `demo-YYYYMMDD-<sha>` tag. It never force-pushes.
+There is no blocking pre-push hook. This keeps the workflow visible: the operator runs the required checks and reports their result instead of relying on hidden local enforcement.
 
-The `.githooks/pre-push` hook rejects all other pushes to `main`. Because local hooks can be bypassed, command output and the attestation remain part of the review record.
+## Demo release
+
+Usually, release directly from a clean, already-pushed `main`:
+
+```bash
+git switch main
+git pull --ff-only
+npm run verify:release
+npm run release:tag -- --push
+```
+
+`release:tag` requires the current clean commit to match its pushed branch and a recent exact-SHA release attestation. It creates and optionally pushes `demo-YYYYMMDD-<sha>` without moving `main`.
+
+Use a temporary `release/<name>` branch only when the demo needs a stabilization line while unrelated development continues on `main`. Run the same release commands on that branch, and merge every release fix back into `main`.
+
+Deploy the immutable tag, not `main` or `release/*`. Each release gets a new tag; never delete, move, or reuse an existing demo tag.
 
 ## Merge conflict policy
 

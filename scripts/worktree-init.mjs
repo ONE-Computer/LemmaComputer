@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, chmod, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -13,23 +13,11 @@ const root = run("git", ["rev-parse", "--show-toplevel"]);
 process.chdir(root);
 const branch = run("git", ["branch", "--show-current"]);
 if (!branch || branch === "main") throw new Error("Worktree bootstrap is forbidden on main; create an issue branch/worktree first");
-const worktreeLines = run("git", ["worktree", "list", "--porcelain"]).split("\n");
-const primaryRoot = worktreeLines.find((line) => line.startsWith("worktree "))?.slice(9);
 const id = createHash("sha256").update(`${root}\0${branch}`).digest("hex").slice(0, 10);
 const slug = `oc-${id}`;
 const portOffset = 1000 + (Number.parseInt(id.slice(0, 6), 16) % 20000);
 
 const localModules = resolve(root, "node_modules");
-if (!await exists(localModules) && primaryRoot && primaryRoot !== root) {
-  const primaryModules = resolve(primaryRoot, "node_modules");
-  const primaryLock = resolve(primaryRoot, "package-lock.json");
-  if (await exists(primaryModules) && await exists(primaryLock)) {
-    const [here, there] = await Promise.all([readFile("package-lock.json"), readFile(primaryLock)]);
-    if (createHash("sha256").update(here).digest("hex") === createHash("sha256").update(there).digest("hex")) {
-      await symlink(primaryModules, localModules, "dir");
-    }
-  }
-}
 if (!await exists(localModules)) {
   const install = spawnSync("npm", ["ci"], { stdio: "inherit" });
   if (install.status !== 0) throw new Error("npm ci failed");
@@ -75,7 +63,6 @@ for (const mountedFile of [
   "config/litellm/logging.yaml",
   "integrations/litellm/onecomputer_policy_callback.py",
 ]) await chmod(mountedFile, 0o644);
-run("git", ["config", "core.hooksPath", ".githooks"]);
 await rm(".artifacts/release-verification", { recursive: true, force: true });
 process.stdout.write([
   `Worktree ${branch} is isolated as ${slug}.`,

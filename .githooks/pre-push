@@ -1,9 +1,0 @@
-#!/bin/sh
-set -eu
-while read -r local_ref local_sha remote_ref remote_sha; do
-  if [ "$remote_ref" = "refs/heads/main" ] && [ "${ONECOMPUTER_RELEASE_PROMOTION:-}" != "1" ]; then
-    echo "Direct pushes to main are disabled locally." >&2
-    echo "Commit on an issue branch, run npm run verify:release, then use npm run release:promote." >&2
-    exit 1
-  fi
-done

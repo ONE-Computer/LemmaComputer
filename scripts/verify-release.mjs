@@ -14,7 +14,10 @@ const capture = (command, args) => {
 };
 if (capture("git", ["status", "--porcelain"])) throw new Error("Release verification requires a clean committed worktree");
 const sha = capture("git", ["rev-parse", "HEAD"]);
-const originMain = capture("git", ["rev-parse", "origin/main"]);
+const branch = capture("git", ["branch", "--show-current"]);
+if (branch !== "main" && !branch.startsWith("release/")) {
+  throw new Error("Release verification must run on main or a release/* branch");
+}
 run("npm", ["run", "qualify:providers"]);
 run("npm", ["run", "qualify:oauth"]);
 run(process.execPath, ["scripts/verify-quick.mjs"]);
@@ -40,9 +43,9 @@ for (const file of migrationFiles) {
   migrations.push({ file, sha256: createHash("sha256").update(contents).digest("hex") });
 }
 const attestation = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   sha,
-  originMain,
+  branch,
   verifiedAt: new Date().toISOString(),
   gates: ["pinned-litellm-provider-settings-qualification", "pinned-litellm-oauth-renewal-qualification", "verify:quick", "verify:db", "isolated-compose-smoke"],
   migrations,
