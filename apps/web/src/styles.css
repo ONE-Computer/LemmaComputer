@@ -2928,7 +2928,7 @@ textarea:focus-visible,
 .chat-composer.companion-chat-composer textarea {
   min-width: 0;
   min-height: 36px;
-  max-height: 140px;
+  max-height: 132px; field-sizing: content;
   align-self: center;
   padding: 6px 8px;
   overflow-y: auto;

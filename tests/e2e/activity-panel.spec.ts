@@ -13,6 +13,26 @@ const openHistoricalActivity = async (page: Page) => {
   return panel;
 };
 
+test("chat composer grows with input and stops after five lines", async ({ page }) => {
+  await page.goto(chatPath);
+  const composer = page.getByPlaceholder(/message/i);
+  const size = () => composer.evaluate((field: HTMLTextAreaElement) => ({
+    height: field.getBoundingClientRect().height,
+    clientHeight: field.clientHeight,
+    scrollHeight: field.scrollHeight,
+  }));
+
+  const oneLine = await size();
+  await composer.fill("One\nTwo\nThree\nFour\nFive");
+  const fiveLines = await size();
+  await composer.fill("One\nTwo\nThree\nFour\nFive\nSix\nSeven");
+  const sevenLines = await size();
+
+  expect(fiveLines.height).toBeGreaterThan(oneLine.height);
+  expect(sevenLines.height).toBeLessThanOrEqual(fiveLines.height + 1);
+  expect(sevenLines.scrollHeight).toBeGreaterThan(sevenLines.clientHeight);
+});
+
 test.describe("streaming Activity panel", () => {
   test.describe.configure({ mode: "serial" });
 
