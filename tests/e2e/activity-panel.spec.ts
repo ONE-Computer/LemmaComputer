@@ -2,12 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 
 const chatPath = "/?view=chat&chat=fixture-session-1";
 
-const openHistoricalActivity = async (page: Page, overlay = false) => {
+const openHistoricalActivity = async (page: Page) => {
   await page.goto(chatPath);
-  if (overlay) await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const panel = overlay
-    ? page.getByRole("dialog", { name: "Activity" })
-    : page.getByRole("region", { name: "Activity" });
+  const panel = page.getByRole("dialog", { name: "Activity" });
+  const toggle = page.getByRole("button", { name: "Activity", exact: true });
+  if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
   await expect(panel).toBeVisible();
   await expect(panel.locator(".activity-event")).toHaveCount(11);
   await expect(panel.locator('[aria-live="polite"]')).toContainText("Activity complete.");
@@ -61,7 +60,8 @@ test.describe("streaming Activity panel", () => {
       });
     });
     await page.goto(chatPath);
-    const panel = page.getByRole("region", { name: "Activity" });
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    const panel = page.getByRole("dialog", { name: "Activity" });
     await expect(panel).toContainText("Activity is no longer available");
     await expect(panel).not.toContainText("FOREIGN_TENANT_SECRET_ACTIVITY");
     await expect(panel.locator(".activity-event")).toHaveCount(0);
@@ -91,14 +91,14 @@ test.describe("streaming Activity panel", () => {
   });
 
   for (const viewport of [
-    { name: "wide", width: 1440, height: 1000, overlay: false },
-    { name: "narrow", width: 1100, height: 800, overlay: true },
-    { name: "tablet", width: 834, height: 1112, overlay: true },
-    { name: "mobile", width: 390, height: 844, overlay: true },
+    { name: "wide", width: 1440, height: 1000 },
+    { name: "narrow", width: 1100, height: 800 },
+    { name: "tablet", width: 834, height: 1112 },
+    { name: "mobile", width: 390, height: 844 },
   ]) {
     test(`matches the ${viewport.name} Activity layout`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await openHistoricalActivity(page, viewport.overlay);
+      await openHistoricalActivity(page);
       await page.addStyleTag({ content: ".activity-event time { visibility: hidden !important; }" });
       await expect(page).toHaveScreenshot(`activity-${viewport.name}.png`, {
         animations: "disabled",
@@ -106,6 +106,63 @@ test.describe("streaming Activity panel", () => {
       });
     });
   }
+
+  test("anchors the drawer to every viewport edge and connects each timeline step", async ({ page }) => {
+    for (const viewport of [
+      { width: 1920, height: 1080 },
+      { width: 1440, height: 900 },
+      { width: 834, height: 1112 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const panel = await openHistoricalActivity(page);
+      await panel.evaluate(async (element) => { await Promise.all(element.getAnimations().map((animation) => animation.finished)); });
+      const panelBox = await panel.boundingBox();
+      expect(panelBox).not.toBeNull();
+      expect(panelBox!.x + panelBox!.width).toBeCloseTo(viewport.width, 0);
+      expect(panelBox!.y).toBeCloseTo(0, 0);
+      expect(panelBox!.height).toBeCloseTo(viewport.height, 0);
+      expect(await panel.evaluate((element) => getComputedStyle(element).position)).toBe("fixed");
+
+      const first = panel.locator(".activity-event").nth(0);
+      const second = panel.locator(".activity-event").nth(1);
+      const [firstBox, firstCardBox, firstIconBox, secondCardBox, secondIconBox, connector] = await Promise.all([
+        first.boundingBox(),
+        first.locator(".activity-event-body, details").boundingBox(),
+        first.locator(".activity-event-icon").boundingBox(),
+        second.locator(".activity-event-body, details").boundingBox(),
+        second.locator(".activity-event-icon").boundingBox(),
+        first.evaluate((element) => {
+          const style = getComputedStyle(element, "::before");
+          return {
+            left: Number.parseFloat(style.left),
+            bottom: Number.parseFloat(style.bottom),
+            height: Number.parseFloat(style.height),
+            width: Number.parseFloat(style.width),
+          };
+        }),
+      ]);
+      expect(firstBox).not.toBeNull();
+      expect(firstCardBox).not.toBeNull();
+      expect(firstIconBox).not.toBeNull();
+      expect(secondCardBox).not.toBeNull();
+      expect(secondIconBox).not.toBeNull();
+      expect(connector.width).toBeCloseTo(1, 0);
+      const connectorX = firstBox!.x + connector.left + connector.width / 2;
+      const firstIconX = firstIconBox!.x + firstIconBox!.width / 2;
+      const secondIconX = secondIconBox!.x + secondIconBox!.width / 2;
+      const connectorStartY = firstBox!.y + firstBox!.height - connector.bottom - connector.height;
+      const connectorEndY = firstBox!.y + firstBox!.height - connector.bottom;
+      const firstCardEndY = firstCardBox!.y + firstCardBox!.height;
+      expect(connectorX).toBeCloseTo(secondIconX, 0);
+      expect(connectorX).toBeCloseTo(firstIconX, 0);
+      expect(connectorStartY).toBeCloseTo(firstCardEndY, 0);
+      expect(connectorEndY).toBeCloseTo(secondCardBox!.y, 0);
+
+      await panel.getByRole("button", { name: "Close Activity" }).click();
+      await expect(panel).toBeHidden();
+    }
+  });
 
   test("replays after a forced disconnect without missing or duplicate events", async ({ page }) => {
     const activityRequests: string[] = [];
@@ -117,7 +174,8 @@ test.describe("streaming Activity panel", () => {
     await page.getByRole("textbox", { name: "Message Hermes Agent CLI" }).fill("Validate the Activity reconnect path.");
     await page.getByRole("button", { name: "Send message" }).click();
 
-    const panel = page.getByRole("region", { name: "Activity" });
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    const panel = page.getByRole("dialog", { name: "Activity" });
     await expect(panel.locator(".activity-event")).toHaveCount(5);
     await expect(panel.locator(".activity-event.terminal")).toContainText("Turn completed");
     const sequences = await panel.locator(".activity-event").evaluateAll((events) => (

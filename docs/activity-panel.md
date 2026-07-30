@@ -6,7 +6,8 @@ Provider-generated summaries carry an explicit label. The panel is not a chain-o
 
 ## Using the panel
 
-- Wide desktop opens Activity as a right rail. Narrow desktop and tablet use a right-side dialog; mobile uses a full-screen dialog.
+- Activity starts closed. Desktop and tablet open it as a viewport-anchored right drawer without reflowing the transcript; mobile uses a full-screen dialog.
+- Timeline connectors occupy only the gap between consecutive cards; they do not run through card content or icons.
 - The Activity button opens the latest turn. **View activity** on an assistant response opens that completed turn’s retained history.
 - Source and webpage links open only validated HTTP(S) destinations in a separate, isolated tab.
 - The computer-view area is an extension slot for issue #17. Issue #16 does not connect, lease, or control Kasm.
