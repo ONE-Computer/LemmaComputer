@@ -2135,18 +2135,17 @@ textarea:focus-visible,
 .activity-event {
   position: relative;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  column-gap: 11px;
-  padding-bottom: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  padding: 0 0 18px;
 }
 
 .activity-event:not(:last-child)::before {
   position: absolute;
-  z-index: 0;
-  top: 16px;
-  bottom: -16px;
-  left: 15.5px;
+  bottom: 0;
+  left: 28.5px;
   width: 1px;
+  height: 18px;
   background: #cfd6de;
   content: "";
 }
@@ -2154,7 +2153,7 @@ textarea:focus-visible,
 .activity-event-body,
 .activity-event details {
   min-width: 0;
-  grid-column: 2;
+  grid-column: 1 / -1;
   padding: 12px 12px 11px;
   border: 1px solid #dfe3e7;
   border-radius: 11px;
@@ -2177,7 +2176,7 @@ textarea:focus-visible,
 .activity-event-body {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
 }
@@ -2197,18 +2196,13 @@ textarea:focus-visible,
 .activity-event summary::-webkit-details-marker { display: none; }
 
 .activity-event-icon {
-  position: relative;
-  z-index: 1;
   display: grid;
   width: 32px;
   height: 32px;
   place-items: center;
-  grid-column: 1;
-  grid-row: 1;
   border-radius: 9px;
   background: #edf2f7;
   color: #345a80;
-  box-shadow: 0 0 0 4px #fbfaf8;
 }
 
 .activity-event.completed .activity-event-icon,
@@ -2284,7 +2278,7 @@ textarea:focus-visible,
 
 .activity-event p,
 .activity-event a {
-  grid-column: 1 / -1;
+  grid-column: 2 / -1;
   margin: 8px 0 0;
   color: #677481;
   font-size: 11px;
@@ -2294,7 +2288,7 @@ textarea:focus-visible,
 
 .activity-event details > p {
   margin: 0;
-  padding: 0 12px 12px;
+  padding: 0 12px 12px 54px;
 }
 
 .activity-event a {
@@ -2306,9 +2300,9 @@ textarea:focus-visible,
 }
 
 .activity-event > time {
-  grid-column: 2;
-  justify-self: end;
-  margin: 4px 4px 0 0;
+  position: absolute;
+  right: 4px;
+  bottom: 5px;
   color: #8a929b;
   font-size: 9px;
 }

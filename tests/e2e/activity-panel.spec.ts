@@ -126,29 +126,38 @@ test.describe("streaming Activity panel", () => {
 
       const first = panel.locator(".activity-event").nth(0);
       const second = panel.locator(".activity-event").nth(1);
-      const [firstBox, secondIconBox, connector] = await Promise.all([
+      const [firstBox, firstCardBox, firstIconBox, secondCardBox, secondIconBox, connector] = await Promise.all([
         first.boundingBox(),
+        first.locator(".activity-event-body, details").boundingBox(),
+        first.locator(".activity-event-icon").boundingBox(),
+        second.locator(".activity-event-body, details").boundingBox(),
         second.locator(".activity-event-icon").boundingBox(),
         first.evaluate((element) => {
           const style = getComputedStyle(element, "::before");
           return {
             left: Number.parseFloat(style.left),
-            top: Number.parseFloat(style.top),
             bottom: Number.parseFloat(style.bottom),
+            height: Number.parseFloat(style.height),
             width: Number.parseFloat(style.width),
           };
         }),
       ]);
       expect(firstBox).not.toBeNull();
+      expect(firstCardBox).not.toBeNull();
+      expect(firstIconBox).not.toBeNull();
+      expect(secondCardBox).not.toBeNull();
       expect(secondIconBox).not.toBeNull();
       expect(connector.width).toBeCloseTo(1, 0);
       const connectorX = firstBox!.x + connector.left + connector.width / 2;
+      const firstIconX = firstIconBox!.x + firstIconBox!.width / 2;
       const secondIconX = secondIconBox!.x + secondIconBox!.width / 2;
+      const connectorStartY = firstBox!.y + firstBox!.height - connector.bottom - connector.height;
       const connectorEndY = firstBox!.y + firstBox!.height - connector.bottom;
-      const secondIconY = secondIconBox!.y + secondIconBox!.height / 2;
+      const firstCardEndY = firstCardBox!.y + firstCardBox!.height;
       expect(connectorX).toBeCloseTo(secondIconX, 0);
-      expect(connectorEndY).toBeCloseTo(secondIconY, 0);
-      expect(connector.top).toBeCloseTo(16, 0);
+      expect(connectorX).toBeCloseTo(firstIconX, 0);
+      expect(connectorStartY).toBeCloseTo(firstCardEndY, 0);
+      expect(connectorEndY).toBeCloseTo(secondCardBox!.y, 0);
 
       await panel.getByRole("button", { name: "Close Activity" }).click();
       await expect(panel).toBeHidden();

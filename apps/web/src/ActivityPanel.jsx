@@ -102,6 +102,7 @@ export function ActivityEventRow({ event }) {
   const expandable = Boolean(copy.detail) && !["provider_summary", "source", "web_action", "terminal"].includes(event.kind);
   const heading = (
     <>
+      <span className="activity-event-icon" aria-hidden="true"><Icon /></span>
       <span className="activity-event-copy">
         <span className="activity-event-kind">
           {presentation.label}
@@ -114,7 +115,6 @@ export function ActivityEventRow({ event }) {
   );
   return (
     <li className={`activity-event ${event.kind} ${event.state}`} data-activity-sequence={event.sequence}>
-      <span className="activity-event-icon" aria-hidden="true"><Icon /></span>
       {expandable ? (
         <details open={event.state === "requires_action" || event.state === "failed"}>
           <summary>{heading}</summary>
