@@ -146,6 +146,11 @@ require_agent_environment() {
       exit 78
     }
   done
+  variable="${prefix}_MODEL_ALIAS"
+  [[ "${!variable}" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$ ]] || {
+    echo "${label} MODEL_ALIAS is invalid" >&2
+    exit 78
+  }
 }
 
 agent_enabled claude-desktop && require_agent_environment ONECOMPUTER "Claude Desktop"
@@ -210,6 +215,10 @@ if agent_enabled claude-desktop; then
   esac
 fi
 
+claude_code_for_desktop_enabled=false
+if agent_enabled claude-desktop && agent_enabled claude-cli; then
+  claude_code_for_desktop_enabled=true
+fi
 install -d -o root -g root -m 0755 /etc/claude-desktop /run/onecomputer
 install -d -o root -g root -m 0755 /etc/onecomputer/policy
 python3 - "$ONECOMPUTER_SIGNED_POLICY_B64" "$ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64" <<'PY'
@@ -293,12 +302,12 @@ os.chmod(path, 0o644)
 os.chown(path, 0, 0)
 PY
 if agent_enabled claude-desktop; then
-python3 - "$ONECOMPUTER_MODEL_ALIAS" "$model_label" "$ONECOMPUTER_COWORK_ENABLED" <<'PY'
+python3 - "$ONECOMPUTER_MODEL_ALIAS" "$model_label" "$ONECOMPUTER_COWORK_ENABLED" "$claude_code_for_desktop_enabled" <<'PY'
 import json
 import os
 import sys
 
-model, label, cowork_enabled = sys.argv[1:]
+model, label, cowork_enabled, code_enabled = sys.argv[1:]
 document = {
     "inferenceProvider": "gateway",
     "inferenceGatewayBaseUrl": "http://127.0.0.1:4312",
@@ -315,7 +324,7 @@ document = {
     "disableDeepLinkRegistration": True,
     "chatTabEnabled": True,
     "chatAdvancedFileAnalysisEnabled": False,
-    "isClaudeCodeForDesktopEnabled": False,
+    "isClaudeCodeForDesktopEnabled": code_enabled == "true",
     "coworkTabEnabled": cowork_enabled == "true",
     "secureVmFeaturesEnabled": cowork_enabled == "true",
     "allowedWorkspaceFolders": ["/home/kasm-user"],
@@ -338,6 +347,13 @@ with open(path, "w", encoding="utf-8") as output:
 os.chmod(path, 0o644)
 os.chown(path, 0, 0)
 PY
+fi
+
+rm -f /etc/claude-desktop/code-model
+if [[ "$claude_code_for_desktop_enabled" == "true" ]]; then
+  printf '%s\n' "$ONECOMPUTER_CLAUDE_CLI_MODEL_ALIAS" > /etc/claude-desktop/code-model
+  chown root:root /etc/claude-desktop/code-model
+  chmod 0644 /etc/claude-desktop/code-model
 fi
 
 if agent_enabled claude-cli; then
@@ -546,10 +562,12 @@ start_agent_broker() {
   local credential_variable="${prefix}_GATEWAY_CREDENTIAL"
   local control_variable="${prefix}_CONTROL_UPSTREAM"
   local bridge_variable="${prefix}_AGENT_BRIDGE_TOKEN"
+  local model_variable="${prefix}_MODEL_ALIAS"
   env -i \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     ONECOMPUTER_GATEWAY_UPSTREAM="${!upstream_variable}" \
     ONECOMPUTER_GATEWAY_CREDENTIAL="${!credential_variable}" \
+    ONECOMPUTER_MODEL_ALIAS="${!model_variable}" \
     ONECOMPUTER_CONTROL_UPSTREAM="${!control_variable}" \
     ONECOMPUTER_AGENT_BRIDGE_TOKEN="${!bridge_variable}" \
     ONECOMPUTER_GATEWAY_LISTEN_PORT="$port" \

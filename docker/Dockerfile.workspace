@@ -218,6 +218,7 @@ COPY docker/workspace/onecomputer-hermes-config.py /usr/local/libexec/onecompute
 COPY docker/workspace/onecomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js
 COPY docker/workspace/onecomputer-workspace-entrypoint.sh /usr/local/sbin/onecomputer-workspace-entrypoint
 COPY docker/workspace/claude-desktop.desktop /usr/local/share/onecomputer/applications/onecomputer-claude-desktop.desktop
+COPY docker/workspace/onecomputer-claude-desktop /usr/local/bin/onecomputer-claude-desktop
 COPY docker/workspace/claude-cli.desktop /usr/local/share/onecomputer/applications/onecomputer-claude-cli.desktop
 COPY docker/workspace/onecomputer-claude /usr/local/bin/onecomputer-claude
 COPY docker/workspace/codex-cli.desktop /usr/local/share/onecomputer/applications/onecomputer-codex-cli.desktop
@@ -241,6 +242,7 @@ RUN chmod 0755 \
       /usr/local/libexec/onecomputer-hermes-config \
       /usr/local/libexec/onecomputer-libreoffice \
       /usr/local/sbin/onecomputer-workspace-entrypoint \
+      /usr/local/bin/onecomputer-claude-desktop \
       /usr/local/bin/onecomputer-claude \
       /usr/local/bin/onecomputer-codex \
       /usr/local/bin/onecomputer-hermes \
