@@ -2,7 +2,7 @@
 Type=Application
 Name=Claude Desktop
 Comment=ONEComputer managed AI workspace
-Exec=/bin/sh -lc 'sleep 4; exec claude-desktop --no-sandbox'
+Exec=/usr/local/bin/onecomputer-claude-desktop
 Icon=claude
 Terminal=false
 Categories=Office;Utility;

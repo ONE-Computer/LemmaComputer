@@ -7,6 +7,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import sys
 import threading
 import urllib.error
@@ -17,11 +18,15 @@ from urllib.parse import urlsplit
 
 UPSTREAM = urlsplit(os.environ["ONECOMPUTER_GATEWAY_UPSTREAM"])
 CREDENTIAL = os.environ["ONECOMPUTER_GATEWAY_CREDENTIAL"]
+MODEL_ALIAS = os.environ["ONECOMPUTER_MODEL_ALIAS"]
 CONTROL = urlsplit(os.environ["ONECOMPUTER_CONTROL_UPSTREAM"])
 AGENT_BRIDGE_TOKEN = os.environ["ONECOMPUTER_AGENT_BRIDGE_TOKEN"]
 LISTEN_PORT = int(os.environ.get("ONECOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
-ALLOWED_PATHS = {"/v1/messages", "/v1/chat/completions", "/v1/responses", "/v1/models", "/mcp-rest/tools/list", "/mcp-rest/tools/call"}
+INFERENCE_PATHS = {"/v1/messages", "/v1/messages/count_tokens", "/v1/chat/completions", "/v1/responses"}
+ALLOWED_PATHS = INFERENCE_PATHS | {"/v1/models", "/mcp-rest/tools/list", "/mcp-rest/tools/call"}
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
+MODEL_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
 LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
 UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
 UPLOAD_JOBS: dict[str, dict] = {}
@@ -30,8 +35,18 @@ UPLOAD_LOCK = threading.Lock()
 
 if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CREDENTIAL) < 24
         or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or len(AGENT_BRIDGE_TOKEN) < 24
+        or not MODEL_ALIAS_PATTERN.fullmatch(MODEL_ALIAS)
         or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}):
     raise SystemExit("invalid gateway broker configuration")
+
+
+def normalize_inference_body(body: bytes) -> tuple[bytes, str]:
+    request = json.loads(body)
+    requested_model = request.get("model") if isinstance(request, dict) else None
+    if not isinstance(requested_model, str) or not requested_model.strip():
+        raise ValueError("inference model is required")
+    request["model"] = MODEL_ALIAS
+    return json.dumps(request, separators=(",", ":")).encode(), requested_model
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -211,8 +226,37 @@ class Handler(BaseHTTPRequestHandler):
         if path not in ALLOWED_PATHS and not is_operation:
             self.send_error(403, "gateway path is not assigned")
             return
-        length = int(self.headers.get("content-length", "0"))
+        try:
+            length = int(self.headers.get("content-length", "0"))
+        except ValueError:
+            self.send_json(400, {"error": "invalid content length"})
+            return
+        if length < 0:
+            self.send_json(400, {"error": "invalid content length"})
+            return
+        if path in INFERENCE_PATHS and (length <= 0 or length > MAX_INFERENCE_BODY_BYTES):
+            self.send_json(413, {"error": "invalid inference request body size"})
+            return
         body = self.rfile.read(length) if length else None
+        if path in INFERENCE_PATHS:
+            if self.command != "POST":
+                self.send_json(405, {"error": "inference requests must use POST"})
+                return
+            if self.headers.get("content-encoding", "identity").lower() not in {"", "identity"}:
+                self.send_json(415, {"error": "encoded inference request bodies are not supported"})
+                return
+            try:
+                body, requested_model = normalize_inference_body(body)
+                if requested_model != MODEL_ALIAS:
+                    logged_model = requested_model if MODEL_ALIAS_PATTERN.fullmatch(requested_model) else "<nonstandard>"
+                    self.log_message(
+                        'normalized model "%s" to assigned route "%s"',
+                        logged_model,
+                        MODEL_ALIAS,
+                    )
+            except (json.JSONDecodeError, ValueError) as error:
+                self.send_json(400, {"error": str(error)})
+                return
         headers = {
             key: value
             for key, value in self.headers.items()
