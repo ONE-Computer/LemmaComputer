@@ -495,7 +495,16 @@ export class WorkspaceService {
     const claimed = await this.store.claim(record.id, ["ready", "open", "provisioning", "restarting", "failed"], "stopping");
     if (!claimed) throw new OneComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
     if (claimed.providerId) await this.controller.destroy(claimed.providerId);
-    await this.revokeAgentGrants(claimed.id, policy);
+    try {
+      await this.revokeAgentGrants(claimed.id, policy);
+    } catch (error) {
+      await this.store.finish(claimed.id, claimed.operationToken!, {
+        state: "failed",
+        providerId: null,
+        failureCode: error instanceof OneComputerError ? error.code : "GATEWAY_REVOKE_FAILED",
+      });
+      throw error;
+    }
     return toView(await this.store.finish(claimed.id, claimed.operationToken!, { state: "stopped", providerId: null, failureCode: null }), undefined, policy);
   }
 

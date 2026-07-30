@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { IdentityContext, Launch, RuntimePolicy, Sandbox, SignedPolicyBundle } from "@onecomputer/contracts";
+import { OneComputerError, type IdentityContext, type Launch, type RuntimePolicy, type Sandbox, type SignedPolicyBundle } from "@onecomputer/contracts";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import type { GatewayClient, GatewayGrant } from "@onecomputer/litellm-adapter";
 import { PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "../apps/control-api/src/service.js";
@@ -218,6 +218,28 @@ test("stop removes provider authority while retaining an owned stopped record", 
   assert.equal((await store.getOwned(alex, workspace.id))?.providerId, null);
   assert.equal(controller.destroys, 1);
   assert.equal(controller.purges, 0);
+});
+
+test("a gateway revoke failure leaves a destroyed workspace explicitly recoverable", async () => {
+  const controller = new FakeController();
+  const store = new MemoryWorkspaceStore();
+  const gateway = new FakeGateway();
+  gateway.revoke = async () => {
+    throw new OneComputerError("GATEWAY_UNAVAILABLE", "The model gateway is unavailable", 503, true);
+  };
+  const service = new WorkspaceService(store, controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "stop-revoke-failure-1", "correlation-1");
+
+  await assert.rejects(
+    service.stop(alex, policy, workspace.id),
+    (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "GATEWAY_UNAVAILABLE"),
+  );
+
+  const failed = await store.getOwned(alex, workspace.id);
+  assert.equal(controller.destroys, 1);
+  assert.equal(failed?.state, "failed");
+  assert.equal(failed?.providerId, null);
+  assert.equal(failed?.failureCode, "GATEWAY_UNAVAILABLE");
 });
 
 test("delete purges persistent storage after removing the runtime", async () => {
