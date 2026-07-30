@@ -6308,3 +6308,49 @@ textarea:focus-visible,
     grid-column: 1 / -1;
   }
 }
+
+
+/* Sites MVP */
+.sites-screen { gap: 28px; }
+.sites-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.sites-heading > div { display: grid; gap: 4px; }
+.sites-heading .secondary-button { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.sites-heading .secondary-button svg { width: 18px; height: 18px; }
+.sites-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 20px; }
+.site-card { overflow: hidden; border: 1px solid #e0e4e9; border-radius: 14px; background: #fff; box-shadow: 0 8px 22px rgba(31, 46, 68, 0.06); }
+.site-card-preview { min-height: 152px; display: grid; place-items: center; color: #476482; background: linear-gradient(145deg, #eef3f8, #f9fafb); border-bottom: 1px solid #e7eaee; }
+.site-card-preview svg { width: 48px; height: 48px; }
+.site-card-copy { display: grid; gap: 6px; padding: 18px 18px 14px; }
+.site-card-copy > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.site-card-copy h2 { margin: 6px 0 0; font-size: 18px; color: var(--navy); }
+.site-card-copy p { margin: 0; color: #6a7480; font-size: 13px; }
+.site-card-copy small { color: #7a838d; font-size: 12px; }
+.site-state { display: inline-flex; align-items: center; gap: 6px; color: #24734a; font-size: 12px; font-weight: 700; }
+.site-state > span { width: 7px; height: 7px; border-radius: 50%; background: #39a66a; }
+.site-card-actions { display: flex; align-items: center; gap: 14px; padding: 0 18px 18px; }
+.site-card-actions .primary-button { min-width: 92px; }
+.sites-empty { min-height: 280px; }
+.site-preview-shell { min-height: 560px; overflow: hidden; border: 1px solid #dce1e7; border-radius: 14px; background: #fff; box-shadow: 0 12px 30px rgba(31, 46, 68, 0.08); }
+.site-preview-toolbar { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 18px; border-bottom: 1px solid #e3e6ea; background: #fafbfc; }
+.site-preview-toolbar span { display: inline-flex; align-items: center; gap: 7px; color: #24734a; font-weight: 700; font-size: 13px; }
+.site-preview-toolbar svg { width: 18px; height: 18px; }
+.site-preview-toolbar small { color: #737d88; }
+.site-preview-shell iframe { display: block; width: 100%; min-height: 620px; border: 0; background: #fff; }
+.site-preview-loading { min-height: 520px; display: grid; place-items: center; color: #66717e; }
+.chat-welcome-skills { width: min(520px, 100%); margin-top: 18px; }
+.chat-welcome-skills > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 13px 15px; border: 1px solid #dde3ea; border-radius: 12px; color: var(--navy); background: #fff; text-align: left; cursor: pointer; }
+.chat-welcome-skills > button:hover { border-color: #aebdce; background: #f8fafc; }
+.chat-welcome-skills svg { width: 22px; height: 22px; }
+.chat-welcome-skills span { display: grid; gap: 2px; }
+.chat-welcome-skills small { color: #6c7784; font-weight: 400; }
+.companion-chat-skill-list { display: grid; gap: 3px; padding: 8px 0; border-top: 1px solid #e4e7eb; border-bottom: 1px solid #e4e7eb; }
+.companion-chat-skill-list > span { padding: 2px 12px 5px; color: #7a8490; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.companion-chat-skill-list button { display: flex; align-items: center; gap: 10px; }
+.companion-chat-skill-list button > span { display: grid; gap: 1px; text-align: left; }
+.companion-chat-skill-list button small { color: #717b87; font-weight: 400; }
+
+@media (max-width: 720px) {
+  .sites-heading { align-items: flex-start; flex-direction: column; }
+  .sites-grid { grid-template-columns: 1fr; }
+  .site-preview-shell iframe { min-height: 520px; }
+}

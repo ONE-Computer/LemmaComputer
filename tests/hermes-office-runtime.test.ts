@@ -83,7 +83,7 @@ test("the workspace image pins the Hermes Office skills and their native runtime
   assert.deepEqual(packageLock.packages[""].dependencies, packageJson.dependencies);
 });
 
-test("selected Hermes profiles seed only Office skills by default and expose the mode-appropriate tools", async () => {
+test("selected Hermes profiles seed reviewed skills by default and expose the mode-appropriate tools", async () => {
   const [entrypoint, profileConfig, cliLauncher, desktopLauncher, chatAdapter] = await Promise.all([
     source("docker/workspace/onecomputer-workspace-entrypoint.sh"),
     source("docker/workspace/onecomputer-hermes-config.py"),
@@ -99,11 +99,12 @@ test("selected Hermes profiles seed only Office skills by default and expose the
   assert.match(entrypoint, /HERMES_BUNDLED_SKILLS=\/opt\/onecomputer\/hermes-agent\/skills/);
   assert.match(entrypoint, /onecomputer-hermes-config/);
   assert.match(profileConfig, /OFFICE_DEFAULT_SKILLS = frozenset/);
+  assert.match(profileConfig, /REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS \| frozenset\(\{"make-a-site"}\)/);
   for (const skill of ["docx", "pdf", "powerpoint", "xlsx", "ocr-and-documents"]) {
     assert.match(profileConfig, new RegExp(`"${skill}"`));
   }
   assert.match(profileConfig, /current_bundled - previous_bundled/);
-  assert.match(profileConfig, /disabled\.update\(skills_to_default_off - OFFICE_DEFAULT_SKILLS\)/);
+  assert.match(profileConfig, /disabled\.update\(skills_to_default_off - REVIEWED_DEFAULT_SKILLS\)/);
   assert.match(profileConfig, /existing\.get\("skills"\)/);
   assert.match(profileConfig, /SKILL_STATE_FILE = "\.onecomputer-skill-defaults\.json"/);
   assert.match(profileConfig, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);

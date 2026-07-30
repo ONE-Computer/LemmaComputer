@@ -8,6 +8,7 @@ export * from "./connector-registry.js";
 export * from "./migrations.js";
 export * from "./provider-settings.js";
 export * from "./schedules.js";
+export * from "./sites.js";
 
 export type WorkspaceRecord = {
   id: string;

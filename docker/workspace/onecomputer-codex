@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export ONECOMPUTER_SITES_BROKER=http://127.0.0.1:4317
 
 export CODEX_HOME=/home/kasm-user/.codex-cli
 export OPENAI_BASE_URL=http://127.0.0.1:4317/v1

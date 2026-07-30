@@ -4,6 +4,8 @@ import { DefaultChatTransport } from "ai";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Home24Filled, Home24Regular } from "@fluentui/react-icons/svg/home";
+import { Apps24Filled, Apps24Regular, Apps48Regular } from "@fluentui/react-icons/svg/apps";
+import { WindowApps24Regular } from "@fluentui/react-icons/svg/window-apps";
 import { Clock24Regular } from "@fluentui/react-icons/svg/clock";
 import { Calendar24Regular } from "@fluentui/react-icons/svg/calendar";
 import { Open24Regular } from "@fluentui/react-icons/svg/open";
@@ -28,7 +30,7 @@ import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { PlugConnected24Regular } from "@fluentui/react-icons/svg/plug-connected";
 import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
-import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi } from "./workspace-api.js";
+import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
 import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
@@ -69,6 +71,7 @@ const operationStateLabels = {
 const navByView = Object.freeze({
   home: "Workspace",
   schedules: "Schedules",
+  sites: "Sites",
   chat: "Chat",
   trail: "Trail",
   firewall: "Firewall",
@@ -509,6 +512,55 @@ function SchedulesScreen({ schedules, workspaces, loading, busyId, error, onSave
       {editor && <ScheduleDialog schedule={editor.id ? editor : null} workspaces={workspaces} busy={Boolean(busyId)} onSave={onSave} onClose={() => setEditor(null)} />}
     </div>
   );
+}
+
+const siteUpdatedAt = (value) => new Intl.DateTimeFormat("en", {
+  dateStyle: "medium",
+  timeStyle: "short",
+}).format(new Date(value));
+
+function SitesScreen({ sites, loading, error, activeSite, preview, previewLoading, busySiteId, onOpen, onBack, onDelete }) {
+  if (activeSite) {
+    return <div className="secondary-screen sites-screen site-preview-screen">
+      <header className="page-heading sites-heading">
+        <div><p>Sites</p><h1>{activeSite.name}</h1><span>Revision {activeSite.currentRevision} · Only you can access this demo site.</span></div>
+        <button className="secondary-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />All sites</button>
+      </header>
+      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Preview unavailable</strong>{error}</span></div>}
+      <section className="site-preview-shell" aria-label={`${activeSite.name} preview`}>
+        <div className="site-preview-toolbar"><span><CheckmarkCircle24Regular aria-hidden="true" />Published</span><small>Sandboxed preview · revision {activeSite.currentRevision}</small></div>
+        {previewLoading ? <div className="site-preview-loading" role="status">Opening site…</div> : preview?.html ? (
+          <iframe title={`${activeSite.name} site`} sandbox="allow-scripts" srcDoc={preview.html} />
+        ) : null}
+      </section>
+    </div>;
+  }
+  return <div className="secondary-screen sites-screen">
+    <header className="page-heading sites-heading">
+      <div><p>Your published apps</p><h1>Sites</h1><span>Sites built by your workspace agents appear here automatically.</span></div>
+    </header>
+    {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sites unavailable</strong>{error}</span></div>}
+    {loading ? <div className="workspace-overview-empty" role="status">Loading sites…</div> : sites.length === 0 ? (
+      <section className="workspace-overview-empty sites-empty">
+        <Apps48Regular aria-hidden="true" />
+        <div><h2>No sites yet</h2><p>Ask a workspace agent to use Make a site, then publish the result.</p></div>
+      </section>
+    ) : <section className="sites-grid" aria-label="Your sites">
+      {sites.map((site) => <article className="site-card" key={site.id}>
+        <div className="site-card-preview"><Apps48Regular aria-hidden="true" /></div>
+        <div className="site-card-copy">
+          <div><span className="site-state"><span aria-hidden="true" />Ready</span><small>Revision {site.currentRevision}</small></div>
+          <h2>{site.name}</h2>
+          <p>{site.slug}</p>
+          <small>Published {siteUpdatedAt(site.updatedAt)}</small>
+        </div>
+        <div className="site-card-actions">
+          <button className="primary-button compact-button" type="button" onClick={() => onOpen(site)}>Open</button>
+          <button className="text-button danger-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}>{busySiteId === site.id ? "Deleting…" : "Delete"}</button>
+        </div>
+      </article>)}
+    </section>}
+  </div>;
 }
 
 function SignInScreen({ error }) {
@@ -1999,6 +2051,7 @@ function ChatConversation({
   companionComposer = false,
   composerContext,
   contextSummary,
+  skills = [],
   sessionOptions = [],
   historyHasMore = false,
   historyLoadingMore = false,
@@ -2291,6 +2344,12 @@ function ChatConversation({
           <div className="chat-welcome">
             <h1>How can {agentName} help?</h1>
             <p>Ask about the files, approved tools, and connections in your managed workspace.</p>
+            {skills.length > 0 && <div className="chat-welcome-skills" aria-label="Available skills">
+              {skills.map((skill) => <button type="button" key={skill.id} onClick={() => setInput(skill.defaultPrompt)}>
+                <WindowApps24Regular aria-hidden="true" />
+                <span><strong>{skill.displayName}</strong><small>{skill.description}</small></span>
+              </button>)}
+            </div>}
           </div>
         ) : visibleMessages.map((message) => (
           <article className={`chat-message ${message.role}`} key={message.id}>
@@ -2409,6 +2468,15 @@ function ChatConversation({
                   >
                     <Add24Regular aria-hidden="true" />New conversation
                   </button>
+                  {skills.length > 0 && <div className="companion-chat-skill-list" role="group" aria-label="Skills">
+                    <span>Skills</span>
+                    {skills.map((skill) => <button type="button" role="menuitem" key={skill.id} onClick={() => {
+                      setInput(skill.defaultPrompt);
+                      setChatActionsOpen(false);
+                    }}>
+                      <WindowApps24Regular aria-hidden="true" /><span><strong>{skill.displayName}</strong><small>{skill.description}</small></span>
+                    </button>)}
+                  </div>}
                   {sessionOptions.length > 1 && <div className="companion-chat-recent-sessions" role="group" aria-label="Recent conversations">
                     <span>Recent conversations</span>
                     {sessionOptions.filter((session) => session.value).map((session) => (
@@ -2496,6 +2564,7 @@ export function ChatScreen({
   workspace,
   workspaces,
   workspaceState,
+  skills = [],
   onWorkspaceChange,
   onStartWorkspace,
   onRestartWorkspace,
@@ -2736,6 +2805,7 @@ export function ChatScreen({
         companionComposer={companionComposer}
         composerContext={companionComposer && contextControls ? <div className="companion-chat-composer-context-fields">{contextControls}</div> : null}
         contextSummary={contextSummary}
+        skills={skills}
         sessionOptions={[
           { value: "", label: "New conversation" },
           ...sessions.map((session, index) => ({
@@ -2761,6 +2831,14 @@ export function App() {
   const [workspaceState, setWorkspaceState] = useState("loading");
   const [homeWorkspaces, setHomeWorkspaces] = useState([]);
   const [homeWorkspacesLoading, setHomeWorkspacesLoading] = useState(true);
+  const [sites, setSites] = useState([]);
+  const [sitesLoading, setSitesLoading] = useState(false);
+  const [sitesError, setSitesError] = useState("");
+  const [activeSite, setActiveSite] = useState(null);
+  const [sitePreview, setSitePreview] = useState(null);
+  const [sitePreviewLoading, setSitePreviewLoading] = useState(false);
+  const [siteBusyId, setSiteBusyId] = useState("");
+  const [reviewedSkills, setReviewedSkills] = useState([]);
   const [workspaceActionId, setWorkspaceActionId] = useState("");
   const [apiError, setApiError] = useState("");
   const [schedules, setSchedules] = useState([]);
@@ -2874,6 +2952,7 @@ export function App() {
         setConnectionCatalogRefresh((current) => current + 1);
       }
       if (name === "Settings") setSettingsView("overview");
+      if (name === "Sites") { setActiveSite(null); setSitePreview(null); setSitesError(""); }
       if (name === "Workspace") {
         setSelectedSandboxGrantId(null);
         setSandboxSettings(null);
@@ -2983,6 +3062,7 @@ export function App() {
       .finally(() => setHomeWorkspacesLoading(false));
     operationApi.recent().then(setOperation).catch(showApiError);
     operationApi.list().then((value) => setOperationHistory(value.operations)).catch(showApiError);
+    skillApi.list().then((value) => setReviewedSkills(value.skills)).catch(() => setReviewedSkills([]));
     connectionApi.credentials()
       .then((value) => setCredentials(value.credentials))
       .catch((error) => setCredentialsError(error.message));
@@ -3060,6 +3140,17 @@ export function App() {
     const interval = window.setInterval(refresh, 10_000);
     return () => { active = false; window.clearInterval(interval); };
   }, [activeNav, session?.user.id, workspace?.id]);
+
+  useEffect(() => {
+    if (!session || activeNav !== "Sites") return undefined;
+    let active = true;
+    setSitesLoading(true);
+    siteApi.list()
+      .then((value) => { if (active) { setSites(value.sites); setSitesError(""); } })
+      .catch((error) => { if (active) setSitesError(error.message); })
+      .finally(() => { if (active) setSitesLoading(false); });
+    return () => { active = false; };
+  }, [activeNav, session?.user.id]);
 
   useEffect(() => {
     if (!session || activeNav !== "Schedules") return undefined;
@@ -3745,10 +3836,38 @@ export function App() {
       setConnectionCatalogRefresh((current) => current + 1);
     }
     if (name === "Settings") setSettingsView("overview");
+    if (name === "Sites") { setActiveSite(null); setSitePreview(null); setSitesError(""); }
     if (name === "Workspace") { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }
     setProfileOpen(false);
     setMobileNavOpen(false);
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
+  };
+
+  const openSite = async (site) => {
+    setActiveSite(site);
+    setSitePreview(null);
+    setSitesError("");
+    setSitePreviewLoading(true);
+    try { setSitePreview(await siteApi.preview(site.id)); }
+    catch (error) { setSitesError(error.message); }
+    finally { setSitePreviewLoading(false); }
+  };
+
+  const deleteSite = async (site) => {
+    if (!await requestConfirmation({
+      title: "Delete this site?",
+      description: `“${site.name}” and all published revisions will be permanently removed.`,
+      confirmLabel: "Delete site",
+      danger: true,
+    })) return;
+    setSiteBusyId(site.id);
+    setSitesError("");
+    try {
+      await siteApi.delete(site.id);
+      setSites((current) => current.filter((item) => item.id !== site.id));
+      setToast("Site deleted.");
+    } catch (error) { setSitesError(error.message); }
+    finally { setSiteBusyId(""); }
   };
 
   const saveSchedule = async (input) => {
@@ -4031,6 +4150,7 @@ export function App() {
         <nav aria-label="Primary navigation">
           <NavButton active={activeNav === "Workspace"} icon={activeNav === "Workspace" ? Home24Filled : Home24Regular} label="Workspace" onClick={() => selectNav("Workspace")} />
           <NavButton active={activeNav === "Schedules"} icon={Calendar24Regular} label="Schedules" onClick={() => selectNav("Schedules")} />
+          <NavButton active={activeNav === "Sites"} icon={activeNav === "Sites" ? Apps24Filled : Apps24Regular} label="Sites" onClick={() => selectNav("Sites")} />
           <NavButton active={activeNav === "Trail"} icon={Clock24Regular} label="Trail" onClick={() => selectNav("Trail")} />
           {session.roles.includes("administrator") && <NavButton active={activeNav === "Firewall"} icon={ShieldCheckmark24Regular} label="Firewall" onClick={() => selectNav("Firewall")} />}
           <NavButton active={activeNav === "Connections"} icon={PlugConnected24Regular} label="Connections" onClick={() => selectNav("Connections")} />
@@ -4093,6 +4213,18 @@ export function App() {
             onManage={selectWorkspaceConfiguration}
           />
         )}
+        {activeNav === "Sites" && <SitesScreen
+          sites={sites}
+          loading={sitesLoading}
+          error={sitesError}
+          activeSite={activeSite}
+          preview={sitePreview}
+          previewLoading={sitePreviewLoading}
+          busySiteId={siteBusyId}
+          onOpen={openSite}
+          onBack={() => { setActiveSite(null); setSitePreview(null); setSitesError(""); }}
+          onDelete={deleteSite}
+        />}
         {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
         {activeNav === "Schedules" && <SchedulesScreen
           schedules={schedules}
@@ -4110,6 +4242,7 @@ export function App() {
           workspace={workspace}
           workspaces={homeWorkspaces}
           workspaceState={workspaceState}
+          skills={reviewedSkills}
           onWorkspaceChange={selectActiveWorkspace}
           onStartWorkspace={openWorkspace}
           onRestartWorkspace={restartWorkspace}

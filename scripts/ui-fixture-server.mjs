@@ -255,6 +255,15 @@ let chatMessages = [
   },
 ];
 
+const reviewedSkills = [{
+  id: "make-a-site",
+  displayName: "Make a site",
+  description: "Build and publish a simple owner-only static Vite site.",
+  defaultPrompt: "Use $make-a-site to build and publish a simple site.",
+}];
+const helloSiteHtml = "<!doctype html><html lang=\"en\"><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Hello world</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;font:600 32px system-ui;color:#14233b}</style><body>Hello world</body></html>";
+let fixtureSites = [];
+
 const activityTurnId = "fixture-turn-1";
 const activityEvent = (turnId, sequence, kind, state, provenance, payload) => ({
   version: 1,
@@ -506,6 +515,7 @@ let fixtureMcpConnections = [
 const responses = new Map([
   ["GET /v1/auth/session", session],
   ["GET /v1/workspaces/current", workspace],
+  ["GET /v1/skills", { skills: reviewedSkills }],
   ["GET /v1/workspaces", { workspaces: [workspace, sandboxWorkspace] }],
   ["GET /v1/sandbox-settings", sandboxSettings],
   ["GET /v1/operations/recent", operation],
@@ -681,6 +691,28 @@ const server = http.createServer((request, response) => {
   }
   if (key === "GET /v1/workspaces") {
     response.end(JSON.stringify({ workspaces: fixtureWorkspaces }));
+    return;
+  }
+  if (key === "GET /v1/sites") {
+    response.end(JSON.stringify({ sites: fixtureSites }));
+    return;
+  }
+  if (request.method === "GET" && /^\/v1\/sites\/[0-9a-f-]+\/preview$/.test(url.pathname)) {
+    const id = url.pathname.split("/").at(-2);
+    const site = fixtureSites.find((item) => item.id === id);
+    if (!site) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "SITE_NOT_FOUND", message: "Site not found", retryable: false } }));
+      return;
+    }
+    response.end(JSON.stringify({ site, revision: site.currentRevision, artifactSha256: "d".repeat(64), html: helloSiteHtml }));
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/sites\/[0-9a-f-]+$/.test(url.pathname)) {
+    const id = url.pathname.split("/").at(-1);
+    fixtureSites = fixtureSites.filter((item) => item.id !== id);
+    response.statusCode = 204;
+    response.end();
     return;
   }
   if (key === "GET /v1/schedules") {
@@ -928,13 +960,34 @@ const server = http.createServer((request, response) => {
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 2, "tool", "completed", "tool", { toolCallId: `${turnId}-tool`, name: "workspace-context", summary: "Context checked" })), 760);
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 3, "provider_summary", "completed", "provider_generated", { summary: "The workspace context is ready for the response.", provider: "Hermes" })), 900);
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 4, "terminal", "completed", "deterministic_system", { turnState: "completed" })), 1_000);
+      const siteRequest = JSON.stringify(input.message).includes("$make-a-site");
+      const openingText = siteRequest
+        ? "I’ll build the smallest Vite site and publish it with the reviewed skill.\n\n"
+        : "I’ll check the workspace context first, then summarize what I can do.\n\n";
+      const closingText = siteRequest
+        ? "Published **Hello world**. Open ONEComputer → Sites to view it."
+        : "I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations";
+      if (siteRequest) {
+        const publishedAt = new Date().toISOString();
+        fixtureSites = [{
+          id: "7c536c1f-6a31-427d-af8f-dbb0c63f8d73",
+          slug: "hello-world",
+          name: "Hello world",
+          state: "ready",
+          currentRevision: 1,
+          sourceWorkspaceId: workspaceId,
+          sourceAgentId: "agent-alex:hermes",
+          createdAt: publishedAt,
+          updatedAt: publishedAt,
+        }];
+      }
       const openingChunks = [
         { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
         { type: "text-start", id: `${turnId}-text` },
-        { type: "text-delta", id: `${turnId}-text`, delta: "I’ll check the workspace context first, then summarize what I can do.\n\n" },
+        { type: "text-delta", id: `${turnId}-text`, delta: openingText },
       ];
       const closingChunks = [
-        { type: "text-delta", id: `${turnId}-text`, delta: "I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations" },
+        { type: "text-delta", id: `${turnId}-text`, delta: closingText },
         { type: "text-end", id: `${turnId}-text` },
         { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
         { type: "finish", finishReason: "stop", messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt } },
@@ -951,7 +1004,7 @@ const server = http.createServer((request, response) => {
           role: "assistant",
           metadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt },
           parts: [
-            { type: "text", text: "I’ll check the workspace context first, then summarize what I can do.\n\nI’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations", state: "done" },
+            { type: "text", text: `${openingText}${closingText}`, state: "done" },
             { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
           ],
         });
