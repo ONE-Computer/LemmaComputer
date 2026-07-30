@@ -11,6 +11,7 @@
   "dependencies": {
     "@onecomputer/contracts": "*",
     "@onecomputer/kasm-adapter": "*",
+    "@onecomputer/managed-sandbox-adapters": "*",
     "@onecomputer/policy-integrity": "*",
     "fastify": "5.10.0",
     "zod": "4.4.3"

@@ -8,25 +8,29 @@ import os
 import selectors
 import socket
 import socketserver
+import ssl
 import sys
 from urllib.parse import unquote, urlsplit
 
 MAX_HEADER_BYTES = 64 * 1024
-UPSTREAM_URL = urlsplit(os.environ["ONECOMPUTER_EGRESS_UPSTREAM"])
+UPSTREAM_FILE = os.environ["ONECOMPUTER_EGRESS_UPSTREAM_FILE"]
 
-if (
-    UPSTREAM_URL.scheme != "http"
-    or not UPSTREAM_URL.hostname
-    or not UPSTREAM_URL.port
-    or UPSTREAM_URL.username != "onecomputer"
-    or not UPSTREAM_URL.password
-):
-    raise SystemExit("invalid egress broker configuration")
 
-UPSTREAM_ADDRESS = (UPSTREAM_URL.hostname, UPSTREAM_URL.port)
-UPSTREAM_CREDENTIAL = base64.b64encode(
-    f"{unquote(UPSTREAM_URL.username)}:{unquote(UPSTREAM_URL.password)}".encode()
-).decode()
+def upstream_configuration():
+    with open(UPSTREAM_FILE, encoding="utf-8") as source:
+        upstream = urlsplit(source.read().strip())
+    if (
+        upstream.scheme not in {"http", "https"}
+        or not upstream.hostname
+        or not upstream.port
+        or upstream.username != "onecomputer"
+        or not upstream.password
+    ):
+        raise ValueError("invalid egress broker configuration")
+    credential = base64.b64encode(
+        f"{unquote(upstream.username)}:{unquote(upstream.password)}".encode()
+    ).decode()
+    return upstream, credential
 
 
 def read_headers(connection: socket.socket) -> bytes:
@@ -41,7 +45,7 @@ def read_headers(connection: socket.socket) -> bytes:
     return bytes(document)
 
 
-def authenticated_request(document: bytes, *, close: bool) -> bytes:
+def authenticated_request(document: bytes, *, close: bool, credential: str) -> bytes:
     header, marker, remainder = document.partition(b"\r\n\r\n")
     if not marker:
         raise ValueError("incomplete proxy request headers")
@@ -53,7 +57,7 @@ def authenticated_request(document: bytes, *, close: bool) -> bytes:
             (b"proxy-authorization:", b"proxy-connection:", b"connection:")
         )
     ]
-    filtered.append(f"Proxy-Authorization: Basic {UPSTREAM_CREDENTIAL}".encode())
+    filtered.append(f"Proxy-Authorization: Basic {credential}".encode())
     if close:
         filtered.extend((b"Proxy-Connection: close", b"Connection: close"))
     return b"\r\n".join(filtered) + marker + remainder
@@ -84,8 +88,21 @@ class Handler(socketserver.BaseRequestHandler):
             if not request:
                 return
             method = request.split(b" ", 1)[0].upper()
-            upstream = socket.create_connection(UPSTREAM_ADDRESS, timeout=10)
-            upstream.sendall(authenticated_request(request, close=method != b"CONNECT"))
+            upstream_url, upstream_credential = upstream_configuration()
+            upstream = socket.create_connection(
+                (upstream_url.hostname, upstream_url.port), timeout=10
+            )
+            if upstream_url.scheme == "https":
+                upstream = ssl.create_default_context().wrap_socket(
+                    upstream, server_hostname=upstream_url.hostname
+                )
+            upstream.sendall(
+                authenticated_request(
+                    request,
+                    close=method != b"CONNECT",
+                    credential=upstream_credential,
+                )
+            )
 
             if method == b"CONNECT":
                 response = read_headers(upstream)

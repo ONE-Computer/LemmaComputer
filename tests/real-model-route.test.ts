@@ -206,7 +206,9 @@ test("the workspace image includes a pinned Firefox ESR locked to governed egres
   assert.match(dockerfile, /sha256sum -c/);
   assert.match(dockerfile, /onecomputer-egress-broker\.py \/usr\/local\/libexec\/onecomputer-egress-broker/);
   assert.match(entrypoint, /onecomputer-firefox\.desktop.*\/home\/kasm-user\/Desktop\/Firefox\.desktop/);
-  assert.match(entrypoint, /ONECOMPUTER_EGRESS_UPSTREAM="\$HTTPS_PROXY"/);
+  assert.match(entrypoint, /printf '%s\\n' "\$HTTPS_PROXY" > "\$egress_upstream_file"/);
+  assert.match(entrypoint, /ONECOMPUTER_EGRESS_UPSTREAM_FILE="\$egress_upstream_file"/);
+  assert.match(entrypoint, /export HTTPS_PROXY=http:\/\/127\.0\.0\.1:4313/);
   assert.match(entrypoint, /onecomputer-egress-broker/);
   assert.equal(policies.policies.Proxy.Mode, "manual");
   assert.equal(policies.policies.Proxy.Locked, true);

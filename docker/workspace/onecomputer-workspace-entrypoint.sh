@@ -618,12 +618,19 @@ for credential_variable in \
 done
 
 if [[ -n "${HTTPS_PROXY:-}" ]]; then
+  egress_upstream_file=/run/onecomputer/egress-upstream
+  umask 077
+  printf '%s\n' "$HTTPS_PROXY" > "$egress_upstream_file"
   env -i \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    ONECOMPUTER_EGRESS_UPSTREAM="$HTTPS_PROXY" \
+    ONECOMPUTER_EGRESS_UPSTREAM_FILE="$egress_upstream_file" \
     /usr/local/libexec/onecomputer-egress-broker &
   egress_broker_pid=$!
   printf '%s\n' "$egress_broker_pid" > /run/onecomputer/egress-broker.pid
+  export HTTP_PROXY=http://127.0.0.1:4313
+  export HTTPS_PROXY=http://127.0.0.1:4313
+  export http_proxy=http://127.0.0.1:4313
+  export https_proxy=http://127.0.0.1:4313
 fi
 
 for enabled_agent in "${enabled_agents[@]}"; do

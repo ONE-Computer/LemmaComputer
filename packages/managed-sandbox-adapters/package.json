@@ -1,0 +1,16 @@
+{
+  "name": "@onecomputer/managed-sandbox-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@onecomputer/contracts": "*",
+    "@onecomputer/kasm-adapter": "*",
+    "e2b": "2.36.1",
+    "modal": "0.9.0"
+  }
+}

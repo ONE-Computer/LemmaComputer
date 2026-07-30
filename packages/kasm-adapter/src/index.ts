@@ -109,9 +109,9 @@ const textValue = (object: JsonObject, ...keys: string[]) => {
   return undefined;
 };
 
-const clipboardPolicyFor = (policy?: RuntimePolicy): ClipboardPolicy => policy?.clipboard ?? defaultClipboardPolicy;
+export const clipboardPolicyFor = (policy?: RuntimePolicy): ClipboardPolicy => policy?.clipboard ?? defaultClipboardPolicy;
 
-const agentEnvironment = (
+export const agentEnvironment = (
   grant: NonNullable<SandboxCreateInput["agentGrants"]>[number],
   policy: RuntimePolicy,
 ) => {
@@ -135,7 +135,7 @@ const agentEnvironment = (
   ];
 };
 
-const chatRuntimeEnvironment = (
+export const chatRuntimeEnvironment = (
   runtime: NonNullable<SandboxCreateInput["chatRuntimes"]>[number],
 ) => {
   if (runtime.catalogId === "hermes-claw") {

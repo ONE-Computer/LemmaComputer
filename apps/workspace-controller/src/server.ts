@@ -12,6 +12,7 @@ import {
   type Sandbox,
 } from "@onecomputer/contracts";
 import { KasmLocalAdapter, KasmDeveloperApiAdapter, type SandboxAdapter } from "@onecomputer/kasm-adapter";
+import { E2bSandboxAdapter, ModalSandboxAdapter } from "@onecomputer/managed-sandbox-adapters";
 import { PolicyVerificationError, verifySignedPolicyBundle } from "@onecomputer/policy-integrity";
 import { z } from "zod";
 
@@ -28,7 +29,7 @@ const envSchema = z.object({
   CONTROLLER_HOST: z.string().default("127.0.0.1"),
   CONTROLLER_PORT: z.coerce.number().int().positive().default(4101),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
-  SANDBOX_DRIVER: z.enum(["kasm", "kasm-local"]).default("kasm-local"),
+  SANDBOX_DRIVER: z.enum(["kasm", "kasm-local", "e2b", "modal"]).default("kasm-local"),
   ONECOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
   KASM_BASE_URL: z.preprocess(
     (value) => value === "" ? undefined : value,
@@ -54,6 +55,19 @@ const envSchema = z.object({
     timeZoneSchema.optional(),
   ),
   CHAT_ATTACHMENT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(90),
+  MANAGED_SANDBOX_EGRESS_PROXY_URL_TEMPLATE: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.string().url().optional(),
+  ),
+  MANAGED_SANDBOX_TIMEOUT_MS: z.coerce.number().int().min(300_000).max(86_400_000).default(3_600_000),
+  E2B_API_KEY: z.string().optional(),
+  E2B_TEMPLATE_ID: z.string().optional(),
+  E2B_LIFECYCLE: z.enum(["pause", "kill"]).default("pause"),
+  MODAL_APP_NAME: z.string().optional(),
+  MODAL_IMAGE_REF: z.string().optional(),
+  MODAL_ENVIRONMENT: z.string().optional(),
+  MODAL_CPU: z.coerce.number().positive().max(64).default(2),
+  MODAL_MEMORY_MIB: z.coerce.number().int().min(512).max(262_144).default(4096),
   POLICY_VERIFICATION_KEYS_B64: z.string().min(32),
 });
 
@@ -280,8 +294,8 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
   return app;
 }
 
-function required(value: string | undefined, name: string) {
-  if (!value) throw new Error(`${name} is required when SANDBOX_DRIVER=kasm`);
+function required(value: string | undefined, name: string, driver: string) {
+  if (!value) throw new Error(`${name} is required when SANDBOX_DRIVER=${driver}`);
   return value;
 }
 
@@ -304,12 +318,36 @@ export function adapterFromEnv(env: z.infer<typeof envSchema>): SandboxAdapter {
       installationKind: env.ONECOMPUTER_INSTALLATION_KIND,
     });
   }
+  if (env.SANDBOX_DRIVER === "e2b") {
+    return new E2bSandboxAdapter({
+      apiKey: required(env.E2B_API_KEY, "E2B_API_KEY", "e2b"),
+      templateId: required(env.E2B_TEMPLATE_ID, "E2B_TEMPLATE_ID", "e2b"),
+      egressProxyUrlTemplate: required(env.MANAGED_SANDBOX_EGRESS_PROXY_URL_TEMPLATE, "MANAGED_SANDBOX_EGRESS_PROXY_URL_TEMPLATE", "e2b"),
+      timeoutMs: env.MANAGED_SANDBOX_TIMEOUT_MS,
+      lifecycle: env.E2B_LIFECYCLE,
+      timeZone: env.KASM_LOCAL_TIME_ZONE,
+      chatAttachmentRetentionDays: env.CHAT_ATTACHMENT_RETENTION_DAYS,
+    });
+  }
+  if (env.SANDBOX_DRIVER === "modal") {
+    return new ModalSandboxAdapter({
+      appName: required(env.MODAL_APP_NAME, "MODAL_APP_NAME", "modal"),
+      imageRef: required(env.MODAL_IMAGE_REF, "MODAL_IMAGE_REF", "modal"),
+      egressProxyUrlTemplate: required(env.MANAGED_SANDBOX_EGRESS_PROXY_URL_TEMPLATE, "MANAGED_SANDBOX_EGRESS_PROXY_URL_TEMPLATE", "modal"),
+      environment: env.MODAL_ENVIRONMENT,
+      timeoutMs: env.MANAGED_SANDBOX_TIMEOUT_MS,
+      cpu: env.MODAL_CPU,
+      memoryMiB: env.MODAL_MEMORY_MIB,
+      timeZone: env.KASM_LOCAL_TIME_ZONE,
+      chatAttachmentRetentionDays: env.CHAT_ATTACHMENT_RETENTION_DAYS,
+    });
+  }
   return new KasmDeveloperApiAdapter({
-    baseUrl: required(env.KASM_BASE_URL, "KASM_BASE_URL"),
-    apiKey: required(env.KASM_API_KEY, "KASM_API_KEY"),
-    apiSecret: required(env.KASM_API_SECRET, "KASM_API_SECRET"),
-    userId: required(env.KASM_USER_ID, "KASM_USER_ID"),
-    imageId: required(env.KASM_IMAGE_ID, "KASM_IMAGE_ID"),
+    baseUrl: required(env.KASM_BASE_URL, "KASM_BASE_URL", "kasm"),
+    apiKey: required(env.KASM_API_KEY, "KASM_API_KEY", "kasm"),
+    apiSecret: required(env.KASM_API_SECRET, "KASM_API_SECRET", "kasm"),
+    userId: required(env.KASM_USER_ID, "KASM_USER_ID", "kasm"),
+    imageId: required(env.KASM_IMAGE_ID, "KASM_IMAGE_ID", "kasm"),
   });
 }
 
