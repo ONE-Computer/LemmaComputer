@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { IdentityContext, RuntimePolicy } from "@onecomputer/contracts";
+import type { IdentityContext, RuntimeAgentPolicy, RuntimePolicy } from "@onecomputer/contracts";
 import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus } from "@onecomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore } from "@onecomputer/workspace-store";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
@@ -594,4 +594,60 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
   assert.equal(linear.state, "expired");
   assert.ok(gateway.toolServers.every((serverName) => serverName === "onecomputer_linear"));
   assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+});
+
+test("connector projection cache preserves the current workspace agent selection", async () => {
+  const gateway = new FakeConnectionGateway();
+  gateway.statusByServer.set("onecomputer_linear", connected);
+  gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  await completeFixtureConnection(service, gateway, alpha, "linear");
+  const claude: RuntimeAgentPolicy = {
+    catalogId: "claude-desktop",
+    agentId: "agent-alpha:claude-desktop",
+    agentProfile: "claude-desktop-managed-v1",
+    displayName: "Claude Desktop",
+    clientVersion: "1.0.0",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+  const hermes: RuntimeAgentPolicy = {
+    catalogId: "hermes-claw",
+    agentId: "agent-alpha:hermes-claw",
+    agentProfile: "hermes-claw-managed-v1",
+    displayName: "Hermes Agent CLI",
+    clientVersion: "1.0.0",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+  const policy: RuntimePolicy = {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: claude.agentId,
+    agentProfile: claude.agentProfile,
+    agents: [claude, hermes],
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+
+  const withHermes = await service.projectConnectedConnectors(alpha, policy);
+  const withoutHermes = await service.projectConnectedConnectors(alpha, { ...policy, agents: [claude] });
+
+  assert.deepEqual(withHermes.agents?.map((agent) => agent.catalogId), ["claude-desktop", "hermes-claw"]);
+  assert.deepEqual(withoutHermes.agents?.map((agent) => agent.catalogId), ["claude-desktop"]);
 });
