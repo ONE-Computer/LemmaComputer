@@ -56,9 +56,18 @@ test("PostgreSQL Activity events are append-only, deduplicated, tenant-scoped, a
       state: "completed",
       summary: "Search completed",
     };
-    const finished: AgentChatEvent = {
+    const webAction: AgentChatEvent = {
       version: 1,
       sequence: 2,
+      sessionId,
+      turnId,
+      type: "web-action",
+      action: "search",
+      label: "Searched for traditional rösti recipes",
+    };
+    const finished: AgentChatEvent = {
+      version: 1,
+      sequence: 3,
       sessionId,
       turnId,
       type: "turn-finish",
@@ -70,6 +79,7 @@ test("PostgreSQL Activity events are append-only, deduplicated, tenant-scoped, a
       service.recordAgentEvent({ ...common, event: tool }),
       service.recordAgentEvent({ ...common, event: tool }),
     ]);
+    await service.recordAgentEvent({ ...common, event: webAction });
     await service.recordAgentEvent({ ...common, event: finished });
 
     const replay = await service.replay(owner, scope, -1);
