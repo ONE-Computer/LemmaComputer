@@ -6324,6 +6324,7 @@ textarea:focus-visible,
 .site-row-meta > span + span::before { content: "·"; margin: 0 9px; color: #a2a9b0; }
 .site-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
 .site-row-actions .primary-button { width: auto; min-width: 92px; text-decoration: none; }
+.site-row-actions .text-button { margin-top: 0; }
 .sites-empty { min-height: 280px; }
 .chat-welcome-skills { width: min(520px, 100%); margin-top: 18px; }
 .chat-welcome-skills > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 13px 15px; border: 1px solid #dde3ea; border-radius: 12px; color: var(--navy); background: #fff; text-align: left; cursor: pointer; }
