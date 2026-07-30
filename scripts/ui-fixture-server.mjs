@@ -712,6 +712,20 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ site, revision: site.currentRevision, artifactSha256: "d".repeat(64), html: helloSiteHtml }));
     return;
   }
+  if (request.method === "GET" && /^\/v1\/sites\/[0-9a-f-]+\/content$/.test(url.pathname)) {
+    const id = url.pathname.split("/").at(-2);
+    const site = fixtureSites.find((item) => item.id === id);
+    if (!site) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "SITE_NOT_FOUND", message: "Site not found", retryable: false } }));
+      return;
+    }
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.setHeader("content-security-policy", "sandbox allow-scripts; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'");
+    response.setHeader("cross-origin-opener-policy", "same-origin");
+    response.end(helloSiteHtml);
+    return;
+  }
   if (request.method === "DELETE" && /^\/v1\/sites\/[0-9a-f-]+$/.test(url.pathname)) {
     const id = url.pathname.split("/").at(-1);
     fixtureSites = fixtureSites.filter((item) => item.id !== id);

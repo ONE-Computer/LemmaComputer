@@ -29,6 +29,7 @@ When implementing from a selected generated mock, treat that image as the source
 - The sidebar account control opens a compact profile menu with Settings and Log out. Keep Gateway and Administration out of primary navigation; surface both through Settings instead.
 - Help is intentionally not part of the production navigation or routing.
 - Chat is the final primary tab. When active, it exposes recent thread titles directly beneath the tab in the sidebar; the main chat area stays focused on the conversation and its single, ChatGPT-style composer.
+- Sites uses a compact, thumbnail-free row list. Opening a published site launches its sandboxed document in a separate browser tab instead of rendering an embedded preview inside ONEComputer.
 - Chat Activity starts closed and opens as a viewport-anchored right drawer without shrinking the transcript; mobile uses the same drawer as a full-screen dialog. Progression connectors appear only in the whitespace between cards and never run inside a card. Cover both viewport-edge geometry and connector endpoints in Playwright alongside reviewed visual baselines.
 - Schedules is a primary employee tab for Control-owned recurring prompts. Each schedule selects an owned workspace and one of its chat-capable agents; it is separate from workspace-local cron, shows run history, and states that stopped workspaces skip runs.
 - Standard dialogs use the shared 720px desktop cap and equal-width, right-aligned actions. The schedule editor gives Repeat, Time, and Timezone their own spaced columns within that common dialog system.

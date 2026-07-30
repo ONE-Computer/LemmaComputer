@@ -84,7 +84,7 @@ export const skillApi = {
 
 export const siteApi = {
   list: () => request("/api/v1/sites", { cache: "no-store" }),
-  preview: (id) => request(`/api/v1/sites/${encodeURIComponent(id)}/preview`, { cache: "no-store" }),
+  contentUrl: (id) => `/api/v1/sites/${encodeURIComponent(id)}/content`,
   delete: (id) => request(`/api/v1/sites/${encodeURIComponent(id)}`, mutation("DELETE")),
 };
 
