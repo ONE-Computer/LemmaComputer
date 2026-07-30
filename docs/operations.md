@@ -297,10 +297,17 @@ isolated development worktrees. Hosted multi-tenant installations fail closed
 with `COWORK_HOST_ISOLATION_REQUIRED`. The adapter
 maps only `/dev/kvm` and `/dev/vhost-vsock` into workspaces that include Claude
 Desktop; it does not make the container privileged or restore dropped
-capabilities. At startup, the image adds `kasm-user` to the numeric groups that
-own the mapped devices, so host and image group IDs do not need to match.
-Changing this setting recreates the workspace container on its next launch
-while preserving its workspace volume.
+capabilities. Cowork containers use the pinned Moby `seccomp/v0.2.1` default
+allowlist with one additional rule permitting only `socket(AF_VSOCK)`, which
+Claude's local execution VM requires. The base profile SHA-256 is
+`536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74`.
+AF_ALG and the other address families excluded by Moby remain blocked;
+AppArmor, `no-new-privileges`, capability drops, scoped device access, PID
+limits, and memory limits also remain active. At startup, the image adds
+`kasm-user` to the numeric groups that own the mapped devices and verifies
+AF_VSOCK socket creation before launching the desktop, so host and image group
+IDs do not need to match. Changing this setting recreates the workspace
+container on its next launch while preserving its workspace volume.
 
 For an external Kasm installation, configure the ONEComputer Workspace image's
 Docker Run Config Override in Kasm:
@@ -316,6 +323,12 @@ Docker Run Config Override in Kasm:
   "environment": {"ONECOMPUTER_COWORK_ENABLED": "true"}
 }
 ```
+
+The local adapter sends the scoped profile to Docker directly. External Kasm
+operators must configure an equivalent custom seccomp profile on eligible
+agents that adds only AF_VSOCK to the default allowlist; do not disable seccomp
+for the Workspace. The image startup preflight rejects a session when the
+required socket is still blocked.
 
 Every Kasm Agent eligible to run this Workspace must expose both devices.
 Mapping KVM and vhost-vsock gives the workspace access to host virtualization

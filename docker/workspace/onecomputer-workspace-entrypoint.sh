@@ -117,6 +117,12 @@ if [[ "$ONECOMPUTER_COWORK_ENABLED" == "true" ]]; then
   }
   grant_cowork_device_access /dev/kvm onecomputer-kvm
   grant_cowork_device_access /dev/vhost-vsock onecomputer-vhost-vsock
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    python3 -c 'import socket; socket.socket(40, socket.SOCK_STREAM).close()' \
+    2>/dev/null || {
+      echo "Cowork cannot create an AF_VSOCK socket; check the workspace seccomp profile" >&2
+      exit 78
+    }
 fi
 
 remove_stale_chrome_singletons() {

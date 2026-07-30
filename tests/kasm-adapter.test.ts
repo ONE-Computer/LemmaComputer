@@ -337,7 +337,25 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.equal(host.Memory, 8_589_934_592);
     assert.equal(host.NanoCpus, 2_000_000_000);
     assert.deepEqual(host.CapDrop, ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]);
-    assert.deepEqual(host.SecurityOpt, ["no-new-privileges"]);
+    const securityOptions = host.SecurityOpt as string[];
+    assert.equal(securityOptions[0], "no-new-privileges");
+    assert.match(securityOptions[1]!, /^seccomp=\{/);
+    const seccomp = JSON.parse(securityOptions[1]!.slice("seccomp=".length)) as {
+      defaultAction: string;
+      syscalls: Array<{ names: string[]; action: string; args?: Array<{ value: number; op: string }> }>;
+    };
+    assert.equal(seccomp.defaultAction, "SCMP_ACT_ERRNO");
+    assert.deepEqual(
+      seccomp.syscalls
+        .filter((rule) => rule.names.length === 1 && rule.names[0] === "socket")
+        .map((rule) => ({ action: rule.action, value: rule.args?.[0]?.value, op: rule.args?.[0]?.op })),
+      [
+        { action: "SCMP_ACT_ALLOW", value: 38, op: "SCMP_CMP_LT" },
+        { action: "SCMP_ACT_ALLOW", value: 39, op: "SCMP_CMP_EQ" },
+        { action: "SCMP_ACT_ALLOW", value: 40, op: "SCMP_CMP_EQ" },
+        { action: "SCMP_ACT_ALLOW", value: 40, op: "SCMP_CMP_GT" },
+      ],
+    );
     assert.deepEqual(host.Devices, [{
       PathOnHost: "/dev/kvm",
       PathInContainer: "/dev/kvm",
@@ -468,6 +486,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const standardHost = sandboxCreates.at(-1)!.body.HostConfig as Record<string, unknown>;
     assert.equal(standardHost.Memory, 4_294_967_296);
     assert.equal(standardHost.Devices, undefined);
+    assert.deepEqual(standardHost.SecurityOpt, ["no-new-privileges"]);
     assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("ONECOMPUTER_COWORK_ENABLED=false"));
 
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
@@ -530,7 +549,7 @@ test("local Kasm retries container creation when Docker drops the workspace netw
 test("local Kasm surfaces allowlisted exit-78 diagnostics before cleanup", async () => {
   const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
-  const message = "Hermes sandbox API configuration is required";
+  const message = "Cowork cannot create an AF_VSOCK socket; check the workspace seccomp profile";
   const frame = Buffer.alloc(8 + Buffer.byteLength(message));
   frame[0] = 2;
   frame.writeUInt32BE(Buffer.byteLength(message), 4);
@@ -567,7 +586,7 @@ test("local Kasm surfaces allowlisted exit-78 diagnostics before cleanup", async
       (adapter as unknown as { waitForStartup: (id: string) => Promise<void> }).waitForStartup("sandbox-id"),
       (error: unknown) => {
         assert.equal((error as { code?: string }).code, "WORKSPACE_STARTUP_REJECTED");
-        assert.match((error as Error).message, /Hermes sandbox API configuration is required/);
+        assert.match((error as Error).message, /Cowork cannot create an AF_VSOCK socket/);
         assert.equal((error as { retryable?: boolean }).retryable, false);
         return true;
       },

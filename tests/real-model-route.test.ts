@@ -144,6 +144,8 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(entrypoint, /"allowedWorkspaceFolders": \["\/home\/kasm-user"\]/);
   assert.match(entrypoint, /grant_cowork_device_access \/dev\/kvm onecomputer-kvm/);
   assert.match(entrypoint, /grant_cowork_device_access \/dev\/vhost-vsock onecomputer-vhost-vsock/);
+  assert.match(entrypoint, /socket\.socket\(40, socket\.SOCK_STREAM\)\.close\(\)/);
+  assert.match(entrypoint, /Cowork cannot create an AF_VSOCK socket/);
   assert.match(entrypoint, /groupadd --system --gid "\$device_gid" "\$device_group"/);
   assert.match(entrypoint, /setpriv --reuid=1000 --regid=1000 --init-groups[\s\S]*\[\[ -r "\$1" && -w "\$1" \]\]/);
   assert.match(entrypoint, /"isLocalDevMcpEnabled": False/);
