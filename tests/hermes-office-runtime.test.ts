@@ -186,6 +186,52 @@ print(json.dumps(result))
   }
 });
 
+test("Telegram deliverables are snapshotted from a bounded Outbox into immutable artifact storage", async () => {
+  const chatAdapter = await source("docker/workspace/onecomputer-agent-chat.py");
+  const functions = chatAdapter.slice(chatAdapter.indexOf("def snapshot_outbox"), chatAdapter.indexOf("def validate_user_message"));
+  const home = await mkdtemp(path.join(tmpdir(), "onecomputer-outbox-test-"));
+  const program = `
+import hashlib, json, os, re, shutil, stat, sys, time, uuid
+from pathlib import Path
+from typing import Any
+HOME = Path(sys.argv[1])
+STATE_DIR = HOME / ".onecomputer-chat" / "hermes-claw"
+ARTIFACT_ROOT = STATE_DIR / "artifacts"
+ARTIFACT_OUTBOX_ROOT = HOME / "ONEComputer" / "Outbox"
+ATTACHMENT_RETENTION_DAYS = 1
+MAX_ARTIFACT_BYTES = 50 * 1024 * 1024
+MAX_TOTAL_ARTIFACT_BYTES = 100 * 1024 * 1024
+MAX_ATTACHMENTS = 4
+ARTIFACT_MEDIA_TYPES = {".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+def attachment_text(media_type, data): return None
+def now(): return "2026-07-30T00:00:00Z"
+def write_attachment_manifest(path, document): path.write_text(json.dumps(document))
+${functions}
+before = snapshot_outbox()
+deliverable = ARTIFACT_OUTBOX_ROOT / "Board Update.pptx"
+deliverable.write_bytes(b"valid-generated-deck")
+artifacts, notice = persist_outbox_artifacts(before)
+manifest = json.loads((ARTIFACT_ROOT / artifacts[0]["artifactId"] / "manifest.json").read_text())
+second, second_notice = persist_outbox_artifacts(snapshot_outbox())
+result = {"artifacts": artifacts, "notice": notice, "manifest": manifest, "second": second, "secondNotice": second_notice,
+  "stored": (ARTIFACT_ROOT / artifacts[0]["artifactId"] / "Board Update.pptx").read_bytes().decode()}
+print(json.dumps(result))
+`;
+  try {
+    const { stdout } = await execFileAsync("python3", ["-c", program, home]);
+    const result = JSON.parse(stdout);
+    assert.equal(result.artifacts.length, 1);
+    assert.equal(result.artifacts[0].filename, "Board Update.pptx");
+    assert.equal(result.artifacts[0].byteLength, 20);
+    assert.equal(result.stored, "valid-generated-deck");
+    assert.equal(result.notice, null);
+    assert.deepEqual(result.second, []);
+    assert.equal(result.manifest.sha256, result.artifacts[0].sha256);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test("governed Calendar discovery advertises only argument shapes Control allows", async () => {
   const bridge = await source("docker/workspace/onecomputer-connectors-stdio.py");
   const schemas = bridge.slice(bridge.indexOf("BOUNDED_LIST_INPUT_PROPERTIES"), bridge.indexOf("LIST_DRIVES_INPUT_SCHEMA"));

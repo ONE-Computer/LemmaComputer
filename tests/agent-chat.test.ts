@@ -3,6 +3,13 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
+  channelArtifactMaxBytes,
+  channelArtifactMaxTotalBytes,
+  channelAttachmentMaxBytes,
+  channelAttachmentMaxTotalBytes,
+  channelTurnResponseSchema,
+  chatAttachmentMaxBytes,
+  chatAttachmentMaxTotalBytes,
   chatTurnStateSchema,
   sendChatTurnSchema,
   type IdentityContext,
@@ -83,6 +90,36 @@ test("chat accepts bounded inline image and document parts but rejects media mis
   assert.equal(sendChatTurnSchema.safeParse({
     message: { ...message, parts: Array.from({ length: 5 }, () => message.parts[0]) },
   }).success, false);
+});
+
+test("Telegram and browser attachment contracts keep separate transport limits", () => {
+  assert.equal(chatAttachmentMaxBytes, 8 * 1024 * 1024);
+  assert.equal(chatAttachmentMaxTotalBytes, 16 * 1024 * 1024);
+  assert.equal(channelAttachmentMaxBytes, 20 * 1024 * 1024);
+  assert.equal(channelAttachmentMaxTotalBytes, 80 * 1024 * 1024);
+
+  const url = `data:application/pdf;base64,${Buffer.alloc(chatAttachmentMaxBytes + 1).toString("base64")}`;
+  const message = {
+    id: "user-message-over-browser-limit",
+    role: "user",
+    metadata: { agentCatalogId: "claude-cli", state: "completed", createdAt: "2026-07-30T00:00:00Z" },
+    parts: [{ type: "file", filename: "report.pdf", mediaType: "application/pdf", url }],
+  };
+  assert.equal(sendChatTurnSchema.safeParse({ message }).success, false);
+  assert.equal(sendChatTurnSchema.safeParse({ message: { ...message, metadata: { ...message.metadata, source: "telegram" } } }).success, true);
+});
+
+test("channel response artifacts are bounded, hashed, and typed", () => {
+  assert.equal(channelArtifactMaxBytes, 50 * 1024 * 1024);
+  assert.equal(channelArtifactMaxTotalBytes, 100 * 1024 * 1024);
+  const artifact = { artifactId: "artifact-44444444444444444444444444444444", filename: "Deck.pptx",
+    mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", byteLength: channelArtifactMaxBytes, sha256: "a".repeat(64) };
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [artifact], state: "completed" }).success, true);
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [{ ...artifact, byteLength: channelArtifactMaxBytes + 1 }], state: "completed" }).success, false);
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [{ ...artifact }, { ...artifact, artifactId: "artifact-55555555555555555555555555555555" }], state: "completed" }).success, true);
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [{ ...artifact }, { ...artifact, artifactId: "artifact-55555555555555555555555555555555" }, { ...artifact, artifactId: "artifact-66666666666666666666666666666666" }], state: "completed" }).success, false);
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [{ ...artifact, sha256: "bad" }], state: "completed" }).success, false);
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: Array.from({ length: 5 }, () => artifact), state: "completed" }).success, false);
 });
 
 const hermesPolicy: RuntimePolicy = {

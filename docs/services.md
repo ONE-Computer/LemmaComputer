@@ -181,7 +181,10 @@ version- and checksum-pinned.
 
 The Hermes payload also contains checksum-pinned copies of the official DOCX,
 PDF, PowerPoint, XLSX, and OCR/document skills and their native, Python, Node,
-and font dependencies. When either Hermes client is selected, the entrypoint
+and font dependencies. Telegram-originated deliverables written to the dedicated
+`ONEComputer/Outbox` are snapshotted into immutable, hash-verified runtime
+artifacts; arbitrary workspace paths are never exported. When either Hermes client
+is selected, the entrypoint
 uses Hermes' bundled-skill manifest sync to seed its persistent profile.
 Managed/restricted Hermes exposes the workspace-local file, terminal, skill,
 and vision tools required by these workflows while keeping public-web and
@@ -333,7 +336,15 @@ back to Control.
 The current adapter polls Telegram, deduplicates update IDs in PostgreSQL,
 checks sender/workspace routing with Control, supports per-sender agent and
 session selection, forwards turns to the agent-neutral chat API, and returns
-typing indicators or safe failures.
+typing indicators, safe failures, and bounded generated files through Telegram
+`sendDocument`. Artifact downloads are re-authorized against the tenant, workspace,
+sender, and assigned agent route, while the broker remains the only holder of the
+Telegram credential. Incoming Telegram files are bounded by the hosted Bot API's
+20 MB download ceiling (80 MB across a four-file turn). Generated files use
+Telegram's 50 MB `sendDocument` ceiling and a 100 MB aggregate response limit.
+The browser chat retains its separate 8 MB per-file and 16 MB aggregate limits.
+Text and file delivery progress are retried durably without rerunning a completed
+agent turn.
 
 The broker has a dedicated egress network; workspaces never receive the bot
 token or direct Telegram reachability.

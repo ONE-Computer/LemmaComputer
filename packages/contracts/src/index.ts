@@ -913,12 +913,23 @@ export const chatAttachmentMediaTypes = [
 export const chatAttachmentMaxFiles = 4;
 export const chatAttachmentMaxBytes = 8 * 1024 * 1024;
 export const chatAttachmentMaxTotalBytes = 16 * 1024 * 1024;
-const chatAttachmentMaxDataUrlLength = Math.ceil(chatAttachmentMaxBytes / 3) * 4 + 128;
+export const channelAttachmentMaxBytes = 20 * 1024 * 1024;
+export const channelAttachmentMaxTotalBytes = channelAttachmentMaxBytes * chatAttachmentMaxFiles;
+export const channelArtifactMaxBytes = 50 * 1024 * 1024;
+export const channelArtifactMaxTotalBytes = 100 * 1024 * 1024;
+const attachmentMaxDataUrlLength = (maxBytes: number) => Math.ceil(maxBytes / 3) * 4 + 128;
+const inlineAttachmentByteLength = (part: { mediaType: string; url: string }) => {
+  const prefix = `data:${part.mediaType};base64,`;
+  if (!part.url.startsWith(prefix)) return Number.POSITIVE_INFINITY;
+  const encoded = part.url.slice(prefix.length);
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor(encoded.length * 3 / 4) - padding);
+};
 export const chatFilePartSchema = z.object({
   type: z.literal("file"),
   mediaType: z.enum(chatAttachmentMediaTypes),
   filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
-  url: z.string().min(1).max(chatAttachmentMaxDataUrlLength),
+  url: z.string().min(1).max(attachmentMaxDataUrlLength(channelAttachmentMaxBytes)),
 }).strict().superRefine((part, context) => {
   if (!part.url.startsWith(`data:${part.mediaType};base64,`)) {
     context.addIssue({ code: "custom", path: ["url"], message: "Attachment must be an inline base64 data URL matching its media type" });
@@ -930,6 +941,14 @@ export const chatFileReferenceDataSchema = z.object({
   filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
   storage: z.literal("workspace"),
 }).strict();
+export const chatArtifactSchema = z.object({
+  artifactId: z.string().regex(/^artifact-[a-f0-9]{32}$/),
+  mediaType: z.enum(chatAttachmentMediaTypes),
+  filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
+  byteLength: z.number().int().min(1).max(channelArtifactMaxBytes),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type ChatArtifact = z.infer<typeof chatArtifactSchema>;
 
 export const chatUiMessagePartSchema = z.discriminatedUnion("type", [
   z.object({
@@ -957,16 +976,23 @@ export const sendChatTurnSchema = z.object({
     const textParts = message.parts.filter((part) => part.type === "text");
     const fileParts = message.parts.filter((part) => part.type === "file");
     const invalidPart = message.parts.some((part) => part.type !== "text" && part.type !== "file");
-    const encodedSize = fileParts.reduce((total, part) => total + part.url.length, 0);
+    const attachmentBytes = fileParts.reduce((total, part) => total + inlineAttachmentByteLength(part), 0);
+    const attachmentMaxBytes = message.metadata.source === "telegram"
+      ? channelAttachmentMaxBytes
+      : chatAttachmentMaxBytes;
+    const attachmentMaxTotalBytes = message.metadata.source === "telegram"
+      ? channelAttachmentMaxTotalBytes
+      : chatAttachmentMaxTotalBytes;
     if (
       message.role !== "user"
       || message.metadata.state !== "completed"
       || invalidPart
       || textParts.length > 1
       || fileParts.length > chatAttachmentMaxFiles
+      || fileParts.some((part) => inlineAttachmentByteLength(part) > attachmentMaxBytes)
       || (!textParts[0]?.text.trim() && fileParts.length === 0)
       || (textParts[0]?.text.length ?? 0) > 16_000
-      || encodedSize > Math.ceil(chatAttachmentMaxTotalBytes / 3) * 4 + (fileParts.length * 128)
+      || attachmentBytes > attachmentMaxTotalBytes
     ) {
       context.addIssue({ code: "custom", message: "A completed user message with optional bounded attachments is required" });
     }
@@ -1049,10 +1075,10 @@ export const channelTurnRequestSchema = channelRouteSchema.extend({
   attachments: z.array(chatFilePartSchema).max(chatAttachmentMaxFiles).optional(),
 }).strict().superRefine((value, context) => {
   const attachments = value.attachments ?? [];
-  const encodedSize = attachments.reduce((total, attachment) => total + attachment.url.length, 0);
+  const attachmentBytes = attachments.reduce((total, attachment) => total + inlineAttachmentByteLength(attachment), 0);
   if (
     (!value.text && attachments.length === 0)
-    || encodedSize > Math.ceil(chatAttachmentMaxTotalBytes / 3) * 4 + (attachments.length * 128)
+    || attachmentBytes > channelAttachmentMaxTotalBytes
   ) {
     context.addIssue({
       code: "custom",
@@ -1064,7 +1090,15 @@ export const channelTurnResponseSchema = z.object({
   sessionId: chatSessionIdSchema,
   text: z.string().max(16_000),
   notices: z.array(z.string().trim().min(1).max(500)).max(16),
+  artifacts: z.array(chatArtifactSchema).max(chatAttachmentMaxFiles).optional(),
   state: chatTurnStateSchema.exclude(["streaming"]),
+}).strict().superRefine((value, context) => {
+  if ((value.artifacts ?? []).reduce((total, artifact) => total + artifact.byteLength, 0) > channelArtifactMaxTotalBytes) {
+    context.addIssue({ code: "custom", path: ["artifacts"], message: "Channel response artifacts exceed their total limit" });
+  }
+});
+export const channelArtifactDownloadRequestSchema = channelRouteSchema.extend({
+  artifact: chatArtifactSchema,
 }).strict();
 export const channelTurnStreamEventSchema = z.discriminatedUnion("type", [
   z.object({
@@ -1142,6 +1176,14 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
     type: z.literal("text-delta"),
     textId: chatPartIdSchema,
     delta: z.string().min(1).max(16_000),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("artifact"),
+    artifactId: chatArtifactSchema.shape.artifactId,
+    mediaType: chatArtifactSchema.shape.mediaType,
+    filename: chatArtifactSchema.shape.filename,
+    byteLength: chatArtifactSchema.shape.byteLength,
+    sha256: chatArtifactSchema.shape.sha256,
   }).strict(),
   agentChatEventBaseSchema.extend({
     type: z.literal("tool"),

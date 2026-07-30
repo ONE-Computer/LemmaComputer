@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { activityEventSchema } from "@onecomputer/contracts";
-import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
+import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
 import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migrations.js";
 export * from "./identity-policy.js";
 export * from "./connector-registry.js";
@@ -72,9 +72,13 @@ export type ChannelCredentialRecord = {
 export type ChannelPendingResponse = {
   connectionId: string;
   updateId: string;
+  senderId: string;
   chatId: string;
   text: string;
   offset: number;
+  agentCatalogId: ChatAgentCatalogId | null;
+  artifacts: ChatArtifact[];
+  artifactOffset: number;
   finalState: "delivered" | "failed";
   finalFailureCode: string | null;
 };
@@ -105,11 +109,14 @@ export interface ChannelStore {
     updateId: string,
     chatId: string,
     text: string,
+    agentCatalogId: ChatAgentCatalogId,
+    artifacts: ChatArtifact[],
     finalState: "delivered" | "failed",
     finalFailureCode?: string,
   ): Promise<void>;
   listPendingChannelResponses(connectionId: string): Promise<ChannelPendingResponse[]>;
   advanceChannelResponseDelivery(connectionId: string, updateId: string, offset: number): Promise<void>;
+  advanceChannelArtifactDelivery(connectionId: string, updateId: string, offset: number): Promise<void>;
   advanceTelegramUpdateOffset(connectionId: string, offset: string): Promise<void>;
   getChannelSenderAgent(connectionId: string, senderId: string): Promise<ChatAgentCatalogId | null>;
   setChannelSenderAgent(connectionId: string, senderId: string, agentCatalogId: ChatAgentCatalogId): Promise<void>;
@@ -1013,22 +1020,25 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     updateId: string,
     chatId: string,
     text: string,
+    agentCatalogId: ChatAgentCatalogId,
+    artifacts: ChatArtifact[],
     finalState: "delivered" | "failed",
     finalFailureCode?: string,
   ) {
     await this.pool.query(
       `UPDATE channel_updates
-       SET state='dispatched',response_chat_id=$3,response_text=$4,response_offset=0,final_state=$5,
-           final_failure_code=$6,failure_code=NULL,updated_at=now()
+       SET state='dispatched',response_chat_id=$3,response_text=$4,response_offset=0,
+           response_agent_catalog_id=$5,response_artifacts=$6::jsonb,response_artifact_offset=0,
+           final_state=$7,final_failure_code=$8,failure_code=NULL,updated_at=now()
        WHERE connection_id=$1 AND update_id=$2::bigint AND state IN ('reserved','dispatched')`,
-      [connectionId, updateId, chatId, text, finalState, finalFailureCode ?? null],
+      [connectionId, updateId, chatId, text, agentCatalogId, JSON.stringify(artifacts), finalState, finalFailureCode ?? null],
     );
   }
 
   async listPendingChannelResponses(connectionId: string) {
     const result = await this.pool.query(
-      `SELECT connection_id,update_id,response_chat_id,response_text,response_offset,
-              final_state,final_failure_code
+      `SELECT connection_id,update_id,sender_id,response_chat_id,response_text,response_offset,
+              response_agent_catalog_id,response_artifacts,response_artifact_offset,final_state,final_failure_code
        FROM channel_updates
        WHERE connection_id=$1 AND state='dispatched' AND response_text IS NOT NULL
        ORDER BY created_at,update_id`,
@@ -1037,9 +1047,13 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return result.rows.map((row): ChannelPendingResponse => ({
       connectionId: String(row.connection_id),
       updateId: String(row.update_id),
+      senderId: String(row.sender_id),
       chatId: String(row.response_chat_id),
       text: String(row.response_text),
       offset: Number(row.response_offset),
+      agentCatalogId: row.response_agent_catalog_id as ChatAgentCatalogId | null,
+      artifacts: Array.isArray(row.response_artifacts) ? row.response_artifacts as ChatArtifact[] : [],
+      artifactOffset: Number(row.response_artifact_offset),
       finalState: row.final_state as "delivered" | "failed",
       finalFailureCode: row.final_failure_code ? String(row.final_failure_code) : null,
     }));
@@ -1049,12 +1063,35 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     await this.pool.query(
       `UPDATE channel_updates
        SET response_offset=$3,
-           state=CASE WHEN $3 >= char_length(response_text) THEN final_state ELSE state END,
-           failure_code=CASE WHEN $3 >= char_length(response_text) THEN final_failure_code ELSE failure_code END,
+           state=CASE WHEN $3 >= char_length(response_text)
+                           AND response_artifact_offset >= jsonb_array_length(response_artifacts)
+                      THEN final_state ELSE state END,
+           failure_code=CASE WHEN $3 >= char_length(response_text)
+                                  AND response_artifact_offset >= jsonb_array_length(response_artifacts)
+                             THEN final_failure_code ELSE failure_code END,
            updated_at=now()
        WHERE connection_id=$1 AND update_id=$2::bigint
          AND state='dispatched' AND response_text IS NOT NULL
          AND response_offset <= $3`,
+      [connectionId, updateId, offset],
+    );
+  }
+
+  async advanceChannelArtifactDelivery(connectionId: string, updateId: string, offset: number) {
+    await this.pool.query(
+      `UPDATE channel_updates
+       SET response_artifact_offset=$3,
+           state=CASE WHEN $3 >= jsonb_array_length(response_artifacts)
+                           AND response_offset >= char_length(response_text)
+                      THEN final_state ELSE state END,
+           failure_code=CASE WHEN $3 >= jsonb_array_length(response_artifacts)
+                                  AND response_offset >= char_length(response_text)
+                             THEN final_failure_code ELSE failure_code END,
+           updated_at=now()
+       WHERE connection_id=$1 AND update_id=$2::bigint
+         AND state='dispatched' AND response_text IS NOT NULL
+         AND response_artifact_offset <= $3
+         AND $3 <= jsonb_array_length(response_artifacts)`,
       [connectionId, updateId, offset],
     );
   }
@@ -1814,7 +1851,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   private channelUpdates = new Map<string, {
     senderId: string;
     state: "reserved" | "dispatched" | "delivered" | "rejected" | "failed";
-    response?: Omit<ChannelPendingResponse, "connectionId" | "updateId">;
+    response?: Omit<ChannelPendingResponse, "connectionId" | "updateId" | "senderId">;
   }>();
   private channelRoutes = new Map<string, ChatAgentCatalogId>();
   private channelSessions = new Map<string, string>();
@@ -2094,6 +2131,8 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     updateId: string,
     chatId: string,
     text: string,
+    agentCatalogId: ChatAgentCatalogId,
+    artifacts: ChatArtifact[],
     finalState: "delivered" | "failed",
     finalFailureCode?: string,
   ) {
@@ -2107,6 +2146,9 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
         chatId,
         text,
         offset: 0,
+        agentCatalogId,
+        artifacts,
+        artifactOffset: 0,
         finalState,
         finalFailureCode: finalFailureCode ?? null,
       },
@@ -2119,6 +2161,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       return [{
         connectionId,
         updateId: key.slice(connectionId.length + 1),
+        senderId: update.senderId,
         ...update.response,
       }];
     });
@@ -2128,11 +2171,26 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     const key = `${connectionId}:${updateId}`;
     const update = this.channelUpdates.get(key);
     if (update?.state !== "dispatched" || !update.response || offset < update.response.offset) return;
-    const complete = offset >= [...update.response.text].length;
+    const complete = offset >= [...update.response.text].length
+      && update.response.artifactOffset >= update.response.artifacts.length;
     this.channelUpdates.set(key, {
       ...update,
       state: complete ? update.response.finalState : update.state,
       response: { ...update.response, offset },
+    });
+  }
+
+  async advanceChannelArtifactDelivery(connectionId: string, updateId: string, offset: number) {
+    const key = `${connectionId}:${updateId}`;
+    const update = this.channelUpdates.get(key);
+    if (update?.state !== "dispatched" || !update.response
+      || offset < update.response.artifactOffset || offset > update.response.artifacts.length) return;
+    const complete = offset >= update.response.artifacts.length
+      && update.response.offset >= [...update.response.text].length;
+    this.channelUpdates.set(key, {
+      ...update,
+      state: complete ? update.response.finalState : update.state,
+      response: { ...update.response, artifactOffset: offset },
     });
   }
 
