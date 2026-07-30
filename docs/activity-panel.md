@@ -2,7 +2,14 @@
 
 Chat can open a turn-scoped **Activity** panel beside the transcript. It shows the sanitized `ActivityEventV1` records that ONEComputer is allowed to present to the employee: plans, progress, provider summaries, tools, web actions, sources, approvals, computer actions, notices, errors, and completion.
 
-Provider-generated summaries carry an explicit label. The panel is not a chain-of-thought, hidden-reasoning, or administrator-observability view. The transcript remains understandable when Activity is closed or unavailable.
+Activity is a work trace: it explains the agent's visible approach, the actions it took, the sources it referenced, and the outcome. Provider-generated approach summaries carry an explicit label. The panel is not a chain-of-thought, hidden-reasoning, or administrator-observability view. The transcript remains understandable when Activity is closed or unavailable.
+
+The work trace favors human descriptions over runtime telemetry:
+
+- the provider's visible pre-tool explanation becomes the turn's **Approach**;
+- repeated running and completed updates for one tool call render as one evolving action;
+- Lifecycle updates with the same plan, progress, tool-call, web-action, or source identity collapse into one current row.
+- supported web tools show the sanitized search, open, or find action rather than a duplicate raw tool row;
 
 ## Using the panel
 
