@@ -102,7 +102,6 @@ export function ActivityEventRow({ event }) {
   const expandable = Boolean(copy.detail) && !["provider_summary", "source", "web_action", "terminal"].includes(event.kind);
   const heading = (
     <>
-      <span className="activity-event-icon" aria-hidden="true"><Icon /></span>
       <span className="activity-event-copy">
         <span className="activity-event-kind">
           {presentation.label}
@@ -115,6 +114,7 @@ export function ActivityEventRow({ event }) {
   );
   return (
     <li className={`activity-event ${event.kind} ${event.state}`} data-activity-sequence={event.sequence}>
+      <span className="activity-event-icon" aria-hidden="true"><Icon /></span>
       {expandable ? (
         <details open={event.state === "requires_action" || event.state === "failed"}>
           <summary>{heading}</summary>
@@ -268,26 +268,14 @@ export function useActivityFeed({ workspaceId, agentId, sessionId, turnId, enabl
   return { events, feedState, retry: () => setReload((value) => value + 1) };
 }
 
-const useOverlayPanel = () => {
-  const [overlay, setOverlay] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1180px)").matches);
-  useEffect(() => {
-    const query = window.matchMedia("(max-width: 1180px)");
-    const update = () => setOverlay(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return overlay;
-};
 
 export function ActivityPanel({ open, workspaceId, agentId, sessionId, turnId, onClose, returnFocusRef }) {
   const closeRef = useRef(null);
   const panelRef = useRef(null);
-  const overlay = useOverlayPanel();
   const { events, feedState, retry } = useActivityFeed({ workspaceId, agentId, sessionId, turnId, enabled: open });
 
   useEffect(() => {
-    if (!open || !overlay) return undefined;
+    if (!open) return undefined;
     const focusFrame = window.requestAnimationFrame(() => closeRef.current?.focus());
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
@@ -314,7 +302,7 @@ export function ActivityPanel({ open, workspaceId, agentId, sessionId, turnId, o
       window.cancelAnimationFrame(focusFrame);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [onClose, open, overlay, returnFocusRef]);
+  }, [onClose, open, returnFocusRef]);
 
   if (!open) return null;
   const announcement = feedState === "disconnected"
@@ -326,13 +314,13 @@ export function ActivityPanel({ open, workspaceId, agentId, sessionId, turnId, o
         : statusCopy[feedState]?.title ?? "Activity is live.";
   return (
     <>
-      {overlay && <button className="activity-panel-scrim" type="button" aria-label="Close Activity" onClick={onClose} />}
+      <button className="activity-panel-scrim" type="button" aria-label="Close Activity" onClick={onClose} />
       <aside
         ref={panelRef}
         id="chat-activity-panel"
-        className={`activity-panel${overlay ? " overlay" : ""}`}
-        role={overlay ? "dialog" : "region"}
-        aria-modal={overlay ? "true" : undefined}
+        className="activity-panel"
+        role="dialog"
+        aria-modal="true"
         aria-labelledby="chat-activity-title"
       >
         <header className="activity-panel-header">

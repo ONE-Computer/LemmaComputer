@@ -108,7 +108,8 @@ test("Activity panel source preserves keyboard dialog behavior, focus return, li
   const source = await readFile(new URL("../apps/web/src/ActivityPanel.jsx", import.meta.url), "utf8");
   assert.match(source, /event\.key === "Escape"/);
   assert.match(source, /event\.key !== "Tab"/);
-  assert.match(source, /aria-modal=\{overlay \? "true"/);
+  assert.match(source, /role="dialog"/);
+  assert.match(source, /aria-modal="true"/);
   assert.match(source, /returnFocusRef\?\.current\?\.focus\(\)/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /data-activity-extension-slot="computer-viewer"/);

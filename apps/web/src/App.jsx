@@ -2021,7 +2021,7 @@ function ChatConversation({
   const contextRef = useRef(null);
   const activityToggleRef = useRef(null);
   const chatPopoverRefs = useMemo(() => [chatActionsRef, contextRef], []);
-  const [activityOpen, setActivityOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1181px)").matches);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [selectedActivityTurnId, setSelectedActivityTurnId] = useState("");
 
   useDismissOnOutside(chatActionsOpen || contextOpen, () => {
