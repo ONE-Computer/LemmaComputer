@@ -14,6 +14,8 @@ Version 1 supports `plan`, `progress`, `provider_summary`, `tool`, `web_action`,
 
 The existing chat event stream remains the transcript transport. Control maps its canonical agent events into Activity records before emitting the corresponding chat UI chunks, so a client that learns a turn ID can immediately replay Activity sequence 0.
 
+Native-agent adapters project only allow-listed, user-visible fields into this stream. Tool inputs may contribute a bounded query, public URL, filename, or human-facing target summary; tool results may contribute validated public source links. Codex reasoning `summary` items may produce `provider_summary` events, but reasoning content is ignored. Claude and Hermes raw thinking blocks are also ignored.
+
 ## Replay and live stream
 
 Both endpoints are scoped by the authenticated workspace owner, selected agent, session, and turn:

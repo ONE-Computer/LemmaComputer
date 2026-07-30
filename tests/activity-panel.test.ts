@@ -6,7 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   ActivityEventRow,
   ActivityTimeline,
+  humanizeToolName,
   mergeActivityEvents,
+  presentActivityEvents,
   safeActivityHref,
 } from "../apps/web/src/ActivityPanel.jsx";
 
@@ -49,7 +51,7 @@ test("Activity component fixtures render every ActivityEventV1 kind", () => {
     assert.doesNotMatch(html, /\[object Object\]/, fixture.kind);
   }
   const provider = renderToStaticMarkup(createElement(ActivityEventRow, { event: fixtures[2] }));
-  assert.match(provider, /Provider summary/);
+  assert.match(provider, /Why this approach/);
   assert.match(provider, /Provider generated/);
   assert.doesNotMatch(provider, /chain-of-thought|full reasoning trace|internal reasoning/i);
 });
@@ -102,6 +104,41 @@ test("Activity merge keeps monotonic order and suppresses event and sequence dup
   const reconnected = mergeActivityEvents(replay, [fixtures[1], { ...fixtures[2], eventId: "30000000-0000-4000-8000-000000000001" }, fixtures[3]]);
   assert.deepEqual(reconnected.map((event) => event.sequence), [0, 1, 2, 3]);
   assert.equal(new Set(reconnected.map((event) => event.eventId)).size, reconnected.length);
+});
+
+test("work trace collapses lifecycle updates and replaces raw web tools with explicit actions", () => {
+  const event = (sequence, kind, state, payload, provenance = "tool") => ({
+    ...base,
+    eventId: `40000000-0000-4000-8000-${String(sequence + 1).padStart(12, "0")}`,
+    sequence,
+    kind,
+    state,
+    provenance,
+    payload,
+  });
+  const presented = presentActivityEvents([
+    event(0, "plan", "running", { title: "Agent started work" }, "deterministic_system"),
+    event(1, "plan", "completed", { title: "Approach", summary: "Compare reputable recipes." }, "provider_generated"),
+    event(2, "tool", "running", { toolCallId: "tool-file", name: "get-drive-item", summary: "Target: plan.docx" }),
+    event(3, "tool", "completed", { toolCallId: "tool-file", name: "get-drive-item", summary: "Target: plan.docx" }),
+    event(4, "tool", "running", { toolCallId: "tool-web", name: "WebSearch", summary: "Searched for “traditional rösti recipe”" }),
+    event(5, "tool", "completed", { toolCallId: "tool-web", name: "WebSearch", summary: "Searched for “traditional rösti recipe”" }),
+    event(6, "web_action", "completed", { action: "search", label: "Searched for “traditional rösti recipe”" }),
+    event(7, "source", "completed", { title: "BBC Good Food", url: "https://www.bbcgoodfood.com/recipes/rosti" }, "provider_generated"),
+    event(8, "source", "completed", { title: "BBC rösti", url: "https://www.bbcgoodfood.com/recipes/rosti" }, "provider_generated"),
+  ]);
+
+  assert.deepEqual(presented.map((item) => [item.kind, item.state]), [
+    ["plan", "completed"],
+    ["tool", "completed"],
+    ["web_action", "completed"],
+    ["source", "completed"],
+  ]);
+  assert.equal(presented[0]?.payload.summary, "Compare reputable recipes.");
+  assert.equal(humanizeToolName("get-drive-item"), "Get drive item");
+  const html = renderToStaticMarkup(createElement(ActivityTimeline, { events: presented, feedState: "ready" }));
+  assert.match(html, /Searched for “traditional rösti recipe”/);
+  assert.doesNotMatch(html, />WebSearch</);
 });
 
 test("Activity panel source preserves keyboard dialog behavior, focus return, live announcements, and the viewer extension slot", async () => {

@@ -213,6 +213,7 @@ COPY --from=hermes_desktop_builder /src/apps/desktop/assets/icon.png /opt/onecom
 COPY docker/workspace/onecomputer-gateway-proxy.py /usr/local/libexec/onecomputer-gateway-proxy
 COPY docker/workspace/onecomputer-egress-broker.py /usr/local/libexec/onecomputer-egress-broker
 COPY docker/workspace/onecomputer-connectors-stdio.py /usr/local/libexec/onecomputer-connectors-stdio
+COPY docker/workspace/onecomputer_work_trace.py /usr/local/libexec/onecomputer_work_trace.py
 COPY docker/workspace/onecomputer-agent-chat.py /usr/local/libexec/onecomputer-agent-chat
 COPY docker/workspace/onecomputer-hermes-config.py /usr/local/libexec/onecomputer-hermes-config
 COPY docker/workspace/onecomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js

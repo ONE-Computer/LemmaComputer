@@ -1114,6 +1114,7 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
     type: z.literal("plan"),
     title: z.string().trim().min(1).max(240),
     summary: z.string().trim().min(1).max(500).optional(),
+    state: z.enum(["running", "completed"]).optional(),
   }).strict(),
   agentChatEventBaseSchema.extend({
     type: z.literal("provider-summary"),

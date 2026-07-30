@@ -32,6 +32,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from onecomputer_work_trace import (
+    approach_summary,
+    extract_sources,
+    safe_trace_text,
+    tool_trace_summary,
+    web_action_for_tool,
+)
+
 AGENT = os.environ["ONECOMPUTER_CHAT_AGENT"]
 API_KEY = os.environ["ONECOMPUTER_CHAT_API_KEY"]
 MODEL = os.environ["ONECOMPUTER_CHAT_MODEL_ALIAS"]
@@ -653,7 +661,8 @@ async def claude_vendor_events(
 ) -> AsyncIterator[dict[str, Any]]:
     from claude_agent_sdk import (
         AssistantMessage, ClaudeAgentOptions, ResultMessage, StreamEvent,
-        ToolResultBlock, ToolUseBlock, UserMessage, query,
+        ServerToolResultBlock, ServerToolUseBlock, ToolResultBlock, ToolUseBlock,
+        UserMessage, query,
     )
 
     # The LiteLLM key is the exact, live connector/tool ceiling. Keep the
@@ -698,6 +707,8 @@ async def claude_vendor_events(
     result: Any = None
     streamed_text = False
     names: dict[str, str] = {}
+    inputs: dict[str, dict[str, Any]] = {}
+    emitted_source_urls: set[str] = set()
     prompt_text = prompt_with_documents(text, attachments)
     images = [attachment for attachment in attachments if attachment["mediaType"] in IMAGE_TYPES]
 
@@ -728,28 +739,44 @@ async def claude_vendor_events(
                 yield {"kind": "text", "delta": delta["text"]}
         elif isinstance(sdk_event, (AssistantMessage, UserMessage)) and isinstance(sdk_event.content, list):
             for block in sdk_event.content:
-                if isinstance(block, ToolUseBlock):
+                if isinstance(block, (ToolUseBlock, ServerToolUseBlock)):
                     tool_id = safe_identifier("tool", turn_id, block.id)
                     names[block.id] = safe_tool_name(block.name)
-                    yield {"kind": "tool", "id": tool_id, "name": names[block.id], "state": "running"}
-                elif isinstance(block, ToolResultBlock):
+                    inputs[block.id] = block.input if isinstance(block.input, dict) else {}
+                    summary = tool_trace_summary(names[block.id], inputs[block.id])
+                    yield {
+                        "kind": "tool", "id": tool_id, "name": names[block.id], "state": "running",
+                        **({"summary": summary} if summary else {}),
+                    }
+                elif isinstance(block, (ToolResultBlock, ServerToolResultBlock)):
                     tool_id = safe_identifier("tool", turn_id, block.tool_use_id)
                     name = names.get(block.tool_use_id, "workspace-tool")
+                    arguments = inputs.get(block.tool_use_id, {})
                     approval = approval_from(block.content)
                     approval_state = approval[1] if approval else None
                     state = (
-                        "failed" if block.is_error or approval_state in {"denied", "failed", "expired"}
+                        "failed" if getattr(block, "is_error", False) or approval_state in {"denied", "failed", "expired"}
                         else "completed" if approval_state in {None, "succeeded"}
                         else "running"
                     )
+                    summary = tool_trace_summary(name, arguments)
                     yield {
                         "kind": "tool", "id": tool_id, "name": name, "state": state,
                         "summary": (
                             "Tool failed" if state == "failed"
-                            else "Tool completed" if state == "completed"
+                            else (summary or "Tool completed") if state == "completed"
                             else "Waiting for governed approval"
                         ),
                     }
+                    if state == "completed":
+                        action = web_action_for_tool(name, arguments)
+                        if action:
+                            yield {"kind": "web-action", **action}
+                            for source in extract_sources(block.content):
+                                if source["url"] in emitted_source_urls:
+                                    continue
+                                emitted_source_urls.add(source["url"])
+                                yield {"kind": "source", **source}
                     if approval:
                         operation_id, approval_state = approval
                         yield {
@@ -763,6 +790,11 @@ async def claude_vendor_events(
             result = sdk_event
     if result is None or result.is_error:
         raise RuntimeError("Claude could not complete the request")
+    for source in extract_sources(result.result):
+        if source["url"] in emitted_source_urls:
+            continue
+        emitted_source_urls.add(source["url"])
+        yield {"kind": "source", **source}
     if not streamed_text and result.result:
         yield {"kind": "text", "delta": result.result}
     yield {
@@ -809,6 +841,7 @@ async def codex_vendor_events(
     streamed_text = False
     final_text = ""
     tool_names: dict[str, str] = {}
+    emitted_source_urls: set[str] = set()
     try:
         async for notification in turn.stream():
             payload = notification.payload
@@ -833,30 +866,52 @@ async def codex_vendor_events(
                 if item_type == "mcpToolCall":
                     raw_id = str(getattr(sdk_item, "id", "tool"))
                     name = safe_tool_name(getattr(sdk_item, "tool", "workspace-tool"))
+                    arguments = getattr(sdk_item, "arguments", {})
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except json.JSONDecodeError:
+                            arguments = {}
+                    if not isinstance(arguments, dict):
+                        arguments = {}
+                    summary = tool_trace_summary(name, arguments)
                     tool_names[raw_id] = name
                     status = getattr(getattr(sdk_item, "status", None), "value", "inProgress")
                     state = "failed" if status == "failed" else "completed" if notification.method == "item/completed" else "running"
-                    approval = approval_from(getattr(sdk_item, "result", None))
+                    result_value = getattr(sdk_item, "result", None)
+                    approval = approval_from(result_value)
                     approval_state = approval[1] if approval else None
                     if approval_state in {"approval_required", "approved", "executing"}:
                         state = "running"
                     elif approval_state in {"denied", "failed", "expired"}:
                         state = "failed"
+                    display_summary = (
+                        "Waiting for governed approval" if approval and state == "running"
+                        else "Tool failed" if state == "failed"
+                        else (summary or "Tool completed") if state == "completed"
+                        else summary
+                    )
                     yield {
                         "kind": "tool",
                         "id": safe_identifier("tool", turn_id, raw_id),
                         "name": name,
                         "state": state,
-                        **({
-                            "summary": (
-                                "Tool failed" if state == "failed"
-                                else "Tool completed" if state == "completed"
-                                else "Waiting for governed approval"
-                            )
-                        } if approval else ({
-                            "summary": "Tool failed" if state == "failed" else "Tool completed"
-                        } if state != "running" else {})),
+                        **({"summary": display_summary} if display_summary else {}),
                     }
+                    if state == "completed":
+                        action = web_action_for_tool(name, arguments)
+                        if action:
+                            yield {"kind": "web-action", **action}
+                            result_payload = (
+                                result_value.model_dump(by_alias=True)
+                                if hasattr(result_value, "model_dump")
+                                else result_value
+                            )
+                            for source in extract_sources(result_payload):
+                                if source["url"] in emitted_source_urls:
+                                    continue
+                                emitted_source_urls.add(source["url"])
+                                yield {"kind": "source", **source}
                     if approval:
                         operation_id, approval_state = approval
                         yield {
@@ -866,6 +921,34 @@ async def codex_vendor_events(
                             "operationId": operation_id,
                             "state": approval_state,
                         }
+                elif notification.method == "item/completed" and item_type == "plan":
+                    plan_summary = approach_summary(getattr(sdk_item, "text", ""))
+                    if plan_summary:
+                        yield {"kind": "plan", "title": "Approach", "summary": plan_summary}
+                elif notification.method == "item/completed" and item_type == "reasoning":
+                    summaries = getattr(sdk_item, "summary", None)
+                    summary = safe_trace_text(" ".join(summaries)) if isinstance(summaries, list) else None
+                    if summary:
+                        yield {"kind": "provider-summary", "summary": summary, "provider": "Codex"}
+                elif notification.method == "item/completed" and item_type == "webSearch":
+                    action_value = getattr(sdk_item, "action", None)
+                    action_value = getattr(action_value, "root", action_value)
+                    action_type = getattr(action_value, "type", "search")
+                    query = getattr(action_value, "query", None) or getattr(sdk_item, "query", "")
+                    queries = getattr(action_value, "queries", None)
+                    if action_type == "search" and isinstance(queries, list) and queries:
+                        query = ", ".join(item for item in queries if isinstance(item, str))
+                    arguments = {"query": query}
+                    tool_name = "web_search"
+                    if action_type == "openPage":
+                        tool_name = "open_page"
+                        arguments = {"url": getattr(action_value, "url", None)}
+                    elif action_type == "findInPage":
+                        tool_name = "find_in_page"
+                        arguments = {"pattern": getattr(action_value, "pattern", None), "url": getattr(action_value, "url", None)}
+                    action = web_action_for_tool(tool_name, arguments)
+                    if action:
+                        yield {"kind": "web-action", **action}
                 elif notification.method == "item/completed" and item_type == "agentMessage":
                     candidate = getattr(sdk_item, "text", "")
                     phase = getattr(getattr(sdk_item, "phase", None), "value", None)
@@ -875,6 +958,11 @@ async def codex_vendor_events(
                 status = getattr(getattr(payload.turn, "status", None), "value", "failed")
                 if status == "failed":
                     raise RuntimeError("Codex could not complete the request")
+                for source in extract_sources(final_text):
+                    if source["url"] in emitted_source_urls:
+                        continue
+                    emitted_source_urls.add(source["url"])
+                    yield {"kind": "source", **source}
                 if not streamed_text and final_text:
                     yield {"kind": "text", "delta": final_text}
                 yield {
@@ -911,7 +999,9 @@ async def hermes_vendor_events(
     streamed_text = False
     final_text = ""
     completed = False
-    tool_ids: dict[str, str] = {}
+    tool_counter = 0
+    pending_tools: dict[str, list[dict[str, Any]]] = {}
+    emitted_source_urls: set[str] = set()
     async with http.stream(
         "POST",
         f"{HERMES_URL}/api/sessions/{vendor_session_id}/chat/stream",
@@ -953,29 +1043,49 @@ async def hermes_vendor_events(
                     yield {"kind": "text", "delta": delta}
             elif name in {"tool.started", "tool.completed", "tool.failed"}:
                 tool_name = safe_tool_name(payload.get("tool_name") or payload.get("tool"))
-                raw_id = str(payload.get("tool_call_id") or payload.get("toolCallId") or tool_name)
-                tool_id = tool_ids.setdefault(
-                    raw_id,
-                    safe_identifier("tool", turn_id, raw_id),
-                )
+                explicit_raw_id = payload.get("tool_call_id") or payload.get("toolCallId")
+                event_arguments = payload.get("args") or payload.get("arguments")
+                arguments = event_arguments if isinstance(event_arguments, dict) else {}
+                preview = payload.get("preview") or payload.get("label")
+                if name == "tool.started":
+                    tool_counter += 1
+                    raw_id = str(explicit_raw_id or f"{tool_name}:{tool_counter}")
+                    tool_id = safe_identifier("tool", turn_id, raw_id)
+                    summary = tool_trace_summary(tool_name, arguments, preview)
+                    pending_tools.setdefault(tool_name, []).append({
+                        "raw_id": raw_id, "id": tool_id, "arguments": arguments, "summary": summary,
+                    })
+                else:
+                    queue = pending_tools.get(tool_name, [])
+                    pending = queue.pop(0) if queue else None
+                    raw_id = str(explicit_raw_id or (pending or {}).get("raw_id") or f"{tool_name}:orphan")
+                    tool_id = (pending or {}).get("id") or safe_identifier("tool", turn_id, raw_id)
+                    if pending:
+                        arguments = pending["arguments"]
+                        summary = pending["summary"]
+                    else:
+                        summary = tool_trace_summary(tool_name, arguments, preview)
                 state = (
                     "running" if name == "tool.started"
                     else "failed" if name == "tool.failed"
                     else "completed"
+                )
+                display_summary = (
+                    "Tool failed" if state == "failed"
+                    else (summary or "Tool completed") if state == "completed"
+                    else summary
                 )
                 yield {
                     "kind": "tool",
                     "id": tool_id,
                     "name": tool_name,
                     "state": state,
-                    **({
-                        "summary": (
-                            safe_summary(payload.get("preview"), "Tool failed")
-                            if state == "failed"
-                            else "Tool completed"
-                        )
-                    } if state != "running" else {}),
+                    **({"summary": display_summary} if display_summary else {}),
                 }
+                if state == "completed":
+                    action = web_action_for_tool(tool_name, arguments)
+                    if action:
+                        yield {"kind": "web-action", **action}
             elif name == "assistant.completed":
                 candidate = payload.get("content")
                 if isinstance(candidate, str):
@@ -996,6 +1106,11 @@ async def hermes_vendor_events(
         raise RuntimeError("Hermes event stream ended without completion")
     if re.match(r"^API call failed after \d+ retries:", final_text.strip(), re.IGNORECASE):
         raise RuntimeError("Hermes could not complete the request")
+    for source in extract_sources(final_text):
+        if source["url"] in emitted_source_urls:
+            continue
+        emitted_source_urls.add(source["url"])
+        yield {"kind": "source", **source}
     if not streamed_text and final_text:
         yield {"kind": "text", "delta": final_text}
     yield {
@@ -1160,6 +1275,9 @@ async def turns(request: Request) -> Response:
         total_text = 0
         pending_initial_text = ""
         text_state_known = False
+        approach_buffer = ""
+        plan_details: dict[str, str] | None = None
+        plan_emitted = False
         needs_input = False
         vendor_session_id = snapshot.get("vendorSessionId")
 
@@ -1207,6 +1325,14 @@ async def turns(request: Request) -> Response:
                         break
                     next_event = asyncio.ensure_future(anext(events))
                     kind = vendor["kind"]
+                    if kind in {"tool", "web-action"} and not plan_emitted:
+                        summary = approach_summary(approach_buffer)
+                        if summary:
+                            plan_details = {"title": "Approach", "summary": summary}
+                            plan_emitted = True
+                            yield frame(canonical(
+                                "plan", **plan_details, state="running",
+                            ))
                     if kind == "text" and vendor.get("delta"):
                         raw_delta = str(vendor["delta"])
                         if not text_state_known:
@@ -1223,6 +1349,8 @@ async def turns(request: Request) -> Response:
                             text_state_known = True
                         if not raw_delta:
                             continue
+                        if not plan_emitted and len(approach_buffer) < 2_000:
+                            approach_buffer = (approach_buffer + raw_delta)[:2_000]
                         total_text += len(raw_delta)
                         if total_text > MAX_TEXT:
                             raise RuntimeError("agent response exceeded the text limit")
@@ -1238,6 +1366,34 @@ async def turns(request: Request) -> Response:
                             name=vendor["name"],
                             state=vendor["state"],
                             **({"summary": vendor["summary"]} if vendor.get("summary") else {}),
+                        ))
+                    elif kind == "plan":
+                        plan_details = {
+                            "title": vendor.get("title") or "Approach",
+                            **({"summary": vendor["summary"]} if vendor.get("summary") else {}),
+                        }
+                        plan_emitted = True
+                        yield frame(canonical(
+                            "plan", **plan_details, state="running",
+                        ))
+                    elif kind == "provider-summary":
+                        yield frame(canonical(
+                            "provider-summary",
+                            summary=vendor["summary"],
+                            **({"provider": vendor["provider"]} if vendor.get("provider") else {}),
+                        ))
+                    elif kind == "web-action":
+                        yield frame(canonical(
+                            "web-action",
+                            action=vendor["action"],
+                            label=vendor["label"],
+                            **({"url": vendor["url"]} if vendor.get("url") else {}),
+                        ))
+                    elif kind == "source":
+                        yield frame(canonical(
+                            "source",
+                            title=vendor["title"],
+                            url=vendor["url"],
                         ))
                     elif kind == "approval":
                         yield frame(canonical(
@@ -1274,6 +1430,10 @@ async def turns(request: Request) -> Response:
                     ))
             if needs_input and terminal_state == "completed":
                 terminal_state = "needs_input"
+            if plan_emitted and plan_details:
+                yield frame(canonical(
+                    "plan", **plan_details, state="completed",
+                ))
             if progress_started:
                 yield frame(canonical(
                     "progress", activityId=activity_id,

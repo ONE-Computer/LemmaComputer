@@ -74,14 +74,6 @@ const terminalState = (state: Extract<AgentChatEvent, { type: "turn-finish" }>["
   failed: "failed",
 }[state] as ActivityEventV1["state"]);
 
-const inferredWebAction = (name: string): "search" | "open" | "find" | undefined => {
-  const normalized = name.toLowerCase().replace(/[:.-]+/g, "_");
-  if (/(?:^|_)(?:web_)?search(?:_query)?(?:_|$)/.test(normalized)) return "search";
-  if (/(?:^|_)(?:browser_)?open(?:_url)?(?:_|$)/.test(normalized)) return "open";
-  if (/(?:^|_)(?:browser_)?find(?:_text)?(?:_|$)/.test(normalized)) return "find";
-  return undefined;
-};
-
 const webActionLabel = (action: "search" | "open" | "find") => ({
   search: "Searched the web",
   open: "Opened a webpage",
@@ -103,7 +95,7 @@ export class ActivityEventMapper {
     if (event.type === "plan") return [{
       ...base,
       kind: "plan",
-      state: "running",
+      state: event.state ?? "running",
       provenance: "provider_generated",
       payload: {
         title: sanitizeActivityText(event.title, "Work plan", 240),
@@ -129,22 +121,13 @@ export class ActivityEventMapper {
     }];
     if (event.type === "tool") {
       const summary = event.summary ? sanitizeActivityText(event.summary, "Tool update") : undefined;
-      const drafts: ActivityEventDraft[] = [{
+      return [{
         ...base,
         kind: "tool",
         state: toolState(event.state),
         provenance: "tool",
         payload: { toolCallId: event.toolCallId, name: event.name, ...(summary ? { summary } : {}) },
       }];
-      const action = inferredWebAction(event.name);
-      if (action) drafts.push({
-        ...base,
-        kind: "web_action",
-        state: toolState(event.state),
-        provenance: "tool",
-        payload: { action, label: summary ?? webActionLabel(action) },
-      });
-      return drafts;
     }
     if (event.type === "approval") return [{
       ...base,
