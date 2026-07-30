@@ -168,6 +168,7 @@ const successfulAgent: AgentChatClient = {
     updatedAt: new Date().toISOString(),
   }),
   listMessages: async () => [],
+  cancelTurn: async () => {},
   async *streamTurn(_access, sessionId, message) {
     assert.equal(sessionId, "session-scheduled-1");
     assert.equal(message.parts[0]?.type, "text");

@@ -2290,6 +2290,17 @@ function ChatConversation({
     }
   };
 
+  const stopTurn = () => {
+    void stop();
+    const sessionId = sessionRef.current;
+    if (!sessionId) return;
+    chatApi.cancelTurn(workspaceId, agentId, sessionId)
+      .then(() => {
+        if (sessionRef.current === sessionId) setHistoryReload((value) => value + 1);
+      })
+      .catch((requestError) => setHistoryError(requestError.message));
+  };
+
   const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
   const awaitingAssistant = turnBusy && visibleMessages.at(-1)?.role === "user";
   const needsInput = !turnBusy
@@ -2520,8 +2531,8 @@ function ChatConversation({
                 </>
               ) : <span className="companion-chat-context-static">{contextSummary}</span>}
             </div>
-            {busy ? (
-              <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={() => { void stop(); }}><Dismiss24Regular aria-hidden="true" /></button>
+            {turnBusy ? (
+              <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
               <button className="chat-send-button" type="submit" aria-label="Send message" disabled={restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
             )}
@@ -2539,8 +2550,8 @@ function ChatConversation({
               <Attach24Regular aria-hidden="true" />
             </button>
             {messageField}
-            {busy ? (
-              <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={() => { void stop(); }}><Dismiss24Regular aria-hidden="true" /></button>
+            {turnBusy ? (
+              <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
               <button className="chat-send-button" type="submit" aria-label="Send message" disabled={restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
             )}

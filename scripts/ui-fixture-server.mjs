@@ -254,6 +254,7 @@ let chatMessages = [
     ],
   },
 ];
+const activeFixtureTurns = new Map();
 
 const reviewedSkills = [{
   id: "make-a-site",
@@ -964,6 +965,51 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ ...chatSession, id: `fixture-session-${Date.now()}`, title: null }));
     return;
   }
+  const cancelTurnMatch = url.pathname.match(/^\/v1\/workspaces\/[^/]+\/chat\/agents\/hermes-claw\/sessions\/([^/]+)\/turns\/active$/);
+  if (request.method === "DELETE" && cancelTurnMatch) {
+    const sessionId = decodeURIComponent(cancelTurnMatch[1]);
+    const activeTurn = activeFixtureTurns.get(sessionId);
+    if (activeTurn) {
+      if (activeTurn.completionTimer) clearTimeout(activeTurn.completionTimer);
+      activeFixtureTurns.delete(sessionId);
+      const checkpoint = chatMessages.findIndex((message) => message.id === activeTurn.messageId);
+      const existing = checkpoint === -1 ? null : chatMessages[checkpoint];
+      const cancelled = {
+        id: activeTurn.messageId,
+        role: "assistant",
+        metadata: {
+          agentCatalogId: "hermes-claw",
+          turnId: activeTurn.turnId,
+          state: "cancelled",
+          createdAt: activeTurn.createdAt,
+        },
+        parts: [
+          ...(existing?.parts ?? []).filter((part) => part.type !== "data-terminal").map((part) => (
+            part.type === "text" ? { ...part, state: "done" } : part
+          )),
+          {
+            type: "data-terminal",
+            id: `${activeTurn.turnId}-terminal`,
+            data: { turnId: activeTurn.turnId, state: "cancelled", message: "Stopped by the employee" },
+          },
+        ],
+      };
+      if (checkpoint === -1) chatMessages.push(cancelled);
+      else chatMessages.splice(checkpoint, 1, cancelled);
+      const events = activityByTurn.get(activeTurn.turnId) ?? [];
+      appendActivity(activeTurn.turnId, activityEvent(
+        activeTurn.turnId,
+        Math.max(-1, ...events.map((event) => event.sequence)) + 1,
+        "terminal",
+        "cancelled",
+        "deterministic_system",
+        { turnState: "cancelled", message: "Stopped by the employee" },
+      ));
+    }
+    response.statusCode = 204;
+    response.end();
+    return;
+  }
   if (key.startsWith(`POST /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/`) && key.endsWith("/messages")) {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -979,27 +1025,15 @@ const server = http.createServer((request, response) => {
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 3, "provider_summary", "completed", "provider_generated", { summary: "The workspace context is ready for the response.", provider: "Hermes" })), 900);
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 4, "terminal", "completed", "deterministic_system", { turnState: "completed" })), 1_000);
       const siteRequest = JSON.stringify(input.message).includes("$make-a-site");
+      const siteRefreshRequest = siteRequest && JSON.stringify(input.message).includes("survive refresh");
       const refreshRecoveryRequest = JSON.stringify(input.message).includes("dashboard layout");
+      const stopRecoveryRequest = JSON.stringify(input.message).includes("until I stop you");
       const openingText = siteRequest
         ? "I’ll build the smallest Vite site and publish it with the reviewed skill.\n\n"
         : "I’ll check the workspace context first, then summarize what I can do.\n\n";
       const closingText = siteRequest
         ? "Published **Hello world**. Open ONEComputer → Sites to view it."
         : "I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations";
-      if (siteRequest) {
-        const publishedAt = new Date().toISOString();
-        fixtureSites = [{
-          id: "7c536c1f-6a31-427d-af8f-dbb0c63f8d73",
-          slug: "hello-world",
-          name: "Hello world",
-          state: "ready",
-          currentRevision: 1,
-          sourceWorkspaceId: workspaceId,
-          sourceAgentId: "agent-alex:hermes",
-          createdAt: publishedAt,
-          updatedAt: publishedAt,
-        }];
-      }
       const openingChunks = [
         { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
         { type: "text-start", id: `${turnId}-text` },
@@ -1012,9 +1046,13 @@ const server = http.createServer((request, response) => {
         { type: "finish", finishReason: "stop", messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt } },
       ];
       chatMessages.push(input.message);
+      const sessionId = decodeURIComponent(url.pathname.split("/").at(-2));
+      const activeTurn = { turnId, messageId, createdAt, completionTimer: null };
+      activeFixtureTurns.set(sessionId, activeTurn);
       response.setHeader("content-type", "text/event-stream");
       response.setHeader("x-vercel-ai-ui-message-stream", "v1");
       setTimeout(() => {
+        if (activeFixtureTurns.get(sessionId) !== activeTurn) return;
         chatMessages.push({
           id: messageId,
           role: "assistant",
@@ -1025,7 +1063,23 @@ const server = http.createServer((request, response) => {
         });
         response.write(openingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(""));
       }, 600);
-      setTimeout(() => {
+      activeTurn.completionTimer = setTimeout(() => {
+        if (activeFixtureTurns.get(sessionId) !== activeTurn) return;
+        activeFixtureTurns.delete(sessionId);
+        if (siteRequest) {
+          const publishedAt = new Date().toISOString();
+          fixtureSites = [{
+            id: "7c536c1f-6a31-427d-af8f-dbb0c63f8d73",
+            slug: "hello-world",
+            name: "Hello world",
+            state: "ready",
+            currentRevision: 1,
+            sourceWorkspaceId: workspaceId,
+            sourceAgentId: "agent-alex:hermes",
+            createdAt: publishedAt,
+            updatedAt: publishedAt,
+          }];
+        }
         const completed = {
           id: messageId,
           role: "assistant",
@@ -1039,7 +1093,7 @@ const server = http.createServer((request, response) => {
         if (checkpoint === -1) chatMessages.push(completed);
         else chatMessages.splice(checkpoint, 1, completed);
         response.end(`${closingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
-      }, refreshRecoveryRequest ? 3_000 : 1_000);
+      }, stopRecoveryRequest ? 10_000 : siteRefreshRequest ? 4_000 : refreshRecoveryRequest ? 3_000 : 1_000);
     });
     return;
   }

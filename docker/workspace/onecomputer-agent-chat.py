@@ -205,8 +205,48 @@ if (
 state_lock = asyncio.Lock()
 active_lock = asyncio.Lock()
 active_sessions: set[str] = set()
+active_turns: dict[str, DetachedTurn] = {}
 codex: Any = None
 http: httpx.AsyncClient | None = None
+
+
+class DetachedTurn:
+    def __init__(self, session_id: str, turn_id: str):
+        self.session_id = session_id
+        self.turn_id = turn_id
+        self.events: list[bytes] = []
+        self.condition = asyncio.Condition()
+        self.done = False
+        self.terminal = False
+        self.cancelled_by_user = False
+        self.task: asyncio.Task[None] | None = None
+
+    async def publish(self, chunk: bytes) -> None:
+        async with self.condition:
+            self.events.append(chunk)
+            if b'"type":"turn-finish"' in chunk:
+                self.terminal = True
+            self.condition.notify_all()
+
+    async def close(self) -> None:
+        async with self.condition:
+            self.done = True
+            self.condition.notify_all()
+
+    async def subscribe(self) -> AsyncIterator[bytes]:
+        cursor = 0
+        while True:
+            async with self.condition:
+                await self.condition.wait_for(
+                    lambda: cursor < len(self.events) or self.done
+                )
+                batch = self.events[cursor:]
+                cursor = len(self.events)
+                done = self.done
+            for chunk in batch:
+                yield chunk
+            if done and cursor == len(self.events):
+                return
 
 
 def now() -> str:
@@ -1669,7 +1709,10 @@ async def turns(request: Request) -> Response:
             completed_at = now()
             canonical(
                 "turn-finish", state="cancelled",
-                message="The connection ended before the agent finished",
+                message=(
+                    "Stopped by the employee" if detached.cancelled_by_user
+                    else "The workspace agent stopped before completion"
+                ),
                 completedAt=completed_at,
             )
             await asyncio.shield(checkpoint(force=True))
@@ -1689,11 +1732,60 @@ async def turns(request: Request) -> Response:
             async with active_lock:
                 active_sessions.discard(session_id)
 
+    detached = DetachedTurn(session_id, turn_id)
+
+    async def produce() -> None:
+        try:
+            async for chunk in stream():
+                await detached.publish(chunk)
+        except asyncio.CancelledError:
+            if not detached.terminal:
+                cancelled = {
+                    "version": 1,
+                    "sequence": len(detached.events),
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "type": "turn-finish",
+                    "state": "cancelled",
+                    "message": (
+                        "Stopped by the employee" if detached.cancelled_by_user
+                        else "The workspace agent stopped before completion"
+                    ),
+                    "completedAt": now(),
+                }
+                await detached.publish(
+                    (json.dumps(cancelled, separators=(",", ":")) + "\n").encode()
+                )
+        finally:
+            await detached.close()
+            async with active_lock:
+                if active_turns.get(session_id) is detached:
+                    active_turns.pop(session_id, None)
+
+    async with active_lock:
+        active_turns[session_id] = detached
+        detached.task = asyncio.create_task(produce(), name=f"chat-{turn_id}")
+
     return StreamingResponse(
-        stream(),
+        detached.subscribe(),
         media_type="application/x-ndjson",
         headers={"cache-control": "no-store", "x-onecomputer-chat-protocol": "1"},
     )
+
+
+async def cancel_active_turn(request: Request) -> Response:
+    if not authorized(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    session_id = str(request.path_params["session_id"])
+    async with active_lock:
+        detached = active_turns.get(session_id)
+        task = detached.task if detached else None
+    if task is None:
+        return Response(status_code=204)
+    detached.cancelled_by_user = True
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    return Response(status_code=204)
 
 
 @asynccontextmanager
@@ -1724,6 +1816,15 @@ async def lifespan(_: Starlette):
     try:
         yield
     finally:
+        async with active_lock:
+            active_tasks = [
+                turn.task for turn in active_turns.values()
+                if turn.task is not None
+            ]
+        for task in active_tasks:
+            task.cancel()
+        if active_tasks:
+            await asyncio.gather(*active_tasks, return_exceptions=True)
         if codex is not None:
             await codex.close()
         if http is not None:
@@ -1737,6 +1838,7 @@ app = Starlette(
         Route("/api/sessions/{session_id:uuid}/messages", messages, methods=["GET"]),
         Route("/api/artifacts/{artifact_id}", artifact, methods=["GET"]),
         Route("/api/sessions/{session_id:uuid}/turns", turns, methods=["POST"]),
+        Route("/api/sessions/{session_id:uuid}/turns/active", cancel_active_turn, methods=["DELETE"]),
     ],
     lifespan=lifespan,
 )

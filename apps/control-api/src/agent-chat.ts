@@ -104,6 +104,7 @@ export interface AgentChatClient {
   listSessions(access: AgentChatAccess, options?: { cursor?: string; limit?: number }): Promise<AgentChatSessionPage>;
   createSession(access: AgentChatAccess, title?: string): Promise<AgentChatSession>;
   listMessages(access: AgentChatAccess, sessionId: string): Promise<ChatUiMessage[]>;
+  cancelTurn(access: AgentChatAccess, sessionId: string): Promise<void>;
   downloadArtifact(access: AgentChatAccess, artifactId: string): Promise<Buffer>;
   streamTurn(
     access: AgentChatAccess,
@@ -338,6 +339,13 @@ export class HttpAgentChatClient implements AgentChatClient {
         throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
       }
       return parsed.data;
+    });
+  }
+
+  async cancelTurn(access: AgentChatAccess, sessionId: string) {
+    const id = chatSessionIdSchema.parse(sessionId);
+    await this.response(access, `/api/sessions/${encodeURIComponent(id)}/turns/active`, {
+      method: "DELETE",
     });
   }
 

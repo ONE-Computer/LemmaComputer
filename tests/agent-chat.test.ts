@@ -117,6 +117,62 @@ asyncio.run(run())
   }
 });
 
+test("detached turn production survives subscriber disconnect and remains replayable", async () => {
+  const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  const detachedTurn = adapter.slice(
+    adapter.indexOf("class DetachedTurn"),
+    adapter.indexOf("def now"),
+  );
+  const program = `
+import asyncio, json
+from typing import AsyncIterator
+${detachedTurn}
+async def run():
+    turn = DetachedTurn("session-1", "turn-1")
+    async def produce():
+        await turn.publish(b'{"type":"turn-start"}\\n')
+        await asyncio.sleep(0.02)
+        await turn.publish(b'{"type":"turn-finish","state":"completed"}\\n')
+        await turn.close()
+    turn.task = asyncio.create_task(produce())
+    first_subscriber = turn.subscribe()
+    first = await anext(first_subscriber)
+    await first_subscriber.aclose()
+    await turn.task
+    replay = [chunk async for chunk in turn.subscribe()]
+    print(json.dumps({
+      "first": first.decode().strip(),
+      "replay": [chunk.decode().strip() for chunk in replay],
+      "terminal": turn.terminal,
+      "done": turn.done,
+    }))
+asyncio.run(run())
+`;
+  const { stdout } = await execFileAsync("python3", ["-c", program]);
+  const result = JSON.parse(stdout);
+  assert.equal(JSON.parse(result.first).type, "turn-start");
+  assert.deepEqual(result.replay.map((frame: string) => JSON.parse(frame).type), ["turn-start", "turn-finish"]);
+  assert.equal(result.terminal, true);
+  assert.equal(result.done, true);
+  assert.match(adapter, /asyncio\.create_task\(produce\(\), name=f"chat-\{turn_id\}"\)/);
+  assert.match(adapter, /StreamingResponse\(\s*detached\.subscribe\(\)/s);
+  assert.match(adapter, /Route\("\/api\/sessions\/\{session_id:uuid\}\/turns\/active", cancel_active_turn, methods=\["DELETE"\]\)/);
+});
+
+test("Control pumps workspace events independently of the browser response", async () => {
+  const control = await readFile(new URL("../apps/control-api/src/server.ts", import.meta.url), "utf8");
+  const path = '"/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages"';
+  const pathIndex = control.lastIndexOf(path);
+  const route = control.slice(control.lastIndexOf("app.post", pathIndex), control.indexOf("app.delete", pathIndex));
+  assert.match(route, /const pump = async \(\) =>/);
+  assert.match(route, /agentChat\.streamTurn\(access, sessionId, input\.message\)/);
+  assert.match(route, /void pump\(\)/);
+  assert.match(route, /chunks\.push\(\.\.\.mapper\.chunks\(projected\)\)/);
+  assert.doesNotMatch(route, /browser-disconnected|abort\.signal/);
+  assert.match(control, /sessions\/:sessionId\/turns\/active/);
+  assert.match(control, /await agentChat\.cancelTurn\(access, sessionId\)/);
+});
+
 test("agent turns receive a fresh trusted timezone context and require clarification without one", async () => {
   const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
   assert.match(adapter, /CONFIGURED_TIME_ZONE = os\.environ\.get\("ONECOMPUTER_TIME_ZONE", ""\)\.strip\(\)/);
@@ -334,6 +390,37 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
       { url: "/api/sessions/session-1/turns", body: { message: { ...message, metadata: { ...message.metadata, agentCatalogId: "claude-cli" } } } },
       { url: "/api/sessions/session-1/turns", body: { message: { ...message, metadata: { ...message.metadata, agentCatalogId: "codex-cli" } } } },
     ]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("agent chat cancellation targets the active detached workspace turn", async () => {
+  let method = "";
+  let url = "";
+  let authorization = "";
+  const server = createServer((request, response) => {
+    method = request.method ?? "";
+    url = request.url ?? "";
+    authorization = String(request.headers.authorization ?? "");
+    response.statusCode = 204;
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const access: AgentChatAccess = {
+    workspaceId: "11111111-1111-4111-8111-111111111111",
+    catalogId: "claude-cli",
+    displayName: "Claude CLI",
+    key: "workspace-specific-claude-api-key",
+    baseUrl: `http://127.0.0.1:${address.port}`,
+  };
+  try {
+    await new HttpAgentChatClient().cancelTurn(access, "session-1");
+    assert.equal(method, "DELETE");
+    assert.equal(url, "/api/sessions/session-1/turns/active");
+    assert.equal(authorization, `Bearer ${access.key}`);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

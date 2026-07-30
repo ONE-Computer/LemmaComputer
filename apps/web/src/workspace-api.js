@@ -69,6 +69,10 @@ export const chatApi = {
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
     { cache: "no-store" },
   ),
+  cancelTurn: (workspaceId, catalogId, sessionId) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/turns/active`,
+    mutation("DELETE"),
+  ),
   activity: (workspaceId, catalogId, sessionId, turnId, after = -1) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/activity?${new URLSearchParams({ after: String(after), limit: "500" })}`,
     { cache: "no-store" },

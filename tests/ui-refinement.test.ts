@@ -406,7 +406,10 @@ test("Chat automatically recovers when a selected agent becomes healthy after th
 });
 
 test("Chat keeps the selected conversation across a page refresh", async () => {
-  const app = await source("apps/web/src/App.jsx");
+  const [app, workspaceApi] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/workspace-api.js"),
+  ]);
   assert.match(app, /const chatSessionFromLocation/);
   assert.match(app, /useState\(chatSessionFromLocation\)/);
   assert.match(app, /setActiveChatSessionId\(chatSessionFromLocation\(\)\)/);
@@ -417,6 +420,10 @@ test("Chat keeps the selected conversation across a page refresh", async () => {
   assert.match(app, /restoredTurnActive/);
   assert.match(app, /latestMessage\.metadata\?\.state === "streaming"/);
   assert.match(app, /chatApi\.messages\(workspaceId, agentId, activeSessionId\)/);
+  assert.match(app, /chatApi\.cancelTurn\(workspaceId, agentId, sessionId\)/);
+  assert.match(app, /onClick=\{stopTurn\}/);
+  assert.match(workspaceApi, /turns\/active/);
+  assert.match(workspaceApi, /mutation\("DELETE"\)/);
   assert.doesNotMatch(app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App")), /onSessionChange\(""\);\s*setAgents/);
 });
 

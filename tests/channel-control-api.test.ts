@@ -191,6 +191,7 @@ class FakeAgentChat implements AgentChatClient {
     return { id: "telegram-session-hermes", title: "Telegram", createdAt: null, updatedAt: null };
   }
   async listMessages() { return []; }
+  async cancelTurn() {}
   async downloadArtifact(_access: unknown, artifactId: string) {
     if (artifactId !== generatedArtifact.artifactId) throw new Error("missing artifact");
     return generatedDeck;

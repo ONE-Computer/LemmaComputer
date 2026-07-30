@@ -1829,6 +1829,19 @@ export function createControlServer(
         .send(Readable.from(frames()));
     },
   );
+  app.delete<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>(
+    "/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/turns/active",
+    async (request, reply) => {
+      const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
+      const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
+      const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+      const access = await service.agentChatAccess(
+        identity(request), policy, request.params.workspaceId, catalogId,
+      );
+      await agentChat.cancelTurn(access, sessionId);
+      return reply.code(204).send();
+    },
+  );
   app.post<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>(
     "/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages",
     { bodyLimit: 24 * 1024 * 1024 },
@@ -1864,65 +1877,82 @@ export function createControlServer(
     }
     const owner = identity(request);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
-    const abort = new AbortController();
-    request.raw.once("aborted", () => abort.abort("browser-disconnected"));
-    reply.raw.once("close", () => {
-      if (!reply.raw.writableFinished) abort.abort("browser-disconnected");
-    });
     const mapper = new AgentUiStreamMapper(catalogId);
+    const chunks: ReturnType<AgentUiStreamMapper["chunks"]>[number][] = [];
+    const waiters = new Set<() => void>();
+    let pumpDone = false;
+    let pumpError: unknown;
+    const notify = () => {
+      for (const waiter of waiters) waiter();
+      waiters.clear();
+    };
+    const pump = async () => {
+      let lastEvent: AgentChatEvent | undefined;
+      try {
+        for await (const event of agentChat.streamTurn(access, sessionId, input.message)) {
+          let projected = event;
+          if (event.type === "approval") {
+            try {
+              const operation = await operations.get(owner, event.operationId);
+              projected = {
+                ...event,
+                summary: chatApprovalSummary(event.state, operation.safeSummary),
+              };
+            } catch (error) {
+              if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
+            }
+          }
+          await activityEvents.recordAgentEvent({
+            identity: owner,
+            workspaceId: request.params.workspaceId,
+            agentCatalogId: catalogId,
+            sessionId,
+            displayName: access.displayName,
+            event: projected,
+          });
+          lastEvent = projected;
+          chunks.push(...mapper.chunks(projected));
+          notify();
+        }
+      } catch (error) {
+        pumpError = error;
+        if (lastEvent && lastEvent.type !== "turn-finish") {
+          const completedAt = new Date().toISOString();
+          const terminal = {
+            version: 1 as const,
+            sequence: lastEvent.sequence + 1,
+            sessionId,
+            turnId: lastEvent.turnId,
+            type: "turn-finish" as const,
+            state: "failed" as const,
+            message: "The agent stream ended before completion",
+            completedAt,
+          };
+          await activityEvents.recordAgentEvent({
+            identity: owner,
+            workspaceId: request.params.workspaceId,
+            agentCatalogId: catalogId,
+            sessionId,
+            displayName: access.displayName,
+            event: terminal,
+          }).catch(() => undefined);
+        }
+      } finally {
+        pumpDone = true;
+        notify();
+      }
+    };
+    void pump();
     const stream = createUIMessageStream<ChatUiMessage>({
       execute: async ({ writer }) => {
-        let lastEvent: AgentChatEvent | undefined;
-        try {
-          for await (const event of agentChat.streamTurn(access, sessionId, input.message, abort.signal)) {
-            let projected = event;
-            if (event.type === "approval") {
-              try {
-                const operation = await operations.get(owner, event.operationId);
-                projected = {
-                  ...event,
-                  summary: chatApprovalSummary(event.state, operation.safeSummary),
-                };
-              } catch (error) {
-                if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
-              }
-            }
-            await activityEvents.recordAgentEvent({
-              identity: owner,
-              workspaceId: request.params.workspaceId,
-              agentCatalogId: catalogId,
-              sessionId,
-              displayName: access.displayName,
-              event: projected,
-            });
-            lastEvent = projected;
-            for (const chunk of mapper.chunks(projected)) writer.write(chunk);
+        let cursor = 0;
+        while (true) {
+          while (cursor < chunks.length) writer.write(chunks[cursor++]!);
+          if (pumpDone) {
+            if (pumpError) throw pumpError;
+            return;
           }
-        } catch (error) {
-          if (lastEvent && lastEvent.type !== "turn-finish") {
-            const completedAt = new Date().toISOString();
-            const terminal = {
-              version: 1 as const,
-              sequence: lastEvent.sequence + 1,
-              sessionId,
-              turnId: lastEvent.turnId,
-              type: "turn-finish" as const,
-              state: abort.signal.aborted ? "cancelled" as const : "failed" as const,
-              message: abort.signal.aborted
-                ? "The connection ended before the agent finished"
-                : "The agent stream ended before completion",
-              completedAt,
-            };
-            await activityEvents.recordAgentEvent({
-              identity: owner,
-              workspaceId: request.params.workspaceId,
-              agentCatalogId: catalogId,
-              sessionId,
-              displayName: access.displayName,
-              event: terminal,
-            });
-          }
-          throw error;
+          await new Promise<void>((resolve) => waiters.add(resolve));
         }
       },
       onError: (error) => error instanceof OneComputerError
