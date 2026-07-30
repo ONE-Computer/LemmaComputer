@@ -82,6 +82,30 @@ application_enabled() {
   [[ ",${ONECOMPUTER_ENABLED_APPLICATIONS}," == *",$1,"* ]]
 }
 
+grant_cowork_device_access() {
+  local device_path="$1"
+  local fallback_group="$2"
+  [[ -c "$device_path" ]] || {
+    echo "Cowork requires the virtualization device at ${device_path}" >&2
+    exit 78
+  }
+
+  local device_gid
+  local device_group
+  device_gid="$(stat -c '%g' "$device_path")"
+  device_group="$(getent group "$device_gid" | cut -d: -f1 || true)"
+  if [[ -z "$device_group" ]]; then
+    device_group="$fallback_group"
+    groupadd --system --gid "$device_gid" "$device_group"
+  fi
+  usermod -aG "$device_group" kasm-user
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    /bin/bash -c '[[ -r "$1" && -w "$1" ]]' _ "$device_path" || {
+      echo "Cowork cannot access ${device_path} as kasm-user" >&2
+      exit 78
+    }
+}
+
 [[ "$ONECOMPUTER_COWORK_ENABLED" == "true" || "$ONECOMPUTER_COWORK_ENABLED" == "false" ]] || {
   echo "invalid Cowork capability setting" >&2
   exit 78
@@ -91,20 +115,12 @@ if [[ "$ONECOMPUTER_COWORK_ENABLED" == "true" ]]; then
     echo "Cowork requires the Claude Desktop agent" >&2
     exit 78
   }
-  [[ -c /dev/kvm ]] || {
-    echo "Cowork requires the KVM device at /dev/kvm" >&2
-    exit 78
-  }
-  kvm_gid="$(stat -c '%g' /dev/kvm)"
-  kvm_group="$(getent group "$kvm_gid" | cut -d: -f1 || true)"
-  if [[ -z "$kvm_group" ]]; then
-    kvm_group="onecomputer-kvm"
-    groupadd --system --gid "$kvm_gid" "$kvm_group"
-  fi
-  usermod -aG "$kvm_group" kasm-user
+  grant_cowork_device_access /dev/kvm onecomputer-kvm
+  grant_cowork_device_access /dev/vhost-vsock onecomputer-vhost-vsock
   setpriv --reuid=1000 --regid=1000 --init-groups \
-    /bin/bash -c '[[ -r /dev/kvm && -w /dev/kvm ]]' || {
-      echo "Cowork cannot access /dev/kvm as kasm-user" >&2
+    python3 -c 'import socket; socket.socket(40, socket.SOCK_STREAM).close()' \
+    2>/dev/null || {
+      echo "Cowork cannot create an AF_VSOCK socket; check the workspace seccomp profile" >&2
       exit 78
     }
 fi
@@ -136,6 +152,11 @@ require_agent_environment() {
       exit 78
     }
   done
+  variable="${prefix}_MODEL_ALIAS"
+  [[ "${!variable}" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$ ]] || {
+    echo "${label} MODEL_ALIAS is invalid" >&2
+    exit 78
+  }
 }
 
 agent_enabled claude-desktop && require_agent_environment ONECOMPUTER "Claude Desktop"
@@ -200,6 +221,10 @@ if agent_enabled claude-desktop; then
   esac
 fi
 
+claude_code_for_desktop_enabled=false
+if agent_enabled claude-desktop && agent_enabled claude-cli; then
+  claude_code_for_desktop_enabled=true
+fi
 install -d -o root -g root -m 0755 /etc/claude-desktop /run/onecomputer
 install -d -o root -g root -m 0755 /etc/onecomputer/policy
 python3 - "$ONECOMPUTER_SIGNED_POLICY_B64" "$ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64" <<'PY'
@@ -283,12 +308,12 @@ os.chmod(path, 0o644)
 os.chown(path, 0, 0)
 PY
 if agent_enabled claude-desktop; then
-python3 - "$ONECOMPUTER_MODEL_ALIAS" "$model_label" "$ONECOMPUTER_COWORK_ENABLED" <<'PY'
+python3 - "$ONECOMPUTER_MODEL_ALIAS" "$model_label" "$ONECOMPUTER_COWORK_ENABLED" "$claude_code_for_desktop_enabled" <<'PY'
 import json
 import os
 import sys
 
-model, label, cowork_enabled = sys.argv[1:]
+model, label, cowork_enabled, code_enabled = sys.argv[1:]
 document = {
     "inferenceProvider": "gateway",
     "inferenceGatewayBaseUrl": "http://127.0.0.1:4312",
@@ -305,8 +330,10 @@ document = {
     "disableDeepLinkRegistration": True,
     "chatTabEnabled": True,
     "chatAdvancedFileAnalysisEnabled": False,
-    "isClaudeCodeForDesktopEnabled": False,
+    "isClaudeCodeForDesktopEnabled": code_enabled == "true",
     "coworkTabEnabled": cowork_enabled == "true",
+    "secureVmFeaturesEnabled": cowork_enabled == "true",
+    "allowedWorkspaceFolders": ["/home/kasm-user"],
     "disableBundledSkills": True,
     "autoModeEnabled": False,
     "toolSearchEnabled": False,
@@ -326,6 +353,13 @@ with open(path, "w", encoding="utf-8") as output:
 os.chmod(path, 0o644)
 os.chown(path, 0, 0)
 PY
+fi
+
+rm -f /etc/claude-desktop/code-model
+if [[ "$claude_code_for_desktop_enabled" == "true" ]]; then
+  printf '%s\n' "$ONECOMPUTER_CLAUDE_CLI_MODEL_ALIAS" > /etc/claude-desktop/code-model
+  chown root:root /etc/claude-desktop/code-model
+  chmod 0644 /etc/claude-desktop/code-model
 fi
 
 if agent_enabled claude-cli; then
@@ -555,10 +589,12 @@ start_agent_broker() {
   local credential_variable="${prefix}_GATEWAY_CREDENTIAL"
   local control_variable="${prefix}_CONTROL_UPSTREAM"
   local bridge_variable="${prefix}_AGENT_BRIDGE_TOKEN"
+  local model_variable="${prefix}_MODEL_ALIAS"
   env -i \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     ONECOMPUTER_GATEWAY_UPSTREAM="${!upstream_variable}" \
     ONECOMPUTER_GATEWAY_CREDENTIAL="${!credential_variable}" \
+    ONECOMPUTER_MODEL_ALIAS="${!model_variable}" \
     ONECOMPUTER_CONTROL_UPSTREAM="${!control_variable}" \
     ONECOMPUTER_AGENT_BRIDGE_TOKEN="${!bridge_variable}" \
     ONECOMPUTER_GATEWAY_LISTEN_PORT="$port" \

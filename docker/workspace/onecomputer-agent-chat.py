@@ -12,8 +12,10 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 import zipfile
 from contextlib import asynccontextmanager
@@ -44,6 +46,13 @@ HOME = Path("/home/kasm-user")
 STATE_DIR = HOME / ".onecomputer-chat" / AGENT
 STATE_FILE = STATE_DIR / "structured-sessions.json"
 ATTACHMENT_ROOT = STATE_DIR / "attachments"
+ATTACHMENT_INBOX_ROOT = HOME / "ONEComputer" / "Inbox"
+try:
+    ATTACHMENT_RETENTION_DAYS = int(os.environ.get("ONECOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS", "90"))
+except ValueError:
+    raise SystemExit("invalid chat attachment retention") from None
+if not 1 <= ATTACHMENT_RETENTION_DAYS <= 3_650:
+    raise SystemExit("invalid chat attachment retention")
 MAX_MESSAGE = 16_000
 MAX_TEXT = 128_000
 MAX_ATTACHMENTS = 4
@@ -358,10 +367,44 @@ def attachment_text(media_type: str, data: bytes) -> str | None:
     raise ValueError("unsupported attachment")
 
 
-def persist_attachment(filename: str, data: bytes) -> str:
+def cleanup_expired_attachments() -> None:
+    if not ATTACHMENT_ROOT.exists():
+        return
+    cutoff = time.time() - ATTACHMENT_RETENTION_DAYS * 24 * 60 * 60
+    for directory in ATTACHMENT_ROOT.iterdir():
+        if (
+            directory.is_symlink()
+            or not directory.is_dir()
+            or not re.fullmatch(r"[a-f0-9]{32}", directory.name)
+        ):
+            continue
+        try:
+            expired = directory.stat().st_mtime < cutoff
+        except OSError:
+            continue
+        if not expired:
+            continue
+        shutil.rmtree(directory, ignore_errors=True)
+        for source_directory in ("Telegram", "Chat"):
+            shutil.rmtree(ATTACHMENT_INBOX_ROOT / source_directory / directory.name, ignore_errors=True)
+
+
+def write_attachment_manifest(path: Path, document: dict[str, Any]) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        json.dump(document, output, separators=(",", ":"))
+        output.write("\n")
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def persist_attachment(filename: str, media_type: str, data: bytes, source: str) -> str:
+    cleanup_expired_attachments()
     ATTACHMENT_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ATTACHMENT_ROOT, 0o700)
-    message_directory = ATTACHMENT_ROOT / uuid.uuid4().hex
+    attachment_id = uuid.uuid4().hex
+    message_directory = ATTACHMENT_ROOT / attachment_id
     message_directory.mkdir(mode=0o700)
     suffix = Path(filename).suffix.lower()
     if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
@@ -375,8 +418,30 @@ def persist_attachment(filename: str, data: bytes) -> str:
             output.write(data)
             output.flush()
             os.fsync(output.fileno())
+        source_directory = "Telegram" if source == "telegram" else "Chat"
+        source_root = ATTACHMENT_INBOX_ROOT / source_directory
+        source_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(ATTACHMENT_INBOX_ROOT, 0o700)
+        os.chmod(source_root, 0o700)
+        inbox_directory = source_root / attachment_id
+        inbox_directory.mkdir(mode=0o700)
+        visible_filename = filename if not filename.startswith(".") else f"attachment-{filename.lstrip('.')}"
+        visible_path = inbox_directory / visible_filename
+        os.symlink(path, visible_path)
+        write_attachment_manifest(message_directory / "manifest.json", {
+            "version": 1,
+            "source": source,
+            "originalFilename": filename,
+            "mediaType": media_type,
+            "byteLength": len(data),
+            "sha256": digest,
+            "storedAt": now(),
+            "workspacePath": str(path),
+            "inboxPath": str(visible_path),
+        })
     except Exception:
-        path.unlink(missing_ok=True)
+        shutil.rmtree(message_directory, ignore_errors=True)
+        shutil.rmtree(ATTACHMENT_INBOX_ROOT / ("Telegram" if source == "telegram" else "Chat") / attachment_id, ignore_errors=True)
         raise
     return str(path)
 
@@ -401,6 +466,9 @@ def validate_user_message(value: object) -> tuple[dict[str, Any], str, list[dict
         raise ValueError("invalid message")
     text_parts = [part for part in parts if part["type"] == "text"]
     file_parts = [part for part in parts if part["type"] == "file"]
+    source = metadata.get("source", "web")
+    if source not in {"web", "telegram"}:
+        raise ValueError("invalid message")
     if len(text_parts) > 1 or len(file_parts) > MAX_ATTACHMENTS:
         raise ValueError("invalid message")
     text = str(text_parts[0].get("text", "")).strip() if text_parts else ""
@@ -440,7 +508,7 @@ def validate_user_message(value: object) -> tuple[dict[str, Any], str, list[dict
         if total_bytes > MAX_TOTAL_ATTACHMENT_BYTES:
             raise ValueError("attachments exceed their total limit")
         extracted = attachment_text(media_type, data)
-        workspace_path = persist_attachment(filename, data)
+        workspace_path = persist_attachment(filename, media_type, data, source)
         if extracted is not None:
             extracted = extracted[:MAX_DOCUMENT_TEXT]
             remaining = MAX_TOTAL_DOCUMENT_TEXT - total_document_text
@@ -455,10 +523,13 @@ def validate_user_message(value: object) -> tuple[dict[str, Any], str, list[dict
             "workspacePath": workspace_path,
         })
         persisted_parts.append({
-            "type": "file",
-            "mediaType": media_type,
-            "filename": filename,
-            "url": url,
+            "type": "data-file-reference",
+            "id": safe_identifier("attachment", message_id, workspace_path),
+            "data": {
+                "mediaType": media_type,
+                "filename": filename,
+                "storage": "workspace",
+            },
         })
     return {
         "id": message_id,
@@ -467,6 +538,7 @@ def validate_user_message(value: object) -> tuple[dict[str, Any], str, list[dict
             "agentCatalogId": AGENT,
             "state": "completed",
             "createdAt": metadata["createdAt"],
+            "source": source,
         },
         "parts": persisted_parts,
     }, text, attachments
@@ -1254,6 +1326,7 @@ async def turns(request: Request) -> Response:
 async def lifespan(_: Starlette):
     global codex, http
     STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    cleanup_expired_attachments()
     http = httpx.AsyncClient()
     if AGENT == "codex-cli":
         from openai_codex import AsyncCodex, CodexConfig

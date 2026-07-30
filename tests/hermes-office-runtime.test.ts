@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const execFileAsync = promisify(execFile);
 
 test("the workspace image pins the Hermes Office skills and their native runtimes", async () => {
   const [dockerfile, requirements, nodePackage, nodeLock] = await Promise.all([
@@ -119,8 +124,14 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
   assert.match(chatAdapter, /Invoke an assigned MCP tool directly/);
   assert.match(chatAdapter, /path as localFilePath; do not read or base64-encode/);
   assert.match(chatAdapter, /ATTACHMENT_ROOT = STATE_DIR \/ "attachments"/);
-  assert.match(chatAdapter, /def persist_attachment\(filename: str, data: bytes\)/);
+  assert.match(chatAdapter, /ATTACHMENT_INBOX_ROOT = HOME \/ "ONEComputer" \/ "Inbox"/);
+  assert.match(chatAdapter, /ONECOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS/);
+  assert.match(chatAdapter, /def persist_attachment\(filename: str, media_type: str, data: bytes, source: str\)/);
   assert.match(chatAdapter, /os\.O_EXCL \| getattr\(os, "O_NOFOLLOW", 0\)/);
+  assert.match(chatAdapter, /"originalFilename": filename/);
+  assert.match(chatAdapter, /os\.symlink\(path, visible_path\)/);
+  assert.match(chatAdapter, /"type": "data-file-reference"/);
+  assert.doesNotMatch(chatAdapter, /persisted_parts\.append\(\{\s*"type": "file",[\s\S]*?"url": url/);
   assert.match(chatAdapter, /"workspacePath": workspace_path/);
   assert.match(chatAdapter, /pass the exact workspace path below as localFilePath/);
   assert.match(chatAdapter, /Treat greetings, acknowledgements, small talk/);
@@ -131,6 +142,48 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
   assert.doesNotMatch(chatAdapter, /Got it — I’m working on that\./);
   assert.match(chatAdapter, /configured IANA timezone/);
   assert.match(chatAdapter, /Before a calendar write/);
+});
+
+test("chat attachments retain original metadata, appear in the workspace Inbox, and expire together", async () => {
+  const chatAdapter = await source("docker/workspace/onecomputer-agent-chat.py");
+  const functions = chatAdapter.slice(
+    chatAdapter.indexOf("def cleanup_expired_attachments"),
+    chatAdapter.indexOf("def validate_user_message"),
+  );
+  const home = await mkdtemp(path.join(tmpdir(), "onecomputer-attachment-test-"));
+  const program = `
+import hashlib, json, os, re, shutil, sys, time, uuid
+from pathlib import Path
+from typing import Any
+HOME = Path(sys.argv[1])
+ATTACHMENT_ROOT = HOME / ".onecomputer-chat" / "hermes-claw" / "attachments"
+ATTACHMENT_INBOX_ROOT = HOME / "ONEComputer" / "Inbox"
+ATTACHMENT_RETENTION_DAYS = 1
+def now(): return "2026-07-29T00:00:00Z"
+${functions}
+stored = Path(persist_attachment("Business Overview.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", b"deck-bytes", "telegram"))
+manifest = json.loads((stored.parent / "manifest.json").read_text())
+visible = Path(manifest["inboxPath"])
+result = {"stored": stored.exists(), "visible": visible.is_symlink(), "target": visible.resolve() == stored, "manifest": manifest}
+os.utime(stored.parent, (0, 0))
+cleanup_expired_attachments()
+result["expired"] = not stored.parent.exists() and not visible.parent.exists()
+print(json.dumps(result))
+`;
+  try {
+    const { stdout } = await execFileAsync("python3", ["-c", program, home]);
+    const result = JSON.parse(stdout);
+    assert.equal(result.stored, true);
+    assert.equal(result.visible, true);
+    assert.equal(result.target, true);
+    assert.equal(result.expired, true);
+    assert.equal(result.manifest.originalFilename, "Business Overview.pptx");
+    assert.equal(result.manifest.source, "telegram");
+    assert.equal(result.manifest.byteLength, 10);
+    assert.match(result.manifest.inboxPath, /ONEComputer\/Inbox\/Telegram/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("governed Calendar discovery advertises only argument shapes Control allows", async () => {

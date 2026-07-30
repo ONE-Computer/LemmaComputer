@@ -695,6 +695,173 @@ test("a policy projection change bypasses the grant cache immediately", async ()
   }
 });
 
+test("a managed model change replaces and verifies the existing workspace grant", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  let storedKey: Record<string, unknown> | undefined;
+  let modelChecks = 0;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    requests.push({ url: request.url ?? "", body });
+    response.setHeader("content-type", "application/json");
+    if (request.url?.startsWith("/key/list?")) {
+      response.end(JSON.stringify({ keys: storedKey ? [storedKey] : [] }));
+      return;
+    }
+    if (request.url === "/key/delete") {
+      storedKey = undefined;
+      response.end(JSON.stringify({ deleted_keys: 1 }));
+      return;
+    }
+    if (request.url === "/key/generate") {
+      storedKey = {
+        ...body,
+        token: createHash("sha256").update(String(body.key)).digest("hex"),
+      };
+      response.end(JSON.stringify({ key: body.key }));
+      return;
+    }
+    if (request.url === "/key/update") {
+      storedKey = { ...storedKey, ...body };
+      response.end(JSON.stringify({ key: body.key }));
+      return;
+    }
+    if (request.url === "/v1/models") {
+      modelChecks += 1;
+      const metadata = storedKey?.metadata as Record<string, unknown> | undefined;
+      response.end(JSON.stringify({ data: [{ id: metadata?.onecomputer_client_model_alias }] }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const routedAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const basePolicy = {
+    schemaVersion: 1 as const,
+    policyVersionId: "policy-version-1",
+    policyVersion: 1,
+    policyHash: "1".repeat(64),
+    workspaceProfile: "kasm-persistent-standard" as const,
+    agentId: "persisted-agent-id",
+    agentProfile: "hermes-claw-managed-v1" as const,
+    networkProfile: "controlled-egress-v1" as const,
+    modelAlias: "onecomputer-claude",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-folders"],
+  };
+  try {
+    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy: basePolicy });
+    const switched = await routedAdapter.ensureGrant({
+      workspaceId: "workspace-a",
+      identity,
+      policy: { ...basePolicy, modelAlias: "onecomputer-glm" },
+    });
+
+    assert.equal(switched.modelAlias, "onecomputer-glm");
+    assert.equal(requests.filter(({ url }) => url === "/key/generate").length, 2);
+    assert.equal(requests.filter(({ url }) => url === "/key/delete").length, 1);
+    assert.equal(requests.filter(({ url }) => url === "/key/update").length, 0);
+    assert.equal(modelChecks, 1);
+    assert.deepEqual(storedKey?.models, [tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-glm")]);
+    assert.equal((storedKey?.metadata as Record<string, unknown>).onecomputer_policy_model_alias, "onecomputer-glm");
+    assert.equal((storedKey?.metadata as Record<string, unknown>).onecomputer_client_model_alias, "onecomputer-glm");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("a model grant replacement fails closed when LiteLLM keeps the stale allowlist", async () => {
+  const routedAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: "http://unused",
+    workspaceUrl: "http://unused",
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const credential = routedAdapter.credentialFor("workspace-a", "persisted-agent-id");
+  const gatewayUserId = routedAdapter.userIdFor(identity);
+  const gatewayAgentId = routedAdapter.agentIdFor("workspace-a", "persisted-agent-id");
+  const claudeAccessGroup = tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-claude");
+  const staleKey = {
+    token: createHash("sha256").update(credential).digest("hex"),
+    user_id: gatewayUserId,
+    agent_id: gatewayAgentId,
+    models: [claudeAccessGroup],
+    metadata: {
+      onecomputer_tenant_id: identity.tenantId,
+      onecomputer_subject_id: identity.subjectId,
+      onecomputer_workspace_id: "workspace-a",
+      onecomputer_agent_id: "persisted-agent-id",
+      onecomputer_policy_version_id: "policy-version-1",
+      onecomputer_policy_hash: "1".repeat(64),
+      onecomputer_policy_model_alias: "onecomputer-claude",
+      onecomputer_client_model_alias: "onecomputer-claude",
+      onecomputer_provider_access_group: claudeAccessGroup,
+    },
+  };
+  let deleteRequests = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain request bodies so the local HTTP connection can be reused.
+    }
+    response.setHeader("content-type", "application/json");
+    if (request.url?.startsWith("/key/list?")) {
+      response.end(JSON.stringify({ keys: [staleKey] }));
+      return;
+    }
+    if (request.url === "/key/delete") {
+      deleteRequests += 1;
+      response.end(JSON.stringify({ deleted_keys: 1 }));
+      return;
+    }
+    if (request.url === "/key/generate") {
+      response.end(JSON.stringify({ key: credential }));
+      return;
+    }
+    if (request.url === "/v1/models") {
+      response.end(JSON.stringify({ data: [{ id: "onecomputer-claude" }] }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const glmPolicy = {
+    schemaVersion: 1 as const,
+    policyVersionId: "policy-version-1",
+    policyVersion: 1,
+    policyHash: "1".repeat(64),
+    workspaceProfile: "kasm-persistent-standard" as const,
+    agentId: "persisted-agent-id",
+    agentProfile: "hermes-claw-managed-v1" as const,
+    networkProfile: "controlled-egress-v1" as const,
+    modelAlias: "onecomputer-glm",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-folders"],
+  };
+  try {
+    await assert.rejects(
+      liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy: glmPolicy }),
+      (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "GATEWAY_GRANT_FAILED"),
+    );
+    assert.equal(deleteRequests, 2);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("workspace grants bind LiteLLM user and agent identities without making either policy authority", async () => {
   let grantBody: Record<string, unknown> = {};
   const server = createServer(async (request, response) => {
@@ -925,11 +1092,15 @@ test("a matching existing workspace key is updated without a duplicate generatio
           token: createHash("sha256").update(credential).digest("hex"),
           user_id: gatewayUserId,
           agent_id: gatewayAgentId,
+          models: [tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-assistant")],
           metadata: {
             onecomputer_tenant_id: identity.tenantId,
             onecomputer_subject_id: identity.subjectId,
             onecomputer_workspace_id: "workspace-a",
             onecomputer_agent_id: "workspace-default:workspace-a",
+            onecomputer_policy_model_alias: "onecomputer-assistant",
+            onecomputer_client_model_alias: "onecomputer-assistant",
+            onecomputer_provider_access_group: tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-assistant"),
           },
         }],
       }));

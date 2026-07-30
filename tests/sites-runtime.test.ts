@@ -3,10 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("the reviewed site skill and scoped publisher reach every supported agent surface", async () => {
-  const [dockerfile, entrypoint, chatAdapter, claude, codex, hermes, hermesDesktop, hermesConfig] = await Promise.all([
+  const [dockerfile, entrypoint, chatAdapter, claudeDesktop, claude, codex, hermes, hermesDesktop, hermesConfig] = await Promise.all([
     readFile("docker/Dockerfile.workspace", "utf8"),
     readFile("docker/workspace/onecomputer-workspace-entrypoint.sh", "utf8"),
     readFile("docker/workspace/onecomputer-agent-chat.py", "utf8"),
+    readFile("docker/workspace/onecomputer-claude-desktop", "utf8"),
     readFile("docker/workspace/onecomputer-claude", "utf8"),
     readFile("docker/workspace/onecomputer-codex", "utf8"),
     readFile("docker/workspace/onecomputer-hermes", "utf8"),
@@ -21,7 +22,7 @@ test("the reviewed site skill and scoped publisher reach every supported agent s
   }
   assert.match(entrypoint, /ONECOMPUTER_SITES_BROKER=http:\/\/127\.0\.0\.1:4314/);
   assert.match(chatAdapter, /"ONECOMPUTER_SITES_BROKER": BROKER/);
-  for (const launcher of [claude, codex, hermes, hermesDesktop]) {
+  for (const launcher of [claudeDesktop, claude, codex, hermes, hermesDesktop]) {
     assert.match(launcher, /ONECOMPUTER_SITES_BROKER=http:\/\/127\.0\.0\.1:43(?:14|15|16|17)/);
   }
   assert.match(hermesConfig, /REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS \| frozenset\(\{"make-a-site"}\)/);

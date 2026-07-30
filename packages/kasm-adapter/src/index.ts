@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   canonicalJson,
   defaultClipboardPolicy,
@@ -14,6 +15,11 @@ import {
   type Sandbox,
   type SignedPolicyBundle,
 } from "@onecomputer/contracts";
+
+const coworkSeccompProfile = readFileSync(
+  new URL("./cowork-seccomp-profile.json", import.meta.url),
+  "utf8",
+).trim();
 
 export interface SandboxAdapter {
   create(input: SandboxCreateInput): Promise<Sandbox>;
@@ -268,14 +274,25 @@ type KasmLocalConfig = {
   egressNetwork?: string;
   publicHost?: string;
   timeZone?: string;
+  chatAttachmentRetentionDays?: number;
   kvmEnabled?: boolean;
+  installationKind: "customer-managed" | "hosted" | "worktree";
   portStart?: number;
   portEnd?: number;
+  startupTimeoutMs?: number;
+  startupPollMs?: number;
 };
 
 export class KasmLocalAdapter implements SandboxAdapter {
   private readonly socketPath: string;
   constructor(private readonly config: KasmLocalConfig) {
+    if (config.kvmEnabled && config.installationKind === "hosted") {
+      throw new OneComputerError(
+        "COWORK_HOST_ISOLATION_REQUIRED",
+        "Local Cowork virtualization is not permitted on hosted multi-tenant nodes",
+        503,
+      );
+    }
     this.socketPath = config.socketPath ?? "/var/run/docker.sock";
   }
 
@@ -291,15 +308,6 @@ export class KasmLocalAdapter implements SandboxAdapter {
     }
     const workspaceNetwork = this.workspaceNetwork(input.workspaceId);
     const workspaceVolume = await this.resolveWorkspaceVolume(input.workspaceId);
-    await this.ensureNetwork(workspaceNetwork, true, input.workspaceId);
-    await this.ensureVolume(workspaceVolume, input.workspaceId);
-    await this.ensureNetwork(this.config.controlNetwork, false);
-    if (input.policy.egress && input.egressProxy && this.config.egressProxyImage) {
-      await this.ensureNetwork(this.config.egressNetwork ?? "onecomputer-egress", false);
-      await this.ensureEgressProxy(input, workspaceNetwork);
-    }
-    if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
-    if ((input.agentBridge || input.chatRuntimes?.length) && this.config.controlContainer) await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
     const name = `onecomputer-sandbox-${input.workspaceId}`;
     const fallbackAgent = ({
       "claude-desktop-managed-v1": "claude-desktop",
@@ -311,14 +319,31 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const enabledAgents = input.agentGrants?.map((grant) => grant.catalogId) ?? [fallbackAgent];
     const enabledApplications = input.policy.applications ?? ["firefox"];
     const coworkEnabled = this.config.kvmEnabled === true && enabledAgents.includes("claude-desktop");
+    const prepareRuntime = async () => {
+      await this.ensureNetwork(workspaceNetwork, true, input.workspaceId);
+      await this.ensureVolume(workspaceVolume, input.workspaceId);
+      await this.ensureNetwork(this.config.controlNetwork, false);
+      if (input.policy.egress && input.egressProxy && this.config.egressProxyImage) {
+        await this.ensureNetwork(this.config.egressNetwork ?? "onecomputer-egress", false);
+        await this.ensureEgressProxy(input, workspaceNetwork);
+      }
+      if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
+      if ((input.agentBridge || input.chatRuntimes?.length) && this.config.controlContainer) {
+        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
+      }
+    };
     const existing = await this.inspectByName(name);
     if (existing?.running && existing.coworkEnabled === coworkEnabled) {
+      await prepareRuntime();
       await this.ensureRelay(name, existing.id, existing.port ?? await this.allocatePort(), workspaceNetwork);
       return { providerId: existing.id, workspaceId: input.workspaceId, state: "ready", failureCode: null };
     }
     if (existing) await this.destroy(existing.id);
+    // destroy() also removes the per-workspace network. Runtime preparation
+    // must therefore happen after stale sandbox cleanup, not before it.
+    await prepareRuntime();
     const port = await this.allocatePort();
-    const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(name)}`, {
+    const created = await this.createContainer(`/containers/create?name=${encodeURIComponent(name)}`, {
       Image: this.config.image,
       Labels: {
         "com.onecomputer.sandbox.provider": "kasm-local",
@@ -361,6 +386,9 @@ export class KasmLocalAdapter implements SandboxAdapter {
         ...(this.config.timeZone ? [
           `TZ=${this.config.timeZone}`,
           `ONECOMPUTER_TIME_ZONE=${this.config.timeZone}`,
+        ] : []),
+        ...(this.config.chatAttachmentRetentionDays ? [
+          `ONECOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS=${this.config.chatAttachmentRetentionDays}`,
         ] : []),
         `ONECOMPUTER_CLIPBOARD_ENABLED=${clipboard.enabled}`,
         `ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=${clipboard.localToWorkspace}`,
@@ -408,26 +436,37 @@ export class KasmLocalAdapter implements SandboxAdapter {
         RestartPolicy: { Name: "unless-stopped" },
         ShmSize: 536_870_912,
         PidsLimit: 1024,
-        Memory: 4_294_967_296,
+        Memory: coworkEnabled ? 8_589_934_592 : 4_294_967_296,
         NanoCpus: 2_000_000_000,
         CapDrop: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
-        SecurityOpt: ["no-new-privileges"],
+        SecurityOpt: [
+          "no-new-privileges",
+          ...(coworkEnabled ? ["seccomp=" + coworkSeccompProfile] : []),
+        ],
         Mounts: [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }],
         ...(coworkEnabled ? {
-          Devices: [{
-            PathOnHost: "/dev/kvm",
-            PathInContainer: "/dev/kvm",
-            CgroupPermissions: "rwm",
-          }],
+          Devices: [
+            {
+              PathOnHost: "/dev/kvm",
+              PathInContainer: "/dev/kvm",
+              CgroupPermissions: "rwm",
+            },
+            {
+              PathOnHost: "/dev/vhost-vsock",
+              PathInContainer: "/dev/vhost-vsock",
+              CgroupPermissions: "rwm",
+            },
+          ],
         } : {}),
       },
-    });
+    }, workspaceNetwork, prepareRuntime);
     const providerId = textValue(created, "Id");
     if (!providerId) throw new OneComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return a container identifier", 502);
     try {
       await this.request("POST", `/containers/${providerId}/start`);
+      await this.waitForStartup(providerId);
       await this.ensureRelay(name, providerId, port, workspaceNetwork);
-      return { providerId, workspaceId: input.workspaceId, state: "provisioning", failureCode: null };
+      return { providerId, workspaceId: input.workspaceId, state: "ready", failureCode: null };
     } catch (error) {
       await this.destroy(providerId).catch(() => undefined);
       throw error;
@@ -463,7 +502,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
       // restart loop. That state cannot serve Kasm and must not be exposed as
       // ready to Control or the browser.
       const restarting = state.Restarting === true;
-      const running = state.Running === true && !restarting && state.Paused !== true;
+      const health = textValue(asObject(state.Health), "Status");
+      const running = state.Running === true && !restarting && state.Paused !== true && health !== "unhealthy";
       const containerConfig = asObject(inspected.Config);
       const labels = asObject(containerConfig.Labels);
       const workspaceNetwork = labels["com.onecomputer.workspace-network"];
@@ -525,14 +565,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
           await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
         }
       }
-      const failed = restarting || (typeof state.ExitCode === "number" && state.ExitCode !== 0);
+      const failed = restarting || health === "unhealthy" || (typeof state.ExitCode === "number" && state.ExitCode !== 0);
       return {
         providerId,
         ...(typeof labels["com.onecomputer.workspace-id"] === "string"
           ? { workspaceId: String(labels["com.onecomputer.workspace-id"]) }
           : {}),
-        state: running ? "ready" : failed ? "failed" : "stopped",
-        failureCode: failed ? "FIXTURE_EXITED" : null,
+        state: running ? health === "starting" ? "provisioning" : "ready" : failed ? "failed" : "stopped",
+        failureCode: failed ? health === "unhealthy" ? "WORKSPACE_HEALTHCHECK_FAILED" : "WORKSPACE_STARTUP_FAILED" : null,
         ...(egressPolicyProjection ? { egressPolicyProjection } : {}),
         policyProjectionPresent: Boolean(projectedPolicyEntry),
         ...(projectedPolicyBundle ? { projectedPolicyBundle } : {}),
@@ -545,7 +585,11 @@ export class KasmLocalAdapter implements SandboxAdapter {
 
   async open(providerId: string): Promise<SandboxLaunch> {
     const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
-    if (asObject(inspected.State).Running !== true) throw new OneComputerError("WORKSPACE_NOT_READY", "The Kasm desktop is not running", 409, true);
+    const state = asObject(inspected.State);
+    const health = textValue(asObject(state.Health), "Status");
+    if (state.Running !== true || state.Restarting === true || state.Paused === true || (health && health !== "healthy")) {
+      throw new OneComputerError("WORKSPACE_NOT_READY", "The Kasm desktop is not healthy yet", 409, true);
+    }
     const labels = asObject(asObject(inspected.Config).Labels);
     const sandboxName = textValue(inspected, "Name")?.replace(/^\//, "");
     const workspaceId = labels["com.onecomputer.workspace-id"];
@@ -647,16 +691,23 @@ export class KasmLocalAdapter implements SandboxAdapter {
   private async ensureNetwork(name: string, internal: boolean, workspaceId?: string) {
     const networks = await this.request("GET", `/networks/${encodeURIComponent(name)}`).catch(() => null);
     if (networks) return;
-    await this.request("POST", "/networks/create", {
-      Name: name,
-      Driver: "bridge",
-      Internal: internal,
-      Attachable: true,
-      Labels: {
-        "com.onecomputer.runtime": "workspace-network",
-        ...(workspaceId ? { "com.onecomputer.workspace-id": workspaceId } : {}),
-      },
-    });
+    try {
+      await this.request("POST", "/networks/create", {
+        Name: name,
+        Driver: "bridge",
+        Internal: internal,
+        Attachable: true,
+        Labels: {
+          "com.onecomputer.runtime": "workspace-network",
+          ...(workspaceId ? { "com.onecomputer.workspace-id": workspaceId } : {}),
+        },
+      });
+    } catch (error) {
+      // Another reconciler may create the same network after our initial GET.
+      // Confirm that race before treating Docker's conflict as a failure.
+      if (await this.request("GET", `/networks/${encodeURIComponent(name)}`).catch(() => null)) return;
+      throw error;
+    }
   }
 
   private async ensureVolume(name: string, workspaceId: string) {
@@ -710,10 +761,17 @@ export class KasmLocalAdapter implements SandboxAdapter {
   }
 
   private async disconnectContainer(network: string, container: string) {
+    if (!(await this.networkContainsContainer(network, container))) return;
     try {
       await this.request("POST", `/networks/${encodeURIComponent(network)}/disconnect`, { Container: container, Force: true });
     } catch (error) {
-      if (!(error instanceof OneComputerError && [404, 409].includes(error.statusCode))) throw error;
+      if (error instanceof OneComputerError && [404, 409].includes(error.statusCode)) return;
+      // Docker can return 500 when Compose replaces a governed service after
+      // the membership check but before disconnect. Treat that race as an
+      // idempotent success only when a fresh inspection confirms the endpoint
+      // is already absent; preserve every genuine Docker failure.
+      if (!(await this.networkContainsContainer(network, container))) return;
+      throw error;
     }
   }
 
@@ -731,9 +789,13 @@ export class KasmLocalAdapter implements SandboxAdapter {
       const labels = asObject(asObject(inspected.Config).Labels);
       const rawPort = labels["com.onecomputer.desktop-port"];
       const state = asObject(inspected.State);
+      const health = textValue(asObject(state.Health), "Status");
       return {
         id: String(inspected.Id),
-        running: state.Running === true && state.Restarting !== true && state.Paused !== true,
+        running: state.Running === true
+          && state.Restarting !== true
+          && state.Paused !== true
+          && (!health || health === "healthy"),
         port: typeof rawPort === "string" ? Number(rawPort) : undefined,
         coworkEnabled: labels["com.onecomputer.cowork-enabled"] === "true",
       };
@@ -845,6 +907,127 @@ export class KasmLocalAdapter implements SandboxAdapter {
       await this.removeContainer(proxyId).catch(() => undefined);
       throw error;
     }
+  }
+
+  private async createContainer(
+    path: string,
+    body: JsonObject,
+    workspaceNetwork: string,
+    prepareRuntime: () => Promise<void>,
+  ) {
+    try {
+      return await this.request("POST", path, body);
+    } catch (error) {
+      const missingWorkspaceNetwork = error instanceof OneComputerError
+        && error.statusCode === 404
+        && error.message.includes(`network ${workspaceNetwork} not found`);
+      if (!missingWorkspaceNetwork) throw error;
+      // Docker can lose a Compose-managed bridge between reconciliation and
+      // container creation. Reconcile once and replay only the idempotent
+      // create request so a transient network race never becomes terminal UI.
+      await prepareRuntime();
+      return this.request("POST", path, body);
+    }
+  }
+
+  private async waitForStartup(providerId: string) {
+    const timeoutMs = this.config.startupTimeoutMs ?? 15_000;
+    const pollMs = this.config.startupPollMs ?? 250;
+    const deadline = Date.now() + timeoutMs;
+    do {
+      const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+      const state = asObject(inspected.State);
+      const health = textValue(asObject(state.Health), "Status");
+      const running = state.Running === true && state.Restarting !== true && state.Paused !== true;
+      if (running && (!health || health === "healthy")) return;
+
+      const terminal = state.OOMKilled === true
+        || state.Restarting === true
+        || health === "unhealthy"
+        || ["dead", "exited"].includes(String(state.Status ?? ""));
+      if (terminal) throw await this.startupFailure(providerId, state, health);
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    } while (Date.now() < deadline);
+
+    throw new OneComputerError(
+      "WORKSPACE_STARTUP_TIMEOUT",
+      "The workspace did not become healthy in time. ONEComputer will retry safely.",
+      504,
+      true,
+    );
+  }
+
+  private async startupFailure(providerId: string, state: JsonObject, health?: string) {
+    const logs = await this.containerLogs(providerId).catch(() => "");
+    const diagnostic = this.safeStartupDiagnostic(logs);
+    const detail = diagnostic ? ` ${diagnostic}` : "";
+    if (state.OOMKilled === true) {
+      return new OneComputerError(
+        "WORKSPACE_RESOURCE_LIMIT",
+        `The workspace exceeded its memory limit during startup.${detail}`,
+        503,
+        true,
+      );
+    }
+    if (state.ExitCode === 78) {
+      return new OneComputerError(
+        "WORKSPACE_STARTUP_REJECTED",
+        `The workspace configuration was rejected during startup.${detail}`,
+        422,
+        false,
+      );
+    }
+    return new OneComputerError(
+      health === "unhealthy" ? "WORKSPACE_HEALTHCHECK_FAILED" : "WORKSPACE_STARTUP_FAILED",
+      `The workspace stopped before it became ready.${detail}`,
+      503,
+      true,
+    );
+  }
+
+  private safeStartupDiagnostic(logs: string) {
+    const patterns = [
+      /Cowork cannot access \/dev\/(?:kvm|vhost-vsock) as kasm-user/,
+      /Cowork cannot create an AF_VSOCK socket/,
+      /Cowork requires the Claude Desktop agent/,
+      /invalid Cowork capability setting/,
+      /(?:Claude Desktop|Claude CLI|Codex CLI|Hermes Agent CLI|Hermes Agent Desktop) (?:GATEWAY_UPSTREAM|GATEWAY_CREDENTIAL|MODEL_ALIAS|CONTROL_UPSTREAM|AGENT_BRIDGE_TOKEN|ALLOWED_TOOLS) is required/,
+      /(?:Hermes sandbox API|Claude Chat API|Codex Chat API) configuration is required/,
+      /invalid clipboard (?:policy boolean|size policy)/,
+    ];
+    for (const pattern of patterns) {
+      const match = logs.match(pattern);
+      if (match) return match[0];
+    }
+    return undefined;
+  }
+
+  private containerLogs(providerId: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const path = `/v1.47/containers/${encodeURIComponent(providerId)}/logs?stdout=1&stderr=1&tail=40`;
+      const request = http.request({ socketPath: this.socketPath, path, method: "GET" }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on("end", () => {
+          const buffer = Buffer.concat(chunks);
+          if ((response.statusCode ?? 500) >= 400) {
+            reject(new OneComputerError("DOCKER_API_ERROR", `Docker API returned ${response.statusCode}`, response.statusCode ?? 500));
+            return;
+          }
+          const decoded: Buffer[] = [];
+          let offset = 0;
+          while (offset + 8 <= buffer.length && [0, 1, 2].includes(buffer[offset]!)) {
+            const length = buffer.readUInt32BE(offset + 4);
+            if (offset + 8 + length > buffer.length) break;
+            decoded.push(buffer.subarray(offset + 8, offset + 8 + length));
+            offset += 8 + length;
+          }
+          resolve((decoded.length ? Buffer.concat(decoded) : buffer).toString("utf8"));
+        });
+      });
+      request.on("error", (error) => reject(new OneComputerError("DOCKER_UNAVAILABLE", error.message, 503, true)));
+      request.end();
+    });
   }
 
   private request(method: string, path: string, body?: JsonObject): Promise<JsonObject> {

@@ -51,6 +51,9 @@ export type CreateConnectorInput = {
 };
 
 const stateDigest = (state: string) => createHash("sha256").update(state).digest("base64url");
+const policyProjectionDigest = (policy: RuntimePolicy) => createHash("sha256")
+  .update(JSON.stringify(policy))
+  .digest("base64url");
 const connectorInputDigest = (input: CreateConnectorInput) => createHash("sha256").update(JSON.stringify({
   name: input.name.trim(),
   shortDescription: input.shortDescription.trim(),
@@ -439,7 +442,7 @@ export class McpConnectionService {
       statusStates.set(connector.serverName, status);
       return status;
     };
-    const cacheKey = `${identity.tenantId}:${identity.subjectId}:${policy.policyHash}:${policy.agentId}`;
+    const cacheKey = `${identity.tenantId}:${identity.subjectId}:${policyProjectionDigest(policy)}`;
     const cached = this.projectionCache.get(cacheKey);
     if (cached && cached.expiresAt > this.now()) {
       const cachedServers = [...new Set((cached.policy.mcpServers ?? [policy.mcpServer]).filter((serverName) => serverName !== policy.mcpServer))];

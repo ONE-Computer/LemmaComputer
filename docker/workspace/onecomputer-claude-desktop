@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Electron does not reliably preserve credentials embedded in proxy URLs.
+# Route Desktop and its Cowork VM through the loopback broker, which adds the
+# workspace-scoped upstream credential. Keep HTTP loopback traffic direct so
+# Claude Code cannot cross into another agent's broker through the egress proxy.
+unset HTTP_PROXY http_proxy
+export HTTPS_PROXY=http://127.0.0.1:4313
+export https_proxy="$HTTPS_PROXY"
+export NO_PROXY=localhost,127.0.0.1
+export no_proxy="$NO_PROXY"
+
+# Desktop Code is enabled only when Control assigned the separate claude-cli
+# agent grant. Its child Claude Code process inherits this loopback-only route;
+# no provider credential is present in the desktop process or user profile.
+if [[ -r /etc/claude-desktop/code-model ]]; then
+  code_model="$(</etc/claude-desktop/code-model)"
+  [[ "$code_model" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$ ]] || exit 78
+  export ONECOMPUTER_SITES_BROKER=http://127.0.0.1:4315
+  export ANTHROPIC_BASE_URL=http://127.0.0.1:4315
+  export ANTHROPIC_AUTH_TOKEN=onecomputer-loopback-broker
+  export ANTHROPIC_MODEL="$code_model"
+  export ANTHROPIC_DEFAULT_OPUS_MODEL="$code_model"
+  export ANTHROPIC_DEFAULT_SONNET_MODEL="$code_model"
+  export ANTHROPIC_DEFAULT_HAIKU_MODEL="$code_model"
+  export ANTHROPIC_SMALL_FAST_MODEL="$code_model"
+  export CLAUDE_CODE_SUBAGENT_MODEL="$code_model"
+  export ANTHROPIC_CUSTOM_MODEL_OPTION="$code_model"
+fi
+
+sleep 4
+exec claude-desktop --no-sandbox

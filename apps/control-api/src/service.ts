@@ -306,6 +306,20 @@ export class WorkspaceService {
     )));
   }
 
+  private async revokeAgentGrantsReliably(workspaceId: string, policy: RuntimePolicy) {
+    const delays = [75, 225];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.revokeAgentGrants(workspaceId, policy);
+        return;
+      } catch (error) {
+        const retryable = error instanceof OneComputerError && error.retryable;
+        if (!retryable || attempt >= delays.length) throw error;
+        await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+      }
+    }
+  }
+
   private async view(record: WorkspaceRecord, policy: RuntimePolicy, enforced?: VerifiedPolicyBundle, projected?: PolicyIntegrityView) {
     const integrity = this.integrityFor(policy, enforced, projected);
     if (!this.gateway || !["ready", "open"].includes(record.state)) return toView(record, undefined, policy, integrity);
@@ -491,11 +505,41 @@ export class WorkspaceService {
 
   async stop(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
-    if (record.state === "stopped") return toView(record, undefined, policy);
-    const claimed = await this.store.claim(record.id, ["ready", "open", "provisioning", "restarting", "failed"], "stopping");
+    const cleanupPending = record.state === "stopped" && record.failureCode === "WORKSPACE_ACCESS_CLEANUP_FAILED";
+    if (record.state === "stopped" && !cleanupPending) return toView(record, undefined, policy);
+    const allowed = cleanupPending
+      ? ["stopped" as const]
+      : ["ready" as const, "open" as const, "provisioning" as const, "restarting" as const, "failed" as const];
+    const claimed = await this.store.claim(record.id, allowed, "stopping");
     if (!claimed) throw new OneComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
-    if (claimed.providerId) await this.controller.destroy(claimed.providerId);
-    await this.revokeAgentGrants(claimed.id, policy);
+    try {
+      if (claimed.providerId) await this.controller.destroy(claimed.providerId);
+    } catch (error) {
+      await this.store.finish(claimed.id, claimed.operationToken!, {
+        state: "failed",
+        providerId: claimed.providerId,
+        failureCode: error instanceof OneComputerError ? error.code : "WORKSPACE_STOP_FAILED",
+      });
+      throw error;
+    }
+    try {
+      await this.revokeAgentGrantsReliably(claimed.id, policy);
+    } catch (error) {
+      await this.store.finish(claimed.id, claimed.operationToken!, {
+        state: "stopped",
+        providerId: null,
+        failureCode: "WORKSPACE_ACCESS_CLEANUP_FAILED",
+      });
+      const retryable = error instanceof OneComputerError ? error.retryable : true;
+      throw new OneComputerError(
+        "WORKSPACE_ACCESS_CLEANUP_FAILED",
+        retryable
+          ? "The workspace stopped, but access cleanup could not be confirmed. ONEComputer will retry safely."
+          : "The workspace stopped, but its access cleanup was rejected and needs administrator attention.",
+        503,
+        retryable,
+      );
+    }
     return toView(await this.store.finish(claimed.id, claimed.operationToken!, { state: "stopped", providerId: null, failureCode: null }), undefined, policy);
   }
 

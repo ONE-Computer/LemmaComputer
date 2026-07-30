@@ -245,7 +245,7 @@ the managed-provider cutover.
 | `ONECOMPUTER_GITHUB_MCP_CLIENT_ID`, `ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET` | The built-in GitHub connector is enabled |
 | `ONECOMPUTER_BOOTSTRAP_TENANT_ID`, `ONECOMPUTER_BOOTSTRAP_USER_ID`, `ONECOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
 | Public URL and port variables | The deployment is intentionally using origins other than the localhost defaults |
-| `KASM_LOCAL_KVM_ENABLED=true` | Claude Cowork local execution is enabled and the Docker host exposes `/dev/kvm` |
+| `KASM_LOCAL_KVM_ENABLED=true` | Claude Cowork is enabled on a customer-managed host that exposes `/dev/kvm` and `/dev/vhost-vsock` and has memory/disk headroom |
 | `KASM_*` variables | `SANDBOX_DRIVER=kasm` uses an external Kasm installation |
 
 Leave generated secrets unchanged and stable while their dependent state

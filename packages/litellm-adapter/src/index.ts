@@ -182,6 +182,15 @@ type LiteLLMConfig = {
 type JsonObject = Record<string, unknown>;
 
 const asObject = (value: unknown): JsonObject => value && typeof value === "object" ? value as JsonObject : {};
+const stringArray = (value: unknown) => Array.isArray(value)
+  ? value.filter((item): item is string => typeof item === "string")
+  : [];
+const sameStrings = (left: string[], right: string[]) => {
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.length === sortedRight.length
+    && sortedLeft.every((value, index) => value === sortedRight[index]);
+};
 const WORKSPACE_RPM_LIMIT = 30;
 // Claude Desktop overlaps its streaming model request, managed MCP calls, and
 // short-lived background work. A limit of four caused healthy agent sessions
@@ -769,19 +778,31 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const keys = Array.isArray(asObject(existing.payload).keys) ? asObject(existing.payload).keys as unknown[] : [];
     const tokenHash = createHash("sha256").update(credential).digest("hex");
     const current = keys.map(asObject).find((key) => key.token === tokenHash);
-    const metadata = asObject(current?.metadata);
-    const identityMatches = current?.user_id === gatewayUserId
-      && current?.agent_id === gatewayAgentId
-      && current?.max_budget == null
-      && current?.budget_duration == null
-      && current?.tpm_limit == null
-      && metadata.onecomputer_tenant_id === input.identity.tenantId
-      && metadata.onecomputer_subject_id === input.identity.subjectId
-      && metadata.onecomputer_workspace_id === input.workspaceId
-      && metadata.onecomputer_agent_id === (agentId ?? `workspace-default:${input.workspaceId}`)
-      && (!input.policy || (metadata.onecomputer_policy_version_id === input.policy.policyVersionId
-        && metadata.onecomputer_policy_hash === input.policy.policyHash));
-    if (keys.length && !identityMatches) {
+    const identityMatches = (key: JsonObject | undefined) => {
+      const metadata = asObject(key?.metadata);
+      return key?.user_id === gatewayUserId
+        && key?.agent_id === gatewayAgentId
+        && key?.max_budget == null
+        && key?.budget_duration == null
+        && key?.tpm_limit == null
+        && metadata.onecomputer_tenant_id === input.identity.tenantId
+        && metadata.onecomputer_subject_id === input.identity.subjectId
+        && metadata.onecomputer_workspace_id === input.workspaceId
+        && metadata.onecomputer_agent_id === (agentId ?? `workspace-default:${input.workspaceId}`)
+        && (!input.policy || (metadata.onecomputer_policy_version_id === input.policy.policyVersionId
+          && metadata.onecomputer_policy_hash === input.policy.policyHash));
+    };
+    const modelProjectionMatches = (key: JsonObject | undefined) => {
+      const metadata = asObject(key?.metadata);
+      return sameStrings(stringArray(key?.models), grantModels)
+        && metadata.onecomputer_policy_model_alias === modelAlias
+        && metadata.onecomputer_client_model_alias === clientModelAlias
+        && (metadata.onecomputer_provider_access_group ?? null) === providerAccessGroup;
+    };
+    const currentIdentityMatches = identityMatches(current);
+    const currentModelProjectionMatches = modelProjectionMatches(current);
+    const replaceForModelChange = currentIdentityMatches && !currentModelProjectionMatches;
+    if (keys.length && (!currentIdentityMatches || replaceForModelChange)) {
       const removed = await this.adminCall("/key/delete", {
         method: "POST",
         body: { key_aliases: [grant.key_alias] },
@@ -790,15 +811,46 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         throw this.upstreamError("GATEWAY_GRANT_IDENTITY_MISMATCH", removed.status, removed.payload);
       }
     }
-    const reconciled = identityMatches
+    const updateExisting = currentIdentityMatches && currentModelProjectionMatches;
+    const reconciled = updateExisting
       ? await this.adminCall("/key/update", { method: "POST", body: grant }, true)
       : await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
     if (!reconciled.ok) {
       throw this.upstreamError(
-        identityMatches ? "GATEWAY_GRANT_FAILED" : "GATEWAY_GRANT_IDENTITY_MISMATCH",
+        currentIdentityMatches ? "GATEWAY_GRANT_FAILED" : "GATEWAY_GRANT_IDENTITY_MISMATCH",
         reconciled.status,
         reconciled.payload,
       );
+    }
+    if (replaceForModelChange) {
+      const [verified, available] = await Promise.all([
+        this.adminCall(`/key/list?return_full_object=true&key_alias=${encodeURIComponent(grant.key_alias)}`, { method: "GET" }, true),
+        this.dataCall("/v1/models", credential),
+      ]);
+      const verifiedKeys = Array.isArray(asObject(verified.payload).keys) ? asObject(verified.payload).keys as unknown[] : [];
+      const verifiedKey = verifiedKeys.map(asObject).find((key) => key.token === tokenHash);
+      const modelIds = Array.isArray(asObject(available.payload).data)
+        ? (asObject(available.payload).data as unknown[]).map((item) => String(asObject(item).id ?? ""))
+        : [];
+      if (
+        !verified.ok
+        || !available.ok
+        || !identityMatches(verifiedKey)
+        || !modelProjectionMatches(verifiedKey)
+        || !modelIds.includes(clientModelAlias)
+      ) {
+        await this.adminCall("/key/delete", {
+          method: "POST",
+          body: { key_aliases: [grant.key_alias] },
+        }, true).catch(() => undefined);
+        this.workspaceGrantStates.delete(credential);
+        throw new OneComputerError(
+          "GATEWAY_GRANT_FAILED",
+          "The model gateway did not apply the workspace model grant",
+          502,
+          true,
+        );
+      }
     }
     this.workspaceGrantStates.set(credential, { expiresAt: expiresAt.getTime(), projection, modelAlias: clientModelAlias });
     return { baseUrl: this.workspaceUrl, credential, modelAlias: clientModelAlias, expiresAt: expiresAt.toISOString() };

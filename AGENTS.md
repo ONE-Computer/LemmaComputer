@@ -55,4 +55,8 @@ The issue definition of success is the test contract. Add the smallest automated
 - any untested behavior or follow-up issue;
 - the exact commit SHA eligible for integration.
 
+Changes to user-visible behavior in `apps/web` must run the smallest relevant Playwright suite in addition to `npm run verify:quick`. Run `npm run test:activity:e2e` for Activity panel work and `npm run test:e2e` when a change spans multiple browser flows. Backend-only changes do not require Playwright unless the issue definition of success requires browser coverage.
+
+Treat visual baselines as reviewed product artifacts. Update Playwright snapshots only when the visual change is intentional and has been inspected; never update snapshots only to make a failing comparison pass.
+
 Do not claim completion with skipped required database tests, a dirty worktree, or a known baseline failure.

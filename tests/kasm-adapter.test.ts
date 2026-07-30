@@ -53,6 +53,111 @@ test("Kasm operational states map to the canonical sandbox contract", () => {
   assert.equal(mapKasmState("error"), "failed");
 });
 
+test("local Kasm destroy tolerates a governed endpoint disappearing during disconnect", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
+  let gatewayConnected = true;
+  let networkRemoved = false;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const path = request.url?.replace(/^\/v1\.47/, "") ?? "";
+    requests.push({ method: request.method ?? "", path, body });
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path === "/containers/sandbox-id/json") {
+      response.end(JSON.stringify({
+        Config: {
+          Labels: {
+            "com.onecomputer.workspace-network": workspaceNetwork,
+            "com.onecomputer.gateway-attached": "true",
+            "com.onecomputer.control-attached": "true",
+          },
+          Env: [],
+        },
+        Name: "/onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+      }));
+      return;
+    }
+    if (request.method === "GET" && path === `/networks/${workspaceNetwork}`) {
+      response.end(JSON.stringify({
+        Containers: gatewayConnected
+          ? { "gateway-container-id": { Name: "onecomputer-litellm" } }
+          : {},
+      }));
+      return;
+    }
+    if (
+      request.method === "POST"
+      && path === `/networks/${workspaceNetwork}/disconnect`
+      && body.Container === "onecomputer-litellm"
+    ) {
+      // Reproduce Docker's observed race: Compose drops the endpoint after
+      // inspection, then Docker reports "not connected" as a 500 response.
+      gatewayConnected = false;
+      response.statusCode = 500;
+      response.end(JSON.stringify({
+        message: "container gateway-container-id is not connected to network onecomputer-workspace",
+      }));
+      return;
+    }
+    if (request.method === "DELETE" && path === `/networks/${workspaceNetwork}`) {
+      networkRemoved = true;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      controlContainer: "onecomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+    });
+    await assert.doesNotReject(adapter.destroy("sandbox-id"));
+    assert.equal(networkRemoved, true);
+    assert.equal(
+      requests.some((item) => (
+        item.path === `/networks/${workspaceNetwork}/disconnect`
+        && item.body.Container === "onecomputer-control-api"
+      )),
+      false,
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("local Cowork virtualization is rejected on hosted multi-tenant nodes", () => {
+  assert.throws(
+    () => new KasmLocalAdapter({
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      controlContainer: "onecomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "hosted",
+      kvmEnabled: true,
+    }),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: string }).code,
+        "COWORK_HOST_ISOLATION_REQUIRED",
+      );
+      return true;
+    },
+  );
+});
+
 test("local Kasm creates a hardened internal network and reconciles governed service attachments", async () => {
   const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
@@ -174,6 +279,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       gatewayContainer: "onecomputer-litellm",
       controlContainer: "onecomputer-control-api",
       relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
       egressProxyImage: "sha256:pinned-egress-proxy",
       egressNetwork: "onecomputer-egress",
       timeZone: "Asia/Singapore",
@@ -181,7 +287,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       portStart: 16920,
       portEnd: 16920,
     });
-    await adapter.create({
+    const createInput: Parameters<KasmLocalAdapter["create"]>[0] = {
       workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
       policy,
       policyBundle: signedPolicy.bundle,
@@ -215,7 +321,8 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
         catalogId: "hermes-claw",
         key: "workspace-specific-hermes-api-key-at-least-32-characters",
       }],
-    });
+    };
+    await adapter.create(createInput);
     const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
     const networkCreate = requests.find((item) => item.path === "/networks/create" && item.body.Name === workspaceNetwork)!;
     assert.equal(networkCreate.body.Internal, true);
@@ -227,13 +334,35 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const sandboxCreate = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=onecomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"))!;
     const host = sandboxCreate.body.HostConfig as Record<string, unknown>;
     assert.equal(host.NetworkMode, workspaceNetwork);
-    assert.equal(host.Memory, 4_294_967_296);
+    assert.equal(host.Memory, 8_589_934_592);
     assert.equal(host.NanoCpus, 2_000_000_000);
     assert.deepEqual(host.CapDrop, ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]);
-    assert.deepEqual(host.SecurityOpt, ["no-new-privileges"]);
+    const securityOptions = host.SecurityOpt as string[];
+    assert.equal(securityOptions[0], "no-new-privileges");
+    assert.match(securityOptions[1]!, /^seccomp=\{/);
+    const seccomp = JSON.parse(securityOptions[1]!.slice("seccomp=".length)) as {
+      defaultAction: string;
+      syscalls: Array<{ names: string[]; action: string; args?: Array<{ value: number; op: string }> }>;
+    };
+    assert.equal(seccomp.defaultAction, "SCMP_ACT_ERRNO");
+    assert.deepEqual(
+      seccomp.syscalls
+        .filter((rule) => rule.names.length === 1 && rule.names[0] === "socket")
+        .map((rule) => ({ action: rule.action, value: rule.args?.[0]?.value, op: rule.args?.[0]?.op })),
+      [
+        { action: "SCMP_ACT_ALLOW", value: 38, op: "SCMP_CMP_LT" },
+        { action: "SCMP_ACT_ALLOW", value: 39, op: "SCMP_CMP_EQ" },
+        { action: "SCMP_ACT_ALLOW", value: 40, op: "SCMP_CMP_EQ" },
+        { action: "SCMP_ACT_ALLOW", value: 40, op: "SCMP_CMP_GT" },
+      ],
+    );
     assert.deepEqual(host.Devices, [{
       PathOnHost: "/dev/kvm",
       PathInContainer: "/dev/kvm",
+      CgroupPermissions: "rwm",
+    }, {
+      PathOnHost: "/dev/vhost-vsock",
+      PathInContainer: "/dev/vhost-vsock",
       CgroupPermissions: "rwm",
     }]);
     const workspaceVolume = "onecomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
@@ -337,8 +466,131 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       host: "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
       port: 16_920,
     });
+    const standardAdapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      controlContainer: "onecomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+      egressProxyImage: "sha256:pinned-egress-proxy",
+      egressNetwork: "onecomputer-egress",
+      kvmEnabled: false,
+      portStart: 16920,
+      portEnd: 16920,
+    });
+    await standardAdapter.create(createInput);
+    const sandboxCreates = requests.filter((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=onecomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"));
+    const standardHost = sandboxCreates.at(-1)!.body.HostConfig as Record<string, unknown>;
+    assert.equal(standardHost.Memory, 4_294_967_296);
+    assert.equal(standardHost.Devices, undefined);
+    assert.deepEqual(standardHost.SecurityOpt, ["no-new-privileges"]);
+    assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("ONECOMPUTER_COWORK_ENABLED=false"));
+
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
     assert.ok(requests.some((item) => item.method === "DELETE" && item.path === `/volumes/${workspaceVolume}?force=true`));
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("local Kasm retries container creation when Docker drops the workspace network", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  let creates = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    const path = request.url?.slice("/v1.47".length) ?? "";
+    response.setHeader("content-type", "application/json");
+    if (request.method === "POST" && path === "/containers/create") {
+      creates += 1;
+      if (creates === 1) {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ message: "failed to set up container networking: network " + workspaceNetwork + " not found" }));
+        return;
+      }
+      response.statusCode = 201;
+      response.end(JSON.stringify({ Id: "sandbox-id" }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+    });
+    let reconciliations = 0;
+    const result = await (adapter as unknown as {
+      createContainer: (path: string, body: Record<string, unknown>, network: string, prepare: () => Promise<void>) => Promise<Record<string, unknown>>;
+    }).createContainer("/containers/create", {}, workspaceNetwork, async () => { reconciliations += 1; });
+    assert.equal(result.Id, "sandbox-id");
+    assert.equal(creates, 2);
+    assert.equal(reconciliations, 1);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("local Kasm surfaces allowlisted exit-78 diagnostics before cleanup", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const message = "Cowork cannot create an AF_VSOCK socket; check the workspace seccomp profile";
+  const frame = Buffer.alloc(8 + Buffer.byteLength(message));
+  frame[0] = 2;
+  frame.writeUInt32BE(Buffer.byteLength(message), 4);
+  frame.write(message, 8);
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    const path = request.url?.slice("/v1.47".length) ?? "";
+    if (path === "/containers/sandbox-id/json") {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ State: { Running: false, Status: "exited", ExitCode: 78 } }));
+      return;
+    }
+    if (path.startsWith("/containers/sandbox-id/logs?")) {
+      response.end(frame);
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+      startupPollMs: 1,
+      startupTimeoutMs: 20,
+    });
+    await assert.rejects(
+      (adapter as unknown as { waitForStartup: (id: string) => Promise<void> }).waitForStartup("sandbox-id"),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "WORKSPACE_STARTUP_REJECTED");
+        assert.match((error as Error).message, /Cowork cannot create an AF_VSOCK socket/);
+        assert.equal((error as { retryable?: boolean }).retryable, false);
+        return true;
+      },
+    );
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

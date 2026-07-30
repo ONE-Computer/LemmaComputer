@@ -75,6 +75,7 @@ test("the local workspace receives an explicit host-seeded IANA timezone", async
   assert.match(initializer, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
   assert.match(compose, /KASM_LOCAL_TIME_ZONE: \$\{ONECOMPUTER_TIME_ZONE:-\}/);
   assert.match(compose, /KASM_LOCAL_KVM_ENABLED: \$\{KASM_LOCAL_KVM_ENABLED:-false\}/);
+  assert.match(compose, /ONECOMPUTER_INSTALLATION_KIND: \$\{ONECOMPUTER_INSTALLATION_KIND:-customer-managed\}/);
   assert.match(entrypoint, /ONECOMPUTER_TIME_ZONE="\$ONECOMPUTER_TIME_ZONE"/);
 });
 
@@ -118,6 +119,7 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
   const proxy = await source("docker/workspace/onecomputer-gateway-proxy.py");
+  const desktopLauncher = await source("docker/workspace/onecomputer-claude-desktop");
   assert.match(dockerfile, /CLAUDE_DESKTOP_VERSION=1\.22209\.3/);
   assert.match(dockerfile, /CLAUDE_DESKTOP_SHA256=d427f46a/);
   assert.match(dockerfile, /CLAUDE_CODE_VERSION=2\.1\.215/);
@@ -134,12 +136,32 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.doesNotMatch(entrypoint, /inferenceGatewayBaseUrl[^\n]+4312\/v1/);
   assert.match(entrypoint, /"disableDeploymentModeChooser": True/);
   assert.match(entrypoint, /"coworkTabEnabled": cowork_enabled == "true"/);
-  assert.match(entrypoint, /groupadd --system --gid "\$kvm_gid" "\$kvm_group"/);
-  assert.match(entrypoint, /setpriv --reuid=1000 --regid=1000 --init-groups[\s\S]*\[\[ -r \/dev\/kvm && -w \/dev\/kvm \]\]/);
+  assert.match(entrypoint, /"secureVmFeaturesEnabled": cowork_enabled == "true"/);
+  assert.match(entrypoint, /claude_code_for_desktop_enabled=false/);
+  assert.match(entrypoint, /agent_enabled claude-desktop && agent_enabled claude-cli/);
+  assert.match(entrypoint, /"isClaudeCodeForDesktopEnabled": code_enabled == "true"/);
+  assert.match(entrypoint, /ONECOMPUTER_MODEL_ALIAS="\$\{!model_variable\}"/);
+  assert.match(entrypoint, /"allowedWorkspaceFolders": \["\/home\/kasm-user"\]/);
+  assert.match(entrypoint, /grant_cowork_device_access \/dev\/kvm onecomputer-kvm/);
+  assert.match(entrypoint, /grant_cowork_device_access \/dev\/vhost-vsock onecomputer-vhost-vsock/);
+  assert.match(entrypoint, /socket\.socket\(40, socket\.SOCK_STREAM\)\.close\(\)/);
+  assert.match(entrypoint, /Cowork cannot create an AF_VSOCK socket/);
+  assert.match(entrypoint, /groupadd --system --gid "\$device_gid" "\$device_group"/);
+  assert.match(entrypoint, /setpriv --reuid=1000 --regid=1000 --init-groups[\s\S]*\[\[ -r "\$1" && -w "\$1" \]\]/);
   assert.match(entrypoint, /"isLocalDevMcpEnabled": False/);
   assert.match(entrypoint, /"isDesktopExtensionEnabled": False/);
   assert.match(entrypoint, /claude-sonnet-4-5/);
   assert.match(proxy, /"\/v1\/messages"/);
+  assert.match(proxy, /"\/v1\/messages\/count_tokens"/);
+  assert.match(proxy, /request\["model"\] = MODEL_ALIAS/);
+  assert.match(proxy, /MAX_INFERENCE_BODY_BYTES = 64 \* 1024 \* 1024/);
+  assert.match(desktopLauncher, /unset HTTP_PROXY http_proxy/);
+  assert.match(desktopLauncher, /HTTPS_PROXY=http:\/\/127\.0\.0\.1:4313/);
+  assert.match(desktopLauncher, /ANTHROPIC_BASE_URL=http:\/\/127\.0\.0\.1:4315/);
+  assert.match(desktopLauncher, /ANTHROPIC_AUTH_TOKEN=onecomputer-loopback-broker/);
+  assert.match(desktopLauncher, /ANTHROPIC_DEFAULT_OPUS_MODEL="\$code_model"/);
+  assert.match(desktopLauncher, /ANTHROPIC_DEFAULT_SONNET_MODEL="\$code_model"/);
+  assert.match(desktopLauncher, /ANTHROPIC_DEFAULT_HAIKU_MODEL="\$code_model"/);
   assert.match(proxy, /"\/mcp-rest\/tools\/call"/);
   assert.match(proxy, /UPLOAD_CHUNK_BYTES = 10 \* 1024 \* 1024/);
   assert.match(proxy, /content-range.*bytes \{offset\}-\{end\}\/\{job\['size'\]\}/s);
@@ -151,6 +173,7 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(entrypoint, /ONECOMPUTER_CONNECTORS_BROKER/);
   assert.doesNotMatch(entrypoint, /mcp_servers\.onecomputer_ms365|ONECOMPUTER_MCP_BROKER/);
   assert.doesNotMatch(`${dockerfile}\n${entrypoint}\n${proxy}`, /ONECOMPUTER_(?:OPENAI|CLAUDE|GLM)_API_KEY|LITELLM_MASTER_KEY/);
+  assert.doesNotMatch(desktopLauncher, /sk-ant-|sk-proj-|LITELLM_MASTER_KEY/);
 });
 
 test("the workspace image enforces bounded native text clipboard without content logging", async () => {

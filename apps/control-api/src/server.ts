@@ -687,6 +687,7 @@ export function createControlServer(
           agentCatalogId: input.agentCatalogId,
           state: "completed",
           createdAt: new Date().toISOString(),
+          source: "telegram",
         },
         parts: [
           ...(input.text ? [{ type: "text" as const, text: input.text }] : []),
