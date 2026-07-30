@@ -414,6 +414,9 @@ test("Chat keeps the selected conversation across a page refresh", async () => {
   assert.match(app, /url\.searchParams\.set\("chat", sessionId\)/);
   assert.match(app, /activeNav !== "Chat" \|\| !activeChatSessionId/);
   assert.match(app, /onSessionChange=\{\(sessionId\) => selectChatSession\(sessionId, "replace"\)\}/);
+  assert.match(app, /restoredTurnActive/);
+  assert.match(app, /latestMessage\.metadata\?\.state === "streaming"/);
+  assert.match(app, /chatApi\.messages\(workspaceId, agentId, activeSessionId\)/);
   assert.doesNotMatch(app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App")), /onSessionChange\(""\);\s*setAgents/);
 });
 

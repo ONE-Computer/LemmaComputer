@@ -757,7 +757,7 @@ def apply_event(message: dict[str, Any], event: dict[str, Any]) -> None:
                     if event["state"] == "cancelled"
                     else "The tool did not return a final result"
                 )
-        parts.append({
+        terminal = {
             "type": "data-terminal",
             "id": f"terminal-{event['turnId']}",
             "data": {
@@ -765,7 +765,12 @@ def apply_event(message: dict[str, Any], event: dict[str, Any]) -> None:
                 "state": event["state"],
                 **({"message": event["message"]} if event.get("message") else {}),
             },
-        })
+        }
+        existing = next((part for part in parts if part.get("id") == terminal["id"]), None)
+        if existing is None:
+            parts.append(terminal)
+        else:
+            parts[parts.index(existing)] = terminal
         message["metadata"]["state"] = event["state"]
 
 
@@ -1254,10 +1259,24 @@ def vendor_events(
     return hermes_vendor_events(item, text, attachments, turn_id, return_artifacts)
 
 
-async def persist_turn(
+def upsert_session_message(item: dict[str, Any], message: dict[str, Any]) -> None:
+    persisted = json.loads(json.dumps(message))
+    for part in persisted.get("parts", []):
+        part.pop("_id", None)
+    messages = item["messages"]
+    existing = next(
+        (index for index, value in enumerate(messages) if value.get("id") == persisted.get("id")),
+        None,
+    )
+    if existing is None:
+        messages.append(persisted)
+    else:
+        messages[existing] = persisted
+
+
+async def persist_turn_messages(
     session_id: str,
-    user_message: dict[str, Any],
-    assistant_message: dict[str, Any],
+    messages: list[dict[str, Any]],
     vendor_session_id: str | None,
     updated_at: str,
 ) -> None:
@@ -1268,7 +1287,8 @@ async def persist_turn(
             return
         item["vendorSessionId"] = vendor_session_id or item.get("vendorSessionId")
         item["updatedAt"] = updated_at
-        item["messages"].extend([user_message, assistant_message])
+        for message in messages:
+            upsert_session_message(item, message)
         write_state(document)
 
 
@@ -1419,6 +1439,12 @@ async def turns(request: Request) -> Response:
         },
         "parts": [],
     }
+    try:
+        await persist_turn_messages(session_id, [user_message], None, created_at)
+    except Exception:
+        async with active_lock:
+            active_sessions.discard(session_id)
+        raise
 
     async def stream() -> AsyncIterator[bytes]:
         sequence = 0
@@ -1430,6 +1456,8 @@ async def turns(request: Request) -> Response:
         plan_emitted = False
         needs_input = False
         vendor_session_id = snapshot.get("vendorSessionId")
+        last_checkpoint_at = 0.0
+        terminal_persisted = False
 
         def canonical(event_type: str, **values: Any) -> dict[str, Any]:
             nonlocal sequence
@@ -1449,8 +1477,34 @@ async def turns(request: Request) -> Response:
         def frame(event: dict[str, Any]) -> bytes:
             return (json.dumps(event, separators=(",", ":")) + "\n").encode()
 
+        async def checkpoint(force: bool = False) -> None:
+            nonlocal last_checkpoint_at
+            if not assistant_message["parts"]:
+                return
+            checkpoint_at = time.monotonic()
+            if not force and checkpoint_at - last_checkpoint_at < 1:
+                return
+            await persist_turn_messages(
+                session_id, [assistant_message], vendor_session_id, now()
+            )
+            last_checkpoint_at = checkpoint_at
+
+        async def emit(
+            event_type: str,
+            *,
+            force_checkpoint: bool = False,
+            **values: Any,
+        ) -> bytes:
+            nonlocal terminal_persisted
+            event = canonical(event_type, **values)
+            if event_type != "turn-start":
+                await checkpoint(force_checkpoint)
+            if event_type == "turn-finish":
+                terminal_persisted = True
+            return frame(event)
+
         try:
-            yield frame(canonical("turn-start", messageId=assistant_id, createdAt=created_at))
+            yield await emit("turn-start", messageId=assistant_id, createdAt=created_at)
             activity_id = safe_identifier("progress", turn_id, "agent")
             progress_started = False
             terminal_state: str | None = None
@@ -1463,11 +1517,12 @@ async def turns(request: Request) -> Response:
                     )
                     if not ready:
                         progress_started = True
-                        yield frame(canonical(
+                        yield await emit(
                             "progress", activityId=activity_id,
                             label="Still working…",
                             state="running",
-                        ))
+                            force_checkpoint=True,
+                        )
                         continue
                     try:
                         vendor = next_event.result()
@@ -1480,9 +1535,9 @@ async def turns(request: Request) -> Response:
                         if summary:
                             plan_details = {"title": "Approach", "summary": summary}
                             plan_emitted = True
-                            yield frame(canonical(
-                                "plan", **plan_details, state="running",
-                            ))
+                            yield await emit(
+                                "plan", **plan_details, state="running", force_checkpoint=True,
+                            )
                     if kind == "text" and vendor.get("delta"):
                         raw_delta = str(vendor["delta"])
                         if not text_state_known:
@@ -1505,55 +1560,60 @@ async def turns(request: Request) -> Response:
                         if total_text > MAX_TEXT:
                             raise RuntimeError("agent response exceeded the text limit")
                         for offset in range(0, len(raw_delta), 16_000):
-                            yield frame(canonical(
+                            yield await emit(
                                 "text-delta", textId=f"text-{turn_id}",
                                 delta=raw_delta[offset:offset + 16_000],
-                            ))
+                            )
                     elif kind == "tool":
-                        yield frame(canonical(
+                        yield await emit(
                             "tool",
                             toolCallId=vendor["id"],
                             name=vendor["name"],
                             state=vendor["state"],
+                            force_checkpoint=True,
                             **({"summary": vendor["summary"]} if vendor.get("summary") else {}),
-                        ))
+                        )
                     elif kind == "plan":
                         plan_details = {
                             "title": vendor.get("title") or "Approach",
                             **({"summary": vendor["summary"]} if vendor.get("summary") else {}),
                         }
                         plan_emitted = True
-                        yield frame(canonical(
-                            "plan", **plan_details, state="running",
-                        ))
+                        yield await emit(
+                            "plan", **plan_details, state="running", force_checkpoint=True,
+                        )
                     elif kind == "provider-summary":
-                        yield frame(canonical(
+                        yield await emit(
                             "provider-summary",
                             summary=vendor["summary"],
+                            force_checkpoint=True,
                             **({"provider": vendor["provider"]} if vendor.get("provider") else {}),
-                        ))
+                        )
                     elif kind == "web-action":
-                        yield frame(canonical(
+                        yield await emit(
                             "web-action",
                             action=vendor["action"],
                             label=vendor["label"],
+                            force_checkpoint=True,
                             **({"url": vendor["url"]} if vendor.get("url") else {}),
-                        ))
+                        )
                     elif kind == "source":
-                        yield frame(canonical(
+                        yield await emit(
                             "source",
                             title=vendor["title"],
                             url=vendor["url"],
-                        ))
+                            force_checkpoint=True,
+                        )
                     elif kind == "approval":
-                        yield frame(canonical(
+                        yield await emit(
                             "approval",
                             approvalId=vendor["id"],
                             toolCallId=vendor["toolId"],
                             operationId=vendor["operationId"],
                             state=vendor["state"],
                             summary=approval_summary(vendor["state"]),
-                        ))
+                            force_checkpoint=True,
+                        )
                     elif kind == "vendor-finish":
                         vendor_session_id = vendor.get("vendorSessionId")
                         terminal_state = vendor.get("state", "completed")
@@ -1574,58 +1634,57 @@ async def turns(request: Request) -> Response:
                 if total_text > MAX_TEXT:
                     raise RuntimeError("agent response exceeded the text limit")
                 for offset in range(0, len(raw_delta), 16_000):
-                    yield frame(canonical(
+                    yield await emit(
                         "text-delta", textId=f"text-{turn_id}",
                         delta=raw_delta[offset:offset + 16_000],
-                    ))
+                    )
             if needs_input and terminal_state == "completed":
                 terminal_state = "needs_input"
             if plan_emitted and plan_details:
-                yield frame(canonical(
-                    "plan", **plan_details, state="completed",
-                ))
+                yield await emit(
+                    "plan", **plan_details, state="completed", force_checkpoint=True,
+                )
             if return_artifacts and terminal_state == "completed":
                 generated_artifacts, artifact_notice = persist_outbox_artifacts(outbox_before)
                 for generated_artifact in generated_artifacts:
-                    yield frame(canonical("artifact", **generated_artifact))
+                    yield await emit("artifact", **generated_artifact, force_checkpoint=True)
                 if artifact_notice:
-                    yield frame(canonical("notice", message=artifact_notice))
+                    yield await emit("notice", message=artifact_notice, force_checkpoint=True)
             if progress_started:
-                yield frame(canonical(
+                yield await emit(
                     "progress", activityId=activity_id,
                     label="Waiting for your reply" if terminal_state == "needs_input" else "Work complete",
                     state="completed",
-                ))
+                    force_checkpoint=True,
+                )
             completed_at = now()
-            yield frame(canonical(
+            yield await emit(
                 "turn-finish", state=terminal_state, completedAt=completed_at,
+                force_checkpoint=True,
                 **({"message": "The turn was cancelled"} if terminal_state == "cancelled" else {}),
-            ))
-            await persist_turn(
-                session_id, user_message, assistant_message, vendor_session_id, completed_at
             )
         except asyncio.CancelledError:
+            if terminal_persisted:
+                raise
             completed_at = now()
             canonical(
                 "turn-finish", state="cancelled",
                 message="The connection ended before the agent finished",
                 completedAt=completed_at,
             )
-            await asyncio.shield(persist_turn(
-                session_id, user_message, assistant_message, vendor_session_id, completed_at
-            ))
+            await asyncio.shield(checkpoint(force=True))
             raise
         except Exception:
+            if terminal_persisted:
+                raise
             completed_at = now()
             failed = canonical(
                 "turn-finish", state="failed",
                 message=f"{AGENT.replace('-cli', '').replace('-claw', '').title()} could not complete the turn",
                 completedAt=completed_at,
             )
+            await checkpoint(force=True)
             yield frame(failed)
-            await persist_turn(
-                session_id, user_message, assistant_message, vendor_session_id, completed_at
-            )
         finally:
             async with active_lock:
                 active_sessions.discard(session_id)

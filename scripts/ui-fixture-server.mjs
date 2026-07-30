@@ -979,6 +979,7 @@ const server = http.createServer((request, response) => {
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 3, "provider_summary", "completed", "provider_generated", { summary: "The workspace context is ready for the response.", provider: "Hermes" })), 900);
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 4, "terminal", "completed", "deterministic_system", { turnState: "completed" })), 1_000);
       const siteRequest = JSON.stringify(input.message).includes("$make-a-site");
+      const refreshRecoveryRequest = JSON.stringify(input.message).includes("dashboard layout");
       const openingText = siteRequest
         ? "I’ll build the smallest Vite site and publish it with the reviewed skill.\n\n"
         : "I’ll check the workspace context first, then summarize what I can do.\n\n";
@@ -1014,10 +1015,18 @@ const server = http.createServer((request, response) => {
       response.setHeader("content-type", "text/event-stream");
       response.setHeader("x-vercel-ai-ui-message-stream", "v1");
       setTimeout(() => {
+        chatMessages.push({
+          id: messageId,
+          role: "assistant",
+          metadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt },
+          parts: [
+            { type: "text", text: openingText, state: "streaming" },
+          ],
+        });
         response.write(openingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(""));
       }, 600);
       setTimeout(() => {
-        chatMessages.push({
+        const completed = {
           id: messageId,
           role: "assistant",
           metadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt },
@@ -1025,9 +1034,12 @@ const server = http.createServer((request, response) => {
             { type: "text", text: `${openingText}${closingText}`, state: "done" },
             { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
           ],
-        });
+        };
+        const checkpoint = chatMessages.findIndex((message) => message.id === messageId);
+        if (checkpoint === -1) chatMessages.push(completed);
+        else chatMessages.splice(checkpoint, 1, completed);
         response.end(`${closingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
-      }, 1_000);
+      }, refreshRecoveryRequest ? 3_000 : 1_000);
     });
     return;
   }

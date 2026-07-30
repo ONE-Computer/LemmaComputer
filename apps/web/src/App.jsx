@@ -84,6 +84,7 @@ const viewByNav = Object.freeze(Object.fromEntries(
 const chatAttachmentMaxFiles = 4;
 const chatAttachmentMaxBytes = 8 * 1024 * 1024;
 const chatAttachmentMaxTotalBytes = 16 * 1024 * 1024;
+const restoredChatTurnMaxAgeMs = 16 * 60 * 1000;
 const chatAttachmentTypes = new Set([
   "image/png",
   "image/jpeg",
@@ -2101,6 +2102,15 @@ function ChatConversation({
     onFinish: () => { void refreshSessions(); },
   });
   const busy = status === "submitted" || status === "streaming";
+  const latestMessage = messages.at(-1);
+  const latestMessageCreatedAt = Date.parse(latestMessage?.metadata?.createdAt ?? "");
+  const restoredTurnActive = !busy
+    && Boolean(activeSessionId)
+    && Number.isFinite(latestMessageCreatedAt)
+    && Date.now() - latestMessageCreatedAt <= restoredChatTurnMaxAgeMs
+    && (latestMessage?.role === "user"
+      || (latestMessage?.role === "assistant" && latestMessage.metadata?.state === "streaming"));
+  const turnBusy = busy || restoredTurnActive;
   const pendingApprovalKey = messages
     .flatMap((message) => message.parts)
     .filter((part) => part.type === "data-approval"
@@ -2156,7 +2166,7 @@ function ChatConversation({
   }, [messages, status]);
 
   useEffect(() => {
-    if (busy || !activeSessionId || !pendingApprovalKey) return undefined;
+    if (busy || !activeSessionId || (!restoredTurnActive && !pendingApprovalKey)) return undefined;
     let active = true;
     const refresh = () => chatApi.messages(workspaceId, agentId, activeSessionId)
       .then((result) => {
@@ -2172,7 +2182,7 @@ function ChatConversation({
       active = false;
       window.clearInterval(interval);
     };
-  }, [activeSessionId, agentId, busy, pendingApprovalKey, setMessages, workspaceId]);
+  }, [activeSessionId, agentId, busy, pendingApprovalKey, restoredTurnActive, setMessages, workspaceId]);
 
   const addAttachments = async (files) => {
     const selected = [...files];
@@ -2236,7 +2246,7 @@ function ChatConversation({
   const submit = async (event) => {
     event.preventDefault();
     const text = input.trim();
-    if ((!text && !attachments.length) || busy || attachmentBusy) return;
+    if ((!text && !attachments.length) || turnBusy || attachmentBusy) return;
     clearError();
     let sessionId = sessionRef.current;
     if (!sessionId) {
@@ -2281,8 +2291,8 @@ function ChatConversation({
   };
 
   const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
-  const awaitingAssistant = status === "submitted" && visibleMessages.at(-1)?.role === "user";
-  const needsInput = !busy
+  const awaitingAssistant = turnBusy && visibleMessages.at(-1)?.role === "user";
+  const needsInput = !turnBusy
     && visibleMessages.at(-1)?.role === "assistant"
     && visibleMessages.at(-1)?.metadata?.state === "needs_input";
   const messageField = (
@@ -2315,7 +2325,7 @@ function ChatConversation({
         placeholder={needsInput ? `Reply to ${agentName}` : `Message ${agentName}`}
         rows="1"
         maxLength="16000"
-        disabled={historyState === "loading"}
+        disabled={restoredTurnActive || historyState === "loading"}
       />
     </>
   );
@@ -2330,7 +2340,7 @@ function ChatConversation({
           setActivityOpen((open) => !open);
         }}
       />
-      <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={busy || historyState === "loading"}>
+      <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={turnBusy || historyState === "loading"}>
         {visibleMessages.length === 0 ? (
           <div className="chat-welcome">
             <h1>How can {agentName} help?</h1>
@@ -2429,7 +2439,7 @@ function ChatConversation({
                 aria-label="Chat actions"
                 aria-expanded={chatActionsOpen}
                 aria-controls="companion-chat-actions"
-                disabled={busy || attachmentBusy || historyState === "loading"}
+                disabled={turnBusy || attachmentBusy || historyState === "loading"}
                 onClick={() => {
                   setChatActionsOpen((open) => !open);
                   setContextOpen(false);
@@ -2513,7 +2523,7 @@ function ChatConversation({
             {busy ? (
               <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={() => { void stop(); }}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
-              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={(!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
+              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
             )}
           </div>
         ) : (
@@ -2523,7 +2533,7 @@ function ChatConversation({
               type="button"
               aria-label="Attach files"
               title="Attach files"
-              disabled={busy || attachmentBusy || historyState === "loading"}
+              disabled={turnBusy || attachmentBusy || historyState === "loading"}
               onClick={() => fileInputRef.current?.click()}
             >
               <Attach24Regular aria-hidden="true" />
@@ -2532,7 +2542,7 @@ function ChatConversation({
             {busy ? (
               <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={() => { void stop(); }}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
-              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={(!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
+              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
             )}
           </>
         )}

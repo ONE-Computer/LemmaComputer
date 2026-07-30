@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
@@ -27,6 +31,8 @@ import {
 } from "../apps/control-api/src/agent-chat.js";
 import { WorkspaceService, type ControllerClient } from "../apps/control-api/src/service.js";
 
+const execFileAsync = promisify(execFile);
+
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "alex",
@@ -42,6 +48,73 @@ test("Hermes session titles stay in the ONEComputer adapter so duplicate user ti
   assert.match(adapter, /NEEDS_INPUT_MARKER = "\[ONECOMPUTER_NEEDS_INPUT\]"/);
   assert.match(adapter, /terminal_state = "needs_input"/);
   assert.equal(chatTurnStateSchema.safeParse("needs_input").success, true);
+});
+
+test("agent turns durably upsert submitted and streaming messages before terminal completion", async () => {
+  const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  const persistence = adapter.slice(
+    adapter.indexOf("def upsert_session_message"),
+    adapter.indexOf("async def health"),
+  );
+  const eventApplication = adapter.slice(
+    adapter.indexOf("def apply_event"),
+    adapter.indexOf("async def claude_vendor_events"),
+  );
+  const home = await mkdtemp(path.join(tmpdir(), "onecomputer-chat-persistence-"));
+  const program = `
+import asyncio, json, sys
+from pathlib import Path
+from typing import Any
+STATE_FILE = Path(sys.argv[1]) / "structured-sessions.json"
+state_lock = asyncio.Lock()
+def read_state(): return json.loads(STATE_FILE.read_text())
+def write_state(document): STATE_FILE.write_text(json.dumps(document))
+def find_session(document, session_id): return next((item for item in document["sessions"] if item.get("id") == session_id), None)
+MAX_TEXT = 128000
+${eventApplication}
+${persistence}
+session_id = "session-1"
+user = {"id":"user-1","role":"user","metadata":{"agentCatalogId":"claude-cli","state":"completed","createdAt":"2026-07-30T00:00:00Z"},"parts":[{"type":"text","text":"Build the site","state":"done"}]}
+streaming = {"id":"assistant-1","role":"assistant","metadata":{"agentCatalogId":"claude-cli","turnId":"turn-1","state":"streaming","createdAt":"2026-07-30T00:00:01Z"},"parts":[{"type":"text","text":"Building","state":"streaming","_id":"text-1"},{"type":"data-progress","id":"progress-1","data":{"activityId":"progress-1","label":"Still working…","state":"running"}}]}
+completed = {"id":"assistant-1","role":"assistant","metadata":{"agentCatalogId":"claude-cli","turnId":"turn-1","state":"completed","createdAt":"2026-07-30T00:00:01Z"},"parts":[{"type":"data-terminal","id":"terminal-1","data":{"turnId":"turn-1","state":"completed"}}]}
+STATE_FILE.write_text(json.dumps({"version":2,"sessions":[{"id":session_id,"vendorSessionId":None,"title":"Build","createdAt":"2026-07-30T00:00:00Z","updatedAt":"2026-07-30T00:00:00Z","messages":[]}]}))
+async def run():
+    await persist_turn_messages(session_id, [user], None, "2026-07-30T00:00:01Z")
+    started = read_state()["sessions"][0]
+    await persist_turn_messages(session_id, [streaming], None, "2026-07-30T00:00:02Z")
+    checkpointed = read_state()["sessions"][0]
+    await persist_turn_messages(session_id, [user, completed], "vendor-1", "2026-07-30T00:00:03Z")
+    await persist_turn_messages(session_id, [user, completed], "vendor-1", "2026-07-30T00:00:03Z")
+    finished = read_state()["sessions"][0]
+    repeated_terminal = {"id":"assistant-terminal","role":"assistant","metadata":{"agentCatalogId":"claude-cli","turnId":"turn-terminal","state":"streaming","createdAt":"2026-07-30T00:00:01Z"},"parts":[]}
+    apply_event(repeated_terminal, {"type":"turn-finish","turnId":"turn-terminal","state":"completed"})
+    apply_event(repeated_terminal, {"type":"turn-finish","turnId":"turn-terminal","state":"cancelled","message":"Disconnected"})
+    print(json.dumps({
+      "startedRoles":[message["role"] for message in started["messages"]],
+      "checkpointedStates":[message["metadata"]["state"] for message in checkpointed["messages"]],
+      "checkpointHasPrivateIds":any("_id" in part for message in checkpointed["messages"] for part in message["parts"]),
+      "finishedStates":[message["metadata"]["state"] for message in finished["messages"]],
+      "finishedIds":[message["id"] for message in finished["messages"]],
+      "vendorSessionId":finished["vendorSessionId"],
+      "terminalCount":len([part for part in repeated_terminal["parts"] if part["type"] == "data-terminal"]),
+      "terminalState":repeated_terminal["metadata"]["state"],
+    }))
+asyncio.run(run())
+`;
+  try {
+    const { stdout } = await execFileAsync("python3", ["-c", program, home]);
+    const result = JSON.parse(stdout);
+    assert.deepEqual(result.startedRoles, ["user"]);
+    assert.deepEqual(result.checkpointedStates, ["completed", "streaming"]);
+    assert.equal(result.checkpointHasPrivateIds, false);
+    assert.deepEqual(result.finishedStates, ["completed", "completed"]);
+    assert.deepEqual(result.finishedIds, ["user-1", "assistant-1"]);
+    assert.equal(result.vendorSessionId, "vendor-1");
+    assert.equal(result.terminalCount, 1);
+    assert.equal(result.terminalState, "cancelled");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("agent turns receive a fresh trusted timezone context and require clarification without one", async () => {
