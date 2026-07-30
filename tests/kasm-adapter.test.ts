@@ -118,10 +118,10 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
       gatewayContainer: "onecomputer-litellm",
       controlContainer: "onecomputer-control-api",
       relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
     });
     await assert.doesNotReject(adapter.destroy("sandbox-id"));
     assert.equal(networkRemoved, true);
-      installationKind: "customer-managed",
     assert.equal(
       requests.some((item) => (
         item.path === `/networks/${workspaceNetwork}/disconnect`
@@ -472,6 +472,106 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
 
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
     assert.ok(requests.some((item) => item.method === "DELETE" && item.path === `/volumes/${workspaceVolume}?force=true`));
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("local Kasm retries container creation when Docker drops the workspace network", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  let creates = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    const path = request.url?.slice("/v1.47".length) ?? "";
+    response.setHeader("content-type", "application/json");
+    if (request.method === "POST" && path === "/containers/create") {
+      creates += 1;
+      if (creates === 1) {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ message: "failed to set up container networking: network " + workspaceNetwork + " not found" }));
+        return;
+      }
+      response.statusCode = 201;
+      response.end(JSON.stringify({ Id: "sandbox-id" }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+    });
+    let reconciliations = 0;
+    const result = await (adapter as unknown as {
+      createContainer: (path: string, body: Record<string, unknown>, network: string, prepare: () => Promise<void>) => Promise<Record<string, unknown>>;
+    }).createContainer("/containers/create", {}, workspaceNetwork, async () => { reconciliations += 1; });
+    assert.equal(result.Id, "sandbox-id");
+    assert.equal(creates, 2);
+    assert.equal(reconciliations, 1);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("local Kasm surfaces allowlisted exit-78 diagnostics before cleanup", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const message = "Hermes sandbox API configuration is required";
+  const frame = Buffer.alloc(8 + Buffer.byteLength(message));
+  frame[0] = 2;
+  frame.writeUInt32BE(Buffer.byteLength(message), 4);
+  frame.write(message, 8);
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    const path = request.url?.slice("/v1.47".length) ?? "";
+    if (path === "/containers/sandbox-id/json") {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ State: { Running: false, Status: "exited", ExitCode: 78 } }));
+      return;
+    }
+    if (path.startsWith("/containers/sandbox-id/logs?")) {
+      response.end(frame);
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+      startupPollMs: 1,
+      startupTimeoutMs: 20,
+    });
+    await assert.rejects(
+      (adapter as unknown as { waitForStartup: (id: string) => Promise<void> }).waitForStartup("sandbox-id"),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "WORKSPACE_STARTUP_REJECTED");
+        assert.match((error as Error).message, /Hermes sandbox API configuration is required/);
+        assert.equal((error as { retryable?: boolean }).retryable, false);
+        return true;
+      },
+    );
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

@@ -1,0 +1,57 @@
+import { expect, test } from "@playwright/test";
+
+test("keeps a retryable workspace start in Preparing instead of Needs attention", async ({ page }) => {
+  let attempts = 0;
+  const idempotencyKeys: string[] = [];
+  await page.route("**/api/v1/workspaces", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    attempts += 1;
+    idempotencyKeys.push((await route.request().allHeaders())["idempotency-key"] ?? "");
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "DOCKER_UNAVAILABLE", message: "Docker is reconciling workspace networking", retryable: true } }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "3c536c1f-6a31-427d-af8f-dbb0c63f8d70",
+        grantId: "sandbox-research",
+        state: "provisioning",
+        readiness: { identity: "checking", network: "checking", models: "checking", tools: "checking" },
+        applications: ["google-chrome"],
+        agents: [{ id: "hermes-desktop", displayName: "Hermes Agent Desktop", clientVersion: "0.17.0", agentId: "agent-alex:research", state: "starting" }],
+        policyAssignment: { version: 4, hash: "a".repeat(64) },
+        profile: {
+          id: "disposable-open-v1",
+          client: "ONEComputer open workspace",
+          clientVersion: "disposable-open-v1",
+          modelAlias: "onecomputer-openai",
+          executionMode: "disposable-open",
+          egressMode: "full-web",
+          persistence: "persistent-home",
+          network: "gateway-only",
+        },
+      }),
+    });
+  });
+
+  await page.goto("/");
+  const card = page.getByRole("article", { name: "Research" });
+  await expect(card).toContainText("Stopped");
+  await card.getByRole("button", { name: "Start workspace" }).click();
+
+  await expect.poll(() => attempts).toBe(2);
+  expect(idempotencyKeys[0]).toBeTruthy();
+  expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+  await expect(card).toContainText("Preparing");
+  await expect(page.getByText("Needs attention", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});

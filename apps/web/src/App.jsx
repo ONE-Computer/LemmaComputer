@@ -3333,7 +3333,14 @@ export function App() {
       updateWorkspaceInventory(await workspaceApi.stop(targetWorkspace.id));
       setToast(`${workspaceName(targetWorkspace)} has stopped.`);
     } catch (error) {
-      if (targetWorkspace.id === workspace?.id) setWorkspaceState(targetWorkspace.state);
+      try {
+        const value = await workspaceApi.list();
+        setHomeWorkspaces(value.workspaces);
+        const refreshed = value.workspaces.find((item) => item.id === targetWorkspace.id);
+        if (refreshed) applyWorkspace(refreshed);
+      } catch {
+        if (targetWorkspace.id === workspace?.id) setWorkspaceState(targetWorkspace.state);
+      }
       showApiError(error);
     } finally {
       setWorkspaceActionId("");

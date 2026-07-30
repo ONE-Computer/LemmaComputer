@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { IdentityContext, Launch, RuntimePolicy, Sandbox, SignedPolicyBundle } from "@onecomputer/contracts";
+import { OneComputerError, type IdentityContext, type Launch, type RuntimePolicy, type Sandbox, type SignedPolicyBundle } from "@onecomputer/contracts";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import type { GatewayClient, GatewayGrant } from "@onecomputer/litellm-adapter";
 import { PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "../apps/control-api/src/service.js";
@@ -272,4 +272,52 @@ test("Control signs and self-verifies policy before issuing grants or calling th
   assert.equal(gateway.lastPolicy?.policyHash, policy.policyHash);
   assert.equal(workspace.policyIntegrity?.state, "unavailable");
   assert.equal(workspace.policyIntegrity?.enforced?.keyId, "psk_test_policy");
+});
+
+
+class FlakyRevokeGateway extends FakeGateway {
+  constructor(public remainingFailures: number) { super(); }
+  override async revoke() {
+    this.revocations += 1;
+    if (this.remainingFailures > 0) {
+      this.remainingFailures -= 1;
+      throw new OneComputerError("GATEWAY_UNAVAILABLE", "Gateway is temporarily unavailable", 503, true);
+    }
+  }
+}
+
+test("stop retries transient grant revocation before completing", async () => {
+  const controller = new FakeController();
+  const store = new MemoryWorkspaceStore();
+  const gateway = new FlakyRevokeGateway(2);
+  const service = new WorkspaceService(store, controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "stop-retry-0001", "correlation-stop-retry");
+  const stopped = await service.stop(alex, policy, workspace.id);
+  assert.equal(stopped.state, "stopped");
+  assert.equal(stopped.failureCode, null);
+  assert.equal(gateway.revocations, 3);
+  assert.equal(controller.destroys, 1);
+});
+
+test("stop records the destroyed runtime and resumes pending access cleanup", async () => {
+  const controller = new FakeController();
+  const store = new MemoryWorkspaceStore();
+  const gateway = new FlakyRevokeGateway(3);
+  const service = new WorkspaceService(store, controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "stop-cleanup-001", "correlation-stop-cleanup");
+  await assert.rejects(
+    service.stop(alex, policy, workspace.id),
+    (error: unknown) => (error as { code?: string }).code === "WORKSPACE_ACCESS_CLEANUP_FAILED",
+  );
+  const pending = await store.getOwned(alex, workspace.id);
+  assert.equal(pending?.state, "stopped");
+  assert.equal(pending?.providerId, null);
+  assert.equal(pending?.failureCode, "WORKSPACE_ACCESS_CLEANUP_FAILED");
+  assert.equal(controller.destroys, 1);
+
+  gateway.remainingFailures = 0;
+  const recovered = await service.stop(alex, policy, workspace.id);
+  assert.equal(recovered.state, "stopped");
+  assert.equal(recovered.failureCode, null);
+  assert.equal(controller.destroys, 1);
 });
