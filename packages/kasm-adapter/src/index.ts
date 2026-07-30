@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   canonicalJson,
   defaultClipboardPolicy,
@@ -14,6 +15,11 @@ import {
   type Sandbox,
   type SignedPolicyBundle,
 } from "@onecomputer/contracts";
+
+const coworkSeccompProfile = readFileSync(
+  new URL("./cowork-seccomp-profile.json", import.meta.url),
+  "utf8",
+).trim();
 
 export interface SandboxAdapter {
   create(input: SandboxCreateInput): Promise<Sandbox>;
@@ -433,7 +439,10 @@ export class KasmLocalAdapter implements SandboxAdapter {
         Memory: coworkEnabled ? 8_589_934_592 : 4_294_967_296,
         NanoCpus: 2_000_000_000,
         CapDrop: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
-        SecurityOpt: ["no-new-privileges"],
+        SecurityOpt: [
+          "no-new-privileges",
+          ...(coworkEnabled ? ["seccomp=" + coworkSeccompProfile] : []),
+        ],
         Mounts: [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }],
         ...(coworkEnabled ? {
           Devices: [
@@ -979,6 +988,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
   private safeStartupDiagnostic(logs: string) {
     const patterns = [
       /Cowork cannot access \/dev\/(?:kvm|vhost-vsock) as kasm-user/,
+      /Cowork cannot create an AF_VSOCK socket/,
       /Cowork requires the Claude Desktop agent/,
       /invalid Cowork capability setting/,
       /(?:Claude Desktop|Claude CLI|Codex CLI|Hermes Agent CLI|Hermes Agent Desktop) (?:GATEWAY_UPSTREAM|GATEWAY_CREDENTIAL|MODEL_ALIAS|CONTROL_UPSTREAM|AGENT_BRIDGE_TOKEN|ALLOWED_TOOLS) is required/,
