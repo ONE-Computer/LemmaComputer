@@ -59,9 +59,13 @@ if not 1 <= ATTACHMENT_RETENTION_DAYS <= 3_650:
 MAX_MESSAGE = 16_000
 MAX_TEXT = 128_000
 MAX_ATTACHMENTS = 4
-MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
-MAX_TOTAL_ATTACHMENT_BYTES = 16 * 1024 * 1024
-MAX_TURN_BODY = 24 * 1024 * 1024
+MAX_WEB_ATTACHMENT_BYTES = 8 * 1024 * 1024
+MAX_WEB_TOTAL_ATTACHMENT_BYTES = 16 * 1024 * 1024
+MAX_CHANNEL_ATTACHMENT_BYTES = 20 * 1024 * 1024
+MAX_CHANNEL_TOTAL_ATTACHMENT_BYTES = MAX_CHANNEL_ATTACHMENT_BYTES * MAX_ATTACHMENTS
+MAX_ARTIFACT_BYTES = 50 * 1024 * 1024
+MAX_TOTAL_ARTIFACT_BYTES = 100 * 1024 * 1024
+MAX_TURN_BODY = 112 * 1024 * 1024
 MAX_DOCUMENT_TEXT = 200_000
 MAX_TOTAL_DOCUMENT_TEXT = 300_000
 MAX_TURN_SECONDS = 15 * 60
@@ -497,7 +501,7 @@ def persist_outbox_artifacts(before: dict[str, tuple[int, int, int, int]]) -> tu
         if not re.fullmatch(r"[^\x00-\x1f/\\]{1,180}", path.name) or path.name in {".", ".."}:
             skipped = True
             continue
-        if not 0 < metadata.st_size <= MAX_ATTACHMENT_BYTES or len(artifacts) >= MAX_ATTACHMENTS:
+        if not 0 < metadata.st_size <= MAX_ARTIFACT_BYTES or len(artifacts) >= MAX_ATTACHMENTS:
             skipped = True
             continue
         try:
@@ -507,11 +511,11 @@ def persist_outbox_artifacts(before: dict[str, tuple[int, int, int, int]]) -> tu
                 if not stat.S_ISREG(opened.st_mode) or opened.st_size != metadata.st_size:
                     skipped = True
                     continue
-                data = source.read(MAX_ATTACHMENT_BYTES + 1)
+                data = source.read(MAX_ARTIFACT_BYTES + 1)
         except OSError:
             skipped = True
             continue
-        if len(data) != metadata.st_size or total_bytes + len(data) > MAX_TOTAL_ATTACHMENT_BYTES:
+        if len(data) != metadata.st_size or total_bytes + len(data) > MAX_TOTAL_ARTIFACT_BYTES:
             skipped = True
             continue
         try:
@@ -533,7 +537,7 @@ def persist_outbox_artifacts(before: dict[str, tuple[int, int, int, int]]) -> tu
         write_attachment_manifest(artifact_directory / "manifest.json", {"version": 1, **artifact, "storedAt": now()})
         artifacts.append(artifact)
         total_bytes += len(data)
-    notice = "Some generated files could not be returned because they were unsupported, invalid, or exceeded the 8 MB per-file / 16 MB total limit." if skipped else None
+    notice = "Some generated files could not be returned because they were unsupported, invalid, or exceeded Telegram’s 50 MB per-file / 100 MB total delivery limit." if skipped else None
     return artifacts, notice
 
 
@@ -572,6 +576,8 @@ def validate_user_message(value: object) -> tuple[dict[str, Any], str, list[dict
     source = metadata.get("source", "web")
     if source not in {"web", "telegram"}:
         raise ValueError("invalid message")
+    attachment_max_bytes = MAX_CHANNEL_ATTACHMENT_BYTES if source == "telegram" else MAX_WEB_ATTACHMENT_BYTES
+    attachment_max_total_bytes = MAX_CHANNEL_TOTAL_ATTACHMENT_BYTES if source == "telegram" else MAX_WEB_TOTAL_ATTACHMENT_BYTES
     if len(text_parts) > 1 or len(file_parts) > MAX_ATTACHMENTS:
         raise ValueError("invalid message")
     text = str(text_parts[0].get("text", "")).strip() if text_parts else ""
@@ -605,10 +611,10 @@ def validate_user_message(value: object) -> tuple[dict[str, Any], str, list[dict
             data = base64.b64decode(url[len(prefix):], validate=True)
         except (binascii.Error, ValueError):
             raise ValueError("invalid attachment") from None
-        if not data or len(data) > MAX_ATTACHMENT_BYTES:
+        if not data or len(data) > attachment_max_bytes:
             raise ValueError("invalid attachment")
         total_bytes += len(data)
-        if total_bytes > MAX_TOTAL_ATTACHMENT_BYTES:
+        if total_bytes > attachment_max_total_bytes:
             raise ValueError("attachments exceed their total limit")
         extracted = attachment_text(media_type, data)
         workspace_path = persist_attachment(filename, media_type, data, source)
@@ -1241,9 +1247,9 @@ async def artifact(request: Request) -> Response:
         descriptor = os.open(stored, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with os.fdopen(descriptor, "rb") as source:
             metadata = os.fstat(source.fileno())
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_ATTACHMENT_BYTES:
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_ARTIFACT_BYTES:
                 raise ValueError("invalid artifact")
-            data = source.read(MAX_ATTACHMENT_BYTES + 1)
+            data = source.read(MAX_ARTIFACT_BYTES + 1)
         if len(data) != manifest.get("byteLength") or hashlib.sha256(data).hexdigest() != manifest.get("sha256"):
             raise ValueError("invalid artifact")
     except (OSError, ValueError, json.JSONDecodeError):

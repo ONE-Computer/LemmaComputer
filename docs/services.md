@@ -339,8 +339,12 @@ session selection, forwards turns to the agent-neutral chat API, and returns
 typing indicators, safe failures, and bounded generated files through Telegram
 `sendDocument`. Artifact downloads are re-authorized against the tenant, workspace,
 sender, and assigned agent route, while the broker remains the only holder of the
-Telegram credential. Text and file delivery progress are retried durably without
-rerunning a completed agent turn.
+Telegram credential. Incoming Telegram files are bounded by the hosted Bot API's
+20 MB download ceiling (80 MB across a four-file turn). Generated files use
+Telegram's 50 MB `sendDocument` ceiling and a 100 MB aggregate response limit.
+The browser chat retains its separate 8 MB per-file and 16 MB aggregate limits.
+Text and file delivery progress are retried durably without rerunning a completed
+agent turn.
 
 The broker has a dedicated egress network; workspaces never receive the bot
 token or direct Telegram reachability.

@@ -1,7 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatAttachmentMaxBytes, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type WorkspaceStore } from "@onecomputer/workspace-store";
@@ -666,7 +666,7 @@ export function createControlServer(
     await agentChat.health(access);
     return reply.code(204).send();
   });
-  app.post("/internal/v1/channels/turns", { bodyLimit: 24 * 1024 * 1024 }, async (request, reply) => {
+  app.post("/internal/v1/channels/turns", { bodyLimit: 112 * 1024 * 1024 }, async (request, reply) => {
     const input = channelTurnRequestSchema.parse(request.body ?? {});
     const { access } = await verifiedChannelRoute(input, true);
     if (!store.claimChannelUpdate || !await store.claimChannelUpdate(
@@ -774,7 +774,7 @@ export function createControlServer(
     if (data.length !== input.artifact.byteLength || createHash("sha256").update(data).digest("hex") !== input.artifact.sha256) {
       throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
     }
-    if (data.length > chatAttachmentMaxBytes) throw new OneComputerError("CHANNEL_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
+    if (data.length > channelArtifactMaxBytes) throw new OneComputerError("CHANNEL_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
     return reply.header("cache-control", "no-store").type(input.artifact.mediaType).send(data);
   });
   app.post("/internal/v1/schedules/runs/execute", async (request) => {

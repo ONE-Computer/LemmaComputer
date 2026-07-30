@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import test from "node:test";
-import { chatAttachmentMaxBytes, type ChannelTurnRequest, type IdentityContext } from "@onecomputer/contracts";
+import { channelAttachmentMaxBytes, type ChannelTurnRequest, type IdentityContext } from "@onecomputer/contracts";
 import {
   ChannelBrokerService,
   ChannelCredentialVault,
@@ -287,7 +287,7 @@ test("Telegram parses document captions and largest photos, then downloads throu
       return Response.json({
         ok: true,
         result: fileId === "too-large"
-          ? { file_path: "documents/large.bin", file_size: chatAttachmentMaxBytes + 1 }
+          ? { file_path: "documents/large.bin", file_size: channelAttachmentMaxBytes + 1 }
           : fileId === "traversal"
             ? { file_path: "documents/../secret", file_size: deck.length }
             : { file_path: "documents/Quarterly deck.pptx", file_size: deck.length },
@@ -318,15 +318,15 @@ test("Telegram parses document captions and largest photos, then downloads throu
   assert.equal(updates[1]?.attachment?.fileId, "large-photo");
   assert.equal(updates[1]?.attachment?.mediaType, "image/jpeg");
   assert.equal(updates[1]?.mediaGroupId, "album-1");
-  assert.deepEqual(await client.downloadFile(token, "deck-file-id", chatAttachmentMaxBytes), deck);
+  assert.deepEqual(await client.downloadFile(token, "deck-file-id", channelAttachmentMaxBytes), deck);
   assert.equal(calls.at(-1)?.url.includes("documents/Quarterly%20deck.pptx"), true);
   assert.equal(calls.at(-1)?.init?.redirect, "error");
   await assert.rejects(
-    client.downloadFile(token, "too-large", chatAttachmentMaxBytes),
+    client.downloadFile(token, "too-large", channelAttachmentMaxBytes),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "CHANNEL_ATTACHMENT_TOO_LARGE"),
   );
   await assert.rejects(
-    client.downloadFile(token, "traversal", chatAttachmentMaxBytes),
+    client.downloadFile(token, "traversal", channelAttachmentMaxBytes),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "TELEGRAM_INVALID_RESPONSE"),
   );
 });
@@ -502,11 +502,11 @@ test("Telegram forwards bounded files and images while rejecting unsupported or 
     chatId: "10001",
     senderId: "10001",
     chatType: "private",
-    attachment: { fileId: "large-file", filename: "large.pdf", mediaType: "application/pdf", fileSize: chatAttachmentMaxBytes + 1 },
+    attachment: { fileId: "large-file", filename: "large.pdf", mediaType: "application/pdf", fileSize: channelAttachmentMaxBytes + 1 },
   }];
   await service.pollOnce();
   assert.equal(control.turns.length, 2);
-  assert.equal(telegram.sent.at(-1)?.text.includes("8 MB or smaller"), true);
+  assert.equal(telegram.sent.at(-1)?.text.includes("20 MB or smaller"), true);
   assert.deepEqual(telegram.downloadRequests.map((request) => request.fileId), ["deck-file", "photo-file"]);
 });
 

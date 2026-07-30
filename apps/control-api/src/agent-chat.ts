@@ -4,7 +4,7 @@ import {
   OneComputerError,
   agentChatEventSchema,
   chatAgentCatalogIdSchema,
-  chatAttachmentMaxBytes,
+  channelArtifactMaxBytes,
   chatSessionIdSchema,
   chatUiMessageSchema,
   ownedAgentCatalog,
@@ -281,7 +281,7 @@ export class HttpAgentChatClient implements AgentChatClient {
     const response = await this.response(access, `/api/artifacts/${encodeURIComponent(artifactId)}`, undefined, 60_000);
     if (!response.body) throw new OneComputerError("CHAT_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", 502, true);
     const declared = Number(response.headers.get("content-length"));
-    if (Number.isFinite(declared) && declared > chatAttachmentMaxBytes) {
+    if (Number.isFinite(declared) && declared > channelArtifactMaxBytes) {
       await response.body.cancel().catch(() => undefined);
       throw new OneComputerError("CHAT_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
     }
@@ -293,7 +293,7 @@ export class HttpAgentChatClient implements AgentChatClient {
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > chatAttachmentMaxBytes) {
+        if (size > channelArtifactMaxBytes) {
           await reader.cancel().catch(() => undefined);
           throw new OneComputerError("CHAT_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
         }

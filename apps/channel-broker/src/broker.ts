@@ -16,8 +16,9 @@ import {
   channelTurnResponseSchema,
   channelTurnStreamEventSchema,
   chatAgentCatalogIdSchema,
-  chatAttachmentMaxBytes,
-  chatAttachmentMaxTotalBytes,
+  channelArtifactMaxBytes,
+  channelAttachmentMaxBytes,
+  channelAttachmentMaxTotalBytes,
   chatAttachmentMediaTypes,
   chatFilePartSchema,
   saveTelegramChannelConnectionSchema,
@@ -305,7 +306,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
     if (!response.ok || !response.body) throw new OneComputerError("CHANNEL_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", response.status || 502, true);
     const reader = response.body.getReader(); const chunks: Buffer[] = []; let size = 0;
     try { while (true) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength;
-      if (size > artifact.byteLength || size > chatAttachmentMaxBytes) { await reader.cancel().catch(() => undefined); throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409); }
+      if (size > artifact.byteLength || size > channelArtifactMaxBytes) { await reader.cancel().catch(() => undefined); throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409); }
       chunks.push(Buffer.from(value)); } } finally { reader.releaseLock(); }
     const data = Buffer.concat(chunks, size);
     if (data.length !== artifact.byteLength || createHash("sha256").update(data).digest("hex") !== artifact.sha256) throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
@@ -705,7 +706,7 @@ const displayNames: Readonly<Record<ChatAgentCatalogId, string>> = Object.freeze
 
 const acknowledgementMessage = "Message received.";
 const unsupportedAttachmentMessage = "I can receive images, PDF, text, Word, Excel, and PowerPoint files. This attachment type is not supported.";
-const oversizedAttachmentMessage = "Telegram attachments must be 8 MB or smaller. Please send a smaller file.";
+const oversizedAttachmentMessage = "Telegram attachments must be 20 MB or smaller. Please send a smaller file.";
 const unavailableAttachmentMessage = "I could not download that Telegram attachment. Please send it again.";
 const safeFailureMessage = "I started the task, but the agent could not complete it. Try again, or use /agent to select another available agent.";
 const approvalFailureMessage = "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.";
@@ -1082,10 +1083,10 @@ export class ChannelBrokerService {
     if (!attachment.mediaType || !telegramAttachmentTypes.has(attachment.mediaType)) {
       throw new OneComputerError("CHANNEL_ATTACHMENT_UNSUPPORTED", "The Telegram attachment type is not supported", 400);
     }
-    if (attachment.fileSize !== undefined && attachment.fileSize > chatAttachmentMaxBytes) {
+    if (attachment.fileSize !== undefined && attachment.fileSize > channelAttachmentMaxBytes) {
       throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
     }
-    const data = await this.telegram.downloadFile(token, attachment.fileId, chatAttachmentMaxBytes);
+    const data = await this.telegram.downloadFile(token, attachment.fileId, channelAttachmentMaxBytes);
     return {
       part: chatFilePartSchema.parse({
         type: "file",
@@ -1184,7 +1185,7 @@ export class ChannelBrokerService {
         for (const attachment of telegramAttachments) {
           const downloaded = await this.attachmentPart(token, attachment);
           totalBytes += downloaded.byteLength;
-          if (totalBytes > chatAttachmentMaxTotalBytes) {
+          if (totalBytes > channelAttachmentMaxTotalBytes) {
             throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachments exceed their total size limit", 400);
           }
           attachments.push(downloaded.part);

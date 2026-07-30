@@ -199,8 +199,8 @@ STATE_DIR = HOME / ".onecomputer-chat" / "hermes-claw"
 ARTIFACT_ROOT = STATE_DIR / "artifacts"
 ARTIFACT_OUTBOX_ROOT = HOME / "ONEComputer" / "Outbox"
 ATTACHMENT_RETENTION_DAYS = 1
-MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
-MAX_TOTAL_ATTACHMENT_BYTES = 16 * 1024 * 1024
+MAX_ARTIFACT_BYTES = 50 * 1024 * 1024
+MAX_TOTAL_ARTIFACT_BYTES = 100 * 1024 * 1024
 MAX_ATTACHMENTS = 4
 ARTIFACT_MEDIA_TYPES = {".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
 def attachment_text(media_type, data): return None
