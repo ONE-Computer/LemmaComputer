@@ -18,6 +18,14 @@ from onecomputer_work_trace import (  # noqa: E402
 
 
 class WorkTraceTests(unittest.TestCase):
+    def test_workspace_image_installs_helper_as_readable_module(self) -> None:
+        dockerfile = (Path(__file__).resolve().parents[1] / "docker" / "Dockerfile.workspace").read_text()
+        self.assertIn(
+            "COPY --chmod=0644 docker/workspace/onecomputer_work_trace.py "
+            "/usr/local/libexec/onecomputer_work_trace.py",
+            dockerfile,
+        )
+
     def test_visible_approach_is_flattened_without_markdown_or_marker(self) -> None:
         self.assertEqual(
             approach_summary("[ONECOMPUTER_NEEDS_INPUT]\n## Plan\n- Compare **trusted** recipes."),

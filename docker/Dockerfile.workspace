@@ -216,7 +216,7 @@ COPY skills/make-a-site /opt/onecomputer/skills/make-a-site
 COPY skills/make-a-site /opt/onecomputer/hermes-agent/skills/onecomputer/make-a-site
 COPY docker/workspace/onecomputer-egress-broker.py /usr/local/libexec/onecomputer-egress-broker
 COPY docker/workspace/onecomputer-connectors-stdio.py /usr/local/libexec/onecomputer-connectors-stdio
-COPY docker/workspace/onecomputer_work_trace.py /usr/local/libexec/onecomputer_work_trace.py
+COPY --chmod=0644 docker/workspace/onecomputer_work_trace.py /usr/local/libexec/onecomputer_work_trace.py
 COPY docker/workspace/onecomputer-agent-chat.py /usr/local/libexec/onecomputer-agent-chat
 COPY docker/workspace/onecomputer-hermes-config.py /usr/local/libexec/onecomputer-hermes-config
 COPY docker/workspace/onecomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js
