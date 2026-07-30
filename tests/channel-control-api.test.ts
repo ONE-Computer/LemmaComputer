@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import {
   m365ToolCatalog,
@@ -29,6 +30,15 @@ const principal: SessionPrincipal = {
   roles: ["employee"],
   identity: alpha,
 };
+const generatedDeck = Buffer.from("control-generated-deck");
+const generatedArtifact = {
+  artifactId: "artifact-33333333333333333333333333333333",
+  filename: "Executive-Summary.pptx",
+  mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
+  byteLength: generatedDeck.length,
+  sha256: createHash("sha256").update(generatedDeck).digest("hex"),
+};
+
 const headers = {
   "x-onecomputer-proxy-token": proxyToken,
   "x-onecomputer-test-tenant-id": alpha.tenantId,
@@ -181,6 +191,10 @@ class FakeAgentChat implements AgentChatClient {
     return { id: "telegram-session-hermes", title: "Telegram", createdAt: null, updatedAt: null };
   }
   async listMessages() { return []; }
+  async downloadArtifact(_access: unknown, artifactId: string) {
+    if (artifactId !== generatedArtifact.artifactId) throw new Error("missing artifact");
+    return generatedDeck;
+  }
   async *streamTurn(access: { catalogId: string }, sessionId: string, message: { parts: Array<{ type: string; text?: string; filename?: string; mediaType?: string; url?: string }> }): AsyncIterable<AgentChatEvent> {
     this.messages.push(message);
     this.turns.push({
@@ -218,13 +232,12 @@ class FakeAgentChat implements AgentChatClient {
       };
     }
     yield {
-      version: 1,
-      sequence: sequence++,
-      sessionId,
-      turnId: "turn-channel",
-      type: "text-delta",
-      textId: "text-channel",
-      delta: "Hello from Hermes",
+      version: 1, sequence: sequence++, sessionId, turnId: "turn-channel", type: "text-delta",
+      textId: "text-channel", delta: "Hello from Hermes",
+    };
+    yield {
+      version: 1, sequence: sequence++, sessionId, turnId: "turn-channel", type: "artifact",
+      ...generatedArtifact,
     };
     yield {
       version: 1,
@@ -418,11 +431,22 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
             notices: [
               "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
             ],
+            artifacts: [generatedArtifact],
             state: "completed",
           },
         },
       ],
     );
+
+    const artifactRequest = { connectionId, identity: alpha, workspaceId: workspace.id, agentCatalogId: "hermes-claw",
+      externalSenderId: "10001", artifact: generatedArtifact };
+    const unauthenticatedArtifact = await app.inject({ method: "POST", url: "/internal/v1/channels/artifacts", payload: artifactRequest });
+    assert.equal(unauthenticatedArtifact.statusCode, 401);
+    const deliveredArtifact = await app.inject({ method: "POST", url: "/internal/v1/channels/artifacts",
+      headers: { "x-onecomputer-channel-token": channelToken, "content-type": "application/json" }, payload: artifactRequest });
+    assert.equal(deliveredArtifact.statusCode, 200);
+    assert.equal(deliveredArtifact.headers["content-type"], generatedArtifact.mediaType);
+    assert.deepEqual(deliveredArtifact.rawPayload, generatedDeck);
 
     const replayed = await app.inject({
       method: "POST",

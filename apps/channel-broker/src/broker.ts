@@ -10,6 +10,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import {
   OneComputerError,
+  channelArtifactDownloadRequestSchema,
   channelRouteSchema,
   channelTurnRequestSchema,
   channelTurnResponseSchema,
@@ -28,6 +29,7 @@ import {
   type ChannelTurnRequest,
   type ChannelTurnResponse,
   type ChatAgentCatalogId,
+  type ChatArtifact,
   type ChatFilePart,
   type IdentityContext,
   type TelegramChannelConnectionStatus,
@@ -75,6 +77,7 @@ export interface TelegramBotClient {
   getUpdates(token: string, offset: string, timeoutSeconds?: number): Promise<TelegramUpdate[]>;
   downloadFile(token: string, fileId: string, maxBytes: number): Promise<Buffer>;
   sendMessage(token: string, chatId: string, text: string, options?: TelegramMessageOptions): Promise<string>;
+  sendDocument(token: string, chatId: string, artifact: ChatArtifact, data: Buffer): Promise<string>;
   editMessage(token: string, chatId: string, messageId: string, text: string): Promise<void>;
   sendChatAction(token: string, chatId: string, action: "typing"): Promise<void>;
   answerCallbackQuery(token: string, callbackQueryId: string, text?: string): Promise<void>;
@@ -87,6 +90,7 @@ export interface ChannelControlClient {
     onNotice?: (notice: string) => Promise<void>,
     onTextDelta?: (delta: string) => Promise<void>,
   ): Promise<ChannelTurnResponse>;
+  downloadArtifact(route: ChannelRoute, artifact: ChatArtifact): Promise<Buffer>;
 }
 
 export class HttpChannelControlClient implements ChannelControlClient {
@@ -289,6 +293,23 @@ export class HttpChannelControlClient implements ChannelControlClient {
 
   async validateRoute(input: ChannelRoute) {
     await this.post("/internal/v1/channels/routes/validate", channelRouteSchema.parse(input));
+  }
+
+  async downloadArtifact(route: ChannelRoute, artifact: ChatArtifact) {
+    const target = new URL("/internal/v1/channels/artifacts", this.baseUrl);
+    if (!["http:", "https:"].includes(target.protocol)) throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
+    const input = channelArtifactDownloadRequestSchema.parse({ ...route, artifact });
+    let response: Response;
+    try { response = await fetch(target, { method: "POST", headers: { "content-type": "application/json", "x-onecomputer-channel-token": this.internalToken }, body: JSON.stringify(input), signal: AbortSignal.timeout(60_000) }); }
+    catch { throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true); }
+    if (!response.ok || !response.body) throw new OneComputerError("CHANNEL_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", response.status || 502, true);
+    const reader = response.body.getReader(); const chunks: Buffer[] = []; let size = 0;
+    try { while (true) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength;
+      if (size > artifact.byteLength || size > chatAttachmentMaxBytes) { await reader.cancel().catch(() => undefined); throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409); }
+      chunks.push(Buffer.from(value)); } } finally { reader.releaseLock(); }
+    const data = Buffer.concat(chunks, size);
+    if (data.length !== artifact.byteLength || createHash("sha256").update(data).digest("hex") !== artifact.sha256) throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
+    return data;
   }
 
   async turn(
@@ -607,6 +628,19 @@ export class TelegramBotApiClient implements TelegramBotClient {
     if (!Number.isSafeInteger(result.message_id)) {
       throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid message", 502, true);
     }
+    return String(result.message_id);
+  }
+
+  async sendDocument(token: string, chatId: string, artifact: ChatArtifact, data: Buffer) {
+    const form = new FormData(); form.set("chat_id", chatId); form.set("document", new Blob([Uint8Array.from(data)], { type: artifact.mediaType }), artifact.filename);
+    let response: Response;
+    try { response = await this.fetcher(`${this.apiOrigin}/bot${token}/sendDocument`, { method: "POST", body: form, signal: AbortSignal.timeout(60_000) }); }
+    catch { throw new OneComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram could not be reached", 503, true); }
+    let payload: Record<string, unknown>;
+    try { payload = botResponseSchema.object(await response.json()); } catch { throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid response", 502, true); }
+    if (!response.ok || payload.ok !== true) throw new OneComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram rejected the generated file", 503, true);
+    const result = botResponseSchema.object(payload.result);
+    if (!Number.isSafeInteger(result.message_id)) throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid message", 502, true);
     return String(result.message_id);
   }
 
@@ -934,7 +968,7 @@ export class ChannelBrokerService {
       audience: "onecomputer-control",
     };
     const token = this.vault.unprotect(identity, connection.credentialId, connection.credentialCiphertext);
-    await this.deliverPendingResponses(connection.id, token);
+    await this.deliverPendingResponses(connection, token);
     let updates = (await this.telegram.getUpdates(token, connection.telegramUpdateOffset))
       .sort((left, right) => Number(BigInt(left.updateId) - BigInt(right.updateId)));
     if (this.compositionWindowMs > 0 && updates.some((update) => !immediateTelegramUpdate(update))) {
@@ -959,19 +993,25 @@ export class ChannelBrokerService {
     }
   }
 
-  private async deliverPendingResponse(token: string, response: ChannelPendingResponse) {
+  private async deliverPendingResponse(connection: ChannelConnectionRecord, token: string, response: ChannelPendingResponse) {
     const characters = [...response.text];
     for (let start = response.offset; start < characters.length; start += 4_000) {
       const end = Math.min(start + 4_000, characters.length);
       await this.telegram.sendMessage(token, response.chatId, characters.slice(start, end).join(""));
       await this.store.advanceChannelResponseDelivery(response.connectionId, response.updateId, end);
     }
+    if (response.artifacts.length && !response.agentCatalogId) throw new OneComputerError("CHANNEL_ARTIFACT_ROUTE_MISSING", "The generated file route is unavailable", 500, true);
+    for (let index = response.artifactOffset; index < response.artifacts.length; index += 1) {
+      const artifact = response.artifacts[index]!;
+      const identity = { tenantId: connection.tenantId, subjectId: connection.subjectId, audience: "onecomputer-control" as const };
+      const data = await this.control.downloadArtifact(this.route(connection, identity, response.senderId, response.agentCatalogId!), artifact);
+      await this.telegram.sendDocument(token, response.chatId, artifact, data);
+      await this.store.advanceChannelArtifactDelivery(response.connectionId, response.updateId, index + 1);
+    }
   }
 
-  private async deliverPendingResponses(connectionId: string, token: string) {
-    for (const response of await this.store.listPendingChannelResponses(connectionId)) {
-      await this.deliverPendingResponse(token, response);
-    }
+  private async deliverPendingResponses(connection: ChannelConnectionRecord, token: string) {
+    for (const response of await this.store.listPendingChannelResponses(connection.id)) await this.deliverPendingResponse(connection, token, response);
   }
 
   private route(
@@ -1191,23 +1231,25 @@ export class ChannelBrokerService {
       const remainingText = [...response.text].slice(streamedCharacters).join("");
       const fallback = response.state === "needs_input"
         ? "The agent needs more information. Reply to continue this conversation."
-        : "The agent completed without a text response.";
+        : response.artifacts?.length ? "" : "The agent completed without a text response.";
       const rendered = [remainingText, ...response.notices].filter(Boolean).join("\n\n")
         || (streamedCharacters ? "" : fallback);
       const delivered = ["completed", "needs_input"].includes(response.state);
       const failureCode = response.state === "cancelled" ? "CHANNEL_TURN_CANCELLED" : "CHANNEL_TURN_FAILED";
-      if (rendered) {
+      if (rendered || response.artifacts?.length) {
         await this.store.stageChannelResponse(
           connection.id,
           update.updateId,
           update.chatId,
           rendered,
+          agentCatalogId,
+          response.artifacts ?? [],
           delivered ? "delivered" : "failed",
           delivered ? undefined : failureCode,
         );
         await finishUpdates(delivered ? "delivered" : "failed", delivered ? undefined : failureCode, false);
         responseStaged = true;
-        await this.deliverPendingResponses(connection.id, token);
+        await this.deliverPendingResponses(connection, token);
       } else {
         await finishUpdates(delivered ? "delivered" : "failed", delivered ? undefined : failureCode);
         responseStaged = true;
@@ -1220,11 +1262,13 @@ export class ChannelBrokerService {
         update.updateId,
         update.chatId,
         approvalNoticeSent ? approvalFailureMessage : safeFailureMessage,
+        agentCatalogId,
+        [],
         "failed",
         failureCode,
       );
       await finishUpdates("failed", failureCode, false);
-      await this.deliverPendingResponses(connection.id, token).catch(() => undefined);
+      await this.deliverPendingResponses(connection, token).catch(() => undefined);
     }
   }
 }

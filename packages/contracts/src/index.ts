@@ -930,6 +930,14 @@ export const chatFileReferenceDataSchema = z.object({
   filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
   storage: z.literal("workspace"),
 }).strict();
+export const chatArtifactSchema = z.object({
+  artifactId: z.string().regex(/^artifact-[a-f0-9]{32}$/),
+  mediaType: z.enum(chatAttachmentMediaTypes),
+  filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
+  byteLength: z.number().int().min(1).max(chatAttachmentMaxBytes),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type ChatArtifact = z.infer<typeof chatArtifactSchema>;
 
 export const chatUiMessagePartSchema = z.discriminatedUnion("type", [
   z.object({
@@ -1064,7 +1072,15 @@ export const channelTurnResponseSchema = z.object({
   sessionId: chatSessionIdSchema,
   text: z.string().max(16_000),
   notices: z.array(z.string().trim().min(1).max(500)).max(16),
+  artifacts: z.array(chatArtifactSchema).max(chatAttachmentMaxFiles).optional(),
   state: chatTurnStateSchema.exclude(["streaming"]),
+}).strict().superRefine((value, context) => {
+  if ((value.artifacts ?? []).reduce((total, artifact) => total + artifact.byteLength, 0) > chatAttachmentMaxTotalBytes) {
+    context.addIssue({ code: "custom", path: ["artifacts"], message: "Channel response artifacts exceed their total limit" });
+  }
+});
+export const channelArtifactDownloadRequestSchema = channelRouteSchema.extend({
+  artifact: chatArtifactSchema,
 }).strict();
 export const channelTurnStreamEventSchema = z.discriminatedUnion("type", [
   z.object({
@@ -1141,6 +1157,14 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
     type: z.literal("text-delta"),
     textId: chatPartIdSchema,
     delta: z.string().min(1).max(16_000),
+  }).strict(),
+  agentChatEventBaseSchema.extend({
+    type: z.literal("artifact"),
+    artifactId: chatArtifactSchema.shape.artifactId,
+    mediaType: chatArtifactSchema.shape.mediaType,
+    filename: chatArtifactSchema.shape.filename,
+    byteLength: chatArtifactSchema.shape.byteLength,
+    sha256: chatArtifactSchema.shape.sha256,
   }).strict(),
   agentChatEventBaseSchema.extend({
     type: z.literal("tool"),

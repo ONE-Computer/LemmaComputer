@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import test from "node:test";
 import { chatAttachmentMaxBytes, type ChannelTurnRequest, type IdentityContext } from "@onecomputer/contracts";
@@ -40,6 +41,8 @@ class FakeTelegram implements TelegramBotClient {
   updates: TelegramUpdate[] = [];
   updateRequests: Array<{ token: string; offset: string; timeoutSeconds?: number }> = [];
   sent: Array<{ token: string; chatId: string; text: string; options?: TelegramMessageOptions }> = [];
+  sentDocuments: Array<{ token: string; chatId: string; filename: string; data: Buffer }> = [];
+  documentFailuresRemaining = 0;
   edits: Array<{ token: string; chatId: string; messageId: string; text: string }> = [];
   chatActions: Array<{ token: string; chatId: string; action: "typing" }> = [];
   answeredCallbacks: Array<{ token: string; callbackQueryId: string; text?: string }> = [];
@@ -78,6 +81,12 @@ class FakeTelegram implements TelegramBotClient {
     return String(this.sent.length);
   }
 
+  async sendDocument(received: string, chatId: string, artifact: { filename: string }, data: Buffer) {
+    if (this.documentFailuresRemaining > 0) { this.documentFailuresRemaining -= 1; throw new Error("temporary document outage"); }
+    this.sentDocuments.push({ token: received, chatId, filename: artifact.filename, data });
+    return `document-${this.sentDocuments.length}`;
+  }
+
   async editMessage(received: string, chatId: string, messageId: string, text: string) {
     this.edits.push({ token: received, chatId, messageId, text });
   }
@@ -98,11 +107,19 @@ class FakeControl implements ChannelControlClient {
   textDeltas: string[] = [];
   state: "needs_input" | "completed" | "cancelled" | "failed" = "completed";
   turns: ChannelTurnRequest[] = [];
+  artifacts: Array<{ artifactId: string; mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation"; filename: string; byteLength: number; sha256: string }> = [];
+  artifactData = new Map<string, Buffer>();
 
   async validateRoute(input: { agentCatalogId: string }) {
     if (!["hermes-claw", "claude-cli", "codex-cli"].includes(input.agentCatalogId)) {
       throw new Error("agent unavailable");
     }
+  }
+
+  async downloadArtifact(_route: unknown, artifact: { artifactId: string }) {
+    const data = this.artifactData.get(artifact.artifactId);
+    if (!data) throw new Error("missing fake artifact");
+    return data;
   }
 
   async turn(input: ChannelTurnRequest, onNotice?: (notice: string) => Promise<void>, onTextDelta?: (delta: string) => Promise<void>) {
@@ -117,6 +134,7 @@ class FakeControl implements ChannelControlClient {
       sessionId: input.sessionId ?? `session-${input.agentCatalogId}`,
       text: this.textDeltas.join("") || `${input.agentCatalogId}: ${input.text ?? "Analyze the attached file."}`,
       notices: [],
+      ...(this.artifacts.length ? { artifacts: this.artifacts } : {}),
       state: this.state,
     };
   }
@@ -200,6 +218,28 @@ test("the channel control client owns a long response timeout instead of inherit
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
+});
+
+test("the channel control client downloads only hash-bound generated artifacts", async () => {
+  const deck = Buffer.from("control-artifact-download");
+  const artifact = { artifactId: "artifact-55555555555555555555555555555555", filename: "Plan.pptx",
+    mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
+    byteLength: deck.length, sha256: createHash("sha256").update(deck).digest("hex") };
+  const server = createServer((request, response) => {
+    assert.equal(request.url, "/internal/v1/channels/artifacts");
+    assert.equal(request.headers["x-onecomputer-channel-token"], "channel-control-test-secret-at-least-32-characters");
+    response.writeHead(200, { "content-type": artifact.mediaType, "content-length": deck.length });
+    response.end(deck);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address(); assert.ok(address && typeof address === "object");
+  const client = new HttpChannelControlClient(`http://127.0.0.1:${address.port}`, "channel-control-test-secret-at-least-32-characters");
+  const route = { connectionId: "29637bba-a710-49b6-8b44-7dac938a6088", identity: alpha,
+    workspaceId: "fcebb39a-df27-4b69-acde-44c9542fca29", agentCatalogId: "hermes-claw" as const, externalSenderId: "10001" };
+  try {
+    assert.deepEqual(await client.downloadArtifact(route, artifact), deck);
+    await assert.rejects(client.downloadArtifact(route, { ...artifact, sha256: "0".repeat(64) }), /changed before delivery/);
+  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 });
 
 test("Telegram parses document captions and largest photos, then downloads through a bounded getFile URL", async () => {
@@ -289,6 +329,30 @@ test("Telegram parses document captions and largest photos, then downloads throu
     client.downloadFile(token, "traversal", chatAttachmentMaxBytes),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "TELEGRAM_INVALID_RESPONSE"),
   );
+});
+
+test("Telegram uploads generated documents with sendDocument multipart metadata", async () => {
+  const deck = Buffer.from("generated-deck");
+  const artifact = {
+    artifactId: "artifact-22222222222222222222222222222222",
+    filename: "Board Update.pptx",
+    mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
+    byteLength: deck.length,
+    sha256: createHash("sha256").update(deck).digest("hex"),
+  };
+  const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+    assert.equal(String(input).endsWith("/sendDocument"), true);
+    assert.ok(init?.body instanceof FormData);
+    assert.equal(init.body.get("chat_id"), "10001");
+    const document = init.body.get("document");
+    assert.ok(document instanceof Blob);
+    assert.equal((document as Blob & { name?: string }).name, "Board Update.pptx");
+    assert.equal(document.type, artifact.mediaType);
+    assert.equal(Buffer.from(await document.arrayBuffer()).toString(), deck.toString());
+    return Response.json({ ok: true, result: { message_id: 44 } });
+  }) as typeof fetch;
+  const client = new TelegramBotApiClient(fetcher);
+  assert.equal(await client.sendDocument(token, "10001", artifact, deck), "44");
 });
 
 test("Telegram groups adjacent text, files, and media albums without merging unrelated messages or commands", () => {
@@ -797,6 +861,39 @@ test("the broker durably retries a completed response without rerunning the agen
     "hermes-claw: send the deck",
   ]);
   assert.equal(control.turns.length, 1);
+});
+
+test("the broker sends generated PowerPoint artifacts and retries file delivery without rerunning the agent", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  const service = new ChannelBrokerService(store, new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"), telegram, control);
+  const workspace = await store.createOrGet(alpha, "personal", "channel-generated-artifact-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  await service.saveConnection(alpha, { workspaceId: workspace.id, credentialId: credential.id, allowedUserIds: ["10001"], defaultAgentId: "hermes-claw", allowAgentSwitch: false });
+  const deck = Buffer.from("generated-powerpoint-bytes");
+  const artifact = {
+    artifactId: "artifact-11111111111111111111111111111111",
+    mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
+    filename: "Quarterly-Review.pptx",
+    byteLength: deck.length,
+    sha256: createHash("sha256").update(deck).digest("hex"),
+  };
+  control.artifacts = [artifact];
+  control.artifactData.set(artifact.artifactId, deck);
+  telegram.documentFailuresRemaining = 1;
+  telegram.updates = [{ updateId: "1", chatId: "10001", senderId: "10001", chatType: "private", text: "Make and send me a PowerPoint" }];
+
+  await service.pollOnce();
+  assert.equal(control.turns.length, 1);
+  assert.equal(telegram.sentDocuments.length, 0);
+  assert.equal(telegram.sent.at(-1)?.text, "hermes-claw: Make and send me a PowerPoint");
+
+  await service.pollOnce();
+  assert.equal(control.turns.length, 1);
+  assert.deepEqual(telegram.sentDocuments.map((item) => ({ filename: item.filename, data: item.data.toString() })), [
+    { filename: "Quarterly-Review.pptx", data: "generated-powerpoint-bytes" },
+  ]);
 });
 
 test("the broker forwards approval notices during a turn and keeps a later failure actionable", async () => {

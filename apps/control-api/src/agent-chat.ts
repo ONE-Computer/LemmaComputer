@@ -4,11 +4,13 @@ import {
   OneComputerError,
   agentChatEventSchema,
   chatAgentCatalogIdSchema,
+  chatAttachmentMaxBytes,
   chatSessionIdSchema,
   chatUiMessageSchema,
   ownedAgentCatalog,
   type AgentChatEvent,
   type ChatAgentCatalogId,
+  type ChatArtifact,
   type ChatUiMessage,
   type IdentityContext,
   type RuntimePolicy,
@@ -102,6 +104,7 @@ export interface AgentChatClient {
   listSessions(access: AgentChatAccess, options?: { cursor?: string; limit?: number }): Promise<AgentChatSessionPage>;
   createSession(access: AgentChatAccess, title?: string): Promise<AgentChatSession>;
   listMessages(access: AgentChatAccess, sessionId: string): Promise<ChatUiMessage[]>;
+  downloadArtifact(access: AgentChatAccess, artifactId: string): Promise<Buffer>;
   streamTurn(
     access: AgentChatAccess,
     sessionId: string,
@@ -274,6 +277,35 @@ export class HttpAgentChatClient implements AgentChatClient {
     await this.response(access, "/health");
   }
 
+  async downloadArtifact(access: AgentChatAccess, artifactId: string) {
+    const response = await this.response(access, `/api/artifacts/${encodeURIComponent(artifactId)}`, undefined, 60_000);
+    if (!response.body) throw new OneComputerError("CHAT_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", 502, true);
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > chatAttachmentMaxBytes) {
+      await response.body.cancel().catch(() => undefined);
+      throw new OneComputerError("CHAT_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
+    }
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > chatAttachmentMaxBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw new OneComputerError("CHAT_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    if (!size) throw new OneComputerError("CHAT_ARTIFACT_UNAVAILABLE", "The generated file is empty", 502);
+    return Buffer.concat(chunks, size);
+  }
+
   async listSessions(access: AgentChatAccess, options: { cursor?: string; limit?: number } = {}) {
     const query = new URLSearchParams();
     if (options.cursor) query.set("cursor", options.cursor);
@@ -416,6 +448,15 @@ export class AgentUiStreamMapper {
           state: event.state,
         },
       }];
+    }
+    if (event.type === "artifact") {
+      const artifact: ChatArtifact = {
+        artifactId: event.artifactId, mediaType: event.mediaType, filename: event.filename,
+        byteLength: event.byteLength, sha256: event.sha256,
+      };
+      return [{ type: "data-file-reference", id: artifact.artifactId, data: {
+        mediaType: artifact.mediaType, filename: artifact.filename, storage: "workspace",
+      } }];
     }
     if (event.type === "text-delta") {
       const chunks: InferUIMessageChunk<ChatUiMessage>[] = [];

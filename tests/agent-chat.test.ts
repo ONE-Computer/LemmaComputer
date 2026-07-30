@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
+  channelTurnResponseSchema,
   chatTurnStateSchema,
   sendChatTurnSchema,
   type IdentityContext,
@@ -83,6 +84,14 @@ test("chat accepts bounded inline image and document parts but rejects media mis
   assert.equal(sendChatTurnSchema.safeParse({
     message: { ...message, parts: Array.from({ length: 5 }, () => message.parts[0]) },
   }).success, false);
+});
+
+test("channel response artifacts are bounded, hashed, and typed", () => {
+  const artifact = { artifactId: "artifact-44444444444444444444444444444444", filename: "Deck.pptx",
+    mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", byteLength: 1024, sha256: "a".repeat(64) };
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [artifact], state: "completed" }).success, true);
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [{ ...artifact, sha256: "bad" }], state: "completed" }).success, false);
+  assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: Array.from({ length: 5 }, () => artifact), state: "completed" }).success, false);
 });
 
 const hermesPolicy: RuntimePolicy = {
