@@ -167,6 +167,18 @@ RUN npm ci \
       node -e 'for (const name of ["docx", "pptxgenjs", "react", "react-dom", "react-icons", "sharp"]) require.resolve(name)' \
     && npm cache clean --force
 
+COPY docker/workspace/acp-runtime/package.json docker/workspace/acp-runtime/package-lock.json /opt/onecomputer/acp-runtime/
+RUN npm ci \
+      --prefix /opt/onecomputer/acp-runtime \
+      --omit=dev \
+      --no-audit \
+      --no-fund \
+    && test -x /opt/onecomputer/acp-runtime/node_modules/.bin/claude-agent-acp \
+    && test -x /opt/onecomputer/acp-runtime/node_modules/.bin/codex-acp \
+    && node -e \
+      'for (const name of ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp"]) require.resolve(name + "/package.json", { paths: ["/opt/onecomputer/acp-runtime"] })' \
+    && npm cache clean --force
+
 RUN uv pip install \
       --python /opt/onecomputer/hermes-venv/bin/python \
       mcp==1.26.0 \

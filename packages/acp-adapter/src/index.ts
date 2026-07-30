@@ -15,6 +15,7 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
   SessionUpdate,
+  SetProviderRequest,
   ToolCallStatus,
   WriteTextFileRequest,
 } from "@agentclientprotocol/sdk";
@@ -120,7 +121,71 @@ export interface AcpHarnessConfiguration {
   permission?: (request: RequestPermissionRequest) => Promise<AcpPermissionResolution>;
   readTextFile?: (request: ReadTextFileRequest) => Promise<string>;
   writeTextFile?: (request: WriteTextFileRequest) => Promise<void>;
+  provider?: SetProviderRequest;
 }
+
+export type OfficialAcpAgent = Extract<ChatAgentCatalogId, "claude-cli" | "codex-cli">;
+
+export interface OfficialAcpHarnessInput {
+  agentCatalogId: OfficialAcpAgent;
+  cwd: string;
+  home?: string;
+  runtimeRoot?: string;
+  model?: string;
+  gateway?: {
+    baseUrl: string;
+    headers: Readonly<Record<string, string>>;
+  };
+}
+
+const officialAcpExecutables: Readonly<Record<OfficialAcpAgent, string>> = Object.freeze({
+  "claude-cli": "claude-agent-acp",
+  "codex-cli": "codex-acp",
+});
+
+export const officialAcpHarnessConfiguration = (
+  input: OfficialAcpHarnessInput,
+): AcpHarnessConfiguration => {
+  const home = resolve(input.home ?? "/home/kasm-user");
+  const runtimeRoot = resolve(input.runtimeRoot ?? "/opt/onecomputer/acp-runtime");
+  const executable = officialAcpExecutables[input.agentCatalogId];
+  if (input.agentCatalogId === "codex-cli" && !input.gateway) {
+    throw new Error("The governed Codex ACP runtime requires a broker gateway");
+  }
+  return {
+    command: resolve(runtimeRoot, "node_modules", ".bin", executable),
+    args: [],
+    cwd: resolve(input.cwd),
+    agentCatalogId: input.agentCatalogId,
+    environment: input.agentCatalogId === "claude-cli"
+      ? {
+        HOME: home,
+        CLAUDE_CONFIG_DIR: resolve(home, ".claude-cli"),
+        NO_BROWSER: "1",
+      }
+      : {
+        HOME: home,
+        CODEX_HOME: resolve(home, ".codex-cli"),
+        ...(input.model ? {
+          CODEX_CONFIG: JSON.stringify({
+            model: input.model,
+            model_context_window: 32_768,
+          }),
+        } : {}),
+        NO_BROWSER: "1",
+      },
+    ...(input.agentCatalogId === "codex-cli" && input.gateway ? {
+      provider: {
+        providerId: "custom-gateway",
+        apiType: "openai",
+        baseUrl: input.gateway.baseUrl,
+        headers: { ...input.gateway.headers },
+      },
+    } : {}),
+    clientName: "ONEComputer",
+    clientVersion: "0.1.0",
+  };
+};
 
 export interface AcpTurnInput {
   sessionId: string;
@@ -361,6 +426,19 @@ export class AcpHarnessSession {
       );
       if (initialized.protocolVersion !== acp.PROTOCOL_VERSION) {
         throw new Error(`Unsupported ACP protocol version ${initialized.protocolVersion}`);
+      }
+      if (configuration.provider) {
+        if (initialized.agentCapabilities?.providers == null) {
+          throw new Error("ACP harness does not support governed provider configuration");
+        }
+        await withTimeout(
+          Promise.race([
+            connection.agent.request(acp.methods.agent.providers.set, configuration.provider),
+            exited,
+          ]),
+          startupTimeoutMs,
+          "ACP provider configuration timed out",
+        );
       }
       const builder = connection.agent.buildSession({
         cwd: resolve(configuration.cwd),

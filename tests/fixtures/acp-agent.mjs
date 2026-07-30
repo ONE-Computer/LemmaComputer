@@ -6,6 +6,7 @@ import { Readable, Writable } from "node:stream";
 const protocolVersion = Number(process.env.ONECOMPUTER_ACP_FIXTURE_PROTOCOL ?? acp.PROTOCOL_VERSION);
 const cancelled = new Set();
 const fixtureMode = process.env.ONECOMPUTER_ACP_FIXTURE_MODE;
+let providerConfig = null;
 
 if (fixtureMode === "exit-before-initialize") {
   process.exit(17);
@@ -32,9 +33,14 @@ acp.agent({ name: "ONEComputer ACP conformance fixture" })
       promptCapabilities: { image: true, embeddedContext: true },
       mcpCapabilities: { http: true, sse: true },
       sessionCapabilities: { resume: {} },
+      ...(fixtureMode === "no-providers" ? {} : { providers: {} }),
     },
     agentInfo: { name: "ACP conformance fixture", version: "1.0.0" },
   }))
+  .onRequest(acp.methods.agent.providers.set, async (context) => {
+    providerConfig = context.params;
+    return {};
+  })
   .onRequest(acp.methods.agent.session.new, async () => ({
     sessionId: crypto.randomUUID(),
   }))
@@ -155,6 +161,25 @@ acp.agent({ name: "ONEComputer ACP conformance fixture" })
     if (text.includes("stderr-check")) {
       process.stderr.write("Authorization Bearer fixture-secret-token\n");
       process.stderr.write("callback?access_token=fixture-access-token\n");
+      return { stopReason: "end_turn" };
+    }
+    if (text.includes("provider-check")) {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "fixture-provider",
+          content: {
+            type: "text",
+            text: JSON.stringify({
+              providerId: providerConfig?.providerId,
+              apiType: providerConfig?.apiType,
+              baseUrl: providerConfig?.baseUrl,
+              authorizationPresent: Boolean(providerConfig?.headers?.authorization),
+            }),
+          },
+        },
+      });
       return { stopReason: "end_turn" };
     }
 

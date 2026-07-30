@@ -7,6 +7,7 @@ import test, { after } from "node:test";
 
 import {
   AcpHarnessSession,
+  officialAcpHarnessConfiguration,
   processEnvironment,
   redactAcpDiagnostic,
   resolveConfinedPath,
@@ -29,6 +30,7 @@ const start = async (options: {
   readTextFile?: Parameters<typeof AcpHarnessSession.start>[0]["readTextFile"];
   writeTextFile?: Parameters<typeof AcpHarnessSession.start>[0]["writeTextFile"];
   stderr?: Parameters<typeof AcpHarnessSession.start>[0]["stderr"];
+  provider?: Parameters<typeof AcpHarnessSession.start>[0]["provider"];
   setup?: (cwd: string) => Promise<void>;
   startupTimeoutMs?: number;
   turnTimeoutMs?: number;
@@ -46,6 +48,7 @@ const start = async (options: {
     readTextFile: options.readTextFile,
     writeTextFile: options.writeTextFile,
     stderr: options.stderr,
+    provider: options.provider,
     startupTimeoutMs: options.startupTimeoutMs,
     turnTimeoutMs: options.turnTimeoutMs,
   });
@@ -368,4 +371,89 @@ test("ACP path confinement and diagnostic redaction fail closed", () => {
     redactAcpDiagnostic("failed https://example.test/callback?access_token=secret-value"),
     "failed https://example.test/callback?access_token=[REDACTED]",
   );
+});
+
+test("ACP configures a governed provider before session creation without exposing its credential", async () => {
+  const token = "scoped-broker-token-must-not-leak";
+  const session = await start({
+    provider: {
+      providerId: "custom-gateway",
+      apiType: "openai",
+      baseUrl: "http://127.0.0.1:4100/v1",
+      headers: { authorization: `Bearer ${token}` },
+    },
+  });
+  try {
+    const events = await collect(session, "provider-check");
+    const text = events.flatMap((event) => event.type === "text-delta" ? [event.delta] : []).join("");
+    assert.deepEqual(JSON.parse(text), {
+      providerId: "custom-gateway",
+      apiType: "openai",
+      baseUrl: "http://127.0.0.1:4100/v1",
+      authorizationPresent: true,
+    });
+    assert.equal(JSON.stringify(events).includes(token), false);
+  } finally {
+    session.close();
+  }
+
+  await assert.rejects(
+    start({
+      environment: { ONECOMPUTER_ACP_FIXTURE_MODE: "no-providers" },
+      provider: {
+        providerId: "custom-gateway",
+        apiType: "openai",
+        baseUrl: "http://127.0.0.1:4100/v1",
+      },
+    }),
+    /does not support governed provider configuration/,
+  );
+});
+
+test("official ACP runtime selection is pinned, allowlisted, and broker-configured", () => {
+  const root = "/opt/onecomputer/acp-runtime";
+  assert.throws(() => officialAcpHarnessConfiguration({
+    agentCatalogId: "codex-cli",
+    cwd: "/home/kasm-user/ONEComputer",
+    runtimeRoot: root,
+    model: "kimi-for-coding",
+  }), /requires a broker gateway/);
+  const claude = officialAcpHarnessConfiguration({
+    agentCatalogId: "claude-cli",
+    cwd: "/home/kasm-user/ONEComputer",
+    runtimeRoot: root,
+  });
+  assert.equal(claude.command, `${root}/node_modules/.bin/claude-agent-acp`);
+  assert.deepEqual(claude.args, []);
+  assert.deepEqual(claude.environment, {
+    HOME: "/home/kasm-user",
+    CLAUDE_CONFIG_DIR: "/home/kasm-user/.claude-cli",
+    NO_BROWSER: "1",
+  });
+
+  const codex = officialAcpHarnessConfiguration({
+    agentCatalogId: "codex-cli",
+    cwd: "/home/kasm-user/ONEComputer",
+    runtimeRoot: root,
+    model: "kimi-for-coding",
+    gateway: {
+      baseUrl: "http://127.0.0.1:4100/v1",
+      headers: { authorization: "Bearer scoped-runtime-token" },
+    },
+  });
+  assert.equal(codex.command, `${root}/node_modules/.bin/codex-acp`);
+  assert.deepEqual(codex.environment, {
+    HOME: "/home/kasm-user",
+    CODEX_HOME: "/home/kasm-user/.codex-cli",
+    CODEX_CONFIG: "{\"model\":\"kimi-for-coding\",\"model_context_window\":32768}",
+    NO_BROWSER: "1",
+  });
+  assert.deepEqual(codex.provider, {
+    providerId: "custom-gateway",
+    apiType: "openai",
+    baseUrl: "http://127.0.0.1:4100/v1",
+    headers: { authorization: "Bearer scoped-runtime-token" },
+  });
+  assert.equal(JSON.stringify([claude, codex]).includes("API_KEY"), false);
+  assert.equal(JSON.stringify([claude.environment, codex.environment]).includes("baseUrl"), false);
 });
