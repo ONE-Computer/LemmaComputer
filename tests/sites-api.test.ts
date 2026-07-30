@@ -109,6 +109,13 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
     assert.equal(preview.statusCode, 200);
     assert.equal(preview.json().html, html.toString());
 
+    const content = await app.inject({ method: "GET", url: `/v1/sites/${published.json().id}/content`, headers: browserHeaders });
+    assert.equal(content.statusCode, 200);
+    assert.match(content.headers["content-type"] ?? "", /^text\/html/);
+    assert.match(content.headers["content-security-policy"] ?? "", /sandbox allow-scripts/);
+    assert.equal(content.headers["cross-origin-opener-policy"], "same-origin");
+    assert.equal(content.body, html.toString());
+
     const staleToken = new AgentBridgeAuthority(proxyToken).issue(identity, workspace.id, { ...policy, policyHash: "b".repeat(64) });
     const rejected = await app.inject({
       method: "POST",

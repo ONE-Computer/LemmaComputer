@@ -1951,6 +1951,20 @@ export function createControlServer(
     await requirePolicy(request);
     return reply.header("cache-control", "no-store").send(await requireSites().preview(identity(request), request.params.siteId));
   });
+  app.get<{ Params: { siteId: string } }>("/v1/sites/:siteId/content", async (request, reply) => {
+    await requirePolicy(request);
+    const { html } = await requireSites().preview(identity(request), request.params.siteId);
+    return reply
+      .headers({
+        "cache-control": "no-store",
+        "content-security-policy": "sandbox allow-scripts; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'",
+        "cross-origin-opener-policy": "same-origin",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+      })
+      .type("text/html; charset=utf-8")
+      .send(html);
+  });
   app.delete<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request, reply) => {
     await requirePolicy(request);
     await requireSites().delete(identity(request), request.params.siteId);

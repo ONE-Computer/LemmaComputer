@@ -519,22 +519,7 @@ const siteUpdatedAt = (value) => new Intl.DateTimeFormat("en", {
   timeStyle: "short",
 }).format(new Date(value));
 
-function SitesScreen({ sites, loading, error, activeSite, preview, previewLoading, busySiteId, onOpen, onBack, onDelete }) {
-  if (activeSite) {
-    return <div className="secondary-screen sites-screen site-preview-screen">
-      <header className="page-heading sites-heading">
-        <div><p>Sites</p><h1>{activeSite.name}</h1><span>Revision {activeSite.currentRevision} · Only you can access this demo site.</span></div>
-        <button className="secondary-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />All sites</button>
-      </header>
-      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Preview unavailable</strong>{error}</span></div>}
-      <section className="site-preview-shell" aria-label={`${activeSite.name} preview`}>
-        <div className="site-preview-toolbar"><span><CheckmarkCircle24Regular aria-hidden="true" />Published</span><small>Sandboxed preview · revision {activeSite.currentRevision}</small></div>
-        {previewLoading ? <div className="site-preview-loading" role="status">Opening site…</div> : preview?.html ? (
-          <iframe title={`${activeSite.name} site`} sandbox="allow-scripts" srcDoc={preview.html} />
-        ) : null}
-      </section>
-    </div>;
-  }
+function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
   return <div className="secondary-screen sites-screen">
     <header className="page-heading sites-heading">
       <div><p>Your published apps</p><h1>Sites</h1><span>Sites built by your workspace agents appear here automatically.</span></div>
@@ -545,17 +530,23 @@ function SitesScreen({ sites, loading, error, activeSite, preview, previewLoadin
         <Apps48Regular aria-hidden="true" />
         <div><h2>No sites yet</h2><p>Ask a workspace agent to use Make a site, then publish the result.</p></div>
       </section>
-    ) : <section className="sites-grid" aria-label="Your sites">
-      {sites.map((site) => <article className="site-card" key={site.id}>
-        <div className="site-card-preview"><Apps48Regular aria-hidden="true" /></div>
-        <div className="site-card-copy">
-          <div><span className="site-state"><span aria-hidden="true" />Ready</span><small>Revision {site.currentRevision}</small></div>
-          <h2>{site.name}</h2>
-          <p>{site.slug}</p>
-          <small>Published {siteUpdatedAt(site.updatedAt)}</small>
+    ) : <section className="sites-list" aria-label="Your sites">
+      {sites.map((site) => <article className="site-row" key={site.id}>
+        <div className="site-row-copy">
+          <div className="site-row-heading">
+            <h2>{site.name}</h2>
+            <span className="site-state"><span aria-hidden="true" />Ready</span>
+          </div>
+          <div className="site-row-meta">
+            <span>{site.slug}</span>
+            <span>Revision {site.currentRevision}</span>
+            <span>Published {siteUpdatedAt(site.updatedAt)}</span>
+          </div>
         </div>
-        <div className="site-card-actions">
-          <button className="primary-button compact-button" type="button" onClick={() => onOpen(site)}>Open</button>
+        <div className="site-row-actions">
+          <a className="primary-button compact-button" href={siteApi.contentUrl(site.id)} target="_blank" rel="noopener noreferrer">
+            Open<span className="sr-only"> {site.name} in a new tab</span>
+          </a>
           <button className="text-button danger-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}>{busySiteId === site.id ? "Deleting…" : "Delete"}</button>
         </div>
       </article>)}
@@ -2834,9 +2825,6 @@ export function App() {
   const [sites, setSites] = useState([]);
   const [sitesLoading, setSitesLoading] = useState(false);
   const [sitesError, setSitesError] = useState("");
-  const [activeSite, setActiveSite] = useState(null);
-  const [sitePreview, setSitePreview] = useState(null);
-  const [sitePreviewLoading, setSitePreviewLoading] = useState(false);
   const [siteBusyId, setSiteBusyId] = useState("");
   const [reviewedSkills, setReviewedSkills] = useState([]);
   const [workspaceActionId, setWorkspaceActionId] = useState("");
@@ -3836,21 +3824,11 @@ export function App() {
       setConnectionCatalogRefresh((current) => current + 1);
     }
     if (name === "Settings") setSettingsView("overview");
-    if (name === "Sites") { setActiveSite(null); setSitePreview(null); setSitesError(""); }
+    if (name === "Sites") setSitesError("");
     if (name === "Workspace") { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }
     setProfileOpen(false);
     setMobileNavOpen(false);
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
-  };
-
-  const openSite = async (site) => {
-    setActiveSite(site);
-    setSitePreview(null);
-    setSitesError("");
-    setSitePreviewLoading(true);
-    try { setSitePreview(await siteApi.preview(site.id)); }
-    catch (error) { setSitesError(error.message); }
-    finally { setSitePreviewLoading(false); }
   };
 
   const deleteSite = async (site) => {
@@ -4217,12 +4195,7 @@ export function App() {
           sites={sites}
           loading={sitesLoading}
           error={sitesError}
-          activeSite={activeSite}
-          preview={sitePreview}
-          previewLoading={sitePreviewLoading}
           busySiteId={siteBusyId}
-          onOpen={openSite}
-          onBack={() => { setActiveSite(null); setSitePreview(null); setSitesError(""); }}
           onDelete={deleteSite}
         />}
         {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
