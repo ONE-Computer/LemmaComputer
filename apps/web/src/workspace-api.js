@@ -20,13 +20,35 @@ const mutation = (method = "POST", body) => ({
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
+export async function retryRetryableRequest(operation, { attempts = 3, baseDelayMs = 250 } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!error?.retryable || attempt === attempts - 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (2 ** attempt)));
+    }
+  }
+  throw lastError;
+}
+
+const retryableMutation = (path, method = "POST", body) => {
+  // Reuse the same idempotency key for every transport attempt. Create maps
+  // that key back to the same workspace record, while restart and stop are
+  // state-machine operations that safely resume from failed/cleanup states.
+  const options = mutation(method, body);
+  return retryRetryableRequest(() => request(path, options));
+};
+
 export const workspaceApi = {
   current: () => request("/api/v1/workspaces/current", { cache: "no-store" }),
   list: () => request("/api/v1/workspaces", { cache: "no-store" }),
-  create: (grantId = "personal") => request("/api/v1/workspaces", mutation("POST", { grantId })),
+  create: (grantId = "personal") => retryableMutation("/api/v1/workspaces", "POST", { grantId }),
   open: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/open`, mutation()),
-  restart: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/restart`, mutation()),
-  stop: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/stop`, mutation()),
+  restart: (id) => retryableMutation(`/api/v1/workspaces/${encodeURIComponent(id)}/restart`),
+  stop: (id) => retryableMutation(`/api/v1/workspaces/${encodeURIComponent(id)}/stop`),
   testGateway: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/gateway/test`, mutation()),
   delete: (id) => request(`/api/v1/workspaces/${encodeURIComponent(id)}`, mutation("DELETE")),
 };
