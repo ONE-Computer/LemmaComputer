@@ -216,6 +216,30 @@ export const chatAgentCatalogIds = ["claude-cli", "codex-cli", "hermes-claw"] as
 export const chatAgentCatalogIdSchema = z.enum(chatAgentCatalogIds);
 export type ChatAgentCatalogId = z.infer<typeof chatAgentCatalogIdSchema>;
 
+export const harnessTransportSchema = z.enum(["native", "acp"]);
+export type HarnessTransport = z.infer<typeof harnessTransportSchema>;
+
+export const harnessRuntimeCapabilitiesSchema = z.object({
+  loadSession: z.boolean(),
+  resumeSession: z.boolean(),
+  cancelTurn: z.boolean(),
+  permissions: z.boolean(),
+  fsReadTextFile: z.boolean(),
+  fsWriteTextFile: z.boolean(),
+  terminal: z.boolean(),
+  mcp: z.boolean(),
+}).strict();
+export type HarnessRuntimeCapabilities = z.infer<typeof harnessRuntimeCapabilitiesSchema>;
+
+export const harnessRuntimeSchema = z.object({
+  transport: harnessTransportSchema,
+  protocolVersion: z.string().trim().min(1).max(32),
+  implementation: z.string().trim().min(1).max(80),
+  implementationVersion: z.string().trim().min(1).max(40),
+  capabilities: harnessRuntimeCapabilitiesSchema,
+}).strict();
+export type HarnessRuntime = z.infer<typeof harnessRuntimeSchema>;
+
 export const scheduleStateSchema = z.enum(["enabled", "paused"]);
 export type ScheduleState = z.infer<typeof scheduleStateSchema>;
 
@@ -867,6 +891,7 @@ export const chatMessageMetadataSchema = z.object({
   state: chatTurnStateSchema,
   createdAt: z.iso.datetime(),
   source: z.enum(["web", "telegram"]).optional(),
+  runtime: harnessRuntimeSchema.optional(),
 }).strict();
 export const chatProgressDataSchema = z.object({
   activityId: chatPartIdSchema,
@@ -1154,6 +1179,7 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
     type: z.literal("turn-start"),
     messageId: chatPartIdSchema,
     createdAt: z.iso.datetime(),
+    runtime: harnessRuntimeSchema.optional(),
   }).strict(),
   agentChatEventBaseSchema.extend({
     type: z.literal("progress"),
@@ -1237,6 +1263,64 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
   }).strict(),
 ]);
 export type AgentChatEvent = z.infer<typeof agentChatEventSchema>;
+
+export const replayFrameKindSchema = z.enum([
+  "computer",
+  "browser",
+  "editor",
+  "terminal",
+  "artifact",
+  "checkpoint",
+]);
+export type ReplayFrameKind = z.infer<typeof replayFrameKindSchema>;
+
+export const replayFrameRefSchema = z.object({
+  frameId: z.uuid(),
+  turnId: chatPartIdSchema,
+  activitySequence: z.number().int().nonnegative().max(100_000),
+  timestamp: z.iso.datetime(),
+  kind: replayFrameKindSchema,
+  viewerRef: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  byteLength: z.number().int().positive().max(16 * 1024 * 1024),
+  mediaType: z.enum(["image/png", "image/jpeg", "application/json", "text/plain"]),
+  expiresAt: z.iso.datetime().nullable(),
+}).strict();
+export type ReplayFrameRef = z.infer<typeof replayFrameRefSchema>;
+
+export const replayMarkerSchema = z.object({
+  sequence: z.number().int().nonnegative().max(100_000),
+  kind: z.enum(["milestone", "tool", "artifact", "approval", "error", "terminal"]),
+  label: z.string().trim().min(1).max(240),
+  state: z.enum(["pending", "running", "requires_action", "completed", "failed", "cancelled"]),
+}).strict();
+export type ReplayMarker = z.infer<typeof replayMarkerSchema>;
+
+export const turnReplayManifestSchema = z.object({
+  version: z.literal(1),
+  workspaceId: z.uuid(),
+  agentCatalogId: chatAgentCatalogIdSchema,
+  sessionId: chatSessionIdSchema,
+  turnId: chatPartIdSchema,
+  latestSequence: z.number().int().min(-1).max(100_000),
+  terminal: z.boolean(),
+  frames: z.array(replayFrameRefSchema).max(10_000),
+  markers: z.array(replayMarkerSchema).max(10_000),
+}).strict();
+export type TurnReplayManifest = z.infer<typeof turnReplayManifestSchema>;
+
+export const turnReplaySnapshotSchema = z.object({
+  version: z.literal(1),
+  requestedSequence: z.number().int().nonnegative().max(100_000),
+  resolvedSequence: z.number().int().min(-1).max(100_000),
+  latestSequence: z.number().int().min(-1).max(100_000),
+  live: z.boolean(),
+  turnState: chatTurnStateSchema,
+  activeFrame: replayFrameRefSchema.nullable(),
+  availableFrames: z.array(replayFrameRefSchema).max(512),
+  markers: z.array(replayMarkerSchema).max(10_000),
+}).strict();
+export type TurnReplaySnapshot = z.infer<typeof turnReplaySnapshotSchema>;
 
 export const activityEventStateSchema = z.enum([
   "pending",
