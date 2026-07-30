@@ -339,8 +339,8 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
     const turnId = "turn-11111111-1111-4111-8111-111111111111";
     const frames = [
       { version: 1, sequence: 0, sessionId: "session-1", turnId, type: "turn-start", messageId: "message-1", createdAt: "2026-07-25T00:00:00Z" },
-      { version: 1, sequence: 1, sessionId: "session-1", turnId, type: "tool", toolCallId: "tool-1", name: "get-drive-item", state: "running" },
-      { version: 1, sequence: 2, sessionId: "session-1", turnId, type: "tool", toolCallId: "tool-1", name: "get-drive-item", state: "completed", summary: "Tool completed" },
+      { version: 1, sequence: 1, sessionId: "session-1", turnId, type: "tool", toolCallId: "tool-1", name: "get-drive-item", state: "running", progressLabel: "Reviewing the requested item…" },
+      { version: 1, sequence: 2, sessionId: "session-1", turnId, type: "tool", toolCallId: "tool-1", name: "get-drive-item", state: "completed", summary: "Tool completed", progressLabel: "Reviewed the requested item." },
       { version: 1, sequence: 3, sessionId: "session-1", turnId, type: "text-delta", textId: "text-1", delta: "The sandbox agent replied." },
       { version: 1, sequence: 4, sessionId: "session-1", turnId, type: "turn-finish", state: "completed", completedAt: "2026-07-25T00:00:01Z" },
     ];
@@ -382,7 +382,11 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
       const chunks = events.flatMap((event) => mapper.chunks(event));
       assert.equal(chunks.filter((chunk) => chunk.type === "start").length, 1);
       assert.equal(chunks.filter((chunk) => chunk.type === "text-delta").length, 1);
-      assert.equal(chunks.filter((chunk) => chunk.type === "data-tool").length, 2);
+      assert.equal(chunks.filter((chunk) => chunk.type === "data-tool").length, 0);
+      assert.deepEqual(
+        chunks.filter((chunk) => chunk.type === "data-progress").map((chunk) => chunk.data.label),
+        ["Reviewing the requested item…", "Reviewed the requested item."],
+      );
       assert.equal(chunks.filter((chunk) => chunk.type === "finish").length, 1);
     }
     assert.deepEqual(requests.map(({ url, body }) => ({ url, body })), [
@@ -527,6 +531,7 @@ test("terminal and repeated-tool updates keep stable owned UI part identifiers f
       toolCallId: "tool-1",
       name: "get-drive-item",
       state: "running",
+      progressLabel: "Reviewing planning-draft.docx…",
     });
     const completed = mapper.chunks({
       ...base,
@@ -536,11 +541,14 @@ test("terminal and repeated-tool updates keep stable owned UI part identifiers f
       name: "get-drive-item",
       state: "completed",
       summary: "Tool completed",
+      progressLabel: "Reviewed planning-draft.docx.",
     });
-    assert.equal(running[0]?.type, "data-tool");
-    assert.equal(completed[0]?.type, "data-tool");
-    assert.equal("id" in running[0]! ? running[0].id : undefined, "tool-1");
-    assert.equal("id" in completed[0]! ? completed[0].id : undefined, "tool-1");
+    assert.equal(running[0]?.type, "data-progress");
+    assert.equal(completed[0]?.type, "data-progress");
+    assert.equal("id" in running[0]! ? running[0].id : undefined, `progress-${base.turnId}`);
+    assert.equal("id" in completed[0]! ? completed[0].id : undefined, `progress-${base.turnId}`);
+    assert.equal(running[0]?.type === "data-progress" ? running[0].data.label : "", "Reviewing planning-draft.docx…");
+    assert.equal(completed[0]?.type === "data-progress" ? completed[0].data.label : "", "Reviewed planning-draft.docx.");
 
     for (const [state, finishReason] of [
       ["needs_input", "stop"],
@@ -559,6 +567,20 @@ test("terminal and repeated-tool updates keep stable owned UI part identifiers f
       assert.equal(terminal.find((chunk) => chunk.type === "finish")?.finishReason, finishReason);
     }
   }
+});
+
+test("legacy tool events stay in Activity without adding transcript parts", () => {
+  const mapper = new AgentUiStreamMapper();
+  assert.deepEqual(mapper.chunks({
+    version: 1,
+    sequence: 1,
+    sessionId: "session-1",
+    turnId: "turn-11111111-1111-4111-8111-111111111111",
+    type: "tool",
+    toolCallId: "tool-1",
+    name: "get-drive-item",
+    state: "running",
+  }), []);
 });
 
 test("terminal history closes stale activity and reconciles approval that completed after stop", async () => {

@@ -2002,13 +2002,7 @@ function ChatPart({ part, markdown = false }) {
     );
   }
   if (part.type === "data-tool") {
-    const stateLabel = part.data.state === "running" ? "Running" : part.data.state === "completed" ? "Completed" : "Failed";
-    return (
-      <details className={`chat-tool ${part.data.state}`} open={part.data.state !== "completed"}>
-        <summary><span>{part.data.name}</span><small>{stateLabel}</small></summary>
-        {part.data.summary && <p>{part.data.summary}</p>}
-      </details>
-    );
+    return null;
   }
   if (part.type === "data-approval") {
     return (

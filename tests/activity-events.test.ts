@@ -82,6 +82,7 @@ test("Activity mapper labels provenance, maps explicit web actions, and redacts 
     name: "web.search",
     state: "completed",
     summary: "Bearer secret-bearer-token https://example.com/result?q=ok&X-Amz-Signature=must-not-leak",
+    progressLabel: "Reviewed the search results.",
   };
   const drafts = mapper.drafts(event);
   assert.deepEqual(drafts.map((draft) => [draft.kind, draft.provenance, draft.state]), [
@@ -141,7 +142,7 @@ test("golden mapper output is stable for existing progress, tool, and approval e
   const mapper = new ActivityEventMapper("Claude CLI");
   const events: AgentChatEvent[] = [
     { version: 1, sequence: 1, sessionId, turnId, type: "progress", activityId: "progress-1", label: "Working", state: "running" },
-    { version: 1, sequence: 2, sessionId, turnId, type: "tool", toolCallId: "tool-1", name: "get-drive-item", state: "completed", summary: "Read the item" },
+    { version: 1, sequence: 2, sessionId, turnId, type: "tool", toolCallId: "tool-1", name: "get-drive-item", state: "completed", summary: "Read the item", progressLabel: "Reviewed the requested item." },
     {
       version: 1,
       sequence: 3,
@@ -206,7 +207,7 @@ async function seededActivity() {
   };
   const events: AgentChatEvent[] = [
     { version: 1, sequence: 0, sessionId, turnId, type: "turn-start", messageId: "message-1", createdAt: timestamp },
-    { version: 1, sequence: 1, sessionId, turnId, type: "tool", toolCallId: "tool-1", name: "web.search", state: "completed", summary: "Search complete" },
+    { version: 1, sequence: 1, sessionId, turnId, type: "tool", toolCallId: "tool-1", name: "web.search", state: "completed", summary: "Search complete", progressLabel: "Reviewed the search results." },
     { version: 1, sequence: 2, sessionId, turnId, type: "web-action", action: "search", label: "Searched for traditional rösti recipes" },
     { version: 1, sequence: 3, sessionId, turnId, type: "turn-finish", state: "completed", completedAt: "2026-07-29T00:00:01.000Z" },
   ];

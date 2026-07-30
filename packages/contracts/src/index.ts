@@ -1191,6 +1191,7 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
     name: z.string().trim().regex(/^[A-Za-z0-9_.:-]{1,160}$/),
     state: chatToolStateSchema,
     summary: z.string().trim().min(1).max(500).optional(),
+    progressLabel: z.string().trim().min(1).max(240).optional(),
   }).strict(),
   agentChatEventBaseSchema.extend({
     type: z.literal("approval"),

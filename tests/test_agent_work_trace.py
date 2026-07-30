@@ -12,6 +12,7 @@ from onecomputer_work_trace import (  # noqa: E402
     extract_sources,
     humanize_tool_name,
     safe_http_url,
+    tool_progress_label,
     tool_trace_summary,
     web_action_for_tool,
 )
@@ -57,6 +58,12 @@ class WorkTraceTests(unittest.TestCase):
             "Target: planning-draft.docx",
         )
         self.assertIsNone(tool_trace_summary("unknown-tool", {"apiKey": "must-not-appear", "id": "opaque"}))
+
+    def test_tool_lifecycle_becomes_one_safe_human_milestone(self) -> None:
+        self.assertEqual(tool_progress_label("Write", "running", "File: App.jsx"), "Updating App.jsx…")
+        self.assertEqual(tool_progress_label("publish-site", "running", "Target: Sales portal"), "Publishing Sales portal…")
+        self.assertEqual(tool_progress_label("Bash", "completed", "Tool completed"), "Workspace checks finished.")
+        self.assertEqual(tool_progress_label("unknown", "running", "Bearer secret-bearer-token"), "Working in the workspace…")
 
     def test_sources_are_deduplicated_titled_and_limited_to_public_http(self) -> None:
         sources = extract_sources({

@@ -1036,10 +1036,14 @@ const server = http.createServer((request, response) => {
         : "I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations";
       const openingChunks = [
         { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
+        { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: siteRequest ? "Updating the site files…" : "Reviewing the workspace context…", state: "running" } },
+        { type: "data-tool", id: `${turnId}-tool`, data: { toolCallId: `${turnId}-tool`, name: "workspace-context", state: "running", summary: "Internal fixture tool" } },
         { type: "text-start", id: `${turnId}-text` },
         { type: "text-delta", id: `${turnId}-text`, delta: openingText },
       ];
       const closingChunks = [
+        { type: "data-tool", id: `${turnId}-tool`, data: { toolCallId: `${turnId}-tool`, name: "workspace-context", state: "completed", summary: "Internal fixture tool" } },
+        { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Work complete", state: "completed" } },
         { type: "text-delta", id: `${turnId}-text`, delta: closingText },
         { type: "text-end", id: `${turnId}-text` },
         { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
@@ -1058,6 +1062,8 @@ const server = http.createServer((request, response) => {
           role: "assistant",
           metadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt },
           parts: [
+            { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: siteRequest ? "Updating the site files…" : "Reviewing the workspace context…", state: "running" } },
+            { type: "data-tool", id: `${turnId}-tool`, data: { toolCallId: `${turnId}-tool`, name: "workspace-context", state: "running", summary: "Internal fixture tool" } },
             { type: "text", text: openingText, state: "streaming" },
           ],
         });
@@ -1085,6 +1091,8 @@ const server = http.createServer((request, response) => {
           role: "assistant",
           metadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt },
           parts: [
+            { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Work complete", state: "completed" } },
+            { type: "data-tool", id: `${turnId}-tool`, data: { toolCallId: `${turnId}-tool`, name: "workspace-context", state: "completed", summary: "Internal fixture tool" } },
             { type: "text", text: `${openingText}${closingText}`, state: "done" },
             { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
           ],

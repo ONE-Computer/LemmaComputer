@@ -476,14 +476,16 @@ export class AgentUiStreamMapper {
       return chunks;
     }
     if (event.type === "tool") {
+      if (!event.progressLabel) {
+        return [];
+      }
       return [{
-        type: "data-tool",
-        id: event.toolCallId,
+        type: "data-progress",
+        id: `progress-${event.turnId}`,
         data: {
-          toolCallId: event.toolCallId,
-          name: event.name,
-          state: event.state,
-          ...(event.summary ? { summary: event.summary } : {}),
+          activityId: `progress-${event.turnId}`,
+          label: event.progressLabel,
+          state: "running",
         },
       }];
     }

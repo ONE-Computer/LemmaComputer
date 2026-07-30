@@ -7,12 +7,15 @@ test("restores and follows an in-flight chat turn after refresh", async ({ page 
   await composer.fill("Keep working on the dashboard layout.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText(/check the workspace context first/)).toBeVisible();
+  await expect(page.getByText("Reviewing the workspace context…")).toBeVisible();
+  await expect(page.locator(".chat-tool")).toHaveCount(0);
 
   await page.reload();
 
   await expect(page.getByText("Keep working on the dashboard layout.")).toBeVisible();
   await expect(page.getByText(/check the workspace context first/)).toBeVisible();
   await expect(composer).toBeDisabled();
+  await expect(page.locator(".chat-tool")).toHaveCount(0);
   await expect(page.getByText(/approved destinations/)).toBeVisible();
   await expect(composer).toBeEnabled();
 });

@@ -42,6 +42,7 @@ test.describe("streaming Activity panel", () => {
     await expect(panel.locator(".activity-event.progress")).toHaveCount(1);
     await expect(panel.locator(".activity-event.provider_summary")).toHaveCount(1);
     await expect(panel.locator(".activity-event.tool")).toHaveCount(1);
+    await expect(page.locator(".chat-tool")).toHaveCount(0);
     await expect(panel.locator(".activity-event.web_action")).toHaveCount(1);
     await expect(panel.locator(".activity-event.source")).toHaveCount(1);
     await expect(panel.locator(".activity-event.approval")).toHaveCount(1);

@@ -382,6 +382,8 @@ test("Chat is last in navigation, with recent threads in the sidebar and a focus
   assert.match(chatScreen, /selected workspace model does not support image input/);
   assert.match(app, /part\.type === "file"/);
   assert.match(app, /part\.type === "data-approval"/);
+  assert.match(app, /part\.type === "data-tool"\) \{\s*return null;/);
+  assert.doesNotMatch(app, /<details className=\{`chat-tool/);
   assert.match(app, /ReactMarkdown/);
   assert.match(app, /remarkGfm/);
   assert.match(chatScreen, /status === "submitted"/);

@@ -55,6 +55,7 @@ test("PostgreSQL Activity events are append-only, deduplicated, tenant-scoped, a
       name: "web.search",
       state: "completed",
       summary: "Search completed",
+      progressLabel: "Reviewed the search results.",
     };
     const webAction: AgentChatEvent = {
       version: 1,

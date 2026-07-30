@@ -37,6 +37,7 @@ from onecomputer_work_trace import (
     approach_summary,
     extract_sources,
     safe_trace_text,
+    tool_progress_label,
     tool_trace_summary,
     web_action_for_tool,
 )
@@ -124,7 +125,10 @@ BASE_SYSTEM_PROMPT = (
     "If a protected operation is pending, use wait-for-governed-operation and "
     "report the final result accurately. Never claim an operation completed until "
     "the tool confirms it. Before using any tool, briefly tell the employee what "
-    "you understood and what you will do next. If you cannot proceed without a "
+    "you understood and what you will do next. During multi-step work, add short "
+    "natural-language progress updates after meaningful milestones and before "
+    "changing phases. Keep updates outcome-focused; never narrate internal tool "
+    "names, commands, hidden reasoning, or every individual call. If you cannot proceed without a "
     "missing detail or employee choice, do not call tools. Ask one concise question "
     f"and begin that response with the exact marker {NEEDS_INPUT_MARKER}; "
     "ONEComputer removes the marker and keeps the conversation ready for their reply. "
@@ -742,9 +746,25 @@ def apply_event(message: dict[str, Any], event: dict[str, Any]) -> None:
             parts.append(existing)
         existing["text"] = (existing["text"] + event["delta"])[:MAX_TEXT]
         return
+    if event_type == "tool":
+        part_id = f"progress-{event['turnId']}"
+        replacement = {
+            "type": "data-progress",
+            "id": part_id,
+            "data": {
+                "activityId": part_id,
+                "label": event["progressLabel"],
+                "state": "running",
+            },
+        }
+        existing = next((part for part in parts if part.get("id") == part_id), None)
+        if existing is None:
+            parts.append(replacement)
+        else:
+            parts[parts.index(existing)] = replacement
+        return
     data_type = {
         "progress": "data-progress",
-        "tool": "data-tool",
         "approval": "data-approval",
     }.get(event_type)
     if data_type:
@@ -754,13 +774,6 @@ def apply_event(message: dict[str, Any], event: dict[str, Any]) -> None:
                 "activityId": event["activityId"],
                 "label": event["label"],
                 "state": event["state"],
-            }
-        elif event_type == "tool":
-            data = {
-                "toolCallId": event["toolCallId"],
-                "name": event["name"],
-                "state": event["state"],
-                **({"summary": event["summary"]} if event.get("summary") else {}),
             }
         else:
             data = {
@@ -1545,7 +1558,7 @@ async def turns(request: Request) -> Response:
 
         try:
             yield await emit("turn-start", messageId=assistant_id, createdAt=created_at)
-            activity_id = safe_identifier("progress", turn_id, "agent")
+            activity_id = f"progress-{turn_id}"
             progress_started = False
             terminal_state: str | None = None
             events = vendor_events(snapshot, text, attachments, turn_id, return_artifacts).__aiter__()
@@ -1605,11 +1618,15 @@ async def turns(request: Request) -> Response:
                                 delta=raw_delta[offset:offset + 16_000],
                             )
                     elif kind == "tool":
+                        progress_started = True
                         yield await emit(
                             "tool",
                             toolCallId=vendor["id"],
                             name=vendor["name"],
                             state=vendor["state"],
+                            progressLabel=tool_progress_label(
+                                vendor["name"], vendor["state"], vendor.get("summary")
+                            ),
                             force_checkpoint=True,
                             **({"summary": vendor["summary"]} if vendor.get("summary") else {}),
                         )

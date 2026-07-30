@@ -157,6 +157,37 @@ def tool_trace_summary(name: object, arguments: object, preview: object = None) 
     return None
 
 
+def tool_progress_label(name: object, state: object, summary: object = None) -> str:
+    """Turn a raw tool lifecycle event into one concise, safe user milestone."""
+    normalized = normalized_tool_name(name)
+    visible_summary = safe_trace_text(summary, 180)
+    detail = None
+    if visible_summary:
+        prefix, separator, value = visible_summary.partition(": ")
+        if separator and prefix in {"File", "Query", "Target", "Website"}:
+            detail = value
+    failed = state == "failed"
+    completed = state == "completed"
+    if failed:
+        return "A workspace step failed."
+    if any(word in normalized for word in ("publish", "deploy")):
+        target = detail or "the site"
+        return f"Published {target}." if completed else f"Publishing {target}…"
+    if any(word in normalized for word in ("browser", "preview", "screenshot")):
+        return "Checked the result." if completed else "Checking the result…"
+    if any(word in normalized for word in ("write", "edit", "patch", "create_file", "update_file")):
+        target = detail or "the workspace files"
+        return f"Updated {target}." if completed else f"Updating {target}…"
+    if any(word in normalized for word in ("read", "search", "find", "list", "get")):
+        target = detail or "the workspace"
+        return f"Reviewed {target}." if completed else f"Reviewing {target}…"
+    if any(word in normalized for word in ("bash", "shell", "terminal", "exec", "command", "test", "build")):
+        return "Workspace checks finished." if completed else "Running workspace checks…"
+    if detail:
+        return f"Finished {detail}." if completed else f"Working on {detail}…"
+    return "Workspace step complete." if completed else "Working in the workspace…"
+
+
 def approach_summary(value: object) -> str | None:
     return safe_trace_text(value, MAX_TRACE_TEXT)
 
