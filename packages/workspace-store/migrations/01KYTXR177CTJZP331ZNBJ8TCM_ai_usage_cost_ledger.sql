@@ -60,6 +60,7 @@ CREATE TABLE ai_usage_attempt_admissions (
   task_id text NOT NULL,
   turn_id text,
   task_binding_provenance text NOT NULL CHECK (task_binding_provenance IN ('explicit_signed','unbound_generated')),
+  context_kind text NOT NULL CHECK (context_kind IN ('chat','channel','schedule','background')),
   policy_version_id text,
   policy_hash text CHECK (policy_hash IS NULL OR policy_hash ~ '^[a-f0-9]{64}$'),
   requested_alias text NOT NULL,

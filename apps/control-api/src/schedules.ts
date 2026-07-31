@@ -138,6 +138,10 @@ export class ScheduleService {
       workspaceId: string,
       agentCatalogId: ChatAgentCatalogId,
     ) => Promise<AgentChatAccess>,
+    private readonly issueUsageTaskBinding?: (input: {
+      identity: IdentityContext; workspaceId: string; agentId: string;
+      taskId: string; sessionId: string; turnId: string;
+    }) => string | undefined,
   ) {}
 
   private next(cronExpression: string, timeZone: string, after = new Date()) {
@@ -261,7 +265,11 @@ export class ScheduleService {
       };
       let terminal: "needs_input" | "completed" | "cancelled" | "failed" | null = null;
       let terminalMessage: string | undefined;
-      for await (const event of this.agentChat.streamTurn(access, session.id, message)) {
+      const usageTaskBinding = this.issueUsageTaskBinding?.({
+        identity, workspaceId: schedule.workspaceId, agentId: access.agentId,
+        taskId: `schedule:${run.id}`, sessionId: session.id, turnId: message.id,
+      });
+      for await (const event of this.agentChat.streamTurn(access, session.id, message, undefined, usageTaskBinding)) {
         if (event.type === "turn-finish") {
           terminal = event.state;
           terminalMessage = event.message;

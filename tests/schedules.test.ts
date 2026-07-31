@@ -154,6 +154,7 @@ const access: AgentChatAccess = {
   workspaceId,
   catalogId: "codex-cli",
   displayName: "Codex",
+  agentId: "codex-agent-policy-id",
   key: "workspace-bound-key",
   baseUrl: "http://sandbox",
 };
@@ -169,7 +170,8 @@ const successfulAgent: AgentChatClient = {
   }),
   listMessages: async () => [],
   cancelTurn: async () => {},
-  async *streamTurn(_access, sessionId, message) {
+  async *streamTurn(_access, sessionId, message, _signal, usageTaskBinding) {
+    assert.equal(usageTaskBinding, "signed-schedule-binding");
     assert.equal(sessionId, "session-scheduled-1");
     assert.equal(message.parts[0]?.type, "text");
     assert.equal(message.parts[0]?.type === "text" ? message.parts[0].text : "", "Summarize the project.");
@@ -222,6 +224,7 @@ test("saved prompts are encrypted and bound to their owner and schedule", () => 
 test("a claimed run revalidates its target and creates a fresh agent session", async () => {
   const store = new MemoryScheduleStore();
   let validations = 0;
+  let bindingIssued = false;
   const service = new ScheduleService(
     store,
     new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
@@ -232,6 +235,16 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
       assert.equal(targetWorkspaceId, workspaceId);
       assert.equal(catalogId, "codex-cli");
       return access;
+    },
+    (input) => {
+      bindingIssued = true;
+      assert.deepEqual(input.identity, identity);
+      assert.equal(input.workspaceId, workspaceId);
+      assert.equal(input.agentId, "codex-agent-policy-id");
+      assert.match(input.taskId, /^schedule:[0-9a-f-]{36}$/);
+      assert.equal(input.sessionId, "session-scheduled-1");
+      assert.match(input.turnId, /^[0-9a-f-]{36}$/);
+      return "signed-schedule-binding";
     },
   );
   const schedule = await service.create(identity, {
@@ -251,6 +264,7 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
   assert.equal(completed.state, "succeeded");
   assert.equal(completed.sessionId, "session-scheduled-1");
   assert.equal(validations, 2);
+  assert.equal(bindingIssued, true);
 });
 
 test("the worker sends only leased run identifiers to Control", async () => {

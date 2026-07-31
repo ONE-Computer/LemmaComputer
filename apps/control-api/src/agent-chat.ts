@@ -21,6 +21,7 @@ export type AgentChatAccess = {
   catalogId: ChatAgentCatalogId;
   displayName: string;
   key: string;
+  agentId: string;
   baseUrl: string;
 };
 
@@ -74,6 +75,7 @@ export class AgentChatAuthority {
     catalogId: ChatAgentCatalogId,
   ): AgentChatAccess | undefined {
     if (!assignedChatAgentIds(policy).includes(catalogId)) return undefined;
+    const agentId = policy.agents?.find((agent) => agent.catalogId === catalogId)?.agentId ?? policy.agentId;
     const key = createHmac("sha256", this.rootSecret)
       .update("onecomputer-agent-chat/v1\0")
       .update(identity.tenantId).update("\0")
@@ -86,6 +88,7 @@ export class AgentChatAuthority {
       workspaceId,
       catalogId,
       displayName: chatDisplayNames[catalogId],
+      agentId,
       key,
       baseUrl: `http://onecomputer-sandbox-${workspaceId}:${chatRuntimePorts[catalogId]}`,
     };
@@ -111,6 +114,7 @@ export interface AgentChatClient {
     sessionId: string,
     message: ChatUiMessage,
     signal?: AbortSignal,
+    usageTaskBinding?: string,
   ): AsyncIterable<AgentChatEvent>;
 }
 
@@ -354,11 +358,12 @@ export class HttpAgentChatClient implements AgentChatClient {
     sessionId: string,
     message: ChatUiMessage,
     signal?: AbortSignal,
+    usageTaskBinding?: string,
   ): AsyncIterable<AgentChatEvent> {
     const id = chatSessionIdSchema.parse(sessionId);
     const response = await this.response(access, `/api/sessions/${encodeURIComponent(id)}/turns`, {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message,...(usageTaskBinding?{usageTaskBinding}:{}) }),
       signal,
     }, agentTurnTimeoutMs);
     if (!response.body || !response.headers.get("content-type")?.startsWith("application/x-ndjson")) {

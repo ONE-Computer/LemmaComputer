@@ -41,7 +41,7 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     const admissionInput = {
       tenantId,sourceSystem:"litellm",sourceAttemptId:`attempt-${suffix}`,subjectId:userId,team:teamSnapshot,
       workspaceId:`workspace-${suffix}`,agentId:"agent-a",sessionId:"session-a",taskId:"task-a",turnId:"turn-a",
-      taskBindingProvenance:"explicit_signed" as const,policyVersionId:"policy-v1",policyHash:hash("d"),requestedAlias:"balanced",
+      taskBindingProvenance:"explicit_signed" as const,contextKind:"chat" as const,policyVersionId:"policy-v1",policyHash:hash("d"),requestedAlias:"balanced",
       requestedServiceClass:"balanced" as const,selectedServiceClass:"balanced" as const,routeMappingVersion:"mapping-v1",
       attemptKind:"inference" as const,...deployment, resolvedProvider:deployment.provider,resolvedModel:deployment.baseModel,resolvedDeploymentId:deployment.deploymentId,admittedAt,
     };

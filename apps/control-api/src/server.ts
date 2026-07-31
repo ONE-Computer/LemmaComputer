@@ -7,6 +7,7 @@ import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
+import { PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@onecomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
 import { ProviderSettingsService } from "./provider-settings.js";
@@ -31,6 +32,7 @@ import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient }
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
+import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -205,6 +207,8 @@ const envSchema = z.object({
   ENTRA_CLIENT_ID: z.string().min(1),
   ENTRA_CLIENT_SECRET: z.string().min(1),
   SESSION_SECRET: z.string().min(32),
+  AI_USAGE_INTERNAL_TOKEN: z.string().min(32),
+  AI_USAGE_TASK_BINDING_SECRET: z.string().min(32),
   WORKSPACE_INGRESS_PUBLIC_URL: optionalEnvString(),
   WORKSPACE_INGRESS_SECRET: optionalEnvString(32),
   WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(300),
@@ -264,6 +268,10 @@ export function createControlServer(
       publicUrl: string;
       authority: WorkspaceIngressAuthority;
     };
+    usageLedgerStore?: PostgresUsageLedgerStore;
+    usageInternalToken?: string;
+    usageTaskBindingSecret?: string;
+    usageAdmissionHook?: UsageAttemptAdmissionHook;
     grantRenewal?: {
       tenantId: string;
       intervalMs: number;
@@ -288,7 +296,7 @@ export function createControlServer(
     toolPolicies: { search_files: "allow" },
   };
   const app = Fastify({
-    logger: { redact: ["req.headers.x-onecomputer-proxy-token", "req.headers.x-onecomputer-mcp-policy-token", "req.headers.authorization", "req.body", "*.arguments", "*.launchUrl"] },
+    logger: { redact: ["req.headers.x-onecomputer-proxy-token", "req.headers.x-onecomputer-mcp-policy-token", "req.headers.x-onecomputer-ai-usage-token", "req.headers.authorization", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
       disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url) || request.url.startsWith("/v1/auth/callback"),
     }),
@@ -309,6 +317,34 @@ export function createControlServer(
     }
     return security.teamStore;
   };
+  const usageDependencies = [security.usageLedgerStore, security.usageInternalToken, security.usageTaskBindingSecret];
+  if (usageDependencies.some(Boolean) && (!usageDependencies.every(Boolean) || !security.teamStore)) {
+    throw new Error("AI usage ledger store, internal token, task-binding secret, and Team store must be configured together");
+  }
+  const usageBindings = security.usageTaskBindingSecret
+    ? new UsageTaskBindingAuthority(security.usageTaskBindingSecret)
+    : undefined;
+  const usageLedger = security.usageLedgerStore && security.teamStore && usageBindings
+    ? new UsageLedgerService(security.usageLedgerStore, security.teamStore, usageBindings, security.usageAdmissionHook)
+    : undefined;
+  const requireUsageLedger = () => {
+    if (!usageLedger || !security.usageLedgerStore) {
+      throw new OneComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
+    }
+    return { service: usageLedger, store: security.usageLedgerStore };
+  };
+  const issueUsageTaskBinding = (
+    owner: IdentityContext,
+    workspaceId: string,
+    agentId: string,
+    contextKind: "chat" | "channel" | "schedule" | "background",
+    taskId: string,
+    sessionId?: string,
+    turnId?: string,
+  ) => usageBindings?.issue({
+    tenantId: owner.tenantId, subjectId: owner.subjectId, workspaceId, agentId,
+    contextKind, taskId, ...(sessionId ? { sessionId } : {}), ...(turnId ? { turnId } : {}),
+  });
   const channelBroker = security.channelBrokerClient;
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
@@ -415,6 +451,15 @@ export function createControlServer(
         security.schedulerInternalToken,
       )) {
         return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Scheduler authentication is required", correlationId: request.id, retryable: false } });
+      }
+      return;
+    }
+    if (request.url.startsWith("/internal/v1/ai-usage/")) {
+      if (!security.usageInternalToken || !sameSecret(
+        request.headers["x-onecomputer-ai-usage-token"] as string | undefined,
+        security.usageInternalToken,
+      )) {
+        return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "AI usage callback authentication is required", correlationId: request.id, retryable: false } });
       }
       return;
     }
@@ -615,6 +660,9 @@ export function createControlServer(
           const { policy } = await channelPolicy(owner, workspaceId);
           return service.agentChatAccess(owner, policy, workspaceId, catalogId);
         },
+        ({ identity: owner, workspaceId, agentId, taskId, sessionId, turnId }) => issueUsageTaskBinding(
+          owner, workspaceId, agentId, "schedule", taskId, sessionId, turnId,
+        ),
       )
     : undefined;
   const requireSchedules = () => {
@@ -663,6 +711,14 @@ export function createControlServer(
   };
 
   app.get("/healthz", async () => ({ status: "ok" }));
+  app.post("/internal/v1/ai-usage/attempts/admit", async (request, reply) => {
+    const result = await requireUsageLedger().service.admit(internalUsageAdmissionSchema.parse(request.body ?? {}));
+    return reply.code(result.status === "created" ? 201 : 200).send(result);
+  });
+  app.post("/internal/v1/ai-usage/events", async (request, reply) => {
+    const result = await requireUsageLedger().service.complete(internalUsageCompletionSchema.parse(request.body ?? {}));
+    return reply.code(result.status === "created" ? 201 : 200).send(result);
+  });
   app.post("/internal/v1/mcp/authorize", { bodyLimit: 6 * 1024 * 1024 }, async (request) => {
     if (!mcpPolicy) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "MCP policy storage is unavailable", 503, true);
     return mcpPolicy.authorize(mcpPolicyRequestSchema.parse(request.body ?? {}), request.id);
@@ -709,7 +765,13 @@ export function createControlServer(
       const artifacts: Array<{ artifactId: string; mediaType: string; filename: string; byteLength: number; sha256: string }> = [];
       let state: "needs_input" | "completed" | "cancelled" | "failed" = "failed";
       try {
-        for await (const event of agentChat.streamTurn(access, session.id, message)) {
+        const usageTaskBinding = issueUsageTaskBinding(
+          input.identity, input.workspaceId, access.agentId, "channel",
+          `channel:${input.connectionId}:${input.updateId}`, session.id,
+        );
+        for await (const event of agentChat.streamTurn(
+          access, session.id, message, undefined, usageTaskBinding,
+        )) {
           if (event.type === "progress") {
             yield frame({ type: "heartbeat" });
           }
@@ -985,6 +1047,74 @@ export function createControlServer(
     return {
       team: await requireTeams().getCurrentDefaultSpendingTeam(actor.tenantId, actor.userId),
     };
+  });
+  const usageQueryFor = (tenantId: string, query: unknown) => {
+    const parsed = adminUsageQuerySchema.parse(query);
+    return {
+      tenantId, from: new Date(parsed.from), to: new Date(parsed.to), limit: parsed.limit,
+      ...(parsed.cursor ? { cursor: decodeUsageCursor(parsed.cursor) } : {}),
+      ...(parsed.teamId ? { teamId: parsed.teamId } : {}),
+      ...(parsed.subjectId ? { subjectId: parsed.subjectId } : {}),
+      ...(parsed.taskId ? { taskId: parsed.taskId } : {}),
+    };
+  };
+  app.get("/v1/admin/ai-usage/events", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const result = await requireUsageLedger().store.listUsageEvents(usageQueryFor(actor.tenantId, request.query));
+    reply.header("cache-control", "no-store");
+    return { events: result.events, nextCursor: encodeUsageCursor(result.nextCursor) };
+  });
+  app.get("/v1/admin/ai-usage/totals", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const query = usageQueryFor(actor.tenantId, request.query);
+    const { limit: _limit, cursor: _cursor, ...totalsQuery } = query;
+    reply.header("cache-control", "no-store");
+    return { totals: await requireUsageLedger().store.providerCostTotals(totalsQuery) };
+  });
+  app.get("/v1/admin/ai-usage/export.csv", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const query = usageQueryFor(actor.tenantId, request.query);
+    const result = await requireUsageLedger().store.listUsageEvents({ ...query, limit: Math.min(query.limit, 500) });
+    const csv = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const header = ["occurred_at","event_id","team","cost_center","subject","task","context","alias","provider","model","deployment","cost","currency","price_status"];
+    const rows = result.events.map((event) => [event.occurredAt,event.id,event.teamDisplayName,event.costCenterCode,event.subjectId,event.taskId,event.contextKind,event.requestedAlias,event.resolvedProvider,event.resolvedModel,event.resolvedDeploymentId,event.providerCost,event.currency,event.priceStatus].map(csv).join(","));
+    return reply.header("cache-control", "no-store")
+      .header("x-onecomputer-export-complete", result.nextCursor ? "false" : "true")
+      .header("x-onecomputer-export-next-cursor", encodeUsageCursor(result.nextCursor) ?? "")
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", "attachment; filename=ai-usage.csv")
+      .send(`${header.join(",")}\n${rows.join("\n")}\n`);
+  });
+  app.get("/v1/admin/ai-usage/rate-cards", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    reply.header("cache-control", "no-store");
+    return { rateCards: await requireUsageLedger().store.listRateCards(actor.tenantId) };
+  });
+  app.post("/v1/admin/ai-usage/rate-cards", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const input = adminRateCardSchema.parse(request.body ?? {});
+    const id = await requireUsageLedger().store.createRateCard({
+      tenantId: actor.tenantId, provider: input.provider, providerAccountId: input.providerAccountId,
+      baseModel: input.baseModel, deploymentId: input.deploymentId,
+      ...(input.region ? { region: input.region } : {}),
+      ...(input.providerServiceTier ? { providerServiceTier: input.providerServiceTier } : {}),
+      currency: input.currency, source: input.source, sourceVersion: input.sourceVersion, sourceHash: input.sourceHash,
+      effectiveFrom: new Date(input.effectiveFrom), ...(input.effectiveTo ? { effectiveTo: new Date(input.effectiveTo) } : {}),
+      approvedBy: actor.userId, ...(input.overrideReason ? { overrideReason: input.overrideReason } : {}), rates: input.rates as RateAmount[],
+    });
+    reply.header("cache-control", "no-store");
+    return reply.code(201).send({ id });
+  });
+  app.post("/v1/admin/ai-usage/reconciliation-runs", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const input = adminReconciliationSchema.parse(request.body ?? {});
+    const result = await requireUsageLedger().store.reconcile({
+      tenantId: actor.tenantId, sourceSystem: input.sourceSystem,
+      windowStart: new Date(input.windowStart), windowEnd: new Date(input.windowEnd),
+      expected: input.expected, startedBy: actor.userId,
+    });
+    reply.header("cache-control", "no-store");
+    return reply.code(201).send(result);
   });
   app.get<{ Querystring: { includeArchived?: string } }>("/v1/admin/teams", async (request) => {
     const actor = requireAdministrator(request);
@@ -1990,7 +2120,10 @@ export function createControlServer(
     const pump = async () => {
       let lastEvent: AgentChatEvent | undefined;
       try {
-        for await (const event of agentChat.streamTurn(access, sessionId, input.message)) {
+        const usageTaskBinding = issueUsageTaskBinding(
+          owner, request.params.workspaceId, access.agentId, "chat", input.message.id, sessionId,
+        );
+        for await (const event of agentChat.streamTurn(access, sessionId, input.message, undefined, usageTaskBinding)) {
           let projected = event;
           if (event.type === "approval") {
             try {
@@ -2212,6 +2345,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const scheduleStore = PostgresScheduleStore.fromConnectionString(env.DATABASE_URL);
   const siteStore = PostgresSiteStore.fromConnectionString(env.DATABASE_URL);
   const teamStore = PostgresTeamStore.fromConnectionString(env.DATABASE_URL);
+  const usageLedgerStore = PostgresUsageLedgerStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
@@ -2322,6 +2456,9 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       scheduleStore,
       siteStore,
       teamStore,
+      usageLedgerStore,
+      usageInternalToken: env.AI_USAGE_INTERNAL_TOKEN,
+      usageTaskBindingSecret: env.AI_USAGE_TASK_BINDING_SECRET,
       schedulerInternalToken: env.SCHEDULER_INTERNAL_TOKEN,
       schedulePromptSecret: env.SCHEDULE_PROMPT_SECRET,
       workspaceIngress,
@@ -2344,6 +2481,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await scheduleStore.close();
     await siteStore.close();
     await teamStore.close();
+    await usageLedgerStore.close();
     await identityPolicyStore.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });
