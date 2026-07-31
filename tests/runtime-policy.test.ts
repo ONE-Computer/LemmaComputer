@@ -60,6 +60,7 @@ test("a user policy projects into an approved workspace runtime", () => {
     },
     modelAlias: "onecomputer-assistant",
     mcpServer: "onecomputer_ms365",
+    requestedServiceClass: "auto",
     allowedTools: ["list-mail-folders", "list-calendars", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file"],
     toolPolicies: {
       "list-mail-folders": "allow",

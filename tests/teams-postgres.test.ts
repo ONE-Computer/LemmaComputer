@@ -179,7 +179,8 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
       userId: memberId,
       removedBy: administratorId,
     }), true);
-    const financeHistory = (await first.getTeam(tenantId, finance.id))!.memberships;
+    const financeHistory = (await first.getTeam(tenantId, finance.id))!.memberships
+      .filter((membership) => membership.userId === memberId);
     assert.equal(financeHistory.length, 1);
     assert.ok(financeHistory[0]!.effectiveTo);
     assert.equal(financeHistory[0]!.isDefaultSpendingTeam, false);
@@ -293,7 +294,8 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
     ]);
     assert.equal(fallback.displayName, "Unallocated");
     assert.equal(fallback.isRolloutFallback, true);
-    assert.equal(administratorFallback.id, fallback.id);
+    assert.equal(administratorFallback.id, finance.id);
+    assert.equal(administratorFallback.isRolloutFallback, false);
     assert.equal((await pool.query(
       "SELECT id FROM allocation_units WHERE tenant_id=$1 AND is_rollout_fallback AND status='active'",
       [tenantId],

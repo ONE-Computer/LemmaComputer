@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import http.client
 import json
@@ -19,7 +20,8 @@ from urllib.parse import urlsplit
 
 UPSTREAM = urlsplit(os.environ["ONECOMPUTER_GATEWAY_UPSTREAM"])
 CREDENTIAL = os.environ["ONECOMPUTER_GATEWAY_CREDENTIAL"]
-MODEL_ALIAS = os.environ["ONECOMPUTER_MODEL_ALIAS"]
+MODEL_ALIAS = os.environ.get("ONECOMPUTER_TRANSPORT_MODEL_ALIAS", os.environ["ONECOMPUTER_MODEL_ALIAS"])
+DEFAULT_SERVICE_CLASS = os.environ.get("ONECOMPUTER_REQUESTED_SERVICE_CLASS", "auto")
 CONTROL = urlsplit(os.environ["ONECOMPUTER_CONTROL_UPSTREAM"])
 AGENT_BRIDGE_TOKEN = os.environ["ONECOMPUTER_AGENT_BRIDGE_TOKEN"]
 LISTEN_PORT = int(os.environ.get("ONECOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
@@ -37,7 +39,7 @@ UPLOAD_LOCK = threading.Lock()
 
 if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CREDENTIAL) < 24
         or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or len(AGENT_BRIDGE_TOKEN) < 24
-        or not MODEL_ALIAS_PATTERN.fullmatch(MODEL_ALIAS)
+        or not MODEL_ALIAS_PATTERN.fullmatch(MODEL_ALIAS) or DEFAULT_SERVICE_CLASS not in {"auto", "lite", "balanced", "pro"}
         or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}):
     raise SystemExit("invalid gateway broker configuration")
 
@@ -53,6 +55,22 @@ def task_service_class(task_binding: str) -> str:
     if requested not in {"auto", "lite", "balanced", "pro"}:
         raise ValueError("invalid AI task binding service class")
     return requested
+
+
+def issue_task_binding() -> str:
+    payload = json.dumps({"requestedServiceClass": DEFAULT_SERVICE_CLASS, "taskId": f"workspace-native:{uuid.uuid4()}"}, separators=(",", ":")).encode()
+    path = f"{CONTROL.path.rstrip("/")}/internal/v1/agent/usage-bindings"
+    target = CONTROL._replace(path=path, query="", fragment="").geturl()
+    request = urllib.request.Request(target, data=payload, method="POST", headers={
+        "authorization": f"Bearer {AGENT_BRIDGE_TOKEN}",
+        "content-type": "application/json",
+    })
+    with urllib.request.urlopen(request, timeout=10) as response:
+        document = json.loads(response.read())
+    binding = document.get("binding") if isinstance(document, dict) else None
+    if not isinstance(binding, str) or not TASK_BINDING_PATTERN.fullmatch(binding):
+        raise ValueError("invalid issued AI task binding")
+    return binding
 
 
 def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tuple[bytes, str]:
@@ -324,6 +342,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 task_binding = self.headers.get("x-onecomputer-ai-task-binding")
+                if task_binding is None and MODEL_ALIAS == "onecomputer-auto":
+                    task_binding = issue_task_binding()
                 if task_binding is not None and (
                     not 32 <= len(task_binding) <= 4096
                     or not TASK_BINDING_PATTERN.fullmatch(task_binding)
@@ -337,7 +357,7 @@ class Handler(BaseHTTPRequestHandler):
                         logged_model,
                         MODEL_ALIAS,
                     )
-            except (json.JSONDecodeError, ValueError) as error:
+            except (json.JSONDecodeError, ValueError, urllib.error.URLError) as error:
                 self.send_json(400, {"error": str(error)})
                 return
         headers = {

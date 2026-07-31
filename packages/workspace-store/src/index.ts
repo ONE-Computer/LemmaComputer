@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { activityEventSchema } from "@onecomputer/contracts";
-import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceState } from "@onecomputer/contracts";
+import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceRequestedServiceClass, WorkspaceState } from "@onecomputer/contracts";
 import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migrations.js";
 export * from "./identity-policy.js";
 export * from "./connector-registry.js";
@@ -36,6 +36,7 @@ export type SandboxSettingsRecord = {
   profileId: SandboxProfileId;
   applicationIds: SandboxApplicationId[];
   modelAlias: SandboxModelAlias;
+  requestedServiceClass: WorkspaceRequestedServiceClass;
   agentIds: AgentCatalogId[];
   updatedAt: Date;
 };
@@ -404,7 +405,7 @@ export interface WorkspaceStore {
   update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   remove(identity: IdentityContext, workspaceId: string): Promise<boolean>;
   getSandboxSettings?(identity: IdentityContext, grantId: string): Promise<SandboxSettingsRecord | null>;
-  saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
+  saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
   registerPolicyVerificationKeys?(keys: PolicyVerificationKey[]): Promise<void>;
 }
 
@@ -428,6 +429,7 @@ const mapSandboxSettingsRow = (row: Record<string, unknown>): SandboxSettingsRec
   profileId: String(row.profile_id) as SandboxProfileId,
   applicationIds: (Array.isArray(row.application_ids) ? row.application_ids : ["firefox"]) as SandboxApplicationId[],
   modelAlias: String(row.model_alias) as SandboxModelAlias,
+  requestedServiceClass: String(row.requested_service_class ?? "auto") as WorkspaceRequestedServiceClass,
   agentIds: (Array.isArray(row.agent_ids) ? row.agent_ids : ["claude-desktop", "hermes-claw"]) as AgentCatalogId[],
   updatedAt: new Date(String(row.updated_at)),
 });
@@ -863,14 +865,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return result.rowCount ? mapSandboxSettingsRow(result.rows[0]) : null;
   }
 
-  async saveSandboxSettings(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; agentIds: AgentCatalogId[] }) {
+  async saveSandboxSettings(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }) {
     const result = await this.pool.query(
-      `INSERT INTO sandbox_settings (tenant_id,subject_id,grant_id,profile_id,application_ids,model_alias,agent_ids,updated_at)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,now())
+      `INSERT INTO sandbox_settings (tenant_id,subject_id,grant_id,profile_id,application_ids,model_alias,requested_service_class,agent_ids,updated_at)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::jsonb,now())
        ON CONFLICT (tenant_id,subject_id,grant_id) DO UPDATE
-       SET profile_id=EXCLUDED.profile_id,application_ids=EXCLUDED.application_ids,model_alias=EXCLUDED.model_alias,agent_ids=EXCLUDED.agent_ids,updated_at=now()
+       SET profile_id=EXCLUDED.profile_id,application_ids=EXCLUDED.application_ids,model_alias=EXCLUDED.model_alias,requested_service_class=EXCLUDED.requested_service_class,agent_ids=EXCLUDED.agent_ids,updated_at=now()
        RETURNING *`,
-      [identity.tenantId, identity.subjectId, input.grantId, input.profileId, JSON.stringify(input.applicationIds), input.modelAlias, JSON.stringify(input.agentIds)],
+      [identity.tenantId, identity.subjectId, input.grantId, input.profileId, JSON.stringify(input.applicationIds), input.modelAlias, input.requestedServiceClass, JSON.stringify(input.agentIds)],
     );
     return mapSandboxSettingsRow(result.rows[0]);
   }

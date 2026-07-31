@@ -74,6 +74,13 @@ export const sandboxModelAliases = ["onecomputer-auto", "onecomputer-claude", "o
 export const sandboxModelAliasSchema = z.enum(sandboxModelAliases);
 export type SandboxModelAlias = z.infer<typeof sandboxModelAliasSchema>;
 
+// Workspaces expose stable product choices. The selected service class is
+// carried separately from the private gateway alias so provider/model swaps do
+// not rewrite workspace configuration or leak into managed clients.
+export const workspaceRequestedServiceClasses = ["auto", "lite", "balanced", "pro"] as const;
+export const workspaceRequestedServiceClassSchema = z.enum(workspaceRequestedServiceClasses);
+export type WorkspaceRequestedServiceClass = z.infer<typeof workspaceRequestedServiceClassSchema>;
+
 // This demo route intentionally has a small, reviewed allow-list. It is not
 // an arbitrary Bedrock pass-through: the only private deployment is a global
 // Claude Sonnet 4.5 inference profile routed through LiteLLM's Bedrock
@@ -491,6 +498,7 @@ export const sandboxConfigurationSchema = z.object({
   applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
   agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length),
   modelAlias: sandboxModelAliasSchema,
+  requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
   egress: runtimeEgressPolicySchema.nullable(),
 }).strict();
 export type SandboxConfiguration = z.infer<typeof sandboxConfigurationSchema>;
@@ -532,6 +540,7 @@ export const workspaceManifestSandboxSchema = z.object({
   applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
   agentIds: z.array(workspaceManifestAgentCatalogIdSchema).min(1).max(workspaceManifestAgentCatalogIds.length),
   modelAlias: sandboxModelAliasSchema,
+  requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
   egress: runtimeEgressPolicySchema.nullable(),
 }).strict();
 export type WorkspaceManifestSandbox = z.infer<typeof workspaceManifestSandboxSchema>;
@@ -583,10 +592,17 @@ export const sandboxSettingsSchema = z.object({
   profileId: sandboxProfileIdSchema,
   applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
   modelAlias: sandboxModelAliasSchema,
+  requestedServiceClass: workspaceRequestedServiceClassSchema,
+  routePreferenceMigrationRequired: z.boolean(),
   profile: sandboxProfileSchema,
   availableProfiles: z.array(sandboxProfileSchema).min(1),
   availableApplications: z.array(sandboxApplicationSchema).min(1),
   availableModels: z.array(z.object({ alias: sandboxModelAliasSchema, displayName: z.string().min(1), provider: z.string().min(1) })).min(1),
+  availableServiceClasses: z.array(z.object({
+    value: workspaceRequestedServiceClassSchema,
+    displayName: z.string().min(1),
+    description: z.string().min(1),
+  }).strict()).min(1),
   agentIds: z.array(agentCatalogIdSchema).min(1),
   availableAgents: z.array(agentCatalogEntrySchema).min(1),
   securityGroup: egressSecurityGroupVersionSchema.optional(),
@@ -601,7 +617,8 @@ export const saveSandboxSettingsSchema = z.object({
   grantId: z.string().min(1).max(128).default("personal"),
   profileId: sandboxProfileIdSchema,
   applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).default(["firefox"]),
-  modelAlias: sandboxModelAliasSchema,
+  modelAlias: sandboxModelAliasSchema.optional(),
+  requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
   agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length).refine(
     (ids) => new Set(ids).size === ids.length,
     "Agent selections must not contain duplicates",
@@ -763,6 +780,7 @@ export const runtimePolicySchema = z.object({
   clipboard: clipboardPolicySchema.optional(),
   modelAlias: z.string().min(1).max(128),
   mcpServer: z.string().min(1).max(128),
+  requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
   mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
   mcpToolPermissions: z.record(
@@ -866,6 +884,7 @@ export const controllerCreateSchema = z.object({
     baseUrl: z.url(),
     credential: z.string().min(24),
     modelAlias: z.string().min(1).max(128),
+    transportModelAlias: z.string().min(1).max(128),
     expiresAt: z.iso.datetime(),
   }).optional(),
   agentBridge: z.object({
@@ -883,6 +902,7 @@ export const controllerCreateSchema = z.object({
       baseUrl: z.url(),
       credential: z.string().min(24),
       modelAlias: z.string().min(1).max(128),
+      transportModelAlias: z.string().min(1).max(128),
       expiresAt: z.iso.datetime(),
     }),
     agentBridge: z.object({

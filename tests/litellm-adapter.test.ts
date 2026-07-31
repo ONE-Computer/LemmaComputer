@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { LiteLLMGatewayAdapter, tenantManagedModelAccessGroup,workspaceModelGrantProjection } from "@onecomputer/litellm-adapter";
+import { LiteLLMGatewayAdapter, tenantManagedModelAccessGroup, workspaceModelGrantProjection } from "@onecomputer/litellm-adapter";
 
 const identity = { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" as const };
 
@@ -22,20 +22,26 @@ test("workspace credentials are deterministic, scoped by workspace, and not the 
   assert.match(first, /^sk-ocw-[A-Za-z0-9_-]+$/);
 });
 
-test("governed routing grants only the synthetic Auto alias",()=>{
-  const projection=workspaceModelGrantProjection("tenant-a","onecomputer-auto");
-  assert.deepEqual(projection.grantModels,["onecomputer-auto"]);
-  assert.equal(projection.clientModelAlias,"onecomputer-auto");
-  assert.equal(projection.providerAccessGroup,null);
-  assert.equal(projection.grantModels.some((model)=>model.includes("bedrock")||model.includes("openai")||model.includes("anthropic")),false);
+test("governed routing grants only the synthetic Auto alias", () => {
+  const projection = workspaceModelGrantProjection("tenant-a", "onecomputer-auto");
+  assert.deepEqual(projection.grantModels, ["onecomputer-auto"]);
+  assert.equal(projection.clientModelAlias, "onecomputer-auto");
+  assert.equal(projection.providerAccessGroup, null);
+  assert.equal(projection.grantModels.some((model) => model.includes("bedrock") || model.includes("openai") || model.includes("anthropic")), false);
+});
+test("Claude clients keep a compatible model name while governed routing uses Auto transport", () => {
+  const projection = workspaceModelGrantProjection("tenant-a", "onecomputer-auto", { agentProfile: "claude-cli-managed-v1" } as never);
+  assert.equal(projection.clientModelAlias, "claude-sonnet-4-6");
+  assert.equal(projection.transportModelAlias, "onecomputer-auto");
+  assert.deepEqual(projection.grantModels, ["onecomputer-auto"]);
 });
 
 test("gateway identity separates OAuth owner, agent actor, and workspace", () => {
   const sameUser = adapter.userIdFor(identity);
   assert.equal(sameUser, adapter.userIdFor(identity));
-  assert.notEqual(sameUser, adapter.userIdFor({ ...identity, subjectId: "another-user" }));
   assert.notEqual(sameUser, adapter.userIdFor({ ...identity, tenantId: "another-tenant" }));
   assert.notEqual(adapter.agentIdFor("workspace-a", "research"), adapter.agentIdFor("workspace-a", "calendar"));
+  assert.notEqual(sameUser, adapter.userIdFor({ ...identity, subjectId: "another-user" }));
   assert.notEqual(adapter.agentIdFor("workspace-a", "research"), adapter.agentIdFor("workspace-b", "research"));
   assert.notEqual(adapter.credentialFor("workspace-a", "research"), adapter.credentialFor("workspace-a", "calendar"));
   const rotatedCredentialAdapter = new LiteLLMGatewayAdapter({
@@ -1255,6 +1261,7 @@ test("a legacy budgeted workspace key is replaced so the cap cannot survive reco
 
 test("availability check exposes safe route usage without sending a prompt", async () => {
   const requests: string[] = [];
+  let connectorAvailable = true;
   const liveAdapter = new LiteLLMGatewayAdapter({
     adminUrl: "http://unused",
     workspaceUrl: "http://unused",
@@ -1270,6 +1277,11 @@ test("availability check exposes safe route usage without sending a prompt", asy
       return;
     }
     if (request.url === "/mcp-rest/tools/list") {
+      if (!connectorAvailable) {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ error: "connector authorization expired" }));
+        return;
+      }
       response.end(JSON.stringify({
         tools: [
           { name: "search_files", description: "Search assigned files" },
@@ -1315,6 +1327,10 @@ test("availability check exposes safe route usage without sending a prompt", asy
     assert.equal(result.modelRoute.capabilities.vision, true);
     assert.equal(result.modelRoute.limits.tokensPerMinute, null);
     assert.equal(result.tools.length, 2);
+    connectorAvailable = false;
+    const modelOnlyResult = await routedAdapter.test("workspace-a");
+    assert.equal(modelOnlyResult.availability, "ready");
+    assert.deepEqual(modelOnlyResult.tools, []);
     assert.ok(!requests.includes("/v1/chat/completions"));
     assert.ok(!JSON.stringify(result).includes("gpt-"));
   } finally {

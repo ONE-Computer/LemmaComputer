@@ -89,11 +89,19 @@ const sandboxProfiles = [
 ] as const;
 
 const sandboxModels = [
+  { alias: "onecomputer-auto", displayName: "Governed routing", provider: "ONEComputer" },
   { alias: "onecomputer-claude", displayName: "Claude", provider: "Anthropic" },
   { alias: "onecomputer-openai", displayName: "OpenAI", provider: "OpenAI" },
   { alias: "onecomputer-glm", displayName: "GLM", provider: "Z.ai" },
   { alias: "onecomputer-bedrock", displayName: "Claude Sonnet 4.5", provider: "Amazon Bedrock" },
   { alias: "onecomputer-assistant", displayName: "Standard route (legacy)", provider: "OpenAI" },
+] as const;
+
+const workspaceServiceClasses = [
+  { value: "auto", displayName: "Auto", description: "ONEComputer chooses the best eligible tier for each task." },
+  { value: "lite", displayName: "Lite", description: "Fast, economical work." },
+  { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
+  { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },
 ] as const;
 
 const sandboxApplications = [
@@ -313,6 +321,7 @@ export function createControlServer(
     applications: ["firefox"],
     networkProfile: "controlled-egress-v1",
     modelAlias: "onecomputer-assistant",
+    requestedServiceClass: "auto",
     mcpServer: "onecomputer_fixture",
     allowedTools: ["search_files"],
     toolPolicies: { search_files: "allow" },
@@ -462,6 +471,7 @@ export function createControlServer(
       applicationIds: configuration.applicationIds,
       agentIds: configuration.agentIds.map(workspaceManifestAgentIdFor),
       modelAlias: configuration.modelAlias,
+      requestedServiceClass: configuration.requestedServiceClass,
       egress: configuration.egress,
     },
     channels: telegram?.state === "connected"
@@ -520,6 +530,7 @@ export function createControlServer(
       || request.url.startsWith("/internal/v1/agent/uploads")
       || request.url.startsWith("/internal/v1/agent/deletions")
       || request.url.startsWith("/internal/v1/agent/sites")
+      || request.url.startsWith("/internal/v1/agent/usage-bindings")
     ) {
       const authorization = request.headers.authorization;
       const value = Array.isArray(authorization) ? authorization[0] : authorization;
@@ -578,14 +589,17 @@ export function createControlServer(
       const workspaceEgress = await workspaceEgressFor(value, effective, grantId);
       const document = effective.document as Record<string, unknown>;
       const availableAgentIds = assignedAgentIds(document);
-      policy = runtimePolicyFor(
-        effective,
-        saved?.modelAlias,
-        saved?.profileId,
-        saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
-        saved?.applicationIds ?? defaultApplicationIds(document),
-        workspaceEgress,
-      );
+      policy = {
+        ...runtimePolicyFor(
+          effective,
+          saved?.modelAlias,
+          saved?.profileId,
+          saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
+          saved?.applicationIds ?? defaultApplicationIds(document),
+          workspaceEgress,
+        ),
+        requestedServiceClass: saved?.requestedServiceClass ?? "auto",
+      };
     }
     return {
       principal: value,
@@ -911,6 +925,24 @@ export function createControlServer(
     const input = executeScheduleRunSchema.parse(request.body ?? {});
     return requireSchedules().executeClaimed(input.runId, input.leaseToken);
   });
+  app.post("/internal/v1/agent/usage-bindings", async (request) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const input = z.strictObject({
+      requestedServiceClass: z.enum(["auto", "lite", "balanced", "pro"]),
+      taskId: z.string().min(1).max(256),
+    }).parse(request.body ?? {});
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" as const };
+    const { policy } = await channelPolicy(owner, actor.workspaceId);
+    const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
+    if (actor.policyHash !== policy.policyHash || !allowedAgentIds.has(actor.agentId)) {
+      throw new OneComputerError("AI_USAGE_TASK_BINDING_MISMATCH", "The route preference is not assigned to this workspace agent", 403);
+    }
+    const binding = issueUsageTaskBinding(owner, actor.workspaceId, actor.agentId, "background", input.taskId, undefined, undefined, input.requestedServiceClass);
+    if (!binding) throw new OneComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
+    return { binding };
+  });
+
   app.post("/internal/v1/agent/sites", { bodyLimit: 800 * 1024 }, async (request, reply) => {
     const actor = agentPrincipals.get(request);
     if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
@@ -1751,14 +1783,17 @@ export function createControlServer(
     const availableProfiles = sandboxProfiles.filter((profile) => assignedProfiles.includes(profile.id));
     const assignedApplications = assignedApplicationIds(document);
     const availableApplications = sandboxApplications.filter((application) => assignedApplications.includes(application.id));
-    const availableModels = sandboxModels.filter((model) => assignedModels.includes(model.alias));
+    const routeMapping = await security.routingStore?.latestMappingVersion(actor.tenantId);
+    const governedRoutingAvailable = ["lite", "balanced", "pro"].every((serviceClass) => routeMapping?.deployments.some((deployment) => deployment.serviceClass === serviceClass));
+    const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "onecomputer-auto" : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
     if (!availableProfiles.length || !availableModels.length || !availableAgents.length) throw new OneComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, or agent", 500);
     if (!availableApplications.length) throw new OneComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const profileId = saved && availableProfiles.some((profile) => profile.id === saved.profileId) ? saved.profileId : availableProfiles[0]!.id;
     const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
-    const modelAlias = saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
+    const modelAlias = governedRoutingAvailable ? "onecomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
+    const requestedServiceClass = governedRoutingAvailable ? saved?.requestedServiceClass ?? "auto" : "auto";
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
@@ -1778,6 +1813,7 @@ export function createControlServer(
       applicationIds: selectedApplicationIds,
       agentIds: selectedAgentIds,
       modelAlias,
+      requestedServiceClass,
       egress: egress ?? null,
     });
     const current = await store.getCurrent(actor.identity, grantId);
@@ -1789,10 +1825,13 @@ export function createControlServer(
       profileId,
       applicationIds: selectedApplicationIds,
       modelAlias,
+      requestedServiceClass,
+      routePreferenceMigrationRequired: governedRoutingAvailable && saved?.modelAlias !== "onecomputer-auto",
       profile: availableProfiles.find((profile) => profile.id === profileId),
       availableProfiles,
       availableApplications,
       availableModels,
+      availableServiceClasses: governedRoutingAvailable ? workspaceServiceClasses : workspaceServiceClasses.slice(0, 1),
       agentIds: selectedAgentIds,
       availableAgents,
       ...(workspaceEgress ? { securityGroup: workspaceEgress } : {}),
@@ -1813,10 +1852,13 @@ export function createControlServer(
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
     const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
+    const routeMapping = await security.routingStore?.latestMappingVersion(actor.tenantId);
+    const governedRoutingAvailable = ["lite", "balanced", "pro"].every((serviceClass) => routeMapping?.deployments.some((deployment) => deployment.serviceClass === serviceClass));
+    const modelAlias = governedRoutingAvailable ? "onecomputer-auto" : input.modelAlias;
     const agents = Array.isArray(document.agents) ? document.agents : ownedAgentCatalog.map((agent) => agent.id);
     if (!profiles.includes(input.profileId)) throw new OneComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new OneComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
-    if (!models.includes(input.modelAlias)) throw new OneComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
+    if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new OneComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
     if (input.agentIds.some((id) => !agents.includes(id))) throw new OneComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
     const current = await store.getCurrent(actor.identity, input.grantId);
     if (current && !["not_created", "stopped", "failed"].includes(current.state)) throw new OneComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop the workspace before changing its profile or model route", 409, true);
@@ -1824,7 +1866,8 @@ export function createControlServer(
       grantId: input.grantId,
       profileId: input.profileId as SandboxProfileId,
       applicationIds: input.applicationIds,
-      modelAlias: input.modelAlias as SandboxModelAlias,
+      modelAlias: modelAlias as SandboxModelAlias,
+      requestedServiceClass: input.requestedServiceClass,
       agentIds: input.agentIds,
     });
     return sandboxSettingsFor(actor, effective, input.grantId, includeAdministratorOptions);

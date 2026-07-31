@@ -457,7 +457,7 @@ test(
         ],
       );
       assert.equal(
-        effectiveAfterFailure?.policy.deployments[0]?.healthy,
+        effectiveAfterFailure?.policy.deployments.find((item) => item.id === deployment)?.healthy,
         false,
       );
       await assert.rejects(

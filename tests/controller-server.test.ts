@@ -132,6 +132,7 @@ test("controller passes a validated scoped gateway grant to the sandbox adapter"
         baseUrl: "http://litellm:4000",
         credential: "sk-scoped-controller-test-000001",
         modelAlias: "onecomputer-assistant",
+        transportModelAlias: "onecomputer-assistant",
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
       },
       agentBridge: {
@@ -159,6 +160,7 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
       baseUrl: "http://litellm:4000",
       credential: "sk-scoped-controller-test-000001",
       modelAlias: "onecomputer-assistant",
+      transportModelAlias: "onecomputer-assistant",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     },
     agentBridge: {

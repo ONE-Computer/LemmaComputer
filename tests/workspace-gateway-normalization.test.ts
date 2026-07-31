@@ -120,6 +120,7 @@ const availableBrokerPort = async () => {
 };
 
 test("the loopback broker forwards only the assigned model, scoped credential, and broker-owned task binding", async () => {
+  let bindingRequests = 0;
   let received: {
     url?: string;
     authorization?: string;
@@ -130,6 +131,15 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    if (request.url === "/internal/v1/agent/usage-bindings") {
+      bindingRequests += 1;
+      const bindingRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      assert.equal(bindingRequest.requestedServiceClass, "lite");
+      assert.match(bindingRequest.taskId, /^workspace-native:/);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ binding: taskBinding("lite") }));
+      return;
+    }
     received = {
       url: request.url,
       authorization: request.headers.authorization,
@@ -148,7 +158,9 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       ...process.env,
       ONECOMPUTER_GATEWAY_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
       ONECOMPUTER_GATEWAY_CREDENTIAL: "scoped-credential-at-least-24-characters",
-      ONECOMPUTER_MODEL_ALIAS: "claude-opus-4-6",
+      ONECOMPUTER_MODEL_ALIAS: "claude-sonnet-4-6",
+      ONECOMPUTER_TRANSPORT_MODEL_ALIAS: "onecomputer-auto",
+      ONECOMPUTER_REQUESTED_SERVICE_CLASS: "lite",
       ONECOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
       ONECOMPUTER_AGENT_BRIDGE_TOKEN: "bridge-token-at-least-24-characters",
       ONECOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
@@ -173,7 +185,6 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       headers: {
         "content-type": "application/json",
         "x-api-key": "client-supplied-key",
-        "x-onecomputer-ai-task-binding": taskBinding("lite"),
       },
       body: JSON.stringify({
         model: "do-not-log\nsecret-value",
@@ -187,11 +198,12 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       }),
     });
     assert.equal(response.status, 200, await response.text());
+    assert.equal(bindingRequests, 1);
     assert.equal(received.url, "/v1/messages");
     assert.equal(received.authorization, "Bearer scoped-credential-at-least-24-characters");
     assert.equal(received.apiKey, undefined);
     assert.equal(received.taskBindingHeader, undefined);
-    assert.equal(received.body?.model, "claude-opus-4-6");
+    assert.equal(received.body?.model, "onecomputer-auto");
     assert.deepEqual(received.body?.metadata, {
       customer_tag: "preserved",
       onecomputer_task_binding: taskBinding("lite"),

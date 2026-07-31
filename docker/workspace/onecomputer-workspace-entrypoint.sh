@@ -590,11 +590,15 @@ start_agent_broker() {
   local control_variable="${prefix}_CONTROL_UPSTREAM"
   local bridge_variable="${prefix}_AGENT_BRIDGE_TOKEN"
   local model_variable="${prefix}_MODEL_ALIAS"
+  local transport_model_variable="${prefix}_TRANSPORT_MODEL_ALIAS"
+  local service_class_variable="${prefix}_REQUESTED_SERVICE_CLASS"
   env -i \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     ONECOMPUTER_GATEWAY_UPSTREAM="${!upstream_variable}" \
     ONECOMPUTER_GATEWAY_CREDENTIAL="${!credential_variable}" \
     ONECOMPUTER_MODEL_ALIAS="${!model_variable}" \
+    ONECOMPUTER_TRANSPORT_MODEL_ALIAS="${!transport_model_variable}" \
+    ONECOMPUTER_REQUESTED_SERVICE_CLASS="${!service_class_variable}" \
     ONECOMPUTER_CONTROL_UPSTREAM="${!control_variable}" \
     ONECOMPUTER_AGENT_BRIDGE_TOKEN="${!bridge_variable}" \
     ONECOMPUTER_GATEWAY_LISTEN_PORT="$port" \

@@ -47,6 +47,7 @@ export type SandboxCreateInput = {
     baseUrl: string;
     credential: string;
     modelAlias: string;
+    transportModelAlias: string;
     expiresAt: string;
   };
   agentBridge?: {
@@ -64,6 +65,7 @@ export type SandboxCreateInput = {
       baseUrl: string;
       credential: string;
       modelAlias: string;
+      transportModelAlias: string;
       expiresAt: string;
     };
     agentBridge: {
@@ -126,6 +128,8 @@ const agentEnvironment = (
     `${prefix}_GATEWAY_UPSTREAM=${grant.gateway.baseUrl}`,
     `${prefix}_GATEWAY_CREDENTIAL=${grant.gateway.credential}`,
     `${prefix}_MODEL_ALIAS=${grant.gateway.modelAlias}`,
+    `${prefix}_TRANSPORT_MODEL_ALIAS=${grant.gateway.transportModelAlias}`,
+    `${prefix}_REQUESTED_SERVICE_CLASS=${policy.requestedServiceClass}`,
     `${prefix}_AGENT_ID=${grant.agentId}`,
     `${prefix}_CONTROL_UPSTREAM=${grant.agentBridge.baseUrl}`,
     `${prefix}_AGENT_BRIDGE_TOKEN=${grant.agentBridge.token}`,
@@ -406,6 +410,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
           `ONECOMPUTER_GATEWAY_UPSTREAM=${input.gateway.baseUrl}`,
           `ONECOMPUTER_GATEWAY_CREDENTIAL=${input.gateway.credential}`,
           `ONECOMPUTER_MODEL_ALIAS=${input.gateway.modelAlias}`,
+          `ONECOMPUTER_TRANSPORT_MODEL_ALIAS=${input.gateway.transportModelAlias}`,
+          `ONECOMPUTER_REQUESTED_SERVICE_CLASS=${input.policy.requestedServiceClass}`,
           `ONECOMPUTER_AGENT_ID=${input.policy.agentId}`,
           `ONECOMPUTER_POLICY_VERSION=${input.policy.policyVersion}`,
           `ONECOMPUTER_POLICY_HASH=${input.policy.policyHash}`,

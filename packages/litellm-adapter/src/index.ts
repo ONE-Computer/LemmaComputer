@@ -18,6 +18,7 @@ export type GatewayGrant = {
   baseUrl: string;
   credential: string;
   modelAlias: string;
+  transportModelAlias: string;
   expiresAt: string;
 };
 
@@ -207,7 +208,7 @@ const BEDROCK_ROUTE_TIMEOUT_SECONDS = 60;
 const BEDROCK_ROUTE_MAX_RETRIES = 2;
 
 const desktopTransportAliases: Record<string, string> = {
-  "onecomputer-auto": "onecomputer-auto",
+  "onecomputer-auto": "claude-sonnet-4-6",
   "onecomputer-claude": "claude-sonnet-4-6",
   "onecomputer-openai": "claude-opus-4-6",
   "onecomputer-glm": "claude-sonnet-4-5",
@@ -223,10 +224,13 @@ const desktopModelAlias = (modelAlias: string, policy?: RuntimePolicy) => {
 
 export const workspaceModelGrantProjection = (tenantId: string, modelAlias: string, policy?: RuntimePolicy) => {
   const clientModelAlias = desktopModelAlias(modelAlias, policy);
-  if (clientModelAlias === "onecomputer-auto") return { clientModelAlias,providerAccessGroup:null,grantModels:["onecomputer-auto"] };
+  const transportModelAlias = modelAlias === "onecomputer-auto" ? "onecomputer-auto" : clientModelAlias;
+  if (transportModelAlias === "onecomputer-auto") {
+    return { clientModelAlias, transportModelAlias, providerAccessGroup: null, grantModels: ["onecomputer-auto"] };
+  }
   const managedProvider = managedProviderForAlias(clientModelAlias);
   const providerAccessGroup = managedProvider ? tenantManagedModelAccessGroup(tenantId, clientModelAlias) : null;
-  return { clientModelAlias,providerAccessGroup,grantModels:providerAccessGroup ? [providerAccessGroup] : [clientModelAlias] };
+  return { clientModelAlias, transportModelAlias, providerAccessGroup, grantModels: providerAccessGroup ? [providerAccessGroup] : [clientModelAlias] };
 };
 
 export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecutor, OAuthConnectionGateway, McpConnectorAdministrationGateway, BedrockApiKeyRouteGateway {
@@ -239,7 +243,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   private readonly workspaceGrantTtlMs: number;
   private readonly workspaceGrantRenewalMs: number;
   private readonly connectionGrantTtlMs: number;
-  private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string; modelAlias: string }>();
+  private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string; modelAlias: string; transportModelAlias: string }>();
   private readonly modelCapabilityStates = new Map<string, { expiresAt: number; capabilities: GatewayModelCapabilities }>();
   private readonly oauthClientRegistrationStates = new Map<string, Promise<string | null>>();
 
@@ -720,7 +724,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async ensureGrant(input: { workspaceId: string; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant> {
     const agentId = input.policy?.agentId ?? input.agentId;
     const modelAlias = input.policy?.modelAlias ?? this.modelAlias;
-    const {clientModelAlias,providerAccessGroup,grantModels}=workspaceModelGrantProjection(input.identity.tenantId,modelAlias,input.policy);
+    const { clientModelAlias, transportModelAlias, providerAccessGroup, grantModels } = workspaceModelGrantProjection(
+      input.identity.tenantId,
+      modelAlias,
+      input.policy,
+    );
     const mcpServer = input.policy?.mcpServer ?? this.mcpServer;
     const allowedTools = input.policy?.allowedTools ?? this.allowedTools;
     const mcpServers = input.policy?.mcpServers ?? [mcpServer];
@@ -730,6 +738,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       modelAlias,
       clientModelAlias,
       grantModels,
+      transportModelAlias,
       mcpServer,
       allowedTools,
       mcpServers,
@@ -743,7 +752,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const gatewayAgentId = this.agentIdFor(input.workspaceId, agentId);
     const cached = this.workspaceGrantStates.get(credential);
     if (cached && cached.projection === projection && cached.expiresAt > Date.now() + this.workspaceGrantRenewalMs) {
-      return { baseUrl: this.workspaceUrl, credential, modelAlias: cached.modelAlias, expiresAt: new Date(cached.expiresAt).toISOString() };
+      return { baseUrl: this.workspaceUrl, credential, modelAlias: cached.modelAlias, transportModelAlias: cached.transportModelAlias, expiresAt: new Date(cached.expiresAt).toISOString() };
     }
     const expiresAt = new Date(Date.now() + this.workspaceGrantTtlMs);
     const durationSeconds = Math.max(60, Math.ceil(this.workspaceGrantTtlMs / 1_000));
@@ -765,7 +774,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         onecomputer_policy_model_alias: modelAlias,
         onecomputer_client_model_alias: clientModelAlias,
         onecomputer_provider_access_group: providerAccessGroup,
-        onecomputer_governed_routing: clientModelAlias === "onecomputer-auto",
+        onecomputer_governed_routing: transportModelAlias === "onecomputer-auto",
         ...(input.policy ? {
           onecomputer_policy_version_id: input.policy.policyVersionId,
           onecomputer_policy_version: input.policy.policyVersion,
@@ -845,7 +854,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         || !available.ok
         || !identityMatches(verifiedKey)
         || !modelProjectionMatches(verifiedKey)
-        || !modelIds.includes(clientModelAlias)
+        || !modelIds.includes(transportModelAlias)
       ) {
         await this.adminCall("/key/delete", {
           method: "POST",
@@ -860,8 +869,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         );
       }
     }
-    this.workspaceGrantStates.set(credential, { expiresAt: expiresAt.getTime(), projection, modelAlias: clientModelAlias });
-    return { baseUrl: this.workspaceUrl, credential, modelAlias: clientModelAlias, expiresAt: expiresAt.toISOString() };
+    this.workspaceGrantStates.set(credential, { expiresAt: expiresAt.getTime(), projection, modelAlias: clientModelAlias, transportModelAlias });
+    return { baseUrl: this.workspaceUrl, credential, modelAlias: clientModelAlias, transportModelAlias, expiresAt: expiresAt.toISOString() };
   }
 
   async readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayReadiness> {
@@ -869,7 +878,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const modelAlias = policy?.modelAlias ?? this.modelAlias;
     const allowedTools = policy?.allowedTools ?? this.allowedTools;
     const credential = this.credentialFor(workspaceId, effectiveAgentId);
-    const gatewayModelAlias = this.workspaceGrantStates.get(credential)?.modelAlias ?? desktopModelAlias(modelAlias, policy);
+    const gatewayModelAlias = this.workspaceGrantStates.get(credential)?.transportModelAlias ?? (modelAlias === "onecomputer-auto" ? "onecomputer-auto" : desktopModelAlias(modelAlias, policy));
     const [models, tools, modelRoute] = await Promise.all([
       this.dataCall("/v1/models", credential),
       this.dataCall("/mcp-rest/tools/list", credential),
@@ -1183,8 +1192,9 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       this.dataCall("/mcp-rest/tools/list", credential),
     ]);
     if (readiness.models !== "ready" || !readiness.modelRoute) throw new OneComputerError("MODEL_ROUTE_FAILED", "The assigned model route is unavailable", 502, true);
-    if (!toolList.ok) throw this.upstreamError("MCP_DISCOVERY_FAILED", toolList.status, toolList.payload);
-    const tools = Array.isArray(asObject(toolList.payload).tools)
+    // Model routing and optional MCP connectors have independent health. A stale
+    // or disconnected connector must not make a working model gateway look down.
+    const tools = toolList.ok && Array.isArray(asObject(toolList.payload).tools)
       ? (asObject(toolList.payload).tools as unknown[]).map((item) => {
           const tool = asObject(item);
           return { name: String(tool.name ?? ""), description: String(tool.description ?? "") };

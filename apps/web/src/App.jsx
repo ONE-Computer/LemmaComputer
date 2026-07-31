@@ -1297,6 +1297,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState("");
+  const [requestedServiceClass, setRequestedServiceClass] = useState("auto");
   const [agentIds, setAgentIds] = useState([]);
   const [securityGroupVersionId, setSecurityGroupVersionId] = useState("");
 
@@ -1305,17 +1306,21 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
     setProfileId(settings.profileId);
     setApplicationIds(settings.applicationIds);
     setModelAlias(settings.modelAlias);
+    setRequestedServiceClass(settings.requestedServiceClass);
     setAgentIds(settings.agentIds);
     setSecurityGroupVersionId(settings.securityGroup?.id ?? settings.availableSecurityGroups?.find((group) => group.isDefault)?.id ?? "");
-  }, [settings?.profileId, settings?.applicationIds, settings?.modelAlias, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
+  }, [settings?.profileId, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
 
   const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
   const creatingWorkspace = !selectedWorkspace;
   const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedWorkspace?.state);
   const dirty = settings && (
+    settings.routePreferenceMigrationRequired
+    ||
     profileId !== settings.profileId
     || applicationIds.join(",") !== settings.applicationIds.join(",")
     || modelAlias !== settings.modelAlias
+    || requestedServiceClass !== settings.requestedServiceClass
     || agentIds.join(",") !== settings.agentIds.join(",")
     || (creatingWorkspace && securityGroupVersionId !== (settings.securityGroup?.id ?? ""))
   );
@@ -1341,7 +1346,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       </header>
       {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong>{error}</span></div>}
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
-        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, agentIds, securityGroupVersionId }); }}>
+        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, requestedServiceClass, agentIds, securityGroupVersionId }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>Choose a restricted organization workspace or an open workspace for non-sensitive work. This does not choose your AI agent.</p></span></div>
             <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{settings.availableProfiles.map((profile) => {
@@ -1394,8 +1399,8 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
           />}
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">AI model</h2><p>The selected model route is delivered through each agent’s own LiteLLM grant. Provider credentials remain outside the workspace.</p></span></div>
-            <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{settings.availableModels.map((model) => <label className={modelAlias === model.alias ? "selected" : ""} key={model.alias}><input type="radio" name="model" value={model.alias} checked={modelAlias === model.alias} onChange={() => setModelAlias(model.alias)} /><span><strong>{model.displayName}</strong><small>{model.provider} through ONEComputer</small></span>{modelAlias === model.alias && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">Model route</h2><p>Choose a stable capability tier. Administrators can change the provider and model behind it without changing this workspace.</p></span></div>
+            <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{settings.availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
           </section>
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">

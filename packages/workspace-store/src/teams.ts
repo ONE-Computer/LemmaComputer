@@ -171,6 +171,21 @@ export class PostgresTeamStore implements TeamStore {
           input.createdBy,
         ],
       );
+      const assignedAt = new Date();
+      await client.query(
+        `INSERT INTO allocation_memberships (id,tenant_id,allocation_unit_id,user_id,effective_from,assigned_by)
+         VALUES ($1,$2,$3,$4,$5,$4)`,
+        [randomUUID(), input.tenantId, teamId, input.ownerUserId, assignedAt],
+      );
+      await client.query(
+        `INSERT INTO default_spending_team_assignments (id,tenant_id,allocation_unit_id,user_id,effective_from,assigned_by)
+         SELECT $1,$2,$3,$4,$5,$4
+         WHERE NOT EXISTS (
+           SELECT 1 FROM default_spending_team_assignments
+           WHERE tenant_id=$2 AND user_id=$4 AND effective_to IS NULL
+         )`,
+        [randomUUID(), input.tenantId, teamId, input.ownerUserId, assignedAt],
+      );
       await this.audit(client, input.tenantId, input.createdBy, "team.created", "team", teamId, {
         changedFields: ["displayName", "description", "ownerUserId", "costCenterCode"],
       });
