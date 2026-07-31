@@ -647,6 +647,76 @@ export const identityContextSchema = z.object({
 });
 export type IdentityContext = z.infer<typeof identityContextSchema>;
 
+export const teamStatusSchema = z.enum(["active", "archived"]);
+export type TeamStatus = z.infer<typeof teamStatusSchema>;
+
+export const teamSummarySchema = z.strictObject({
+  id: z.uuid(),
+  displayName: z.string().trim().min(1).max(120),
+  description: z.string().max(500),
+  ownerUserId: z.string().min(1).max(200),
+  costCenterCode: z.string().trim().min(1).max(80).nullable(),
+  status: teamStatusSchema,
+  isRolloutFallback: z.boolean(),
+  activeMemberCount: z.number().int().nonnegative(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  archivedAt: z.iso.datetime().nullable(),
+});
+export type TeamSummary = z.infer<typeof teamSummarySchema>;
+
+export const teamMembershipSchema = z.strictObject({
+  id: z.uuid(),
+  teamId: z.uuid(),
+  userId: z.string().min(1).max(200),
+  effectiveFrom: z.iso.datetime(),
+  effectiveTo: z.iso.datetime().nullable(),
+  isDefaultSpendingTeam: z.boolean(),
+});
+export type TeamMembership = z.infer<typeof teamMembershipSchema>;
+
+export const teamDetailSchema = teamSummarySchema.extend({
+  memberships: z.array(teamMembershipSchema),
+});
+export type TeamDetail = z.infer<typeof teamDetailSchema>;
+
+export const minimalSpendingTeamSchema = z.strictObject({
+  id: z.uuid(),
+  displayName: z.string().min(1).max(120),
+  costCenterCode: z.string().min(1).max(80).nullable(),
+  isRolloutFallback: z.boolean(),
+});
+export type MinimalSpendingTeam = z.infer<typeof minimalSpendingTeamSchema>;
+
+export const createTeamSchema = z.strictObject({
+  displayName: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).default(""),
+  ownerUserId: z.string().trim().min(1).max(200),
+  costCenterCode: z.string().trim().min(1).max(80).nullable().optional(),
+});
+export type CreateTeam = z.infer<typeof createTeamSchema>;
+
+export const updateTeamSchema = z.strictObject({
+  displayName: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(500).optional(),
+  ownerUserId: z.string().trim().min(1).max(200).optional(),
+  costCenterCode: z.string().trim().min(1).max(80).nullable().optional(),
+}).refine((value) => Object.keys(value).length > 0, "At least one Team field is required");
+export type UpdateTeam = z.infer<typeof updateTeamSchema>;
+
+export const assignTeamMembershipSchema = z.strictObject({
+  userId: z.string().trim().min(1).max(200),
+  effectiveFrom: z.iso.datetime().optional(),
+  makeDefault: z.boolean().default(false),
+});
+export type AssignTeamMembership = z.infer<typeof assignTeamMembershipSchema>;
+
+export const setDefaultSpendingTeamSchema = z.strictObject({
+  userId: z.string().trim().min(1).max(200),
+  effectiveFrom: z.iso.datetime().optional(),
+});
+export type SetDefaultSpendingTeam = z.infer<typeof setDefaultSpendingTeamSchema>;
+
 export const runtimeAgentPolicySchema = z.object({
   catalogId: agentCatalogIdSchema,
   agentId: z.string().min(1).max(128),

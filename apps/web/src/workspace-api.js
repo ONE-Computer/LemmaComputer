@@ -173,6 +173,14 @@ export const authApi = {
 
 export const adminApi = {
   users: () => request("/api/v1/admin/users"),
+  teams: (includeArchived = true) => request(`/api/v1/admin/teams?${new URLSearchParams({ includeArchived: String(includeArchived) })}`, { cache: "no-store" }),
+  team: (teamId) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}`, { cache: "no-store" }),
+  createTeam: (input) => request("/api/v1/admin/teams", mutation("POST", input)),
+  updateTeam: (teamId, input) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}`, mutation("PATCH", input)),
+  archiveTeam: (teamId) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}/archive`, mutation()),
+  assignTeamMembership: (teamId, userId, makeDefault = false) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}/memberships`, mutation("POST", { userId, makeDefault })),
+  removeTeamMembership: (teamId, userId) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}/memberships/${encodeURIComponent(userId)}`, mutation("DELETE")),
+  setDefaultSpendingTeam: (teamId, userId) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}/default`, mutation("PUT", { userId })),
   setUserStatus: (userId, status) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/status`, mutation("PATCH", { status })),
   revokeUserSessions: (userId) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/sessions/revoke`, mutation()),
   assignPolicy: (userId) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/policy`, mutation()),
