@@ -23,7 +23,36 @@ test("administrator can inspect alias mappings, pricing coverage, and supported 
 
   await page.getByRole("button", { name: "Create draft" }).click();
   const mappingEditor = page.getByRole("dialog", { name: "Create a mapping draft" });
+  await mappingEditor.getByLabel("Mapping revision note").fill("init");
+  await expect(mappingEditor.getByText("4 more characters needed.")).toBeVisible();
+  await expect(mappingEditor.getByText("Add 4 more characters to the revision note to save this draft.")).toBeVisible();
+  await expect(mappingEditor.getByRole("button", { name: "Save local draft" })).toBeDisabled();
   await mappingEditor.getByLabel("Mapping revision note").fill("Move Lite to the reviewed Luna v2 deployment.");
+  await expect(mappingEditor.getByRole("button", { name: "Save local draft" })).toBeEnabled();
+
+  const revisionField = await mappingEditor.locator(".route-revision-field").boundingBox();
+  const mappingList = await mappingEditor.locator(".route-mapping-editor-list").boundingBox();
+  const mappingRows = mappingEditor.locator(".route-mapping-editor-row");
+  const firstRow = await mappingRows.nth(0).boundingBox();
+  const secondRow = await mappingRows.nth(1).boundingBox();
+  const routeWarning = await mappingEditor.locator(".route-editor-warning").boundingBox();
+  const modalActions = await mappingEditor.locator(".modal-actions").boundingBox();
+  const firstProviderField = await mappingRows.nth(0).locator(".modal-field").nth(0).boundingBox();
+  const firstPriceField = await mappingRows.nth(0).locator(".modal-field").nth(1).boundingBox();
+  expect(revisionField).not.toBeNull();
+  expect(mappingList).not.toBeNull();
+  expect(firstRow).not.toBeNull();
+  expect(secondRow).not.toBeNull();
+  expect(routeWarning).not.toBeNull();
+  expect(modalActions).not.toBeNull();
+  expect(firstProviderField).not.toBeNull();
+  expect(firstPriceField).not.toBeNull();
+  expect(mappingList!.y - (revisionField!.y + revisionField!.height)).toBeGreaterThanOrEqual(18);
+  expect(secondRow!.y - (firstRow!.y + firstRow!.height)).toBeGreaterThanOrEqual(14);
+  expect(routeWarning!.y - (mappingList!.y + mappingList!.height)).toBeGreaterThanOrEqual(18);
+  expect(modalActions!.y - (routeWarning!.y + routeWarning!.height)).toBeGreaterThanOrEqual(22);
+  expect(Math.abs(firstProviderField!.y - firstPriceField!.y)).toBeLessThanOrEqual(1);
+
   await mappingEditor.getByLabel("Lite provider deployment").click();
   await page.getByRole("option", { name: "Anthropic Claude Sonnet 4.6 · Anthropic" }).click();
   await mappingEditor.getByRole("button", { name: "Save local draft" }).click();
@@ -92,4 +121,30 @@ test("administrator can configure the first alias mapping from provider inventor
   await editor.getByLabel("Mapping revision note").fill("Create the first reviewed enterprise route map.");
   await editor.getByRole("button", { name: "Save local draft" }).click();
   await expect(page.getByText("Local mapping draft saved")).toBeVisible();
+});
+
+test("mapping editor keeps a clear vertical rhythm at compact width", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto("/?view=ai-control-plane&section=model-routes");
+  await page.getByRole("button", { name: "Create draft" }).click();
+
+  const editor = page.getByRole("dialog", { name: "Create a mapping draft" });
+  await editor.getByLabel("Mapping revision note").fill("Compact layout review");
+  const firstRow = editor.locator(".route-mapping-editor-row").first();
+  const rowHeader = await firstRow.locator("header").boundingBox();
+  const providerField = await firstRow.locator(".modal-field").nth(0).boundingBox();
+  const priceField = await firstRow.locator(".modal-field").nth(1).boundingBox();
+  expect(rowHeader).not.toBeNull();
+  expect(providerField).not.toBeNull();
+  expect(priceField).not.toBeNull();
+  expect(providerField!.y - (rowHeader!.y + rowHeader!.height)).toBeGreaterThanOrEqual(16);
+  expect(priceField!.y - (providerField!.y + providerField!.height)).toBeGreaterThanOrEqual(16);
+  expect(providerField!.width).toBeGreaterThanOrEqual(rowHeader!.width - 1);
+  expect(priceField!.width).toBeGreaterThanOrEqual(rowHeader!.width - 1);
+
+  const warning = await editor.locator(".route-editor-warning").boundingBox();
+  const actions = await editor.locator(".modal-actions").boundingBox();
+  expect(warning).not.toBeNull();
+  expect(actions).not.toBeNull();
+  expect(actions!.y - (warning!.y + warning!.height)).toBeGreaterThanOrEqual(22);
 });

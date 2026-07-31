@@ -515,17 +515,16 @@
 
 .route-mapping-editor-list {
   display: grid;
-  gap: 12px;
-  max-height: min(52vh, 520px);
-  padding-right: 3px;
-  overflow-y: auto;
+  gap: 16px;
+  margin-top: 20px;
 }
 
 .route-mapping-editor-row {
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr) minmax(0, .72fr);
-  gap: 13px 15px;
-  padding: 15px;
+  align-items: start;
+  gap: 18px 20px;
+  padding: 18px;
   border: 1px solid #dfe5ea;
   border-radius: 10px;
   background: #fbfcfd;
@@ -544,7 +543,8 @@
 }
 
 .route-mapping-editor-row .modal-field {
-  gap: 5px;
+  gap: 8px;
+  margin-top: 0;
 }
 
 .route-mapping-editor-row .select-menu,
@@ -566,8 +566,47 @@
   min-height: 78px;
 }
 
-.route-editor-warning {
-  margin-top: 2px;
+.route-revision-field .route-field-help {
+  color: #697684;
+  font-size: 12px;
+  font-weight: 450;
+  line-height: 1.4;
+}
+
+.route-revision-field .route-field-help.invalid {
+  color: #9b3a34;
+}
+
+.route-revision-field .route-field-help.valid {
+  color: #1e7147;
+}
+
+.route-editor-validation {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border: 1px solid #ead2a2;
+  border-radius: 10px;
+  color: #744b05;
+  background: #fff9e9;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.route-editor-validation svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.route-mapping-editor .route-editor-warning {
+  margin-top: 20px;
+}
+
+.route-mapping-editor .route-editor-validation + .route-editor-warning {
+  margin-top: 12px;
 }
 
 .route-confirm {

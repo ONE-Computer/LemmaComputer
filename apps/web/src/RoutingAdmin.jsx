@@ -120,7 +120,12 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
       return next;
     }),
   });
-  const valid = editor.revisionNote.trim().length >= 8 && editor.deployments.length >= 3 && editor.deployments.every((item) => item.provider && item.providerModel.trim() && item.providerDeployment.trim());
+  const minimumRevisionLength = 8;
+  const revisionLength = editor.revisionNote.trim().length;
+  const remainingRevisionCharacters = Math.max(0, minimumRevisionLength - revisionLength);
+  const revisionValid = remainingRevisionCharacters === 0;
+  const deploymentsValid = editor.deployments.length >= 3 && editor.deployments.every((item) => item.provider && item.providerModel.trim() && item.providerDeployment.trim());
+  const valid = revisionValid && deploymentsValid;
   return <ModalDialog
     title="Create a mapping draft"
     description="Edit the private provider deployment behind each stable employee alias. Saving keeps the draft local until you publish a new immutable mapping version."
@@ -129,7 +134,7 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
     onClose={busy ? () => undefined : onClose}
     className="route-mapping-editor"
   >
-    <label className="modal-field"><span>Revision note</span><input aria-label="Mapping revision note" value={editor.revisionNote} disabled={busy} onChange={(event) => onChange({ ...editor, revisionNote: event.target.value })} placeholder="Why these routes are changing" /></label>
+    <label className="modal-field route-revision-field"><span>Revision note</span><input aria-label="Mapping revision note" aria-describedby="route-revision-help" aria-invalid={revisionLength > 0 && !revisionValid} value={editor.revisionNote} disabled={busy} onChange={(event) => onChange({ ...editor, revisionNote: event.target.value })} placeholder="Why these routes are changing" /><small id="route-revision-help" className={`route-field-help${revisionLength > 0 && !revisionValid ? " invalid" : revisionValid ? " valid" : ""}`}>{revisionValid ? "Ready to save." : revisionLength ? `${remainingRevisionCharacters} more character${remainingRevisionCharacters === 1 ? "" : "s"} needed.` : `Use at least ${minimumRevisionLength} characters so administrators can identify this change.`}</small></label>
     <div className="route-mapping-editor-list">
       {editor.deployments.map((deployment) => {
         const compatibleCards = rateCards.filter((card) => rateCardMatchesDeployment(card, deployment));
@@ -151,6 +156,7 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
         </section>;
       })}
     </div>
+    {!valid && <div className="route-editor-validation" role="status" aria-live="polite"><Info20Regular aria-hidden="true" /><span>{!revisionValid ? revisionLength ? `Add ${remainingRevisionCharacters} more character${remainingRevisionCharacters === 1 ? "" : "s"} to the revision note to save this draft.` : `Add a revision note of at least ${minimumRevisionLength} characters to save this draft.` : "Select a valid provider deployment for Lite, Balanced, and Pro."}</span></div>}
     <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Publishing creates a version for policy and shadow evaluation. It does not activate or repoint any current Team rollout.</span></div>
     <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !valid} onClick={onSave}>Save local draft</button></div>
   </ModalDialog>;
