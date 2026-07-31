@@ -48,6 +48,7 @@ test(
     const otherMapping = randomUUID();
     const deployment = randomUUID();
     const otherDeployment = randomUUID();
+    const alternateExecution = randomUUID();
     try {
       await pool.query(
         "INSERT INTO tenants(id,external_tenant_id,display_name) VALUES($1,$2,'Routing'),($3,$4,'Other')",
@@ -77,6 +78,14 @@ test(
         description: "",
         ownerUserId: admin,
         costCenterCode: "CC-R",
+      });
+      const localOtherTeam = await teams.createTeam({
+        tenantId: tenant,
+        createdBy: admin,
+        displayName: "Operations",
+        description: "",
+        ownerUserId: admin,
+        costCenterCode: "CC-O2",
       });
       await teams.createTeam({
         tenantId: other,
@@ -127,7 +136,7 @@ test(
         residency: ["sg"],
       };
       await pool.query(
-        "INSERT INTO ai_routing_deployments(id,tenant_id,mapping_version_id,service_class,provider,provider_model,provider_deployment,rate_card_id,capabilities,approved,evaluation_passed) VALUES($1,$2,$3,'lite','openai','private/luna','private-lite',$4,$5,true,true),($6,$7,$8,'lite','openai','other','other-lite',NULL,$5,true,true)",
+        "INSERT INTO ai_routing_deployments(id,tenant_id,mapping_version_id,service_class,provider,provider_account_id,provider_model,provider_deployment,rate_card_id,capabilities,approved,evaluation_passed) VALUES($1,$2,$3,'lite','openai','account','private/luna','private-lite',$4,$5,true,true),($6,$7,$8,'lite','openai','other-account','other','other-lite',NULL,$5,true,true)",
         [
           deployment,
           tenant,
@@ -138,6 +147,10 @@ test(
           other,
           otherMapping,
         ],
+      );
+      await pool.query(
+        "INSERT INTO ai_routing_deployments(id,tenant_id,mapping_version_id,service_class,provider,provider_account_id,provider_model,provider_deployment,rate_card_id,capabilities,approved,evaluation_passed) VALUES($1,$2,$3,'lite','openai','account','private/luna','alternate-execution',NULL,$4,true,true)",
+        [alternateExecution, tenant, mapping, capabilities],
       );
       const scope = {
         allowedServiceClasses: ["lite"] as const,
@@ -217,14 +230,10 @@ test(
         { unit: "input_uncached_token", quantity: "1000" },
         { unit: "output_token", quantity: "100" },
       ]);
-      assert.equal(
-        effective?.policy.deployments[0]?.expectedCost?.amount,
-        "0.001200000000",
+      const effectiveDeployment = effective?.policy.deployments.find(
+        (item) => item.id === deployment,
       );
-      assert.equal(
-        effective?.policy.deployments[0]?.expectedCost?.currency,
-        "USD",
-      );
+      assert.equal(effectiveDeployment?.expectedCost?.amount, "0.001200000000");
       const decision = (
         requestId: string,
         currency = "USD",
@@ -354,6 +363,25 @@ test(
         ],
       });
       assert.equal(event.status, "created");
+      await assert.rejects(
+        routing.appendObservation({
+          tenantId: tenant,
+          decisionId: recorded.id,
+          usageEventId: event.eventId!,
+          outcome: "success",
+          actualCost: "9.000000000000",
+          currency: "USD",
+          latencyMs: 50,
+        }),
+        /cost does not match/,
+      );
+      await assert.rejects(
+        pool.query(
+          "INSERT INTO ai_routing_decision_observations(id,tenant_id,decision_id,usage_event_id,outcome,actual_cost,currency,latency_ms) VALUES($1,$2,$3,$4,'success','9','USD',50)",
+          [randomUUID(), tenant, recorded.id, event.eventId],
+        ),
+        /does not match/,
+      );
       const observed = await routing.appendObservation({
         tenantId: tenant,
         decisionId: recorded.id,
@@ -402,6 +430,18 @@ test(
       );
       await assert.rejects(
         routing.appendObservation({
+          tenantId: tenant,
+          decisionId: recorded.id,
+          usageEventId: event.eventId!,
+          outcome: "error",
+          actualCost: event.providerCost!,
+          currency: event.currency!,
+          latencyMs: 50,
+        }),
+        /replay does not match/,
+      );
+      await assert.rejects(
+        routing.appendObservation({
           tenantId: other,
           decisionId: recorded.id,
           usageEventId: event.eventId!,
@@ -437,9 +477,159 @@ test(
         ["health"],
       );
       const report = await routing.shadowReport(tenant, team.id);
-      assert.equal(report.sampleSize, 2);
-      assert.equal(report.currency, null);
-      assert.equal(report.expectedCost, null);
+      assert.equal(report.sampleSize, 1);
+      assert.equal(report.currency, "USD");
+      assert.equal(report.expectedCost, "0.001200000000");
+      assert.equal(report.actualCost, "0.001200000000");
+
+      const mismatchCases = [
+        {
+          label: "task",
+          teamId: team.id,
+          userId: user,
+          taskId: "other-task",
+          routed: decision(`task-mismatch-${suffix}`),
+        },
+        {
+          label: "actor",
+          teamId: team.id,
+          userId: admin,
+          taskId: "task",
+          routed: decision(`actor-mismatch-${suffix}`),
+        },
+        {
+          label: "team",
+          teamId: localOtherTeam.id,
+          userId: user,
+          taskId: "task",
+          routed: decision(`team-mismatch-${suffix}`),
+        },
+        {
+          label: "execution",
+          teamId: team.id,
+          userId: user,
+          taskId: "task",
+          routed: {
+            ...decision(`execution-mismatch-${suffix}`),
+            executedDeployment: {
+              id: alternateExecution,
+              provider: "openai" as const,
+              model: "private/luna",
+              deployment: "alternate-execution",
+            },
+          },
+        },
+      ];
+      for (const mismatch of mismatchCases) {
+        const mismatchDecision = await routing.recordDecision({
+          tenantId: tenant,
+          teamId: mismatch.teamId,
+          userId: mismatch.userId,
+          taskId: mismatch.taskId,
+          rolloutVersionId: rollout.id,
+          decision: mismatch.routed,
+        });
+        await assert.rejects(
+          routing.appendObservation({
+            tenantId: tenant,
+            decisionId: mismatchDecision.id,
+            usageEventId: event.eventId!,
+            outcome: "success",
+            actualCost: event.providerCost!,
+            currency: event.currency!,
+            latencyMs: 50,
+          }),
+          /execution evidence/,
+          mismatch.label,
+        );
+      }
+
+      const foreignRateCard = await usage.createRateCard({
+        tenantId: tenant,
+        provider: "openai",
+        providerAccountId: "account",
+        baseModel: "private/foreign",
+        deploymentId: "private-lite",
+        currency: "USD",
+        source: "pinned_catalogue",
+        sourceVersion: "routing-foreign-v1",
+        sourceHash: "b".repeat(64),
+        effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+        effectiveTo: new Date("2027-01-01T00:00:00Z"),
+        rates: [
+          { unit: "input_uncached_token", amountPerUnit: "1", unitScale: "1" },
+        ],
+      });
+      const foreignPriceDecision = decision(`foreign-price-${suffix}`);
+      foreignPriceDecision.selectedDeployment.rateCardId = foreignRateCard;
+      await assert.rejects(
+        routing.recordDecision({
+          tenantId: tenant,
+          teamId: team.id,
+          userId: user,
+          taskId: "task",
+          rolloutVersionId: rollout.id,
+          decision: foreignPriceDecision,
+        }),
+        /canonical effective deployment price/,
+      );
+
+      const overrideRateCard = await usage.createRateCard({
+        tenantId: tenant,
+        provider: "openai",
+        providerAccountId: "account",
+        baseModel: "private/luna",
+        deploymentId: "private-lite",
+        currency: "USD",
+        source: "contract_override",
+        sourceVersion: "routing-contract-v2",
+        sourceHash: "c".repeat(64),
+        effectiveFrom: new Date("2026-01-15T00:00:00Z"),
+        approvedBy: admin,
+        overrideReason: "New canonical routing contract",
+        rates: [
+          {
+            unit: "input_uncached_token",
+            amountPerUnit: "3",
+            unitScale: "1000000",
+          },
+          { unit: "output_token", amountPerUnit: "4", unitScale: "1000000" },
+        ],
+      });
+      assert.equal(
+        (
+          await usage.selectEffectiveRateCard({
+            tenantId: tenant,
+            provider: "openai",
+            providerAccountId: "account",
+            baseModel: "private/luna",
+            deploymentId: "private-lite",
+            at: new Date(),
+          })
+        )?.id,
+        overrideRateCard,
+      );
+      const stalePolicy = await routing.resolveEffectivePolicy(
+        tenant,
+        team.id,
+        [
+          { unit: "input_uncached_token", quantity: "1000" },
+          { unit: "output_token", quantity: "100" },
+        ],
+      );
+      assert.equal(stalePolicy?.policy.deployments[0]?.expectedCost, null);
+      assert.deepEqual(stalePolicy?.policy.budgetEligibleDeploymentIds, []);
+      await assert.rejects(
+        routing.recordDecision({
+          tenantId: tenant,
+          teamId: team.id,
+          userId: user,
+          taskId: "task",
+          rolloutVersionId: rollout.id,
+          decision: decision(`stale-price-${suffix}`),
+        }),
+        /canonical effective deployment price/,
+      );
       assert.equal((await routing.adminReadModel(other, team.id)).policy, null);
     } finally {
       await Promise.all([

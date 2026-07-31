@@ -36,6 +36,8 @@ Model names are intentionally absent from the user contract. Decision details ex
 
 Administrators set the policy billing currency, but do not type a single blended price on a service-class alias. Each concrete deployment references an immutable effective rate card. Expected cost is calculated from the expected usage buckets and that deployment's rates before selection.
 
+Routing calls the ledger's canonical rate-card selector with the exact tenant, provider account, model, deployment, region, and service tier. The configured card must be the currently effective winner under contract-override, pinned-catalogue, and conservative precedence. A stale card, a higher-priority replacement, or any route-dimension mismatch fails closed. Decision insertion repeats this check in PostgreSQL.
+
 Cache reads, cache writes, reasoning tokens, uncached input, output, requests, images, audio, and provider-specific units remain separate when the provider reports them. The usage ledger applies the exact decimal rate for each available bucket. A missing required rate, unknown price, expired card, or currency mismatch makes that deployment budget-ineligible; routing fails closed when no safe candidate remains.
 
 If an administrator swaps the deployment behind Balanced, the new mapping version points to the replacement deployment and its own rate card. Historical decisions remain tied to the old immutable mapping and pricing evidence.
@@ -49,6 +51,8 @@ If an administrator swaps the deployment behind Balanced, the new mapping versio
 - Duplicate request IDs replay the durable decision instead of routing or charging twice.
 
 Decision and observation rows are append-only and tenant-scoped in both customer-managed and hosted profiles. Mixed-currency reports deliberately show an unknown aggregate instead of adding incomparable money.
+
+An observation is accepted only when its immutable usage event belongs to the same task, Team, actor, policy, mapping, service class, and executed provider/model/deployment as the routing decision. Its actual cost and currency must exactly equal the usage ledger fact. Both the store transaction and a database trigger enforce this binding.
 
 ## Rollout and rollback
 
