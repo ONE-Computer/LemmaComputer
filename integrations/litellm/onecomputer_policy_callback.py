@@ -7,6 +7,8 @@ import hmac
 import json
 import os
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 import urllib.error
 import urllib.request
@@ -31,6 +33,9 @@ USAGE_TOKEN = os.environ.get("ONECOMPUTER_AI_USAGE_TOKEN", "")
 ROUTING_STATE_KEY = "onecomputer_routing_state"
 USAGE_STATE_KEY = "onecomputer_usage_state"
 USAGE_CHAIN_KEY = "onecomputer_usage_chain"
+ROUTING_HEALTH_TTL_SECONDS = 60
+_ROUTING_HEALTH_LOCK = threading.Lock()
+_ROUTING_UNAVAILABLE_UNTIL = {}
 USAGE_CHAIN_SECRET = hmac.new(
     USAGE_TOKEN.encode("utf-8"),
     b"onecomputer-usage-chain-secret/v1",
@@ -369,6 +374,30 @@ def _set_routing_state(kwargs, state):
     metadata[ROUTING_STATE_KEY] = state
 
 
+def _record_execution_health(tenant_id, deployment_id, outcome):
+    if not isinstance(tenant_id, str) or not isinstance(deployment_id, str):
+        return
+    key = (tenant_id, deployment_id)
+    with _ROUTING_HEALTH_LOCK:
+        if outcome == "unavailable":
+            _ROUTING_UNAVAILABLE_UNTIL[key] = time.monotonic() + ROUTING_HEALTH_TTL_SECONDS
+        elif outcome == "healthy":
+            _ROUTING_UNAVAILABLE_UNTIL.pop(key, None)
+
+
+def _unavailable_deployment_ids(tenant_id):
+    now = time.monotonic()
+    with _ROUTING_HEALTH_LOCK:
+        expired = [key for key, expires_at in _ROUTING_UNAVAILABLE_UNTIL.items() if expires_at <= now]
+        for key in expired:
+            _ROUTING_UNAVAILABLE_UNTIL.pop(key, None)
+        return sorted(
+            deployment_id
+            for (candidate_tenant, deployment_id), expires_at in _ROUTING_UNAVAILABLE_UNTIL.items()
+            if candidate_tenant == tenant_id and expires_at > now
+        )[:100]
+
+
 def _request_routing_metadata(kwargs):
     values = {}
     for metadata in _metadata_dicts(kwargs):
@@ -447,7 +476,7 @@ def _routing_payload(kwargs):
     agent_id = trusted.get("onecomputer_agent_id")
     if not isinstance(workspace_id, str) or not workspace_id or not isinstance(agent_id, str) or not agent_id:
         raise RuntimeError("Governed routing workspace identity is incomplete")
-    return {
+    payload = {
         "schemaVersion": 1,
         "tenantId": tenant_id,
         "subjectId": subject_id,
@@ -471,6 +500,10 @@ def _routing_payload(kwargs):
             {"unit": "request", "quantity": "1"},
         ],
     }
+    unavailable = _unavailable_deployment_ids(tenant_id)
+    if unavailable:
+        payload["unavailableDeploymentIds"] = unavailable
+    return payload
 
 
 def _tracking_metadata(kwargs):
@@ -800,7 +833,27 @@ def _completion_payload(kwargs, response_obj, start_time, end_time, outcome):
     return {name: value for name, value in payload.items() if value is not None}
 
 
-async def _record_routing_observation(kwargs, event_result, completion_payload):
+def _deployment_health_status(response_obj, outcome):
+    if outcome == "success":
+        return "healthy"
+    response = _as_dict(response_obj)
+    status = response.get("status_code") or response.get("status")
+    if not isinstance(status, int):
+        status = getattr(response_obj, "status_code", None)
+    nested = getattr(response_obj, "response", None)
+    if not isinstance(status, int) and nested is not None:
+        status = getattr(nested, "status_code", None)
+    if status == 429 or (isinstance(status, int) and status >= 500):
+        return "unavailable"
+    failure_class = type(response_obj).__name__.lower()
+    if any(marker in failure_class for marker in (
+        "timeout", "connection", "unavailable", "ratelimit", "authentication", "permission",
+    )):
+        return "unavailable"
+    return None
+
+
+async def _record_routing_observation(kwargs, event_result, completion_payload, response_obj):
     state = _usage_state(kwargs)
     if not state or not state.get("routingDecisionId"):
         return
@@ -817,7 +870,15 @@ async def _record_routing_observation(kwargs, event_result, completion_payload):
         "currency": event_result.get("currency"),
         "latencyMs": completion_payload.get("latencyMs"),
     }
+    health_status = _deployment_health_status(response_obj, completion_payload["outcome"])
+    if health_status:
+        observation["deploymentHealth"] = health_status
     await asyncio.to_thread(_usage_request, "routing/observations", {key:value for key,value in observation.items() if value is not None})
+    _record_execution_health(
+        state["tenantId"],
+        state.get("deploymentId"),
+        health_status,
+    )
 
 
 class OneComputerMcpPolicyCallback(CustomLogger):
@@ -910,6 +971,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             "provider": payload["resolvedProvider"],
             "billableRequestUnit": route.get("onecomputer_billable_request_unit") is True,
             "routingDecisionId": routing_state.get("decisionId") if routing_state else None,
+            "deploymentId": routing_state.get("executedDeploymentId") if routing_state else None,
         }, task_binding, payload["sourceAttemptId"], payload.get("parentAttemptId"))
         return kwargs
 
@@ -919,7 +981,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             if payload is None:
                 return
             result = await asyncio.to_thread(_usage_request, "events", payload)
-            await _record_routing_observation(kwargs, result, payload)
+            await _record_routing_observation(kwargs, result, payload, response_obj)
         except Exception:
             # Completion telemetry must never replace a successful model response.
             return
@@ -930,7 +992,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             if payload is None:
                 return
             result = await asyncio.to_thread(_usage_request, "events", payload)
-            await _record_routing_observation(kwargs, result, payload)
+            await _record_routing_observation(kwargs, result, payload, response_obj)
         except Exception:
             return
 

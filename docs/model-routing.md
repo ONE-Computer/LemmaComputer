@@ -22,6 +22,14 @@ Auto, Lite, Balanced, and Pro are product contracts, not provider model names. A
 5. Control records the decision and all eligible and rejected candidates atomically before returning a signed concrete-deployment binding.
 6. LiteLLM verifies that binding immediately before provider execution, admits spend, and appends the final usage observation after completion.
 
+Provider execution outcomes are also health evidence. A concrete provider availability
+failure is marked unavailable for a bounded 60-second window in both the callback's
+immediate routing signal and Control's durable tenant-scoped evidence. A later
+successful execution clears the signal. The router records health-rejected
+candidates and an `availability` escalation, or fails closed when no approved
+deployment remains. LiteLLM never falls back outside the signed concrete
+deployment binding.
+
 Model names are intentionally absent from the user contract. Decision details expose provider, deployment, mapping, rate-card, and candidate evidence only to administrators.
 
 ## Cost model

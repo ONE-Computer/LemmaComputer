@@ -347,7 +347,7 @@ test(
         sourceEventId: `event-${suffix}`,
         eventType: "usage",
         occurredAt: new Date("2026-02-01T00:00:01Z"),
-        outcome: "success",
+        outcome: "failure",
         units: [
           { unit: "input_uncached_token", quantity: "1000" },
           { unit: "output_token", quantity: "100" },
@@ -358,7 +358,8 @@ test(
         tenantId: tenant,
         decisionId: recorded.id,
         usageEventId: event.eventId!,
-        outcome: "success",
+        outcome: "error",
+        deploymentHealth: "unavailable",
         actualCost: event.providerCost!,
         currency: event.currency!,
         latencyMs: 50,
@@ -370,13 +371,34 @@ test(
             tenantId: tenant,
             decisionId: recorded.id,
             usageEventId: event.eventId!,
-            outcome: "success",
+            outcome: "error",
+            deploymentHealth: "unavailable",
             actualCost: event.providerCost!,
             currency: event.currency!,
             latencyMs: 50,
           })
         ).status,
         "duplicate",
+      );
+      const health = await pool.query(
+        "SELECT id,status,expires_at,observed_at FROM ai_routing_deployment_health_observations WHERE tenant_id=$1 AND deployment_id=$2",
+        [tenant, deployment],
+      );
+      assert.equal(health.rowCount, 1);
+      assert.equal(health.rows[0].status, "unavailable");
+      assert.ok(health.rows[0].expires_at > health.rows[0].observed_at);
+      const effectiveAfterFailure = await routing.resolveEffectivePolicy(
+        tenant,
+        team.id,
+        [
+          { unit: "input_uncached_token", quantity: "1000" },
+          { unit: "output_token", quantity: "100" },
+        ],
+      );
+      assert.equal(effectiveAfterFailure?.policy.deployments[0]?.healthy, false);
+      await assert.rejects(
+        pool.query("UPDATE ai_routing_deployment_health_observations SET status='healthy' WHERE tenant_id=$1 AND id=$2", [tenant, health.rows[0].id]),
+        /immutable/,
       );
       await assert.rejects(
         routing.appendObservation({
@@ -393,14 +415,27 @@ test(
         ),
         /immutable/,
       );
-      await routing.recordDecision({
+      const availabilityDecision: ModelRoutingDecision = {
+        ...decision(`availability-${suffix}`, "EUR", []),
+        reasonCode: "availability_escalation",
+        escalationReason: "availability",
+        ineligible: [{ deploymentId: deployment, reasonCode: "health" }],
+      };
+      const availabilityRecord = await routing.recordDecision({
         tenantId: tenant,
         teamId: team.id,
         userId: user,
         taskId: "task-eur",
         rolloutVersionId: rollout.id,
-        decision: decision(`eur-${suffix}`, "EUR"),
+        decision: availabilityDecision,
       });
+      const availabilityEvidence = await routing.decision(tenant, availabilityRecord.id);
+      assert.equal(availabilityEvidence?.reason_code, "availability_escalation");
+      assert.equal(availabilityEvidence?.escalation_reason, "availability");
+      assert.deepEqual(
+        (availabilityEvidence?.candidates as Array<Record<string, unknown>>).map((candidate) => candidate.reason_code),
+        ["health"],
+      );
       const report = await routing.shadowReport(tenant, team.id);
       assert.equal(report.sampleSize, 2);
       assert.equal(report.currency, null);

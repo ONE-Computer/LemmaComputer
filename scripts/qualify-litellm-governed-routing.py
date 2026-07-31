@@ -80,6 +80,16 @@ async def qualify():
     ambiguous = await routed("Please prepare a concise summary of the quarterly update for our team.")
     reasoning = await routed("Compare and justify the trade-offs step by step before recommending an option.")
     explicit = await routed("Use the administrator-permitted premium service class.", "pro")
+    assert module._deployment_health_status(SimpleNamespace(status_code=503), "failure") == "unavailable"
+    assert module._deployment_health_status(SimpleNamespace(status_code=400), "failure") is None
+    assert module._deployment_health_status({}, "success") == "healthy"
+    unavailable_id = "44444444-4444-4444-8444-444444444444"
+    module._record_execution_health("tenant-a", unavailable_id, "unavailable")
+    await routed("Confirm the execution health signal is carried.")
+    assert captured[-1]["unavailableDeploymentIds"] == [unavailable_id]
+    module._record_execution_health("tenant-a", unavailable_id, "healthy")
+    await routed("Confirm successful execution clears the health signal.")
+    assert "unavailableDeploymentIds" not in captured[-1]
     assert ambiguous["model"] == "private-balanced"
     assert reasoning["model"] == "private-pro"
     assert explicit["model"] == "private-pro"
