@@ -426,8 +426,21 @@ let adminUsers = [
     }],
   },
 ];
-let fixtureTeams = [];
-let fixtureTeamMemberships = new Map();
+const fixtureSpendTeamId = "11111111-1111-4111-8111-111111111111";
+let fixtureTeams = [{
+  id: fixtureSpendTeamId,
+  displayName: "Finance",
+  description: "Finance allocation and reporting",
+  ownerUserId: "fixture-admin",
+  costCenterCode: "FIN-100",
+  status: "active",
+  isRolloutFallback: false,
+  activeMemberCount: 1,
+  createdAt: "2026-07-01T00:00:00.000Z",
+  updatedAt: "2026-07-01T00:00:00.000Z",
+  archivedAt: null,
+}];
+let fixtureTeamMemberships = new Map([[fixtureSpendTeamId, []]]);
 let fixtureTeamBudgets = new Map();
 const emptyBudgetStatus = { budget:null,period:null,effectiveLimitAmount:null,settledProviderCost:null,outstandingReservations:null,remainingAmount:null,percentConsumed:null,priceStatus:"unknown",enforcement:"none",alerts:[],lastReconciliation:null };
 const fixtureBudgetStatus = (teamId) => fixtureTeamBudgets.get(teamId) ?? emptyBudgetStatus;
@@ -527,7 +540,6 @@ let fixtureMcpConnections = [
   canManageConnection: true,
 }));
 
-const fixtureSpendTeamId = "11111111-1111-4111-8111-111111111111";
 const fixtureSpendUserId = "alex-morgan";
 const fixtureSpendTasks = Array.from({ length: 201 }, (_, index) => {
   const number = index + 1;
