@@ -17,18 +17,43 @@ import {
 
 export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock"] as const;
 export type ManagedProviderName = typeof managedProviderNames[number];
+type SelectableProviderName = Exclude<ManagedProviderName, "bedrock">;
 export type ManagedProviderOperation = {
   tenantId: string;
   provider: ManagedProviderName;
   existingModelIds: string[];
   configuration?: ProviderSettingMetadata;
 };
+type DirectProviderSelection<T extends ProviderModelId> =
+  | { modelId: T; modelIds?: never }
+  | { modelId?: never; modelIds: T[] };
 export type ManagedProviderConfiguration =
-  | (ManagedProviderOperation & { provider: "openai"; apiKey: string; modelId: OpenAiProviderModelId })
-  | (ManagedProviderOperation & { provider: "anthropic"; apiKey: string; modelId: AnthropicProviderModelId })
-  | (ManagedProviderOperation & { provider: "glm"; apiKey: string; modelId: GlmProviderModelId })
+  | (ManagedProviderOperation & { provider: "openai"; apiKey: string } & DirectProviderSelection<OpenAiProviderModelId>)
+  | (ManagedProviderOperation & { provider: "anthropic"; apiKey: string } & DirectProviderSelection<AnthropicProviderModelId>)
+  | (ManagedProviderOperation & { provider: "glm"; apiKey: string } & DirectProviderSelection<GlmProviderModelId>)
   | (ManagedProviderOperation & { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId });
-export type ManagedProviderRoute = { modelIds: string[]; credentialFingerprint: string; configuration: ProviderSettingMetadata };
+export type ManagedProviderDeploymentDescriptor = {
+  id: string;
+  provider: ManagedProviderName;
+  providerAccountId: string;
+  modelId: ProviderModelId | null;
+  displayName: string;
+  aliases: string[];
+  providerModel: string;
+  providerDeployment: string;
+  region: BedrockApiKeyRegion | null;
+  providerServiceTier: "standard";
+  accessGroup: string;
+  primary: boolean;
+  legacyAlias: boolean;
+  vision: boolean;
+};
+export type ManagedProviderRoute = {
+  modelIds: string[];
+  deployments: ManagedProviderDeploymentDescriptor[];
+  credentialFingerprint: string;
+  configuration: ProviderSettingMetadata;
+};
 export interface ProviderAdministrationGateway {
   configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute>;
   testManagedProvider(input: ManagedProviderOperation): Promise<void>;
@@ -47,7 +72,6 @@ export type ManagedProviderDisplayMetadata = {
   upstreamModelDisplayName: string;
 };
 
-type SelectableProviderName = Exclude<ManagedProviderName, "bedrock">;
 type ProviderModelProfile = { id: ProviderModelId; displayName: string; model: string; vision: boolean };
 
 export const managedProviderModelProfiles = Object.freeze({
@@ -116,9 +140,14 @@ export const managedProviderModels: Record<ManagedProviderName, readonly Managed
   ],
 };
 
-export const managedProviderForAlias = (alias: string) => managedProviderNames.find((provider) => (
-  managedProviderModels[provider].some((model) => model.alias === alias)
-));
+export const managedProviderModelAlias = (provider: SelectableProviderName, modelId: ProviderModelId) =>
+  `onecomputer-${provider}-${modelId.replaceAll(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}`;
+
+export const managedProviderForAlias = (alias: string) => managedProviderNames.find((provider) => {
+  if (managedProviderModels[provider].some((model) => model.alias === alias)) return true;
+  if (provider === "bedrock") return false;
+  return managedProviderModelProfiles[provider].some((profile) => managedProviderModelAlias(provider, profile.id) === alias);
+});
 
 const tenantRouteHash = (tenantId: string) => createHash("sha256")
   .update(`onecomputer:provider-route:${tenantId}`)
@@ -135,6 +164,117 @@ const tenantModelId = (tenantId: string, provider: ManagedProviderName, alias: s
 
 export type LiteLLMProviderAdministrationConfig = { adminUrl: string; masterKey: string; credentialSecret: string; requestTimeoutMs?: number; bedrockRuntimeEndpoint?: string };
 type JsonObject = Record<string, unknown>;
+
+type ProviderModelTemplate = {
+  alias: string;
+  model: ManagedProviderModel;
+  upstreamModelId: ProviderModelId | null;
+  displayName: string;
+  primary: boolean;
+  legacyAlias: boolean;
+};
+
+export const managedProviderSelectedModelIds = (
+  provider: SelectableProviderName,
+  configuration: ProviderSettingMetadata = {},
+): ProviderModelId[] => {
+  const requested = configuration.modelIds
+    ?? (configuration.modelId ? [configuration.modelId] : [defaultManagedProviderModelIds[provider]]);
+  const requestedSet = new Set(requested);
+  const selected = managedProviderModelProfiles[provider].filter((profile) => requestedSet.has(profile.id));
+  if (selected.length !== requested.length || selected.length !== requestedSet.size || selected.length === 0) {
+    throw new OneComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider models are not approved", 400);
+  }
+  return selected.map((profile) => profile.id);
+};
+
+const templatesFor = (
+  provider: ManagedProviderName,
+  configuration: ProviderSettingMetadata,
+): ProviderModelTemplate[] => {
+  if (provider === "bedrock") {
+    const profile = approvedBedrockApiKeyModelProfiles.find((candidate) => (
+      candidate.id === configuration.modelProfileId
+      && configuration.region
+      && candidate.regions.includes(configuration.region)
+    ));
+    if (!profile || !configuration.region) return [];
+    return [{
+      alias: bedrockApiKeyRouteAlias,
+      model: {
+        alias: bedrockApiKeyRouteAlias,
+        model: profile.litellmModel,
+        vision: profile.capabilities.vision,
+        bedrock: { region: configuration.region, profile },
+      },
+      upstreamModelId: null,
+      displayName: "Amazon Bedrock Claude Sonnet 4.5",
+      primary: true,
+      legacyAlias: true,
+    }];
+  }
+  const selectedIds = managedProviderSelectedModelIds(provider, configuration);
+  const profiles = selectedIds.map((id) => managedProviderModel(provider, id)!);
+  const primary = profiles[0]!;
+  const legacy = managedProviderModels[provider].map((model) => ({
+    alias: model.alias,
+    model: { ...model, model: primary.model, vision: primary.vision },
+    upstreamModelId: primary.id,
+    displayName: primary.displayName,
+    primary: true,
+    legacyAlias: true,
+  }));
+  if (!configuration.modelIds) return legacy;
+  return [
+    ...legacy,
+    ...profiles.map((profile) => {
+      const alias = managedProviderModelAlias(provider, profile.id);
+      return {
+        alias,
+        model: { alias, model: profile.model, vision: profile.vision },
+        upstreamModelId: profile.id,
+        displayName: profile.displayName,
+        primary: profile.id === primary.id,
+        legacyAlias: false,
+      };
+    }),
+  ];
+};
+
+export const managedProviderDeploymentDescriptors = (
+  tenantId: string,
+  provider: ManagedProviderName,
+  configuration: ProviderSettingMetadata,
+): ManagedProviderDeploymentDescriptor[] => {
+  const accountId = tenantCredentialName(tenantId, provider);
+  const templates = templatesFor(provider, configuration);
+  const concrete = configuration.modelIds
+    ? templates.filter((template) => !template.legacyAlias)
+    : [templates.find((template) => template.alias === managedProviderDisplayMetadata[provider].primaryAlias) ?? templates[0]]
+      .filter((template): template is ProviderModelTemplate => Boolean(template));
+  return concrete.map((template) => {
+    const accessGroup = tenantManagedModelAccessGroup(tenantId, template.alias);
+    const compatibilityAliases = template.primary
+      ? templates.filter((candidate) => candidate.legacyAlias).map((candidate) => candidate.alias)
+      : [];
+    return {
+      id: tenantModelId(tenantId, provider, template.alias),
+      provider,
+      providerAccountId: accountId,
+      modelId: template.upstreamModelId,
+      displayName: template.displayName,
+      aliases: [...new Set([template.alias, ...compatibilityAliases])],
+      providerModel: template.model.model,
+      providerDeployment: accessGroup,
+      region: template.model.bedrock?.region ?? null,
+      providerServiceTier: "standard",
+      accessGroup,
+      primary: template.primary,
+      legacyAlias: template.legacyAlias,
+      vision: template.model.vision,
+    };
+  });
+};
 type GatewayResult = { ok: boolean; status: number; payload: unknown; embeddedError: boolean };
 const asObject = (value: unknown): JsonObject => value && typeof value === "object" ? value as JsonObject : {};
 type ProviderModelDeployment = {
@@ -142,6 +282,9 @@ type ProviderModelDeployment = {
   provider: ManagedProviderName;
   alias: string;
   model: ManagedProviderModel;
+  upstreamModelId: ProviderModelId | null;
+  primary: boolean;
+  legacyAlias: boolean;
   credentialName: string;
   accessGroups: string[];
 };
@@ -164,122 +307,137 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
     const apiKey = input.apiKey.trim();
     if (!apiKey) throw new OneComputerError("PROVIDER_KEY_REQUIRED", "A provider API key is required", 400);
-    const models = this.modelsFor(input);
-    const expectedModelIds = models.map((model) => tenantModelId(input.tenantId, input.provider, model.alias));
-    const existing = [...new Set(input.existingModelIds)];
-    if (existing.length > 0 && (
-      existing.length !== models.length
-      || expectedModelIds.some((id) => !existing.includes(id))
-    )) {
-      throw new OneComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The existing provider route cannot be safely rotated", 409);
+    const configuration = this.configurationFor(input);
+    const models = templatesFor(input.provider, configuration);
+    if (models.length === 0) {
+      throw new OneComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider models are not approved", 400);
     }
-    await this.ensureRetiringAliasesAreGone(input.provider);
+    const descriptors = managedProviderDeploymentDescriptors(input.tenantId, input.provider, configuration);
     const credentialName = tenantCredentialName(input.tenantId, input.provider);
+    const deploymentFor = (template: ProviderModelTemplate, candidate = false): ProviderModelDeployment => {
+      const suffix = candidate ? `-candidate-${randomBytes(8).toString("hex")}` : "";
+      const alias = candidate
+        ? `${tenantManagedModelAccessGroup(input.tenantId, template.alias)}${suffix}`
+        : template.alias;
+      return {
+        id: `${tenantModelId(input.tenantId, input.provider, template.alias)}${suffix}`,
+        provider: input.provider,
+        alias,
+        model: template.model,
+        upstreamModelId: template.upstreamModelId,
+        primary: template.primary,
+        legacyAlias: template.legacyAlias,
+        credentialName: candidate
+          ? `${credentialName}-candidate`
+          : credentialName,
+        accessGroups: candidate ? [] : [tenantManagedModelAccessGroup(input.tenantId, template.alias)],
+      };
+    };
+    const targetDeployments = models.map((model) => deploymentFor(model));
+    const targetIds = targetDeployments.map((deployment) => deployment.id);
+    const targetIdSet = new Set(targetIds);
+    const existing = [...new Set(input.existingModelIds)];
+    const previousConfiguration = input.configuration ?? configuration;
+    const previousModels = existing.length ? templatesFor(input.provider, previousConfiguration) : [];
+    const previousDeployments = previousModels.map((model) => deploymentFor(model));
+    const previousIds = previousDeployments.map((deployment) => deployment.id);
+    const previousIdSet = new Set(previousIds);
+    if (existing.length !== input.existingModelIds.length || (
+      existing.length > 0
+      && (existing.length !== previousIds.length || existing.some((id) => !previousIdSet.has(id)))
+    )) {
+      throw new OneComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The existing provider route cannot be safely changed", 409);
+    }
+
+    await this.ensureRetiringAliasesAreGone(input.provider);
     const candidateCredentialName = `${credentialName}-candidate-${randomBytes(12).toString("hex")}`;
     const candidates: Array<{ id: string; alias: string }> = [];
     try {
       await this.createCredential(candidateCredentialName, input, apiKey);
       for (const model of models) {
-        const alias = `${tenantManagedModelAccessGroup(input.tenantId, model.alias)}-candidate-${randomBytes(8).toString("hex")}`;
-        candidates.push({
-          id: await this.createModel({
-            id: `${tenantModelId(input.tenantId, input.provider, model.alias)}-candidate-${randomBytes(8).toString("hex")}`,
-            provider: input.provider,
-            alias,
-            model,
-            credentialName: candidateCredentialName,
-            accessGroups: [],
-          }),
-          alias,
-        });
+        const deployment = deploymentFor(model, true);
+        deployment.credentialName = candidateCredentialName;
+        candidates.push({ id: await this.createModel(deployment), alias: deployment.alias });
       }
       await this.probe(candidates[0]!.alias, undefined, input.provider);
-      if (existing.length === models.length) {
+
+      if (existing.length > 0) {
         await this.replaceCredential(credentialName, input, apiKey);
-        const previousModels = input.provider === "bedrock"
-          ? models
-          : this.selectableModels(
-            input.provider,
-            input.configuration?.modelId ?? defaultManagedProviderModelIds[input.provider],
-          );
         try {
-          for (const model of models) {
-            await this.upsertModel({
-              id: tenantModelId(input.tenantId, input.provider, model.alias),
-              provider: input.provider,
-              alias: model.alias,
-              model,
-              credentialName,
-              accessGroups: [tenantManagedModelAccessGroup(input.tenantId, model.alias)],
-            });
+          for (const deployment of targetDeployments) {
+            const updated = await this.upsertModel(deployment);
+            if (updated.id !== deployment.id) {
+              throw new OneComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The provider route identity changed unexpectedly", 409);
+            }
           }
-          await this.probe(models[0]!.alias, tenantManagedModelAccessGroup(input.tenantId, models[0]!.alias), input.provider);
+          const primary = targetDeployments[0]!;
+          await this.probe(primary.alias, primary.accessGroups[0], input.provider);
+          for (const retiredId of existing.filter((id) => !targetIdSet.has(id))) {
+            await this.deleteModel(retiredId, input.provider);
+          }
         } catch (error) {
-          for (const model of previousModels) {
-            await this.upsertModel({
-              id: tenantModelId(input.tenantId, input.provider, model.alias),
-              provider: input.provider,
-              alias: model.alias,
-              model,
-              credentialName,
-              accessGroups: [tenantManagedModelAccessGroup(input.tenantId, model.alias)],
-            }).catch(() => undefined);
+          for (const previous of previousDeployments) {
+            await this.upsertModel(previous).catch(() => undefined);
+          }
+          for (const addedId of targetIds.filter((id) => !previousIdSet.has(id))) {
+            await this.deleteModel(addedId, input.provider).catch(() => undefined);
           }
           throw error;
         }
         return {
-          modelIds: expectedModelIds,
+          modelIds: targetIds,
+          deployments: descriptors,
           credentialFingerprint: this.fingerprint(apiKey),
-          configuration: this.configurationFor(input),
+          configuration,
         };
       }
+
       let stableCredentialCreated = false;
       const createdModelIds: string[] = [];
       try {
         await this.createCredential(credentialName, input, apiKey);
         stableCredentialCreated = true;
-        const modelIds: string[] = [];
-        for (const model of models) {
-          const deployment = await this.upsertModel({
-            id: tenantModelId(input.tenantId, input.provider, model.alias),
-            provider: input.provider,
-            alias: model.alias,
-            model,
-            credentialName,
-            accessGroups: [tenantManagedModelAccessGroup(input.tenantId, model.alias)],
-          });
-          if (deployment.created) createdModelIds.push(deployment.id);
-          modelIds.push(deployment.id);
+        for (const deployment of targetDeployments) {
+          const updated = await this.upsertModel(deployment);
+          if (updated.id !== deployment.id) {
+            throw new OneComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The provider route identity changed unexpectedly", 409);
+          }
+          if (updated.created) createdModelIds.push(updated.id);
         }
-        await this.probe(models[0]!.alias, tenantManagedModelAccessGroup(input.tenantId, models[0]!.alias), input.provider);
+        const primary = targetDeployments[0]!;
+        await this.probe(primary.alias, primary.accessGroups[0], input.provider);
         return {
-          modelIds,
+          modelIds: targetIds,
+          deployments: descriptors,
           credentialFingerprint: this.fingerprint(apiKey),
-          configuration: this.configurationFor(input),
+          configuration,
         };
       } catch (error) {
-        await Promise.all(createdModelIds.map((id) => this.deleteModel(id).catch(() => undefined)));
-        if (stableCredentialCreated) await this.deleteCredential(credentialName).catch(() => undefined);
+        await Promise.all(createdModelIds.map((id) => this.deleteModel(id, input.provider).catch(() => undefined)));
+        if (stableCredentialCreated) await this.deleteCredential(credentialName, input.provider).catch(() => undefined);
         throw error;
       }
     } catch (error) {
       if (error instanceof OneComputerError) throw error;
       throw new OneComputerError("PROVIDER_CONFIGURATION_FAILED", "The provider configuration could not be validated", 502, true);
     } finally {
-      await Promise.all(candidates.map(({ id }) => this.deleteModel(id).catch(() => undefined)));
-      await this.deleteCredential(candidateCredentialName).catch(() => undefined);
+      await Promise.all(candidates.map(({ id }) => this.deleteModel(id, input.provider).catch(() => undefined)));
+      await this.deleteCredential(candidateCredentialName, input.provider).catch(() => undefined);
     }
   }
 
   async testManagedProvider(input: ManagedProviderOperation) {
-    const models = input.provider === "bedrock"
-      ? managedProviderModels.bedrock
-      : this.selectableModels(
-        input.provider,
-        input.configuration?.modelId ?? defaultManagedProviderModelIds[input.provider],
-      );
+    const configuration = input.configuration ?? (input.provider === "bedrock"
+      ? {
+        region: approvedBedrockApiKeyModelProfiles[0]!.regions[0],
+        modelProfileId: approvedBedrockApiKeyModelProfiles[0]!.id,
+      }
+      : {});
+    const models = templatesFor(input.provider, configuration);
     const model = models[0];
-    if (!model || input.existingModelIds.length !== models.length) {
+    const expectedIds = models.map((item) => tenantModelId(input.tenantId, input.provider, item.alias));
+    if (!model || input.existingModelIds.length !== expectedIds.length
+      || input.existingModelIds.some((id) => !expectedIds.includes(id))) {
       throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
     await this.ensureRetiringAliasesAreGone(input.provider);
@@ -292,8 +450,14 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     await this.deleteCredential(tenantCredentialName(input.tenantId, input.provider));
   }
 
-  private modelsFor(input: ManagedProviderConfiguration): readonly ManagedProviderModel[] {
-    if (input.provider !== "bedrock") return this.selectableModels(input.provider, input.modelId);
+  private configurationFor(input: ManagedProviderConfiguration): ProviderSettingMetadata {
+    if (input.provider !== "bedrock") {
+      if (input.modelIds) {
+        return { modelIds: managedProviderSelectedModelIds(input.provider, { modelIds: input.modelIds }) };
+      }
+      const selected = managedProviderSelectedModelIds(input.provider, { modelId: input.modelId });
+      return { modelId: selected[0]! };
+    }
     const region = bedrockApiKeyRegionSchema.safeParse(input.region);
     const modelProfileId = bedrockApiKeyModelProfileIdSchema.safeParse(input.modelProfileId);
     if (!region.success || !modelProfileId.success) {
@@ -303,29 +467,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     if (!profile || !profile.regions.includes(region.data)) {
       throw new OneComputerError("BEDROCK_ROUTE_UNAPPROVED", "The selected Bedrock region or inference profile is not approved", 400);
     }
-    return [{
-      alias: bedrockApiKeyRouteAlias,
-      model: profile.litellmModel,
-      vision: profile.capabilities.vision,
-      bedrock: { region: region.data, profile },
-    }];
-  }
-
-  private selectableModels(provider: SelectableProviderName, modelId: unknown): readonly ManagedProviderModel[] {
-    const profile = managedProviderModel(provider, modelId);
-    if (!profile) {
-      throw new OneComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider model is not approved", 400);
-    }
-    return managedProviderModels[provider].map((model) => ({
-      ...model,
-      model: profile.model,
-      vision: profile.vision,
-    }));
-  }
-
-  private configurationFor(input: ManagedProviderConfiguration): ProviderSettingMetadata {
-    if (input.provider === "bedrock") return { region: input.region, modelProfileId: input.modelProfileId };
-    return { modelId: input.modelId };
+    return { region: region.data, modelProfileId: modelProfileId.data };
   }
 
   private async createModel(deployment: ProviderModelDeployment) {
@@ -448,6 +590,9 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         onecomputer_deployment_id: deployment.id,
         onecomputer_provider_service_tier: "standard",
         ...(bedrock ? { onecomputer_region: bedrock.region } : {}),
+        ...(deployment.upstreamModelId ? { onecomputer_upstream_model_id: deployment.upstreamModelId } : {}),
+        onecomputer_primary_deployment: deployment.primary,
+        onecomputer_legacy_alias: deployment.legacyAlias,
         supports_vision: deployment.model.vision,
         ...(bedrock ? {
           supports_function_calling: bedrock.profile.capabilities.toolCalls,

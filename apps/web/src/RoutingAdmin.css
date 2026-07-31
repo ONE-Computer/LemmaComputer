@@ -1,18 +1,19 @@
 .routing-admin-screen {
+  display: grid;
   gap: 24px;
   color: #172334;
 }
 
 .route-page-heading {
   display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 18px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
 }
 
 .route-page-heading > div:first-child {
   display: grid;
-  min-width: 360px;
+  min-width: 0;
   gap: 5px;
 }
 
@@ -28,7 +29,7 @@
 
 .route-page-heading h2 {
   color: var(--ink);
-  font-size: clamp(38px, 3.3vw, 48px);
+  font-size: 32px;
   font-weight: 710;
   letter-spacing: -0.044em;
   line-height: 1.12;
@@ -40,7 +41,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  width: 100%;
+  width: auto;
   flex-wrap: wrap;
 }
 
@@ -416,6 +417,37 @@
   text-align: center !important;
 }
 
+.route-empty-state {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 96px;
+  text-align: left;
+}
+
+.route-empty-state > svg {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+}
+
+.route-empty-state > div {
+  display: grid;
+  gap: 4px;
+  margin-right: auto;
+}
+
+.route-empty-state strong,
+.route-empty-state span {
+  display: block;
+}
+
+.route-empty-state .primary-button,
+.route-empty-state .secondary-button {
+  width: auto;
+  text-decoration: none;
+}
+
 .route-team-picker {
   display: grid;
   gap: 6px;
@@ -491,7 +523,7 @@
 
 .route-mapping-editor-row {
   display: grid;
-  grid-template-columns: 160px repeat(2, minmax(0, 1fr));
+  grid-template-columns: 150px minmax(0, 1fr) minmax(0, .72fr);
   gap: 13px 15px;
   padding: 15px;
   border: 1px solid #dfe5ea;
@@ -503,7 +535,6 @@
   display: grid;
   align-content: start;
   gap: 7px;
-  grid-row: span 2;
 }
 
 .route-mapping-editor-row header small {
@@ -526,9 +557,6 @@
   justify-content: space-between;
 }
 
-.route-editor-rate {
-  grid-column: 2 / -1;
-}
 
 .route-price-reason {
   grid-column: 1 / -1;

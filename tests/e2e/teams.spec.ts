@@ -1,8 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("administrator creates a Team, assigns membership, selects the default, and archives it", async ({ page }) => {
-  await page.goto("/?view=settings");
-  await page.getByRole("button", { name: "Workspace administration" }).click();
+  await page.goto("/?view=ai-control-plane&section=teams-budgets");
 
   await expect(page.getByRole("heading", { name: "Teams" })).toBeVisible();
   await page.getByRole("button", { name: "Add Team" }).click();

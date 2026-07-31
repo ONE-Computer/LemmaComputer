@@ -171,15 +171,28 @@ const providerNameSchema = z.enum(["openai", "anthropic", "glm", "bedrock"]);
 const saveProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096),
 });
-const saveOpenAiProviderApiKeySchema = saveProviderApiKeySchema.extend({
-  modelId: openAiProviderModelIdSchema,
-});
-const saveAnthropicProviderApiKeySchema = saveProviderApiKeySchema.extend({
-  modelId: anthropicProviderModelIdSchema,
-});
-const saveGlmProviderApiKeySchema = saveProviderApiKeySchema.extend({
-  modelId: glmProviderModelIdSchema,
-});
+const uniqueModelIds = <T extends string>(modelIds: T[]) => new Set(modelIds).size === modelIds.length;
+const saveOpenAiProviderApiKeySchema = z.union([
+  saveProviderApiKeySchema.extend({ modelId: openAiProviderModelIdSchema }),
+  saveProviderApiKeySchema.extend({
+    modelIds: z.array(openAiProviderModelIdSchema).min(1).max(3)
+      .refine(uniqueModelIds, "Provider model selections must be unique"),
+  }),
+]);
+const saveAnthropicProviderApiKeySchema = z.union([
+  saveProviderApiKeySchema.extend({ modelId: anthropicProviderModelIdSchema }),
+  saveProviderApiKeySchema.extend({
+    modelIds: z.array(anthropicProviderModelIdSchema).min(1).max(2)
+      .refine(uniqueModelIds, "Provider model selections must be unique"),
+  }),
+]);
+const saveGlmProviderApiKeySchema = z.union([
+  saveProviderApiKeySchema.extend({ modelId: glmProviderModelIdSchema }),
+  saveProviderApiKeySchema.extend({
+    modelIds: z.array(glmProviderModelIdSchema).min(1).max(2)
+      .refine(uniqueModelIds, "Provider model selections must be unique"),
+  }),
+]);
 const saveBedrockProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096),
   region: bedrockApiKeyRegionSchema,

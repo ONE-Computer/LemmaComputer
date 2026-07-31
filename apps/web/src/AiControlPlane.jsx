@@ -6,7 +6,6 @@ export const aiControlPlaneTabs = [
   { id: "model-routes", label: "Model routes" },
   { id: "pricing", label: "Pricing" },
   { id: "teams-budgets", label: "Teams & budgets" },
-  { id: "audit-log", label: "Audit log" },
 ];
 
 export function AiControlPlane({ activeView, onViewChange, children }) {
@@ -38,17 +37,5 @@ export function AiControlPlane({ activeView, onViewChange, children }) {
         {children}
       </div>
     </div>
-  );
-}
-
-export function AiControlPlanePlaceholder({ title, description, actionLabel, onAction }) {
-  const headingId = `ai-control-plane-${title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
-  return (
-    <section className="ai-control-plane-placeholder" aria-labelledby={headingId}>
-      <p>Organization controls</p>
-      <h2 id={headingId}>{title}</h2>
-      <span>{description}</span>
-      {actionLabel && onAction && <button className="secondary-button" type="button" onClick={onAction}>{actionLabel}</button>}
-    </section>
   );
 }

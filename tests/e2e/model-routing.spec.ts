@@ -24,29 +24,15 @@ test("administrator can inspect alias mappings, pricing coverage, and supported 
   await page.getByRole("button", { name: "Create draft" }).click();
   const mappingEditor = page.getByRole("dialog", { name: "Create a mapping draft" });
   await mappingEditor.getByLabel("Mapping revision note").fill("Move Lite to the reviewed Luna v2 deployment.");
-  await mappingEditor.getByLabel("Lite provider model").fill("private/luna-v2");
-  await mappingEditor.getByLabel("Lite deployment ID").fill("foundry/luna-v2");
+  await mappingEditor.getByLabel("Lite provider deployment").click();
+  await page.getByRole("option", { name: "Anthropic Claude Sonnet 4.6 · Anthropic" }).click();
   await mappingEditor.getByRole("button", { name: "Save local draft" }).click();
-  await expect(aliasTable.getByText("Azure AI Foundry · private/luna-v2")).toBeVisible();
+  await expect(aliasTable.getByText("Anthropic · claude-sonnet-4-6")).toBeVisible();
   await expect(aliasTable.getByText("No card")).toBeVisible();
   await page.getByRole("button", { name: "Publish mapping version" }).click();
   await page.getByRole("dialog", { name: "Publish mapping version?" }).getByRole("button", { name: "Publish mapping version" }).click();
   await expect(page.getByRole("status")).toContainText("Published for policy/shadow evaluation; current Team rollouts are unchanged.");
 
-  const liteRow = aliasTable.getByRole("row").filter({ hasText: "private/luna-v2" });
-  await liteRow.getByRole("button", { name: "Add price record" }).click();
-  const pricing = page.getByRole("dialog", { name: "New Lite price version" });
-  await expect(pricing.getByLabel("Provider account ID")).toHaveValue("foundry-primary");
-  await pricing.getByLabel("Input price per 1M tokens").fill("0.4");
-  await pricing.getByLabel("Output price per 1M tokens").fill("2");
-  await pricing.getByLabel("Cache read price per 1M tokens").fill("0.1");
-  await pricing.getByLabel("Cache write price per 1M tokens").fill("0.5");
-  await pricing.getByLabel("Price approval reason").fill("Finance-approved enterprise rate update.");
-  await pricing.getByRole("button", { name: "Create price record" }).click();
-  await expect(page.getByRole("status")).toContainText("attached to the local mapping draft");
-  await page.getByRole("button", { name: "Publish mapping version" }).click();
-  await page.getByRole("dialog", { name: "Publish mapping version?" }).getByRole("button", { name: "Publish mapping version" }).click();
-  await expect(page.getByRole("status")).toContainText("current Team rollouts are unchanged");
 
   await page.getByLabel("Pro").uncheck();
   await page.getByRole("button", { name: "Save Team policy" }).click();
@@ -76,4 +62,34 @@ test("administrator can inspect alias mappings, pricing coverage, and supported 
   await page.getByRole("button", { name: "Activate kill switch" }).click();
   await expect(page.getByText("disabled", { exact: true })).toBeVisible();
   await page.screenshot({ path: "test-results/model-routing-admin-reviewed.png", fullPage: true });
+});
+
+test("administrator can configure the first alias mapping from provider inventory", async ({ page }) => {
+  await page.route("**/api/v1/admin/routing/mappings/latest", async (route) => {
+    await route.fulfill({ json: { mapping: null } });
+  });
+  await page.route(/\/api\/v1\/admin\/teams\/[^/]+\/routing$/, async (route) => {
+    await route.fulfill({
+      json: {
+        teamId: "11111111-1111-4111-8111-111111111111",
+        policy: null,
+        rollout: { mode: "disabled" },
+        review: null,
+        deployments: [],
+      },
+    });
+  });
+
+  await page.goto("/?view=ai-control-plane&section=model-routes");
+
+  await expect(page.getByText("No model routes yet")).toBeVisible();
+  await expect(page.getByText("Auto", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Configure first mapping" }).click();
+  const editor = page.getByRole("dialog", { name: "Create a mapping draft" });
+  await expect(editor.getByLabel("Lite provider deployment")).toBeVisible();
+  await expect(editor.getByLabel("Balanced provider deployment")).toBeVisible();
+  await expect(editor.getByLabel("Pro provider deployment")).toBeVisible();
+  await editor.getByLabel("Mapping revision note").fill("Create the first reviewed enterprise route map.");
+  await editor.getByRole("button", { name: "Save local draft" }).click();
+  await expect(page.getByText("Local mapping draft saved")).toBeVisible();
 });

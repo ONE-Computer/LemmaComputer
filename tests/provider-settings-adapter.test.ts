@@ -274,6 +274,57 @@ test("managed provider configuration isolates tenants, validates candidates, and
       .map(modelDocument);
     assert.equal(stableUpdates.length, 3);
     assert.ok(stableUpdates.every((document) => document.litellm_params.model === "openai/gpt-5.6-luna"));
+
+    const modelSetStart = requests.length;
+    const modelSet = await gateway.configureManagedProvider({
+      tenantId: "tenant-alpha",
+      provider: "openai",
+      apiKey: rotatedKey,
+      modelIds: ["gpt-5.6-luna", "gpt-5.6-sol"],
+      existingModelIds: switched.modelIds,
+      configuration: switched.configuration,
+    });
+    assert.deepEqual(modelSet.configuration, { modelIds: ["gpt-5.6-sol", "gpt-5.6-luna"] });
+    assert.equal(modelSet.modelIds.length, 5);
+    assert.deepEqual(modelSet.deployments.map((deployment) => deployment.modelId), [
+      "gpt-5.6-sol",
+      "gpt-5.6-luna",
+    ]);
+    assert.equal(modelSet.deployments[0]!.primary, true);
+    assert.ok(modelSet.deployments[0]!.aliases.includes("onecomputer-assistant"));
+    assert.match(modelSet.deployments[0]!.providerDeployment, /^ocp-/);
+    assert.notEqual(modelSet.deployments[0]!.id, modelSet.deployments[1]!.id);
+    const modelSetUpdates = requests.slice(modelSetStart)
+      .filter((request) => request.method === "PATCH" && request.url.startsWith("/model/"))
+      .map(modelDocument);
+    assert.equal(modelSetUpdates.length, 5);
+    assert.equal(modelSetUpdates.filter((document) => document.model_info.onecomputer_legacy_alias === false).length, 2);
+    assert.deepEqual(
+      modelSetUpdates
+        .filter((document) => document.model_info.onecomputer_legacy_alias === false)
+        .map((document) => document.model_info.onecomputer_upstream_model_id),
+      ["gpt-5.6-sol", "gpt-5.6-luna"],
+    );
+
+    const retireStart = requests.length;
+    const retired = await gateway.configureManagedProvider({
+      tenantId: "tenant-alpha",
+      provider: "openai",
+      apiKey: rotatedKey,
+      modelIds: ["gpt-5.6-terra"],
+      existingModelIds: modelSet.modelIds,
+      configuration: modelSet.configuration,
+    });
+    assert.equal(retired.modelIds.length, 4);
+    assert.deepEqual(retired.configuration, { modelIds: ["gpt-5.6-terra"] });
+    assert.deepEqual(retired.deployments.map((deployment) => deployment.modelId), ["gpt-5.6-terra"]);
+    const deletedModelIds = requests.slice(retireStart)
+      .filter((request) => request.url === "/model/delete")
+      .map((request) => request.body.id);
+    assert.deepEqual(
+      new Set(deletedModelIds.filter((id) => modelSet.modelIds.includes(String(id)))),
+      new Set(modelSet.modelIds.filter((id) => !retired.modelIds.includes(id))),
+    );
     assert.ok(stableUpdates.every((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length === 1));
     assert.ok(switchRequests.filter((request) => request.url === "/chat/completions")
       .every((request) => !Object.hasOwn(request.body, "max_tokens")));

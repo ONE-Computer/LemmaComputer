@@ -33,7 +33,7 @@ import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
 import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
 import { SpendDashboard } from "./SpendDashboard.jsx";
 import { RoutingAdmin } from "./RoutingAdmin.jsx";
-import { AiControlPlane, AiControlPlanePlaceholder, aiControlPlaneTabs } from "./AiControlPlane.jsx";
+import { AiControlPlane, aiControlPlaneTabs } from "./AiControlPlane.jsx";
 import { AiControlPlaneOverview } from "./AiControlPlaneOverview.jsx";
 import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
@@ -864,7 +864,7 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
   );
 }
 
-function AdminScreen({ users, teams, currentUserId, loading, teamsLoading, teamsBusy, busyUserId, onLoadTeam, onCreateTeam, onUpdateTeam, onArchiveTeam, onAssignTeamMember, onRemoveTeamMember, onSetDefaultTeam, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
+function AdminScreen({ users, currentUserId, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
   return (
     <div className="secondary-screen admin-screen">
       <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
@@ -886,19 +886,6 @@ function AdminScreen({ users, teams, currentUserId, loading, teamsLoading, teams
         </div>
         <button className="secondary-button" type="button" onClick={onConfigureConnector}>Open connector settings<ChevronRight16Regular aria-hidden="true" /></button>
       </section>
-      <TeamsAdminSection
-        teams={teams}
-        users={users}
-        loading={teamsLoading}
-        onLoad={onLoadTeam}
-        busy={teamsBusy}
-        onCreate={onCreateTeam}
-        onUpdate={onUpdateTeam}
-        onArchive={onArchiveTeam}
-        onAssignMember={onAssignTeamMember}
-        onRemoveMember={onRemoveTeamMember}
-        onSetDefault={onSetDefaultTeam}
-      />
       <section className="admin-user-list" aria-label="Organization users">
         {loading ? <p>Loading organization users…</p> : users.map((item) => (
           <article key={item.userId}>
@@ -981,38 +968,48 @@ function CredentialsScreen({ credentials, workspaces, loading, busy, error, onCr
   );
 }
 
-function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTest, onDisable, onDelete, onBack }) {
+function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTest, onDisable, onDelete }) {
   const [editor, setEditor] = useState(null);
   const [apiKey, setApiKey] = useState("");
   const closeEditor = () => { setApiKey(""); setEditor(null); };
   const openEditor = (provider) => {
+    const selectedModelIds = provider.selectedModelIds?.length
+      ? provider.selectedModelIds
+      : provider.modelId
+        ? [provider.modelId]
+        : provider.modelOptions?.[0]?.id
+          ? [provider.modelOptions[0].id]
+          : [];
     setApiKey("");
     setEditor({
       ...provider,
-      modelId: provider.modelId ?? provider.modelOptions?.[0]?.id ?? null,
+      selectedModelIds,
       region: provider.region ?? "ap-southeast-1",
       modelProfileId: provider.modelProfileId ?? "claude-sonnet-4-5-global",
     });
   };
+  const toggleModel = (modelId, selected) => setEditor((current) => ({
+    ...current,
+    selectedModelIds: selected
+      ? [...new Set([...current.selectedModelIds, modelId])]
+      : current.selectedModelIds.filter((id) => id !== modelId),
+  }));
   const save = async () => {
     const submitted = apiKey.trim();
-    if (!editor || !submitted) return;
+    if (!editor || !submitted || (editor.provider !== "bedrock" && !editor.selectedModelIds.length)) return;
     setApiKey("");
     const input = editor.provider === "bedrock"
       ? { apiKey: submitted, region: editor.region, modelProfileId: editor.modelProfileId }
-      : editor.modelOptions?.length
-      ? { apiKey: submitted, modelId: editor.modelId }
-      : { apiKey: submitted };
+      : { apiKey: submitted, modelIds: editor.selectedModelIds };
     const saved = await onSave(editor.provider, input);
     if (saved) setEditor(null);
   };
   return (
     <div className="secondary-screen settings-screen provider-settings-screen">
-      <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
       <header className="page-heading compact">
         <p>Model access</p>
         <h1>Provider settings</h1>
-        <span>Connect a provider key and choose the upstream model routed by LiteLLM. ONEComputer stores only a safe fingerprint, route selection, and test status.</span>
+        <span>Connect provider credentials and choose the deployments that organization routing may use. Credentials remain write-only.</span>
       </header>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Provider operation failed</strong>{error}</span></div>}
       <section className="credential-inventory provider-settings-inventory" aria-labelledby="provider-settings-heading">
@@ -1020,12 +1017,20 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
         {loading ? <p className="credential-empty">Loading provider settings…</p> : providers.map((provider) => {
           const needsRecovery = provider.state === "needs-reconfiguration";
           const stateLabel = provider.state === "active" ? "Active" : provider.state === "disabled" ? "Disabled" : needsRecovery ? "Needs reconfiguration" : "Not configured";
+          const deployments = provider.deployments ?? [];
           return (
             <article key={provider.provider}>
               <span className="connection-logo compact"><Bot24Regular aria-hidden="true" /></span>
               <div className="credential-copy">
                 <strong>{providerTitle(provider.provider)}</strong>
-                <small>{provider.primaryAlias} · {provider.upstreamModelDisplayName}</small>
+                {deployments.length > 0 ? <ul className="provider-deployment-list" aria-label={`${providerTitle(provider.provider)} configured deployments`}>
+                  {deployments.map((deployment) => {
+                    const modelId = deployment.modelId ?? deployment.id;
+                    const displayName = deployment.displayName ?? deployment.upstreamModelDisplayName ?? provider.modelOptions?.find((option) => option.id === modelId)?.displayName ?? modelId;
+                    const aliases = deployment.aliases ?? (deployment.alias ? [deployment.alias] : []);
+                    return <li key={deployment.id ?? modelId}><strong>{displayName}</strong><small>{aliases.length ? aliases.join(" · ") : modelId}</small></li>;
+                  })}
+                </ul> : <small>{provider.primaryAlias} · {provider.upstreamModelDisplayName}</small>}
                 <span>{stateLabel}{provider.fingerprint ? <> · {provider.fingerprint}</> : null}</span>
                 {provider.provider === "bedrock" && provider.region && <span>Region {provider.region} · Profile {provider.modelProfileId}</span>}
                 {provider.lastTestedAt && <span>Last tested {new Date(provider.lastTestedAt).toLocaleString()}</span>}
@@ -1041,20 +1046,27 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
           );
         })}
       </section>
-      {editor && <ModalDialog title={(editor.state === "active" ? "Configure " : "Connect ") + providerTitle(editor.provider)} description={editor.provider === "bedrock" ? "Choose an approved Bedrock region and inference profile. The API key is submitted once to Control, encrypted by LiteLLM, and never displayed again." : "Choose the upstream model LiteLLM should route for this provider. Re-enter the provider key to validate and apply the route; the key is never displayed again."} eyebrow="Write-only provider key" labelledBy="provider-key-title" onClose={busy ? () => undefined : closeEditor}>
-        {editor.modelOptions?.length > 0 && <label className="modal-field"><span>Upstream model</span><SelectMenu value={editor.modelId} options={editor.modelOptions.map((option) => ({ value: option.id, label: option.displayName }))} ariaLabel={`${providerTitle(editor.provider)} upstream model`} disabled={busy} onValueChange={(modelId) => setEditor((current) => ({ ...current, modelId }))} /></label>}
+      {editor && <ModalDialog title={(editor.state === "active" ? "Configure " : "Connect ") + providerTitle(editor.provider)} description={editor.provider === "bedrock" ? "Choose an approved Bedrock region and inference profile. The API key is encrypted and never displayed again." : "Choose every approved model this provider should make available to organization routing. Re-enter the provider key to validate and apply the deployment set."} eyebrow="Write-only provider key" labelledBy="provider-key-title" onClose={busy ? () => undefined : closeEditor}>
+        {editor.modelOptions?.length > 0 && <fieldset className="provider-model-options">
+          <legend>Models available for routing</legend>
+          <span>Select one or more provider models. Model routes decide which tier uses each deployment.</span>
+          {editor.modelOptions.map((option) => <label key={option.id}>
+            <input type="checkbox" checked={editor.selectedModelIds.includes(option.id)} disabled={busy} onChange={(event) => toggleModel(option.id, event.target.checked)} />
+            <span><strong>{option.displayName}</strong><small>{option.id}</small></span>
+          </label>)}
+        </fieldset>}
         {editor.provider === "bedrock" && <>
           <label className="modal-field"><span>Approved region</span><SelectMenu value={editor.region} options={bedrockRegionOptions} ariaLabel="Approved Bedrock region" disabled={busy || editor.state === "active"} onValueChange={(region) => setEditor((current) => ({ ...current, region }))} /></label>
           <label className="modal-field"><span>Approved inference profile</span><SelectMenu value={editor.modelProfileId} options={bedrockProfileOptions} ariaLabel="Approved Bedrock inference profile" disabled={busy || editor.state === "active"} onValueChange={(modelProfileId) => setEditor((current) => ({ ...current, modelProfileId }))} /></label>
         </>}
         <label className="modal-field"><span>{providerTitle(editor.provider)} API key</span><input name="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste the provider API key" disabled={busy} /></label>
-        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={closeEditor}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim()} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Apply configuration" : "Connect provider"}</button></div>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={closeEditor}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim() || (editor.provider !== "bedrock" && !editor.selectedModelIds.length)} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Apply configuration" : "Connect provider"}</button></div>
       </ModalDialog>}
     </div>
   );
 }
 
-function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, teams, loading, teamsLoading, teamsBusy, busyUserId, onLoadTeam, onCreateTeam, onUpdateTeam, onArchiveTeam, onAssignTeamMember, onRemoveTeamMember, onSetDefaultTeam, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
+function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
   if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
     return <WorkspaceConfigurationScreen
       settings={adminSandboxSettings}
@@ -1083,19 +1095,9 @@ function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCrede
   if (view === "admin" && isAdmin) {
     return <AdminScreen
       users={users}
-      teams={teams}
       currentUserId={currentUserId}
       loading={loading}
-      teamsLoading={teamsLoading}
-      teamsBusy={teamsBusy}
       busyUserId={busyUserId}
-      onLoadTeam={onLoadTeam}
-      onCreateTeam={onCreateTeam}
-      onUpdateTeam={onUpdateTeam}
-      onArchiveTeam={onArchiveTeam}
-      onAssignTeamMember={onAssignTeamMember}
-      onSetDefaultTeam={onSetDefaultTeam}
-      onRemoveTeamMember={onRemoveTeamMember}
       onAssign={onAssign}
       onRevoke={onRevoke}
       onStatusChange={onStatusChange}
@@ -3419,18 +3421,27 @@ export function App() {
   }, [activeNav, session?.user.id]);
 
   useEffect(() => {
-    if (activeNav !== "Settings" || settingsView !== "admin" || !session?.roles.includes("administrator")) return;
-    setAdminLoading(true);
-    setAdminTeamsLoading(true);
-    Promise.all([adminApi.users(), adminApi.mcpPolicy(), adminApi.teams(true)])
+    const workspaceAdminOpen = activeNav === "Settings" && settingsView === "admin";
+    const teamsOpen = activeNav === "AI control plane" && aiControlPlaneView === "teams-budgets";
+    if ((!workspaceAdminOpen && !teamsOpen) || !session?.roles.includes("administrator")) return;
+    if (workspaceAdminOpen) setAdminLoading(true);
+    if (teamsOpen) setAdminTeamsLoading(true);
+    Promise.all([
+      adminApi.users(),
+      workspaceAdminOpen ? adminApi.mcpPolicy() : Promise.resolve(null),
+      teamsOpen ? adminApi.teams(true) : Promise.resolve(null),
+    ])
       .then(([users, policy, teams]) => {
         setAdminUsers(users.users);
-        setMcpPolicy(policy);
-        setAdminTeams(teams.teams);
+        if (policy) setMcpPolicy(policy);
+        if (teams) setAdminTeams(teams.teams);
       })
       .catch(showApiError)
-      .finally(() => { setAdminLoading(false); setAdminTeamsLoading(false); });
-  }, [activeNav, settingsView, session?.user.id]);
+      .finally(() => {
+        if (workspaceAdminOpen) setAdminLoading(false);
+        if (teamsOpen) setAdminTeamsLoading(false);
+      });
+  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id]);
 
   useEffect(() => {
     if (activeNav !== "Firewall" || !session?.roles.includes("administrator")) return;
@@ -4651,20 +4662,18 @@ export function App() {
             />}
             {aiControlPlaneView === "model-routes" && <RoutingAdmin />}
             {aiControlPlaneView === "pricing" && <RoutingAdmin section="pricing" />}
-            {aiControlPlaneView === "teams-budgets" && <AiControlPlanePlaceholder
-              title="Teams & budgets"
-              description="Team definitions, membership, budget periods, thresholds, and enforcement remain available through the existing organization administration flow while this control-plane view is consolidated."
-              actionLabel="Open organization administration"
-              onAction={() => {
-                selectNav("Settings");
-                setSettingsView("admin");
-              }}
-            />}
-            {aiControlPlaneView === "audit-log" && <AiControlPlanePlaceholder
-              title="Audit log"
-              description="Review the organization evidence behind protected actions, routing changes, policy decisions, and administrative approvals."
-              actionLabel="Open Trail"
-              onAction={() => selectNav("Trail")}
+            {aiControlPlaneView === "teams-budgets" && <TeamsAdminSection
+              teams={adminTeams}
+              users={adminUsers}
+              loading={adminTeamsLoading}
+              busy={adminTeamsBusy}
+              onLoad={loadAdminTeam}
+              onCreate={createAdminTeam}
+              onUpdate={updateAdminTeam}
+              onArchive={archiveAdminTeam}
+              onAssignMember={assignAdminTeamMember}
+              onRemoveMember={removeAdminTeamMember}
+              onSetDefault={setAdminDefaultTeam}
             />}
           </AiControlPlane>
         )}
@@ -4684,18 +4693,8 @@ export function App() {
           onRotateCredential={rotateTelegramCredential}
           onDeleteCredential={deleteTelegramCredential}
           users={adminUsers}
-          teams={adminTeams}
           loading={adminLoading}
-          teamsLoading={adminTeamsLoading}
-          teamsBusy={adminTeamsBusy}
           busyUserId={adminBusyUserId}
-          onLoadTeam={loadAdminTeam}
-          onCreateTeam={createAdminTeam}
-          onUpdateTeam={updateAdminTeam}
-          onArchiveTeam={archiveAdminTeam}
-          onAssignTeamMember={assignAdminTeamMember}
-          onRemoveTeamMember={removeAdminTeamMember}
-          onSetDefaultTeam={setAdminDefaultTeam}
           onAssign={assignPolicy}
           onRevoke={revokePolicy}
           onStatusChange={changeUserStatus}

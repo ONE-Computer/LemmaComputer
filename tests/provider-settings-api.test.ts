@@ -3,6 +3,8 @@ import test from "node:test";
 import { OneComputerError, type IdentityContext } from "@onecomputer/contracts";
 import {
   managedProviderModels,
+  managedProviderDeploymentDescriptors,
+  managedProviderModelAlias,
   type GatewayClient,
   type ManagedProviderConfiguration,
   type ManagedProviderOperation,
@@ -106,12 +108,21 @@ class FakeProviderAdministration implements ProviderAdministrationGateway {
   async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
     if (this.failure) throw this.failure;
     this.configured.push(input);
+    const configuration = input.provider === "bedrock"
+      ? { region: input.region, modelProfileId: input.modelProfileId }
+      : input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId };
+    const additionalModelIds = input.provider !== "bedrock" && input.modelIds
+      ? input.modelIds.map((modelId) => input.tenantId + "-" + managedProviderModelAlias(input.provider, modelId))
+      : [];
+    const modelIds = [
+      ...managedProviderModels[input.provider].map((model) => input.tenantId + "-" + input.provider + "-" + model.alias),
+      ...additionalModelIds,
+    ];
     return {
-      modelIds: managedProviderModels[input.provider].map((model) => input.tenantId + "-" + input.provider + "-" + model.alias),
+      modelIds,
+      deployments: managedProviderDeploymentDescriptors(input.tenantId, input.provider, configuration),
       credentialFingerprint: "fp_" + input.tenantId + "_" + input.provider,
-      configuration: input.provider === "bedrock"
-        ? { region: input.region, modelProfileId: input.modelProfileId }
-        : { modelId: input.modelId },
+      configuration,
     };
   }
 
@@ -467,7 +478,67 @@ test("provider settings do not expose an administrator endpoint to an employee s
       headers: { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=employee" },
     });
     assert.equal(response.statusCode, 403);
+
     assert.equal(response.json().error.code, "FORBIDDEN");
+  } finally {
+    await app.close();
+  }
+});
+
+test("provider settings accept model sets and expose concrete deployment descriptors", async () => {
+  const settingsStore = new MemoryProviderSettingsStore();
+  const providerAdministration = new FakeProviderAdministration();
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    proxyToken,
+    undefined,
+    undefined,
+    {},
+    {
+      testIdentityMode: true,
+      identityPolicyStore: identityPolicies(),
+      providerSettingsStore: settingsStore,
+      providerAdministration,
+    },
+  );
+
+  try {
+    const configured = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/openai",
+      headers: { ...testHeaders, "content-type": "application/json" },
+      payload: { apiKey: rawOpenAiKey, modelIds: ["gpt-5.6-luna", "gpt-5.6-sol"] },
+    });
+    assert.equal(configured.statusCode, 200);
+    const provider = configured.json().provider;
+    assert.equal(provider.modelId, "gpt-5.6-sol");
+    assert.deepEqual(provider.selectedModelIds, ["gpt-5.6-sol", "gpt-5.6-luna"]);
+    assert.equal(provider.deployments.length, 2);
+    assert.deepEqual(provider.deployments.map((deployment: { modelId: string }) => deployment.modelId), [
+      "gpt-5.6-sol",
+      "gpt-5.6-luna",
+    ]);
+    assert.equal(provider.deployments[0].primary, true);
+    assert.ok(provider.deployments[0].aliases.includes("onecomputer-openai"));
+    assert.match(provider.deployments[0].providerDeployment, /^ocp-/);
+    assert.notEqual(provider.deployments[0].id, provider.deployments[1].id);
+
+    const invalidPayloads = [
+      { apiKey: rawOpenAiKey, modelIds: [] },
+      { apiKey: rawOpenAiKey, modelIds: ["gpt-5.6-sol", "gpt-5.6-sol"] },
+      { apiKey: rawOpenAiKey, modelIds: ["claude-opus-4-8"] },
+      { apiKey: rawOpenAiKey, modelId: "gpt-5.6-sol", modelIds: ["gpt-5.6-sol"] },
+    ];
+    for (const payload of invalidPayloads) {
+      const rejected = await app.inject({
+        method: "PUT",
+        url: "/v1/admin/provider-settings/openai",
+        headers: { ...testHeaders, "content-type": "application/json" },
+        payload,
+      });
+      assert.equal(rejected.statusCode, 400);
+    }
   } finally {
     await app.close();
   }

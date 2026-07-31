@@ -299,16 +299,22 @@ test("desktop pages begin at one shared top-bar offset without compact-page padd
 test("the account menu gateways administrators to the AI control plane without adding primary navigation", async () => {
   const app = await source("apps/web/src/App.jsx");
   const primaryNav = app.slice(app.indexOf('<nav aria-label="Primary navigation">'), app.indexOf("</nav>", app.indexOf('<nav aria-label="Primary navigation">')));
+  const controlPlane = await source("apps/web/src/AiControlPlane.jsx");
+  const adminScreen = app.slice(app.indexOf("function AdminScreen"), app.indexOf("function CredentialsScreen"));
   const accountMenu = app.slice(app.indexOf('id="sidebar-account-menu"'), app.indexOf("</aside>", app.indexOf('id="sidebar-account-menu"')));
   const settingsScreen = app.slice(app.indexOf("function SettingsScreen"), app.indexOf("function FirewallScreen"));
   assert.match(app, /settings: "Settings"/);
   assert.match(app, /function SettingsScreen/);
   assert.match(app, /aiControlPlaneView === "models-providers"/);
-  assert.match(app, /provider\.primaryAlias} · {provider\.upstreamModelDisplayName/);
-  assert.match(app, /<span>Upstream model<\/span><SelectMenu/);
-  assert.match(app, /ariaLabel={`\$\{providerTitle\(editor\.provider\)\} upstream model`} disabled={busy}/);
+  assert.match(app, /provider\.deployments \?\? \[\]/);
+  assert.match(app, /provider\.selectedModelIds\?\.length/);
+  assert.match(app, /modelIds: editor\.selectedModelIds/);
+  assert.match(app, /type="checkbox" checked={editor\.selectedModelIds\.includes/);
   assert.match(app, /editor\.modelOptions\?\.length > 0/);
+  assert.doesNotMatch(app, /<span>Upstream model<\/span><SelectMenu/);
   assert.doesNotMatch(app, /provider\.aliases\.join/);
+  assert.doesNotMatch(adminScreen, /<TeamsAdminSection/);
+  assert.doesNotMatch(controlPlane, /Audit log|audit-log/);
   assert.match(settingsScreen, /<strong>Workspace administration<\/strong>/);
   assert.doesNotMatch(settingsScreen, /<strong>Provider settings<\/strong>|<strong>AI spend<\/strong>|<strong>Model routing<\/strong>/);
   assert.match(settingsScreen, /Manage your credentials and current workspace controls\./);

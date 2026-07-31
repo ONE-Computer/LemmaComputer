@@ -10,12 +10,12 @@ test("administrator enters the AI control plane from the account menu and naviga
   await expect(page).toHaveURL(/\?view=ai-control-plane$/);
   await expect(page.getByRole("heading", { name: "AI control plane", exact: true })).toBeVisible();
   const tabs = page.getByRole("navigation", { name: "AI control plane" });
-  await expect(tabs.getByRole("button")).toHaveCount(6);
+  await expect(tabs.getByRole("button")).toHaveCount(5);
+  await expect(tabs.getByRole("button", { name: "Audit log" })).toHaveCount(0);
   await expect(tabs.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-current", "page");
   await tabs.getByRole("button", { name: "Pricing" }).click();
   await expect(page).toHaveURL(/\?view=ai-control-plane&section=pricing$/);
   await expect(page.getByRole("heading", { name: "Pricing", exact: true })).toBeVisible();
-  await expect(page.getByRole("columnheader", { name: "Token prices / 1M" })).toBeVisible();
   await tabs.getByRole("button", { name: "Model routes" }).click();
   await expect(page).toHaveURL(/\?view=ai-control-plane&section=model-routes$/);
   await expect(page.getByRole("heading", { name: "Model routes" })).toBeVisible();
@@ -35,6 +35,36 @@ test("Settings keeps account and workspace controls without duplicating AI gover
   await expect(page.getByRole("button", { name: "Provider settings" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "AI spend" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Model routing" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Workspace administration" }).click();
+  await expect(page.getByRole("heading", { name: "Workspace policy" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Teams" })).toHaveCount(0);
+});
+
+test("provider setup shows configured deployments and selects more than one routing model", async ({ page }) => {
+  await page.goto("/?view=ai-control-plane&section=models-providers");
+  await expect(page.getByRole("heading", { name: "Provider settings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to Settings" })).toHaveCount(0);
+
+  const anthropic = page.locator(".provider-settings-inventory article").filter({ hasText: "Anthropic" });
+  await expect(anthropic.getByRole("list", { name: "Anthropic configured deployments" })).toContainText("Anthropic Claude Sonnet 4.6");
+  await expect(anthropic.getByRole("list", { name: "Anthropic configured deployments" })).toContainText("Anthropic Claude Opus 4.8");
+  await anthropic.getByRole("button", { name: "Configure" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Configure Anthropic" });
+  const sonnet = dialog.getByRole("checkbox", { name: /Anthropic Claude Sonnet 4.6/ });
+  const opus = dialog.getByRole("checkbox", { name: /Anthropic Claude Opus 4.8/ });
+  await expect(sonnet).toBeChecked();
+  await expect(opus).toBeChecked();
+  await opus.uncheck();
+  await expect(sonnet).toBeChecked();
+  await expect(opus).not.toBeChecked();
+});
+
+test("Teams and budgets is the sole Team-management surface", async ({ page }) => {
+  await page.goto("/?view=ai-control-plane&section=teams-budgets");
+  await expect(page.getByRole("heading", { name: "Teams" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add Team" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open organization administration" })).toHaveCount(0);
 });
 
 test("employee cannot discover or deep-link the administrator control plane", async ({ page }) => {

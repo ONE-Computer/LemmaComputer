@@ -1,11 +1,16 @@
 import { OneComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderModelId } from "@onecomputer/contracts";
-import { defaultManagedProviderModelIds, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, type ManagedProviderConfiguration, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
+import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import type { ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
 
+type DirectProviderInput<T extends ProviderModelId> = { apiKey: string } & (
+  | { modelId: T; modelIds?: never }
+  | { modelId?: never; modelIds: T[] }
+);
+
 export type ProviderSettingInput =
-  | { provider: "openai"; apiKey: string; modelId: OpenAiProviderModelId }
-  | { provider: "anthropic"; apiKey: string; modelId: AnthropicProviderModelId }
-  | { provider: "glm"; apiKey: string; modelId: GlmProviderModelId }
+  | ({ provider: "openai" } & DirectProviderInput<OpenAiProviderModelId>)
+  | ({ provider: "anthropic" } & DirectProviderInput<AnthropicProviderModelId>)
+  | ({ provider: "glm" } & DirectProviderInput<GlmProviderModelId>)
   | { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
 
 type BedrockSelection = { region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
@@ -19,6 +24,8 @@ export type ProviderSettingView = {
   fingerprint: string | null;
   modelId: ProviderModelId | null;
   modelOptions: Array<{ id: ProviderModelId; displayName: string }>;
+  selectedModelIds: ProviderModelId[];
+  deployments: ManagedProviderDeploymentDescriptor[];
   region: BedrockApiKeyRegion | null;
   modelProfileId: BedrockApiKeyModelProfileId | null;
   lastTestedAt: string | null;
@@ -33,19 +40,30 @@ const bedrockSelection = (provider: ManagedProviderName, record: ProviderSetting
   return { region: parsed.data.region, modelProfileId: parsed.data.modelProfileId };
 };
 
-const providerModelSelection = (provider: ManagedProviderName, record: ProviderSettingRecord | null): ProviderModelId | null => {
-  if (provider === "bedrock") return null;
+const providerModelSelection = (provider: ManagedProviderName, record: ProviderSettingRecord | null): ProviderModelId[] => {
+  if (provider === "bedrock") return [];
+  if (!record) return [];
   const parsed = providerSettingMetadataSchema.safeParse(record?.configuration ?? {});
-  return parsed.success && parsed.data.modelId && managedProviderModel(provider, parsed.data.modelId)
-    ? parsed.data.modelId
-    : defaultManagedProviderModelIds[provider];
+  if (!parsed.success) return [];
+  try {
+    return managedProviderSelectedModelIds(provider, parsed.data);
+  } catch {
+    return [];
+  }
 };
 
 const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | null): ProviderSettingView => {
   const selection = bedrockSelection(provider, record);
-  const modelId = providerModelSelection(provider, record);
+  const selectedModelIds = providerModelSelection(provider, record);
+  const modelId = selectedModelIds[0] ?? null;
   const providerModel = provider !== "bedrock" && modelId ? managedProviderModel(provider, modelId) : null;
-  const needsReconfiguration = provider === "bedrock" && record?.state === "active" && !selection;
+  const needsReconfiguration = record?.state === "active" && (
+    provider === "bedrock" ? !selection : selectedModelIds.length === 0
+  );
+  const configuration = providerSettingMetadataSchema.safeParse(record?.configuration ?? {});
+  const deployments = record?.state === "active" && !needsReconfiguration && configuration.success
+    ? managedProviderDeploymentDescriptors(record.tenantId, provider, configuration.data)
+    : [];
   return {
     provider,
     aliases: managedProviderModels[provider].map((model) => model.alias),
@@ -56,6 +74,8 @@ const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | n
     modelId,
     modelOptions: provider === "bedrock" ? [] : managedProviderModelOptions(provider),
     region: selection?.region ?? null,
+    selectedModelIds,
+    deployments,
     modelProfileId: selection?.modelProfileId ?? null,
     lastTestedAt: record?.lastTestedAt?.toISOString() ?? null,
     lastErrorCode: needsReconfiguration ? "PROVIDER_CONFIGURATION_INVALID" : record?.lastErrorCode ?? null,
@@ -186,7 +206,7 @@ export class ProviderSettingsService {
           tenantId: actor.tenantId,
           provider: input.provider,
           apiKey: input.apiKey,
-          modelId: input.modelId,
+          ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
           existingModelIds,
           configuration: current?.configuration,
         }
@@ -195,7 +215,7 @@ export class ProviderSettingsService {
           tenantId: actor.tenantId,
           provider: input.provider,
           apiKey: input.apiKey,
-          modelId: input.modelId,
+          ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
           existingModelIds,
           configuration: current?.configuration,
         }
@@ -203,7 +223,7 @@ export class ProviderSettingsService {
           tenantId: actor.tenantId,
           provider: input.provider,
           apiKey: input.apiKey,
-          modelId: input.modelId,
+          ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
           existingModelIds,
           configuration: current?.configuration,
         };
@@ -363,7 +383,7 @@ export class ProviderSettingsService {
     const current = await this.store.getProviderSetting(actor.tenantId, provider);
     if (
       current?.state !== "active"
-      || current.modelIds.length !== managedProviderModels[provider].length
+      || current.modelIds.length === 0
     ) {
       throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }

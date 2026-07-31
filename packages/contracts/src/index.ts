@@ -169,6 +169,11 @@ export const providerModelIds = [
 ] as const;
 export const providerModelIdSchema = z.enum(providerModelIds);
 export type ProviderModelId = z.infer<typeof providerModelIdSchema>;
+export const providerModelIdSetSchema = z.array(providerModelIdSchema)
+  .min(1)
+  .max(providerModelIds.length)
+  .refine((modelIds) => new Set(modelIds).size === modelIds.length, "Provider model selections must be unique");
+export type ProviderModelIdSet = z.infer<typeof providerModelIdSetSchema>;
 
 // Provider Settings persists only read-safe route selection metadata. The API
 // key itself is deliberately absent: LiteLLM owns its encrypted credential
@@ -177,14 +182,16 @@ export const providerSettingMetadataSchema = z.strictObject({
   region: bedrockApiKeyRegionSchema.optional(),
   modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
   modelId: providerModelIdSchema.optional(),
+  modelIds: providerModelIdSetSchema.optional(),
 }).refine(
   (value) => {
     const hasBedrockSelection = value.region !== undefined || value.modelProfileId !== undefined;
     return hasBedrockSelection
-      ? value.region !== undefined && value.modelProfileId !== undefined && value.modelId === undefined
-      : true;
+      ? value.region !== undefined && value.modelProfileId !== undefined
+        && value.modelId === undefined && value.modelIds === undefined
+      : !(value.modelId !== undefined && value.modelIds !== undefined);
   },
-  "Provider metadata must contain either an OpenAI model or a complete Bedrock selection",
+  "Provider metadata must contain a legacy model, a model set, or a complete Bedrock selection",
 );
 export type ProviderSettingMetadata = z.infer<typeof providerSettingMetadataSchema>;
 
