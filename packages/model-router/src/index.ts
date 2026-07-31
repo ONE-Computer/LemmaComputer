@@ -69,8 +69,9 @@ export type ModelRoutingDecision = {
     | "low_confidence_default"
     | "session_affinity"
     | "session_affinity_escalation"
-    | "capability_escalation";
-  escalationReason: "stronger_task" | "capability_floor" | null;
+    | "capability_escalation"
+    | "availability_escalation";
+  escalationReason: "stronger_task" | "capability_floor" | "availability" | null;
   mappingVersion: string;
   selectedDeployment: {
     id: string;
@@ -253,6 +254,9 @@ export class DeterministicModelRouter implements ModelRouter {
     const unavailableIds = new Set(request.unavailableDeploymentIds ?? []);
     let ranked: RoutingDeployment[] = [];
     let selected: RoutingDeployment | undefined;
+    const routingCandidateIds: string[] = [];
+    const skippedCandidateIds: string[] = [];
+    let availabilityFailure = false;
     for (const candidateClass of productServiceClasses.slice(serviceClassIndex(selectedServiceClass))) {
       if (!allowedClasses.has(candidateClass)) continue;
       ranked = policy.deployments
@@ -262,23 +266,26 @@ export class DeterministicModelRouter implements ModelRouter {
           && satisfiesCapabilities(deployment, request.requiredCapabilities))
         .sort((left, right) => left.expectedCostUsd - right.expectedCostUsd || left.id.localeCompare(right.id));
       if (ranked.length === 0) continue;
+      routingCandidateIds.push(...ranked.map(({ id }) => id));
       selected = ranked.find((deployment) => deployment.healthy && !unavailableIds.has(deployment.id));
       if (selected) {
+        const selectedIndex = ranked.findIndex((deployment) => deployment.id === selected!.id);
+        skippedCandidateIds.push(...ranked.slice(0, selectedIndex).map(({ id }) => id));
         if (candidateClass !== selectedServiceClass) {
           selectedServiceClass = candidateClass;
-          cause = "capability_escalation";
-          escalationReason = "capability_floor";
+          cause = availabilityFailure ? "availability_escalation" : "capability_escalation";
+          escalationReason = availabilityFailure ? "availability" : "capability_floor";
         }
         break;
       }
-      break;
+      availabilityFailure = true;
+      skippedCandidateIds.push(...ranked.map(({ id }) => id));
     }
     if (!selected) {
       throw new ModelRoutingError("NO_ELIGIBLE_DEPLOYMENT", "No policy-approved deployment satisfies the request");
     }
     if (request.requestedServiceClass === "Auto") this.writeAffinity(affinityKey, selectedServiceClass);
 
-    const selectedIndex = ranked.findIndex((deployment) => deployment.id === selected!.id);
     return {
       requestedAlias: "onecomputer-auto",
       requestedServiceClass: request.requestedServiceClass,
@@ -296,8 +303,8 @@ export class DeterministicModelRouter implements ModelRouter {
         rateCardKey: selected.rateCardKey,
         expectedCostUsd: selected.expectedCostUsd,
       },
-      routingCandidateIds: ranked.map(({ id }) => id),
-      skippedCandidateIds: ranked.slice(0, selectedIndex).map(({ id }) => id),
+      routingCandidateIds,
+      skippedCandidateIds,
       billedFallbackAttemptIds: [],
       routerOverheadMs: performance.now() - startedAt,
     };

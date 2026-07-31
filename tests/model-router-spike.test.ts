@@ -104,6 +104,18 @@ test("unavailable candidates are routing skips, never fabricated billed fallback
   assert.deepEqual(decision.billedFallbackAttemptIds, []);
 });
 
+test("an unavailable lower class safely escalates while retaining every unbilled routing skip", async () => {
+  const decision = await new DeterministicModelRouter().route(request({
+    unavailableDeploymentIds: ["lite-cheap", "lite-expensive"],
+  }), policy);
+  assert.equal(decision.selectedServiceClass, "Balanced");
+  assert.equal(decision.cause, "availability_escalation");
+  assert.equal(decision.escalationReason, "availability");
+  assert.deepEqual(decision.routingCandidateIds, ["lite-cheap", "lite-expensive", "balanced-vision"]);
+  assert.deepEqual(decision.skippedCandidateIds, ["lite-cheap", "lite-expensive"]);
+  assert.deepEqual(decision.billedFallbackAttemptIds, []);
+});
+
 test("affinity is hashed, bounded, expires, and rechecks policy", async () => {
   let now = 1_000;
   const router = new DeterministicModelRouter({ affinityTtlMs: 100, maxAffinityEntries: 1, now: () => now });

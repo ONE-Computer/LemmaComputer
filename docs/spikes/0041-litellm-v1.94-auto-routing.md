@@ -129,7 +129,8 @@ The reference proves:
   fallback attempts remain empty until an inference dispatch actually occurs;
 - explicit service-class requests ignore stale Auto affinity;
 - affinity keys are hashed, bounded, and expiring; stronger tasks or capability
-  floors may safely escalate and record the reason;
+  floors or exhausted lower-class availability may safely escalate and record
+  the reason, retaining lower-class routing skips as unbilled;
 - Foundry, OpenAI, Anthropic, GLM, and Bedrock are provider-neutral deployment
   values, not product vocabulary;
 - replacing Foundry behind `Lite` with Bedrock preserves `Lite` and the stable
