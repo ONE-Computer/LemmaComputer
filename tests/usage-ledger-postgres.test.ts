@@ -75,8 +75,10 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     assert.equal(snapshot.rows[0].rate_card_source_version,"contract-v1");
     assert.equal(snapshot.rows[0].conversation_history_count,8);
 
-    await assert.rejects(ledger.appendUsageEvent({ ...usageInput,sourceEventId:`correction-before-${suffix}`,eventType:"correction",correctsEventId:crypto.randomUUID(),providerReportedTotalTokens:"-1",units:[{ unit:"output_token",quantity:"-1" }] }),/Correction target/);
-    const correction = await ledger.appendUsageEvent({ ...usageInput,sourceEventId:`correction-${suffix}`,eventType:"correction",correctsEventId:usage.eventId!,providerReportedTotalTokens:"-10",units:[{ unit:"output_token",quantity:"-10" }] });
+    await assert.rejects(ledger.appendUsageEvent({ ...usageInput,sourceEventId:`correction-before-${suffix}`,eventType:"correction",correctsEventId:crypto.randomUUID(),providerReportedTotalTokens:"-1",units:[{ unit:"output_token",quantity:"-1" }],costDrivers:{} }),/Correction target/);
+    await assert.rejects(ledger.appendUsageEvent({ ...usageInput,sourceEventId:`correction-drivers-${suffix}`,eventType:"correction",correctsEventId:usage.eventId!,units:[{ unit:"output_token",quantity:"-1" }] }),/cannot repeat cost-driver/);
+    await assert.rejects(ledger.appendUsageEvent({ ...usageInput,sourceEventId:`confirmed-pair-${suffix}`,providerConfirmedCost:"1.00" }),/cost and currency/);
+    const correction = await ledger.appendUsageEvent({ ...usageInput,sourceEventId:`correction-${suffix}`,eventType:"correction",correctsEventId:usage.eventId!,occurredAt:new Date("2026-03-01T00:00:00.000Z"),providerReportedTotalTokens:"-10",units:[{ unit:"output_token",quantity:"-10" }],costDrivers:{} });
     assert.equal(correction.providerCost,"-0.000005000000");
     const total = await pool.query(`SELECT sum(provider_cost)::text AS total FROM ai_usage_events WHERE tenant_id=$1 AND admission_id=$2`, [tenantId,admitted.admissionId]);
     assert.equal(total.rows[0].total,"0.000545000000");
@@ -84,7 +86,7 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     const currentTeam = (await teams.getCurrentDefaultSpendingTeam(tenantId,userId))!;
     const retry = await ledger.admitAttempt({ ...admissionInput,sourceAttemptId:`retry-${suffix}`,team:currentTeam,taskId:"task-a",attemptKind:"retry",parentAttemptId:admitted.admissionId! });
     assert.equal(retry.status,"created");
-    await assert.rejects(ledger.appendUsageEvent({ ...usageInput,admissionId:retry.admissionId!,sourceEventId:`bad-correction-${suffix}`,eventType:"correction",correctsEventId:usage.eventId!,units:[{ unit:"output_token",quantity:"-1" }] }),/same attempt/);
+    await assert.rejects(ledger.appendUsageEvent({ ...usageInput,admissionId:retry.admissionId!,sourceEventId:`bad-correction-${suffix}`,eventType:"correction",correctsEventId:usage.eventId!,units:[{ unit:"output_token",quantity:"-1" }],costDrivers:{} }),/same attempt/);
 
     const unknown = await ledger.admitAttempt({ ...admissionInput,sourceAttemptId:`unknown-${suffix}`,team:currentTeam,resolvedDeploymentId:"unpriced" });
     const unknownEvent = await ledger.appendUsageEvent({ ...usageInput,admissionId:unknown.admissionId!,sourceEventId:`unknown-event-${suffix}` });
