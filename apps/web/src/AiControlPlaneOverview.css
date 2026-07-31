@@ -514,6 +514,12 @@
   text-decoration: none;
 }
 
+.ai-emissions-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+}
+
 .ai-emissions-evidence button:disabled {
   color: #89919a;
 }

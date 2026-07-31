@@ -4,6 +4,7 @@ import { Globe20Regular } from "@fluentui/react-icons/svg/globe";
 import { Info20Regular } from "@fluentui/react-icons/svg/info";
 import { Pulse20Regular } from "@fluentui/react-icons/svg/pulse";
 import { adminApi } from "./workspace-api.js";
+import { estimateAiTokenEmissions } from "./ai-emissions.js";
 import "./AiControlPlaneOverview.css";
 
 const DAY_MS = 86_400_000;
@@ -37,6 +38,19 @@ const signedCount = (value) => {
   const amount = number(value);
   return `${amount > 0 ? "+" : ""}${compactNumber.format(amount)}`;
 };
+
+const formatEmissions = (emissions) => {
+  if (!emissions) return "Estimate not configured";
+  const kg = emissions.amountKgCo2e ?? (number(emissions.amountTco2e) * 1_000);
+  if (kg >= 1_000) return `${(kg / 1_000).toFixed(2)} tCO₂e`;
+  if (kg >= 1) return `${kg.toFixed(2)} kgCO₂e`;
+  const grams = kg * 1_000;
+  return grams < 0.01 ? "<0.01 gCO₂e" : `${grams.toFixed(2)} gCO₂e`;
+};
+
+const emissionsComparison = (emissions) => emissions?.changePercent === null || emissions?.changePercent === undefined
+  ? "no comparable prior-period estimate"
+  : `${emissions.changePercent > 0 ? "+" : ""}${emissions.changePercent}% from prior period`;
 
 const currentMonthRange = (now = new Date()) => {
   const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
@@ -80,10 +94,11 @@ export async function loadAiControlPlaneOverviewData(now = new Date()) {
   const range = currentMonthRange(now);
   const priorRange = priorRangeFor(range);
   const ranges = trendRanges(now);
-  const [currentResult, priorResult, teamsResult, ...seriesResults] = await Promise.all([
+  const [currentResult, priorResult, teamsResult, providersResult, ...seriesResults] = await Promise.all([
     safely(() => adminApi.spend(spendQuery(range))),
     safely(() => adminApi.spend(spendQuery(priorRange))),
     safely(() => adminApi.teams(false)),
+    safely(() => adminApi.providerSettings()),
     ...ranges.map((item) => safely(() => adminApi.spend(spendQuery(item)))),
   ]);
 
@@ -98,6 +113,7 @@ export async function loadAiControlPlaneOverviewData(now = new Date()) {
     report: currentResult.value.report,
     priorReport: priorResult.value?.report ?? null,
     teams,
+    providers: providersResult.value?.providers ?? [],
     budgets: budgetResults.map((result, index) => ({
       teamId: teams[index].id,
       status: result.value?.status ?? null,
@@ -112,7 +128,7 @@ export async function loadAiControlPlaneOverviewData(now = new Date()) {
       costs: result.value?.report?.totals?.costs ?? [],
       unavailable: !result.value,
     })),
-    partial: Boolean(priorResult.error || teamsResult.error || seriesResults.some((result) => result.error)),
+    partial: Boolean(priorResult.error || teamsResult.error || providersResult.error || seriesResults.some((result) => result.error)),
   };
 }
 
@@ -272,7 +288,8 @@ export function AiControlPlaneOverview({
   const seriesPeak = Math.max(...series, 1);
   const topTeams = (report?.teams ?? []).slice(0, 5);
   const teamBudgetById = new Map((data?.budgets ?? []).map((item) => [item.teamId, item.status]));
-  const emissions = estimates?.emissions ?? null;
+  const emissions = estimates?.emissions
+    ?? estimateAiTokenEmissions(report, data?.priorReport, data?.providers);
   const estimatedView = viewMode === "estimated";
   const exportRange = report?.range ? {
     from: report.range.from,
@@ -431,14 +448,14 @@ export function AiControlPlaneOverview({
         <span className="ai-emissions-icon"><Globe20Regular aria-hidden="true" /></span>
         <div className="ai-emissions-copy">
           <p>Estimated AI-related emissions</p>
-          <h3 id="ai-emissions-heading">{emissions ? `${number(emissions.amountTco2e).toFixed(2)} tCO₂e` : "Estimate not configured"}</h3>
-          <span>{emissions ? `${emissions.coveragePercent ?? 0}% data coverage · ${emissions.changePercent > 0 ? "+" : ""}${emissions.changePercent ?? 0}% from prior period` : "Connect a documented provider or energy-factor methodology before reporting a number."}</span>
+          <h3 id="ai-emissions-heading">{formatEmissions(emissions)}</h3>
+          <span>{emissions ? `${emissions.coveragePercent ?? 0}% token coverage · ${emissionsComparison(emissions)}` : "Choose an estimated serving grid on at least one configured provider before reporting a number."}</span>
         </div>
         <span className="ai-emissions-coverage">{emissions ? `${emissions.coveragePercent ?? 0}% evidence coverage` : "No assured emissions source"}</span>
         <div className="ai-emissions-evidence">
-          <strong>Scope 3 · Category 1 candidate</strong>
-          <span>Purchased cloud/AI services; confirm the reporting boundary with your sustainability policy.</span>
-          {emissions?.methodologyUrl ? <a href={emissions.methodologyUrl} target="_blank" rel="noreferrer">View methodology</a> : <button type="button" disabled>Methodology required</button>}
+          <strong>Operational estimate · Scope 3 Category 1 candidate</strong>
+          <span>{emissions?.methodologyVersion ? `${emissions.energyKwhPerMillionTextTokens} kWh / 1M text tokens · ${emissions.methodologyVersion}` : "Purchased cloud/AI services; confirm the reporting boundary with your sustainability policy."}</span>
+          {emissions?.methodologyUrl ? <div className="ai-emissions-links"><a href={emissions.methodologyUrl} target="_blank" rel="noreferrer">Energy method</a>{emissions.regionSources?.map((source) => <a key={source.region} href={source.sourceUrl} target="_blank" rel="noreferrer">{source.region.toUpperCase()} grid factor</a>)}</div> : <button type="button" disabled>Methodology required</button>}
         </div>
       </section>
 

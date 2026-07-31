@@ -175,6 +175,12 @@ export const providerModelIdSetSchema = z.array(providerModelIdSchema)
   .refine((modelIds) => new Set(modelIds).size === modelIds.length, "Provider model selections must be unique");
 export type ProviderModelIdSet = z.infer<typeof providerModelIdSetSchema>;
 
+// This is an accounting assumption for the operational-emissions estimate,
+// not a claim that the provider contract pins inference to this geography.
+export const providerEmissionsRegions = ["us", "sg"] as const;
+export const providerEmissionsRegionSchema = z.enum(providerEmissionsRegions);
+export type ProviderEmissionsRegion = z.infer<typeof providerEmissionsRegionSchema>;
+
 // Provider Settings persists only read-safe route selection metadata. The API
 // key itself is deliberately absent: LiteLLM owns its encrypted credential
 // record and Control stores only approved model/region choices.
@@ -183,6 +189,7 @@ export const providerSettingMetadataSchema = z.strictObject({
   modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
   modelId: providerModelIdSchema.optional(),
   modelIds: providerModelIdSetSchema.optional(),
+  emissionsRegion: providerEmissionsRegionSchema.optional(),
 }).refine(
   (value) => {
     const hasBedrockSelection = value.region !== undefined || value.modelProfileId !== undefined;
