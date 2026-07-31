@@ -1,8 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("administrator filters spend, drills Team to user to 201 tasks, explains cost, and exports the snapshot", async ({ page }) => {
-  await page.goto("/?view=settings");
-  await page.getByRole("button", { name: "AI spend" }).click();
+  await page.goto("/?view=ai-control-plane&section=spend");
 
   await expect(page.getByRole("heading", { name: "Organization spend" })).toBeVisible();
   await expect(page.getByRole("status")).toContainText("Some cost data is unavailable");

@@ -1,8 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("administrator can inspect alias mappings, pricing coverage, and supported rollout controls", async ({ page }) => {
-  await page.goto("/?view=settings");
-  await page.getByRole("button", { name: "Model routing" }).click();
+  await page.goto("/?view=ai-control-plane&section=model-routes");
 
   await expect(page.getByRole("heading", { name: "Model routes" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Routing Team" })).toContainText("Finance");

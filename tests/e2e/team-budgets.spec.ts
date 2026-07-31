@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("administrator creates, monitors, reconciles, and temporarily overrides a Team budget",async({page})=>{
   await page.goto("/?view=settings");
-  await page.getByRole("button",{name:"Administration"}).click();
+  await page.getByRole("button",{name:"Workspace administration"}).click();
   await page.getByRole("button",{name:"Add Team"}).click();
   const create=page.getByRole("dialog",{name:"Create Team"});
   await create.getByLabel("Team name").fill("AI Platform");

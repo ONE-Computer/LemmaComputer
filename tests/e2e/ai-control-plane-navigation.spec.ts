@@ -27,6 +27,16 @@ test("administrator enters the AI control plane from the account menu and naviga
   await expect(tabs.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-current", "page");
 });
 
+test("Settings keeps account and workspace controls without duplicating AI governance", async ({ page }) => {
+  await page.goto("/?view=settings");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Credentials" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workspace administration" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Provider settings" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "AI spend" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Model routing" })).toHaveCount(0);
+});
+
 test("employee cannot discover or deep-link the administrator control plane", async ({ page }) => {
   await page.route("**/v1/auth/session", async (route) => {
     const response = await route.fetch();
