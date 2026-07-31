@@ -39,24 +39,28 @@ Run:
 ```bash
 npm run qualify:auto-routing
 ONECOMPUTER_LITELLM_QUALIFICATION_IMAGE='ghcr.io/berriai/litellm:v1.94.0@sha256:65d84a2282137b4dc73bbe184650a7c807177c533e4223b3bfbc87963fe3fabe' npm run qualify:providers
-npm test -- tests/model-router-spike.test.ts
-npm run build -w @onecomputer/litellm-adapter
+npx tsx --test tests/model-router-spike.test.ts
+npm run build -w @onecomputer/model-router
 ```
 
 The credential-free image harness imports the code from the candidate image,
-classifies four deterministic tasks, and runs 2,000 iterations:
+calls its actual `async_pre_routing_hook`, classifies four deterministic tasks,
+asserts the no-user default and key-scoped session affinity, and measures 500
+hook invocations. Executable assertions also prove that the hook's typed result
+contains only `model` and `messages`, while request metadata receives no tier,
+score, signals, cause, or routing-decision object:
 
-| Fixture | LiteLLM tier | Score |
-| --- | --- | ---: |
-| simple | `SIMPLE` | -0.15 |
-| medium | `MEDIUM` | 0.20 |
-| complex | `COMPLEX` | 0.55 |
-| reasoning | `REASONING` | 0.25, reasoning override |
+| Fixture | Hook-selected model group | Typed decision fields |
+| --- | --- | --- |
+| simple | `onecomputer-lite` | none |
+| medium | `onecomputer-balanced` | none |
+| complex | `onecomputer-pro` | none |
+| reasoning | `onecomputer-pro` | none |
 
 Measured on the qualification host:
 
-- local heuristic median: **0.201 ms**
-- local heuristic p95: **0.207 ms**
+- async pre-routing hook median: **0.219 ms**
+- async pre-routing hook p95: **0.227 ms**
 - classifier/provider calls: **0**
 - classifier cost: **USD 0**
 
@@ -93,7 +97,7 @@ LiteLLM cannot be the authority that produces the governed routing decision.
 
 ## Selected fallback `ModelRouter` boundary
 
-`packages/litellm-adapter/src/model-router.ts` is an unwired reference adapter
+`packages/model-router/src/index.ts` is an unwired, provider-neutral workspace package
 for #42. Its contract deliberately separates:
 
 1. the client request (`Auto`, `Lite`, `Balanced`, or `Pro`);
@@ -119,8 +123,13 @@ The reference proves:
 - session affinity pins a class, while every turn re-checks current capability
   and deployment policy;
 - vision, tools, streaming, and context limits are enforced before selection;
-- an outage can fall back only inside the same approved class and skipped
-  attempts are recorded;
+- rate-card-derived expected cost ranks eligible deployments rather than
+  configuration order;
+- unhealthy/unavailable options are recorded as routing skips, while billed
+  fallback attempts remain empty until an inference dispatch actually occurs;
+- explicit service-class requests ignore stale Auto affinity;
+- affinity keys are hashed, bounded, and expiring; stronger tasks or capability
+  floors may safely escalate and record the reason;
 - Foundry, OpenAI, Anthropic, GLM, and Bedrock are provider-neutral deployment
   values, not product vocabulary;
 - replacing Foundry behind `Lite` with Bedrock preserves `Lite` and the stable
@@ -161,6 +170,23 @@ No rollout occurs in this issue. For a later approved image upgrade:
    backward compatible.
 
 ## Untested and follow-up
+
+### Acceptance matrix after the telemetry NO-GO
+
+| Required behavior | Candidate-hook status | Owned adapter status | Reason when unqualified |
+| --- | --- | --- | --- |
+| Four tiers and default | Qualified by executable hook assertions | Qualified | — |
+| Session affinity | Qualified for same-key pin and cross-key isolation | Qualified with expiry/bounds and safe escalation | — |
+| Typed tier/score/signals/cause | **Blocked** by executable negative assertion | Qualified | v1.94 hook returns only `model` and `messages` and does not enrich metadata |
+| Tenant/Team model allowlist denial | Unqualified after NO-GO | Qualified fail-closed | The pre-routing hook does not own proxy authentication/access-group enforcement; a full proxy integration would still lack typed decisions |
+| Provider outage and billed fallback | Unqualified after NO-GO | Routing skips qualified; billed attempts intentionally deferred to dispatch/ledger | The hook selects a model group before provider dispatch and cannot truthfully report billed retries |
+| Vision/tools/streaming/context floors | Unqualified after NO-GO | Qualified with safe upward escalation | ComplexityRouter hook has no typed capability-floor decision contract |
+| Provider transport | OpenAI-style and Bedrock-style candidate compatibility qualified with local fixtures; Anthropic and GLM Auto transport unqualified after NO-GO | Foundry, OpenAI, Anthropic, GLM, and Bedrock identifiers qualified | No live provider credentials; not a provider benchmark |
+| One-alias grant / arbitrary-model denial | Existing grant tests qualify the current access-group boundary | Bounded class vocabulary qualified | Direct hook invocation bypasses proxy virtual-key auth by design |
+
+The blocked rows are not treated as passes. The early telemetry NO-GO makes a
+larger proxy Auto Routing integration unable to satisfy the governing audit
+contract, so #42 must qualify these behaviors at the owned dispatch boundary.
 
 No real provider credentials were used. The following remain intentionally
 untested:

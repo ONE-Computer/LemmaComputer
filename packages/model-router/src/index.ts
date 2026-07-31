@@ -1,5 +1,5 @@
-import { performance } from "node:perf_hooks";
 import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
 
 export const productServiceClasses = ["Lite", "Balanced", "Pro"] as const;
 export const requestedServiceClasses = ["Auto", ...productServiceClasses] as const;
@@ -32,6 +32,7 @@ export type RoutingDeployment = {
   serviceClass: ProductServiceClass;
   mappingVersion: string;
   rateCardKey: string;
+  expectedCostUsd: number;
   capabilities: RoutingCapabilities;
   healthy: boolean;
 };
@@ -62,15 +63,25 @@ export type ModelRoutingDecision = {
   taskClass: InternalTaskClass;
   confidence: number;
   signals: RoutingSignal[];
-  cause: "explicit_service_class" | "complexity_classifier" | "low_confidence_default" | "session_affinity";
+  cause:
+    | "explicit_service_class"
+    | "complexity_classifier"
+    | "low_confidence_default"
+    | "session_affinity"
+    | "session_affinity_escalation"
+    | "capability_escalation";
+  escalationReason: "stronger_task" | "capability_floor" | null;
   mappingVersion: string;
   selectedDeployment: {
     id: string;
     provider: ManagedRoutingProvider;
     model: string;
     rateCardKey: string;
+    expectedCostUsd: number;
   };
-  fallbackDeploymentIds: string[];
+  routingCandidateIds: string[];
+  skippedCandidateIds: string[];
+  billedFallbackAttemptIds: [];
   routerOverheadMs: number;
 };
 
@@ -80,6 +91,7 @@ export class ModelRoutingError extends Error {
       | "ROUTING_SCOPE_DENIED"
       | "SERVICE_CLASS_DENIED"
       | "SERVICE_CLASS_INVALID"
+      | "RATE_CARD_INVALID"
       | "NO_ELIGIBLE_DEPLOYMENT",
     message: string,
   ) {
@@ -152,14 +164,50 @@ const satisfiesCapabilities = (
 const isRequestedServiceClass = (value: string): value is RequestedServiceClass =>
   requestedServiceClasses.some((candidate) => candidate === value);
 
-/**
- * Spike-only deterministic reference implementation.
- *
- * The raw prompt is used ephemerally and is never included in the returned decision,
- * cache key, errors, or logs. Production integration is intentionally deferred to #42.
- */
+const serviceClassIndex = (value: ProductServiceClass) => productServiceClasses.indexOf(value);
+
+type AffinityEntry = { serviceClass: ProductServiceClass; expiresAt: number };
+
 export class DeterministicModelRouter implements ModelRouter {
-  private readonly sessionClasses = new Map<string, ProductServiceClass>();
+  private readonly sessionClasses = new Map<string, AffinityEntry>();
+  private readonly affinityTtlMs: number;
+  private readonly maxAffinityEntries: number;
+  private readonly now: () => number;
+
+  constructor(options: { affinityTtlMs?: number; maxAffinityEntries?: number; now?: () => number } = {}) {
+    this.affinityTtlMs = Math.max(1, options.affinityTtlMs ?? 60 * 60 * 1_000);
+    this.maxAffinityEntries = Math.max(1, options.maxAffinityEntries ?? 10_000);
+    this.now = options.now ?? Date.now;
+  }
+
+  private affinityKey(request: ModelRoutingRequest) {
+    if (!request.sessionId) return null;
+    return createHash("sha256")
+      .update(`${request.tenantId}\u0000${request.teamId ?? ""}\u0000${request.userId}\u0000${request.sessionId}`)
+      .digest("base64url");
+  }
+
+  private readAffinity(key: string | null) {
+    if (!key) return undefined;
+    const entry = this.sessionClasses.get(key);
+    if (!entry) return undefined;
+    if (entry.expiresAt <= this.now()) {
+      this.sessionClasses.delete(key);
+      return undefined;
+    }
+    return entry.serviceClass;
+  }
+
+  private writeAffinity(key: string | null, serviceClass: ProductServiceClass) {
+    if (!key) return;
+    this.sessionClasses.delete(key);
+    while (this.sessionClasses.size >= this.maxAffinityEntries) {
+      const oldest = this.sessionClasses.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.sessionClasses.delete(oldest);
+    }
+    this.sessionClasses.set(key, { serviceClass, expiresAt: this.now() + this.affinityTtlMs });
+  }
 
   async route(request: ModelRoutingRequest, policy: ModelRoutingPolicy): Promise<ModelRoutingDecision> {
     const startedAt = performance.now();
@@ -169,45 +217,68 @@ export class DeterministicModelRouter implements ModelRouter {
     if (!isRequestedServiceClass(request.requestedServiceClass)) {
       throw new ModelRoutingError("SERVICE_CLASS_INVALID", "Only Auto, Lite, Balanced, or Pro may be requested");
     }
+    for (const deployment of policy.deployments) {
+      if (!Number.isFinite(deployment.expectedCostUsd) || deployment.expectedCostUsd < 0) {
+        throw new ModelRoutingError("RATE_CARD_INVALID", "Every deployment requires a non-negative expected cost");
+      }
+    }
 
     const classification = classifyRoutingTask(request.prompt);
-    const sessionKey = request.sessionId
-      ? createHash("sha256")
-        .update(`${request.tenantId}\u0000${request.teamId ?? ""}\u0000${request.userId}\u0000${request.sessionId}`)
-        .digest("base64url")
-      : null;
-    const pinnedClass = sessionKey ? this.sessionClasses.get(sessionKey) : undefined;
+    const desiredClass = autoServiceClass(classification);
+    const affinityKey = this.affinityKey(request);
+    const pinnedClass = request.requestedServiceClass === "Auto" ? this.readAffinity(affinityKey) : undefined;
     let selectedServiceClass: ProductServiceClass;
     let cause: ModelRoutingDecision["cause"];
-    if (pinnedClass) {
-      selectedServiceClass = pinnedClass;
-      cause = "session_affinity";
-    } else if (request.requestedServiceClass === "Auto") {
-      selectedServiceClass = autoServiceClass(classification);
-      cause = classification.confidence < 0.55 ? "low_confidence_default" : "complexity_classifier";
-    } else {
+    let escalationReason: ModelRoutingDecision["escalationReason"] = null;
+    if (request.requestedServiceClass !== "Auto") {
       selectedServiceClass = request.requestedServiceClass;
       cause = "explicit_service_class";
+    } else if (pinnedClass && serviceClassIndex(desiredClass) > serviceClassIndex(pinnedClass)) {
+      selectedServiceClass = desiredClass;
+      cause = "session_affinity_escalation";
+      escalationReason = "stronger_task";
+    } else if (pinnedClass) {
+      selectedServiceClass = pinnedClass;
+      cause = "session_affinity";
+    } else {
+      selectedServiceClass = desiredClass;
+      cause = classification.confidence < 0.55 ? "low_confidence_default" : "complexity_classifier";
     }
 
-    if (!policy.allowedServiceClasses.includes(selectedServiceClass)) {
+    const allowedClasses = new Set(policy.allowedServiceClasses);
+    if (!allowedClasses.has(selectedServiceClass)) {
       throw new ModelRoutingError("SERVICE_CLASS_DENIED", "The selected service class is not allowed by Team policy");
     }
-
     const allowedIds = new Set(policy.allowedDeploymentIds);
     const unavailableIds = new Set(request.unavailableDeploymentIds ?? []);
-    const classDeployments = policy.deployments.filter((deployment) =>
-      deployment.serviceClass === selectedServiceClass
-      && allowedIds.has(deployment.id)
-      && satisfiesCapabilities(deployment, request.requiredCapabilities));
-    const candidates = classDeployments.filter((deployment) => deployment.healthy && !unavailableIds.has(deployment.id));
-    const selected = candidates[0];
+    let ranked: RoutingDeployment[] = [];
+    let selected: RoutingDeployment | undefined;
+    for (const candidateClass of productServiceClasses.slice(serviceClassIndex(selectedServiceClass))) {
+      if (!allowedClasses.has(candidateClass)) continue;
+      ranked = policy.deployments
+        .filter((deployment) =>
+          deployment.serviceClass === candidateClass
+          && allowedIds.has(deployment.id)
+          && satisfiesCapabilities(deployment, request.requiredCapabilities))
+        .sort((left, right) => left.expectedCostUsd - right.expectedCostUsd || left.id.localeCompare(right.id));
+      if (ranked.length === 0) continue;
+      selected = ranked.find((deployment) => deployment.healthy && !unavailableIds.has(deployment.id));
+      if (selected) {
+        if (candidateClass !== selectedServiceClass) {
+          selectedServiceClass = candidateClass;
+          cause = "capability_escalation";
+          escalationReason = "capability_floor";
+        }
+        break;
+      }
+      break;
+    }
     if (!selected) {
       throw new ModelRoutingError("NO_ELIGIBLE_DEPLOYMENT", "No policy-approved deployment satisfies the request");
     }
-    if (sessionKey) this.sessionClasses.set(sessionKey, selectedServiceClass);
+    if (request.requestedServiceClass === "Auto") this.writeAffinity(affinityKey, selectedServiceClass);
 
-    const selectedIndex = classDeployments.findIndex((deployment) => deployment.id === selected.id);
+    const selectedIndex = ranked.findIndex((deployment) => deployment.id === selected!.id);
     return {
       requestedAlias: "onecomputer-auto",
       requestedServiceClass: request.requestedServiceClass,
@@ -216,14 +287,18 @@ export class DeterministicModelRouter implements ModelRouter {
       confidence: classification.confidence,
       signals: classification.signals,
       cause,
+      escalationReason,
       mappingVersion: selected.mappingVersion,
       selectedDeployment: {
         id: selected.id,
         provider: selected.provider,
         model: selected.model,
         rateCardKey: selected.rateCardKey,
+        expectedCostUsd: selected.expectedCostUsd,
       },
-      fallbackDeploymentIds: classDeployments.slice(0, selectedIndex).map((deployment) => deployment.id),
+      routingCandidateIds: ranked.map(({ id }) => id),
+      skippedCandidateIds: ranked.slice(0, selectedIndex).map(({ id }) => id),
+      billedFallbackAttemptIds: [],
       routerOverheadMs: performance.now() - startedAt,
     };
   }
