@@ -67,6 +67,66 @@ const hashPricingRecord = async (record) => {
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
 };
+const routeDraftServiceClasses = ["lite", "balanced", "pro"];
+const routeDraftStorageKey = (scope) => scope?.tenantId && scope?.userId
+  ? `onecomputer.routing-mapping-draft:v1:${encodeURIComponent(scope.tenantId)}:${encodeURIComponent(scope.userId)}`
+  : "";
+const storedRouteDeployment = (value) => {
+  if (!value || typeof value !== "object"
+    || typeof value.id !== "string"
+    || !routeDraftServiceClasses.includes(value.serviceClass)
+    || typeof value.provider !== "string"
+    || typeof value.providerModel !== "string"
+    || typeof value.providerDeployment !== "string"
+    || !value.provider.trim()
+    || !value.providerModel.trim()
+    || !value.providerDeployment.trim()
+    || !value.capabilities
+    || typeof value.capabilities !== "object") return null;
+  return value;
+};
+const readRouteDraft = (scope) => {
+  const key = routeDraftStorageKey(scope);
+  if (!key) return null;
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    const deployments = Array.isArray(parsed?.draft?.deployments)
+      ? parsed.draft.deployments.map(storedRouteDeployment)
+      : [];
+    const classes = new Set(deployments.map((deployment) => deployment?.serviceClass));
+    if (parsed?.schemaVersion !== 1
+      || typeof parsed?.draft?.revisionNote !== "string"
+      || parsed.draft.revisionNote.trim().length < 8
+      || parsed.draft.revisionNote.length > 500
+      || deployments.some((deployment) => !deployment)
+      || deployments.length !== 3
+      || classes.size !== 3
+      || routeDraftServiceClasses.some((serviceClass) => !classes.has(serviceClass))) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return { revisionNote: parsed.draft.revisionNote, deployments };
+  } catch {
+    return null;
+  }
+};
+const writeRouteDraft = (scope, draft) => {
+  const key = routeDraftStorageKey(scope);
+  if (!key) return false;
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ schemaVersion: 1, savedAt: new Date().toISOString(), draft }));
+    return true;
+  } catch {
+    return false;
+  }
+};
+const clearRouteDraft = (scope) => {
+  const key = routeDraftStorageKey(scope);
+  if (!key) return;
+  try { window.localStorage.removeItem(key); } catch { /* Browser storage may be unavailable. */ }
+};
 
 function PriceCell({ card, unit }) {
   const missing = ratePerMillion(card, unit) == null;
@@ -128,7 +188,7 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
   const valid = revisionValid && deploymentsValid;
   return <ModalDialog
     title="Create a mapping draft"
-    description="Edit the private provider deployment behind each stable employee alias. Saving keeps the draft local until you publish a new immutable mapping version."
+    description="Edit the private provider deployment behind each stable employee alias. Saving keeps the draft in this browser until you publish a new immutable mapping version."
     eyebrow="Model routes"
     labelledBy="route-mapping-editor-title"
     onClose={busy ? () => undefined : onClose}
@@ -162,19 +222,19 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
   </ModalDialog>;
 }
 
-export function RoutingAdmin({ onBack, section = "routes" }) {
+export function RoutingAdmin({ onBack, section = "routes", draftScope }) {
   if (section === "pricing") return <PricingAdmin onBack={onBack} />;
-  return <ModelRoutesAdmin onBack={onBack} />;
+  return <ModelRoutesAdmin onBack={onBack} draftScope={draftScope} />;
 }
 
-function ModelRoutesAdmin({ onBack }) {
+function ModelRoutesAdmin({ onBack, draftScope }) {
   const [teams, setTeams] = useState([]);
   const [teamId, setTeamId] = useState("");
   const [settings, setSettings] = useState(null);
   const [report, setReport] = useState(null);
   const [rateCards, setRateCards] = useState([]);
   const [mapping, setMapping] = useState(null);
-  const [draft, setDraft] = useState(null);
+  const [draft, setDraft] = useState(() => readRouteDraft(draftScope));
   const [providers, setProviders] = useState([]);
   const [classes, setClasses] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -319,9 +379,11 @@ function ModelRoutesAdmin({ onBack }) {
     deployments: draftableDeployments(),
   });
   const saveMappingDraft = () => {
-    setDraft({ revisionNote: mappingEditor.revisionNote.trim(), deployments: mappingEditor.deployments });
+    const nextDraft = { revisionNote: mappingEditor.revisionNote.trim(), deployments: mappingEditor.deployments };
+    const persisted = writeRouteDraft(draftScope, nextDraft);
+    setDraft(nextDraft);
     setMappingEditor(null);
-    setNotice("Local mapping draft saved. Review the route and pinned price record, then publish a version for policy and shadow evaluation.");
+    setNotice(persisted ? "Local mapping draft saved in this browser. It will remain after a refresh until you publish it." : "Draft saved for this page only because browser storage is unavailable. Publish it before refreshing.");
   };
   const mappingInput = (value) => ({
     revisionNote: value.revisionNote,
@@ -348,6 +410,7 @@ function ModelRoutesAdmin({ onBack }) {
       const result = await adminApi.createRoutingMapping(mappingInput(draft));
       setMapping(result.mapping);
       setDraft(null);
+      clearRouteDraft(draftScope);
       setPublishOpen(false);
       setNotice("Published for policy/shadow evaluation; current Team rollouts are unchanged.");
     } catch (caught) {
@@ -392,10 +455,12 @@ function ModelRoutesAdmin({ onBack }) {
       setPriceEditor(null);
       const source = draft?.deployments ?? mapping?.deployments;
       if (source?.length) {
-        setDraft({
+        const nextDraft = {
           revisionNote: draft?.revisionNote ?? `Update ${serviceClassLabels[priceEditor.deployment.serviceClass]} pricing`,
           deployments: source.map((deployment) => deployment.id === priceEditor.deployment.id ? { ...deployment, rateCardId: created.id } : deployment),
-        });
+        };
+        setDraft(nextDraft);
+        writeRouteDraft(draftScope, nextDraft);
         setNotice(`Price record ${shortId(created.id)} was created and attached to the local mapping draft. Publish the mapping version to make it available for policy evaluation.`);
       } else {
         setNotice(`Price record ${shortId(created.id)} was created, but no complete mapping was available to attach it.`);

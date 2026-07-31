@@ -4660,7 +4660,7 @@ export function App() {
               onDisable={disableProviderSetting}
               onDelete={deleteProviderSetting}
             />}
-            {aiControlPlaneView === "model-routes" && <RoutingAdmin />}
+            {aiControlPlaneView === "model-routes" && <RoutingAdmin draftScope={{ tenantId: session.tenant.id, userId: session.user.id }} />}
             {aiControlPlaneView === "pricing" && <RoutingAdmin section="pricing" />}
             {aiControlPlaneView === "teams-budgets" && <TeamsAdminSection
               teams={adminTeams}
