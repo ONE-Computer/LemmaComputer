@@ -41,7 +41,7 @@ test("spend aggregation applies correction deltas once, keeps currencies separat
     }),
     event({
       eventId: "event-2", admissionId: "attempt-2", taskId: "task-2", teamId: "team-research",
-      teamDisplayName: "Research", costCenterCode: "RND-200", providerCost: "3.000000000000",
+      teamDisplayName: "Research", costCenterCode: "RND-200", providerCost: "3.000000000000", providerConfirmedCost: "2.750000000000",
     }),
     event({ eventId: "event-3", admissionId: "attempt-3", taskId: "task-3", currency: "SGD", providerCost: "4.500000000000", attemptKind: "fallback" }),
   ], range);
@@ -51,6 +51,12 @@ test("spend aggregation applies correction deltas once, keeps currencies separat
   assert.equal(report.totals.fallbackCount, 1);
   assert.equal(report.totals.usage.input_uncached_token, "290");
   assert.equal(report.teams.reduce((sum, team) => sum + team.attemptCount, 0), report.totals.attemptCount);
+  assert.deepEqual(report.totals.providerConfirmedCosts, [{ currency: "USD", amount: "2.75" }]);
+  assert.deepEqual(report.totals.latency, { sampleCount: 3, averageMs: 900, p95Ms: 900 });
+  assert.deepEqual(report.breakdowns.requestedRoutes.map((item) => item.requestedRoute), ["balanced"]);
+  assert.equal(report.breakdowns.resolvedModels[0]?.provider, "openai");
+  assert.equal(report.breakdowns.workspaces[0]?.workspaceId, "workspace-1");
+  assert.equal(report.breakdowns.agents[0]?.agentId, "agent-1");
   assert.equal(report.users.reduce((sum, user) => sum + user.attemptCount, 0), report.totals.attemptCount);
 });
 
@@ -78,6 +84,23 @@ test("missing, incomplete, delayed, corrected, and price snapshots stay distingu
   });
 });
 
+test("composite task identity prevents reused task IDs from merging and trend compares an equal prior period", () => {
+  const report = buildSpendReport([
+    event(),
+    event({ eventId: "other-user-event", admissionId: "other-user-attempt", subjectId: "sam", subjectDisplayName: "Sam", taskId: "task-1" }),
+    event({ eventId: "other-turn-event", admissionId: "other-turn-attempt", turnId: "turn-2", taskId: "task-1" }),
+  ], range, 0, [event({ eventId: "prior", admissionId: "prior-attempt", providerCost: "4" })]);
+  assert.equal(report.tasks.length, 3);
+  assert.deepEqual(report.trend, {
+    previousRange: { from: "2026-05-31T00:00:00.000Z", to: "2026-07-01T00:00:00.000Z" },
+    costs: [{ currency: "USD", amount: "4" }],
+    providerConfirmedCosts: [],
+    attemptCount: 1,
+    attemptCountDelta: 2,
+    costDeltas: [{ currency: "USD", amount: "26" }],
+  });
+});
+
 test("high-cost task explanation is deterministic and contains only safe driver categories", () => {
   const detail = buildSpendTaskDetail([event({
     conversationHistoryCount: 5, attachmentCount: 400, retrievalCount: 40, systemPolicyContextCount: 2,
@@ -98,12 +121,14 @@ test("high-cost task explanation is deterministic and contains only safe driver 
 });
 
 test("CSV is stable, reconciles to the task view, and contains no raw-provider fields", () => {
-  const csv = spendReportCsv(buildSpendReport([event()], range));
-  assert.match(csv, /^contract_version,range_from,range_to,team_id/);
+  const csv = spendReportCsv(buildSpendReport([event({ providerConfirmedCost: "9.75" })], range), "acme");
+  assert.match(csv, /^contract_version,tenant_id,range_from,range_to,as_of,team_id/);
+  assert.match(csv, /1,acme,/);
   assert.match(csv, /task-1/);
   assert.match(csv, /USD,10/);
   assert.equal(csv.includes("source_system"), false);
   assert.equal(csv.includes("provider_account_id"), false);
   assert.equal(csv.includes("session-1"), false);
   assert.equal(csv.includes("raw_content"), false);
+  assert.match(csv, /USD,10,9.75/);
 });

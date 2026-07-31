@@ -18,11 +18,12 @@ export type SpendRange = {
   to: Date;
   teamId?: string;
   userId?: string;
-  workspaceId?: string;
-  agentId?: string;
-  sessionId?: string;
+  workspaceId?: string | null;
+  agentId?: string | null;
+  sessionId?: string | null;
   taskId?: string;
-  turnId?: string;
+  turnId?: string | null;
+  receivedBefore?: Date;
 };
 
 export type SpendUnitRow = {
@@ -102,6 +103,11 @@ type GroupTotals = {
   costs: CurrencyTotal[];
   providerConfirmedCosts: CurrencyTotal[];
   usage: UsageTotals;
+  latency: {
+    sampleCount: number;
+    averageMs: number | null;
+    p95Ms: number | null;
+  };
   attemptCount: number;
   eventCount: number;
   retryCount: number;
@@ -115,6 +121,7 @@ type GroupTotals = {
 export type SpendReport = {
   contractVersion: 1;
   range: { from: string; to: string };
+  asOf: string;
   filters: {
     teamId: string | null;
     userId: string | null;
@@ -140,6 +147,24 @@ export type SpendReport = {
     userId: string;
     userDisplayName: string;
   }>;
+  breakdowns: {
+    requestedRoutes: Array<GroupTotals & { requestedRoute: string }>;
+    resolvedModels: Array<GroupTotals & {
+      provider: string;
+      model: string;
+      deploymentId: string;
+    }>;
+    workspaces: Array<GroupTotals & { workspaceId: string | null }>;
+    agents: Array<GroupTotals & { agentId: string | null }>;
+  };
+  trend: null | {
+    previousRange: { from: string; to: string };
+    costs: CurrencyTotal[];
+    providerConfirmedCosts: CurrencyTotal[];
+    attemptCount: number;
+    attemptCountDelta: number;
+    costDeltas: CurrencyTotal[];
+  };
   tasks: Array<GroupTotals & {
     taskKey: string;
     taskId: string;
@@ -302,6 +327,18 @@ const finalized = (group: MutableGroup): GroupTotals => ({
   costs: sortedTotals(group.costs),
   providerConfirmedCosts: sortedTotals(group.providerConfirmedCosts),
   usage: usageTotals(group.usage),
+  latency: (() => {
+    const byAdmission = new Map<string, number>();
+    for (const row of group.rows) {
+      if (row.latencyMs !== null) byAdmission.set(row.admissionId, row.latencyMs);
+    }
+    const values = [...byAdmission.values()].sort((a, b) => a - b);
+    return {
+      sampleCount: values.length,
+      averageMs: values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null,
+      p95Ms: values.length ? values[Math.ceil(values.length * 0.95) - 1]! : null,
+    };
+  })(),
   attemptCount: group.admissions.size,
   eventCount: group.rows.length,
   retryCount: group.retries.size,
@@ -364,11 +401,16 @@ export const buildSpendReport = (
   rows: SpendEventRow[],
   range: SpendRange,
   delayedAttemptCount = 0,
+  previousRows?: SpendEventRow[],
 ): SpendReport => {
   const all = mutableGroup();
   const teamGroups = new Map<string, MutableGroup>();
   const userGroups = new Map<string, MutableGroup>();
   const taskGroups = new Map<string, MutableGroup>();
+  const requestedRouteGroups = new Map<string, MutableGroup>();
+  const resolvedModelGroups = new Map<string, MutableGroup>();
+  const workspaceGroups = new Map<string, MutableGroup>();
+  const agentGroups = new Map<string, MutableGroup>();
   for (const row of rows) {
     include(all, row);
     const team = teamGroups.get(row.teamId) ?? mutableGroup();
@@ -382,6 +424,22 @@ export const buildSpendReport = (
     const task = taskGroups.get(taskKey) ?? mutableGroup();
     include(task, row);
     taskGroups.set(taskKey, task);
+    const requestedRoute = row.requestedServiceClass ?? row.requestedAlias;
+    const requestedRouteGroup = requestedRouteGroups.get(requestedRoute) ?? mutableGroup();
+    include(requestedRouteGroup, row);
+    requestedRouteGroups.set(requestedRoute, requestedRouteGroup);
+    const resolvedModelKey = JSON.stringify([row.resolvedProvider, row.resolvedModel, row.resolvedDeploymentId]);
+    const resolvedModelGroup = resolvedModelGroups.get(resolvedModelKey) ?? mutableGroup();
+    include(resolvedModelGroup, row);
+    resolvedModelGroups.set(resolvedModelKey, resolvedModelGroup);
+    const workspaceKey = JSON.stringify(row.workspaceId);
+    const workspaceGroup = workspaceGroups.get(workspaceKey) ?? mutableGroup();
+    include(workspaceGroup, row);
+    workspaceGroups.set(workspaceKey, workspaceGroup);
+    const agentKey = JSON.stringify(row.agentId);
+    const agentGroup = agentGroups.get(agentKey) ?? mutableGroup();
+    include(agentGroup, row);
+    agentGroups.set(agentKey, agentGroup);
   }
   const uniqueAdmissions = new Map<string, SpendEventRow>();
   rows.forEach((row) => uniqueAdmissions.set(row.admissionId, row));
@@ -439,9 +497,56 @@ export const buildSpendReport = (
     };
   }).sort((a, b) => groupSort(a, b) || a.taskKey.localeCompare(b.taskKey));
   const totals = finalized(all);
+  const breakdowns = {
+    requestedRoutes: [...requestedRouteGroups].map(([requestedRoute, group]) => ({
+      ...finalized(group),
+      requestedRoute,
+    })).sort(groupSort),
+    resolvedModels: [...resolvedModelGroups].map(([, group]) => {
+      const first = group.rows[0]!;
+      return {
+        ...finalized(group),
+        provider: first.resolvedProvider,
+        model: first.resolvedModel,
+        deploymentId: first.resolvedDeploymentId,
+      };
+    }).sort(groupSort),
+    workspaces: [...workspaceGroups].map(([, group]) => ({
+      ...finalized(group),
+      workspaceId: group.rows[0]!.workspaceId,
+    })).sort(groupSort),
+    agents: [...agentGroups].map(([, group]) => ({
+      ...finalized(group),
+      agentId: group.rows[0]!.agentId,
+    })).sort(groupSort),
+  };
+  const trend = previousRows === undefined ? null : (() => {
+    const previous = mutableGroup();
+    previousRows.forEach((row) => include(previous, row));
+    const previousTotals = finalized(previous);
+    const currentByCurrency = new Map(totals.costs.map((item) => [item.currency, decimal(item.amount)]));
+    const previousByCurrency = new Map(previousTotals.costs.map((item) => [item.currency, decimal(item.amount)]));
+    const currencies = [...new Set([...currentByCurrency.keys(), ...previousByCurrency.keys()])].sort();
+    const duration = range.to.getTime() - range.from.getTime();
+    return {
+      previousRange: {
+        from: new Date(range.from.getTime() - duration).toISOString(),
+        to: range.from.toISOString(),
+      },
+      costs: previousTotals.costs,
+      providerConfirmedCosts: previousTotals.providerConfirmedCosts,
+      attemptCount: previousTotals.attemptCount,
+      attemptCountDelta: totals.attemptCount - previousTotals.attemptCount,
+      costDeltas: currencies.map((currency) => ({
+        currency,
+        amount: formatDecimal((currentByCurrency.get(currency) ?? 0n) - (previousByCurrency.get(currency) ?? 0n)),
+      })),
+    };
+  })();
   return {
     contractVersion: 1,
     range: { from: range.from.toISOString(), to: range.to.toISOString() },
+    asOf: (range.receivedBefore ?? range.to).toISOString(),
     filters: {
       teamId: range.teamId ?? null,
       userId: range.userId ?? null,
@@ -458,6 +563,8 @@ export const buildSpendReport = (
     totals: { ...totals, delayedAttemptCount, allocatedAttemptCount, unallocatedAttemptCount },
     teams,
     users,
+    breakdowns,
+    trend,
     tasks,
   };
 };
@@ -574,16 +681,20 @@ export class PostgresSpendObservabilityStore implements SpendObservabilityStore 
   async close() { await this.pool.end(); }
 
   private conditions(tenantId: string, range: SpendRange, prefix = "e") {
-    const values: unknown[] = [tenantId, range.from, range.to];
-    const clauses = [`${prefix}.tenant_id=$1`, `${prefix}.occurred_at >= $2`, `${prefix}.occurred_at < $3`];
+    const values: unknown[] = [tenantId, range.from, range.to, range.receivedBefore ?? new Date()];
+    const clauses = [`${prefix}.tenant_id=$1`, `${prefix}.occurred_at >= $2`, `${prefix}.occurred_at < $3`, `${prefix}.received_at <= $4`];
     const admissionClauses: string[] = [];
-    const bind = (clause: string, value: string) => {
+    const bind = (clause: string, value: string | null) => {
       values.push(value);
       admissionClauses.push(clause.replace("?", `$${values.length}`));
     };
     if (range.teamId) bind("a.team_id=?", range.teamId);
     if (range.userId) bind("a.subject_id=?", range.userId);
+    if (range.workspaceId !== undefined) bind("a.workspace_id IS NOT DISTINCT FROM ?", range.workspaceId);
+    if (range.agentId !== undefined) bind("a.agent_id IS NOT DISTINCT FROM ?", range.agentId);
+    if (range.sessionId !== undefined) bind("a.session_id IS NOT DISTINCT FROM ?", range.sessionId);
     if (range.taskId) bind("a.task_id=?", range.taskId);
+    if (range.turnId !== undefined) bind("a.turn_id IS NOT DISTINCT FROM ?", range.turnId);
     return { values, clauses: [...clauses, ...admissionClauses] };
   }
 
@@ -611,34 +722,50 @@ export class PostgresSpendObservabilityStore implements SpendObservabilityStore 
   }
 
   private async delayed(tenantId: string, range: SpendRange) {
-    const values: unknown[] = [tenantId, range.from, range.to];
-    const clauses = ["a.tenant_id=$1", "a.admitted_at >= $2", "a.admitted_at < $3"];
-    const bind = (column: string, value?: string) => {
-      if (!value) return;
+    const values: unknown[] = [tenantId, range.from, range.to, range.receivedBefore ?? new Date()];
+    const clauses = ["a.tenant_id=$1", "a.admitted_at >= $2", "a.admitted_at < $3", "a.created_at <= $4"];
+    const bind = (column: string, value?: string | null) => {
+      if (value === undefined) return;
       values.push(value);
-      clauses.push(`a.${column}=$${values.length}`);
+      clauses.push(`a.${column} IS NOT DISTINCT FROM $${values.length}`);
     };
     bind("team_id", range.teamId);
     bind("subject_id", range.userId);
+    bind("workspace_id", range.workspaceId);
+    bind("agent_id", range.agentId);
+    bind("session_id", range.sessionId);
     bind("task_id", range.taskId);
+    bind("turn_id", range.turnId);
     const result = await this.pool.query(`
       SELECT count(*)::integer AS count
       FROM ai_usage_attempt_admissions a
       WHERE ${clauses.join(" AND ")}
         AND NOT EXISTS (
-          SELECT 1 FROM ai_usage_events e WHERE e.tenant_id=a.tenant_id AND e.admission_id=a.id
+          SELECT 1 FROM ai_usage_events e WHERE e.tenant_id=a.tenant_id AND e.admission_id=a.id AND e.received_at <= $4
         )
     `, values);
     return Number(result.rows[0]?.count ?? 0);
   }
 
   async report(tenantId: string, range: SpendRange) {
-    const [rows, delayed] = await Promise.all([this.rows(tenantId, range), this.delayed(tenantId, range)]);
-    return buildSpendReport(rows, range, delayed);
+    const duration = range.to.getTime() - range.from.getTime();
+    const previousRange = {
+      ...range,
+      from: new Date(range.from.getTime() - duration),
+      to: range.from,
+    };
+    const [rows, delayed, previousRows] = await Promise.all([
+      this.rows(tenantId, range),
+      this.delayed(tenantId, range),
+      this.rows(tenantId, previousRange),
+    ]);
+    return buildSpendReport(rows, range, delayed, previousRows);
   }
 
-  async task(tenantId: string, taskId: string, range: Omit<SpendRange, "taskId">) {
-    const scoped = { ...range, taskId };
+  async task(tenantId: string, taskKey: string, range: Omit<SpendRange, "taskId" | "userId" | "workspaceId" | "agentId" | "sessionId" | "turnId">) {
+    const identity = decodeSpendTaskKey(taskKey);
+    if (!identity) return null;
+    const scoped = { ...range, ...identity };
     return buildSpendTaskDetail(await this.rows(tenantId, scoped), scoped);
   }
 }
@@ -647,20 +774,26 @@ const csvCell = (value: unknown) => {
   const text = value === null || value === undefined ? "" : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
 };
-export const spendReportCsv = (report: SpendReport) => {
+export const spendReportCsv = (report: SpendReport, tenantId = "") => {
   const header = [
-    "contract_version", "range_from", "range_to", "team_id", "team_name", "cost_center_code",
-    "user_id", "user_name", "task_id", "turn_id", "workspace_id", "agent_id", "requested_route",
-    "resolved_routes", "currency", "provider_cost", "attempt_count", "event_count", "retry_count",
-    "fallback_count", "failed_attempt_count", "price_state", "dominant_driver",
+    "contract_version", "tenant_id", "range_from", "range_to", "as_of", "team_id", "team_name", "cost_center_code",
+    "user_id", "user_name", "task_key", "task_id", "turn_id", "workspace_id", "agent_id", "requested_route",
+    "resolved_routes", "currency", "provider_cost", "provider_confirmed_cost", "attempt_count", "event_count", "retry_count",
+    "fallback_count", "failed_attempt_count", "latency_average_ms", "latency_p95_ms", "price_state", "corrected", "dominant_driver",
   ];
   const rows = report.tasks.flatMap((task) => {
-    const costs = task.costs.length ? task.costs : [{ currency: "", amount: "" }];
-    return costs.map((cost) => [
-      report.contractVersion, report.range.from, report.range.to, task.teamId, task.teamDisplayName, report.teams.find((team) => team.teamId === task.teamId)?.costCenterCode ?? "",
-      task.userId, task.userDisplayName, task.taskId, task.turnId, task.workspaceId, task.agentId, task.requestedRoute,
-      task.resolvedRoutes.join("|"), cost.currency, cost.amount, task.attemptCount, task.eventCount, task.retryCount,
-      task.fallbackCount, task.failedAttemptCount, task.priceState, task.dominantDriver?.code ?? "",
+    const currencies = [...new Set([
+      ...task.costs.map((item) => item.currency),
+      ...task.providerConfirmedCosts.map((item) => item.currency),
+    ])].sort();
+    if (!currencies.length) currencies.push("");
+    return currencies.map((currency) => [
+      report.contractVersion, tenantId, report.range.from, report.range.to, report.asOf, task.teamId, task.teamDisplayName, report.teams.find((team) => team.teamId === task.teamId)?.costCenterCode ?? "",
+      task.userId, task.userDisplayName, task.taskKey, task.taskId, task.turnId, task.workspaceId, task.agentId, task.requestedRoute,
+      task.resolvedRoutes.join("|"), currency, task.costs.find((item) => item.currency === currency)?.amount ?? "",
+      task.providerConfirmedCosts.find((item) => item.currency === currency)?.amount ?? "",
+      task.attemptCount, task.eventCount, task.retryCount, task.fallbackCount, task.failedAttemptCount,
+      task.latency.averageMs, task.latency.p95Ms, task.priceState, task.corrected, task.dominantDriver?.code ?? "",
     ]);
   });
   return `${[header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;

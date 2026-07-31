@@ -527,6 +527,77 @@ let fixtureMcpConnections = [
   canManageConnection: true,
 }));
 
+const fixtureSpendTeamId = "11111111-1111-4111-8111-111111111111";
+const fixtureSpendUserId = "alex-morgan";
+const fixtureSpendTasks = Array.from({ length: 201 }, (_, index) => {
+  const number = index + 1;
+  return {
+    taskKey: `fixture-task-key-${number}`,
+    taskId: `quarterly-analysis-${String(number).padStart(3, "0")}`,
+    turnId: `fixture-spend-turn-${number}`,
+    teamId: fixtureSpendTeamId,
+    teamDisplayName: "Finance",
+    userId: fixtureSpendUserId,
+    userDisplayName: "Mike Sun",
+    workspaceId,
+    agentId: "agent-alex:hermes",
+    requestedRoute: number === 1 ? "pro" : "balanced",
+    resolvedRoutes: [number === 1 ? "anthropic/claude-opus" : "openai/gpt-terra"],
+    dominantDriver: { code: number === 1 ? "attachments" : "conversation_history", label: number === 1 ? "Attachments" : "Conversation history", score: "12", evidenceCount: "12" },
+    priceState: number === 2 ? "missing" : "priced",
+    corrected: number === 1,
+    costs: number === 2 ? [] : [{ currency: "USD", amount: number === 1 ? "74.25" : "0.5" }],
+    providerConfirmedCosts: [],
+    usage: { input_uncached_token: "100", cache_read_token: "40", cache_write_token: "8", output_token: "20", reasoning_token: "5", image: "1" },
+    attemptCount: number === 1 ? 2 : 1,
+    eventCount: number === 1 ? 3 : 1,
+    retryCount: number === 1 ? 1 : 0,
+    fallbackCount: 0,
+    failedAttemptCount: 0,
+    unknownCostEventCount: number === 2 ? 1 : 0,
+    incompleteCostEventCount: 0,
+    correctedEventCount: number === 1 ? 1 : 0,
+  };
+});
+const fixtureSpendReport = (tasks = fixtureSpendTasks, empty = false) => ({
+  contractVersion: 1,
+  range: { from: "2026-07-01T00:00:00.000Z", to: "2026-08-01T00:00:00.000Z" },
+  asOf: "2026-07-31T00:00:00.000Z",
+  filters: { teamId: null, userId: null, workspaceId: null, agentId: null, taskId: null, turnId: null },
+  state: empty ? "empty" : "partial",
+  totals: {
+    costs: empty ? [] : [{ currency: "USD", amount: "173.75" }], providerConfirmedCosts: [],
+    usage: empty ? {} : { input_uncached_token: "20100", cache_read_token: "8040", cache_write_token: "1608", output_token: "4020", reasoning_token: "1005", image: "2" }, latency: { sampleCount: empty ? 0 : 202, averageMs: empty ? null : 910, p95Ms: empty ? null : 1450 },
+    attemptCount: empty ? 0 : 202, eventCount: empty ? 0 : 203, retryCount: empty ? 0 : 1, fallbackCount: 0, failedAttemptCount: 0,
+    unknownCostEventCount: empty ? 0 : 1, incompleteCostEventCount: 0, correctedEventCount: empty ? 0 : 1,
+    delayedAttemptCount: empty ? 0 : 1, allocatedAttemptCount: empty ? 0 : 202, unallocatedAttemptCount: 0,
+  },
+  teams: empty ? [] : [{
+    teamId: fixtureSpendTeamId, teamDisplayName: "Finance", costCenterCode: "FIN-100", allocation: "allocated",
+    costs: [{ currency: "USD", amount: "173.75" }], providerConfirmedCosts: [], usage: {}, attemptCount: 202, eventCount: 203,
+    retryCount: 1, fallbackCount: 0, failedAttemptCount: 0, unknownCostEventCount: 1, incompleteCostEventCount: 0, correctedEventCount: 1,
+  }],
+  users: empty ? [] : [{
+    teamId: fixtureSpendTeamId, userId: fixtureSpendUserId, userDisplayName: "Mike Sun",
+    costs: [{ currency: "USD", amount: "173.75" }], providerConfirmedCosts: [], usage: {}, attemptCount: 202, eventCount: 203,
+    retryCount: 1, fallbackCount: 0, failedAttemptCount: 0, unknownCostEventCount: 1, incompleteCostEventCount: 0, correctedEventCount: 1,
+  }],
+  breakdowns: empty ? { requestedRoutes: [], resolvedModels: [], workspaces: [], agents: [] } : {
+    requestedRoutes: [
+      { requestedRoute: "balanced", costs: [{ currency: "USD", amount: "99.5" }], attemptCount: 200 },
+      { requestedRoute: "pro", costs: [{ currency: "USD", amount: "74.25" }], attemptCount: 2 },
+    ],
+    resolvedModels: [
+      { provider: "openai", model: "gpt-terra", deploymentId: "terra-sg", costs: [{ currency: "USD", amount: "99.5" }], attemptCount: 200 },
+      { provider: "anthropic", model: "claude-opus", deploymentId: "opus-bedrock", costs: [{ currency: "USD", amount: "74.25" }], attemptCount: 2 },
+    ],
+    workspaces: [{ workspaceId, costs: [{ currency: "USD", amount: "173.75" }], attemptCount: 202 }],
+    agents: [{ agentId: "agent-alex:hermes", costs: [{ currency: "USD", amount: "173.75" }], attemptCount: 202 }],
+  },
+  trend: empty ? null : { previousRange: { from: "2026-05-31T00:00:00.000Z", to: "2026-07-01T00:00:00.000Z" }, costs: [{ currency: "USD", amount: "150" }], providerConfirmedCosts: [], attemptCount: 180, attemptCountDelta: 22, costDeltas: [{ currency: "USD", amount: "23.75" }] },
+  tasks: empty ? [] : tasks,
+});
+
 const responses = new Map([
   ["GET /v1/auth/session", session],
   ["GET /v1/workspaces/current", workspace],
@@ -1113,6 +1184,54 @@ const server = http.createServer((request, response) => {
         response.end(`${closingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
       }, stopRecoveryRequest ? 10_000 : siteRefreshRequest ? 4_000 : refreshRecoveryRequest ? 3_000 : 1_000);
     });
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/v1/admin/spend/export") {
+    if (url.searchParams.get("format") === "json") {
+      response.setHeader("content-disposition", "attachment; filename=\"onecomputer-ai-spend.json\"");
+      response.end(JSON.stringify({ report: fixtureSpendReport() }));
+      return;
+    }
+    response.setHeader("content-type", "text/csv; charset=utf-8");
+    response.setHeader("content-disposition", "attachment; filename=\"onecomputer-ai-spend.csv\"");
+    response.end("contract_version,team_id,user_id,task_id,currency,provider_cost\r\n1,11111111-1111-4111-8111-111111111111,alex-morgan,quarterly-analysis-001,USD,74.25\r\n");
+    return;
+  }
+  if (request.method === "GET" && /^\/v1\/admin\/spend\/tasks\/[^/]+$/.test(url.pathname)) {
+    const taskKey = decodeURIComponent(url.pathname.split("/").at(-1));
+    const task = fixtureSpendTasks.find((item) => item.taskKey === taskKey);
+    if (!task) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "SPEND_VIEW_NOT_FOUND", message: "Spend view not found", retryable: false } }));
+      return;
+    }
+    response.end(JSON.stringify({ task: {
+      task,
+      drivers: [
+        { code: "attachments", label: "Attachments", score: "400", evidenceCount: "400" },
+        { code: "output_reasoning", label: "Output and reasoning", score: "125", evidenceCount: "125" },
+        { code: "conversation_history", label: "Conversation history", score: "12", evidenceCount: "12" },
+      ],
+      attempts: [{
+        admissionId: `fixture-admission-${task.taskId}`, attemptKind: "inference", parentAttemptId: null,
+        requestedRoute: task.requestedRoute, selectedServiceClass: task.requestedRoute,
+        provider: task.resolvedRoutes[0].split("/")[0], model: task.resolvedRoutes[0].split("/")[1], deploymentId: "fixture-deployment",
+        outcome: "success", latencyMs: 1450, occurredAt: "2026-07-20T10:00:00.000Z", costs: task.costs, providerConfirmedCosts: [],
+        usage: task.usage, priceStatus: task.priceState === "missing" ? "unknown" : "priced", costStatus: task.priceState === "missing" ? "unpriced" : "estimated",
+        correction: task.corrected, priceBasis: task.priceState === "missing" ? null : { rateCardId: "fixture-rate", source: "pinned_catalogue", version: "2026-07", sourceHash: "a".repeat(64), effectiveFrom: "2026-07-01T00:00:00.000Z" },
+      }],
+    } }));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/v1/admin/spend") {
+    const empty = url.searchParams.get("from")?.startsWith("2020-");
+    const cursor = url.searchParams.get("cursor");
+    const tasks = cursor ? fixtureSpendTasks.slice(200) : fixtureSpendTasks.slice(0, 200);
+    const report = fixtureSpendReport(tasks, empty);
+    response.end(JSON.stringify({
+      report,
+      page: { limit: 200, returnedTasks: report.tasks.length, totalTasks: empty ? 0 : 201, nextCursor: !empty && !cursor ? "fixture-spend-next" : null },
+    }));
     return;
   }
   if (key === "GET /v1/admin/teams") {

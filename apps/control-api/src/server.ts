@@ -6,6 +6,7 @@ import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudget
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
+import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@onecomputer/workspace-store";
 import { z } from "zod";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@onecomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
@@ -35,6 +36,7 @@ import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
 
+import { paginateSpendReport, parseSpendQuery } from "./spend-observability.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
 const workspaceMemoryGiB = 4;
@@ -262,6 +264,7 @@ export function createControlServer(
     teamStore?: TeamStore;
     budgetStore?: TeamBudgetStore;
     budgetProjector?: LiteLlmTeamBudgetProjector;
+    spendObservabilityStore?: SpendObservabilityStore;
     schedulerInternalToken?: string;
     schedulePromptSecret?: string;
     connectorRegistryStore?: ConnectorRegistryStore;
@@ -352,6 +355,27 @@ export function createControlServer(
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
   const requireBudgets=()=>{if(!budgets)throw new OneComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
   const channelBroker = security.channelBrokerClient;
+  const requireSpendObservability = (request: object) => {
+    const actor = principal(request);
+    if (!isAdministrator(actor)) {
+      throw new OneComputerError("SPEND_VIEW_NOT_FOUND", "Spend view not found", 404);
+    }
+    if (!security.spendObservabilityStore) {
+      throw new OneComputerError("SPEND_OBSERVABILITY_NOT_CONFIGURED", "Spend observability is unavailable", 503, true);
+    }
+    return { actor, store: security.spendObservabilityStore };
+  };
+  const readSpendReport = async (tenantId: string, range: Parameters<SpendObservabilityStore["report"]>[1]) => {
+    try {
+      return await security.spendObservabilityStore!.report(tenantId, range);
+    } catch (error) {
+      if (error instanceof SpendReadLimitError) {
+        throw new OneComputerError("SPEND_RANGE_TOO_LARGE", error.message, 422);
+      }
+      throw error;
+    }
+  };
+
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
     issue: (identity, workspaceId, policy) => agentBridgeAuthority.issue(identity, workspaceId, policy),
@@ -1127,6 +1151,35 @@ export function createControlServer(
     return {
       teams: await requireTeams().listTeams(actor.tenantId, request.query.includeArchived === "true"),
     };
+  });
+  app.get("/v1/admin/spend", async (request, reply) => {
+    const { actor } = requireSpendObservability(request);
+    const query = parseSpendQuery(request.query);
+    const report = await readSpendReport(actor.tenantId, query.range);
+    reply.header("cache-control", "no-store");
+    return paginateSpendReport(report, query);
+  });
+  app.get<{ Params: { taskKey: string } }>("/v1/admin/spend/tasks/:taskKey", async (request, reply) => {
+    const { actor, store: spendStore } = requireSpendObservability(request);
+    const query = parseSpendQuery(request.query);
+    const task = await spendStore.task(actor.tenantId, request.params.taskKey, query.range);
+    if (!task) throw new OneComputerError("SPEND_VIEW_NOT_FOUND", "Spend view not found", 404);
+    reply.header("cache-control", "no-store");
+    return { task };
+  });
+  app.get("/v1/admin/spend/export", async (request, reply) => {
+    const { actor } = requireSpendObservability(request);
+    const query = parseSpendQuery(request.query);
+    const report = await readSpendReport(actor.tenantId, query.range);
+    reply.header("cache-control", "no-store");
+    if (query.format === "json") {
+      reply.header("content-disposition", "attachment; filename=\"onecomputer-ai-spend.json\"");
+      return { tenantId: actor.tenantId, report };
+    }
+    return reply
+      .type("text/csv; charset=utf-8")
+      .header("content-disposition", "attachment; filename=\"onecomputer-ai-spend.csv\"")
+      .send(spendReportCsv(report, actor.tenantId));
   });
   app.post("/v1/admin/teams", async (request, reply) => {
     const actor = requireAdministrator(request);
@@ -2364,6 +2417,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const siteStore = PostgresSiteStore.fromConnectionString(env.DATABASE_URL);
   const teamStore = PostgresTeamStore.fromConnectionString(env.DATABASE_URL);
   const usageLedgerStore = PostgresUsageLedgerStore.fromConnectionString(env.DATABASE_URL);
+  const spendObservabilityStore = PostgresSpendObservabilityStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   const budgetStore=PostgresTeamBudgetStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
@@ -2482,6 +2536,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       usageTaskBindingSecret: env.AI_USAGE_TASK_BINDING_SECRET,
       budgetStore,
       budgetProjector,
+      spendObservabilityStore,
       schedulerInternalToken: env.SCHEDULER_INTERNAL_TOKEN,
       schedulePromptSecret: env.SCHEDULE_PROMPT_SECRET,
       workspaceIngress,
@@ -2506,6 +2561,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await teamStore.close();
     await usageLedgerStore.close();
     await budgetStore.close();
+    await spendObservabilityStore.close();
     await identityPolicyStore.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });

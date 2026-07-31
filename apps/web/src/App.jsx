@@ -31,6 +31,7 @@ import { PlugConnected24Regular } from "@fluentui/react-icons/svg/plug-connected
 import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
 import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
+import { SpendDashboard } from "./SpendDashboard.jsx";
 import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
@@ -1036,7 +1037,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
   );
 }
 
-function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onOpenProviderSettings, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, providerSettings, providerSettingsLoading, providerSettingsBusy, providerSettingsError, onSaveProviderSetting, onTestProviderSetting, onDisableProviderSetting, onDeleteProviderSetting, users, teams, loading, teamsLoading, teamsBusy, busyUserId, onLoadTeam, onCreateTeam, onUpdateTeam, onArchiveTeam, onAssignTeamMember, onRemoveTeamMember, onSetDefaultTeam, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
+function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onOpenProviderSettings, onOpenSpend, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, providerSettings, providerSettingsLoading, providerSettingsBusy, providerSettingsError, onSaveProviderSetting, onTestProviderSetting, onDisableProviderSetting, onDeleteProviderSetting, users, teams, loading, teamsLoading, teamsBusy, busyUserId, onLoadTeam, onCreateTeam, onUpdateTeam, onArchiveTeam, onAssignTeamMember, onRemoveTeamMember, onSetDefaultTeam, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
   if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
     return <WorkspaceConfigurationScreen
       settings={adminSandboxSettings}
@@ -1095,6 +1096,9 @@ function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCrede
   if (view === "provider-settings" && isAdmin) {
     return <ProviderSettingsScreen providers={providerSettings} loading={providerSettingsLoading} busy={providerSettingsBusy} error={providerSettingsError} onSave={onSaveProviderSetting} onTest={onTestProviderSetting} onDisable={onDisableProviderSetting} onDelete={onDeleteProviderSetting} onBack={onBack} />;
   }
+  if (view === "spend" && isAdmin) {
+    return <SpendDashboard onBack={onBack} />;
+  }
 
   return (
     <div className="secondary-screen settings-screen">
@@ -1112,6 +1116,11 @@ function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCrede
         {isAdmin && <button className="settings-item" type="button" onClick={onOpenProviderSettings}>
           <span className="settings-item-icon"><Bot24Regular aria-hidden="true" /></span>
           <span className="settings-item-copy"><strong>Provider settings</strong><small>Configure encrypted organization model-provider keys and verify their routes.</small></span>
+          <ChevronRight16Regular aria-hidden="true" />
+        </button>}
+        {isAdmin && <button className="settings-item" type="button" onClick={onOpenSpend}>
+          <span className="settings-item-icon"><Clock24Regular aria-hidden="true" /></span>
+          <span className="settings-item-copy"><strong>AI spend</strong><small>Review provider cost by Team, user, task, and governed model call.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
         </button>}
         {isAdmin && <button className="settings-item" type="button" onClick={onOpenAdmin}>
@@ -4575,6 +4584,7 @@ export function App() {
           onOpenAdmin={() => setSettingsView("admin")}
           onOpenCredentials={() => setSettingsView("credentials")}
           onOpenProviderSettings={() => setSettingsView("provider-settings")}
+          onOpenSpend={() => setSettingsView("spend")}
           onBack={() => setSettingsView("overview")}
           credentials={credentials}
           workspaces={homeWorkspaces}

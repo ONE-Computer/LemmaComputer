@@ -4,6 +4,8 @@
 - [Teams and cost allocation](teams-and-cost-allocation.md) defines Team membership, default spending assignment, cost-center references, and the access-control boundary.
 - [AI usage and cost ledger](ai-usage-ledger.md) defines governed-attempt attribution, normalized provider units, immutable pricing snapshots, reconciliation, privacy, and callback operations.
 - [Pinned provider-rate catalogue](pinned-rate-catalogue.md) defines the local, hashed pricing evidence used to materialize exact deployment rate cards without egress.
+- [Team spend budgets](team-budgets.md) defines period limits, conservative reservations, hard and soft enforcement, overrides, and reconciliation.
+- [AI spend observability](ai-spend-observability.md) explains administrator totals, allocation, token categories, price basis, exports, and missing-data states.
 - [Demo release runbook](demo-release.md) keeps the demo environment pinned, backed up, and separate from development.
 - [ADR 0001](adr/0001-local-release-gates.md) records why enforcement is local and hosted/self-hosted share one codebase.
 
