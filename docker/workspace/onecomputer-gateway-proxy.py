@@ -27,6 +27,7 @@ INFERENCE_PATHS = {"/v1/messages", "/v1/messages/count_tokens", "/v1/chat/comple
 ALLOWED_PATHS = INFERENCE_PATHS | {"/v1/models", "/mcp-rest/tools/list", "/mcp-rest/tools/call"}
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
 MODEL_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
 LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
 UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
@@ -41,11 +42,36 @@ if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CRE
     raise SystemExit("invalid gateway broker configuration")
 
 
-def normalize_inference_body(body: bytes) -> tuple[bytes, str]:
+def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tuple[bytes, str]:
     request = json.loads(body)
-    requested_model = request.get("model") if isinstance(request, dict) else None
+    if not isinstance(request, dict):
+        raise ValueError("inference request must be an object")
+    requested_model = request.get("model")
     if not isinstance(requested_model, str) or not requested_model.strip():
         raise ValueError("inference model is required")
+    internal_request = {
+        "user_api_key_dict", "user_api_key_metadata", "model_info",
+        "litellm_model_info", "litellm_params", "previous_models",
+    }
+    for name in list(request):
+        if name in internal_request or (
+            isinstance(name, str) and name.startswith("onecomputer_")
+        ):
+            request.pop(name, None)
+    metadata = request.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    internal_metadata = {
+        "user_api_key_metadata", "model_info", "requester_metadata",
+        "user_api_key", "headers", "endpoint", "deployment",
+    }
+    metadata = {
+        name: value for name, value in metadata.items()
+        if name not in internal_metadata
+        and not (isinstance(name, str) and name.startswith("onecomputer_"))
+    }
+    if task_binding is not None:
+        metadata["onecomputer_task_binding"] = task_binding
+    request["metadata"] = metadata
     request["model"] = MODEL_ALIAS
     return json.dumps(request, separators=(",", ":")).encode(), requested_model
 
@@ -283,7 +309,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(415, {"error": "encoded inference request bodies are not supported"})
                 return
             try:
-                body, requested_model = normalize_inference_body(body)
+                task_binding = self.headers.get("x-onecomputer-ai-task-binding")
+                if task_binding is not None and (
+                    not 32 <= len(task_binding) <= 4096
+                    or not TASK_BINDING_PATTERN.fullmatch(task_binding)
+                ):
+                    raise ValueError("invalid AI task binding")
+                body, requested_model = normalize_inference_body(body, task_binding)
                 if requested_model != MODEL_ALIAS:
                     logged_model = requested_model if MODEL_ALIAS_PATTERN.fullmatch(requested_model) else "<nonstandard>"
                     self.log_message(
@@ -297,7 +329,10 @@ class Handler(BaseHTTPRequestHandler):
         headers = {
             key: value
             for key, value in self.headers.items()
-            if key.lower() not in HOP_BY_HOP | {"host", "authorization", "x-api-key", "content-length"}
+            if key.lower() not in HOP_BY_HOP | {
+                "host", "authorization", "x-api-key", "content-length",
+                "x-onecomputer-ai-task-binding",
+            }
         }
         target = CONTROL if is_operation else UPSTREAM
         headers["authorization"] = f"Bearer {AGENT_BRIDGE_TOKEN if is_operation else CREDENTIAL}"
