@@ -51,6 +51,11 @@ MS365_ACCOUNT_LOOKUP_ARGUMENTS = {
 }
 AUDIT_ONLY_ARGUMENTS = {"onecomputerAudit"}
 
+_PROVIDER_INTERNAL_FIELDS = (
+    "user_api_key_dict",
+    "user_api_key_metadata",
+)
+
 
 def _metadata(auth):
     value = getattr(auth, "metadata", None)
@@ -218,6 +223,14 @@ def _trusted_key_metadata(kwargs):
     """Read identity only from LiteLLM's authenticated key projection."""
     auth = kwargs.get("user_api_key_dict")
     return _metadata(auth) if auth is not None else {}
+
+
+def _provider_request(kwargs):
+    """Return provider-bound kwargs without LiteLLM authentication internals."""
+    request = dict(kwargs)
+    for name in _PROVIDER_INTERNAL_FIELDS:
+        request.pop(name, None)
+    return request
 
 
 def _signed_usage_chain(value):
@@ -944,7 +957,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
                 _budget_bounds(kwargs, route) if route else None,
             )
             if payload is None:
-                return kwargs
+                return _provider_request(kwargs)
             if routing_state:
                 payload["requestedAlias"] = "onecomputer-auto"
                 payload["requestedServiceClass"] = routing_state["requestedServiceClass"]
@@ -973,7 +986,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             "routingDecisionId": routing_state.get("decisionId") if routing_state else None,
             "deploymentId": routing_state.get("executedDeploymentId") if routing_state else None,
         }, task_binding, payload["sourceAttemptId"], payload.get("parentAttemptId"))
-        return kwargs
+        return _provider_request(kwargs)
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
         try:

@@ -85,6 +85,7 @@ assert http_calls == [2]
 test("the pinned LiteLLM callback normalizes provider units and preserves governed attempt lineage", () => {
   const callback = path.resolve(import.meta.dirname, "../integrations/litellm/onecomputer_policy_callback.py");
   const script = String.raw`
+import asyncio
 import json
 import os
 import runpy
@@ -429,6 +430,74 @@ except RuntimeError as error:
     assert "concrete invocation ID is missing" in str(error)
 else:
     raise AssertionError("admission must fail closed without LiteLLM's concrete invocation ID")
+
+# Authentication projections are callback-only. They must remain available
+# through routing and admission, but must never cross the provider boundary.
+authority_calls = []
+
+
+def usage_authority(path, payload):
+    authority_calls.append((path, payload))
+    if path == "attempts/admit":
+        return {"status": "created", "admissionId": "admission-boundary"}
+    raise AssertionError(f"unexpected usage authority call: {path}")
+
+callback_type.async_pre_call_deployment_hook.__globals__["_usage_request"] = usage_authority
+callback = callback_type()
+
+
+class ProbeAuth:
+    metadata = {
+        "onecomputer_non_billable_exemption": "provider-route-test-v1",
+        "onecomputer_policy_model_alias": "balanced",
+    }
+
+async def assert_provider_boundary():
+    probe = {
+        "model": "openai/gpt-real",
+        "messages": [{"role": "user", "content": "probe"}],
+        "litellm_call_id": "probe-call",
+        "litellm_params": {"model_info": openai_route},
+        "user_api_key_metadata": {"untrusted": True},
+    }
+    routed_probe = await callback.async_pre_call_hook(
+        ProbeAuth(), None, probe, "acompletion"
+    )
+    assert "user_api_key_dict" in routed_probe
+    provider_probe = await callback.async_pre_call_deployment_hook(
+        routed_probe, "acompletion"
+    )
+    assert provider_probe is not routed_probe
+    assert "user_api_key_dict" in routed_probe
+    assert "user_api_key_dict" not in provider_probe
+    assert "user_api_key_metadata" not in provider_probe
+    assert provider_probe["model"] == "openai/gpt-real"
+    assert provider_probe["messages"] == probe["messages"]
+    assert authority_calls == []
+
+    admitted = {
+        "model": "openai/gpt-real",
+        "messages": [{"role": "user", "content": "billable request"}],
+        "litellm_call_id": "admitted-call",
+        "litellm_params": {"model_info": openai_route},
+        "metadata": {"onecomputer_task_binding": "signed." + "x" * 64},
+        "user_api_key_metadata": {"untrusted": True},
+    }
+    routed_admitted = await callback.async_pre_call_hook(
+        Auth(), None, admitted, "acompletion"
+    )
+    provider_admitted = await callback.async_pre_call_deployment_hook(
+        routed_admitted, "acompletion"
+    )
+    assert authority_calls[0][0] == "attempts/admit"
+    assert authority_calls[0][1]["resolvedProvider"] == "openai"
+    assert "user_api_key_dict" in routed_admitted
+    assert "user_api_key_dict" not in provider_admitted
+    assert "user_api_key_metadata" not in provider_admitted
+    assert provider_admitted["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
+    assert "onecomputer_usage_chain" in provider_admitted["metadata"]
+
+asyncio.run(assert_provider_boundary())
 `;
   const result = spawnSync("python3", ["-c", script, callback], {
     encoding: "utf8",

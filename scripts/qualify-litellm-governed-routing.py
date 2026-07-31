@@ -13,9 +13,21 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 captured = []
+captured_admissions = []
+captured_verifications = []
 
 
 def authority(path, payload):
+    if path == "routing/verify":
+        captured_verifications.append(payload)
+        return {"schemaVersion": 1}
+    if path == "attempts/admit":
+        captured_admissions.append(payload)
+        return {
+            "schemaVersion": 1,
+            "status": "created",
+            "admissionId": f"admission-{len(captured_admissions)}",
+        }
     if path != "routing/decide":
         raise AssertionError(f"unexpected authority call: {path}")
     captured.append(payload)
@@ -68,10 +80,14 @@ async def routed(text, requested="auto", model="onecomputer-auto"):
         "model": model,
         "litellm_call_id": f"call-{len(captured)}",
         "messages": [{"role": "user", "content": text}],
-        "metadata": {"requester_metadata": {
+        "user_api_key_metadata": {"untrusted": True},
+        "metadata": {
+            "requester_metadata": {
+                "onecomputer_task_binding": "signed." + "x" * 64,
+                "onecomputer_requested_service_class": requested,
+            },
             "onecomputer_task_binding": "signed." + "x" * 64,
-            "onecomputer_requested_service_class": requested,
-        }},
+        },
     }
     return await callback.async_pre_call_hook(auth, None, data, "completion")
 
@@ -79,6 +95,50 @@ async def routed(text, requested="auto", model="onecomputer-auto"):
 async def qualify():
     ambiguous = await routed("Please prepare a concise summary of the quarterly update for our team.")
     reasoning = await routed("Compare and justify the trade-offs step by step before recommending an option.")
+
+    ambiguous["litellm_params"] = {
+        "model_info": {
+            "onecomputer_provider": "openai",
+            "onecomputer_provider_account_id": "account-openai",
+            "onecomputer_base_model": "openai/gpt-qualification",
+            "onecomputer_deployment_id": "deployment-balanced",
+        }
+    }
+    provider_request = await callback.async_pre_call_deployment_hook(
+        ambiguous, "completion"
+    )
+    assert "user_api_key_dict" in ambiguous
+    assert "user_api_key_dict" not in provider_request
+    assert "user_api_key_metadata" not in provider_request
+    assert provider_request["onecomputer_usage_state"]["admissionId"] == "admission-1"
+    assert captured_verifications[0]["actual"]["deploymentId"] == "deployment-balanced"
+    assert captured_admissions[0]["resolvedProvider"] == "openai"
+
+    probe_auth = SimpleNamespace(metadata={
+        "onecomputer_non_billable_exemption": "provider-route-test-v1",
+        "onecomputer_policy_model_alias": "balanced",
+    })
+    probe = await callback.async_pre_call_hook(probe_auth, None, {
+        "model": "openai/gpt-qualification",
+        "litellm_call_id": "provider-probe",
+        "messages": [{"role": "user", "content": "probe"}],
+        "user_api_key_metadata": {"untrusted": True},
+        "litellm_params": {
+            "model_info": {
+                "onecomputer_provider": "openai",
+                "onecomputer_provider_account_id": "account-openai",
+                "onecomputer_base_model": "openai/gpt-qualification",
+                "onecomputer_deployment_id": "deployment-balanced",
+            }
+        },
+    }, "completion")
+    provider_probe = await callback.async_pre_call_deployment_hook(
+        probe, "completion"
+    )
+    assert "user_api_key_dict" in probe
+    assert "user_api_key_dict" not in provider_probe
+    assert "user_api_key_metadata" not in provider_probe
+    assert len(captured_admissions) == 1
     explicit = await routed("Use the administrator-permitted premium service class.", "pro")
     assert module._deployment_health_status(SimpleNamespace(status_code=503), "failure") == "unavailable"
     assert module._deployment_health_status(SimpleNamespace(status_code=400), "failure") is None
@@ -101,7 +161,12 @@ async def qualify():
         assert error.status_code == 503 and error.detail["error"] == "AI_ROUTING_UNAVAILABLE"
     else:
         raise AssertionError("an underlying model bypass was accepted")
-    print(json.dumps({"pinned_hook": "pre_call_before_router", "grant_models": auth.models, "selected": [ambiguous["model"], reasoning["model"], explicit["model"]]}))
+    print(json.dumps({
+        "pinned_hook": "pre_call_before_router",
+        "provider_boundary": "internal_auth_stripped",
+        "grant_models": auth.models,
+        "selected": [ambiguous["model"], reasoning["model"], explicit["model"]],
+    }))
 
 
 asyncio.run(qualify())
