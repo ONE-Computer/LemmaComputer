@@ -5,6 +5,7 @@ import { createControlServer } from "../apps/control-api/src/server.js";
 import {
   buildSpendReport,
   buildSpendTaskDetail,
+  decodeSpendTaskKey,
   MemoryWorkspaceStore,
   type IdentityPolicyStore,
   type SessionPrincipal,
@@ -106,10 +107,17 @@ class FakeSpendStore implements SpendObservabilityStore {
   async task(tenantId: string, taskKey: string, range: SpendRange) {
     this.calls.push({ method: "task", tenantId, range });
     if (tenantId !== "acme") return null;
-    const report = await this.report(tenantId, range);
-    const task = report.tasks.find((item) => item.taskKey === taskKey);
-    if (!task) return null;
-    return buildSpendTaskDetail(this.rows.filter((row) => row.taskId === task.taskId), range);
+    const identity = decodeSpendTaskKey(taskKey);
+    if (!identity) return null;
+    return buildSpendTaskDetail(this.rows.filter((row) => (
+      row.teamId === identity.teamId
+      && row.subjectId === identity.userId
+      && row.workspaceId === identity.workspaceId
+      && row.agentId === identity.agentId
+      && row.sessionId === identity.sessionId
+      && row.taskId === identity.taskId
+      && row.turnId === identity.turnId
+    )), { ...range, ...identity });
   }
 }
 
@@ -213,6 +221,47 @@ test("cursor freezes late corrections and CSV/JSON export reconciles to the same
     assert.equal(json.statusCode, 200);
     assert.equal(json.json().report.totals.costs[0].amount, "21");
     assert.equal(json.json().tenantId, "acme");
+  } finally {
+    await app.close();
+  }
+});
+
+test("opaque task keys keep identical task coordinates under different Team snapshots separate", async () => {
+  const store = new FakeSpendStore();
+  store.rows = [
+    event("shared", "9", "2026-07-20T10:00:01.000Z"),
+    event("shared", "4", "2026-07-20T10:00:01.000Z", {
+      eventId: "event-shared-research",
+      admissionId: "attempt-shared-research",
+      teamId: "22222222-2222-4222-8222-222222222222",
+      teamDisplayName: "Research",
+      costCenterCode: "RND-200",
+    }),
+  ];
+  const app = appFor(administrator, store);
+  try {
+    const reportResponse = await app.inject({
+      method: "GET",
+      url: "/v1/admin/spend?from=2026-07-01T00%3A00%3A00.000Z&to=2026-08-01T00%3A00%3A00.000Z",
+      headers,
+    });
+    assert.equal(reportResponse.statusCode, 200);
+    const report = reportResponse.json().report;
+    assert.equal(report.tasks.length, 2);
+    assert.notEqual(report.tasks[0].taskKey, report.tasks[1].taskKey);
+
+    for (const task of report.tasks) {
+      const detailResponse = await app.inject({
+        method: "GET",
+        url: `/v1/admin/spend/tasks/${encodeURIComponent(task.taskKey)}?from=2026-07-01T00%3A00%3A00.000Z&to=2026-08-01T00%3A00%3A00.000Z`,
+        headers,
+      });
+      assert.equal(detailResponse.statusCode, 200);
+      const detail = detailResponse.json().task;
+      assert.equal(detail.task.teamId, task.teamId);
+      assert.deepEqual(detail.task.costs, task.costs);
+      assert.equal(detail.attempts.length, 1);
+    }
   } finally {
     await app.close();
   }

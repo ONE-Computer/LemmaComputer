@@ -307,6 +307,7 @@ export function createControlServer(
       disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url) || request.url.startsWith("/v1/auth/callback"),
     }),
     bodyLimit: 32 * 1024,
+    routerOptions: { maxParamLength: 2048 },
   });
   const agentBridgeAuthority = new AgentBridgeAuthority(security.mcpPolicyToken ?? proxyToken);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;

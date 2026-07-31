@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildSpendReport, buildSpendTaskDetail, spendReportCsv, type SpendEventRow, type SpendRange } from "@onecomputer/workspace-store";
+import {
+  buildSpendReport,
+  buildSpendTaskDetail,
+  decodeSpendTaskKey,
+  spendReportCsv,
+  type SpendEventRow,
+  type SpendRange,
+} from "@onecomputer/workspace-store";
 
 const range: SpendRange = {
   from: new Date("2026-07-01T00:00:00.000Z"),
@@ -99,6 +106,47 @@ test("composite task identity prevents reused task IDs from merging and trend co
     attemptCountDelta: 2,
     costDeltas: [{ currency: "USD", amount: "26" }],
   });
+});
+
+test("Team snapshots keep otherwise identical task identities and details separate", () => {
+  const finance = event();
+  const research = event({
+    eventId: "research-event",
+    admissionId: "research-attempt",
+    teamId: "team-research",
+    teamDisplayName: "Research",
+    costCenterCode: "RND-200",
+    providerCost: "4.000000000000",
+  });
+  const rows = [finance, research];
+  const report = buildSpendReport(rows, range);
+
+  assert.equal(report.tasks.length, 2);
+  const financeTask = report.tasks.find((task) => task.teamId === finance.teamId);
+  const researchTask = report.tasks.find((task) => task.teamId === research.teamId);
+  assert.ok(financeTask);
+  assert.ok(researchTask);
+  assert.notEqual(financeTask.taskKey, researchTask.taskKey);
+  assert.deepEqual(financeTask.costs, [{ currency: "USD", amount: "10" }]);
+  assert.deepEqual(researchTask.costs, [{ currency: "USD", amount: "4" }]);
+
+  for (const task of report.tasks) {
+    const identity = decodeSpendTaskKey(task.taskKey);
+    assert.ok(identity);
+    assert.equal(identity.teamId, task.teamId);
+    const detail = buildSpendTaskDetail(rows.filter((row) => (
+      row.teamId === identity.teamId
+      && row.subjectId === identity.userId
+      && row.workspaceId === identity.workspaceId
+      && row.agentId === identity.agentId
+      && row.sessionId === identity.sessionId
+      && row.taskId === identity.taskId
+      && row.turnId === identity.turnId
+    )), { ...range, ...identity });
+    assert.equal(detail?.task.teamId, task.teamId);
+    assert.deepEqual(detail?.task.costs, task.costs);
+    assert.equal(detail?.attempts.length, 1);
+  }
 });
 
 test("high-cost task explanation is deterministic and contains only safe driver categories", () => {

@@ -216,7 +216,7 @@ export type SpendTaskDetail = {
 
 export interface SpendObservabilityStore {
   report(tenantId: string, range: SpendRange): Promise<SpendReport>;
-  task(tenantId: string, taskKey: string, range: Omit<SpendRange, "taskId" | "userId" | "workspaceId" | "agentId" | "turnId">): Promise<SpendTaskDetail | null>;
+  task(tenantId: string, taskKey: string, range: Omit<SpendRange, "teamId" | "taskId" | "userId" | "workspaceId" | "agentId" | "sessionId" | "turnId">): Promise<SpendTaskDetail | null>;
 }
 
 export class SpendReadLimitError extends Error {
@@ -254,6 +254,7 @@ const isUnallocated = (row: SpendEventRow) => row.teamDisplayName === "Unallocat
 const routeFor = (row: SpendEventRow) => `${row.resolvedProvider}/${row.resolvedModel}`;
 
 export type SpendTaskIdentity = {
+  teamId: string;
   userId: string;
   workspaceId: string | null;
   agentId: string | null;
@@ -262,6 +263,7 @@ export type SpendTaskIdentity = {
   turnId: string | null;
 };
 const taskIdentity = (row: SpendEventRow): SpendTaskIdentity => ({
+  teamId: row.teamId,
   userId: row.subjectId,
   workspaceId: row.workspaceId,
   agentId: row.agentId,
@@ -270,15 +272,15 @@ const taskIdentity = (row: SpendEventRow): SpendTaskIdentity => ({
   turnId: row.turnId,
 });
 export const encodeSpendTaskKey = (identity: SpendTaskIdentity) => Buffer.from(JSON.stringify([
-  identity.userId, identity.workspaceId, identity.agentId, identity.sessionId, identity.taskId, identity.turnId,
+  identity.teamId, identity.userId, identity.workspaceId, identity.agentId, identity.sessionId, identity.taskId, identity.turnId,
 ])).toString("base64url");
 export const decodeSpendTaskKey = (value: string): SpendTaskIdentity | null => {
   if (!/^[A-Za-z0-9_-]{8,2048}$/.test(value)) return null;
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-    if (!Array.isArray(parsed) || parsed.length !== 6 || typeof parsed[0] !== "string" || typeof parsed[4] !== "string") return null;
+    if (!Array.isArray(parsed) || parsed.length !== 7 || typeof parsed[0] !== "string" || typeof parsed[1] !== "string" || typeof parsed[5] !== "string") return null;
     if (parsed.some((item) => item !== null && (typeof item !== "string" || item.length > 512))) return null;
-    return { userId: parsed[0], workspaceId: parsed[1], agentId: parsed[2], sessionId: parsed[3], taskId: parsed[4], turnId: parsed[5] };
+    return { teamId: parsed[0], userId: parsed[1], workspaceId: parsed[2], agentId: parsed[3], sessionId: parsed[4], taskId: parsed[5], turnId: parsed[6] };
   } catch { return null; }
 };
 
@@ -762,7 +764,7 @@ export class PostgresSpendObservabilityStore implements SpendObservabilityStore 
     return buildSpendReport(rows, range, delayed, previousRows);
   }
 
-  async task(tenantId: string, taskKey: string, range: Omit<SpendRange, "taskId" | "userId" | "workspaceId" | "agentId" | "sessionId" | "turnId">) {
+  async task(tenantId: string, taskKey: string, range: Omit<SpendRange, "teamId" | "taskId" | "userId" | "workspaceId" | "agentId" | "sessionId" | "turnId">) {
     const identity = decodeSpendTaskKey(taskKey);
     if (!identity) return null;
     const scoped = { ...range, ...identity };
