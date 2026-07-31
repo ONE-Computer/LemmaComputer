@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   RoutingAdministrationService,
   changeRoutingRolloutSchema,
+  createRoutingMappingSchema,
   internalRoutingObservationSchema,
   saveRoutingPolicySchema,
   saveRoutingReviewSchema,
@@ -90,6 +91,77 @@ test("production enablement requires both evidence and an explicit typed confirm
     }).success,
     false,
   );
+});
+test("routing mappings require every stable service class", () => {
+  const deployment = {
+    provider: "openai" as const,
+    providerAccountId: "primary",
+    providerModel: "gpt-concrete",
+    providerDeployment: "deployment-a",
+    capabilities: {
+      vision: true,
+      tools: true,
+      streaming: true,
+      contextTokens: 128000,
+      outputTokens: 16000,
+      residency: ["sg"],
+    },
+    approved: true,
+    evaluationPassed: false,
+  };
+  assert.ok(
+    createRoutingMappingSchema.safeParse({
+      revisionNote: "Publish the first governed model map",
+      deployments: [
+        { ...deployment, serviceClass: "lite" },
+        { ...deployment, serviceClass: "balanced" },
+        { ...deployment, serviceClass: "pro" },
+      ],
+    }).success,
+  );
+  assert.equal(
+    createRoutingMappingSchema.safeParse({
+      revisionNote: "Missing the premium service class",
+      deployments: [
+        { ...deployment, serviceClass: "lite" },
+        { ...deployment, serviceClass: "balanced" },
+        { ...deployment, serviceClass: "balanced" },
+      ],
+    }).success,
+    false,
+  );
+});
+test("mapping administration always uses the authenticated tenant", async () => {
+  const calls: Array<{ operation: string; tenantId: string }> = [];
+  const store = {
+    latestMappingVersion: async (tenantId: string) => {
+      calls.push({ operation: "read", tenantId });
+      return null;
+    },
+    createMappingVersion: async (input: { tenantId: string }) => {
+      calls.push({ operation: "create", tenantId: input.tenantId });
+      return {};
+    },
+  } as unknown as RoutingStore;
+  const service = new RoutingAdministrationService(store);
+  const actor = { tenantId: "tenant-a", userId: "admin" };
+  await service.latestMapping(actor);
+  await service.createMapping(actor, {
+    revisionNote: "Publish the first governed model map",
+    deployments: ["lite", "balanced", "pro"].map((serviceClass) => ({
+      serviceClass: serviceClass as "lite" | "balanced" | "pro",
+      provider: "openai",
+      providerModel: "gpt-concrete",
+      providerDeployment: serviceClass,
+      capabilities: { vision: true, tools: true, streaming: true, contextTokens: 128000, outputTokens: 16000, residency: ["sg"] },
+      approved: true,
+      evaluationPassed: false,
+    })),
+  });
+  assert.deepEqual(calls, [
+    { operation: "read", tenantId: "tenant-a" },
+    { operation: "create", tenantId: "tenant-a" },
+  ]);
 });
 test("evidence review metrics are derived by the server", () => {
   assert.ok(

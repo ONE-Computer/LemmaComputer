@@ -36,7 +36,7 @@ import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchem
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
-import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
+import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
 
 import { paginateSpendReport, parseSpendQuery } from "./spend-observability.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
@@ -1291,6 +1291,15 @@ export function createControlServer(
   });
   app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget/reconcile",async(request)=>{
     const actor=requireAdministrator(request);return{reconciliation:await requireBudgets().sync(actor,z.uuid().parse(request.params.teamId))};
+  });
+  app.get("/v1/admin/routing/mappings/latest",async(request,reply)=>{
+    const actor=requireAdministrator(request);
+    reply.header("cache-control","no-store");
+    return {mapping:await requireRouting().latestMapping(actor)};
+  });
+  app.post("/v1/admin/routing/mappings",async(request,reply)=>{
+    const actor=requireAdministrator(request);const mapping=await requireRouting().createMapping(actor,createRoutingMappingSchema.parse(request.body??{}));
+    reply.header("cache-control","no-store");return reply.code(201).send({mapping});
   });
   app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing",async(request)=>{const actor=requireAdministrator(request);return requireRouting().settings(actor,z.uuid().parse(request.params.teamId));});
   app.put<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/policy",async(request)=>{const actor=requireAdministrator(request);return requireRouting().savePolicy(actor,z.uuid().parse(request.params.teamId),saveRoutingPolicySchema.parse(request.body??{}));});

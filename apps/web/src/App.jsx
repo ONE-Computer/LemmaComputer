@@ -33,6 +33,8 @@ import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
 import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
 import { SpendDashboard } from "./SpendDashboard.jsx";
 import { RoutingAdmin } from "./RoutingAdmin.jsx";
+import { AiControlPlane, AiControlPlanePlaceholder, aiControlPlaneTabs } from "./AiControlPlane.jsx";
+import { AiControlPlaneOverview } from "./AiControlPlaneOverview.jsx";
 import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
@@ -79,6 +81,7 @@ const navByView = Object.freeze({
   firewall: "Firewall",
   connections: "Connections",
   settings: "Settings",
+  "ai-control-plane": "AI control plane",
 });
 const viewByNav = Object.freeze(Object.fromEntries(
   Object.entries(navByView).map(([view, name]) => [name, view]),
@@ -169,6 +172,12 @@ const attachmentSize = (bytes) => bytes < 1024 * 1024
 const navFromLocation = () => {
   const view = new URLSearchParams(window.location.search).get("view") ?? "home";
   return navByView[view] ?? "Workspace";
+};
+const aiControlPlaneViews = new Set([...aiControlPlaneTabs.map((tab) => tab.id), "spend"]);
+const aiControlPlaneViewFromLocation = () => {
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("section") ?? "overview";
+  return params.get("view") === "ai-control-plane" && aiControlPlaneViews.has(view) ? view : "overview";
 };
 const chatSessionFromLocation = () => {
   const params = new URLSearchParams(window.location.search);
@@ -3099,6 +3108,7 @@ export function App() {
   const [connectionsView, setConnectionsView] = useState("list");
   const [settingsView, setSettingsView] = useState("overview");
   const [chatSessions, setChatSessions] = useState([]);
+  const [aiControlPlaneView, setAiControlPlaneView] = useState(aiControlPlaneViewFromLocation);
   const [activeChatSessionId, setActiveChatSessionId] = useState(chatSessionFromLocation);
   const [chatAgentPreferences, setChatAgentPreferences] = useState({});
   const [chatHistoryHasMore, setChatHistoryHasMore] = useState(false);
@@ -3171,6 +3181,7 @@ export function App() {
       const name = navFromLocation();
       setActiveNav(name);
       setActiveChatSessionId(chatSessionFromLocation());
+      setAiControlPlaneView(aiControlPlaneViewFromLocation());
       if (name === "Connections") {
         setConnectionsView("list");
         setConnectionCatalogRefresh((current) => current + 1);
@@ -3338,7 +3349,9 @@ export function App() {
   }, [activeNav, settingsView, session?.user.id]);
 
   useEffect(() => {
-    if (!session || activeNav !== "Settings" || settingsView !== "provider-settings" || !session.roles.includes("administrator")) return undefined;
+    const providerPageOpen = (activeNav === "Settings" && settingsView === "provider-settings")
+      || (activeNav === "AI control plane" && aiControlPlaneView === "models-providers");
+    if (!session || !providerPageOpen || !session.roles.includes("administrator")) return undefined;
     let active = true;
     setProviderSettingsLoading(true);
     adminApi.providerSettings()
@@ -3346,7 +3359,7 @@ export function App() {
       .catch((error) => { if (active) setProviderSettingsError(error.message); })
       .finally(() => { if (active) setProviderSettingsLoading(false); });
     return () => { active = false; };
-  }, [activeNav, settingsView, session?.user.id]);
+  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id]);
 
   useEffect(() => {
     if (!session || activeNav !== "Workspace") return undefined;
@@ -3422,10 +3435,11 @@ export function App() {
   }, [session?.user.id]);
 
   useEffect(() => {
-    if (!session || session.roles.includes("administrator") || activeNav !== "Firewall") return;
+    if (!session || session.roles.includes("administrator") || !["Firewall", "AI control plane"].includes(activeNav)) return;
     setActiveNav("Workspace");
     const url = new URL(window.location.href);
     url.searchParams.delete("view");
+    url.searchParams.delete("section");
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
   }, [activeNav, session?.user.id]);
 
@@ -4052,6 +4066,7 @@ export function App() {
     else url.searchParams.set("view", viewByNav[name]);
     if (name === "Chat" && activeChatSessionId) url.searchParams.set("chat", activeChatSessionId);
     else url.searchParams.delete("chat");
+    url.searchParams.delete("section");
     const nextLocation = `${url.pathname}${url.search}`;
     if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
     else if (nextLocation !== `${window.location.pathname}${window.location.search}`) {
@@ -4064,6 +4079,26 @@ export function App() {
     if (name === "Settings") setSettingsView("overview");
     if (name === "Sites") setSitesError("");
     if (name === "Workspace") { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }
+    setProfileOpen(false);
+    setMobileNavOpen(false);
+    window.requestAnimationFrame(() => mainContentRef.current?.focus());
+  };
+
+
+  const selectAiControlPlaneView = (view = "overview", historyMode = "push") => {
+    const nextView = aiControlPlaneViews.has(view) ? view : "overview";
+    setActiveNav("AI control plane");
+    setAiControlPlaneView(nextView);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "ai-control-plane");
+    if (nextView === "overview") url.searchParams.delete("section");
+    else url.searchParams.set("section", nextView);
+    url.searchParams.delete("chat");
+    const nextLocation = `${url.pathname}${url.search}`;
+    if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
+    else if (nextLocation !== `${window.location.pathname}${window.location.search}`) {
+      window.history.pushState({}, "", nextLocation);
+    }
     setProfileOpen(false);
     setMobileNavOpen(false);
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
@@ -4498,6 +4533,11 @@ export function App() {
                 <span><strong>{session.user.displayName}</strong><small>{session.user.email}</small></span>
               </div>
               <div className="sidebar-account-menu-actions">
+                {session.roles.includes("administrator") && <>
+                  <span className="sidebar-menu-section-label">Organization</span>
+                  <button className="sidebar-control-plane-link" type="button" onClick={() => selectAiControlPlaneView("overview")}><Bot24Regular aria-hidden="true" /><span>AI control plane</span><ChevronRight16Regular aria-hidden="true" /></button>
+                  <span className="sidebar-menu-divider" aria-hidden="true" />
+                </>}
                 <button type="button" onClick={() => selectNav("Settings")}><Settings24Regular aria-hidden="true" /><span>Settings</span><ChevronRight16Regular aria-hidden="true" /></button>
                 <button className="sidebar-signout" type="button" onClick={logout}><SignOut24Regular aria-hidden="true" /><span>Log out</span></button>
               </div>
@@ -4616,6 +4656,43 @@ export function App() {
           />
         )}
         {activeNav === "Firewall" && session.roles.includes("administrator") && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
+        {activeNav === "AI control plane" && session.roles.includes("administrator") && (
+          <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView}>
+            {aiControlPlaneView === "overview" && <AiControlPlaneOverview
+              onOpenSpend={() => selectAiControlPlaneView("spend")}
+              onOpenRouting={() => selectAiControlPlaneView("model-routes")}
+              onOpenPricing={() => selectAiControlPlaneView("pricing")}
+            />}
+            {aiControlPlaneView === "spend" && <SpendDashboard onBack={() => selectAiControlPlaneView("overview")} />}
+            {aiControlPlaneView === "models-providers" && <ProviderSettingsScreen
+              providers={providerSettings}
+              loading={providerSettingsLoading}
+              busy={providerSettingsBusy}
+              error={providerSettingsError}
+              onSave={saveProviderSetting}
+              onTest={testProviderSetting}
+              onDisable={disableProviderSetting}
+              onDelete={deleteProviderSetting}
+            />}
+            {aiControlPlaneView === "model-routes" && <RoutingAdmin />}
+            {aiControlPlaneView === "pricing" && <RoutingAdmin section="pricing" />}
+            {aiControlPlaneView === "teams-budgets" && <AiControlPlanePlaceholder
+              title="Teams & budgets"
+              description="Team definitions, membership, budget periods, thresholds, and enforcement remain available through the existing organization administration flow while this control-plane view is consolidated."
+              actionLabel="Open organization administration"
+              onAction={() => {
+                selectNav("Settings");
+                setSettingsView("admin");
+              }}
+            />}
+            {aiControlPlaneView === "audit-log" && <AiControlPlanePlaceholder
+              title="Audit log"
+              description="Review the organization evidence behind protected actions, routing changes, policy decisions, and administrative approvals."
+              actionLabel="Open Trail"
+              onAction={() => selectNav("Trail")}
+            />}
+          </AiControlPlane>
+        )}
         {activeNav === "Settings" && <SettingsScreen
           view={settingsView}
           isAdmin={session.roles.includes("administrator")}

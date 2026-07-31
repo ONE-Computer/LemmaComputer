@@ -12,6 +12,52 @@ import type {
 } from "@onecomputer/workspace-store";
 import { UsageTaskBindingAuthority } from "./usage-ledger.js";
 const serviceClass = z.enum(["lite", "balanced", "pro"]);
+const managedProvider = z.enum([
+  "foundry",
+  "openai",
+  "anthropic",
+  "glm",
+  "bedrock",
+]);
+const routingCapabilities = z.strictObject({
+  vision: z.boolean(),
+  tools: z.boolean(),
+  streaming: z.boolean(),
+  contextTokens: z.number().int().positive(),
+  outputTokens: z.number().int().positive(),
+  residency: z.array(z.string().trim().min(2).max(64)).max(16),
+});
+export const createRoutingMappingSchema = z
+  .strictObject({
+    revisionNote: z.string().trim().min(8).max(500),
+    deployments: z
+      .array(
+        z.strictObject({
+          serviceClass,
+          provider: managedProvider,
+          providerAccountId: z.string().trim().min(1).max(200).optional(),
+          providerModel: z.string().trim().min(1).max(300),
+          providerDeployment: z.string().trim().min(1).max(300),
+          region: z.string().trim().min(1).max(100).optional(),
+          providerServiceTier: z.string().trim().min(1).max(100).optional(),
+          rateCardId: z.uuid().optional(),
+          capabilities: routingCapabilities,
+          approved: z.boolean(),
+          evaluationPassed: z.boolean(),
+        }),
+      )
+      .min(3)
+      .max(100),
+  })
+  .superRefine((value, context) => {
+    for (const name of serviceClass.options)
+      if (!value.deployments.some((deployment) => deployment.serviceClass === name))
+        context.addIssue({
+          code: "custom",
+          path: ["deployments"],
+          message: `A ${name} deployment is required`,
+        });
+  });
 const money = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,12})?$/);
 const rate = z.string().regex(/^(?:0|1)(?:\.\d{1,6})?$/);
 const scope = z.strictObject({
@@ -184,6 +230,30 @@ export const internalRoutingObservationSchema = z
   });
 export class RoutingAdministrationService {
   constructor(private readonly store: RoutingStore) {}
+  latestMapping(actor: Actor) {
+    return this.store.latestMappingVersion(actor.tenantId);
+  }
+  createMapping(
+    actor: Actor,
+    input: z.infer<typeof createRoutingMappingSchema>,
+  ) {
+    return this.store.createMappingVersion({
+      tenantId: actor.tenantId,
+      revisionNote: input.revisionNote,
+      createdBy: actor.userId,
+      deployments: input.deployments.map((deployment) => ({
+        ...deployment,
+        ...(deployment.providerAccountId
+          ? { providerAccountId: deployment.providerAccountId }
+          : {}),
+        ...(deployment.region ? { region: deployment.region } : {}),
+        ...(deployment.providerServiceTier
+          ? { providerServiceTier: deployment.providerServiceTier }
+          : {}),
+        ...(deployment.rateCardId ? { rateCardId: deployment.rateCardId } : {}),
+      })),
+    });
+  }
   settings(actor: Actor, teamId: string) {
     return this.store.adminReadModel(actor.tenantId, teamId);
   }

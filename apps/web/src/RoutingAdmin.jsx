@@ -1,61 +1,211 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckmarkCircle20Regular } from "@fluentui/react-icons/svg/checkmark-circle";
+import { ErrorCircle20Regular } from "@fluentui/react-icons/svg/error-circle";
+import { Info20Regular } from "@fluentui/react-icons/svg/info";
 import { adminApi } from "./workspace-api.js";
-const labels = { lite: "Lite", balanced: "Balanced", pro: "Pro" };
-const money = (amount, currency) =>
-  amount == null
-    ? "—"
-    : `${currency ?? ""} ${Number(amount).toFixed(2)}`.trim();
-export function RoutingAdmin({ onBack }) {
+import { ModalDialog, SelectMenu } from "./ui.jsx";
+import "./RoutingAdmin.css";
+
+const serviceClassLabels = { auto: "Auto", lite: "Lite", balanced: "Balanced", pro: "Pro" };
+const serviceClassDescriptions = {
+  lite: "Fast, economical work",
+  balanced: "Everyday reasoning and tool use",
+  pro: "Highest capability for complex work",
+};
+const pricingUnits = [
+  { key: "input_uncached_token", label: "Input" },
+  { key: "output_token", label: "Output" },
+  { key: "cache_read_token", label: "Cache read" },
+  { key: "cache_write_token", label: "Cache write" },
+];
+const money = (amount, currency) => amount == null ? "—" : `${currency ?? ""} ${Number(amount).toFixed(2)}`.trim();
+const shortId = (value) => value ? `${String(value).slice(0, 8)}…${String(value).slice(-4)}` : "Not configured";
+const providerName = (value) => ({
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  bedrock: "Amazon Bedrock",
+  foundry: "Azure AI Foundry",
+  azure: "Azure AI Foundry",
+  google: "Google",
+}[value] ?? value);
+const ratePerMillion = (card, unit) => {
+  const rate = card?.rates?.find((item) => item.unit === unit);
+  if (!rate) return null;
+  return Number(rate.amountPerUnit) * 1_000_000 / Number(rate.unitScale);
+};
+const rateLabel = (card, unit) => {
+  const amount = ratePerMillion(card, unit);
+  if (amount == null || !Number.isFinite(amount)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: card.currency,
+    minimumFractionDigits: amount < 1 ? 3 : 2,
+    maximumFractionDigits: amount < 1 ? 4 : 2,
+  }).format(amount);
+};
+const pricingCoverage = (card) => {
+  if (!card) return { complete: false, missing: pricingUnits.map((item) => item.label) };
+  const missing = pricingUnits.filter((item) => ratePerMillion(card, item.key) == null).map((item) => item.label);
+  return { complete: missing.length === 0, missing };
+};
+const datetimeLocalValue = () => {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+};
+const hashPricingRecord = async (record) => {
+  const bytes = new TextEncoder().encode(JSON.stringify(record));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+};
+
+function PriceCell({ card, unit }) {
+  const missing = ratePerMillion(card, unit) == null;
+  return <span className={missing ? "route-price-missing" : ""}>{rateLabel(card, unit)}</span>;
+}
+
+function RouteHealth({ deployment }) {
+  if (deployment.healthy === true) return <span className="route-health healthy"><CheckmarkCircle20Regular aria-hidden="true" />Healthy</span>;
+  if (deployment.healthy === false) return <span className="route-health unavailable"><ErrorCircle20Regular aria-hidden="true" />Unavailable</span>;
+  return <span className="route-health unknown"><Info20Regular aria-hidden="true" />Not reported</span>;
+}
+
+function PricingEditor({ editor, busy, onChange, onClose, onCreate }) {
+  const updateRate = (key, value) => onChange({ ...editor, prices: { ...editor.prices, [key]: value } });
+  const canCreate = editor.providerAccountId.trim()
+    && editor.sourceVersion.trim()
+    && editor.overrideReason.trim()
+    && editor.prices.input_uncached_token !== ""
+    && editor.prices.output_token !== "";
+  return <ModalDialog
+    title={`New ${serviceClassLabels[editor.deployment.serviceClass]} price version`}
+    description="Create immutable pricing evidence for this provider deployment and attach it to a local mapping draft. This does not change a current Team rollout."
+    eyebrow="Rate card"
+    labelledBy="route-pricing-title"
+    onClose={busy ? () => undefined : onClose}
+  >
+    <div className="route-price-target" role="note">
+      <span>{providerName(editor.deployment.provider)}</span>
+      <strong>{editor.deployment.providerModel}</strong>
+      <small>{editor.deployment.providerDeployment}</small>
+    </div>
+    <div className="route-price-form-grid">
+      <label className="modal-field"><span>Provider account ID</span><input aria-label="Provider account ID" value={editor.providerAccountId} disabled={busy} onChange={(event) => onChange({ ...editor, providerAccountId: event.target.value })} /></label>
+      <label className="modal-field"><span>Currency</span><input aria-label="Pricing currency" value={editor.currency} maxLength={3} disabled={busy} onChange={(event) => onChange({ ...editor, currency: event.target.value.toUpperCase() })} /></label>
+      {pricingUnits.map((item) => <label className="modal-field" key={item.key}><span>{item.label} / 1M tokens{item.key.startsWith("cache") ? " (optional)" : ""}</span><input aria-label={`${item.label} price per 1M tokens`} type="number" min="0" step="0.0001" value={editor.prices[item.key]} disabled={busy} onChange={(event) => updateRate(item.key, event.target.value)} /></label>)}
+      <label className="modal-field"><span>Version label</span><input aria-label="Price version label" value={editor.sourceVersion} disabled={busy} onChange={(event) => onChange({ ...editor, sourceVersion: event.target.value })} /></label>
+      <label className="modal-field"><span>Effective from</span><input aria-label="Price effective from" type="datetime-local" value={editor.effectiveFrom} disabled={busy} onChange={(event) => onChange({ ...editor, effectiveFrom: event.target.value })} /></label>
+      <label className="modal-field route-price-reason"><span>Approval reason</span><textarea aria-label="Price approval reason" value={editor.overrideReason} disabled={busy} onChange={(event) => onChange({ ...editor, overrideReason: event.target.value })} /></label>
+    </div>
+    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>The new record is staged in a local mapping draft. Publish that mapping version separately for policy and shadow evaluation.</span></div>
+    <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !canCreate} onClick={onCreate}>{busy ? "Creating…" : "Create price record"}</button></div>
+  </ModalDialog>;
+}
+
+function MappingEditor({ editor, rateCards, busy, onChange, onClose, onSave }) {
+  const updateDeployment = (id, change) => onChange({
+    ...editor,
+    deployments: editor.deployments.map((deployment) => {
+      if (deployment.id !== id) return deployment;
+      const next = { ...deployment, ...change };
+      if ("provider" in change || "providerModel" in change || "providerDeployment" in change) next.rateCardId = "";
+      if ("provider" in change) next.providerAccountId = "";
+      return next;
+    }),
+  });
+  const valid = editor.revisionNote.trim().length >= 8 && editor.deployments.length >= 3 && editor.deployments.every((item) => item.provider && item.providerModel.trim() && item.providerDeployment.trim());
+  return <ModalDialog
+    title="Create a mapping draft"
+    description="Edit the private provider deployment behind each stable employee alias. Saving keeps the draft local until you publish a new immutable mapping version."
+    eyebrow="Model routes"
+    labelledBy="route-mapping-editor-title"
+    onClose={busy ? () => undefined : onClose}
+    className="route-mapping-editor"
+  >
+    <label className="modal-field"><span>Revision note</span><input aria-label="Mapping revision note" value={editor.revisionNote} disabled={busy} onChange={(event) => onChange({ ...editor, revisionNote: event.target.value })} placeholder="Why these routes are changing" /></label>
+    <div className="route-mapping-editor-list">
+      {editor.deployments.map((deployment) => {
+        const compatibleCards = rateCards.filter((card) => card.provider === deployment.provider && card.baseModel === deployment.providerModel && card.deploymentId === deployment.providerDeployment);
+        return <section key={deployment.id} className="route-mapping-editor-row" aria-labelledby={`route-editor-${deployment.serviceClass}`}>
+          <header><span className={`route-alias ${deployment.serviceClass}`} id={`route-editor-${deployment.serviceClass}`}>{serviceClassLabels[deployment.serviceClass]}</span><small>{serviceClassDescriptions[deployment.serviceClass]}</small></header>
+          <label className="modal-field"><span>Provider</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} provider`} value={deployment.provider} options={["foundry", "openai", "anthropic", "glm", "bedrock"].map((provider) => ({ value: provider, label: providerName(provider) }))} disabled={busy} onValueChange={(provider) => updateDeployment(deployment.id, { provider })} /></label>
+          <label className="modal-field"><span>Provider account ID</span><input aria-label={`${serviceClassLabels[deployment.serviceClass]} provider account ID`} value={deployment.providerAccountId ?? ""} disabled={busy} onChange={(event) => updateDeployment(deployment.id, { providerAccountId: event.target.value })} /></label>
+          <label className="modal-field"><span>Provider model</span><input aria-label={`${serviceClassLabels[deployment.serviceClass]} provider model`} value={deployment.providerModel} disabled={busy} onChange={(event) => updateDeployment(deployment.id, { providerModel: event.target.value })} /></label>
+          <label className="modal-field"><span>Deployment ID</span><input aria-label={`${serviceClassLabels[deployment.serviceClass]} deployment ID`} value={deployment.providerDeployment} disabled={busy} onChange={(event) => updateDeployment(deployment.id, { providerDeployment: event.target.value })} /></label>
+          <label className="modal-field route-editor-rate"><span>Pinned price record</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} price record`} value={deployment.rateCardId ?? ""} options={[{ value: "", label: "No price record" }, ...compatibleCards.map((card) => ({ value: card.id, label: `${card.sourceVersion} · ${card.currency}` }))]} disabled={busy} onValueChange={(rateCardId) => updateDeployment(deployment.id, { rateCardId })} /></label>
+        </section>;
+      })}
+    </div>
+    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Publishing creates a version for policy and shadow evaluation. It does not activate or repoint any current Team rollout.</span></div>
+    <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !valid} onClick={onSave}>Save local draft</button></div>
+  </ModalDialog>;
+}
+
+export function RoutingAdmin({ onBack, section = "routes" }) {
+  const pricingView = section === "pricing";
   const [teams, setTeams] = useState([]);
   const [teamId, setTeamId] = useState("");
   const [settings, setSettings] = useState(null);
   const [report, setReport] = useState(null);
+  const [rateCards, setRateCards] = useState([]);
+  const [mapping, setMapping] = useState(null);
+  const [draft, setDraft] = useState(null);
   const [classes, setClasses] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [enableOpen, setEnableOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewNote, setReviewNote] = useState("");
   const [reviewPassed, setReviewPassed] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [priceEditor, setPriceEditor] = useState(null);
+  const [mappingEditor, setMappingEditor] = useState(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+
+  const cardById = useMemo(() => new Map(rateCards.map((card) => [card.id, card])), [rateCards]);
+  const mappedDeployments = useMemo(() => {
+    const rank = { lite: 0, balanced: 1, pro: 2 };
+    return [...(draft?.deployments ?? mapping?.deployments ?? settings?.deployments ?? [])].sort((left, right) => (rank[left.serviceClass] ?? 9) - (rank[right.serviceClass] ?? 9));
+  }, [draft, mapping, settings]);
+  const pricingGapCount = mappedDeployments.filter((deployment) => !pricingCoverage(cardById.get(deployment.rateCardId)).complete).length;
+
   useEffect(() => {
-    adminApi
-      .teams(false)
-      .then(({ teams }) => {
-        setTeams(teams);
-        setTeamId(teams[0]?.id ?? "");
+    Promise.all([adminApi.teams(false), adminApi.rateCards(), adminApi.latestRoutingMapping()])
+      .then(([teamResult, rateResult, mappingResult]) => {
+        setTeams(teamResult.teams);
+        setTeamId(teamResult.teams[0]?.id ?? "");
+        setRateCards(rateResult.rateCards ?? []);
+        setMapping(mappingResult.mapping ?? null);
       })
-      .catch((caught) => setError(caught.message));
+      .catch((caught) => setError(caught.message))
+      .finally(() => setLoading(false));
   }, []);
+
   const load = async (id) => {
     if (!id) return;
     setError("");
     try {
-      const [current, shadow] = await Promise.all([
-        adminApi.routingSettings(id),
-        adminApi.routingShadowReport(id),
-      ]);
+      const [current, shadow] = await Promise.all([adminApi.routingSettings(id), adminApi.routingShadowReport(id)]);
       setSettings(current);
       setReport(shadow);
-      setClasses(
-        current.policy?.team?.allowedServiceClasses ??
-          current.policy?.identity.allowedServiceClasses ??
-          [],
-      );
+      setClasses(current.policy?.team?.allowedServiceClasses ?? current.policy?.identity.allowedServiceClasses ?? []);
     } catch (caught) {
       setError(caught.message);
     }
   };
-  useEffect(() => {
-    void load(teamId);
-  }, [teamId]);
-  const run = async (operation) => {
+  useEffect(() => { void load(teamId); }, [teamId]);
+
+  const run = async (operation, successNotice = "") => {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await operation();
       await load(teamId);
+      if (successNotice) setNotice(successNotice);
       return true;
     } catch (caught) {
       setError(caught.message);
@@ -64,68 +214,38 @@ export function RoutingAdmin({ onBack }) {
       setBusy(false);
     }
   };
-  const savePolicy = () =>
-    run(() =>
-      adminApi.saveRoutingPolicy(teamId, {
-        mappingVersionId: settings.policy.mappingVersionId,
-        billingCurrency: settings.policy.billingCurrency,
-        serviceClassPolicies: settings.policy.serviceClassPolicies,
-        identity: settings.policy.identity,
-        team: {
-          ...settings.policy.identity,
-          allowedServiceClasses: classes,
-          allowedDeploymentIds:
-            settings.policy.identity.allowedDeploymentIds.filter((id) =>
-              settings.deployments.some(
-                (deployment) =>
-                  deployment.id === id &&
-                  classes.includes(deployment.serviceClass),
-              ),
-            ),
-        },
-        ...(settings.policy.requiredResidency
-          ? { requiredResidency: settings.policy.requiredResidency }
-          : {}),
-      }),
-    );
-  const rollout = (mode, confirmation) =>
-    run(() =>
-      adminApi.changeRoutingRollout(teamId, {
-        policyVersionId: settings.policy.id,
-        mappingVersionId: settings.policy.mappingVersionId,
-        mode,
-        fixedDeploymentId: settings.rollout.fixedDeploymentId,
-        ...(mode === "enabled" && settings.review?.id
-          ? { evidenceReviewId: settings.review.id }
-          : {}),
-        reason:
-          mode === "shadow"
-            ? "Administrator started bounded shadow evaluation"
-            : "Administrator reviewed evidence and enabled governed Auto routing",
-        ...(confirmation ? { confirmation } : {}),
-      }),
-    );
+
+  const savePolicy = () => run(() => adminApi.saveRoutingPolicy(teamId, {
+    mappingVersionId: settings.policy.mappingVersionId,
+    billingCurrency: settings.policy.billingCurrency,
+    serviceClassPolicies: settings.policy.serviceClassPolicies,
+    identity: settings.policy.identity,
+    team: {
+      ...settings.policy.identity,
+      allowedServiceClasses: classes,
+      allowedDeploymentIds: settings.policy.identity.allowedDeploymentIds.filter((id) => settings.deployments.some((deployment) => deployment.id === id && classes.includes(deployment.serviceClass))),
+    },
+    ...(settings.policy.requiredResidency ? { requiredResidency: settings.policy.requiredResidency } : {}),
+  }), "Team route eligibility saved.");
+  const rollout = (mode, confirmation) => run(() => adminApi.changeRoutingRollout(teamId, {
+    policyVersionId: settings.policy.id,
+    mappingVersionId: settings.policy.mappingVersionId,
+    mode,
+    fixedDeploymentId: settings.rollout.fixedDeploymentId,
+    ...(mode === "enabled" && settings.review?.id ? { evidenceReviewId: settings.review.id } : {}),
+    reason: mode === "shadow" ? "Administrator started bounded shadow evaluation" : "Administrator reviewed evidence and enabled governed Auto routing",
+    ...(confirmation ? { confirmation } : {}),
+  }));
   const enable = async () => {
     if (await rollout("enabled", "ENABLE AUTO ROUTING")) {
       setEnableOpen(false);
       setConfirmed(false);
+      setNotice("Production routing enabled for this Team.");
     }
   };
-  const kill = () =>
-    run(() =>
-      adminApi.routingKillSwitch(teamId, {
-        reason: "Administrator activated the immediate routing kill switch",
-      }),
-    );
+  const kill = () => run(() => adminApi.routingKillSwitch(teamId, { reason: "Administrator activated the immediate routing kill switch" }), "Kill switch activated. The prior fixed route is restored.");
   const review = async () => {
-    if (
-      await run(() =>
-        adminApi.saveRoutingReview(teamId, {
-          evaluationPassed: reviewPassed,
-          reviewNote,
-        }),
-      )
-    ) {
+    if (await run(() => adminApi.saveRoutingReview(teamId, { evaluationPassed: reviewPassed, reviewNote }), "Evidence review recorded.")) {
       setReviewOpen(false);
       setReviewNote("");
       setReviewPassed(false);
@@ -133,386 +253,193 @@ export function RoutingAdmin({ onBack }) {
   };
   const openDecision = async (id) => {
     setError("");
+    try { setDetail(await adminApi.routingDecision(id)); } catch (caught) { setError(caught.message); }
+  };
+  const draftableDeployments = () => mappedDeployments.map((deployment) => {
+    const policyCapabilities = settings?.policy?.serviceClassPolicies?.[deployment.serviceClass]?.capabilityFloor;
+    const card = cardById.get(deployment.rateCardId);
+    return {
+      ...deployment,
+      providerAccountId: deployment.providerAccountId ?? card?.providerAccountId ?? "",
+      region: deployment.region ?? card?.region ?? null,
+      providerServiceTier: deployment.providerServiceTier ?? card?.providerServiceTier ?? null,
+      rateCardId: deployment.rateCardId ?? "",
+      capabilities: deployment.capabilities ?? {
+        vision: policyCapabilities?.vision ?? false,
+        tools: policyCapabilities?.tools ?? false,
+        streaming: policyCapabilities?.streaming ?? true,
+        contextTokens: policyCapabilities?.contextTokens ?? 32000,
+        outputTokens: policyCapabilities?.outputTokens ?? 8192,
+        residency: settings?.policy?.requiredResidency ? [settings.policy.requiredResidency] : [],
+      },
+      approved: deployment.approved === true,
+      evaluationPassed: deployment.evaluationPassed === true,
+    };
+  });
+  const openMappingEditor = () => setMappingEditor({
+    revisionNote: draft?.revisionNote ?? "",
+    deployments: draftableDeployments(),
+  });
+  const saveMappingDraft = () => {
+    setDraft({ revisionNote: mappingEditor.revisionNote.trim(), deployments: mappingEditor.deployments });
+    setMappingEditor(null);
+    setNotice("Local mapping draft saved. Review the deployment and pricing rows, then publish a version for policy and shadow evaluation.");
+  };
+  const mappingInput = (value) => ({
+    revisionNote: value.revisionNote,
+    deployments: value.deployments.map((deployment) => ({
+      serviceClass: deployment.serviceClass,
+      provider: deployment.provider,
+      ...(deployment.providerAccountId?.trim() ? { providerAccountId: deployment.providerAccountId.trim() } : {}),
+      providerModel: deployment.providerModel.trim(),
+      providerDeployment: deployment.providerDeployment.trim(),
+      ...(deployment.region ? { region: deployment.region } : {}),
+      ...(deployment.providerServiceTier ? { providerServiceTier: deployment.providerServiceTier } : {}),
+      ...(deployment.rateCardId ? { rateCardId: deployment.rateCardId } : {}),
+      capabilities: deployment.capabilities,
+      approved: deployment.approved,
+      evaluationPassed: deployment.evaluationPassed,
+    })),
+  });
+  const publishMapping = async () => {
+    if (!draft) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
     try {
-      setDetail(await adminApi.routingDecision(id));
+      const result = await adminApi.createRoutingMapping(mappingInput(draft));
+      setMapping(result.mapping);
+      setDraft(null);
+      setPublishOpen(false);
+      setNotice("Published for policy/shadow evaluation; current Team rollouts are unchanged.");
     } catch (caught) {
       setError(caught.message);
+    } finally {
+      setBusy(false);
     }
   };
-  return (
-    <div className="secondary-screen routing-admin-screen">
-      <button className="settings-back-button" type="button" onClick={onBack}>
-        ← Back to Settings
-      </button>
-      <header className="page-heading compact">
-        <p>AI governance</p>
-        <h1>Model routing</h1>
-        <span>
-          Users see stable Auto, Lite, Balanced, and Pro service classes.
-          Concrete provider deployments remain administrator-only.
-        </span>
-      </header>
-      {error && (
-        <div className="workspace-error" role="alert">
-          <span>
-            <strong>Routing unavailable</strong>
-            {error}
-          </span>
-        </div>
-      )}
-      <section className="routing-control-card">
-        <label className="modal-field">
-          <span>Team</span>
-          <select
-            aria-label="Routing Team"
-            value={teamId}
-            onChange={(event) => setTeamId(event.target.value)}
-          >
-            {teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div>
-          <span>Rollout state</span>
-          <strong
-            className={`routing-mode ${settings?.rollout?.mode ?? "disabled"}`}
-          >
-            {settings?.rollout?.mode ?? "not configured"}
-          </strong>
-        </div>
-        <p>
-          The kill switch always restores the prior fixed route without changing
-          provider credentials.
-        </p>
-      </section>
-      {settings?.policy && (
-        <>
-          <section
-            className="routing-control-card"
-            aria-labelledby="routing-policy-heading"
-          >
-            <div>
-              <p>Team policy</p>
-              <h2 id="routing-policy-heading">Eligible service classes</h2>
-            </div>
-            <div className="routing-class-grid">
-              {["lite", "balanced", "pro"].map((item) => (
-                <label key={item}>
-                  <input
-                    type="checkbox"
-                    checked={classes.includes(item)}
-                    disabled={
-                      busy ||
-                      !settings.policy.identity.allowedServiceClasses.includes(
-                        item,
-                      )
-                    }
-                    onChange={(event) =>
-                      setClasses((current) =>
-                        event.target.checked
-                          ? [...current, item]
-                          : current.filter((value) => value !== item),
-                      )
-                    }
-                  />
-                  <strong>{labels[item]}</strong>
-                  <span>
-                    {item === "lite"
-                      ? "Lowest-cost routine work"
-                      : item === "balanced"
-                        ? "Safe default for ambiguous work"
-                        : "Highest capability floor"}
-                  </span>
-                </label>
-              ))}
-            </div>
-            <button
-              className="secondary-button"
-              disabled={busy || !classes.length}
-              onClick={savePolicy}
-            >
-              Save Team policy
-            </button>
-          </section>
-          <section
-            className="routing-control-card"
-            aria-labelledby="routing-rollout-heading"
-          >
-            <div>
-              <p>Controlled rollout</p>
-              <h2 id="routing-rollout-heading">
-                Shadow first, enable with evidence
-              </h2>
-            </div>
-            <div className="routing-actions">
-              <button
-                className="secondary-button"
-                disabled={busy || !report?.sampleSize}
-                onClick={() => setReviewOpen(true)}
-              >
-                Review evidence
-              </button>
-              <button
-                className="secondary-button"
-                disabled={busy || settings.rollout?.mode === "shadow"}
-                onClick={() => rollout("shadow")}
-              >
-                Start shadow mode
-              </button>
-              <button
-                className="primary-button"
-                disabled={busy || !settings.review?.evaluationPassed}
-                onClick={() => setEnableOpen(true)}
-              >
-                Enable production routing
-              </button>
-              <button
-                className="connection-quiet-button danger-button"
-                disabled={busy || settings.rollout?.mode === "disabled"}
-                onClick={kill}
-              >
-                Activate kill switch
-              </button>
-            </div>
-            {!settings.review?.evaluationPassed && (
-              <p>
-                Production remains off until a reviewed evidence record passes
-                its evaluation thresholds.
-              </p>
-            )}
-          </section>
-        </>
-      )}
-      <section
-        className="routing-control-card"
-        aria-labelledby="routing-evidence-heading"
-      >
-        <div>
-          <p>Shadow evidence</p>
-          <h2 id="routing-evidence-heading">Enablement report</h2>
-        </div>
-        <div className="routing-metrics">
-          <div>
-            <span>Requests</span>
-            <strong>{report?.sampleSize ?? 0}</strong>
-          </div>
-          <div>
-            <span>Estimated savings</span>
-            <strong>{money(report?.estimatedSavings, report?.currency)}</strong>
-          </div>
-          <div>
-            <span>Fallback rate</span>
-            <strong>
-              {Number(report?.fallbackRate ?? 0).toLocaleString(undefined, {
-                style: "percent",
-                maximumFractionDigits: 1,
-              })}
-            </strong>
-          </div>
-          <div>
-            <span>Error rate</span>
-            <strong>
-              {Number(report?.errorRate ?? 0).toLocaleString(undefined, {
-                style: "percent",
-                maximumFractionDigits: 1,
-              })}
-            </strong>
-          </div>
-          <div>
-            <span>Regret / override</span>
-            <strong>
-              {Number(report?.regretRate ?? 0).toLocaleString(undefined, {
-                style: "percent",
-                maximumFractionDigits: 1,
-              })}
-            </strong>
-          </div>
-          <div>
-            <span>Router overhead</span>
-            <strong>
-              {Number(report?.routerOverheadMs ?? 0).toFixed(2)} ms
-            </strong>
-          </div>
-        </div>
-        <div
-          className="routing-decisions"
-          role="region"
-          aria-label="Recent routing decisions"
-        >
-          {report?.decisions?.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              onClick={() => openDecision(item.id)}
-            >
-              <span>
-                {labels[item.selectedServiceClass] ?? item.selectedServiceClass}
-              </span>
-              <strong>{item.reasonCode.replaceAll("_", " ")}</strong>
-              <small>
-                {money(item.expectedCost, item.currency)} ·{" "}
-                {item.outcome ?? "outcome pending"}
-              </small>
-            </button>
-          ))}
-        </div>
-      </section>
-      {enableOpen && (
-        <div className="modal-backdrop">
-          <section
-            className="modal-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Enable production routing"
-          >
-            <p>Controlled rollout</p>
-            <h2>Enable production routing?</h2>
-            <p>
-              Auto will replace the fixed route for this Team. The reviewed
-              mapping and policy stay pinned, and the kill switch remains
-              available.
-            </p>
-            <label>
-              <input
-                type="checkbox"
-                checked={confirmed}
-                onChange={(event) => setConfirmed(event.target.checked)}
-              />{" "}
-              I reviewed the shadow evidence and understand this changes the
-              executed deployment.
-            </label>
-            <div className="modal-actions">
-              <button
-                className="secondary-button"
-                onClick={() => setEnableOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="primary-button"
-                disabled={!confirmed || busy}
-                onClick={enable}
-              >
-                Enable Auto routing
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-      {reviewOpen && (
-        <div className="modal-backdrop">
-          <section
-            className="modal-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Review routing evidence"
-          >
-            <p>Shadow evidence</p>
-            <h2>Record administrator review</h2>
-            <p>
-              This immutable review records the current sample and rollout
-              thresholds.
-            </p>
-            <label className="modal-field">
-              <span>Review note</span>
-              <textarea
-                aria-label="Routing review note"
-                value={reviewNote}
-                onChange={(event) => setReviewNote(event.target.value)}
-              />
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={reviewPassed}
-                onChange={(event) => setReviewPassed(event.target.checked)}
-              />{" "}
-              Evidence passed the configured evaluation threshold.
-            </label>
-            <div className="modal-actions">
-              <button
-                className="secondary-button"
-                onClick={() => setReviewOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="primary-button"
-                disabled={busy || reviewNote.trim().length < 8}
-                onClick={review}
-              >
-                Record review
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-      {detail && (
-        <div className="modal-backdrop">
-          <section
-            className="modal-dialog routing-decision-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Routing decision details"
-          >
-            <p>Administrator evidence</p>
-            <h2>Routing decision</h2>
-            <dl>
-              <div>
-                <dt>Selected class</dt>
-                <dd>
-                  {labels[detail.selected_service_class] ??
-                    detail.selected_service_class}
-                </dd>
-              </div>
-              <div>
-                <dt>Reason</dt>
-                <dd>{String(detail.reason_code).replaceAll("_", " ")}</dd>
-              </div>
-              <div>
-                <dt>Executed provider</dt>
-                <dd>{detail.executed_provider}</dd>
-              </div>
-              <div>
-                <dt>Provider model</dt>
-                <dd>{detail.executed_model}</dd>
-              </div>
-              <div>
-                <dt>Deployment</dt>
-                <dd>{detail.executed_provider_deployment}</dd>
-              </div>
-              <div>
-                <dt>Mapping version</dt>
-                <dd>{detail.mapping_version_id}</dd>
-              </div>
-              <div>
-                <dt>Rate card</dt>
-                <dd>{detail.rate_card_id}</dd>
-              </div>
-            </dl>
-            <h3>Candidate evidence</h3>
-            <ul>
-              {detail.candidates?.map((item) => (
-                <li key={`${item.ordinal}-${item.deployment_id}`}>
-                  {item.provider_deployment}: {item.eligibility}
-                  {item.reason_code ? ` (${item.reason_code})` : ""}
-                </li>
-              ))}
-            </ul>
-            <div className="modal-actions">
-              <button
-                className="primary-button"
-                onClick={() => setDetail(null)}
-              >
-                Close details
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-    </div>
-  );
+  const openPricing = (deployment) => {
+    const card = cardById.get(deployment.rateCardId);
+    setPriceEditor({
+      deployment,
+      providerAccountId: deployment.providerAccountId ?? card?.providerAccountId ?? "",
+      currency: card?.currency ?? settings?.policy?.billingCurrency ?? "USD",
+      sourceVersion: `manual-${new Date().toISOString().slice(0, 10)}`,
+      effectiveFrom: datetimeLocalValue(),
+      overrideReason: "",
+      prices: Object.fromEntries(pricingUnits.map((item) => [item.key, ratePerMillion(card, item.key)?.toString() ?? ""])),
+    });
+  };
+  const createPriceRecord = async () => {
+    const record = {
+      provider: priceEditor.deployment.provider,
+      providerAccountId: priceEditor.providerAccountId.trim(),
+      baseModel: priceEditor.deployment.providerModel,
+      deploymentId: priceEditor.deployment.providerDeployment,
+      currency: priceEditor.currency.trim().toUpperCase(),
+      source: "contract_override",
+      sourceVersion: priceEditor.sourceVersion.trim(),
+      effectiveFrom: new Date(priceEditor.effectiveFrom).toISOString(),
+      overrideReason: priceEditor.overrideReason.trim(),
+      rates: pricingUnits.filter((item) => priceEditor.prices[item.key] !== "").map((item) => ({ unit: item.key, amountPerUnit: String(priceEditor.prices[item.key]), unitScale: "1000000" })),
+    };
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const sourceHash = await hashPricingRecord(record);
+      const created = await adminApi.createRateCard({ ...record, sourceHash });
+      const refreshed = await adminApi.rateCards();
+      setRateCards(refreshed.rateCards ?? []);
+      setPriceEditor(null);
+      const source = draft?.deployments ?? mapping?.deployments;
+      if (source?.length) {
+        setDraft({
+          revisionNote: draft?.revisionNote ?? `Update ${serviceClassLabels[priceEditor.deployment.serviceClass]} pricing`,
+          deployments: source.map((deployment) => deployment.id === priceEditor.deployment.id ? { ...deployment, rateCardId: created.id } : deployment),
+        });
+        setNotice(`Price record ${shortId(created.id)} was created and attached to the local mapping draft. Publish the mapping version to make it available for policy evaluation.`);
+      } else {
+        setNotice(`Price record ${shortId(created.id)} was created, but no complete mapping was available to attach it.`);
+      }
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const PageTitle = onBack ? "h1" : "h2";
+  return <div className="secondary-screen routing-admin-screen">
+    {onBack && <button className="settings-back-button" type="button" onClick={onBack}>← Back to AI control</button>}
+    <header className="page-heading route-page-heading">
+      <div>
+        <p>{pricingView ? "Rate cards" : "AI control"}</p>
+        <PageTitle>{pricingView ? "Pricing" : "Model routes"}</PageTitle>
+        <span>{pricingView ? "Create immutable model price versions, including cache-token dimensions, and pin them to stable routing aliases." : "Keep employee-facing choices stable while providers and models change behind the scenes."}</span>
+      </div>
+      <div className="route-heading-actions">
+        <div className="route-version"><span>{draft ? "Local draft" : "Latest published mapping"}</span><strong title={draft ? draft.revisionNote : mapping?.id}>{draft ? "Unsaved changes" : shortId(mapping?.id)}</strong></div>
+        <button className="secondary-button" type="button" disabled={busy || !mappedDeployments.length} onClick={openMappingEditor}>{draft ? "Edit draft" : "Create draft"}</button>
+        <button className="primary-button" type="button" disabled={busy || !draft} onClick={() => setPublishOpen(true)}>Publish mapping version</button>
+      </div>
+    </header>
+    <div className="route-api-boundary" role="note"><Info20Regular aria-hidden="true" /><span><strong>Publishing is non-activating.</strong> A new immutable mapping becomes available for policy and shadow evaluation; current Team rollouts stay pinned until separately reviewed.</span></div>
+    {error && <div className="workspace-error" role="alert"><span><strong>Model routes unavailable</strong>{error}</span></div>}
+    {notice && <div className="route-success" role="status"><CheckmarkCircle20Regular aria-hidden="true" /><span>{notice}</span></div>}
+
+    <section className="route-summary-grid" aria-label="Route summary">
+      <article><span>Employee aliases</span><strong>4</strong><small>Auto, Lite, Balanced, Pro</small></article>
+      <article><span>Concrete deployments</span><strong>{mappedDeployments.length}</strong><small>Across {new Set(mappedDeployments.map((item) => item.provider)).size} providers</small></article>
+      <article className={pricingGapCount ? "has-gap" : ""}><span>Pricing coverage</span><strong>{mappedDeployments.length ? `${mappedDeployments.length - pricingGapCount}/${mappedDeployments.length}` : "—"}</strong><small>{pricingGapCount ? `${pricingGapCount} route${pricingGapCount === 1 ? "" : "s"} need attention` : "All token buckets covered"}</small></article>
+      <article><span>Selected Team rollout</span><strong className={`routing-mode ${settings?.rollout?.mode ?? "disabled"}`}>{settings?.rollout?.mode ?? "not configured"}</strong><small>Team-specific, mapping remains shared</small></article>
+    </section>
+
+    <section className="route-table-card" aria-labelledby="route-map-heading">
+      <div className="route-section-heading"><div><p>{pricingView ? "Price coverage" : "Alias map"}</p><h2 id="route-map-heading">{pricingView ? "Pinned token pricing by alias" : "Stable choices, private deployments"}</h2><span>Prices are the rate card pinned to this mapping version, shown per 1M tokens.</span></div><span className={`route-readonly-badge${draft ? " draft" : ""}`}>{draft ? "Local draft" : mapping?.id === settings?.policy?.mappingVersionId ? "Active for selected Team" : "Published · not active"}</span></div>
+      <div className="route-table-scroll">
+        <table className="route-table">
+          <thead><tr><th>Alias</th><th>Provider deployment</th><th>Health</th><th>Token prices / 1M</th><th>Pricing</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <tbody>
+            <tr className="route-auto-row"><td><span className="route-alias auto">Auto</span><small>Recommended default</small></td><td><strong>Task-based route selection</strong><small>Chooses Lite, Balanced, or Pro within policy</small></td><td><span className="route-health healthy"><CheckmarkCircle20Regular aria-hidden="true" />Policy active</span></td><td><span className="route-auto-pricing">Uses the selected tier’s pinned price</span></td><td><span className="route-coverage complete"><CheckmarkCircle20Regular aria-hidden="true" />Inherited</span></td><td><button type="button" className="route-text-button" disabled={busy || !mappedDeployments.length} onClick={openMappingEditor}>Edit mapping</button></td></tr>
+            {mappedDeployments.map((deployment) => {
+              const card = cardById.get(deployment.rateCardId);
+              const coverage = pricingCoverage(card);
+              return <tr key={deployment.id}>
+                <td><span className={`route-alias ${deployment.serviceClass}`}>{serviceClassLabels[deployment.serviceClass] ?? deployment.serviceClass}</span><small>{serviceClassDescriptions[deployment.serviceClass]}</small></td>
+                <td><strong>{providerName(deployment.provider)} · {deployment.providerModel}</strong><small>{deployment.providerDeployment}</small></td>
+                <td><RouteHealth deployment={deployment} /></td>
+                <td><div className="route-price-grid">{pricingUnits.map((item) => <span key={item.key}><small>{item.label}</small><PriceCell card={card} unit={item.key} /></span>)}</div></td>
+                <td>{coverage.complete ? <span className="route-coverage complete"><CheckmarkCircle20Regular aria-hidden="true" />Complete</span> : <span className="route-coverage gap"><ErrorCircle20Regular aria-hidden="true" />{card ? `${coverage.missing.length} gap${coverage.missing.length === 1 ? "" : "s"}` : "No card"}</span>}<small className="route-card-version" title={card?.id}>{card ? card.sourceVersion : "No pinned rate card"}</small></td>
+                <td><div className="route-row-actions"><button type="button" className="route-text-button" onClick={() => openPricing(deployment)}>{card ? "New price version" : "Add price record"}</button><button type="button" className="route-text-button" disabled={busy} onClick={openMappingEditor}>Edit mapping</button></div></td>
+              </tr>;
+            })}
+            {!loading && !mappedDeployments.length && <tr><td className="route-empty" colSpan={6}>No deployment mapping is configured for this Team’s pinned policy.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    {!pricingView && <>
+    <section className="route-team-card" aria-labelledby="route-team-heading">
+      <div className="route-section-heading"><div><p>Team rollout</p><h2 id="route-team-heading">Eligibility and controlled release</h2><span>The deployment map is shared. Eligibility, evidence, and rollout are scoped to the selected Team.</span></div><label className="route-team-picker"><span>Team</span><SelectMenu ariaLabel="Routing Team" value={teamId} options={teams.map((team) => ({ value: team.id, label: team.displayName }))} disabled={busy} onValueChange={setTeamId} /></label></div>
+      {settings?.policy && <div className="routing-class-grid">{["lite", "balanced", "pro"].map((item) => <label key={item}><input aria-label={serviceClassLabels[item]} type="checkbox" checked={classes.includes(item)} disabled={busy || !settings.policy.identity.allowedServiceClasses.includes(item)} onChange={(event) => setClasses((current) => event.target.checked ? [...current, item] : current.filter((value) => value !== item))} /><strong>{serviceClassLabels[item]}</strong><span>{serviceClassDescriptions[item]}</span></label>)}</div>}
+      <div className="route-rollout-footer"><button className="secondary-button" type="button" disabled={busy || !classes.length || !settings?.policy} onClick={savePolicy}>Save Team policy</button><div className="routing-actions"><button className="secondary-button" type="button" disabled={busy || !report?.sampleSize} onClick={() => setReviewOpen(true)}>Review evidence</button><button className="secondary-button" type="button" disabled={busy || settings?.rollout?.mode === "shadow" || !settings?.policy} onClick={() => rollout("shadow")}>Start shadow mode</button><button className="primary-button" type="button" disabled={busy || !settings?.review?.evaluationPassed} onClick={() => setEnableOpen(true)}>Enable production routing</button><button className="connection-quiet-button danger-button" type="button" disabled={busy || settings?.rollout?.mode === "disabled"} onClick={kill}>Activate kill switch</button></div></div>
+      {!settings?.review?.evaluationPassed && <p className="route-helper">Production remains off until an administrator reviews evidence that passes the configured thresholds.</p>}
+    </section>
+
+    <section className="route-evidence-card" aria-labelledby="routing-evidence-heading">
+      <div className="route-section-heading"><div><p>Shadow evidence</p><h2 id="routing-evidence-heading">Enablement report</h2></div><small>{report?.sampleSize ? `${report.sampleSize} observed requests` : "No observations yet"}</small></div>
+      <div className="routing-metrics"><div><span>Estimated savings</span><strong>{money(report?.estimatedSavings, report?.currency)}</strong></div><div><span>Fallback rate</span><strong>{Number(report?.fallbackRate ?? 0).toLocaleString(undefined, { style: "percent", maximumFractionDigits: 1 })}</strong></div><div><span>Error rate</span><strong>{Number(report?.errorRate ?? 0).toLocaleString(undefined, { style: "percent", maximumFractionDigits: 1 })}</strong></div><div><span>Regret / override</span><strong>{Number(report?.regretRate ?? 0).toLocaleString(undefined, { style: "percent", maximumFractionDigits: 1 })}</strong></div><div><span>Router overhead</span><strong>{Number(report?.routerOverheadMs ?? 0).toFixed(2)} ms</strong></div></div>
+      <div className="routing-decisions" role="region" aria-label="Recent routing decisions">{report?.decisions?.map((item) => <button type="button" key={item.id} onClick={() => openDecision(item.id)}><span>{serviceClassLabels[item.selectedServiceClass] ?? item.selectedServiceClass}</span><strong>{item.reasonCode.replaceAll("_", " ")}</strong><small>{money(item.expectedCost, item.currency)} · {item.outcome ?? "outcome pending"}</small></button>)}</div>
+    </section>
+    </>}
+
+    {priceEditor && <PricingEditor editor={priceEditor} busy={busy} onChange={setPriceEditor} onClose={() => setPriceEditor(null)} onCreate={createPriceRecord} />}
+    {mappingEditor && <MappingEditor editor={mappingEditor} rateCards={rateCards} busy={busy} onChange={setMappingEditor} onClose={() => setMappingEditor(null)} onSave={saveMappingDraft} />}
+    {publishOpen && <ModalDialog title="Publish mapping version?" description="This creates an immutable mapping version for policy and shadow evaluation. Current Team policies and rollouts remain pinned to their existing mapping." eyebrow="Model routes" labelledBy="route-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span><strong>No automatic activation.</strong> Review and adoption happen through each Team’s controlled policy and rollout workflow.</span></div><div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button type="button" className="primary-button" disabled={busy} onClick={publishMapping}>{busy ? "Publishing…" : "Publish mapping version"}</button></div></ModalDialog>}
+    {enableOpen && <ModalDialog title="Enable production routing?" description="Auto will replace the fixed route for this Team. The reviewed mapping and policy stay pinned, and the kill switch remains available." eyebrow="Controlled rollout" labelledBy="route-enable-title" onClose={busy ? () => undefined : () => setEnableOpen(false)}><label className="route-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I reviewed the shadow evidence and understand this changes the executed deployment.</label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setEnableOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={!confirmed || busy} onClick={enable}>Enable Auto routing</button></div></ModalDialog>}
+    {reviewOpen && <ModalDialog title="Record administrator review" description="This immutable review records the current sample and rollout thresholds." eyebrow="Shadow evidence" labelledBy="route-review-title" onClose={busy ? () => undefined : () => setReviewOpen(false)}><label className="modal-field"><span>Review note</span><textarea aria-label="Routing review note" value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} /></label><label className="route-confirm"><input type="checkbox" checked={reviewPassed} onChange={(event) => setReviewPassed(event.target.checked)} /> Evidence passed the configured evaluation threshold.</label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setReviewOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || reviewNote.trim().length < 8} onClick={review}>Record review</button></div></ModalDialog>}
+    {detail && <ModalDialog title="Routing decision" description="The provider deployment and immutable evidence used for this governed request." eyebrow="Administrator evidence" labelledBy="route-decision-title" onClose={() => setDetail(null)}><dl className="route-decision-list"><div><dt>Selected class</dt><dd>{serviceClassLabels[detail.selected_service_class] ?? detail.selected_service_class}</dd></div><div><dt>Reason</dt><dd>{String(detail.reason_code).replaceAll("_", " ")}</dd></div><div><dt>Executed provider</dt><dd>{detail.executed_provider}</dd></div><div><dt>Provider model</dt><dd>{detail.executed_model}</dd></div><div><dt>Deployment</dt><dd>{detail.executed_provider_deployment}</dd></div><div><dt>Mapping version</dt><dd>{detail.mapping_version_id}</dd></div><div><dt>Rate card</dt><dd>{detail.rate_card_id}</dd></div></dl><h3>Candidate evidence</h3><ul className="route-candidates">{detail.candidates?.map((item) => <li key={`${item.ordinal}-${item.deployment_id}`}>{item.provider_deployment}: {item.eligibility}{item.reason_code ? ` (${item.reason_code})` : ""}</li>)}</ul><div className="modal-actions"><button className="primary-button" type="button" onClick={() => setDetail(null)}>Close details</button></div></ModalDialog>}
+  </div>;
 }

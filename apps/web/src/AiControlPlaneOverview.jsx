@@ -1,0 +1,451 @@
+import { useEffect, useMemo, useState } from "react";
+import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
+import { Globe20Regular } from "@fluentui/react-icons/svg/globe";
+import { Info20Regular } from "@fluentui/react-icons/svg/info";
+import { Pulse20Regular } from "@fluentui/react-icons/svg/pulse";
+import { adminApi } from "./workspace-api.js";
+import "./AiControlPlaneOverview.css";
+
+const DAY_MS = 86_400_000;
+const number = (value) => Number(value ?? 0);
+const dateOnly = (value) => value.toISOString().slice(0, 10);
+const isoDate = (value) => new Date(`${value}T00:00:00.000Z`).toISOString();
+const sumCosts = (costs = [], currency) => costs
+  .filter((item) => !currency || item.currency === currency)
+  .reduce((sum, item) => sum + number(item.amount), 0);
+const amountFor = (costs = [], currency) => costs.find((item) => item.currency === currency)?.amount;
+const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+const percent = new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 0 });
+
+const money = (value, currency, { compact = false } = {}) => {
+  if (value === null || value === undefined || !currency) return "—";
+  return new Intl.NumberFormat("en", {
+    style: "currency",
+    currency,
+    notation: compact ? "compact" : "standard",
+    maximumFractionDigits: compact ? 1 : 0,
+  }).format(number(value));
+};
+
+const signedMoney = (value, currency) => {
+  if (value === null || value === undefined || !currency) return "—";
+  const amount = number(value);
+  return `${amount > 0 ? "+" : ""}${money(amount, currency, { compact: true })}`;
+};
+
+const signedCount = (value) => {
+  const amount = number(value);
+  return `${amount > 0 ? "+" : ""}${compactNumber.format(amount)}`;
+};
+
+const currentMonthRange = (now = new Date()) => {
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  return { from, to };
+};
+
+const priorRangeFor = ({ from, to }) => {
+  const duration = to.getTime() - from.getTime();
+  return {
+    from: new Date(from.getTime() - duration),
+    to: from,
+  };
+};
+
+const trendRanges = (now = new Date(), buckets = 6) => {
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  const from = new Date(to.getTime() - 30 * DAY_MS);
+  const bucketMs = (to.getTime() - from.getTime()) / buckets;
+  return Array.from({ length: buckets }, (_, index) => ({
+    from: new Date(from.getTime() + (bucketMs * index)),
+    to: new Date(from.getTime() + (bucketMs * (index + 1))),
+  }));
+};
+
+const spendQuery = (range) => ({
+  from: range.from.toISOString(),
+  to: range.to.toISOString(),
+  limit: 1,
+});
+
+const safely = async (operation) => {
+  try {
+    return { value: await operation(), error: null };
+  } catch (error) {
+    return { value: null, error };
+  }
+};
+
+export async function loadAiControlPlaneOverviewData(now = new Date()) {
+  const range = currentMonthRange(now);
+  const priorRange = priorRangeFor(range);
+  const ranges = trendRanges(now);
+  const [currentResult, priorResult, teamsResult, ...seriesResults] = await Promise.all([
+    safely(() => adminApi.spend(spendQuery(range))),
+    safely(() => adminApi.spend(spendQuery(priorRange))),
+    safely(() => adminApi.teams(false)),
+    ...ranges.map((item) => safely(() => adminApi.spend(spendQuery(item)))),
+  ]);
+
+  if (!currentResult.value) throw currentResult.error;
+  const teams = teamsResult.value?.teams ?? [];
+  const [budgetResults, routingResults] = await Promise.all([
+    Promise.all(teams.map((team) => safely(() => adminApi.teamBudget(team.id)))),
+    Promise.all(teams.map((team) => safely(() => adminApi.routingSettings(team.id)))),
+  ]);
+
+  return {
+    report: currentResult.value.report,
+    priorReport: priorResult.value?.report ?? null,
+    teams,
+    budgets: budgetResults.map((result, index) => ({
+      teamId: teams[index].id,
+      status: result.value?.status ?? null,
+    })),
+    routing: routingResults.map((result, index) => ({
+      teamId: teams[index].id,
+      settings: result.value,
+    })).filter((item) => item.settings),
+    series: seriesResults.map((result, index) => ({
+      from: ranges[index].from.toISOString(),
+      to: ranges[index].to.toISOString(),
+      costs: result.value?.report?.totals?.costs ?? [],
+      unavailable: !result.value,
+    })),
+    partial: Boolean(priorResult.error || teamsResult.error || seriesResults.some((result) => result.error)),
+  };
+}
+
+const currencyFor = (data) => {
+  const reportCurrencies = new Set(data?.report?.totals?.costs?.map((item) => item.currency) ?? []);
+  if (reportCurrencies.size === 1) return [...reportCurrencies][0];
+  if (reportCurrencies.size > 1) return null;
+  const currencies = new Set();
+  data?.budgets?.forEach(({ status }) => {
+    if (status?.budget?.currency) currencies.add(status.budget.currency);
+  });
+  return currencies.size === 1 ? [...currencies][0] : null;
+};
+
+const budgetSummaryFor = (data, currency, report) => {
+  if (!currency) return { spent: null, limit: null, configured: 0, total: data?.budgets?.length ?? 0 };
+  const reportFrom = report?.range?.from ? new Date(report.range.from).getTime() : null;
+  const reportTo = report?.range?.to ? new Date(report.range.to).getTime() : null;
+  const statuses = (data?.budgets ?? [])
+    .map((item) => item.status)
+    .filter((status) => {
+      if (status?.budget?.currency !== currency || status.budget.periodType !== "calendar_month") return false;
+      if (reportFrom === null || reportTo === null) return true;
+      return new Date(status.period?.start).getTime() === reportFrom
+        && new Date(status.period?.end).getTime() === reportTo;
+    });
+  return {
+    spent: statuses.length ? statuses.reduce((sum, status) => sum + number(status.settledProviderCost), 0) : null,
+    limit: statuses.length ? statuses.reduce((sum, status) => sum + number(status.effectiveLimitAmount), 0) : null,
+    configured: statuses.length,
+    total: data?.budgets?.length ?? 0,
+  };
+};
+
+const forecastFor = (spent, report) => {
+  if (spent === null || !report?.range?.from || !report?.asOf) return null;
+  const from = new Date(report.range.from);
+  const asOf = new Date(report.asOf);
+  const nextMonth = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 1));
+  const elapsed = Math.max(1, (asOf.getTime() - from.getTime()) / DAY_MS);
+  const period = Math.max(elapsed, (nextMonth.getTime() - from.getTime()) / DAY_MS);
+  return spent * (period / elapsed);
+};
+
+const routeSummaryFor = (routing = []) => {
+  const deployments = routing.flatMap((item) => item.settings?.deployments ?? []);
+  const classes = new Set(deployments.map((item) => item.serviceClass));
+  const pricingGaps = deployments.filter((item) => !item.rateCardId).length;
+  const ready = deployments.filter((item) => (
+    item.rateCardId && item.approved && item.evaluationPassed
+  )).length;
+  return { classCount: classes.size, deploymentCount: deployments.length, pricingGaps, ready };
+};
+
+const deltasFor = (report, priorReport, currency) => {
+  if (!report || !priorReport || !currency) return [];
+  const currentRoutes = new Map((report.breakdowns?.requestedRoutes ?? []).map((item) => [
+    item.requestedRoute,
+    number(amountFor(item.costs, currency)),
+  ]));
+  const priorRoutes = new Map((priorReport.breakdowns?.requestedRoutes ?? []).map((item) => [
+    item.requestedRoute,
+    number(amountFor(item.costs, currency)),
+  ]));
+  const routeDeltas = [...new Set([...currentRoutes.keys(), ...priorRoutes.keys()])]
+    .map((route) => ({
+      label: `${route.charAt(0).toUpperCase()}${route.slice(1)} route spend`,
+      value: (currentRoutes.get(route) ?? 0) - (priorRoutes.get(route) ?? 0),
+      description: "Compared with the same-length prior period",
+      tone: "money",
+    }))
+    .sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
+    .slice(0, 2);
+  const retryDelta = number(report.totals?.retryCount) - number(priorReport.totals?.retryCount);
+  const cacheRead = number(report.totals?.usage?.cache_read_token);
+  const input = number(report.totals?.usage?.input_uncached_token);
+  const cacheShare = (cacheRead + input) > 0 ? cacheRead / (cacheRead + input) : null;
+  return [
+    ...routeDeltas,
+    {
+      label: "Retry activity",
+      value: retryDelta,
+      description: "Retry attempts versus the prior period",
+      tone: "count",
+    },
+    {
+      label: "Cache-read share",
+      value: cacheShare,
+      description: "Usage signal only; not a savings claim",
+      tone: "percent",
+    },
+  ].slice(0, 4);
+};
+
+const displayDelta = (item, currency) => {
+  if (item.tone === "money") return signedMoney(item.value, currency);
+  if (item.tone === "percent") return item.value === null ? "—" : percent.format(item.value);
+  return signedCount(item.value);
+};
+
+function InlineLink({ onClick, children, className = "" }) {
+  if (!onClick) return null;
+  return (
+    <button className={`ai-overview-link${className ? ` ${className}` : ""}`} type="button" onClick={onClick}>
+      <span>{children}</span>
+      <ChevronRight16Regular aria-hidden="true" />
+    </button>
+  );
+}
+
+export function AiControlPlaneOverview({
+  data: suppliedData,
+  loadData = loadAiControlPlaneOverviewData,
+  viewMode = "live",
+  estimates = null,
+  onOpenSpend,
+  onOpenRouting,
+  onOpenPricing,
+}) {
+  const [loadedData, setLoadedData] = useState(null);
+  const [loading, setLoading] = useState(!suppliedData);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (suppliedData) {
+      setLoadedData(null);
+      setLoading(false);
+      setError("");
+      return undefined;
+    }
+    let active = true;
+    setLoading(true);
+    setError("");
+    Promise.resolve(loadData())
+      .then((value) => { if (active) setLoadedData(value); })
+      .catch((caught) => { if (active) setError(caught?.message ?? "AI spend data is unavailable."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [suppliedData, loadData]);
+
+  const data = suppliedData ?? loadedData;
+  const report = data?.report;
+  const currency = currencyFor(data);
+  const budget = useMemo(() => budgetSummaryFor(data, currency, report), [data, currency, report]);
+  const providerSpend = currency ? sumCosts(report?.totals?.costs, currency) : null;
+  const spent = providerSpend;
+  const forecast = estimates?.forecastAmount ?? forecastFor(spent, report);
+  const routeSummary = routeSummaryFor(data?.routing);
+  const deltas = estimates?.explanations ?? deltasFor(report, data?.priorReport, currency);
+  const unpricedCount = number(report?.totals?.unknownCostEventCount)
+    + number(report?.totals?.incompleteCostEventCount)
+    + number(report?.totals?.delayedAttemptCount);
+  const budgetRatio = spent !== null && budget.limit ? Math.max(0, spent / budget.limit) : null;
+  const series = estimates?.spendSeries ?? (data?.series ?? []).map((item) => (
+    currency ? sumCosts(item.costs, currency) : 0
+  ));
+  const seriesPeak = Math.max(...series, 1);
+  const topTeams = (report?.teams ?? []).slice(0, 5);
+  const teamBudgetById = new Map((data?.budgets ?? []).map((item) => [item.teamId, item.status]));
+  const emissions = estimates?.emissions ?? null;
+  const estimatedView = viewMode === "estimated";
+  const exportRange = report?.range ? {
+    from: report.range.from,
+    to: report.range.to,
+    asOf: report.asOf,
+  } : null;
+
+  return (
+    <section className="ai-overview" aria-labelledby="ai-overview-heading" aria-busy={loading || undefined}>
+      <h2 id="ai-overview-heading" className="sr-only">AI Control Plane overview</h2>
+      {estimatedView && (
+        <div className="ai-overview-estimate-banner" role="status">
+          <Info20Regular aria-hidden="true" />
+          <span><strong>Estimated view</strong> Preview values are illustrative unless a live ledger or provider methodology is named.</span>
+        </div>
+      )}
+      {error && (
+        <div className="connection-error ai-overview-error" role="alert">
+          <span><strong>Overview data unavailable</strong>{error}</span>
+        </div>
+      )}
+
+      <div className="ai-route-health">
+        <span className="ai-route-health-icon"><Pulse20Regular aria-hidden="true" /></span>
+        <div>
+          <small>Route readiness</small>
+          {loading ? <strong>Checking configured routes…</strong> : routeSummary.deploymentCount ? (
+            <strong>
+              {routeSummary.classCount} service {routeSummary.classCount === 1 ? "class" : "classes"}
+              <i aria-hidden="true">·</i>
+              {routeSummary.ready} ready
+              <i aria-hidden="true">·</i>
+              {routeSummary.pricingGaps} pricing {routeSummary.pricingGaps === 1 ? "gap" : "gaps"}
+            </strong>
+          ) : <strong>Runtime health signal is not available</strong>}
+        </div>
+        <InlineLink onClick={onOpenRouting}>View Model routes</InlineLink>
+      </div>
+
+      <section className="ai-budget-panel" aria-labelledby="ai-budget-heading">
+        <div className="ai-budget-summary">
+          <div className="ai-panel-heading">
+            <div>
+              <p>Organization budget</p>
+              <h3 id="ai-budget-heading">Spend this month</h3>
+            </div>
+            <div className="ai-budget-actions">
+              <InlineLink onClick={onOpenSpend}>Review budget risks</InlineLink>
+              {exportRange && (
+                <a className="ai-overview-link" href={adminApi.spendExportUrl(exportRange, "csv")} download>
+                  <span>Export report</span>
+                </a>
+              )}
+            </div>
+          </div>
+          <div className="ai-budget-numbers">
+            <div className="ai-budget-primary">
+              <strong>{loading ? "—" : money(spent, currency)}</strong>
+              <span>{budget.limit === null ? "No organization budget total" : `of ${money(budget.limit, currency)}`}</span>
+            </div>
+            <dl>
+              <div>
+                <dt>Forecast</dt>
+                <dd>{money(forecast, currency)}</dd>
+                <small>Straight-line estimate</small>
+              </div>
+              <div>
+                <dt>Unpriced usage</dt>
+                <dd>{loading ? "—" : compactNumber.format(unpricedCount)}</dd>
+                <small>Excluded from monetary totals</small>
+              </div>
+            </dl>
+          </div>
+          <div
+            className="ai-budget-progress"
+            role="progressbar"
+            aria-label="Organization budget consumed"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={budgetRatio === null ? undefined : Math.min(100, Math.round(budgetRatio * 100))}
+          >
+            <span style={{ width: `${budgetRatio === null ? 0 : Math.min(100, budgetRatio * 100)}%` }} />
+          </div>
+          <div className="ai-budget-footnote">
+            <span>{budget.configured ? `${budget.configured} of ${budget.total} Teams have a matching monthly ${currency} budget` : "No matching monthly Team budgets were found"}</span>
+            {budgetRatio !== null && <strong>{percent.format(budgetRatio)} used</strong>}
+          </div>
+        </div>
+
+        <div className="ai-spend-trend">
+          <div className="ai-trend-heading">
+            <div>
+              <span>30-day provider cost</span>
+              <strong>{series.length && currency ? `${money(series.at(-1), currency, { compact: true })} latest 5-day bucket` : "Ledger trend unavailable"}</strong>
+            </div>
+            <span>{data?.series?.some((item) => item.unavailable) ? "Some buckets unavailable" : "Immutable ledger buckets"}</span>
+          </div>
+          <div className="ai-trend-plot" aria-label="Provider cost over six five-day buckets">
+            {series.length && currency ? (
+              <div className="ai-trend-bars" role="img" aria-label={`Six provider-cost buckets: ${series.map((item) => money(item, currency, { compact: true })).join(", ")}`}>
+                {series.map((item, index) => <span key={`${index}-${item}`} style={{ height: `${Math.max(4, (number(item) / seriesPeak) * 100)}%` }} />)}
+              </div>
+            ) : <div className="ai-trend-empty">Daily spend data will appear after governed model calls are recorded.</div>}
+          </div>
+          <div className="ai-trend-labels"><span>30 days ago</span><span>Today</span></div>
+        </div>
+      </section>
+
+      <div className="ai-overview-columns">
+        <section className="ai-overview-section ai-team-spend" aria-labelledby="ai-team-spend-heading">
+          <div className="ai-panel-heading">
+            <div><p>Allocation</p><h3 id="ai-team-spend-heading">Top spending Teams</h3></div>
+            <InlineLink onClick={onOpenSpend}>View all</InlineLink>
+          </div>
+          <div className="ai-team-table" role="table" aria-label="Top spending Teams">
+            <div className="ai-team-table-head" role="row">
+              <span role="columnheader">Team</span><span role="columnheader">Budget</span><span role="columnheader">Spend</span>
+            </div>
+            {topTeams.length ? topTeams.map((team) => {
+              const teamStatus = teamBudgetById.get(team.teamId);
+              const teamCurrency = team.costs?.[0]?.currency ?? currency;
+              const teamCost = amountFor(team.costs, teamCurrency);
+              return (
+                <div className="ai-team-row" role="row" key={team.teamId}>
+                  <span role="cell"><strong>{team.teamDisplayName}</strong><small>{team.costCenterCode ?? `${team.attemptCount} attempts`}</small></span>
+                  <span role="cell">{teamStatus?.percentConsumed === null || teamStatus?.percentConsumed === undefined ? "—" : `${number(teamStatus.percentConsumed).toFixed(0)}%`}</span>
+                  <span role="cell"><strong>{money(teamCost, teamCurrency, { compact: true })}</strong><small>{providerSpend ? percent.format(number(teamCost) / providerSpend) : "share unavailable"}</small></span>
+                </div>
+              );
+            }) : <p className="ai-overview-empty">{loading ? "Loading Team spend…" : "No Team spend was recorded this month."}</p>}
+          </div>
+        </section>
+
+        <section className="ai-overview-section ai-cost-explanation" aria-labelledby="ai-cost-explanation-heading">
+          <div className="ai-panel-heading">
+            <div><p>Explainability</p><h3 id="ai-cost-explanation-heading">Why spend changed</h3></div>
+            <span className="ai-safe-label">Safe signals only</span>
+          </div>
+          <div className="ai-driver-rows">
+            {deltas.length ? deltas.map((item, index) => (
+              <div className="ai-driver-row" key={`${item.label}-${index}`}>
+                <span className={`ai-driver-mark ${number(item.value) > 0 ? "up" : number(item.value) < 0 ? "down" : ""}`} aria-hidden="true" />
+                <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                <b>{displayDelta(item, currency)}</b>
+              </div>
+            )) : <p className="ai-overview-empty">{loading ? "Comparing ledger periods…" : "A prior period is required to explain changes."}</p>}
+            <div className="ai-routing-impact">
+              <span><strong>Routing impact</strong><small>Savings are not claimed without replay or provider evidence.</small></span>
+              <InlineLink onClick={onOpenRouting}>Review evidence</InlineLink>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section className="ai-emissions" aria-labelledby="ai-emissions-heading">
+        <span className="ai-emissions-icon"><Globe20Regular aria-hidden="true" /></span>
+        <div className="ai-emissions-copy">
+          <p>Estimated AI-related emissions</p>
+          <h3 id="ai-emissions-heading">{emissions ? `${number(emissions.amountTco2e).toFixed(2)} tCO₂e` : "Estimate not configured"}</h3>
+          <span>{emissions ? `${emissions.coveragePercent ?? 0}% data coverage · ${emissions.changePercent > 0 ? "+" : ""}${emissions.changePercent ?? 0}% from prior period` : "Connect a documented provider or energy-factor methodology before reporting a number."}</span>
+        </div>
+        <span className="ai-emissions-coverage">{emissions ? `${emissions.coveragePercent ?? 0}% evidence coverage` : "No assured emissions source"}</span>
+        <div className="ai-emissions-evidence">
+          <strong>Scope 3 · Category 1 candidate</strong>
+          <span>Purchased cloud/AI services; confirm the reporting boundary with your sustainability policy.</span>
+          {emissions?.methodologyUrl ? <a href={emissions.methodologyUrl} target="_blank" rel="noreferrer">View methodology</a> : <button type="button" disabled>Methodology required</button>}
+        </div>
+      </section>
+
+      <footer className="ai-overview-footer">
+        <span>Costs exclude unpriced usage and are never treated as zero.</span>
+        <InlineLink onClick={onOpenPricing}>Manage pricing</InlineLink>
+      </footer>
+    </section>
+  );
+}

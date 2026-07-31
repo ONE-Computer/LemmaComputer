@@ -296,7 +296,7 @@ test("desktop pages begin at one shared top-bar offset without compact-page padd
   assert.match(styles, /@media \(max-width: 880px\) \{[\s\S]*?\.home-screen,\s*\.secondary-screen\s*\{\s*margin-top: 32px/);
 });
 
-test("the account menu owns Settings, with Provider settings and Administration out of primary navigation", async () => {
+test("the account menu gateways administrators to the AI control plane without adding primary navigation", async () => {
   const app = await source("apps/web/src/App.jsx");
   const primaryNav = app.slice(app.indexOf('<nav aria-label="Primary navigation">'), app.indexOf("</nav>", app.indexOf('<nav aria-label="Primary navigation">')));
   const accountMenu = app.slice(app.indexOf('id="sidebar-account-menu"'), app.indexOf("</aside>", app.indexOf('id="sidebar-account-menu"')));
@@ -310,6 +310,10 @@ test("the account menu owns Settings, with Provider settings and Administration 
   assert.doesNotMatch(app, /provider\.aliases\.join/);
   assert.match(app, /<strong>Administration<\/strong>/);
   assert.doesNotMatch(primaryNav, /label="Admin"|label="Gateway"/);
+  assert.doesNotMatch(primaryNav, /AI control plane/);
+  assert.match(accountMenu, /sidebar-menu-section-label">Organization/);
+  assert.match(accountMenu, /session\.roles\.includes\("administrator"\)/);
+  assert.match(accountMenu, /selectAiControlPlaneView\("overview"\)/);
   assert.match(accountMenu, /selectNav\("Settings"\)/);
   assert.match(accountMenu, /Log out/);
   assert.doesNotMatch(app, /admin: "Admin"/);

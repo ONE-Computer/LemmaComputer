@@ -125,7 +125,47 @@ export type ResolvedRoutingPolicy = {
   rollout: RoutingRollout;
   policy: ModelRoutingPolicy;
 };
+export type RoutingMappingVersion = {
+  id: string;
+  tenantId: string;
+  revisionNote: string;
+  createdBy: string;
+  createdAt: Date;
+  deployments: Array<{
+    id: string;
+    serviceClass: ProductServiceClass;
+    provider: ManagedRoutingProvider;
+    providerAccountId: string | null;
+    providerModel: string;
+    providerDeployment: string;
+    region: string | null;
+    providerServiceTier: string | null;
+    rateCardId: string | null;
+    capabilities: RoutingCapabilities;
+    approved: boolean;
+    evaluationPassed: boolean;
+  }>;
+};
 export interface RoutingStore extends RoutingAffinityStore {
+  createMappingVersion(input: {
+    tenantId: string;
+    revisionNote: string;
+    createdBy: string;
+    deployments: Array<{
+      serviceClass: ProductServiceClass;
+      provider: ManagedRoutingProvider;
+      providerAccountId?: string;
+      providerModel: string;
+      providerDeployment: string;
+      region?: string;
+      providerServiceTier?: string;
+      rateCardId?: string;
+      capabilities: RoutingCapabilities;
+      approved: boolean;
+      evaluationPassed: boolean;
+    }>;
+  }): Promise<RoutingMappingVersion>;
+  latestMappingVersion(tenantId: string): Promise<RoutingMappingVersion | null>;
   createPolicy(input: {
     tenantId: string;
     teamId: string;
@@ -263,6 +303,147 @@ export class PostgresRoutingStore implements RoutingStore {
   }
   async close() {
     await this.pool.end();
+  }
+  async createMappingVersion(
+    input: Parameters<RoutingStore["createMappingVersion"]>[0],
+  ): Promise<RoutingMappingVersion> {
+    const classes = new Set(input.deployments.map((item) => item.serviceClass));
+    if (
+      input.deployments.length < 3 ||
+      !(["lite", "balanced", "pro"] as ProductServiceClass[]).every((item) =>
+        classes.has(item),
+      )
+    )
+      throw new Error(
+        "A routing mapping requires at least one Lite, Balanced, and Pro deployment",
+      );
+    const client = await this.pool.connect();
+    const mappingVersionId = randomUUID();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+        [`routing-mapping:${input.tenantId}`],
+      );
+      await client.query(
+        "INSERT INTO ai_routing_mapping_versions(id,tenant_id,revision_note,created_by) VALUES($1,$2,$3,$4)",
+        [mappingVersionId, input.tenantId, input.revisionNote, input.createdBy],
+      );
+      for (const deployment of input.deployments) {
+        if (deployment.rateCardId) {
+          const matchingRateCard = await client.query(
+            `SELECT 1 FROM ai_deployment_rate_cards
+             WHERE tenant_id=$1 AND id=$2 AND provider=$3
+               AND provider_account_id IS NOT DISTINCT FROM $4
+               AND base_model=$5 AND deployment_id=$6
+               AND region IS NOT DISTINCT FROM $7
+               AND provider_service_tier IS NOT DISTINCT FROM $8
+             LIMIT 1`,
+            [
+              input.tenantId,
+              deployment.rateCardId,
+              deployment.provider,
+              deployment.providerAccountId ?? null,
+              deployment.providerModel,
+              deployment.providerDeployment,
+              deployment.region ?? null,
+              deployment.providerServiceTier ?? null,
+            ],
+          );
+          if (!matchingRateCard.rowCount)
+            throw new Error(
+              "Pinned routing rate card does not match its provider deployment",
+            );
+        }
+        await client.query(
+          `INSERT INTO ai_routing_deployments(
+            id,tenant_id,mapping_version_id,service_class,provider,provider_account_id,
+            provider_model,provider_deployment,region,provider_service_tier,rate_card_id,
+            capabilities,approved,evaluation_passed
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [
+            randomUUID(),
+            input.tenantId,
+            mappingVersionId,
+            deployment.serviceClass,
+            deployment.provider,
+            deployment.providerAccountId ?? null,
+            deployment.providerModel,
+            deployment.providerDeployment,
+            deployment.region ?? null,
+            deployment.providerServiceTier ?? null,
+            deployment.rateCardId ?? null,
+            deployment.capabilities,
+            deployment.approved,
+            deployment.evaluationPassed,
+          ],
+        );
+      }
+      await client.query("COMMIT");
+      const created = await this.mappingVersion(input.tenantId, mappingVersionId);
+      if (!created) throw new Error("Created routing mapping could not be read");
+      return created;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async latestMappingVersion(
+    tenantId: string,
+  ): Promise<RoutingMappingVersion | null> {
+    const latest = await this.pool.query(
+      "SELECT id FROM ai_routing_mapping_versions WHERE tenant_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1",
+      [tenantId],
+    );
+    return latest.rowCount
+      ? this.mappingVersion(tenantId, String(latest.rows[0].id))
+      : null;
+  }
+  private async mappingVersion(
+    tenantId: string,
+    mappingVersionId: string,
+  ): Promise<RoutingMappingVersion | null> {
+    const [mapping, deployments] = await Promise.all([
+      this.pool.query(
+        "SELECT * FROM ai_routing_mapping_versions WHERE tenant_id=$1 AND id=$2 LIMIT 1",
+        [tenantId, mappingVersionId],
+      ),
+      this.pool.query(
+        "SELECT * FROM ai_routing_deployments WHERE tenant_id=$1 AND mapping_version_id=$2 ORDER BY service_class,id",
+        [tenantId, mappingVersionId],
+      ),
+    ]);
+    if (!mapping.rowCount) return null;
+    const row = mapping.rows[0];
+    return {
+      id: String(row.id),
+      tenantId: String(row.tenant_id),
+      revisionNote: String(row.revision_note),
+      createdBy: String(row.created_by),
+      createdAt: new Date(row.created_at),
+      deployments: deployments.rows.map((deployment) => ({
+        id: String(deployment.id),
+        serviceClass: deployment.service_class as ProductServiceClass,
+        provider: deployment.provider as ManagedRoutingProvider,
+        providerAccountId: deployment.provider_account_id
+          ? String(deployment.provider_account_id)
+          : null,
+        providerModel: String(deployment.provider_model),
+        providerDeployment: String(deployment.provider_deployment),
+        region: deployment.region ? String(deployment.region) : null,
+        providerServiceTier: deployment.provider_service_tier
+          ? String(deployment.provider_service_tier)
+          : null,
+        rateCardId: deployment.rate_card_id
+          ? String(deployment.rate_card_id)
+          : null,
+        capabilities: deployment.capabilities as RoutingCapabilities,
+        approved: Boolean(deployment.approved),
+        evaluationPassed: Boolean(deployment.evaluation_passed),
+      })),
+    };
   }
   async get(tenantId: string, affinityKey: string, now: Date) {
     const result = await this.pool.query(

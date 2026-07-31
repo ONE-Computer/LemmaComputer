@@ -135,6 +135,54 @@ test(
         outputTokens: 8000,
         residency: ["sg"],
       };
+      const publishedMapping = await routing.createMappingVersion({
+        tenantId: tenant,
+        revisionNote: "Publish administrator-selected service class routes",
+        createdBy: admin,
+        deployments: [
+          {
+            serviceClass: "lite",
+            provider: "openai",
+            providerAccountId: "account",
+            providerModel: "private/luna",
+            providerDeployment: "private-lite",
+            rateCardId: rateCard,
+            capabilities,
+            approved: true,
+            evaluationPassed: false,
+          },
+          {
+            serviceClass: "balanced",
+            provider: "openai",
+            providerAccountId: "account",
+            providerModel: "private/terra",
+            providerDeployment: "private-balanced",
+            capabilities,
+            approved: true,
+            evaluationPassed: false,
+          },
+          {
+            serviceClass: "pro",
+            provider: "anthropic",
+            providerAccountId: "primary",
+            providerModel: "private/opus",
+            providerDeployment: "private-pro",
+            capabilities,
+            approved: true,
+            evaluationPassed: false,
+          },
+        ],
+      });
+      assert.equal(publishedMapping.tenantId, tenant);
+      assert.equal(publishedMapping.deployments.length, 3);
+      assert.equal(
+        (await routing.latestMappingVersion(tenant))?.id,
+        publishedMapping.id,
+      );
+      assert.equal(
+        await routing.latestMappingVersion(`missing-${suffix}`),
+        null,
+      );
       await pool.query(
         "INSERT INTO ai_routing_deployments(id,tenant_id,mapping_version_id,service_class,provider,provider_account_id,provider_model,provider_deployment,rate_card_id,capabilities,approved,evaluation_passed) VALUES($1,$2,$3,'lite','openai','account','private/luna','private-lite',$4,$5,true,true),($6,$7,$8,'lite','openai','other-account','other','other-lite',NULL,$5,true,true)",
         [
