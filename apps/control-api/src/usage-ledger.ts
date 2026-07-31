@@ -26,7 +26,7 @@ const budgetBounds = z.object({
   maximumOutputTokens:nonnegativeDecimal,maximumReasoningTokens:nonnegativeDecimal.optional(),requestUnits:nonnegativeDecimal.optional(),
   cacheStatus:z.enum(["known_hit","known_miss","unknown"]),
   maxRetries:z.number().int().min(0).max(100),maxFallbacks:z.number().int().min(0).max(100),maxAgentSteps:z.number().int().min(1).max(1000),
-  routingOverhead:z.array(z.object({ unit:usageUnit,quantity:nonnegativeDecimal,diagnostic:z.boolean().optional() }).strict()).max(64).optional(),
+  routingOverhead:z.array(z.object({ unit:usageUnit,quantity:nonnegativeDecimal }).strict()).max(64).optional(),
   reservationTtlSeconds:z.number().int().min(30).max(3600).optional(),providerDeadlineAt:z.iso.datetime().optional(),
 }).strict();
 
@@ -96,6 +96,12 @@ export const decodeUsageCursor=(value:string|undefined)=>{
 };
 export const encodeUsageCursor=(value:{occurredAt:string;id:string}|null)=>value?Buffer.from(JSON.stringify(value)).toString("base64url"):null;
 
+export interface UsageEventRecordedHook {
+  recorded(input: InternalUsageCompletion, result: { status:"created"|"duplicate"; eventId:string }): Promise<void>;
+}
+export class NoopUsageEventRecordedHook implements UsageEventRecordedHook {
+  async recorded() {}
+}
 
 export type UsageTaskContextKind = "chat"|"channel"|"schedule"|"background";
 export type UsageTaskBinding = {
@@ -140,6 +146,7 @@ export class UsageLedgerService {
     private readonly teams: TeamStore,
     private readonly bindings: UsageTaskBindingAuthority,
     private readonly admissionHook: UsageAttemptAdmissionHook = new AllowUsageAttemptAdmission(),
+    private readonly recordedHook: UsageEventRecordedHook = new NoopUsageEventRecordedHook(),
   ) {}
 
   async admit(input: InternalUsageAdmission) {
@@ -184,6 +191,11 @@ export class UsageLedgerService {
     };
     const result = await this.store.appendUsageEvent(event);
     if (result.status === "conflict") throw new OneComputerError("AI_USAGE_EVENT_CONFLICT","The source event key was reused with different facts",409);
+    if (result.status === "pending") return { schemaVersion:1,...result };
+    if (input.eventType === "usage") {
+      if (!result.eventId) throw new Error("Recorded AI usage event did not return an event id");
+      await this.recordedHook.recorded(input,{ status:result.status,eventId:result.eventId });
+    }
     return { schemaVersion:1,...result };
   }
 }

@@ -428,6 +428,11 @@ let adminUsers = [
 ];
 let fixtureTeams = [];
 let fixtureTeamMemberships = new Map();
+let fixtureTeamBudgets = new Map();
+const emptyBudgetStatus = { budget:null,period:null,effectiveLimitAmount:null,settledProviderCost:null,outstandingReservations:null,remainingAmount:null,percentConsumed:null,priceStatus:"unknown",enforcement:"none",alerts:[],lastReconciliation:null };
+const fixtureBudgetStatus = (teamId) => fixtureTeamBudgets.get(teamId) ?? emptyBudgetStatus;
+const fixturePeriod = () => ({ start:"2026-07-01T00:00:00.000Z",end:"2026-08-01T00:00:00.000Z" });
+
 const fixtureTeamDetail = (teamId) => ({
   ...fixtureTeams.find((team) => team.id === teamId), memberships: fixtureTeamMemberships.get(teamId) ?? [],
 });
@@ -1113,6 +1118,35 @@ const server = http.createServer((request, response) => {
   if (key === "GET /v1/admin/teams") {
     response.end(JSON.stringify({ teams: fixtureTeams }));
     return;
+  }
+  if (request.method === "GET" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/budget$/.test(url.pathname)) {
+    response.end(JSON.stringify({status:fixtureBudgetStatus(url.pathname.split("/").at(-2))}));
+    return;
+  }
+  if (request.method === "PUT" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/budget$/.test(url.pathname)) {
+    let body="";request.on("data",(chunk)=>{body+=chunk;});request.on("end",()=>{
+      const teamId=url.pathname.split("/").at(-2);const input=JSON.parse(body);const createdAt=new Date().toISOString();
+      const status={
+        budget:{id:crypto.randomUUID(),tenantId:"fixture-tenant",teamId,limitAmount:input.limitAmount,currency:input.currency,periodType:input.periodType,timezone:input.timezone,mode:input.mode,thresholds:input.thresholds,effectiveFrom:input.effectiveFrom, effectiveTo:null,createdBy:session.user.userId,createdAt},
+        period:fixturePeriod(),effectiveLimitAmount:input.limitAmount,settledProviderCost:"650.000000000000",outstandingReservations:"100.000000000000",remainingAmount:String(Number(input.limitAmount)-750),percentConsumed:String(750 / Number(input.limitAmount) * 100),priceStatus:"priced",enforcement:input.mode,
+        alerts:[{thresholdPercent:"50",createdAt}],lastReconciliation:{status:"current",checkedAt:createdAt,detail:null},
+      };
+      fixtureTeamBudgets.set(teamId,status);response.end(JSON.stringify({status,reconciliation:{status:"matched"}}));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/budget\/override$/.test(url.pathname)) {
+    let body="";request.on("data",(chunk)=>{body+=chunk;});request.on("end",()=>{
+      const teamId=url.pathname.split("/").at(-3);const input=JSON.parse(body);const current=fixtureBudgetStatus(teamId);
+      const status={...current,effectiveLimitAmount:input.newLimitAmount??current.effectiveLimitAmount,enforcement:"override",remainingAmount:input.newLimitAmount?String(Number(input.newLimitAmount)-Number(current.settledProviderCost)-Number(current.outstandingReservations)):current.remainingAmount};
+      fixtureTeamBudgets.set(teamId,status);response.end(JSON.stringify({status,reconciliation:{status:"matched"}}));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/budget\/reconcile$/.test(url.pathname)) {
+    const teamId=url.pathname.split("/").at(-3);const current=fixtureBudgetStatus(teamId);const checkedAt=new Date().toISOString();
+    fixtureTeamBudgets.set(teamId,{...current,lastReconciliation:{status:"current",checkedAt,detail:null}});
+    response.end(JSON.stringify({reconciliation:{status:"matched",checkedAt}}));return;
   }
   if (key === "POST /v1/admin/teams") {
     let body = "";

@@ -699,8 +699,75 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
   );
 }
 
+function TeamBudgetDialog({ team, onClose }) {
+  const [status, setStatus] = useState(null);
+  const [draft, setDraft] = useState({ limitAmount: "1000", currency: "USD", periodType: "calendar_month", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", mode: "soft", thresholds: "50, 80, 100" });
+  const [override, setOverride] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const hydrate = (value) => {
+    setStatus(value);
+    if (value?.budget) setDraft({ limitAmount: value.budget.limitAmount, currency: value.budget.currency, periodType: value.budget.periodType, timezone: value.budget.timezone, mode: value.budget.mode, thresholds: value.budget.thresholds.join(", ") });
+  };
+  useEffect(() => {
+    let active = true;
+    setBusy(true);
+    adminApi.teamBudget(team.id).then((value) => { if (active) hydrate(value.status); }).catch((caught) => { if (active) setError(caught.message); }).finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, [team.id]);
+  const run = async (operation) => {
+    setBusy(true); setError("");
+    try { return await operation(); } catch (caught) { setError(caught.message); return null; } finally { setBusy(false); }
+  };
+  const save = async () => {
+    const result = await run(() => adminApi.saveTeamBudget(team.id, { ...draft, thresholds: draft.thresholds.split(",").map((item) => item.trim()).filter(Boolean), effectiveFrom: new Date().toISOString() }));
+    if (result) hydrate(result.status);
+  };
+  const saveOverride = async () => {
+    if (!override?.confirmed) return;
+    const payload = { overrideType: override.overrideType, ...(override.overrideType === "limit_increase" ? { newLimitAmount: override.newLimitAmount } : {}), reason: override.reason, expiresAt: new Date(override.expiresAt).toISOString() };
+    const result = await run(() => adminApi.overrideTeamBudget(team.id, payload));
+    if (result) { hydrate(result.status); setOverride(null); }
+  };
+  const reconcile = async () => {
+    const result = await run(async () => { await adminApi.reconcileTeamBudget(team.id); return adminApi.teamBudget(team.id); });
+    if (result) hydrate(result.status);
+  };
+  const money = (value) => value === null || value === undefined ? "—" : `${status?.budget?.currency ?? draft.currency} ${Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+  return <ModalDialog className="team-budget-modal" title={`${team.displayName} budget`} description="ONEComputer is the authoritative spend ledger. The LiteLLM Team limit is a defense-in-depth projection." eyebrow="Organization spend" labelledBy="team-budget-title" onClose={busy ? () => undefined : onClose}>
+    {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Budget operation failed</strong>{error}</span></div>}
+    {status?.budget && <section className="team-budget-status" aria-label="Current budget period">
+      <div><span>Settled spend</span><strong>{money(status.settledProviderCost)}</strong></div>
+      <div><span>In-flight reservations</span><strong>{money(status.outstandingReservations)}</strong></div>
+      <div><span>Remaining</span><strong>{money(status.remainingAmount)}</strong></div>
+      <div><span>Consumed</span><strong>{Number(status.percentConsumed).toFixed(1)}%</strong></div>
+      <p>{status.period ? `${new Date(status.period.start).toLocaleDateString()} – ${new Date(status.period.end).toLocaleDateString()}` : "No current period"} · {status.enforcement} enforcement · pricing {status.priceStatus}</p>
+    </section>}
+    {!!status?.alerts?.length && <div className="team-budget-alert" role="status"><Info24Regular aria-hidden="true" /><span><strong>Spend warning</strong>{status.alerts.map((item) => `${Number(item.thresholdPercent)}%`).join(", ")} threshold reached this period.</span></div>}
+    <div className="team-budget-fields">
+      <label className="modal-field"><span>Budget limit</span><input name="team-budget-limit" inputMode="decimal" value={draft.limitAmount} disabled={busy} onChange={(event) => setDraft({ ...draft, limitAmount: event.target.value })} /></label>
+      <label className="modal-field"><span>Currency</span><input name="team-budget-currency" maxLength="3" value={draft.currency} disabled={busy} onChange={(event) => setDraft({ ...draft, currency: event.target.value.toUpperCase() })} /></label>
+      <label className="modal-field"><span>Period</span><SelectMenu value={draft.periodType} disabled={busy} onValueChange={(periodType) => setDraft({ ...draft, periodType })} ariaLabel="Period" options={[{value:"calendar_month",label:"Calendar month"},{value:"calendar_week",label:"Calendar week"}]} /></label>
+      <label className="modal-field"><span>Enforcement</span><SelectMenu value={draft.mode} disabled={busy} onValueChange={(mode) => setDraft({ ...draft, mode })} ariaLabel="Enforcement" options={[{value:"soft",label:"Soft · warn only"},{value:"hard",label:"Hard · block before dispatch"}]} /></label>
+      <label className="modal-field"><span>IANA timezone</span><input name="team-budget-timezone" value={draft.timezone} disabled={busy} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></label>
+      <label className="modal-field"><span>Warning thresholds (%)</span><input name="team-budget-thresholds" value={draft.thresholds} disabled={busy} onChange={(event) => setDraft({ ...draft, thresholds: event.target.value })} /></label>
+    </div>
+    {override && <section className="team-budget-override" aria-label="Temporary budget override">
+      <strong>Temporary audited override</strong>
+      <label className="modal-field"><span>Override</span><SelectMenu value={override.overrideType} onValueChange={(overrideType) => setOverride({ ...override, overrideType })} ariaLabel="Override" options={[{value:"limit_increase",label:"Increase limit"},{value:"hard_limit_bypass",label:"Bypass hard limit"}]} /></label>
+      {override.overrideType === "limit_increase" && <label className="modal-field"><span>Temporary limit</span><input name="team-budget-override-limit" value={override.newLimitAmount} onChange={(event) => setOverride({ ...override, newLimitAmount: event.target.value })} /></label>}
+      <label className="modal-field"><span>Expires at</span><input name="team-budget-override-expiry" type="datetime-local" value={override.expiresAt} onChange={(event) => setOverride({ ...override, expiresAt: event.target.value })} /></label>
+      <label className="modal-field"><span>Reason</span><input name="team-budget-override-reason" value={override.reason} onChange={(event) => setOverride({ ...override, reason: event.target.value })} /></label>
+      <label className="team-budget-confirm"><input name="team-budget-override-confirm" type="checkbox" checked={override.confirmed} onChange={(event) => setOverride({ ...override, confirmed: event.target.checked })} /><span>I confirm this time-bound override will be recorded in the audit history.</span></label>
+      <button className="primary-button compact-button" type="button" disabled={busy || !override.confirmed || !override.reason.trim() || (override.overrideType === "limit_increase" && !override.newLimitAmount)} onClick={saveOverride}>Apply override</button>
+    </section>}
+    <div className="modal-actions team-budget-actions"><button className="secondary-button" type="button" disabled={busy || !status?.budget} onClick={reconcile}>Reconcile gateway</button><button className="secondary-button" type="button" disabled={busy || !status?.budget} onClick={() => setOverride({ overrideType: "limit_increase", newLimitAmount: status?.effectiveLimitAmount ?? draft.limitAmount, reason: "", expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16), confirmed: false })}>Temporary override</button><span /><button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Cancel</button><button className="primary-button" type="button" disabled={busy || !draft.limitAmount || !draft.currency || !draft.timezone || !draft.thresholds} onClick={save}>{busy ? "Saving" : status?.budget ? "Save new version" : "Create budget"}</button></div>
+  </ModalDialog>;
+}
+
 function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUpdate, onArchive, onAssignMember, onRemoveMember, onSetDefault }) {
   const [editor, setEditor] = useState(null);
+  const [budgetTeam, setBudgetTeam] = useState(null);
   const [memberUserId, setMemberUserId] = useState("");
   const userOptions = users.filter((user) => user.status === "active").map((user) => ({ value: user.userId, label: `${user.displayName} · ${user.email}` }));
   const userName = (userId) => users.find((user) => user.userId === userId)?.displayName ?? userId;
@@ -720,6 +787,7 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
     if (saved) setEditor(null);
   };
   return (
+    <>
     <section className="admin-team-section" aria-labelledby="admin-teams-heading">
       <div className="admin-team-heading">
         <div><p>Spend allocation</p><h2 id="admin-teams-heading">Teams</h2><span>Team membership decides where AI usage is charged. It does not grant workspace, model, tool, connector, or administrator access.</span></div>
@@ -730,7 +798,7 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
           <div><strong>{team.displayName}</strong><small>{team.description || "No description"}</small></div>
           <div><strong>{team.costCenterCode || "No cost-center code"}</strong><small>{team.activeMemberCount} active {team.activeMemberCount === 1 ? "member" : "members"}</small></div>
           <span className={`admin-team-status ${team.status}`}>{team.status === "archived" ? "Archived" : team.isRolloutFallback ? "Rollout fallback" : "Active"}</span>
-          {!team.isRolloutFallback && team.status === "active" && <button className="secondary-button" type="button" disabled={busy} onClick={() => openEdit(team)}>Manage</button>}
+          {!team.isRolloutFallback && team.status === "active" && <div className="admin-team-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setBudgetTeam(team)}>Budget</button><button className="secondary-button" type="button" disabled={busy} onClick={() => openEdit(team)}>Manage</button></div>}
         </article>)}
       </div>}
       {editor && <ModalDialog title={editor.id ? `Manage ${editor.displayName}` : "Create Team"} description="A Team is an internal spend-allocation group. The optional cost-center code is an external accounting reference only." eyebrow="Organization spend" labelledBy="team-editor-title" onClose={busy ? () => undefined : () => setEditor(null)}>
@@ -773,6 +841,8 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
         </div>
       </ModalDialog>}
     </section>
+    {budgetTeam && <TeamBudgetDialog team={budgetTeam} onClose={() => setBudgetTeam(null)} />}
+    </>
   );
 }
 

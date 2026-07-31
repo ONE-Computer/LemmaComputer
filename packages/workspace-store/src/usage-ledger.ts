@@ -91,7 +91,7 @@ export type AttemptBudgetBounds = {
   maxRetries: number;
   maxFallbacks: number;
   maxAgentSteps: number;
-  routingOverhead?: UsageAmount[];
+  routingOverhead?: Array<Omit<UsageAmount,"diagnostic">>;
   reservationTtlSeconds?: number;
   providerDeadlineAt?: Date;
 };

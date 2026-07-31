@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { MinimalSpendingTeam } from "@onecomputer/contracts";
 import { MemoryWorkspaceStore, attemptAdmissionFingerprint, type AdmissionResult, type AttemptAdmissionInput, type AttemptAdmissionSemanticInput, type PostgresUsageLedgerStore, type TeamStore, type UsageAttemptAdmissionHook, type UsageEventInput } from "@onecomputer/workspace-store";
+import type { UsageEventResult } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 import { UsageLedgerService, UsageTaskBindingAuthority, internalUsageAdmissionSchema, type InternalUsageAdmission } from "../apps/control-api/src/usage-ledger.js";
+import type { InternalUsageCompletion, UsageEventRecordedHook } from "../apps/control-api/src/usage-ledger.js";
 
 const taskSecret = "usage-task-binding-test-secret-with-at-least-32-characters";
 const internalToken = "usage-internal-test-token-with-at-least-32-characters";
@@ -34,6 +36,7 @@ class FakeLedger {
   admissions: AttemptAdmissionInput[] = [];
   events: UsageEventInput[] = [];
   hookTransactions: unknown[] = [];
+  appendResults: UsageEventResult[] = [];
   private replay(input: AttemptAdmissionSemanticInput): AdmissionResult | null {
     const prior = this.admissions.find((item) => (
       item.tenantId === input.tenantId
@@ -59,7 +62,7 @@ class FakeLedger {
   }
   async appendUsageEvent(input: UsageEventInput) {
     this.events.push(input);
-    return { status: "created" as const, eventId: "00000000-0000-4000-8000-100000000001", priceStatus: "unknown" as const, providerCost: null, currency: null };
+    return this.appendResults.shift() ?? { status: "created" as const, eventId: "00000000-0000-4000-8000-100000000001", priceStatus: "unknown" as const, providerCost: null, currency: null };
   }
 }
 
@@ -72,6 +75,14 @@ const admission = (overrides: Partial<InternalUsageAdmission> = {}) => internalU
   resolvedModel: "gpt-test", resolvedDeploymentId: "deployment-1", providerServiceTier: "standard",
   budgetBounds: { inputTokens:"128",maximumOutputTokens:"256",maximumReasoningTokens:"64",cacheStatus:"unknown",maxRetries:1,maxFallbacks:1,maxAgentSteps:2,reservationTtlSeconds:300,providerDeadlineAt:"2026-07-31T10:05:00.000Z" },
   admittedAt: "2026-07-31T10:00:00.000Z", ...overrides,
+});
+
+const completion = (overrides: Partial<InternalUsageCompletion> = {}): InternalUsageCompletion => ({
+  schemaVersion:1,tenantId:"acme",admissionId:"00000000-0000-4000-8000-000000000001",
+  sourceSystem:"litellm",sourceEventId:"event-1",eventType:"usage",
+  occurredAt:"2026-07-31T10:01:00.000Z",outcome:"success",
+  units:[{ unit:"input_uncached_token",quantity:"1" }],
+  ...overrides,
 });
 
 test("simultaneous signed task contexts remain explicit and independent", async () => {
@@ -187,4 +198,62 @@ test("internal usage endpoints require their dedicated token and reject raw payl
   } finally {
     await app.close();
   }
+});
+
+test("completion retries budget settlement after a durable usage write and ignores corrections", async () => {
+  const eventId = "00000000-0000-4000-8000-100000000001";
+  const correctionId = "00000000-0000-4000-8000-100000000002";
+  const ledger = new FakeLedger();
+  ledger.appendResults.push(
+    { status:"pending",eventId:null },
+    { status:"created",eventId:correctionId,priceStatus:"priced",providerCost:"-0.100000000000",currency:"USD" },
+    { status:"created",eventId,priceStatus:"priced",providerCost:"1.000000000000",currency:"USD" },
+    { status:"duplicate",eventId,priceStatus:"priced",providerCost:"1.000000000000",currency:"USD" },
+  );
+  const settlements: Array<{ status:"created"|"duplicate";eventId:string }> = [];
+  let failFirstSettlement = true;
+  const hook: UsageEventRecordedHook = {
+    async recorded(_input,result) {
+      settlements.push(result);
+      if (failFirstSettlement) {
+        failFirstSettlement = false;
+        throw new Error("budget store unavailable after ledger commit");
+      }
+    },
+  };
+  const service = new UsageLedgerService(
+    ledger as unknown as PostgresUsageLedgerStore,
+    new FakeTeams() as unknown as TeamStore,
+    new UsageTaskBindingAuthority(taskSecret),
+    undefined,
+    hook,
+  );
+
+  const pending = await service.complete(completion({ sourceEventId:"correction-pending",eventType:"correction",correctsEventId:eventId }));
+  const correction = await service.complete(completion({ sourceEventId:"correction-created",eventType:"correction",correctsEventId:eventId }));
+  assert.equal(pending.status,"pending");
+  assert.equal(correction.status,"created");
+  assert.equal(settlements.length,0);
+
+  await assert.rejects(() => service.complete(completion()),/budget store unavailable/);
+  const retry = await service.complete(completion());
+  assert.equal(retry.status,"duplicate");
+  assert.deepEqual(settlements,[{ status:"created",eventId },{ status:"duplicate",eventId }]);
+});
+
+test("admission budget bounds accept callback and qualified requests but reject diagnostic overhead", () => {
+  const callbackStyle = admission();
+  assert.equal(callbackStyle.budgetBounds?.requestUnits,undefined);
+
+  const qualified = admission({ budgetBounds:{
+    ...callbackStyle.budgetBounds!,requestUnits:"1",routingOverhead:[{ unit:"request",quantity:"1" }],
+  } });
+  assert.equal(qualified.budgetBounds?.requestUnits,"1");
+  assert.deepEqual(qualified.budgetBounds?.routingOverhead,[{ unit:"request",quantity:"1" }]);
+
+  const diagnostic = internalUsageAdmissionSchema.safeParse({
+    ...callbackStyle,
+    budgetBounds:{ ...callbackStyle.budgetBounds!,routingOverhead:[{ unit:"request",quantity:"1",diagnostic:true }] },
+  });
+  assert.equal(diagnostic.success,false);
 });

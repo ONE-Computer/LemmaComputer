@@ -2,12 +2,12 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
-import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
+import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
-import { PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@onecomputer/workspace-store";
+import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@onecomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
 import { ProviderSettingsService } from "./provider-settings.js";
@@ -30,6 +30,7 @@ import {
 } from "./agent-chat.js";
 import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient } from "./channel-broker.js";
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
+import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchema, TeamBudgetAdministrationService } from "./budgets.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
@@ -259,6 +260,8 @@ export function createControlServer(
     scheduleStore?: ScheduleStore;
     siteStore?: SiteStore;
     teamStore?: TeamStore;
+    budgetStore?: TeamBudgetStore;
+    budgetProjector?: LiteLlmTeamBudgetProjector;
     schedulerInternalToken?: string;
     schedulePromptSecret?: string;
     connectorRegistryStore?: ConnectorRegistryStore;
@@ -324,8 +327,9 @@ export function createControlServer(
   const usageBindings = security.usageTaskBindingSecret
     ? new UsageTaskBindingAuthority(security.usageTaskBindingSecret)
     : undefined;
+  const usageRecordedHook=security.budgetStore?new BudgetUsageEventRecordedHook(security.budgetStore):undefined;
   const usageLedger = security.usageLedgerStore && security.teamStore && usageBindings
-    ? new UsageLedgerService(security.usageLedgerStore, security.teamStore, usageBindings, security.usageAdmissionHook)
+    ? new UsageLedgerService(security.usageLedgerStore, security.teamStore, usageBindings, security.usageAdmissionHook, usageRecordedHook)
     : undefined;
   const requireUsageLedger = () => {
     if (!usageLedger || !security.usageLedgerStore) {
@@ -345,6 +349,8 @@ export function createControlServer(
     tenantId: owner.tenantId, subjectId: owner.subjectId, workspaceId, agentId,
     contextKind, taskId, ...(sessionId ? { sessionId } : {}), ...(turnId ? { turnId } : {}),
   });
+  const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
+  const requireBudgets=()=>{if(!budgets)throw new OneComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
   const channelBroker = security.channelBrokerClient;
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
@@ -1202,6 +1208,18 @@ export function createControlServer(
   app.get("/v1/admin/teams-audit", async (request) => {
     const actor = requireAdministrator(request);
     return { events: await requireTeams().listAuditEvents(actor.tenantId) };
+  });
+  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget",async(request)=>{
+    const actor=requireAdministrator(request);return{status:await requireBudgets().get(actor,z.uuid().parse(request.params.teamId))};
+  });
+  app.put<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget",async(request)=>{
+    const actor=requireAdministrator(request);return requireBudgets().save(actor,z.uuid().parse(request.params.teamId),saveTeamBudgetSchema.parse(request.body??{}));
+  });
+  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget/override",async(request)=>{
+    const actor=requireAdministrator(request);return requireBudgets().override(actor,z.uuid().parse(request.params.teamId),budgetOverrideSchema.parse(request.body??{}));
+  });
+  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget/reconcile",async(request)=>{
+    const actor=requireAdministrator(request);return{reconciliation:await requireBudgets().sync(actor,z.uuid().parse(request.params.teamId))};
   });
   app.get("/v1/admin/users", async (request) => {
     const actor = requireAdministrator(request);
@@ -2347,6 +2365,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const teamStore = PostgresTeamStore.fromConnectionString(env.DATABASE_URL);
   const usageLedgerStore = PostgresUsageLedgerStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
+  const budgetStore=PostgresTeamBudgetStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
   if (gatewayValues.some(Boolean) && !gatewayValues.every(Boolean)) throw new Error("All LiteLLM gateway settings must be configured together");
@@ -2372,6 +2391,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const channelBrokerClient = env.CHANNEL_BROKER_URL && env.CHANNEL_BROKER_INTERNAL_TOKEN
     ? new HttpChannelBrokerManagementClient(env.CHANNEL_BROKER_URL, env.CHANNEL_BROKER_INTERNAL_TOKEN)
     : undefined;
+  const budgetProjector=env.LITELLM_ADMIN_URL&&env.LITELLM_MASTER_KEY?new LiteLlmTeamBudgetProjector({adminUrl:env.LITELLM_ADMIN_URL,masterKey:env.LITELLM_MASTER_KEY}):undefined;
   const webPushValues = [env.WEB_PUSH_VAPID_SUBJECT, env.WEB_PUSH_VAPID_PUBLIC_KEY, env.WEB_PUSH_VAPID_PRIVATE_KEY, env.WEB_PUSH_SUBSCRIPTION_SECRET];
   if (webPushValues.some(Boolean) && !webPushValues.every(Boolean)) throw new Error("All Web Push settings must be configured together");
   const pushProvider = env.WEB_PUSH_VAPID_SUBJECT && env.WEB_PUSH_VAPID_PUBLIC_KEY
@@ -2457,8 +2477,11 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       siteStore,
       teamStore,
       usageLedgerStore,
+      usageAdmissionHook:new BudgetUsageAttemptAdmission(budgetStore),
       usageInternalToken: env.AI_USAGE_INTERNAL_TOKEN,
       usageTaskBindingSecret: env.AI_USAGE_TASK_BINDING_SECRET,
+      budgetStore,
+      budgetProjector,
       schedulerInternalToken: env.SCHEDULER_INTERNAL_TOKEN,
       schedulePromptSecret: env.SCHEDULE_PROMPT_SECRET,
       workspaceIngress,
@@ -2482,6 +2505,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await siteStore.close();
     await teamStore.close();
     await usageLedgerStore.close();
+    await budgetStore.close();
     await identityPolicyStore.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });

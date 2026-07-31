@@ -5645,8 +5645,27 @@ textarea:focus-visible,
 .admin-team-list article:last-child { border-bottom: 0; }
 .admin-team-list article > div { display: grid; gap: 4px; min-width: 0; }
 .admin-team-list article small { overflow: hidden; color: #68727d; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-team-actions { display: flex !important; grid-auto-flow: column; gap: 8px !important; }
 .admin-team-status { width: fit-content; padding: 4px 8px; border-radius: 999px; background: #eaf4ed; color: #25633a; font-size: 11px; font-weight: 700; }
 .admin-team-status.archived { background: #f0f1f2; color: #68727d; }
+.team-budget-modal { width: min(860px, calc(100vw - 32px)); }
+.team-budget-status { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+.team-budget-status > div { display: grid; gap: 5px; padding: 13px; border: 1px solid #dfe4ea; border-radius: 7px; background: #f8fafc; }
+.team-budget-status span { color: #68727d; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.team-budget-status strong { color: #172334; font-size: 17px; }
+.team-budget-status p { grid-column: 1 / -1; margin: 0; color: #68727d; font-size: 12px; }
+.team-budget-alert { display: flex; gap: 10px; margin-bottom: 18px; padding: 12px; border: 1px solid #e8ce7b; border-radius: 7px; background: #fff9e8; color: #694f08; }
+.team-budget-alert span { display: grid; gap: 3px; font-size: 12px; }
+.team-budget-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.team-budget-fields select,
+.team-budget-override select { width: 100%; min-height: 40px; padding: 0 10px; border: 1px solid #cfd5dc; border-radius: 6px; background: #fff; color: #172334; }
+.team-budget-override { display: grid; grid-template-columns: repeat(3, 1fr); align-items: end; gap: 12px; margin-top: 20px; padding: 16px; border: 1px solid #d9dfe6; border-radius: 8px; background: #f8fafc; }
+.team-budget-override > strong { grid-column: 1 / -1; }
+.team-budget-confirm { display: flex; align-items: start; gap: 8px; grid-column: 1 / -1; color: #4e5966; font-size: 12px; line-height: 1.4; }
+.team-budget-confirm input { margin-top: 2px; }
+.team-budget-actions { flex-wrap: wrap; }
+.team-budget-actions > button { width: auto; }
+.team-budget-actions > span { flex: 1 1 24px; }
 .team-editor-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .team-membership-editor {
   display: grid;
