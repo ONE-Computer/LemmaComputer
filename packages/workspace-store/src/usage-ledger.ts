@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import type { MinimalSpendingTeam } from "@onecomputer/contracts";
+import { pinnedRateCardForDeployment } from "./pinned-rate-catalogue.js";
 
 export const usageUnits = ["input_uncached_token","cache_read_token","cache_write_token","output_token","reasoning_token","image","audio_second","request","character","second"] as const;
 export type UsageUnit = typeof usageUnits[number] | `provider:${string}`;
@@ -143,6 +144,12 @@ const nonnegativeInteger = (value: number | undefined, name: string) => {
   return normalized;
 };
 const asNullableText = (value: string | undefined) => value ?? null;
+const validateRateCard = (input: RateCardInput) => {
+  if (!input.rates.length) throw new Error("A rate card requires at least one rate");
+  if (input.source === "contract_override" && (!input.approvedBy || !input.overrideReason)) throw new Error("Contract overrides require actor and reason");
+  input.rates.forEach((rate) => { assertUnit(rate.unit); scaled(rate.amountPerUnit); scaled(rate.unitScale); });
+  assertUniqueUnits(input.rates, "rate");
+};
 
 export interface UsageAttemptAdmissionHook {
   admit(input: AttemptAdmissionInput,transaction:pg.PoolClient): Promise<{ decision: "allow" }|{ decision: "deny"; code: string }>;
@@ -157,16 +164,11 @@ export class PostgresUsageLedgerStore {
   async close() { await this.pool.end(); }
 
   async createRateCard(input: RateCardInput) {
-    if (!input.rates.length) throw new Error("A rate card requires at least one rate");
-    if (input.source === "contract_override" && (!input.approvedBy || !input.overrideReason)) throw new Error("Contract overrides require actor and reason");
-    const id = randomUUID();
-    input.rates.forEach((rate) => { assertUnit(rate.unit); scaled(rate.amountPerUnit); scaled(rate.unitScale); });
-    assertUniqueUnits(input.rates, "rate");
+    validateRateCard(input);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`INSERT INTO ai_deployment_rate_cards (id,tenant_id,provider,provider_account_id,base_model,deployment_id,region,provider_service_tier,currency,source,source_version,source_hash,catalogue_release,effective_from,effective_to,approved_at,approved_by,override_reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now(),$16,$17)`, [id,input.tenantId,input.provider,input.providerAccountId,input.baseModel,input.deploymentId,input.region??null,input.providerServiceTier??null,input.currency,input.source,input.sourceVersion,input.sourceHash,input.catalogueRelease??null,input.effectiveFrom,input.effectiveTo??null,input.approvedBy??null,input.overrideReason??null]);
-      for (const rate of input.rates) await client.query(`INSERT INTO ai_deployment_rate_card_rates (tenant_id,rate_card_id,unit,amount_per_unit,unit_scale) VALUES ($1,$2,$3,$4,$5)`, [input.tenantId,id,rate.unit,rate.amountPerUnit,rate.unitScale]);
+      const id = await this.insertRateCard(client,input);
       await client.query("COMMIT");
       return id;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
@@ -197,7 +199,15 @@ export class PostgresUsageLedgerStore {
     deploymentId: string; region?: string; providerServiceTier?: string; at: Date;
   }): Promise<EffectiveRateCard | null> {
     const client = await this.pool.connect();
-    try { return await this.readEffectiveRateCard(client, input); } finally { client.release(); }
+    try {
+      await client.query("BEGIN");
+      const selected = await this.readEffectiveRateCard(client,input);
+      await client.query("COMMIT");
+      return selected;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
   }
 
   async appendUsageEvent(input: UsageEventInput): Promise<UsageEventResult> {
@@ -376,6 +386,53 @@ export class PostgresUsageLedgerStore {
     tenantId: string; provider: string; providerAccountId: string; baseModel: string;
     deploymentId: string; region?: string; providerServiceTier?: string; at: Date;
   }): Promise<EffectiveRateCard | null> {
+    const existing = await this.queryEffectiveRateCard(client,input);
+    if (existing?.source === "contract_override") return existing;
+    const catalogue = pinnedRateCardForDeployment(input);
+    if (catalogue.status === "unsupported") return existing;
+    const isCurrentPinned = (card: EffectiveRateCard | null) => card?.source === "pinned_catalogue"
+      && card.sourceVersion === catalogue.card.sourceVersion
+      && card.sourceHash === catalogue.card.sourceHash
+      && card.effectiveFrom.getTime() === catalogue.card.effectiveFrom.getTime();
+    if (
+      catalogue.card.effectiveFrom > input.at
+      || isCurrentPinned(existing)
+    ) return existing;
+
+    const routeHash = usageFingerprint({
+      tenantId:input.tenantId,provider:input.provider,providerAccountId:input.providerAccountId,
+      baseModel:input.baseModel,deploymentId:input.deploymentId,region:asNullableText(input.region),
+      providerServiceTier:asNullableText(input.providerServiceTier),
+    });
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`ai-rate-card:${routeHash}`]);
+    const selectedAfterLock = await this.queryEffectiveRateCard(client,input);
+    if (
+      selectedAfterLock?.source === "contract_override"
+      || isCurrentPinned(selectedAfterLock)
+    ) return selectedAfterLock;
+
+    const priorCatalogueCard = await client.query(`SELECT id FROM ai_deployment_rate_cards
+      WHERE tenant_id=$1 AND provider=$2 AND provider_account_id=$3 AND base_model=$4 AND deployment_id=$5
+        AND region IS NOT DISTINCT FROM $6::text AND provider_service_tier IS NOT DISTINCT FROM $7::text
+        AND source='pinned_catalogue' AND source_version=$8 AND source_hash=$9 AND effective_from=$10
+        AND effective_to IS NULL
+      LIMIT 1`, [
+      input.tenantId,input.provider,input.providerAccountId,input.baseModel,input.deploymentId,
+      asNullableText(input.region),asNullableText(input.providerServiceTier),
+      catalogue.card.sourceVersion,catalogue.card.sourceHash,catalogue.card.effectiveFrom,
+    ]);
+    const pinnedCardId = priorCatalogueCard.rowCount
+      ? String(priorCatalogueCard.rows[0].id)
+      : await this.insertRateCard(client,catalogue.card);
+    const finalSelection = await this.queryEffectiveRateCard(client,input);
+    if (finalSelection?.source === "contract_override") return finalSelection;
+    return this.readRateCardById(client,input.tenantId,pinnedCardId);
+  }
+
+  private async queryEffectiveRateCard(client: pg.PoolClient, input: {
+    tenantId: string; provider: string; providerAccountId: string; baseModel: string;
+    deploymentId: string; region?: string; providerServiceTier?: string; at: Date;
+  }): Promise<EffectiveRateCard | null> {
     const selected = await client.query(`SELECT id,currency,source,source_version,source_hash,effective_from
       FROM ai_deployment_rate_cards
       WHERE tenant_id=$1 AND provider=$2 AND provider_account_id=$3 AND base_model=$4 AND deployment_id=$5
@@ -385,6 +442,14 @@ export class PostgresUsageLedgerStore {
         effective_from DESC, created_at DESC, id DESC LIMIT 1`, [input.tenantId,input.provider,input.providerAccountId,input.baseModel,input.deploymentId,asNullableText(input.region),asNullableText(input.providerServiceTier),input.at]);
     if (!selected.rowCount) return null;
     return this.readRateCardById(client,input.tenantId,String(selected.rows[0].id));
+  }
+
+  private async insertRateCard(client: pg.PoolClient,input: RateCardInput): Promise<string> {
+    validateRateCard(input);
+    const id = randomUUID();
+    await client.query(`INSERT INTO ai_deployment_rate_cards (id,tenant_id,provider,provider_account_id,base_model,deployment_id,region,provider_service_tier,currency,source,source_version,source_hash,catalogue_release,effective_from,effective_to,approved_at,approved_by,override_reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now(),$16,$17)`, [id,input.tenantId,input.provider,input.providerAccountId,input.baseModel,input.deploymentId,input.region??null,input.providerServiceTier??null,input.currency,input.source,input.sourceVersion,input.sourceHash,input.catalogueRelease??null,input.effectiveFrom,input.effectiveTo??null,input.approvedBy??null,input.overrideReason??null]);
+    for (const rate of input.rates) await client.query(`INSERT INTO ai_deployment_rate_card_rates (tenant_id,rate_card_id,unit,amount_per_unit,unit_scale) VALUES ($1,$2,$3,$4,$5)`, [input.tenantId,id,rate.unit,rate.amountPerUnit,rate.unitScale]);
+    return id;
   }
 
   private async readRateCardById(client: pg.PoolClient, tenantId: string, rateCardId: string): Promise<EffectiveRateCard | null> {

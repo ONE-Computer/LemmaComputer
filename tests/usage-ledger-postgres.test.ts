@@ -127,3 +127,146 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     await Promise.all([pool.end(),teams.close(),ledger.close()]);
   }
 });
+
+test("fresh PostgreSQL ledger materializes supported catalogue cards exactly once", { skip:!connectionString }, async () => {
+  const pool = new pg.Pool({ connectionString });
+  const teams = PostgresTeamStore.fromConnectionString(connectionString!);
+  const firstLedger = PostgresUsageLedgerStore.fromConnectionString(connectionString!);
+  const secondLedger = PostgresUsageLedgerStore.fromConnectionString(connectionString!);
+  const suffix = crypto.randomUUID();
+  const tenantId = `catalogue-tenant-${suffix}`;
+  const userId = `catalogue-user-${suffix}`;
+  const model = "bedrock/converse/global.anthropic.claude-sonnet-4-5-20250929-v1:0";
+  const deploymentId = "global.anthropic.claude-sonnet-4-5-20250929-v1:0";
+  const concurrentDeployment = {
+    tenantId,
+    provider:"bedrock",
+    providerAccountId:`bedrock-concurrent-${suffix}`,
+    baseModel:model,
+    deploymentId,
+    region:"ap-southeast-1",
+    providerServiceTier:"standard",
+  };
+  try {
+    await pool.query(`INSERT INTO tenants (id,external_tenant_id,display_name) VALUES ($1,$2,'Catalogue tenant')`, [tenantId,`external-${tenantId}`]);
+    await pool.query(`INSERT INTO users (id,tenant_id,email,display_name) VALUES ($1,$2,$3,'Catalogue user')`, [userId,tenantId,`${userId}@test.invalid`]);
+    await pool.query(`INSERT INTO user_roles (user_id,role,assigned_by) VALUES ($1,'employee',$1),($1,'administrator',$1)`, [userId]);
+    const team = await teams.createTeam({ tenantId,createdBy:userId,displayName:"Catalogue",description:"",ownerUserId:userId,costCenterCode:"CAT-100" });
+    await teams.assignMembership({ tenantId,teamId:team.id,userId,assignedBy:userId,makeDefault:true });
+
+    assert.equal(await firstLedger.selectEffectiveRateCard({
+      ...concurrentDeployment,
+      at:new Date("2026-07-30T23:59:59.999Z"),
+    }),null);
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards WHERE tenant_id=$1`, [tenantId])).rows[0].count,0);
+
+    const unsupported = await firstLedger.selectEffectiveRateCard({
+      tenantId,provider:"openai",providerAccountId:"future-openai",baseModel:"gpt-5.6-luna",
+      deploymentId:"future-luna",region:"eastus",providerServiceTier:"standard",
+      at:new Date("2026-08-01T00:00:00.000Z"),
+    });
+    assert.equal(unsupported,null);
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards WHERE tenant_id=$1`, [tenantId])).rows[0].count,0);
+
+    const conservativeDeployment = { ...concurrentDeployment,providerAccountId:`bedrock-conservative-${suffix}` };
+    await firstLedger.createRateCard({
+      ...conservativeDeployment,currency:"USD",source:"conservative",sourceVersion:"conservative-v1",
+      sourceHash:hash("a"),effectiveFrom:new Date("2026-07-01T00:00:00.000Z"),
+      rates:[{ unit:"input_uncached_token",amountPerUnit:"99.000000000000",unitScale:"1000000" }],
+    });
+    assert.equal((await firstLedger.selectEffectiveRateCard({
+      ...conservativeDeployment,at:new Date("2026-08-01T00:00:00.000Z"),
+    }))?.sourceVersion,"onecomputer-product-rates-2026-07-31.1");
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
+      WHERE tenant_id=$1 AND provider_account_id=$2 AND source='pinned_catalogue'`, [tenantId,conservativeDeployment.providerAccountId])).rows[0].count,1);
+
+    const olderPinnedDeployment = { ...concurrentDeployment,providerAccountId:`bedrock-older-${suffix}` };
+    await firstLedger.createRateCard({
+      ...olderPinnedDeployment,currency:"USD",source:"pinned_catalogue",sourceVersion:"catalogue-old",
+      sourceHash:hash("b"),catalogueRelease:"catalogue-old",effectiveFrom:new Date("2026-07-01T00:00:00.000Z"),
+      rates:[{ unit:"input_uncached_token",amountPerUnit:"98.000000000000",unitScale:"1000000" }],
+    });
+    assert.equal((await firstLedger.selectEffectiveRateCard({
+      ...olderPinnedDeployment,at:new Date("2026-08-01T00:00:00.000Z"),
+    }))?.sourceVersion,"onecomputer-product-rates-2026-07-31.1");
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
+      WHERE tenant_id=$1 AND provider_account_id=$2 AND source_version='onecomputer-product-rates-2026-07-31.1'`, [tenantId,olderPinnedDeployment.providerAccountId])).rows[0].count,1);
+
+    const overrideDeployment = { ...concurrentDeployment,providerAccountId:`bedrock-override-${suffix}` };
+    const existingOverrideId = await firstLedger.createRateCard({
+      ...overrideDeployment,currency:"USD",source:"contract_override",sourceVersion:"contract-existing-v1",
+      sourceHash:hash("c"),effectiveFrom:new Date("2026-07-01T00:00:00.000Z"),approvedBy:userId,
+      overrideReason:"Existing contract must remain authoritative",
+      rates:[{ unit:"input_uncached_token",amountPerUnit:"1.000000000000",unitScale:"1000000" }],
+    });
+    assert.equal((await firstLedger.selectEffectiveRateCard({
+      ...overrideDeployment,at:new Date("2026-08-01T00:00:00.000Z"),
+    }))?.id,existingOverrideId);
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
+      WHERE tenant_id=$1 AND provider_account_id=$2 AND source='pinned_catalogue'`, [tenantId,overrideDeployment.providerAccountId])).rows[0].count,0);
+
+    const selections = await Promise.all(Array.from({ length:8 }, (_,index) =>
+      (index % 2 === 0 ? firstLedger : secondLedger).selectEffectiveRateCard({
+        ...concurrentDeployment,
+        at:new Date("2026-08-01T00:00:00.000Z"),
+      }),
+    ));
+    assert.ok(selections.every((selection) => selection?.id === selections[0]?.id));
+    assert.equal(selections[0]?.currency,"USD");
+    assert.equal(selections[0]?.source,"pinned_catalogue");
+    assert.equal(selections[0]?.sourceVersion,"onecomputer-product-rates-2026-07-31.1");
+    assert.deepEqual(selections[0]?.rates, [
+      { unit:"input_uncached_token",amountPerUnit:"3.000000000000",unitScale:"1000000.000000" },
+      { unit:"output_token",amountPerUnit:"15.000000000000",unitScale:"1000000.000000" },
+      { unit:"reasoning_token",amountPerUnit:"15.000000000000",unitScale:"1000000.000000" },
+      { unit:"request",amountPerUnit:"0.000000000000",unitScale:"1.000000" },
+    ]);
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
+      WHERE tenant_id=$1 AND provider_account_id=$2 AND source='pinned_catalogue'`, [tenantId,concurrentDeployment.providerAccountId])).rows[0].count,1);
+
+    const teamSnapshot = (await teams.getCurrentDefaultSpendingTeam(tenantId,userId))!;
+    const eventOnlyDeployment = { ...concurrentDeployment,providerAccountId:`bedrock-event-${suffix}` };
+    const admission = await firstLedger.admitAttempt({
+      tenantId,sourceSystem:"litellm",sourceAttemptId:`catalogue-attempt-${suffix}`,subjectId:userId,team:teamSnapshot,
+      taskId:"catalogue-task",taskBindingProvenance:"unbound_generated",contextKind:"background",
+      requestedAlias:"balanced",requestedServiceClass:"balanced",selectedServiceClass:"balanced",
+      attemptKind:"inference",resolvedProvider:eventOnlyDeployment.provider,
+      providerAccountId:eventOnlyDeployment.providerAccountId,resolvedModel:eventOnlyDeployment.baseModel,
+      resolvedDeploymentId:eventOnlyDeployment.deploymentId,region:eventOnlyDeployment.region,
+      providerServiceTier:eventOnlyDeployment.providerServiceTier,admittedAt:new Date("2026-08-01T00:00:00.000Z"),
+    });
+    assert.equal(admission.status,"created");
+    const usage = await firstLedger.appendUsageEvent({
+      tenantId,admissionId:admission.admissionId!,sourceSystem:"litellm",sourceEventId:`catalogue-event-${suffix}`,
+      eventType:"usage",occurredAt:new Date("2026-08-01T00:00:01.000Z"),outcome:"success",
+      units:[
+        { unit:"input_uncached_token",quantity:"1000" },
+        { unit:"output_token",quantity:"100" },
+        { unit:"request",quantity:"1" },
+      ],
+    });
+    assert.equal(usage.priceStatus,"priced");
+    assert.equal(usage.providerCost,"0.004500000000");
+    assert.equal(usage.currency,"USD");
+    const eventEvidence = await pool.query(`SELECT rate_card_source,rate_card_source_version FROM ai_usage_events WHERE tenant_id=$1 AND id=$2`, [tenantId,usage.eventId]);
+    assert.equal(eventEvidence.rows[0].rate_card_source,"pinned_catalogue");
+    assert.equal(eventEvidence.rows[0].rate_card_source_version,"onecomputer-product-rates-2026-07-31.1");
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
+      WHERE tenant_id=$1 AND provider_account_id=$2 AND source='pinned_catalogue'`, [tenantId,eventOnlyDeployment.providerAccountId])).rows[0].count,1);
+
+    const overrideId = await firstLedger.createRateCard({
+      ...concurrentDeployment,currency:"USD",source:"contract_override",sourceVersion:"catalogue-contract-v1",
+      sourceHash:hash("f"),effectiveFrom:new Date("2026-08-02T00:00:00.000Z"),approvedBy:userId,
+      overrideReason:"Contract precedence qualification",
+      rates:[{ unit:"input_uncached_token",amountPerUnit:"1.000000000000",unitScale:"1000000" }],
+    });
+    assert.equal((await firstLedger.selectEffectiveRateCard({
+      ...concurrentDeployment,
+      at:new Date("2026-08-03T00:00:00.000Z"),
+    }))?.id,overrideId);
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
+      WHERE tenant_id=$1 AND provider_account_id=$2 AND source='pinned_catalogue'`, [tenantId,concurrentDeployment.providerAccountId])).rows[0].count,1);
+  } finally {
+    await Promise.all([pool.end(),teams.close(),firstLedger.close(),secondLedger.close()]);
+  }
+});

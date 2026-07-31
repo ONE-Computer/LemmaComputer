@@ -41,10 +41,10 @@ unpriced; hard-budget admission must fail closed rather than substitute a rate.
 ## Control integration
 
 After provider configuration has produced its stable deployment descriptor,
-Control should call:
+Control's pre-dispatch budget path should call the ledger store:
 
 ```ts
-const result = pinnedRateCardForDeployment({
+const rateCard = await usageLedger.selectEffectiveRateCard({
   tenantId,
   provider: modelInfo.provider,
   providerAccountId: modelInfo.providerAccountId,
@@ -52,14 +52,21 @@ const result = pinnedRateCardForDeployment({
   deploymentId: modelInfo.deploymentId,
   region: modelInfo.region,
   providerServiceTier: modelInfo.providerServiceTier,
+  at: new Date(),
 });
 ```
 
-For `supported`, Control must ensure the card exists idempotently using the
-tenant, full concrete deployment dimensions, effective time, and source hash
-before invoking the ledger's `createRateCard`. It must not blindly insert a
-duplicate on every startup. For `unsupported`, Control should preserve the
-reason in operational diagnostics and leave the deployment unpriced.
+The store preserves an effective contract override immediately. Otherwise, it
+evaluates the local catalogue and, for a supported effective release, takes a
+tenant-and-full-route advisory transaction lock, rechecks, materializes the
+exact pinned card if necessary, and reselects. Concurrent first use therefore
+creates one card. Current pinned releases supersede conservative and older
+pinned cards; unsupported routes remain `null`. Historical lookups before the
+catalogue entry's effective time do not back-price or materialize it.
+
+Usage-event pricing uses the same lookup within the event transaction, so a
+fresh installation is priced even if no pre-dispatch lookup ran first.
+Callers must not insert catalogue cards directly on startup.
 
 The catalogue is packaged code and performs no egress. A new price, provider,
 model, region, tier, currency, or effective interval requires a new release
