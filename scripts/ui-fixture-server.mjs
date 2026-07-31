@@ -234,7 +234,7 @@ const chatSession = {
   updatedAt: now,
   agentCatalogId: "hermes-claw",
 };
-let chatMessages = [
+const initialChatMessages = [
   {
     id: "fixture-user-message-1",
     role: "user",
@@ -254,6 +254,7 @@ let chatMessages = [
     ],
   },
 ];
+const chatMessages = structuredClone(initialChatMessages);
 const activeFixtureTurns = new Map();
 
 const reviewedSkills = [{
@@ -775,6 +776,15 @@ const server = http.createServer((request, response) => {
   const key = `${request.method} ${url.pathname}`;
   response.setHeader("content-type", "application/json");
   response.setHeader("cache-control", "no-store");
+  if (key === "POST /__test/reset/chat") {
+    for (const activeTurn of activeFixtureTurns.values()) {
+      if (activeTurn.completionTimer) clearTimeout(activeTurn.completionTimer);
+    }
+    activeFixtureTurns.clear();
+    chatMessages.splice(0, chatMessages.length, ...structuredClone(initialChatMessages));
+    response.end(JSON.stringify({ reset: true }));
+    return;
+  }
   const activityMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/([^/]+)\/sessions\/([^/]+)\/turns\/([^/]+)\/activity(\/stream)?$/);
   if (request.method === "GET" && activityMatch) {
     const [, requestedWorkspaceId, requestedAgentId, requestedSessionId, requestedTurnId, streamPath] = activityMatch.map((value) => value ? decodeURIComponent(value) : value);
