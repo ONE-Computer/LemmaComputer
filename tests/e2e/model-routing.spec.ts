@@ -132,6 +132,90 @@ test("administrator can configure the first alias mapping from provider inventor
   await expect(page.getByText("Local mapping draft saved")).toBeVisible();
 });
 
+test("administrator can set up a published mapping for a Team and start first shadow rollout", async ({ page }) => {
+  const mappingId = "22222222-2222-4222-8222-222222222222";
+  const policyId = "33333333-3333-4333-8333-333333333333";
+  const deployments = [
+    { id: "44444444-4444-4444-8444-444444444444", serviceClass: "lite", providerModel: "gpt-luna", contextTokens: 32000 },
+    { id: "55555555-5555-4555-8555-555555555555", serviceClass: "balanced", providerModel: "gpt-terra", contextTokens: 32000 },
+    { id: "66666666-6666-4666-8666-666666666666", serviceClass: "pro", providerModel: "gpt-sol", contextTokens: 128000 },
+  ].map((item, index) => ({
+    ...item,
+    provider: "openai",
+    providerAccountId: "openai-primary",
+    providerDeployment: `openai/${item.providerModel}`,
+    region: "sg",
+    providerServiceTier: "standard",
+    rateCardId: `99999999-9999-4999-8999-99999999999${index + 1}`,
+    capabilities: { vision: item.serviceClass !== "lite", tools: item.serviceClass !== "lite", streaming: true, contextTokens: item.contextTokens, outputTokens: 8192, residency: ["sg"] },
+    approved: true,
+    evaluationPassed: true,
+  }));
+  const rates = [
+    { unit: "input_uncached_token", amountPerUnit: "1", unitScale: "1000000" },
+    { unit: "output_token", amountPerUnit: "2", unitScale: "1000000" },
+    { unit: "cache_read_token", amountPerUnit: "0.1", unitScale: "1000000" },
+    { unit: "cache_write_token", amountPerUnit: "1.25", unitScale: "1000000" },
+  ];
+  let policy = null;
+  let rollout = null;
+
+  await page.route("**/api/v1/admin/routing/mappings/latest", async (route) => {
+    await route.fulfill({ json: { mapping: { id: mappingId, tenantId: "acme", revisionNote: "Initial governed mapping", createdBy: "admin", createdAt: "2026-07-31T00:00:00.000Z", deployments } } });
+  });
+  await page.route("**/api/v1/admin/ai-usage/rate-cards", async (route) => {
+    await route.fulfill({ json: { rateCards: deployments.map((deployment) => ({ id: deployment.rateCardId, provider: "openai", providerAccountId: "openai-primary", baseModel: deployment.providerModel, deploymentId: deployment.providerDeployment, region: "sg", providerServiceTier: "standard", currency: "USD", sourceVersion: "verified-2026-07-31", rates })) } });
+  });
+  await page.route(/\/api\/v1\/admin\/teams\/[^/]+\/routing$/, async (route) => {
+    await route.fulfill({ json: { teamId: "11111111-1111-4111-8111-111111111111", policy, rollout, review: null, deployments: policy ? deployments : [] } });
+  });
+  await page.route(/\/api\/v1\/admin\/teams\/[^/]+\/routing\/policy$/, async (route) => {
+    const savedPolicy = route.request().postDataJSON();
+    policy = { id: policyId, ...savedPolicy, createdAt: "2026-07-31T00:00:00.000Z" };
+    await route.fulfill({ json: { id: policyId } });
+  });
+  await page.route(/\/api\/v1\/admin\/teams\/[^/]+\/routing\/shadow-report$/, async (route) => {
+    await route.fulfill({ json: { teamId: "11111111-1111-4111-8111-111111111111", sampleSize: 0, fallbackRate: "0", errorRate: "0", regretRate: "0", routerOverheadMs: "0", decisions: [] } });
+  });
+  await page.route(/\/api\/v1\/admin\/teams\/[^/]+\/routing\/rollout$/, async (route) => {
+    const savedRollout = route.request().postDataJSON();
+    rollout = { id: "77777777-7777-4777-8777-777777777777", tenantId: "acme", teamId: "11111111-1111-4111-8111-111111111111", ...savedRollout, evidenceReviewId: null, previousRolloutVersionId: null, createdBy: "admin", createdAt: "2026-07-31T00:00:00.000Z" };
+    await route.fulfill({ status: 201, json: { rollout } });
+  });
+
+  await page.goto("/?view=ai-control-plane&section=model-routes");
+
+  await expect(page.locator(".route-readonly-badge")).toHaveText("Published · not active");
+  await expect(page.getByText("Policy not configured", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set up Team rollout" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Save Team policy" })).toHaveCount(0);
+
+  const policyRequest = page.waitForRequest((request) => request.method() === "PUT" && /\/api\/v1\/admin\/teams\/[^/]+\/routing\/policy$/.test(request.url()));
+  await page.getByRole("button", { name: "Set up Team rollout" }).click();
+
+  await expect(page.getByText("Finance is ready for shadow evaluation.")).toBeVisible();
+  const savedPolicy = (await policyRequest).postDataJSON();
+  expect(savedPolicy.mappingVersionId).toBe(mappingId);
+  expect(savedPolicy.billingCurrency).toBe("USD");
+  expect(savedPolicy.identity.allowedDeploymentIds).toEqual(deployments.map((deployment) => deployment.id));
+  expect(savedPolicy.serviceClassPolicies.balanced.safeDefault).toBe(true);
+  await expect(page.locator(".route-readonly-badge")).toHaveText("Ready for shadow");
+  await expect(page.getByRole("button", { name: "Start shadow mode" })).toBeEnabled();
+
+  const rolloutRequest = page.waitForRequest((request) => request.method() === "POST" && /\/api\/v1\/admin\/teams\/[^/]+\/routing\/rollout$/.test(request.url()));
+  await page.getByRole("button", { name: "Start shadow mode" }).click();
+
+  const savedRollout = (await rolloutRequest).postDataJSON();
+  expect(savedRollout.mode).toBe("shadow");
+  expect(savedRollout.policyVersionId).toBe(policyId);
+  expect(savedRollout.mappingVersionId).toBe(mappingId);
+  expect(savedRollout.fixedDeploymentId).toBe(deployments[1].id);
+  await expect(page.locator(".route-readonly-badge")).toHaveText("Shadow evaluation");
+  await expect(page.getByText("Shadow evaluation started for this Team.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start shadow mode" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Enable production routing" })).toBeDisabled();
+});
+
 test("mapping editor keeps a clear vertical rhythm at compact width", async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 900 });
   await page.goto("/?view=ai-control-plane&section=model-routes");

@@ -473,6 +473,51 @@
   border-top: 1px solid #e4e8ec;
 }
 
+.route-team-setup {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #d8e2ec;
+  border-radius: 11px;
+  background: #f7faff;
+}
+
+.route-team-setup > svg {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  color: #315f8f;
+}
+
+.route-team-setup > div {
+  display: grid;
+  gap: 5px;
+  margin-right: auto;
+}
+
+.route-team-setup strong {
+  color: #21344a;
+  font-size: 14px;
+}
+
+.route-team-setup span,
+.route-team-setup small {
+  color: #657383;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.route-team-setup small {
+  color: #9a5d0c;
+  font-weight: 650;
+}
+
+.route-team-setup .primary-button {
+  width: auto;
+  flex: 0 0 auto;
+}
+
 .route-helper {
   margin: -6px 0 0;
   color: #727d88;
@@ -713,6 +758,15 @@
   }
 
   .route-team-picker {
+    width: 100%;
+  }
+
+  .route-team-setup {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .route-team-setup .primary-button {
     width: 100%;
   }
 
