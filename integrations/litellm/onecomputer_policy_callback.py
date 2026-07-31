@@ -331,13 +331,23 @@ def _attempt_kind(kwargs, call_type):
     value = str(getattr(call_type, "value", call_type) or "")
     if "embedding" in value:
         return "embedding"
+    fallback_depth = kwargs.get("fallback_depth")
+    if isinstance(fallback_depth, (int, float)) and fallback_depth > 0:
+        return "fallback"
     previous = kwargs.get("previous_models")
+    for name in ("metadata", "litellm_metadata"):
+        candidate = kwargs.get(name)
+        if not isinstance(previous, list) and isinstance(candidate, dict):
+            previous = candidate.get("previous_models")
     if not isinstance(previous, list):
         params = kwargs.get("litellm_params")
-        previous = params.get("previous_models") if isinstance(params, dict) else None
+        if isinstance(params, dict):
+            previous = params.get("previous_models")
+            metadata = params.get("metadata")
+            if not isinstance(previous, list) and isinstance(metadata, dict):
+                previous = metadata.get("previous_models")
     if isinstance(previous, list) and previous:
-        models = {_as_dict(item).get("model") for item in previous}
-        return "fallback" if len(models) > 1 else "retry"
+        return "retry"
     return "inference"
 
 
@@ -517,7 +527,9 @@ def _normalized_units(provider, response_obj):
     cache_read = _integer(usage, "cache_read_input_tokens", "cacheReadInputTokens") or _integer(prompt_details, "cached_tokens")
     cache_write = _integer(usage, "cache_creation_input_tokens", "cache_write_input_tokens", "cacheWriteInputTokens")
     reasoning = _integer(usage, "reasoning_tokens") or _integer(output_details, "reasoning_tokens")
-    input_uncached = prompt if provider in ("anthropic", "bedrock") else max(0, prompt - cache_read - cache_write)
+    input_uncached = prompt - cache_read - cache_write
+    if input_uncached < 0:
+        raise ValueError("provider cache buckets exceed the normalized prompt total")
     output = max(0, output_total - reasoning)
     values = [
         ("input_uncached_token", input_uncached, False),
@@ -635,20 +647,20 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         return kwargs
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-        payload = _completion_payload(kwargs, response_obj, start_time, end_time, "success")
-        if payload is None:
-            return
         try:
+            payload = _completion_payload(kwargs, response_obj, start_time, end_time, "success")
+            if payload is None:
+                return
             await asyncio.to_thread(_usage_request, "events", payload)
         except Exception:
             # Completion telemetry must never replace a successful model response.
             return
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
-        payload = _completion_payload(kwargs, response_obj, start_time, end_time, "failure")
-        if payload is None:
-            return
         try:
+            payload = _completion_payload(kwargs, response_obj, start_time, end_time, "failure")
+            if payload is None:
+                return
             await asyncio.to_thread(_usage_request, "events", payload)
         except Exception:
             return
