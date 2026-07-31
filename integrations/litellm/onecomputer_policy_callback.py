@@ -244,19 +244,40 @@ def _verified_usage_chain(value):
         return None
 
 
-def _request_usage_context_and_strip_reserved(kwargs):
+def _request_usage_context_and_strip_reserved(kwargs, source_attempt_id=None):
     """Recover only callback-signed lineage or the proxy-owned initial binding."""
     task_binding = None
     parent_attempt_id = None
+    lineage_found = False
     for metadata in _metadata_dicts(kwargs):
         chain = _verified_usage_chain(metadata.get(USAGE_CHAIN_KEY))
         if chain is not None:
             candidate = chain.get("taskBinding")
-            parent = chain.get("admissionId")
             if task_binding is None and isinstance(candidate, str):
                 task_binding = candidate
-            if parent_attempt_id is None and isinstance(parent, str):
-                parent_attempt_id = parent
+            prior_admission_id = chain.get("admissionId")
+            prior_source_attempt_id = chain.get("sourceAttemptId")
+            original_parent_attempt_id = chain.get("originalParentAttemptId")
+            original_parent_is_valid = (
+                original_parent_attempt_id is None
+                or isinstance(original_parent_attempt_id, str)
+            )
+            if not lineage_found and isinstance(prior_admission_id, str):
+                if (
+                    isinstance(source_attempt_id, str)
+                    and prior_source_attempt_id == source_attempt_id
+                    and "originalParentAttemptId" in chain
+                    and original_parent_is_valid
+                ):
+                    # LiteLLM may enter the deployment hook again for the same
+                    # concrete invocation. Preserve the parent admitted the
+                    # first time instead of making the attempt its own parent.
+                    parent_attempt_id = original_parent_attempt_id
+                else:
+                    # A different concrete retry/fallback descends from the
+                    # prior admitted invocation.
+                    parent_attempt_id = prior_admission_id
+                lineage_found = True
         requester = metadata.get("requester_metadata")
         if isinstance(requester, dict):
             candidate = requester.get("onecomputer_task_binding")
@@ -396,7 +417,9 @@ def _source_attempt_id(kwargs, route):
     return f"litellm-attempt-{digest}"
 
 
-def _set_usage_state(kwargs, state, task_binding):
+def _set_usage_state(
+    kwargs, state, task_binding, source_attempt_id, original_parent_attempt_id
+):
     kwargs[USAGE_STATE_KEY] = state
     metadata = kwargs.get("metadata")
     if not isinstance(metadata, dict):
@@ -406,6 +429,8 @@ def _set_usage_state(kwargs, state, task_binding):
     metadata[USAGE_CHAIN_KEY] = _signed_usage_chain({
         "admissionId": state["admissionId"],
         "taskBinding": task_binding,
+        "sourceAttemptId": source_attempt_id,
+        "originalParentAttemptId": original_parent_attempt_id,
     })
 
 
@@ -651,7 +676,6 @@ def _completion_payload(kwargs, response_obj, start_time, end_time, outcome):
 
 class OneComputerMcpPolicyCallback(CustomLogger):
     async def async_pre_call_deployment_hook(self, kwargs, call_type):
-        task_binding, parent_attempt_id = _request_usage_context_and_strip_reserved(kwargs)
         image_input = _contains_image_input(kwargs.get("messages")) or _contains_image_input(
             kwargs.get("input")
         )
@@ -665,6 +689,10 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             )
         route = _model_info(kwargs)
         try:
+            source_attempt_id = _source_attempt_id(kwargs, route) if route else None
+            task_binding, parent_attempt_id = _request_usage_context_and_strip_reserved(
+                kwargs, source_attempt_id
+            )
             payload = _admission_payload(
                 kwargs,
                 call_type,
@@ -694,7 +722,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             "tenantId": payload["tenantId"],
             "provider": payload["resolvedProvider"],
             "billableRequestUnit": route.get("onecomputer_billable_request_unit") is True,
-        }, task_binding)
+        }, task_binding, payload["sourceAttemptId"], payload.get("parentAttemptId"))
         return kwargs
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):

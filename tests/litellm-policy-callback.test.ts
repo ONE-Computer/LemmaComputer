@@ -116,6 +116,8 @@ admission_payload = module["_admission_payload"]
 budget_bounds = module["_budget_bounds"]
 set_usage_state = module["_set_usage_state"]
 request_context = module["_request_usage_context_and_strip_reserved"]
+source_attempt_id = module["_source_attempt_id"]
+verified_usage_chain = module["_verified_usage_chain"]
 completion_payload = module["_completion_payload"]
 callback_type = module["OneComputerMcpPolicyCallback"]
 
@@ -272,7 +274,38 @@ set_usage_state(first, {
     "admissionId": "admission-first",
     "tenantId": "tenant-real",
     "provider": "openai",
-}, task_binding)
+}, task_binding, first_payload["sourceAttemptId"], first_payload.get("parentAttemptId"))
+
+# A second entry into the deployment hook for the same concrete invocation
+# must preserve the original no-parent lineage and duplicate source identity.
+first_chain = verified_usage_chain(first["metadata"]["onecomputer_usage_chain"])
+assert first_chain == {
+    "admissionId": "admission-first",
+    "originalParentAttemptId": None,
+    "sourceAttemptId": first_payload["sourceAttemptId"],
+    "taskBinding": task_binding,
+}
+first_reentry_binding, first_reentry_parent = request_context(
+    first, first_payload["sourceAttemptId"]
+)
+first_reentry_payload = admission_payload(
+    first,
+    "acompletion",
+    first_reentry_binding,
+    first_reentry_parent,
+    budget_bounds(first, openai_route),
+)
+assert first_reentry_binding == task_binding
+assert first_reentry_parent is None
+assert first_reentry_payload["sourceAttemptId"] == first_payload["sourceAttemptId"]
+assert "parentAttemptId" not in first_reentry_payload
+
+# Restore the chain after the duplicate response for the distinct retry.
+set_usage_state(first, {
+    "admissionId": "admission-first",
+    "tenantId": "tenant-real",
+    "provider": "openai",
+}, first_reentry_binding, first_reentry_payload["sourceAttemptId"], first_reentry_payload.get("parentAttemptId"))
 retry = {
     "user_api_key_dict": Auth(),
     "litellm_params": {"model_info": openai_route},
@@ -285,7 +318,8 @@ retry = {
     "litellm_call_id": "litellm-call-stable",
     "litellm_metadata": {"attempted_retries": 1},
 }
-retry_binding, retry_parent = request_context(retry)
+retry_source = source_attempt_id(retry, openai_route)
+retry_binding, retry_parent = request_context(retry, retry_source)
 assert retry_binding == task_binding
 assert retry_parent == "admission-first"
 retry_payload = admission_payload(
@@ -299,7 +333,7 @@ set_usage_state(retry, {
     "admissionId": "admission-retry",
     "tenantId": "tenant-real",
     "provider": "openai",
-}, retry_binding)
+}, retry_binding, retry_payload["sourceAttemptId"], retry_payload.get("parentAttemptId"))
 anthropic_route = {
     "onecomputer_provider": "anthropic",
     "onecomputer_provider_account_id": "account-real",
@@ -321,7 +355,8 @@ fallback = {
     "litellm_call_id": "litellm-call-stable",
     "litellm_metadata": {"attempted_retries": 0},
 }
-fallback_binding, fallback_parent = request_context(fallback)
+fallback_source = source_attempt_id(fallback, anthropic_route)
+fallback_binding, fallback_parent = request_context(fallback, fallback_source)
 fallback_payload = admission_payload(
     fallback, "acompletion", fallback_binding, fallback_parent, budget_bounds(fallback, anthropic_route)
 )
@@ -336,6 +371,22 @@ fallback_replay = admission_payload(
     fallback, "acompletion", fallback_binding, fallback_parent, budget_bounds(fallback, anthropic_route)
 )
 assert fallback_replay["sourceAttemptId"] == fallback_payload["sourceAttemptId"]
+
+# A tampered request chain cannot invent a parent admission.
+signed_chain = first["metadata"]["onecomputer_usage_chain"]
+tampered_chain = signed_chain[:-1] + ("0" if signed_chain[-1] != "0" else "1")
+tampered = {
+    "metadata": {
+        "onecomputer_task_binding": "proxy.initial-binding",
+        "onecomputer_usage_chain": tampered_chain,
+    },
+}
+tampered_binding, tampered_parent = request_context(
+    tampered, first_payload["sourceAttemptId"]
+)
+assert tampered_binding == "proxy.initial-binding"
+assert tampered_parent is None
+assert all(not key.startswith("onecomputer_") for key in tampered["metadata"])
 
 completion = completion_payload(
     {"metadata": retry["metadata"], "messages": first["messages"]},
