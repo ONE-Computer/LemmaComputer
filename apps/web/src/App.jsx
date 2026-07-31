@@ -699,7 +699,84 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
   );
 }
 
-function AdminScreen({ users, currentUserId, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
+function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUpdate, onArchive, onAssignMember, onRemoveMember, onSetDefault }) {
+  const [editor, setEditor] = useState(null);
+  const [memberUserId, setMemberUserId] = useState("");
+  const userOptions = users.filter((user) => user.status === "active").map((user) => ({ value: user.userId, label: `${user.displayName} · ${user.email}` }));
+  const userName = (userId) => users.find((user) => user.userId === userId)?.displayName ?? userId;
+  const openCreate = () => {
+    setMemberUserId("");
+    setEditor({ id: null, displayName: "", description: "", ownerUserId: userOptions[0]?.value ?? "", costCenterCode: "", status: "active", isRolloutFallback: false });
+  };
+  const openEdit = async (team) => {
+    setMemberUserId(userOptions[0]?.value ?? "");
+    const detail = await onLoad(team.id);
+    if (detail) setEditor({ ...detail, costCenterCode: detail.costCenterCode ?? "" });
+  };
+  const save = async () => {
+    if (!editor?.displayName.trim() || !editor.ownerUserId) return;
+    const input = { displayName: editor.displayName.trim(), description: editor.description.trim(), ownerUserId: editor.ownerUserId, costCenterCode: editor.costCenterCode.trim() || null };
+    const saved = editor.id ? await onUpdate(editor.id, input) : await onCreate(input);
+    if (saved) setEditor(null);
+  };
+  return (
+    <section className="admin-team-section" aria-labelledby="admin-teams-heading">
+      <div className="admin-team-heading">
+        <div><p>Spend allocation</p><h2 id="admin-teams-heading">Teams</h2><span>Team membership decides where AI usage is charged. It does not grant workspace, model, tool, connector, or administrator access.</span></div>
+        <button className="primary-button compact-button" type="button" onClick={openCreate}>Add Team</button>
+      </div>
+      {loading ? <p className="admin-team-empty">Loading Teams…</p> : !teams.length ? <p className="admin-team-empty">No Teams have been created yet.</p> : <div className="admin-team-list">
+        {teams.map((team) => <article key={team.id}>
+          <div><strong>{team.displayName}</strong><small>{team.description || "No description"}</small></div>
+          <div><strong>{team.costCenterCode || "No cost-center code"}</strong><small>{team.activeMemberCount} active {team.activeMemberCount === 1 ? "member" : "members"}</small></div>
+          <span className={`admin-team-status ${team.status}`}>{team.status === "archived" ? "Archived" : team.isRolloutFallback ? "Rollout fallback" : "Active"}</span>
+          {!team.isRolloutFallback && team.status === "active" && <button className="secondary-button" type="button" disabled={busy} onClick={() => openEdit(team)}>Manage</button>}
+        </article>)}
+      </div>}
+      {editor && <ModalDialog title={editor.id ? `Manage ${editor.displayName}` : "Create Team"} description="A Team is an internal spend-allocation group. The optional cost-center code is an external accounting reference only." eyebrow="Organization spend" labelledBy="team-editor-title" onClose={busy ? () => undefined : () => setEditor(null)}>
+        <div className="team-editor-fields">
+          <label className="modal-field"><span>Team name</span><input name="team-name" value={editor.displayName} disabled={busy || editor.isRolloutFallback} onChange={(event) => setEditor({ ...editor, displayName: event.target.value })} /></label>
+          <label className="modal-field"><span>Description</span><input name="team-description" value={editor.description} disabled={busy || editor.isRolloutFallback} onChange={(event) => setEditor({ ...editor, description: event.target.value })} /></label>
+          <label className="modal-field"><span>Owner / budget manager</span><SelectMenu value={editor.ownerUserId} disabled={busy || editor.isRolloutFallback} onValueChange={(ownerUserId) => setEditor({ ...editor, ownerUserId })} ariaLabel="Team owner or budget manager" options={userOptions} /></label>
+          <label className="modal-field"><span>Cost-center code (optional)</span><input name="team-cost-center-code" value={editor.costCenterCode} disabled={busy || editor.isRolloutFallback} onChange={(event) => setEditor({ ...editor, costCenterCode: event.target.value })} /></label>
+        </div>
+        {editor.id && <div className="team-membership-editor">
+          <div><strong>Spending membership</strong><span>Assign a member, then choose whether this Team should become their default charge destination.</span></div>
+          <div className="team-membership-list" role="region" aria-label="Team membership history">
+            {!editor.memberships?.length ? <p>No membership history yet.</p> : editor.memberships.map((membership) => <article key={membership.id}>
+              <div>
+                <strong>{userName(membership.userId)}</strong>
+                <small>{membership.effectiveTo ? `Ended ${new Date(membership.effectiveTo).toLocaleDateString()}` : `Active since ${new Date(membership.effectiveFrom).toLocaleDateString()}`}</small>
+              </div>
+              {membership.isDefaultSpendingTeam && <span className="admin-team-status active">Current default</span>}
+              {!membership.effectiveTo && !membership.isDefaultSpendingTeam && <button className="connection-quiet-button danger-button" type="button" disabled={busy} onClick={async () => {
+                const detail = await onRemoveMember(editor.id, membership.userId);
+                if (detail) setEditor({ ...detail, costCenterCode: detail.costCenterCode ?? "" });
+              }}>Remove</button>}
+            </article>)}
+          </div>
+          <SelectMenu value={memberUserId} disabled={busy} onValueChange={setMemberUserId} ariaLabel="Team member" options={userOptions} />
+          <button className="secondary-button" type="button" disabled={busy || !memberUserId} onClick={async () => {
+            const detail = await onAssignMember(editor.id, memberUserId);
+            if (detail) setEditor({ ...detail, costCenterCode: detail.costCenterCode ?? "" });
+          }}>Assign member</button>
+          <button className="secondary-button" type="button" disabled={busy || !memberUserId} onClick={async () => {
+            const detail = await onSetDefault(editor.id, memberUserId);
+            if (detail) setEditor({ ...detail, costCenterCode: detail.costCenterCode ?? "" });
+          }}>Make default</button>
+        </div>}
+        <div className="modal-actions team-editor-actions">
+          {editor.id && <button className="connection-quiet-button danger-button" type="button" disabled={busy} onClick={async () => { if (await onArchive(editor)) setEditor(null); }}>Archive Team</button>}
+          <span />
+          <button className="secondary-button" type="button" disabled={busy} onClick={() => setEditor(null)}>Cancel</button>
+          <button className="primary-button" type="button" disabled={busy || !editor.displayName.trim() || !editor.ownerUserId} onClick={save}>{busy ? "Saving" : editor.id ? "Save changes" : "Create Team"}</button>
+        </div>
+      </ModalDialog>}
+    </section>
+  );
+}
+
+function AdminScreen({ users, teams, currentUserId, loading, teamsLoading, teamsBusy, busyUserId, onLoadTeam, onCreateTeam, onUpdateTeam, onArchiveTeam, onAssignTeamMember, onRemoveTeamMember, onSetDefaultTeam, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
   return (
     <div className="secondary-screen admin-screen">
       <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
@@ -721,6 +798,19 @@ function AdminScreen({ users, currentUserId, loading, busyUserId, onAssign, onRe
         </div>
         <button className="secondary-button" type="button" onClick={onConfigureConnector}>Open connector settings<ChevronRight16Regular aria-hidden="true" /></button>
       </section>
+      <TeamsAdminSection
+        teams={teams}
+        users={users}
+        loading={teamsLoading}
+        onLoad={onLoadTeam}
+        busy={teamsBusy}
+        onCreate={onCreateTeam}
+        onUpdate={onUpdateTeam}
+        onArchive={onArchiveTeam}
+        onAssignMember={onAssignTeamMember}
+        onRemoveMember={onRemoveTeamMember}
+        onSetDefault={onSetDefaultTeam}
+      />
       <section className="admin-user-list" aria-label="Organization users">
         {loading ? <p>Loading organization users…</p> : users.map((item) => (
           <article key={item.userId}>
@@ -876,7 +966,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
   );
 }
 
-function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onOpenProviderSettings, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, providerSettings, providerSettingsLoading, providerSettingsBusy, providerSettingsError, onSaveProviderSetting, onTestProviderSetting, onDisableProviderSetting, onDeleteProviderSetting, users, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
+function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onOpenProviderSettings, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, providerSettings, providerSettingsLoading, providerSettingsBusy, providerSettingsError, onSaveProviderSetting, onTestProviderSetting, onDisableProviderSetting, onDeleteProviderSetting, users, teams, loading, teamsLoading, teamsBusy, busyUserId, onLoadTeam, onCreateTeam, onUpdateTeam, onArchiveTeam, onAssignTeamMember, onRemoveTeamMember, onSetDefaultTeam, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
   if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
     return <WorkspaceConfigurationScreen
       settings={adminSandboxSettings}
@@ -905,9 +995,19 @@ function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCrede
   if (view === "admin" && isAdmin) {
     return <AdminScreen
       users={users}
+      teams={teams}
       currentUserId={currentUserId}
       loading={loading}
+      teamsLoading={teamsLoading}
+      teamsBusy={teamsBusy}
       busyUserId={busyUserId}
+      onLoadTeam={onLoadTeam}
+      onCreateTeam={onCreateTeam}
+      onUpdateTeam={onUpdateTeam}
+      onArchiveTeam={onArchiveTeam}
+      onAssignTeamMember={onAssignTeamMember}
+      onSetDefaultTeam={onSetDefaultTeam}
+      onRemoveTeamMember={onRemoveTeamMember}
       onAssign={onAssign}
       onRevoke={onRevoke}
       onStatusChange={onStatusChange}
@@ -2887,6 +2987,9 @@ export function App() {
   const [chatHistoryLoadingMore, setChatHistoryLoadingMore] = useState(false);
   const [chatHistoryLoadRequest, setChatHistoryLoadRequest] = useState(0);
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminTeams, setAdminTeams] = useState([]);
+  const [adminTeamsLoading, setAdminTeamsLoading] = useState(false);
+  const [adminTeamsBusy, setAdminTeamsBusy] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyUserId, setAdminBusyUserId] = useState("");
   const [adminWorkspaceTarget, setAdminWorkspaceTarget] = useState(null);
@@ -3211,13 +3314,15 @@ export function App() {
   useEffect(() => {
     if (activeNav !== "Settings" || settingsView !== "admin" || !session?.roles.includes("administrator")) return;
     setAdminLoading(true);
-    Promise.all([adminApi.users(), adminApi.mcpPolicy()])
-      .then(([users, policy]) => {
+    setAdminTeamsLoading(true);
+    Promise.all([adminApi.users(), adminApi.mcpPolicy(), adminApi.teams(true)])
+      .then(([users, policy, teams]) => {
         setAdminUsers(users.users);
         setMcpPolicy(policy);
+        setAdminTeams(teams.teams);
       })
       .catch(showApiError)
-      .finally(() => setAdminLoading(false));
+      .finally(() => { setAdminLoading(false); setAdminTeamsLoading(false); });
   }, [activeNav, settingsView, session?.user.id]);
 
   useEffect(() => {
@@ -3959,6 +4064,106 @@ export function App() {
   };
 
   const refreshAdminUsers = () => adminApi.users().then((value) => setAdminUsers(value.users));
+  const refreshAdminTeams = () => adminApi.teams(true).then((value) => setAdminTeams(value.teams));
+  const createAdminTeam = async (input) => {
+    setAdminTeamsBusy(true);
+    try {
+      await adminApi.createTeam(input);
+      await refreshAdminTeams();
+      setToast(`${input.displayName} was created.`);
+      return true;
+    } catch (error) {
+      showApiError(error);
+      return false;
+    } finally {
+      setAdminTeamsBusy(false);
+    }
+  };
+  const updateAdminTeam = async (teamId, input) => {
+    setAdminTeamsBusy(true);
+    try {
+      await adminApi.updateTeam(teamId, input);
+      await refreshAdminTeams();
+      setToast(`${input.displayName} was updated.`);
+      return true;
+    } catch (error) {
+      showApiError(error);
+      return false;
+    } finally {
+      setAdminTeamsBusy(false);
+    }
+  };
+  const archiveAdminTeam = async (team) => {
+    if (!await requestConfirmation({
+      title: `Archive ${team.displayName}?`,
+      description: "Membership history is retained. Anyone currently charging to this Team is moved to the Unallocated rollout fallback.",
+      confirmLabel: "Archive Team",
+      danger: true,
+    })) return false;
+    setAdminTeamsBusy(true);
+    try {
+      await adminApi.archiveTeam(team.id);
+      await refreshAdminTeams();
+      setToast(`${team.displayName} was archived.`);
+      return true;
+    } catch (error) {
+      showApiError(error);
+      return false;
+    } finally {
+      setAdminTeamsBusy(false);
+    }
+  };
+  const loadAdminTeam = async (teamId) => {
+    setAdminTeamsBusy(true);
+    try {
+      return (await adminApi.team(teamId)).team;
+    } catch (error) {
+      showApiError(error);
+      return null;
+    } finally {
+      setAdminTeamsBusy(false);
+    }
+  };
+  const assignAdminTeamMember = async (teamId, userId) => {
+    setAdminTeamsBusy(true);
+    try {
+      await adminApi.assignTeamMembership(teamId, userId);
+      await refreshAdminTeams();
+      setToast("Team membership was assigned.");
+      return (await adminApi.team(teamId)).team;
+    } catch (error) {
+      showApiError(error);
+      return null;
+    }
+    finally { setAdminTeamsBusy(false); }
+  };
+  const removeAdminTeamMember = async (teamId, userId) => {
+    setAdminTeamsBusy(true);
+    try {
+      await adminApi.removeTeamMembership(teamId, userId);
+      await refreshAdminTeams();
+      setToast("Team membership was removed.");
+      return (await adminApi.team(teamId)).team;
+    } catch (error) {
+      showApiError(error);
+      return null;
+    } finally {
+      setAdminTeamsBusy(false);
+    }
+  };
+  const setAdminDefaultTeam = async (teamId, userId) => {
+    setAdminTeamsBusy(true);
+    try {
+      await adminApi.setDefaultSpendingTeam(teamId, userId);
+      await refreshAdminTeams();
+      setToast("The default spending Team was updated.");
+      return (await adminApi.team(teamId)).team;
+    } catch (error) {
+      showApiError(error);
+      return null;
+    }
+    finally { setAdminTeamsBusy(false); }
+  };
   const refreshEgressGroups = () => adminApi.egressSecurityGroups().then((value) => setEgressVersions(value.securityGroups));
   const assignPolicy = async (userId) => {
     setAdminBusyUserId(userId);
@@ -4318,8 +4523,18 @@ export function App() {
           onDisableProviderSetting={disableProviderSetting}
           onDeleteProviderSetting={deleteProviderSetting}
           users={adminUsers}
+          teams={adminTeams}
           loading={adminLoading}
+          teamsLoading={adminTeamsLoading}
+          teamsBusy={adminTeamsBusy}
           busyUserId={adminBusyUserId}
+          onLoadTeam={loadAdminTeam}
+          onCreateTeam={createAdminTeam}
+          onUpdateTeam={updateAdminTeam}
+          onArchiveTeam={archiveAdminTeam}
+          onAssignTeamMember={assignAdminTeamMember}
+          onRemoveTeamMember={removeAdminTeamMember}
+          onSetDefaultTeam={setAdminDefaultTeam}
           onAssign={assignPolicy}
           onRevoke={revokePolicy}
           onStatusChange={changeUserStatus}

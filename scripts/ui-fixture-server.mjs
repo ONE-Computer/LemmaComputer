@@ -426,6 +426,11 @@ let adminUsers = [
     }],
   },
 ];
+let fixtureTeams = [];
+let fixtureTeamMemberships = new Map();
+const fixtureTeamDetail = (teamId) => ({
+  ...fixtureTeams.find((team) => team.id === teamId), memberships: fixtureTeamMemberships.get(teamId) ?? [],
+});
 let fixtureWorkspaces = [workspace, sandboxWorkspace];
 let fixtureMcpConnections = [
   {
@@ -1103,6 +1108,109 @@ const server = http.createServer((request, response) => {
         response.end(`${closingChunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
       }, stopRecoveryRequest ? 10_000 : siteRefreshRequest ? 4_000 : refreshRecoveryRequest ? 3_000 : 1_000);
     });
+    return;
+  }
+  if (key === "GET /v1/admin/teams") {
+    response.end(JSON.stringify({ teams: fixtureTeams }));
+    return;
+  }
+  if (key === "POST /v1/admin/teams") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const timestamp = new Date().toISOString();
+      const team = {
+        id: crypto.randomUUID(),
+        displayName: input.displayName,
+        description: input.description ?? "",
+        ownerUserId: input.ownerUserId,
+        costCenterCode: input.costCenterCode ?? null,
+        status: "active",
+        isRolloutFallback: false,
+        activeMemberCount: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        archivedAt: null,
+      };
+      fixtureTeams.push(team);
+      fixtureTeamMemberships.set(team.id, []);
+      response.statusCode = 201;
+      response.end(JSON.stringify({ team: fixtureTeamDetail(team.id) }));
+    });
+    return;
+  }
+  if (request.method === "GET" && /^\/v1\/admin\/teams\/[0-9a-f-]+$/.test(url.pathname)) {
+    response.end(JSON.stringify({ team: fixtureTeamDetail(url.pathname.split("/").at(-1)) }));
+    return;
+  }
+  if (request.method === "PATCH" && /^\/v1\/admin\/teams\/[0-9a-f-]+$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const teamId = url.pathname.split("/").at(-1);
+      const input = JSON.parse(body);
+      fixtureTeams = fixtureTeams.map((team) => team.id === teamId ? { ...team, ...input, updatedAt: new Date().toISOString() } : team);
+      response.end(JSON.stringify({ team: fixtureTeamDetail(teamId) }));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/memberships$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const teamId = url.pathname.split("/").at(-2);
+      const input = JSON.parse(body);
+      const memberships = fixtureTeamMemberships.get(teamId) ?? [];
+      let membership = memberships.find((item) => item.userId === input.userId && !item.effectiveTo);
+      if (!membership) {
+        membership = { id: crypto.randomUUID(), teamId, userId: input.userId, effectiveFrom: new Date().toISOString(), effectiveTo: null, isDefaultSpendingTeam: false };
+        fixtureTeamMemberships.set(teamId, [membership, ...memberships]);
+      }
+      fixtureTeams = fixtureTeams.map((team) => team.id === teamId ? { ...team, activeMemberCount: (fixtureTeamMemberships.get(teamId) ?? []).filter((item) => !item.effectiveTo).length } : team);
+      response.statusCode = 201;
+      response.end(JSON.stringify({ membership }));
+    });
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/memberships\/[^/]+$/.test(url.pathname)) {
+    const parts = url.pathname.split("/");
+    const teamId = parts.at(-3);
+    const userId = decodeURIComponent(parts.at(-1));
+    fixtureTeamMemberships.set(teamId, (fixtureTeamMemberships.get(teamId) ?? []).map((membership) => (
+      membership.userId === userId && !membership.effectiveTo
+        ? { ...membership, effectiveTo: new Date().toISOString(), isDefaultSpendingTeam: false }
+        : membership
+    )));
+    fixtureTeams = fixtureTeams.map((team) => team.id === teamId ? { ...team, activeMemberCount: (fixtureTeamMemberships.get(teamId) ?? []).filter((item) => !item.effectiveTo).length } : team);
+    response.statusCode = 204;
+    response.end();
+    return;
+  }
+  if (request.method === "PUT" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/default$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const teamId = url.pathname.split("/").at(-2);
+      const input = JSON.parse(body);
+      const team = fixtureTeams.find((candidate) => candidate.id === teamId);
+      for (const [candidateTeamId, memberships] of fixtureTeamMemberships) {
+        fixtureTeamMemberships.set(candidateTeamId, memberships.map((membership) => ({
+          ...membership,
+          isDefaultSpendingTeam: !membership.effectiveTo && candidateTeamId === teamId && membership.userId === input.userId,
+        })));
+      }
+      response.end(JSON.stringify({ team: { id: team.id, displayName: team.displayName, costCenterCode: team.costCenterCode, isRolloutFallback: false }, userId: input.userId }));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/archive$/.test(url.pathname)) {
+    const teamId = url.pathname.split("/").at(-2);
+    fixtureTeams = fixtureTeams.map((team) => team.id === teamId ? { ...team, status: "archived", archivedAt: new Date().toISOString(), activeMemberCount: 0 } : team);
+    fixtureTeamMemberships.set(teamId, (fixtureTeamMemberships.get(teamId) ?? []).map((membership) => (
+      membership.effectiveTo ? membership : { ...membership, effectiveTo: new Date().toISOString(), isDefaultSpendingTeam: false }
+    )));
+    response.end(JSON.stringify({ team: fixtureTeamDetail(teamId) }));
     return;
   }
   if (key === "GET /v1/admin/users") {

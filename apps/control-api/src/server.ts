@@ -1,10 +1,10 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
@@ -254,6 +254,7 @@ export function createControlServer(
     channelBrokerInternalToken?: string;
     scheduleStore?: ScheduleStore;
     siteStore?: SiteStore;
+    teamStore?: TeamStore;
     schedulerInternalToken?: string;
     schedulePromptSecret?: string;
     connectorRegistryStore?: ConnectorRegistryStore;
@@ -301,6 +302,12 @@ export function createControlServer(
   const requireSites = () => {
     if (!sites) throw new OneComputerError("SITES_NOT_CONFIGURED", "Sites are unavailable", 503, true);
     return sites;
+  };
+  const requireTeams = () => {
+    if (!security.teamStore) {
+      throw new OneComputerError("TEAMS_NOT_CONFIGURED", "Team administration is unavailable", 503, true);
+    }
+    return security.teamStore;
   };
   const channelBroker = security.channelBrokerClient;
   const service = new WorkspaceService(store, controller, gateway, {
@@ -971,6 +978,100 @@ export function createControlServer(
   app.post("/v1/auth/logout", async (request, reply) => {
     if (!security.authentication) return reply.code(204).send();
     return reply.code(204).header("set-cookie", await security.authentication.logout(request.headers.cookie)).send();
+  });
+  app.get("/v1/teams/default", async (request, reply) => {
+    const actor = principal(request);
+    reply.header("cache-control", "no-store");
+    return {
+      team: await requireTeams().getCurrentDefaultSpendingTeam(actor.tenantId, actor.userId),
+    };
+  });
+  app.get<{ Querystring: { includeArchived?: string } }>("/v1/admin/teams", async (request) => {
+    const actor = requireAdministrator(request);
+    return {
+      teams: await requireTeams().listTeams(actor.tenantId, request.query.includeArchived === "true"),
+    };
+  });
+  app.post("/v1/admin/teams", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const input = createTeamSchema.parse(request.body ?? {});
+    const team = await requireTeams().createTeam({
+      tenantId: actor.tenantId,
+      createdBy: actor.userId,
+      ...input,
+      costCenterCode: input.costCenterCode ?? null,
+    });
+    return reply.code(201).send({ team });
+  });
+  app.get<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId", async (request) => {
+    const actor = requireAdministrator(request);
+    const team = await requireTeams().getTeam(actor.tenantId, z.uuid().parse(request.params.teamId));
+    if (!team) throw new OneComputerError("TEAM_NOT_FOUND", "Team not found", 404);
+    return { team };
+  });
+  app.patch<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId", async (request) => {
+    const actor = requireAdministrator(request);
+    const input = updateTeamSchema.parse(request.body ?? {});
+    return {
+      team: await requireTeams().updateTeam({
+        tenantId: actor.tenantId,
+        teamId: z.uuid().parse(request.params.teamId),
+        updatedBy: actor.userId,
+        ...input,
+      }),
+    };
+  });
+  app.post<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId/archive", async (request) => {
+    const actor = requireAdministrator(request);
+    return {
+      team: await requireTeams().archiveTeam({
+        tenantId: actor.tenantId,
+        teamId: z.uuid().parse(request.params.teamId),
+        archivedBy: actor.userId,
+      }),
+    };
+  });
+  app.post<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId/memberships", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const input = assignTeamMembershipSchema.parse(request.body ?? {});
+    const membership = await requireTeams().assignMembership({
+      tenantId: actor.tenantId,
+      teamId: z.uuid().parse(request.params.teamId),
+      userId: input.userId,
+      assignedBy: actor.userId,
+      effectiveFrom: input.effectiveFrom ? new Date(input.effectiveFrom) : undefined,
+      makeDefault: input.makeDefault,
+    });
+    return reply.code(201).send({ membership });
+  });
+  app.delete<{ Params: { teamId: string; userId: string } }>("/v1/admin/teams/:teamId/memberships/:userId", async (request, reply) => {
+    const actor = requireAdministrator(request);
+    const removed = await requireTeams().removeMembership({
+      tenantId: actor.tenantId,
+      teamId: z.uuid().parse(request.params.teamId),
+      userId: z.string().min(1).max(200).parse(request.params.userId),
+      removedBy: actor.userId,
+    });
+    return removed ? reply.code(204).send() : reply.code(404).send({
+      error: { code: "TEAM_MEMBERSHIP_NOT_FOUND", message: "Active Team membership not found", correlationId: request.id, retryable: false },
+    });
+  });
+  app.put<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId/default", async (request) => {
+    const actor = requireAdministrator(request);
+    const input = setDefaultSpendingTeamSchema.parse(request.body ?? {});
+    return {
+      team: await requireTeams().setDefaultSpendingTeam({
+        tenantId: actor.tenantId,
+        teamId: z.uuid().parse(request.params.teamId),
+        userId: input.userId,
+        assignedBy: actor.userId,
+        effectiveFrom: input.effectiveFrom ? new Date(input.effectiveFrom) : undefined,
+      }),
+    };
+  });
+  app.get("/v1/admin/teams-audit", async (request) => {
+    const actor = requireAdministrator(request);
+    return { events: await requireTeams().listAuditEvents(actor.tenantId) };
   });
   app.get("/v1/admin/users", async (request) => {
     const actor = requireAdministrator(request);
@@ -2110,6 +2211,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const providerSettingsStore = PostgresProviderSettingsStore.fromConnectionString(env.DATABASE_URL);
   const scheduleStore = PostgresScheduleStore.fromConnectionString(env.DATABASE_URL);
   const siteStore = PostgresSiteStore.fromConnectionString(env.DATABASE_URL);
+  const teamStore = PostgresTeamStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
@@ -2219,6 +2321,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
       scheduleStore,
       siteStore,
+      teamStore,
       schedulerInternalToken: env.SCHEDULER_INTERNAL_TOKEN,
       schedulePromptSecret: env.SCHEDULE_PROMPT_SECRET,
       workspaceIngress,
@@ -2240,6 +2343,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await providerSettingsStore.close();
     await scheduleStore.close();
     await siteStore.close();
+    await teamStore.close();
     await identityPolicyStore.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });
