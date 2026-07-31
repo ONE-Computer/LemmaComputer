@@ -1,159 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  DeterministicModelRouter,
-  ModelRoutingError,
-  classifyRoutingTask,
-  type ModelRoutingPolicy,
-  type ModelRoutingRequest,
-  type RoutingDeployment,
-} from "@onecomputer/model-router";
+import {DeterministicModelRouter,ModelRoutingError,RoutingDecisionBindingAuthority,compareExactMoney,validateGovernedTransportRequest,type ModelRoutingPolicy,type ModelRoutingRequest,type RoutingAffinityStore,type RoutingDeployment,type SessionAffinity} from "@onecomputer/model-router";
 
-const capabilities = { vision: true, tools: true, streaming: true, contextTokens: 200_000 };
-const deployments: RoutingDeployment[] = [
-  { id: "lite-expensive", provider: "openai", model: "openai/luna", serviceClass: "Lite", mappingVersion: "v1", rateCardKey: "openai:luna:v1", expectedCostUsd: 0.02, capabilities: { ...capabilities, vision: false }, healthy: true },
-  { id: "lite-cheap", provider: "foundry", model: "foundry/luna", serviceClass: "Lite", mappingVersion: "v1", rateCardKey: "foundry:luna:v1", expectedCostUsd: 0.01, capabilities: { ...capabilities, vision: false }, healthy: true },
-  { id: "balanced-vision", provider: "glm", model: "zai/glm-5.2", serviceClass: "Balanced", mappingVersion: "v1", rateCardKey: "zai:glm:v1", expectedCostUsd: 0.03, capabilities, healthy: true },
-  { id: "pro-primary", provider: "bedrock", model: "bedrock/opus", serviceClass: "Pro", mappingVersion: "v1", rateCardKey: "bedrock:opus:v1", expectedCostUsd: 0.05, capabilities, healthy: true },
-  { id: "pro-secondary", provider: "anthropic", model: "anthropic/opus", serviceClass: "Pro", mappingVersion: "v1", rateCardKey: "anthropic:opus:v1", expectedCostUsd: 0.08, capabilities, healthy: true },
-];
-const policy: ModelRoutingPolicy = {
-  tenantId: "tenant-alpha",
-  teamId: "team-research",
-  allowedServiceClasses: ["Lite", "Balanced", "Pro"],
-  allowedDeploymentIds: deployments.map(({ id }) => id),
-  deployments,
-};
-const request = (overrides: Partial<ModelRoutingRequest> = {}): ModelRoutingRequest => ({
-  tenantId: "tenant-alpha",
-  userId: "user-alex",
-  teamId: "team-research",
-  requestedServiceClass: "Auto",
-  prompt: "Hello",
-  requiredCapabilities: { streaming: true, contextTokens: 8_000 },
-  ...overrides,
-});
-const errorCode = (code: ModelRoutingError["code"]) => (error: unknown) =>
-  error instanceof ModelRoutingError && error.code === code;
+class MemoryAffinity implements RoutingAffinityStore{
+  values=new Map<string,SessionAffinity>();
+  async get(tenantId:string,key:string,now:Date){const found=this.values.get(`${tenantId}:${key}`);return found&&found.expiresAt>now?found:null}
+  async put(value:SessionAffinity){this.values.set(`${value.tenantId}:${value.affinityKey}`,value)}
+}
+const capabilities={vision:true,tools:true,streaming:true,contextTokens:200_000,outputTokens:16_000,residency:["sg"]};
+const deployment=(id:string,serviceClass:"lite"|"balanced"|"pro",amount:string,overrides:Partial<RoutingDeployment>={}):RoutingDeployment=>({id,provider:"bedrock",model:`private/${id}`,deployment:`deployment/${id}`,serviceClass,mappingVersionId:"mapping-v1",rateCardId:`rate-${id}`,expectedCost:{amount,currency:"USD"},capabilities,approved:true,healthy:true,evaluationPassed:true,...overrides});
+const deployments=[deployment("lite-a","lite","0.010000000002"),deployment("lite-b","lite","0.010000000001"),deployment("balanced","balanced","0.03"),deployment("pro","pro","0.05")];
+const scope={allowedServiceClasses:["lite","balanced","pro"] as const,allowedDeploymentIds:deployments.map(({id})=>id),explicitSelectionAllowed:true,forceServiceClass:null,safeDefault:"balanced" as const};
+const classPolicy=(eligibleDeploymentIds:string[])=>({capabilityFloor:{vision:false,tools:false,streaming:true,contextTokens:8_000,outputTokens:1_000},evaluationThreshold:"0.800000",qualityPosture:"standard" as const,costPosture:"balanced" as const,latencyPosture:"balanced" as const,requiredModalities:["text" as const],requiredResidency:["sg"],eligibleDeploymentIds,safeDefault:false});
+const policy=(overrides:Partial<ModelRoutingPolicy>={}):ModelRoutingPolicy=>({tenantId:"tenant-a",teamId:"team-a",policyVersionId:"policy-v1",mappingVersionId:"mapping-v1",mode:"shadow",fixedDeploymentId:"balanced",billingCurrency:"USD",serviceClassPolicies:{lite:classPolicy(["lite-a","lite-b"]),balanced:classPolicy(["balanced"]),pro:classPolicy(["pro"])},identity:{...scope,allowedServiceClasses:[...scope.allowedServiceClasses]},team:null,deployments,budgetEligibleDeploymentIds:deployments.map(({id})=>id),approvedProviders:["bedrock"],requiredResidency:"sg",...overrides});
+const request=(overrides:Partial<ModelRoutingRequest>={}):ModelRoutingRequest=>({requestId:"req-1",tenantId:"tenant-a",userId:"user-a",teamId:"team-a",taskId:"task-a",requestedServiceClass:"auto",boundedSignals:["short_request"],estimatedInputTokens:10,requiredCapabilities:{streaming:true,contextTokens:8_000},...overrides});
+const errorCode=(code:ModelRoutingError["code"])=>(error:unknown)=>error instanceof ModelRoutingError&&error.code===code;
 
-test("classifier covers all internal tiers and low-confidence Balanced default", async () => {
-  assert.equal(classifyRoutingTask("Hello").taskClass, "SIMPLE");
-  assert.equal(classifyRoutingTask("Explain how an API endpoint works.").taskClass, "MEDIUM");
-  assert.equal(classifyRoutingTask("Design a distributed architecture with encryption and concurrency.").taskClass, "COMPLEX");
-  assert.equal(classifyRoutingTask("Think through the pros and cons step by step and evaluate them.").taskClass, "REASONING");
-  const ambiguous = await new DeterministicModelRouter().route(request({
-    prompt: "Summarize the material in a useful response for the intended audience without changing its meaning.",
-  }), policy);
-  assert.equal(ambiguous.selectedServiceClass, "Balanced");
-  assert.equal(ambiguous.cause, "low_confidence_default");
-});
-
-test("explicit class is never overridden by stale Auto affinity and arbitrary model names fail", async () => {
-  const router = new DeterministicModelRouter();
-  await router.route(request({ sessionId: "session-1" }), policy);
-  const explicit = await router.route(request({ sessionId: "session-1", requestedServiceClass: "Pro" }), policy);
-  assert.equal(explicit.selectedServiceClass, "Pro");
-  assert.equal(explicit.cause, "explicit_service_class");
-  await assert.rejects(router.route(request({ requestedServiceClass: "bedrock/arbitrary" }), policy), errorCode("SERVICE_CLASS_INVALID"));
-});
-
-test("stronger Auto task safely escalates affinity and records why", async () => {
-  const router = new DeterministicModelRouter();
-  await router.route(request({ sessionId: "session-2" }), policy);
-  const escalated = await router.route(request({
-    sessionId: "session-2",
-    prompt: "Think through the pros and cons step by step, compare and contrast, then evaluate every option.",
-  }), policy);
-  assert.equal(escalated.selectedServiceClass, "Pro");
-  assert.equal(escalated.cause, "session_affinity_escalation");
-  assert.equal(escalated.escalationReason, "stronger_task");
-});
-
-test("capability floor escalates safely while Team and tenant policy fail closed", async () => {
-  const router = new DeterministicModelRouter();
-  const decision = await router.route(request({ requiredCapabilities: { vision: true, tools: true, streaming: true } }), policy);
-  assert.equal(decision.selectedServiceClass, "Balanced");
-  assert.equal(decision.cause, "capability_escalation");
-  assert.equal(decision.escalationReason, "capability_floor");
-  await assert.rejects(router.route(request({ tenantId: "tenant-beta" }), policy), errorCode("ROUTING_SCOPE_DENIED"));
-  await assert.rejects(router.route(request(), { ...policy, allowedDeploymentIds: [] }), errorCode("NO_ELIGIBLE_DEPLOYMENT"));
-});
-
-test("candidate ranking uses rate-card expected cost, not configuration order", async () => {
-  const decision = await new DeterministicModelRouter().route(request(), policy);
-  assert.equal(decision.selectedDeployment.id, "lite-cheap");
-  assert.equal(decision.selectedDeployment.expectedCostUsd, 0.01);
-  assert.deepEqual(decision.routingCandidateIds, ["lite-cheap", "lite-expensive"]);
-  await assert.rejects(
-    new DeterministicModelRouter().route(request(), {
-      ...policy,
-      deployments: [{ ...deployments[0]!, expectedCostUsd: Number.NaN }],
-      allowedDeploymentIds: ["lite-expensive"],
-    }),
-    errorCode("RATE_CARD_INVALID"),
-  );
-});
-
-test("unavailable candidates are routing skips, never fabricated billed fallback attempts", async () => {
-  const decision = await new DeterministicModelRouter().route(request({
-    requestedServiceClass: "Pro",
-    unavailableDeploymentIds: ["pro-primary"],
-  }), policy);
-  assert.equal(decision.selectedDeployment.id, "pro-secondary");
-  assert.deepEqual(decision.skippedCandidateIds, ["pro-primary"]);
-  assert.deepEqual(decision.billedFallbackAttemptIds, []);
-});
-
-test("an unavailable lower class safely escalates while retaining every unbilled routing skip", async () => {
-  const decision = await new DeterministicModelRouter().route(request({
-    unavailableDeploymentIds: ["lite-cheap", "lite-expensive"],
-  }), policy);
-  assert.equal(decision.selectedServiceClass, "Balanced");
-  assert.equal(decision.cause, "availability_escalation");
-  assert.equal(decision.escalationReason, "availability");
-  assert.deepEqual(decision.routingCandidateIds, ["lite-cheap", "lite-expensive", "balanced-vision"]);
-  assert.deepEqual(decision.skippedCandidateIds, ["lite-cheap", "lite-expensive"]);
-  assert.deepEqual(decision.billedFallbackAttemptIds, []);
-});
-
-test("affinity is hashed, bounded, expires, and rechecks policy", async () => {
-  let now = 1_000;
-  const router = new DeterministicModelRouter({ affinityTtlMs: 100, maxAffinityEntries: 1, now: () => now });
-  await router.route(request({ sessionId: "private-session", prompt: "Hello" }), policy);
-  now += 101;
-  const afterExpiry = await router.route(request({
-    sessionId: "private-session",
-    prompt: "Think through the pros and cons step by step, compare and contrast, then evaluate every option.",
-  }), policy);
-  assert.equal(afterExpiry.cause, "complexity_classifier");
-  assert.equal(afterExpiry.selectedServiceClass, "Pro");
-  const evidence = JSON.stringify(afterExpiry);
-  assert.doesNotMatch(evidence, /private-session|prompt|payload|api[_-]?key|chain.of.thought/i);
-});
-
-test("deployment replacement preserves class while version/rate evidence changes immutably", async () => {
-  const router = new DeterministicModelRouter();
-  const before = await router.route(request(), policy);
-  const replacement: RoutingDeployment = {
-    ...deployments[1]!,
-    id: "lite-bedrock-v2",
-    provider: "bedrock",
-    model: "bedrock/nova-lite",
-    mappingVersion: "v2",
-    rateCardKey: "bedrock:nova-lite:v2",
-    expectedCostUsd: 0.009,
-  };
-  const after = await router.route(request(), { ...policy, deployments: [replacement], allowedDeploymentIds: [replacement.id] });
-  assert.equal(before.selectedServiceClass, after.selectedServiceClass);
-  assert.equal(before.mappingVersion, "v1");
-  assert.equal(after.mappingVersion, "v2");
-  assert.equal(after.selectedDeployment.rateCardKey, "bedrock:nova-lite:v2");
-});
-
-test("router overhead is separate and local", async () => {
-  const router = new DeterministicModelRouter();
-  const values: number[] = [];
-  for (let index = 0; index < 1_000; index += 1) values.push((await router.route(request(), policy)).routerOverheadMs);
-  values.sort((left, right) => left - right);
-  assert.ok(values[950]! < 10);
-});
+test("exact decimal ranking never converts money to Number",async()=>{assert.equal(compareExactMoney({amount:"0.010000000001",currency:"USD"},{amount:"0.010000000002",currency:"USD"}),-1);const decision=await new DeterministicModelRouter().route(request(),policy());assert.equal(decision.selectedDeployment.id,"lite-b");assert.deepEqual(decision.selectedDeployment.expectedCost,{amount:"0.010000000001",currency:"USD"})});
+test("governed transport exposes one alias and cannot directly name provider models",()=>{const authority=new RoutingDecisionBindingAuthority("routing-test-secret-at-least-32-characters");const routingBinding=authority.issue({tenantId:"tenant-a",requestId:"req-1",decisionId:"decision-1",deploymentId:"balanced",mappingVersionId:"mapping-v1",policyVersionId:"policy-v1"});assert.equal(validateGovernedTransportRequest({model:"onecomputer-auto",metadata:{requestedServiceClass:"auto",routingBinding},messages:[]}).model,"onecomputer-auto");assert.throws(()=>validateGovernedTransportRequest({model:"bedrock/opus",metadata:{requestedServiceClass:"pro",routingBinding},messages:[]}),errorCode("SERVICE_CLASS_INVALID"))});
+test("stable aliases reject provider names and Team policy can only narrow identity policy",async()=>{const router=new DeterministicModelRouter();await assert.rejects(router.route(request({requestedServiceClass:"bedrock/opus"}),policy()),errorCode("SERVICE_CLASS_INVALID"));await assert.rejects(router.route(request({requestedServiceClass:"pro"}),policy({team:{...scope,allowedServiceClasses:["lite"],allowedDeploymentIds:["lite-a","lite-b"],safeDefault:"lite"}})),errorCode("SERVICE_CLASS_DENIED"))});
+test("Auto covers simple, complex, reasoning, vision, tools, long context, and low confidence",async()=>{const router=new DeterministicModelRouter();assert.equal((await router.route(request(),policy())).selectedServiceClass,"lite");assert.equal((await router.route(request({boundedSignals:["technical_request"]}),policy())).selectedServiceClass,"pro");assert.equal((await router.route(request({boundedSignals:["reasoning_request"]}),policy())).selectedServiceClass,"pro");assert.equal((await router.route(request({boundedSignals:["vision_required"],requiredCapabilities:{vision:true}}),policy())).selectedServiceClass,"lite");assert.equal((await router.route(request({boundedSignals:["tools_required"],requiredCapabilities:{tools:true}}),policy())).selectedServiceClass,"lite");assert.equal((await router.route(request({boundedSignals:[],estimatedInputTokens:120_000}),policy())).selectedServiceClass,"pro");assert.equal((await router.route(request({boundedSignals:[],estimatedInputTokens:30}),policy())).selectedServiceClass,"balanced")});
+test("shadow records hypothetical route while executing the fixed route",async()=>{const decision=await new DeterministicModelRouter().route(request(),policy());assert.equal(decision.selectedDeployment.id,"lite-b");assert.equal(decision.executedDeployment.id,"balanced");assert.equal(decision.reasonCode,"shadow_fixed_route");assert.equal(decision.shadow,true)});
+test("enabled executes selection and disabled keeps fixed route",async()=>{assert.equal((await new DeterministicModelRouter().route(request(),policy({mode:"enabled"}))).executedDeployment.id,"lite-b");assert.equal((await new DeterministicModelRouter().route(request(),policy({mode:"disabled"}))).executedDeployment.id,"balanced")});
+test("unknown and mixed-currency prices, exhausted budgets, provider down, and incapable routes fail closed",async()=>{const base=policy();await assert.rejects(new DeterministicModelRouter().route(request(),policy({deployments:[deployment("unknown","lite","0",{rateCardId:null,expectedCost:null})],fixedDeploymentId:"unknown",budgetEligibleDeploymentIds:["unknown"]})),errorCode("NO_ELIGIBLE_DEPLOYMENT"));await assert.rejects(new DeterministicModelRouter().route(request(),policy({deployments:[deployment("eur","lite","0.01",{expectedCost:{amount:"0.01",currency:"EUR"}}),deployment("usd","lite","0.02")],fixedDeploymentId:"usd",budgetEligibleDeploymentIds:["eur"]})),errorCode("NO_ELIGIBLE_DEPLOYMENT"));await assert.rejects(new DeterministicModelRouter().route(request(),policy({...base,budgetEligibleDeploymentIds:[]})),errorCode("NO_ELIGIBLE_DEPLOYMENT"));await assert.rejects(new DeterministicModelRouter().route(request({unavailableDeploymentIds:deployments.map(({id})=>id)}),base),errorCode("NO_ELIGIBLE_DEPLOYMENT"));await assert.rejects(new DeterministicModelRouter().route(request({requiredCapabilities:{contextTokens:999_999}}),base),errorCode("NO_ELIGIBLE_DEPLOYMENT"))});
+test("durable tenant-scoped affinity preserves follow-ups and escalates stronger tasks",async()=>{const affinities=new MemoryAffinity();const router=new DeterministicModelRouter(affinities);const first=await router.route(request({sessionId:"secret-session"}),policy());const follow=await router.route(request({requestId:"req-2",sessionId:"secret-session",boundedSignals:[],estimatedInputTokens:30}),policy());assert.equal(first.selectedServiceClass,"lite");assert.equal(follow.selectedServiceClass,"lite");const stronger=await router.route(request({requestId:"req-3",sessionId:"secret-session",boundedSignals:["reasoning_request"]}),policy());assert.equal(stronger.selectedServiceClass,"pro");assert.equal(stronger.affinityMovedReason,"stronger_task");assert.doesNotMatch(JSON.stringify(stronger),/secret-session|prompt|response|tool.arguments/i);await assert.rejects(router.route(request({tenantId:"tenant-b"}),policy()),errorCode("ROUTING_SCOPE_DENIED"))});
+test("affinity pins the exact deployment while eligible and records provider-down movement",async()=>{const affinities=new MemoryAffinity();const router=new DeterministicModelRouter(affinities);const onlyExpensive=policy({mode:"enabled",deployments:[deployments[0]!,deployments[2]!,deployments[3]!],identity:{...scope,allowedDeploymentIds:["lite-a","balanced","pro"],allowedServiceClasses:["lite","balanced","pro"]},budgetEligibleDeploymentIds:["lite-a","balanced","pro"]});assert.equal((await router.route(request({sessionId:"sticky"}),onlyExpensive)).selectedDeployment.id,"lite-a");assert.equal((await router.route(request({requestId:"sticky-2",sessionId:"sticky"}),policy({mode:"enabled"}))).selectedDeployment.id,"lite-a");const moved=await router.route(request({requestId:"sticky-3",sessionId:"sticky",unavailableDeploymentIds:["lite-a"]}),policy({mode:"enabled"}));assert.equal(moved.selectedDeployment.id,"lite-b");assert.equal(moved.affinityMovedReason,"deployment_unavailable");assert.equal(moved.reasonCode,"availability_escalation")});
+test("signed decision binding authorizes exactly the executed concrete deployment",()=>{const authority=new RoutingDecisionBindingAuthority("routing-test-secret-at-least-32-characters");const binding=authority.issue({tenantId:"tenant-a",requestId:"req-1",decisionId:"decision-1",deploymentId:"balanced",mappingVersionId:"mapping-v1",policyVersionId:"policy-v1"});assert.equal(authority.verify(binding,{tenantId:"tenant-a",requestId:"req-1",deploymentId:"balanced"}).decisionId,"decision-1");assert.throws(()=>authority.verify(binding,{tenantId:"tenant-a",requestId:"req-1",deploymentId:"lite-b"}),errorCode("DECISION_BINDING_MISMATCH"))});
+test("mapping replacement preserves the service-class alias and historical decision evidence",async()=>{const before=await new DeterministicModelRouter().route(request(),policy({mode:"enabled"}));const replacement=deployment("foundry-lite","lite","0.009",{provider:"foundry",mappingVersionId:"mapping-v2",model:"private/replacement",deployment:"managed/replacement"});const after=await new DeterministicModelRouter().route(request(),policy({mode:"enabled",mappingVersionId:"mapping-v2",deployments:[replacement],fixedDeploymentId:replacement.id,budgetEligibleDeploymentIds:[replacement.id],approvedProviders:["foundry"],serviceClassPolicies:{lite:classPolicy([replacement.id]),balanced:classPolicy([replacement.id]),pro:classPolicy([replacement.id])},identity:{...scope,allowedDeploymentIds:[replacement.id],allowedServiceClasses:["lite","balanced","pro"]}}));assert.equal(before.selectedServiceClass,after.selectedServiceClass);assert.equal(before.mappingVersionId,"mapping-v1");assert.equal(after.mappingVersionId,"mapping-v2");assert.notEqual(before.selectedDeployment.id,after.selectedDeployment.id)});

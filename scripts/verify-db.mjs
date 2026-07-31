@@ -63,6 +63,7 @@ try {
     "tests/team-budgets-postgres.test.ts",
     "tests/schedules-postgres.test.ts",
     "tests/usage-ledger-postgres.test.ts",
+    "tests/routing-postgres.test.ts",
     "tests/openvtc-companion-push-postgres.test.ts",
     "tests/migration-ledger-baseline-postgres.test.ts",
   ], {
@@ -71,6 +72,7 @@ try {
       ACTIVITY_TEST_DATABASE_URL: postgresUrl,
       TEAM_TEST_DATABASE_URL: postgresUrl,
       USAGE_LEDGER_TEST_DATABASE_URL: postgresUrl,
+      ROUTING_TEST_DATABASE_URL: postgresUrl,
       BUDGET_TEST_DATABASE_URL: postgresUrl,
       SCHEDULE_TEST_DATABASE_URL: postgresUrl,
       OPENVTC_PUSH_TEST_DATABASE_URL: postgresUrl,

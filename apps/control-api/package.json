@@ -11,6 +11,7 @@
   "dependencies": {
     "@onecomputer/contracts": "*",
     "@onecomputer/egress-policy": "*",
+    "@onecomputer/model-router": "*",
     "@onecomputer/litellm-adapter": "*",
     "@onecomputer/policy-integrity": "*",
     "@onecomputer/workspace-ingress-auth": "*",

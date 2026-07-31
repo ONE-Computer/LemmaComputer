@@ -449,6 +449,23 @@ let fixtureTeamMemberships = new Map([[fixtureSpendTeamId, [{
   isDefaultSpendingTeam: true,
 }]]]);
 let fixtureTeamBudgets = new Map();
+const routingMappingId="22222222-2222-4222-8222-222222222222";
+const routingPolicyId="33333333-3333-4333-8333-333333333333";
+const routingDeploymentIds={lite:"44444444-4444-4444-8444-444444444444",balanced:"55555555-5555-4555-8555-555555555555",pro:"66666666-6666-4666-8666-666666666666"};
+const routingScope={allowedServiceClasses:["lite","balanced","pro"],allowedDeploymentIds:Object.values(routingDeploymentIds),explicitSelectionAllowed:true,forceServiceClass:null,safeDefault:"balanced"};
+const routingClassPolicy=(serviceClass)=>({capabilityFloor:{vision:serviceClass!=="lite",tools:serviceClass!=="lite",streaming:true,contextTokens:serviceClass==="pro"?128000:32000,outputTokens:8192},evaluationThreshold:"0.800000",qualityPosture:serviceClass==="pro"?"premium":"standard",costPosture:serviceClass==="lite"?"lowest":"balanced",latencyPosture:"balanced",requiredModalities:["text"],requiredResidency:["sg"],eligibleDeploymentIds:[routingDeploymentIds[serviceClass]],safeDefault:serviceClass==="balanced"});
+const routingClassPolicies={lite:routingClassPolicy("lite"),balanced:routingClassPolicy("balanced"),pro:routingClassPolicy("pro")};
+let fixtureRoutingReview=null;
+let fixtureRoutingMode="shadow";
+const fixtureRoutingSettings=()=>({teamId:fixtureSpendTeamId,policy:{id:routingPolicyId,mappingVersionId:routingMappingId,billingCurrency:"USD",serviceClassPolicies:routingClassPolicies,identity:routingScope,team:routingScope,requiredResidency:"sg",createdAt:"2026-07-15T00:00:00.000Z"},rollout:{id:"77777777-7777-4777-8777-777777777777",tenantId:"acme",teamId:fixtureSpendTeamId,policyVersionId:routingPolicyId,mappingVersionId:routingMappingId,mode:fixtureRoutingMode,fixedDeploymentId:routingDeploymentIds.balanced,evidenceReviewId:fixtureRoutingReview?.id??null,previousRolloutVersionId:null,reason:"Design partner shadow evaluation",createdBy:"fixture-admin",createdAt:"2026-07-20T00:00:00.000Z"},review:fixtureRoutingReview,deployments:[
+  {id:routingDeploymentIds.lite,serviceClass:"lite",provider:"foundry",providerModel:"private/luna",providerDeployment:"foundry/luna",rateCardId:"99999999-9999-4999-8999-999999999991",approved:true,evaluationPassed:true},
+  {id:routingDeploymentIds.balanced,serviceClass:"balanced",provider:"bedrock",providerModel:"private/terra",providerDeployment:"bedrock/terra",rateCardId:"99999999-9999-4999-8999-999999999992",approved:true,evaluationPassed:true},
+  {id:routingDeploymentIds.pro,serviceClass:"pro",provider:"bedrock",providerModel:"private/sol",providerDeployment:"bedrock/sol",rateCardId:"99999999-9999-4999-8999-999999999993",approved:true,evaluationPassed:true},
+]});
+const fixtureRoutingReport=()=>({teamId:fixtureSpendTeamId,sampleSize:240,selectedDistribution:{lite:142,balanced:74,pro:24},executedDistribution:{[routingDeploymentIds.balanced]:240},expectedCost:"91.580000000000",actualCost:"123.000000000000",currency:"USD",estimatedSavings:"31.420000000000",fallbackRate:"0.025",errorRate:"0.008",regretRate:"0.012",routerOverheadMs:"1.420000",decisions:[
+  {id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",createdAt:"2026-07-30T08:00:00.000Z",selectedServiceClass:"lite",reasonCode:"complexity_classifier",shadow:true,expectedCost:"0.018",currency:"USD",outcome:"success"},
+  {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",createdAt:"2026-07-30T07:00:00.000Z",selectedServiceClass:"pro",reasonCode:"capability_escalation",shadow:true,expectedCost:"0.084",currency:"USD",outcome:"override"},
+]});
 const emptyBudgetStatus = { budget:null,period:null,effectiveLimitAmount:null,settledProviderCost:null,outstandingReservations:null,remainingAmount:null,percentConsumed:null,priceStatus:"unknown",enforcement:"none",alerts:[],lastReconciliation:null };
 const fixtureBudgetStatus = (teamId) => fixtureTeamBudgets.get(teamId) ?? emptyBudgetStatus;
 const fixturePeriod = () => ({ start:"2026-07-01T00:00:00.000Z",end:"2026-08-01T00:00:00.000Z" });
@@ -1257,6 +1274,15 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ teams: fixtureTeams }));
     return;
   }
+  if(request.method==="GET"&&/^\/v1\/admin\/teams\/[0-9a-f-]+\/routing$/.test(url.pathname)){response.end(JSON.stringify(fixtureRoutingSettings()));return;}
+  if(request.method==="GET"&&/^\/v1\/admin\/teams\/[0-9a-f-]+\/routing\/shadow-report$/.test(url.pathname)){response.end(JSON.stringify(fixtureRoutingReport()));return;}
+  if(request.method==="GET"&&/^\/v1\/admin\/routing\/decisions\/[0-9a-f-]+$/.test(url.pathname)){response.end(JSON.stringify({id:url.pathname.split("/").at(-1),selected_service_class:"lite",reason_code:"complexity_classifier",executed_provider:"bedrock",executed_model:"private/terra",executed_provider_deployment:"bedrock/terra",mapping_version_id:routingMappingId,rate_card_id:"99999999-9999-4999-8999-999999999992",candidates:[{ordinal:0,deployment_id:routingDeploymentIds.lite,provider:"foundry",provider_deployment:"foundry/luna",eligibility:"eligible",reason_code:null},{ordinal:1,deployment_id:routingDeploymentIds.pro,provider:"bedrock",provider_deployment:"bedrock/sol",eligibility:"ineligible",reason_code:"budget"}]}));return;}
+  if(request.method==="POST"&&/^\/v1\/admin\/teams\/[0-9a-f-]+\/routing\/reviews$/.test(url.pathname)){let body="";request.on("data",(chunk)=>{body+=chunk});request.on("end",()=>{const input=JSON.parse(body);fixtureRoutingReview={id:"88888888-8888-4888-8888-888888888888",tenantId:"acme",teamId:fixtureSpendTeamId,...input,reviewerUserId:"fixture-admin",reviewedAt:new Date().toISOString()};response.statusCode=201;response.end(JSON.stringify(fixtureRoutingReview))});return;}
+  if(request.method==="PUT"&&/^\/v1\/admin\/teams\/[0-9a-f-]+\/routing\/policy$/.test(url.pathname)){let body="";request.on("data",(chunk)=>{body+=chunk});request.on("end",()=>{const input=JSON.parse(body);Object.assign(routingScope,input.team??input.identity);response.end(JSON.stringify({id:routingPolicyId}))});return;}
+  if(request.method==="POST"&&/^\/v1\/admin\/teams\/[0-9a-f-]+\/routing\/rollout$/.test(url.pathname)){
+    let body="";request.on("data",(chunk)=>{body+=chunk});request.on("end",()=>{const input=JSON.parse(body);if(input.mode==="enabled"&&input.confirmation!=="ENABLE AUTO ROUTING"){response.statusCode=400;response.end(JSON.stringify({error:{message:"Explicit production enable confirmation is required"}}));return}fixtureRoutingMode=input.mode;response.statusCode=201;response.end(JSON.stringify({rollout:fixtureRoutingSettings().rollout}))});return;
+  }
+  if(request.method==="POST"&&/^\/v1\/admin\/teams\/[0-9a-f-]+\/routing\/kill-switch$/.test(url.pathname)){fixtureRoutingMode="disabled";response.statusCode=201;response.end(JSON.stringify({rollout:fixtureRoutingSettings().rollout}));return;}
   if (request.method === "GET" && /^\/v1\/admin\/teams\/[0-9a-f-]+\/budget$/.test(url.pathname)) {
     response.end(JSON.stringify({status:fixtureBudgetStatus(url.pathname.split("/").at(-2))}));
     return;

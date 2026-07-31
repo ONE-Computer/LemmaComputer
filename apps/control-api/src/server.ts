@@ -3,8 +3,9 @@ import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
+import {RoutingDecisionBindingAuthority} from "@onecomputer/model-router";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@onecomputer/workspace-store";
 import { z } from "zod";
@@ -35,6 +36,7 @@ import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchem
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
+import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
 
 import { paginateSpendReport, parseSpendQuery } from "./spend-observability.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
@@ -263,6 +265,7 @@ export function createControlServer(
     siteStore?: SiteStore;
     teamStore?: TeamStore;
     budgetStore?: TeamBudgetStore;
+    routingStore?: RoutingStore;
     budgetProjector?: LiteLlmTeamBudgetProjector;
     spendObservabilityStore?: SpendObservabilityStore;
     schedulerInternalToken?: string;
@@ -355,6 +358,9 @@ export function createControlServer(
   });
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
   const requireBudgets=()=>{if(!budgets)throw new OneComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
+  const routingExecution=security.routingStore&&security.teamStore&&usageBindings?new RoutingExecutionService(security.routingStore,security.teamStore,new RoutingDecisionBindingAuthority(security.usageTaskBindingSecret!),usageBindings,security.budgetStore):undefined;
+  const routing=security.routingStore?new RoutingAdministrationService(security.routingStore):undefined;
+  const requireRouting=()=>{if(!routing)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
   const channelBroker = security.channelBrokerClient;
   const requireSpendObservability = (request: object) => {
     const actor = principal(request);
@@ -741,6 +747,15 @@ export function createControlServer(
     return match[1];
   };
 
+  app.post("/internal/v1/ai-usage/routing/decide",async(request,reply)=>{
+    if(!routingExecution)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const result=await routingExecution.decide(internalRoutingDecisionSchema.parse(request.body??{}));return reply.code(result.status==="created"?201:200).send(result);
+  });
+  app.post("/internal/v1/ai-usage/routing/verify",async(request)=>{
+    if(!routingExecution)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const body=z.strictObject({binding:z.strictObject({schemaVersion:z.literal(1),tenantId:z.string(),requestId:z.string(),decisionId:z.string(),deploymentId:z.string(),mappingVersionId:z.string(),policyVersionId:z.string(),expiresAt:z.iso.datetime(),signature:z.string()}),actual:z.strictObject({tenantId:z.string(),requestId:z.string(),deploymentId:z.string()})}).parse(request.body??{});return routingExecution.verify(body.binding,body.actual);
+  });
+  app.post("/internal/v1/ai-usage/routing/observations",async(request,reply)=>{
+    if(!routingExecution)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const result=await routingExecution.observe(internalRoutingObservationSchema.parse(request.body??{}));return reply.code(result.status==="created"?201:200).send(result);
+  });
   app.get("/healthz", async () => ({ status: "ok" }));
   app.post("/internal/v1/ai-usage/attempts/admit", async (request, reply) => {
     const result = await requireUsageLedger().service.admit(internalUsageAdmissionSchema.parse(request.body ?? {}));
@@ -1275,6 +1290,15 @@ export function createControlServer(
   app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget/reconcile",async(request)=>{
     const actor=requireAdministrator(request);return{reconciliation:await requireBudgets().sync(actor,z.uuid().parse(request.params.teamId))};
   });
+  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing",async(request)=>{const actor=requireAdministrator(request);return requireRouting().settings(actor,z.uuid().parse(request.params.teamId));});
+  app.put<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/policy",async(request)=>{const actor=requireAdministrator(request);return requireRouting().savePolicy(actor,z.uuid().parse(request.params.teamId),saveRoutingPolicySchema.parse(request.body??{}));});
+  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/reviews",async(request,reply)=>{const actor=requireAdministrator(request);const review=await requireRouting().review(actor,z.uuid().parse(request.params.teamId),saveRoutingReviewSchema.parse(request.body??{}));return reply.code(201).send({review});});
+  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/rollout",async(request,reply)=>{const actor=requireAdministrator(request);const rollout=await requireRouting().rollout(actor,z.uuid().parse(request.params.teamId),changeRoutingRolloutSchema.parse(request.body??{}));return reply.code(201).send({rollout});});
+  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/kill-switch",async(request,reply)=>{
+    const actor=requireAdministrator(request);const body=z.strictObject({reason:z.string().trim().min(8).max(1000)}).parse(request.body??{});const rollout=await requireRouting().killSwitch(actor,z.uuid().parse(request.params.teamId),body.reason);return reply.code(201).send({rollout});
+  });
+  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/shadow-report",async(request)=>{const actor=requireAdministrator(request);return requireRouting().report(actor,z.uuid().parse(request.params.teamId));});
+  app.get<{Params:{decisionId:string}}>("/v1/admin/routing/decisions/:decisionId",async(request,reply)=>{const actor=requireAdministrator(request);const decision=await requireRouting().decision(actor,z.uuid().parse(request.params.decisionId));if(!decision)return reply.code(404).send({error:{code:"ROUTING_DECISION_NOT_FOUND",message:"Routing decision not found",correlationId:request.id,retryable:false}});return decision;});
   app.get("/v1/admin/users", async (request) => {
     const actor = requireAdministrator(request);
     if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
@@ -2421,6 +2445,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const spendObservabilityStore = PostgresSpendObservabilityStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   const budgetStore=PostgresTeamBudgetStore.fromConnectionString(env.DATABASE_URL);
+  const routingStore=PostgresRoutingStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
   if (gatewayValues.some(Boolean) && !gatewayValues.every(Boolean)) throw new Error("All LiteLLM gateway settings must be configured together");
@@ -2536,6 +2561,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       usageInternalToken: env.AI_USAGE_INTERNAL_TOKEN,
       usageTaskBindingSecret: env.AI_USAGE_TASK_BINDING_SECRET,
       budgetStore,
+      routingStore,
       budgetProjector,
       spendObservabilityStore,
       schedulerInternalToken: env.SCHEDULER_INTERNAL_TOKEN,
@@ -2562,6 +2588,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await teamStore.close();
     await usageLedgerStore.close();
     await budgetStore.close();
+    await routingStore.close();
     await spendObservabilityStore.close();
     await identityPolicyStore.close();
   });

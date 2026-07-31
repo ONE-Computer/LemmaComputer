@@ -14,6 +14,7 @@ export * from "./spend-observability.js";
 export * from "./teams.js";
 export * from "./usage-ledger.js";
 export * from "./budgets.js";
+export * from "./routing.js";
 
 export type WorkspaceRecord = {
   id: string;

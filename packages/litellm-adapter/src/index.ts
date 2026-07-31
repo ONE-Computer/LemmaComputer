@@ -207,6 +207,7 @@ const BEDROCK_ROUTE_TIMEOUT_SECONDS = 60;
 const BEDROCK_ROUTE_MAX_RETRIES = 2;
 
 const desktopTransportAliases: Record<string, string> = {
+  "onecomputer-auto": "onecomputer-auto",
   "onecomputer-claude": "claude-sonnet-4-6",
   "onecomputer-openai": "claude-opus-4-6",
   "onecomputer-glm": "claude-sonnet-4-5",
@@ -218,6 +219,14 @@ const desktopModelAlias = (modelAlias: string, policy?: RuntimePolicy) => {
   const transportAlias = desktopTransportAliases[modelAlias];
   if (!transportAlias) throw new OneComputerError("DESKTOP_MODEL_ROUTE_INVALID", "The selected model has no Claude Desktop transport route", 500);
   return transportAlias;
+};
+
+export const workspaceModelGrantProjection = (tenantId: string, modelAlias: string, policy?: RuntimePolicy) => {
+  const clientModelAlias = desktopModelAlias(modelAlias, policy);
+  if (clientModelAlias === "onecomputer-auto") return { clientModelAlias,providerAccessGroup:null,grantModels:["onecomputer-auto"] };
+  const managedProvider = managedProviderForAlias(clientModelAlias);
+  const providerAccessGroup = managedProvider ? tenantManagedModelAccessGroup(tenantId, clientModelAlias) : null;
+  return { clientModelAlias,providerAccessGroup,grantModels:providerAccessGroup ? [providerAccessGroup] : [clientModelAlias] };
 };
 
 export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecutor, OAuthConnectionGateway, McpConnectorAdministrationGateway, BedrockApiKeyRouteGateway {
@@ -711,10 +720,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async ensureGrant(input: { workspaceId: string; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant> {
     const agentId = input.policy?.agentId ?? input.agentId;
     const modelAlias = input.policy?.modelAlias ?? this.modelAlias;
-    const clientModelAlias = desktopModelAlias(modelAlias, input.policy);
-    const managedProvider = managedProviderForAlias(clientModelAlias);
-    const providerAccessGroup = managedProvider ? tenantManagedModelAccessGroup(input.identity.tenantId, clientModelAlias) : null;
-    const grantModels = providerAccessGroup ? [providerAccessGroup] : [clientModelAlias];
+    const {clientModelAlias,providerAccessGroup,grantModels}=workspaceModelGrantProjection(input.identity.tenantId,modelAlias,input.policy);
     const mcpServer = input.policy?.mcpServer ?? this.mcpServer;
     const allowedTools = input.policy?.allowedTools ?? this.allowedTools;
     const mcpServers = input.policy?.mcpServers ?? [mcpServer];
@@ -759,6 +765,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         onecomputer_policy_model_alias: modelAlias,
         onecomputer_client_model_alias: clientModelAlias,
         onecomputer_provider_access_group: providerAccessGroup,
+        onecomputer_governed_routing: clientModelAlias === "onecomputer-auto",
         ...(input.policy ? {
           onecomputer_policy_version_id: input.policy.policyVersionId,
           onecomputer_policy_version: input.policy.policyVersion,

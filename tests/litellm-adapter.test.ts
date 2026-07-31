@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { LiteLLMGatewayAdapter, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
+import { LiteLLMGatewayAdapter, tenantManagedModelAccessGroup,workspaceModelGrantProjection } from "@onecomputer/litellm-adapter";
 
 const identity = { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" as const };
 
@@ -20,6 +20,14 @@ test("workspace credentials are deterministic, scoped by workspace, and not the 
   assert.notEqual(first, adapter.credentialFor("workspace-b"));
   assert.notEqual(first, "sk-master-test-not-used-00001");
   assert.match(first, /^sk-ocw-[A-Za-z0-9_-]+$/);
+});
+
+test("governed routing grants only the synthetic Auto alias",()=>{
+  const projection=workspaceModelGrantProjection("tenant-a","onecomputer-auto");
+  assert.deepEqual(projection.grantModels,["onecomputer-auto"]);
+  assert.equal(projection.clientModelAlias,"onecomputer-auto");
+  assert.equal(projection.providerAccessGroup,null);
+  assert.equal(projection.grantModels.some((model)=>model.includes("bedrock")||model.includes("openai")||model.includes("anthropic")),false);
 });
 
 test("gateway identity separates OAuth owner, agent actor, and workspace", () => {

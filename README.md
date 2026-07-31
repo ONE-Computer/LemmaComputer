@@ -134,6 +134,7 @@ configuration lives in `config/` and `integrations/`.
 
 - [Architecture and trust model](docs/architecture.md)
 - [Service reference](docs/services.md)
+- [Governed model routing](docs/model-routing.md)
 - [Local deployment and Entra setup](docs/local-deployment.md)
 - [Extending ONEComputer](docs/extending.md)
 - [Configuration and operations](docs/operations.md)

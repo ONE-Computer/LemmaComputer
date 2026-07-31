@@ -6418,3 +6418,18 @@ textarea:focus-visible,
   .site-row { grid-template-columns: 1fr; gap: 16px; padding: 18px 2px; }
   .site-row-actions { justify-content: flex-start; }
 }
+
+.routing-admin-screen { gap: 22px; }
+.routing-control-card { display: grid; gap: 18px; padding: 22px; border: 1px solid #dfe4e9; border-radius: 16px; background: #fff; }
+.routing-control-card h2, .routing-control-card p { margin: 0; }
+.routing-control-card > div > p { color: #65717e; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.routing-mode { width: fit-content; padding: 5px 9px; border-radius: 999px; background: #eef1f5; color: #435160; text-transform: capitalize; }
+.routing-mode.shadow { background: #fff3d7; color: #835c00; }.routing-mode.enabled { background: #def5e8; color: #12653a; }
+.routing-class-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.routing-class-grid label { display: grid; grid-template-columns: auto 1fr; gap: 4px 9px; padding: 14px; border: 1px solid #dfe4e9; border-radius: 12px; }
+.routing-class-grid label span { grid-column: 2; color: #6b7682; font-size: 13px; }.routing-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.routing-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.routing-metrics > div { display: grid; gap: 4px; padding: 14px; border-radius: 12px; background: #f5f7f9; }.routing-metrics span { color: #687480; font-size: 12px; }.routing-metrics strong { color: var(--navy); font-size: 18px; }
+.routing-decisions { display: grid; border-top: 1px solid #e4e7eb; }.routing-decisions button { appearance:none;background:none;color:inherit;font:inherit;text-align:left;display:grid;grid-template-columns:90px 1fr auto;gap:12px;padding:12px 2px;border:0;border-bottom:1px solid #e4e7eb;cursor:pointer; }.routing-decisions button:hover,.routing-decisions button:focus-visible{background:#f6f8fa}.routing-decisions small { color: #6f7984; }
+.routing-decision-dialog dl>div{display:grid;grid-template-columns:140px 1fr;gap:12px;padding:7px 0}.routing-decision-dialog dt{color:#6f7984}.routing-decision-dialog dd{margin:0;overflow-wrap:anywhere}.routing-decision-dialog ul{padding-left:20px}
+@media (max-width:720px){.routing-class-grid,.routing-metrics{grid-template-columns:1fr}.routing-decisions button{grid-template-columns:1fr;gap:4px}}

@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 import urllib.error
 import urllib.request
@@ -27,6 +28,7 @@ USAGE_URL = os.environ.get(
     "http://control-api:4100/internal/v1/ai-usage",
 ).rstrip("/")
 USAGE_TOKEN = os.environ.get("ONECOMPUTER_AI_USAGE_TOKEN", "")
+ROUTING_STATE_KEY = "onecomputer_routing_state"
 USAGE_STATE_KEY = "onecomputer_usage_state"
 USAGE_CHAIN_KEY = "onecomputer_usage_chain"
 USAGE_CHAIN_SECRET = hmac.new(
@@ -345,6 +347,130 @@ def _usage_request(path, payload):
     if not isinstance(result, dict) or result.get("schemaVersion") != 1:
         raise RuntimeError("AI usage authority returned a malformed response")
     return result
+
+
+def _routing_state(kwargs):
+    value = kwargs.get(ROUTING_STATE_KEY)
+    if isinstance(value, dict):
+        return value
+    for metadata in _metadata_dicts(kwargs):
+        value = metadata.get(ROUTING_STATE_KEY)
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _set_routing_state(kwargs, state):
+    kwargs[ROUTING_STATE_KEY] = state
+    metadata = kwargs.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        kwargs["metadata"] = metadata
+    metadata[ROUTING_STATE_KEY] = state
+
+
+def _request_routing_metadata(kwargs):
+    values = {}
+    for metadata in _metadata_dicts(kwargs):
+        requester = metadata.get("requester_metadata")
+        if isinstance(requester, dict):
+            values.update(requester)
+        values.update(metadata)
+    return values
+
+
+def _bounded_request_text(value, remaining=8192):
+    if remaining <= 0:
+        return ""
+    if isinstance(value, str):
+        return value[:remaining]
+    if isinstance(value, list):
+        return " ".join(_bounded_request_text(item, remaining) for item in value)[:remaining]
+    if isinstance(value, dict):
+        return " ".join(_bounded_request_text(item, remaining) for item in value.values())[:remaining]
+    return ""
+
+
+def _routing_signals(kwargs, estimated):
+    text = _bounded_request_text(kwargs.get("messages") or kwargs.get("input")).lower()
+    signals = []
+    if estimated < 20:
+        signals.append("short_request")
+    if "```" in text or re.search(r"\b(function|class|import|const|def|sql|typescript|python)\b", text):
+        signals.append("code_request")
+    if re.search(r"\b(api|database|debug|latency|schema|deployment|network|architecture)\b", text):
+        signals.append("technical_request")
+    if re.search(r"\b(reason|reasoning|prove|trade-?offs?|root cause|step by step|compare and justify)\b", text):
+        signals.append("reasoning_request")
+    if (isinstance(kwargs.get("messages"), list) and len(kwargs["messages"]) > 4) or re.search(r"(?:^|\n)\s*[1-3][.)]", text):
+        signals.append("multi_step_request")
+    if estimated > 16000:
+        signals.extend(["long_request", "long_context_required"])
+    return list(dict.fromkeys(signals)) or ["low_confidence_default"]
+
+
+def _routing_payload(kwargs):
+    trusted = _trusted_key_metadata(kwargs)
+    if trusted.get("onecomputer_policy_model_alias") != "onecomputer-auto":
+        return None
+    if kwargs.get("model") != "onecomputer-auto":
+        raise RuntimeError("Governed routing accepts only the synthetic Auto transport alias")
+    tenant_id = trusted.get("onecomputer_tenant_id")
+    subject_id = trusted.get("onecomputer_subject_id")
+    if not isinstance(tenant_id, str) or not tenant_id or not isinstance(subject_id, str) or not subject_id:
+        raise RuntimeError("Governed routing authenticated identity is incomplete")
+    call_id = kwargs.get("litellm_call_id")
+    if not isinstance(call_id, str) or not call_id:
+        params = kwargs.get("litellm_params")
+        call_id = params.get("litellm_call_id") if isinstance(params, dict) else None
+    if not isinstance(call_id, str) or not call_id:
+        raise RuntimeError("Governed routing invocation ID is missing")
+    messages = kwargs.get("messages")
+    estimated = _estimated_input_tokens(kwargs)
+    signals = _routing_signals(kwargs, estimated)
+    vision = _contains_image_input(messages) or _contains_image_input(kwargs.get("input"))
+    tools = bool(_nested_parameter(kwargs, "tools"))
+    if vision:
+        signals.append("vision_required")
+    if tools:
+        signals.append("tools_required")
+    signals = list(dict.fromkeys(signals))
+    maximum_output = _maximum_output_tokens(kwargs, {})
+    request_metadata = _request_routing_metadata(kwargs)
+    task_binding = request_metadata.get("onecomputer_task_binding")
+    if not isinstance(task_binding, str) or len(task_binding) < 32:
+        raise RuntimeError("Governed routing requires a signed AI task binding")
+    requested_class = request_metadata.get("onecomputer_requested_service_class", "auto")
+    if requested_class not in ("auto", "lite", "balanced", "pro"):
+        raise RuntimeError("Governed routing service class is invalid")
+    workspace_id = trusted.get("onecomputer_workspace_id")
+    agent_id = trusted.get("onecomputer_agent_id")
+    if not isinstance(workspace_id, str) or not workspace_id or not isinstance(agent_id, str) or not agent_id:
+        raise RuntimeError("Governed routing workspace identity is incomplete")
+    return {
+        "schemaVersion": 1,
+        "tenantId": tenant_id,
+        "subjectId": subject_id,
+        "workspaceId": workspace_id,
+        "agentId": agent_id,
+        "taskBinding": task_binding,
+        "requestId": call_id,
+        "requestedServiceClass": requested_class,
+        "boundedSignals": signals,
+        "estimatedInputTokens": estimated,
+        "requiredCapabilities": {
+            "vision": vision,
+            "tools": tools,
+            "streaming": bool(kwargs.get("stream")),
+            "contextTokens": estimated,
+            "outputTokens": maximum_output,
+        },
+        "expectedUsage": [
+            {"unit": "input_uncached_token", "quantity": str(estimated)},
+            {"unit": "output_token", "quantity": str(maximum_output)},
+            {"unit": "request", "quantity": "1"},
+        ],
+    }
 
 
 def _tracking_metadata(kwargs):
@@ -674,8 +800,50 @@ def _completion_payload(kwargs, response_obj, start_time, end_time, outcome):
     return {name: value for name, value in payload.items() if value is not None}
 
 
+async def _record_routing_observation(kwargs, event_result, completion_payload):
+    state = _usage_state(kwargs)
+    if not state or not state.get("routingDecisionId"):
+        return
+    event_id = event_result.get("eventId")
+    if not isinstance(event_id, str) or not event_id:
+        return
+    observation = {
+        "schemaVersion": 1,
+        "tenantId": state["tenantId"],
+        "decisionId": state["routingDecisionId"],
+        "usageEventId": event_id,
+        "outcome": "success" if completion_payload["outcome"] == "success" else "error",
+        "actualCost": event_result.get("providerCost"),
+        "currency": event_result.get("currency"),
+        "latencyMs": completion_payload.get("latencyMs"),
+    }
+    await asyncio.to_thread(_usage_request, "routing/observations", {key:value for key,value in observation.items() if value is not None})
+
+
 class OneComputerMcpPolicyCallback(CustomLogger):
+    async def async_pre_routing_hook(self, kwargs, call_type):
+        try:
+            payload = _routing_payload(kwargs)
+            if payload is None:
+                return kwargs
+            result = await asyncio.to_thread(_usage_request, "routing/decide", payload)
+            required = {
+                "decisionId", "executedDeploymentId", "executedModelGroup",
+                "requestedServiceClass", "selectedServiceClass", "binding",
+            }
+            if not required.issubset(result) or not isinstance(result.get("binding"), dict):
+                raise RuntimeError("Governed routing authority returned a malformed decision")
+            _set_routing_state(kwargs, result)
+            kwargs["model"] = result["executedModelGroup"]
+            return kwargs
+        except urllib.error.HTTPError as error:
+            status = error.code if error.code in (403, 409, 429) else 503
+            raise HTTPException(status_code=status, detail={"error": "AI_ROUTING_DENIED"}) from None
+        except (OSError, ValueError, RuntimeError, urllib.error.URLError):
+            raise HTTPException(status_code=503, detail={"error": "AI_ROUTING_UNAVAILABLE"}) from None
+
     async def async_pre_call_deployment_hook(self, kwargs, call_type):
+        routing_state = _routing_state(kwargs)
         image_input = _contains_image_input(kwargs.get("messages")) or _contains_image_input(
             kwargs.get("input")
         )
@@ -689,6 +857,20 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             )
         route = _model_info(kwargs)
         try:
+            trusted = _trusted_key_metadata(kwargs)
+            if trusted.get("onecomputer_policy_model_alias") == "onecomputer-auto":
+                if not routing_state:
+                    raise RuntimeError("Governed routing decision binding is missing")
+                actual = {
+                    "tenantId": trusted.get("onecomputer_tenant_id"),
+                    "requestId": routing_state.get("binding", {}).get("requestId"),
+                    "deploymentId": route.get("onecomputer_deployment_id"),
+                }
+                if actual["deploymentId"] != routing_state.get("executedDeploymentId"):
+                    raise RuntimeError("LiteLLM selected a deployment outside the governed decision")
+                await asyncio.to_thread(_usage_request, "routing/verify", {
+                    "binding": routing_state.get("binding"), "actual": actual,
+                })
             source_attempt_id = _source_attempt_id(kwargs, route) if route else None
             task_binding, parent_attempt_id = _request_usage_context_and_strip_reserved(
                 kwargs, source_attempt_id
@@ -702,6 +884,11 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             )
             if payload is None:
                 return kwargs
+            if routing_state:
+                payload["requestedAlias"] = "onecomputer-auto"
+                payload["requestedServiceClass"] = routing_state["requestedServiceClass"]
+                payload["selectedServiceClass"] = routing_state["selectedServiceClass"]
+                payload["routeMappingVersion"] = routing_state["binding"]["mappingVersionId"]
             result = await asyncio.to_thread(_usage_request, "attempts/admit", payload)
         except urllib.error.HTTPError as error:
             status = error.code if error.code in (403, 409, 429) else 503
@@ -722,6 +909,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             "tenantId": payload["tenantId"],
             "provider": payload["resolvedProvider"],
             "billableRequestUnit": route.get("onecomputer_billable_request_unit") is True,
+            "routingDecisionId": routing_state.get("decisionId") if routing_state else None,
         }, task_binding, payload["sourceAttemptId"], payload.get("parentAttemptId"))
         return kwargs
 
@@ -730,7 +918,8 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             payload = _completion_payload(kwargs, response_obj, start_time, end_time, "success")
             if payload is None:
                 return
-            await asyncio.to_thread(_usage_request, "events", payload)
+            result = await asyncio.to_thread(_usage_request, "events", payload)
+            await _record_routing_observation(kwargs, result, payload)
         except Exception:
             # Completion telemetry must never replace a successful model response.
             return
@@ -740,13 +929,17 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             payload = _completion_payload(kwargs, response_obj, start_time, end_time, "failure")
             if payload is None:
                 return
-            await asyncio.to_thread(_usage_request, "events", payload)
+            result = await asyncio.to_thread(_usage_request, "events", payload)
+            await _record_routing_observation(kwargs, result, payload)
         except Exception:
             return
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
         if call_type != "call_mcp_tool":
-            return data
+            # v1.93 invokes this owned callback after key authorization for the
+            # sole synthetic alias and before Router model-group lookup.
+            data["user_api_key_dict"] = user_api_key_dict
+            return await self.async_pre_routing_hook(data, call_type)
 
         metadata = _metadata(user_api_key_dict)
         permission = getattr(user_api_key_dict, "object_permission", None)

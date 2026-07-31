@@ -70,7 +70,7 @@ export type SandboxApplication = z.infer<typeof sandboxApplicationSchema>;
 // workspace policy documents.
 export const bedrockApiKeyRouteAlias = "onecomputer-bedrock" as const;
 
-export const sandboxModelAliases = ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm", "onecomputer-assistant", bedrockApiKeyRouteAlias] as const;
+export const sandboxModelAliases = ["onecomputer-auto", "onecomputer-claude", "onecomputer-openai", "onecomputer-glm", "onecomputer-assistant", bedrockApiKeyRouteAlias] as const;
 export const sandboxModelAliasSchema = z.enum(sandboxModelAliases);
 export type SandboxModelAlias = z.infer<typeof sandboxModelAliasSchema>;
 

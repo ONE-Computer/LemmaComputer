@@ -1,0 +1,72 @@
+# Governed model routing
+
+ONEComputer exposes stable service classes while keeping provider deployments and prices under administrator control.
+
+## User-facing contract
+
+Users choose one of four aliases:
+
+- `Auto` classifies the task and selects an eligible service class.
+- `Lite` favors lower-cost work within its capability contract.
+- `Balanced` is the safe default for ambiguous work.
+- `Pro` is reserved for work that needs its stronger capability contract.
+
+Auto, Lite, Balanced, and Pro are product contracts, not provider model names. Administrators can replace the deployment behind a class without changing user workflows.
+
+## Decision flow
+
+1. LiteLLM accepts only the synthetic `onecomputer-auto` transport alias.
+2. The callback validates the signed task binding and trusted workspace identity.
+3. Control resolves the user's default Team and its immutable rollout and policy versions.
+4. The router applies explicit class requests or privacy-safe task signals, then capability, residency, approval, health, rate-card, currency, and budget constraints.
+5. Control records the decision and all eligible and rejected candidates atomically before returning a signed concrete-deployment binding.
+6. LiteLLM verifies that binding immediately before provider execution, admits spend, and appends the final usage observation after completion.
+
+Model names are intentionally absent from the user contract. Decision details expose provider, deployment, mapping, rate-card, and candidate evidence only to administrators.
+
+## Cost model
+
+Administrators set the policy billing currency, but do not type a single blended price on a service-class alias. Each concrete deployment references an immutable effective rate card. Expected cost is calculated from the expected usage buckets and that deployment's rates before selection.
+
+Cache reads, cache writes, reasoning tokens, uncached input, output, requests, images, audio, and provider-specific units remain separate when the provider reports them. The usage ledger applies the exact decimal rate for each available bucket. A missing required rate, unknown price, expired card, or currency mismatch makes that deployment budget-ineligible; routing fails closed when no safe candidate remains.
+
+If an administrator swaps the deployment behind Balanced, the new mapping version points to the replacement deployment and its own rate card. Historical decisions remain tied to the old immutable mapping and pricing evidence.
+
+## Safety and privacy
+
+- Task classification is bounded and stores signal codes, never prompt text.
+- Low-confidence or ambiguous Auto classification defaults to Balanced.
+- Team policy can narrow identity policy but cannot widen it.
+- Session affinity pins the exact eligible deployment and records why it moves.
+- Duplicate request IDs replay the durable decision instead of routing or charging twice.
+
+Decision and observation rows are append-only and tenant-scoped in both customer-managed and hosted profiles. Mixed-currency reports deliberately show an unknown aggregate instead of adding incomparable money.
+
+## Rollout and rollback
+
+Start every Team in shadow mode. The fixed deployment executes while the router records its hypothetical choice, expected cost, candidate evidence, fallback rate, errors, regret, and overhead.
+
+1. Review a representative evidence window in the administrator UI.
+2. Record the reviewer, note, sample size, and pass or fail result.
+3. Enable production routing only after a passing review and typed confirmation.
+4. Monitor observations and use the decision drill-down when results diverge.
+
+The kill switch appends a disabled rollout that returns execution to the configured fixed deployment. It does not mutate or erase the prior rollout, policy, mapping, decision, or observation evidence.
+
+## Operator provisioning and qualification
+
+Before creating a Team policy, provision:
+
+- an immutable mapping version;
+- approved, evaluated deployments with capability and residency metadata; and
+- effective tenant rate cards for every deployment expected to carry traffic.
+
+Both deployment profiles use the same callback, Control APIs, schema, and tenant-scoped records. Deployment-specific endpoints and secrets remain configuration.
+
+Qualify the pinned LiteLLM image and real callback hook with:
+
+`npm run qualify:governed-routing`
+
+Run fresh migrations and Postgres integrity coverage with:
+
+`npm run verify:db`

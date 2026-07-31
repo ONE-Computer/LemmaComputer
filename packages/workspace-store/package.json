@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@onecomputer/contracts": "*",
+    "@onecomputer/model-router": "*",
     "@onecomputer/egress-policy": "*",
     "cron-parser": "5.4.0",
     "pg": "8.22.0"
