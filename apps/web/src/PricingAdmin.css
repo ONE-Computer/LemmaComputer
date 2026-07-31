@@ -42,7 +42,7 @@
 .pricing-editor { width: min(780px, calc(100vw - 32px)); max-width: 780px; }
 .pricing-editor .select-menu, .pricing-editor .select-menu-trigger { width: 100%; }
 .pricing-editor .select-menu-trigger { justify-content: space-between; }
-.pricing-target { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 13px 14px; border: 1px solid #dfe5ea; border-radius: 9px; background: #f7f9fb; }
+.pricing-target { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 10px; padding: 13px 14px; border: 1px solid #dfe5ea; border-radius: 9px; background: #f7f9fb; }
 .pricing-target > div { display: grid; gap: 3px; }
 .pricing-target span, .pricing-target small { color: #6c7884; font-size: 12px; }
 .pricing-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }

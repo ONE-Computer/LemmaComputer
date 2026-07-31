@@ -15,6 +15,12 @@ test("administrator prices configured provider deployments independently of rout
   const editor = page.getByRole("dialog", { name: "Create price version" });
   await expect(editor.getByLabel("Price provider deployment")).toContainText("Anthropic Claude Sonnet 4.6");
   await editor.getByLabel("Input price per 1M tokens").fill("3");
+  const deploymentField = await editor.locator(".modal-field").filter({ hasText: "Provider deployment" }).boundingBox();
+  const deploymentSummary = await editor.getByRole("note").boundingBox();
+  expect(deploymentField).not.toBeNull();
+  expect(deploymentSummary).not.toBeNull();
+  expect(deploymentSummary!.y - (deploymentField!.y + deploymentField!.height)).toBeGreaterThanOrEqual(8);
+
   await editor.getByLabel("Output price per 1M tokens").fill("15");
   await editor.getByLabel("Cache read price per 1M tokens").fill("0.3");
   await editor.getByLabel("Cache write price per 1M tokens").fill("3.75");
