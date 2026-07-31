@@ -142,7 +142,7 @@ assert_units("openai", {
     {"unit": "cache_read_token", "quantity": "20"},
     {"unit": "output_token", "quantity": "38"},
     {"unit": "reasoning_token", "quantity": "12"},
-    {"unit": "request", "quantity": "1"},
+    {"unit": "request", "quantity": "1", "diagnostic": True},
     {"unit": "provider:total_tokens", "quantity": "150", "diagnostic": True},
 ], "150")
 
@@ -159,7 +159,7 @@ assert_units("anthropic", {
     {"unit": "cache_read_token", "quantity": "12"},
     {"unit": "cache_write_token", "quantity": "8"},
     {"unit": "output_token", "quantity": "20"},
-    {"unit": "request", "quantity": "1"},
+    {"unit": "request", "quantity": "1", "diagnostic": True},
     {"unit": "provider:total_tokens", "quantity": "100", "diagnostic": True},
 ], "100")
 
@@ -173,7 +173,7 @@ assert_units("glm", {
     {"unit": "cache_read_token", "quantity": "4"},
     {"unit": "output_token", "quantity": "10"},
     {"unit": "reasoning_token", "quantity": "6"},
-    {"unit": "request", "quantity": "1"},
+    {"unit": "request", "quantity": "1", "diagnostic": True},
     {"unit": "provider:total_tokens", "quantity": "56", "diagnostic": True},
 ], "56")
 
@@ -192,9 +192,17 @@ assert_units("bedrock", {
     {"unit": "cache_write_token", "quantity": "5"},
     {"unit": "output_token", "quantity": "23"},
     {"unit": "reasoning_token", "quantity": "7"},
-    {"unit": "request", "quantity": "1"},
+    {"unit": "request", "quantity": "1", "diagnostic": True},
     {"unit": "provider:total_tokens", "quantity": "100", "diagnostic": True},
 ], "100")
+
+unknown_units, unknown_total = normalized_units("openai", RuntimeError("provider failed"))
+assert unknown_units == [{"unit": "request", "quantity": "1", "diagnostic": True}]
+assert unknown_total is None
+
+request_units, request_total = normalized_units("provider-with-request-rate", {}, True)
+assert request_units == [{"unit": "request", "quantity": "1"}]
+assert request_total is None
 
 class Auth:
     metadata = {
@@ -232,6 +240,8 @@ first = {
     "model": "openai/gpt-real",
     "messages": [{"role": "user", "content": "hello"}],
     "max_tokens": 32,
+    "litellm_call_id": "litellm-call-stable",
+    "litellm_metadata": {"attempted_retries": 0},
 }
 task_binding, parent = request_context(first)
 assert task_binding == "initial.signed-binding"
@@ -249,6 +259,14 @@ assert "parentAttemptId" not in first_payload
 assert first_payload["budgetBounds"]["maxRetries"] == 0
 assert first_payload["budgetBounds"]["maxFallbacks"] == 0
 assert first_payload["budgetBounds"]["inputTokens"] == "7"
+assert "requestUnits" not in first_payload["budgetBounds"]
+
+# Replaying the same concrete LiteLLM v1.93 hook tuple must converge on the
+# same source attempt instead of creating another charge.
+first_replay = admission_payload(first, "acompletion", task_binding, parent, first_bounds)
+assert first_replay["sourceAttemptId"] == first_payload["sourceAttemptId"]
+request_billed_route = {**openai_route, "onecomputer_billable_request_unit": True}
+assert budget_bounds(first, request_billed_route)["requestUnits"] == "1"
 
 set_usage_state(first, {
     "admissionId": "admission-first",
@@ -264,6 +282,8 @@ retry = {
     },
     "model": "openai/gpt-real",
     "messages": first["messages"],
+    "litellm_call_id": "litellm-call-stable",
+    "litellm_metadata": {"attempted_retries": 1},
 }
 retry_binding, retry_parent = request_context(retry)
 assert retry_binding == task_binding
@@ -298,6 +318,8 @@ fallback = {
     # v1.93 stores one prior model in metadata on the first fallback and sets
     # fallback_depth before recursively selecting the next concrete route.
     "fallback_depth": 1,
+    "litellm_call_id": "litellm-call-stable",
+    "litellm_metadata": {"attempted_retries": 0},
 }
 fallback_binding, fallback_parent = request_context(fallback)
 fallback_payload = admission_payload(
@@ -310,6 +332,10 @@ assert fallback_payload["resolvedDeploymentId"] == "deployment-anthropic"
 assert fallback_payload["sourceAttemptId"] not in {
     first_payload["sourceAttemptId"], retry_payload["sourceAttemptId"]
 }
+fallback_replay = admission_payload(
+    fallback, "acompletion", fallback_binding, fallback_parent, budget_bounds(fallback, anthropic_route)
+)
+assert fallback_replay["sourceAttemptId"] == fallback_payload["sourceAttemptId"]
 
 completion = completion_payload(
     {"metadata": retry["metadata"], "messages": first["messages"]},
@@ -321,6 +347,7 @@ completion = completion_payload(
 assert completion["admissionId"] == "admission-retry"
 assert completion["sourceEventId"] == "admission-retry:completion"
 assert completion["providerReportedTotalTokens"] == "14"
+assert next(item for item in completion["units"] if item["unit"] == "request")["diagnostic"] is True
 
 class ForeignAuth:
     metadata = {}
@@ -338,6 +365,19 @@ except RuntimeError as error:
     assert "authenticated identity is incomplete" in str(error)
 else:
     raise AssertionError("request metadata must not impersonate authenticated identity")
+
+try:
+    admission_payload({
+        "user_api_key_dict": Auth(),
+        "litellm_params": {"model_info": openai_route},
+        "metadata": {},
+        "model": "openai/gpt-real",
+        "messages": [],
+    }, "acompletion", "initial.signed-binding")
+except RuntimeError as error:
+    assert "concrete invocation ID is missing" in str(error)
+else:
+    raise AssertionError("admission must fail closed without LiteLLM's concrete invocation ID")
 `;
   const result = spawnSync("python3", ["-c", script, callback], {
     encoding: "utf8",

@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import json
 import os
-import uuid
 from datetime import datetime, timedelta, timezone
 import urllib.error
 import urllib.request
@@ -327,28 +326,74 @@ def _usage_request(path, payload):
     return result
 
 
+def _tracking_metadata(kwargs):
+    candidates = [kwargs.get("litellm_metadata"), kwargs.get("metadata")]
+    params = kwargs.get("litellm_params")
+    if isinstance(params, dict):
+        candidates.extend([params.get("litellm_metadata"), params.get("metadata")])
+    return [candidate for candidate in candidates if isinstance(candidate, dict)]
+
+
+def _previous_models(kwargs):
+    previous = kwargs.get("previous_models")
+    for candidate in _tracking_metadata(kwargs):
+        if not isinstance(previous, list):
+            previous = candidate.get("previous_models")
+    params = kwargs.get("litellm_params")
+    if not isinstance(previous, list) and isinstance(params, dict):
+        previous = params.get("previous_models")
+    return previous if isinstance(previous, list) else []
+
+
+def _attempt_ordinal(kwargs):
+    # LiteLLM v1.93 initializes this to zero before the first router call and
+    # sets current_attempt + 1 immediately before each concrete retry.
+    for candidate in _tracking_metadata(kwargs):
+        value = candidate.get("attempted_retries")
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    # Non-router calls have no retry metadata. The previous-model list is the
+    # v1.93 compatibility signal for retries created before tracking starts.
+    return len(_previous_models(kwargs))
+
+
+def _fallback_depth(kwargs):
+    value = kwargs.get("fallback_depth")
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
 def _attempt_kind(kwargs, call_type):
     value = str(getattr(call_type, "value", call_type) or "")
     if "embedding" in value:
         return "embedding"
-    fallback_depth = kwargs.get("fallback_depth")
-    if isinstance(fallback_depth, (int, float)) and fallback_depth > 0:
+    if _fallback_depth(kwargs) > 0:
         return "fallback"
-    previous = kwargs.get("previous_models")
-    for name in ("metadata", "litellm_metadata"):
-        candidate = kwargs.get(name)
-        if not isinstance(previous, list) and isinstance(candidate, dict):
-            previous = candidate.get("previous_models")
-    if not isinstance(previous, list):
-        params = kwargs.get("litellm_params")
-        if isinstance(params, dict):
-            previous = params.get("previous_models")
-            metadata = params.get("metadata")
-            if not isinstance(previous, list) and isinstance(metadata, dict):
-                previous = metadata.get("previous_models")
-    if isinstance(previous, list) and previous:
+    if _attempt_ordinal(kwargs) > 0 or _previous_models(kwargs):
         return "retry"
     return "inference"
+
+
+def _source_attempt_id(kwargs, route):
+    # In pinned LiteLLM v1.93 the proxy installs `litellm_call_id` from
+    # x-litellm-call-id (or a generated UUID), provider wrappers preserve it,
+    # and this hook runs after deployment selection. Never substitute fresh
+    # randomness here: replaying the same concrete hook must be idempotent.
+    call_id = kwargs.get("litellm_call_id")
+    if not isinstance(call_id, str) or not call_id.strip():
+        params = kwargs.get("litellm_params")
+        call_id = params.get("litellm_call_id") if isinstance(params, dict) else None
+    if not isinstance(call_id, str) or not call_id.strip():
+        raise RuntimeError("LiteLLM concrete invocation ID is missing")
+    identity = {
+        "schemaVersion": 1,
+        "litellmCallId": call_id.strip(),
+        "retryOrdinal": _attempt_ordinal(kwargs),
+        "fallbackDepth": _fallback_depth(kwargs),
+        "deploymentId": route["onecomputer_deployment_id"],
+    }
+    encoded = json.dumps(identity, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    digest = hashlib.sha256(b"onecomputer-litellm-attempt/v1\0" + encoded).hexdigest()
+    return f"litellm-attempt-{digest}"
 
 
 def _set_usage_state(kwargs, state, task_binding):
@@ -438,7 +483,6 @@ def _budget_bounds(kwargs, route):
         "inputTokens": str(_estimated_input_tokens(kwargs)),
         "cacheStatus": "unknown",
         "maximumOutputTokens": str(maximum_output),
-        "requestUnits": "1",
         # The hook runs once for every concrete provider invocation, so a retry
         # or fallback receives its own admission rather than hiding here.
         "maxRetries": 0,
@@ -447,6 +491,8 @@ def _budget_bounds(kwargs, route):
         "reservationTtlSeconds": int(seconds),
         "providerDeadlineAt": _iso(datetime.now(timezone.utc) + timedelta(seconds=seconds)),
     }
+    if route.get("onecomputer_billable_request_unit") is True:
+        bounds["requestUnits"] = "1"
     if route.get("supports_reasoning") is True:
         bounds["maximumReasoningTokens"] = str(maximum_output)
     return bounds
@@ -480,7 +526,7 @@ def _admission_payload(
     payload = {
         "schemaVersion": 1,
         "sourceSystem": "litellm",
-        "sourceAttemptId": str(uuid.uuid4()),
+        "sourceAttemptId": _source_attempt_id(kwargs, route),
         "tenantId": trusted["onecomputer_tenant_id"],
         "subjectId": trusted["onecomputer_subject_id"],
         "workspaceId": trusted["onecomputer_workspace_id"],
@@ -514,7 +560,7 @@ def _integer(source, *names):
     return 0
 
 
-def _normalized_units(provider, response_obj):
+def _normalized_units(provider, response_obj, billable_request_unit=False):
     response = _as_dict(response_obj)
     usage = _as_dict(response.get("usage"))
     if not usage:
@@ -537,7 +583,7 @@ def _normalized_units(provider, response_obj):
         ("cache_write_token", cache_write, False),
         ("output_token", output, False),
         ("reasoning_token", reasoning, False),
-        ("request", 1, False),
+        ("request", 1, billable_request_unit is not True),
         ("provider:total_tokens", total, True),
     ]
     return [
@@ -577,7 +623,11 @@ def _completion_payload(kwargs, response_obj, start_time, end_time, outcome):
     state = _usage_state(kwargs)
     if not state:
         return None
-    units, provider_total = _normalized_units(state["provider"], response_obj)
+    units, provider_total = _normalized_units(
+        state["provider"],
+        response_obj,
+        state.get("billableRequestUnit") is True,
+    )
     latency = None
     if isinstance(start_time, datetime) and isinstance(end_time, datetime):
         latency = max(0, int((end_time - start_time).total_seconds() * 1000))
@@ -643,6 +693,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             "admissionId": admission_id,
             "tenantId": payload["tenantId"],
             "provider": payload["resolvedProvider"],
+            "billableRequestUnit": route.get("onecomputer_billable_request_unit") is True,
         }, task_binding)
         return kwargs
 
