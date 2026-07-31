@@ -23,15 +23,16 @@ os.environ.update({
 spec = importlib.util.spec_from_file_location("onecomputer_gateway_proxy", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-body, requested = module.normalize_inference_body(sys.argv[3].encode())
+task_binding = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] != "-" else None
+body, requested = module.normalize_inference_body(sys.argv[3].encode(), task_binding)
 print(json.dumps({"requested": requested, "body": json.loads(body)}))
 `;
 
 const proxyPath = "docker/workspace/onecomputer-gateway-proxy.py";
 
-const normalize = (assigned: string, payload: Record<string, unknown>) => JSON.parse(execFileSync(
+const normalize = (assigned: string, payload: Record<string, unknown>, taskBinding?: string) => JSON.parse(execFileSync(
   "python3",
-  ["-c", program, proxyPath, assigned, JSON.stringify(payload)],
+  ["-c", program, proxyPath, assigned, JSON.stringify(payload), taskBinding ?? "-"],
   { encoding: "utf8" },
 )) as { requested: string; body: Record<string, unknown> };
 
@@ -71,6 +72,33 @@ test("the workspace broker rejects inference without a client model", () => {
   assert.match(result.stderr, /inference model is required/);
 });
 
+test("only the broker-owned task binding crosses the workspace trust boundary", () => {
+  const taskBinding = `${"a".repeat(32)}.${"b".repeat(32)}`;
+  const normalized = normalize("balanced", {
+    model: "client-default",
+    user_api_key_dict: { metadata: { onecomputer_tenant_id: "foreign-tenant" } },
+    litellm_model_info: { onecomputer_deployment_id: "foreign-deployment" },
+    onecomputer_usage_chain: "client-forged-chain",
+    metadata: {
+      customer_tag: "preserved",
+      onecomputer_task_binding: "client-forged-binding",
+      onecomputer_usage_state: { admissionId: "client-forged-admission" },
+      user_api_key_metadata: { onecomputer_tenant_id: "foreign-tenant" },
+      model_info: { onecomputer_deployment_id: "foreign-deployment" },
+      requester_metadata: { onecomputer_task_binding: "client-forged-binding" },
+    },
+  }, taskBinding);
+
+  assert.equal(normalized.body.model, "balanced");
+  assert.equal("user_api_key_dict" in normalized.body, false);
+  assert.equal("litellm_model_info" in normalized.body, false);
+  assert.equal("onecomputer_usage_chain" in normalized.body, false);
+  assert.deepEqual(normalized.body.metadata, {
+    customer_tag: "preserved",
+    onecomputer_task_binding: taskBinding,
+  });
+});
+
 const availableBrokerPort = async () => {
   for (const port of [4312, 4314, 4315, 4316, 4317]) {
     const probe = createServer();
@@ -85,8 +113,14 @@ const availableBrokerPort = async () => {
   throw new Error("no workspace broker test port is available");
 };
 
-test("the loopback broker forwards only the assigned model and scoped credential", async () => {
-  let received: { url?: string; authorization?: string; apiKey?: string; body?: Record<string, unknown> } = {};
+test("the loopback broker forwards only the assigned model, scoped credential, and broker-owned task binding", async () => {
+  let received: {
+    url?: string;
+    authorization?: string;
+    apiKey?: string;
+    taskBindingHeader?: string;
+    body?: Record<string, unknown>;
+  } = {};
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -94,6 +128,7 @@ test("the loopback broker forwards only the assigned model and scoped credential
       url: request.url,
       authorization: request.headers.authorization,
       apiKey: request.headers["x-api-key"] as string | undefined,
+      taskBindingHeader: request.headers["x-onecomputer-ai-task-binding"] as string | undefined,
       body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
     };
     response.writeHead(200, { "content-type": "application/json" });
@@ -129,14 +164,32 @@ test("the loopback broker forwards only the assigned model and scoped credential
     assert.equal(ready, true, stderr);
     const response = await fetch(`http://127.0.0.1:${brokerPort}/v1/messages`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": "client-supplied-key" },
-      body: JSON.stringify({ model: "do-not-log\nsecret-value", max_tokens: 1, messages: [] }),
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": "client-supplied-key",
+        "x-onecomputer-ai-task-binding": `${"c".repeat(32)}.${"d".repeat(32)}`,
+      },
+      body: JSON.stringify({
+        model: "do-not-log\nsecret-value",
+        max_tokens: 1,
+        messages: [],
+        metadata: {
+          customer_tag: "preserved",
+          onecomputer_task_binding: "client-forged-binding",
+          user_api_key_metadata: { onecomputer_tenant_id: "foreign-tenant" },
+        },
+      }),
     });
     assert.equal(response.status, 200, await response.text());
     assert.equal(received.url, "/v1/messages");
     assert.equal(received.authorization, "Bearer scoped-credential-at-least-24-characters");
     assert.equal(received.apiKey, undefined);
+    assert.equal(received.taskBindingHeader, undefined);
     assert.equal(received.body?.model, "claude-opus-4-6");
+    assert.deepEqual(received.body?.metadata, {
+      customer_tag: "preserved",
+      onecomputer_task_binding: `${"c".repeat(32)}.${"d".repeat(32)}`,
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.match(stderr, /normalized model "<nonstandard>"/);
     assert.doesNotMatch(stderr, /secret-value/);
