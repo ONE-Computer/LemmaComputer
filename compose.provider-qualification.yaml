@@ -63,7 +63,7 @@ services:
     restart: "no"
 
   litellm:
-    image: ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e
+    image: ${ONECOMPUTER_LITELLM_QUALIFICATION_IMAGE:-ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e}
     command:
       - --config
       - /app/provider-qualification.yaml
