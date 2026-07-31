@@ -352,9 +352,11 @@ export function createControlServer(
     taskId: string,
     sessionId?: string,
     turnId?: string,
+    requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto",
   ) => usageBindings?.issue({
     tenantId: owner.tenantId, subjectId: owner.subjectId, workspaceId, agentId,
     contextKind, taskId, ...(sessionId ? { sessionId } : {}), ...(turnId ? { turnId } : {}),
+    requestedServiceClass,
   });
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
   const requireBudgets=()=>{if(!budgets)throw new OneComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
@@ -2218,6 +2220,7 @@ export function createControlServer(
       try {
         const usageTaskBinding = issueUsageTaskBinding(
           owner, request.params.workspaceId, access.agentId, "chat", input.message.id, sessionId,
+          undefined, input.requestedServiceClass,
         );
         for await (const event of agentChat.streamTurn(access, sessionId, input.message, undefined, usageTaskBinding)) {
           let projected = event;

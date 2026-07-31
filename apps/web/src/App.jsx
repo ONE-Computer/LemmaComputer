@@ -87,6 +87,13 @@ const chatAttachmentMaxFiles = 4;
 const chatAttachmentMaxBytes = 8 * 1024 * 1024;
 const chatAttachmentMaxTotalBytes = 16 * 1024 * 1024;
 const restoredChatTurnMaxAgeMs = 16 * 60 * 1000;
+const chatServiceClassOptions = [
+  { value: "auto", label: "Auto · best fit per task" },
+  { value: "lite", label: "Lite · lowest cost" },
+  { value: "balanced", label: "Balanced · everyday work" },
+  { value: "pro", label: "Pro · highest capability" },
+];
+const chatServiceClassLabel = Object.fromEntries(chatServiceClassOptions.map((item) => [item.value, item.label.split(" · ")[0]]));
 const chatAttachmentTypes = new Set([
   "image/png",
   "image/jpeg",
@@ -2218,6 +2225,8 @@ function ChatConversation({
   agentId,
   agentName,
   supportsVision,
+  requestedServiceClass,
+  onTurnBusyChange,
   activeSessionId,
   onSessionsChange,
   onSessionChange,
@@ -2266,10 +2275,10 @@ function ChatConversation({
         headers: {
           "idempotency-key": crypto.randomUUID(),
         },
-        body: { message: messages.at(-1) },
+        body: { message: messages.at(-1), requestedServiceClass },
       };
     },
-  }), [workspaceId, agentId]);
+  }), [workspaceId, agentId, requestedServiceClass]);
   const {
     messages,
     sendMessage,
@@ -2304,6 +2313,11 @@ function ChatConversation({
     .filter((message) => message.role === "assistant" && message.metadata?.turnId)
     .map((message) => message.metadata.turnId);
   const latestActivityTurnId = activityTurns.at(-1) ?? "";
+
+  useEffect(() => {
+    onTurnBusyChange?.(turnBusy);
+    return () => onTurnBusyChange?.(false);
+  }, [onTurnBusyChange, turnBusy]);
 
   useEffect(() => {
     if (latestActivityTurnId) setSelectedActivityTurnId(latestActivityTurnId);
@@ -2783,6 +2797,8 @@ export function ChatScreen({
   const [reload, setReload] = useState(0);
   const [sessionNextCursor, setSessionNextCursor] = useState(null);
   const [sessionLoadingMore, setSessionLoadingMore] = useState(false);
+  const [requestedServiceClass, setRequestedServiceClass] = useState("auto");
+  const [contextBusy, setContextBusy] = useState(false);
   const handledHistoryLoadRequest = useRef(historyLoadRequest);
 
   const publishHistoryMetadata = (nextCursor = sessionNextCursor, loading = sessionLoadingMore) => {
@@ -2916,6 +2932,7 @@ export function ChatScreen({
         <SelectMenu
           value={workspace?.id ?? ""}
           onValueChange={onWorkspaceChange}
+          disabled={contextBusy}
           ariaLabel="Choose workspace"
           options={workspaceOptions.map((item) => ({ value: item.id, label: workspaceName(item) }))}
         />
@@ -2925,10 +2942,21 @@ export function ChatScreen({
         <SelectMenu
           value={activeAgentId}
           onValueChange={selectAgent}
+          disabled={contextBusy}
           ariaLabel="Choose chat agent"
           options={agentOptions}
         />
       </div>}
+      <div className="chat-agent-selector">
+        <span className="chat-agent-selector-label">Model</span>
+        <SelectMenu
+          value={requestedServiceClass}
+          onValueChange={setRequestedServiceClass}
+          disabled={contextBusy}
+          ariaLabel="Choose model mode"
+          options={chatServiceClassOptions}
+        />
+      </div>
     </>
   ) : null;
   const contextSelector = contextControls ? (
@@ -2936,7 +2964,7 @@ export function ChatScreen({
       {contextControls}
     </div>
   ) : null;
-  const contextSummary = [agentName, workspace ? workspaceName(workspace) : ""]
+  const contextSummary = [agentName, workspace ? workspaceName(workspace) : "", chatServiceClassLabel[requestedServiceClass]]
     .filter(Boolean)
     .join(" · ");
   if (status !== "ready") {
@@ -2992,6 +3020,8 @@ export function ChatScreen({
         agentId={activeAgentId}
         agentName={agentName}
         supportsVision={workspace.modelRoute?.capabilities?.vision === true}
+        requestedServiceClass={requestedServiceClass}
+        onTurnBusyChange={setContextBusy}
         activeSessionId={activeSessionId}
         onSessionsChange={onSessionsChange}
         onSessionChange={onSessionChange}

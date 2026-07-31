@@ -23,6 +23,13 @@ export function useDismissOnOutside(open, onDismiss, refs) {
     if (!open) return undefined;
     const onPointerDown = (event) => {
       if (refs.some((ref) => ref.current?.contains(event.target))) return;
+      const portal = event.target instanceof Element ? event.target.closest(".select-menu-popup") : null;
+      if (portal?.id && refs.some((ref) => (
+        [...(ref.current?.querySelectorAll("[aria-controls]") ?? [])]
+          .some((control) => control.getAttribute("aria-controls") === portal.id)
+      ))) {
+        return;
+      }
       dismissRef.current();
     };
     const onKeyDown = (event) => {

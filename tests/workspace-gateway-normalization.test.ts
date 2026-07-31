@@ -36,6 +36,11 @@ const normalize = (assigned: string, payload: Record<string, unknown>, taskBindi
   { encoding: "utf8" },
 )) as { requested: string; body: Record<string, unknown> };
 
+const taskBinding = (requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto") => `${Buffer.from(JSON.stringify({
+  schemaVersion: 1,
+  requestedServiceClass,
+})).toString("base64url")}.${"s".repeat(43)}`;
+
 test("the workspace broker binds Claude background model names to the assigned provider route", () => {
   const normalized = normalize("claude-sonnet-4-6", {
     model: "claude-sonnet-4-5",
@@ -73,7 +78,7 @@ test("the workspace broker rejects inference without a client model", () => {
 });
 
 test("only the broker-owned task binding crosses the workspace trust boundary", () => {
-  const taskBinding = `${"a".repeat(32)}.${"b".repeat(32)}`;
+  const binding = taskBinding("pro");
   const normalized = normalize("balanced", {
     model: "client-default",
     user_api_key_dict: { metadata: { onecomputer_tenant_id: "foreign-tenant" } },
@@ -87,7 +92,7 @@ test("only the broker-owned task binding crosses the workspace trust boundary", 
       model_info: { onecomputer_deployment_id: "foreign-deployment" },
       requester_metadata: { onecomputer_task_binding: "client-forged-binding" },
     },
-  }, taskBinding);
+  }, binding);
 
   assert.equal(normalized.body.model, "balanced");
   assert.equal("user_api_key_dict" in normalized.body, false);
@@ -95,7 +100,8 @@ test("only the broker-owned task binding crosses the workspace trust boundary", 
   assert.equal("onecomputer_usage_chain" in normalized.body, false);
   assert.deepEqual(normalized.body.metadata, {
     customer_tag: "preserved",
-    onecomputer_task_binding: taskBinding,
+    onecomputer_task_binding: binding,
+    onecomputer_requested_service_class: "pro",
   });
 });
 
@@ -167,7 +173,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       headers: {
         "content-type": "application/json",
         "x-api-key": "client-supplied-key",
-        "x-onecomputer-ai-task-binding": `${"c".repeat(32)}.${"d".repeat(32)}`,
+        "x-onecomputer-ai-task-binding": taskBinding("lite"),
       },
       body: JSON.stringify({
         model: "do-not-log\nsecret-value",
@@ -188,7 +194,8 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     assert.equal(received.body?.model, "claude-opus-4-6");
     assert.deepEqual(received.body?.metadata, {
       customer_tag: "preserved",
-      onecomputer_task_binding: `${"c".repeat(32)}.${"d".repeat(32)}`,
+      onecomputer_task_binding: taskBinding("lite"),
+      onecomputer_requested_service_class: "lite",
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.match(stderr, /normalized model "<nonstandard>"/);

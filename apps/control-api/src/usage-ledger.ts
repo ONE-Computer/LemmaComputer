@@ -107,11 +107,13 @@ export type UsageTaskContextKind = "chat"|"channel"|"schedule"|"background";
 export type UsageTaskBinding = {
   schemaVersion:1; tenantId:string; subjectId:string; workspaceId:string; agentId:string;
   contextKind:UsageTaskContextKind; taskId:string; sessionId?:string; turnId?:string;
+  requestedServiceClass?:"auto"|"lite"|"balanced"|"pro";
   issuedAt:string; expiresAt:string;
 };
 const taskBindingSchema = z.object({
   schemaVersion:z.literal(1),tenantId:boundedId,subjectId:boundedId,workspaceId:boundedId,agentId:boundedId,
   contextKind:z.enum(["chat","channel","schedule","background"]),taskId:boundedId,sessionId:boundedId.optional(),turnId:boundedId.optional(),
+  requestedServiceClass:serviceClass.default("auto"),
   issuedAt:z.iso.datetime(),expiresAt:z.iso.datetime(),
 }).strict();
 

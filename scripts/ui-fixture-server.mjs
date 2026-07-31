@@ -76,6 +76,23 @@ const sandboxWorkspace = {
   },
 };
 
+const productWorkspaceId = "4d647d2f-7b42-438e-b1bb-4e91347eb58d";
+const productWorkspace = {
+  ...workspace,
+  id: productWorkspaceId,
+  grantId: "workspace-product",
+  agents: [
+    { id: "hermes-claw", displayName: "Hermes Agent CLI", clientVersion: "0.19.0", agentId: "agent-alex:product-hermes", state: "ready" },
+    { id: "codex-cli", displayName: "Codex CLI", clientVersion: "0.116.0", agentId: "agent-alex:product-codex", state: "ready" },
+  ],
+  modelRoute: {
+    alias: "onecomputer-auto",
+    status: "ready",
+    fallback: "none",
+    limits: { requestsPerMinute: 30, tokensPerMinute: 50000, maxParallelRequests: 4 },
+  },
+};
+
 const profile = {
   id: "claude-desktop-standard-v1",
   version: 1,
@@ -474,7 +491,7 @@ const fixturePeriod = () => ({ start:"2026-07-01T00:00:00.000Z",end:"2026-08-01T
 const fixtureTeamDetail = (teamId) => ({
   ...fixtureTeams.find((team) => team.id === teamId), memberships: fixtureTeamMemberships.get(teamId) ?? [],
 });
-let fixtureWorkspaces = [workspace, sandboxWorkspace];
+let fixtureWorkspaces = [workspace, sandboxWorkspace, productWorkspace];
 let fixtureMcpConnections = [
   {
     id: "microsoft-365",
@@ -756,6 +773,11 @@ const responses = new Map([
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/status`, { workspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [chatSession] }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }] }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/status`, { workspaceId: productWorkspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [] }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/codex-cli/status`, { workspaceId: productWorkspaceId, catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/codex-cli/sessions`, { sessions: [] }],
   ["GET /v1/openvtc/approvers/current", { connected: false, executorDid: "did:key:z6MkFixture", approver: null }],
   ["GET /v1/openvtc/companion/config", { enabled: false, vapidPublicKey: null }],
   ["GET /v1/openvtc/companions", { companions: [] }],
@@ -1087,9 +1109,11 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
-  if (key === `POST /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`) {
+  const createChatSessionMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli)\/sessions$/);
+  if (request.method === "POST" && createChatSessionMatch && [workspaceId, productWorkspaceId].includes(decodeURIComponent(createChatSessionMatch[1]))) {
+    const agentCatalogId = decodeURIComponent(createChatSessionMatch[2]);
     response.statusCode = 201;
-    response.end(JSON.stringify({ ...chatSession, id: `fixture-session-${Date.now()}`, title: null }));
+    response.end(JSON.stringify({ ...chatSession, id: `fixture-session-${Date.now()}`, title: null, agentCatalogId }));
     return;
   }
   const cancelTurnMatch = url.pathname.match(/^\/v1\/workspaces\/[^/]+\/chat\/agents\/hermes-claw\/sessions\/([^/]+)\/turns\/active$/);
@@ -1137,7 +1161,9 @@ const server = http.createServer((request, response) => {
     response.end();
     return;
   }
-  if (key.startsWith(`POST /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/`) && key.endsWith("/messages")) {
+  const sendChatMessageMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli)\/sessions\/([^/]+)\/messages$/);
+  if (request.method === "POST" && sendChatMessageMatch && [workspaceId, productWorkspaceId].includes(decodeURIComponent(sendChatMessageMatch[1]))) {
+    const agentCatalogId = decodeURIComponent(sendChatMessageMatch[2]);
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
@@ -1162,7 +1188,7 @@ const server = http.createServer((request, response) => {
         ? "Published **Hello world**. Open ONEComputer → Sites to view it."
         : "I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations";
       const openingChunks = [
-        { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
+        { type: "start", messageId, messageMetadata: { agentCatalogId, turnId, state: "streaming", createdAt } },
         { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: siteRequest ? "Updating the site files…" : "Reviewing the workspace context…", state: "running" } },
         { type: "data-tool", id: `${turnId}-tool`, data: { toolCallId: `${turnId}-tool`, name: "workspace-context", state: "running", summary: "Internal fixture tool" } },
         { type: "text-start", id: `${turnId}-text` },
@@ -1174,7 +1200,7 @@ const server = http.createServer((request, response) => {
         { type: "text-delta", id: `${turnId}-text`, delta: closingText },
         { type: "text-end", id: `${turnId}-text` },
         { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },
-        { type: "finish", finishReason: "stop", messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt } },
+        { type: "finish", finishReason: "stop", messageMetadata: { agentCatalogId, turnId, state: "completed", createdAt } },
       ];
       chatMessages.push(input.message);
       const sessionId = decodeURIComponent(url.pathname.split("/").at(-2));
@@ -1187,7 +1213,7 @@ const server = http.createServer((request, response) => {
         chatMessages.push({
           id: messageId,
           role: "assistant",
-          metadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt },
+          metadata: { agentCatalogId, turnId, state: "streaming", createdAt },
           parts: [
             { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: siteRequest ? "Updating the site files…" : "Reviewing the workspace context…", state: "running" } },
             { type: "data-tool", id: `${turnId}-tool`, data: { toolCallId: `${turnId}-tool`, name: "workspace-context", state: "running", summary: "Internal fixture tool" } },
@@ -1216,7 +1242,7 @@ const server = http.createServer((request, response) => {
         const completed = {
           id: messageId,
           role: "assistant",
-          metadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt },
+          metadata: { agentCatalogId, turnId, state: "completed", createdAt },
           parts: [
             { type: "data-progress", id: `${turnId}-progress`, data: { activityId: `${turnId}-progress`, label: "Work complete", state: "completed" } },
             { type: "data-tool", id: `${turnId}-tool`, data: { toolCallId: `${turnId}-tool`, name: "workspace-context", state: "completed", summary: "Internal fixture tool" } },

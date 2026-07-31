@@ -42,6 +42,19 @@ if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CRE
     raise SystemExit("invalid gateway broker configuration")
 
 
+def task_service_class(task_binding: str) -> str:
+    try:
+        encoded = task_binding.split(".", 1)[0]
+        padding = "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded + padding))
+        requested = payload.get("requestedServiceClass", "auto")
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
+        raise ValueError("invalid AI task binding payload") from None
+    if requested not in {"auto", "lite", "balanced", "pro"}:
+        raise ValueError("invalid AI task binding service class")
+    return requested
+
+
 def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tuple[bytes, str]:
     request = json.loads(body)
     if not isinstance(request, dict):
@@ -71,6 +84,7 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
     }
     if task_binding is not None:
         metadata["onecomputer_task_binding"] = task_binding
+        metadata["onecomputer_requested_service_class"] = task_service_class(task_binding)
     request["metadata"] = metadata
     request["model"] = MODEL_ALIAS
     return json.dumps(request, separators=(",", ":")).encode(), requested_model

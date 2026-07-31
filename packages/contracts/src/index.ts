@@ -1041,7 +1041,11 @@ export const chatUiMessageSchema = z.object({
 }).strict();
 export type ChatUiMessage = z.infer<typeof chatUiMessageSchema>;
 
+export const chatRequestedServiceClassSchema = z.enum(["auto", "lite", "balanced", "pro"]);
+export type ChatRequestedServiceClass = z.infer<typeof chatRequestedServiceClassSchema>;
+
 export const sendChatTurnSchema = z.object({
+  requestedServiceClass: chatRequestedServiceClassSchema.default("auto"),
   message: chatUiMessageSchema.superRefine((message, context) => {
     const textParts = message.parts.filter((part) => part.type === "text");
     const fileParts = message.parts.filter((part) => part.type === "file");
