@@ -7,9 +7,11 @@ export * from "./identity-policy.js";
 export * from "./connector-registry.js";
 export * from "./migrations.js";
 export * from "./provider-settings.js";
+export * from "./pinned-rate-catalogue.js";
 export * from "./schedules.js";
 export * from "./sites.js";
 export * from "./teams.js";
+export * from "./usage-ledger.js";
 
 export type WorkspaceRecord = {
   id: string;

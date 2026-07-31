@@ -9,6 +9,42 @@ import { promisify } from "node:util";
 const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const execFileAsync = promisify(execFile);
 
+test("the pinned Hermes runtime forwards each AI usage binding without shared state", async () => {
+  const [dockerfile, patch, chatAdapter] = await Promise.all([
+    source("docker/Dockerfile.workspace"),
+    source("docker/workspace/hermes-agent-onecomputer.patch"),
+    source("docker/workspace/onecomputer-agent-chat.py"),
+  ]);
+  assert.match(dockerfile, /HERMES_AGENT_TAG=v2026\.7\.20/);
+  assert.match(dockerfile, /HERMES_AGENT_SHA256=285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990/);
+  assert.match(
+    dockerfile,
+    /patch --batch --forward --fuzz=0 -d \/opt\/onecomputer\/hermes-agent -p1 < \/tmp\/hermes-agent-onecomputer\.patch/,
+  );
+
+  const additions = patch
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1))
+    .join("\n");
+  assert.match(additions, /_parse_ai_usage_task_binding_header/);
+  assert.match(additions, /not 32 <= len\(raw\) <= 4096/);
+  assert.match(additions, /runtime_kwargs\.pop\("request_overrides", None\)/);
+  assert.match(additions, /request_overrides = dict\(raw_request_overrides or \{\}\)/);
+  assert.match(additions, /extra_headers = dict\(raw_extra_headers or \{\}\)/);
+  assert.match(additions, /extra_headers\[self\._AI_USAGE_TASK_BINDING_HEADER\] = usage_task_binding/);
+  assert.match(additions, /request_overrides=request_overrides or None/);
+  assert.equal(
+    additions.match(/usage_task_binding=usage_task_binding/g)?.length,
+    3,
+    "sync, stream, and executor-to-agent boundaries must each forward the request-local value",
+  );
+  assert.doesNotMatch(additions, /ContextVar|os\.environ|self\.usage_task_binding/);
+
+  assert.match(chatAdapter, /"x-onecomputer-ai-task-binding": usage_task_binding/);
+  assert.match(chatAdapter, /f"\{HERMES_URL\}\/api\/sessions\/\{vendor_session_id\}\/chat\/stream"/);
+});
+
 test("the workspace image pins the Hermes Office skills and their native runtimes", async () => {
   const [dockerfile, requirements, nodePackage, nodeLock] = await Promise.all([
     source("docker/Dockerfile.workspace"),

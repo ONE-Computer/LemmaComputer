@@ -1,0 +1,120 @@
+diff --git a/gateway/platforms/api_server.py b/gateway/platforms/api_server.py
+index 65d5b32..0faa6bd 100644
+--- a/gateway/platforms/api_server.py
++++ b/gateway/platforms/api_server.py
+@@ -1536,6 +1536,29 @@ class APIServerAdapter(BasePlatformAdapter):
+     # that the sanitized form is safe to pass into Honcho / state.db.
+     _MAX_SESSION_HEADER_LEN = 256
+ 
++    _AI_USAGE_TASK_BINDING_HEADER = "x-onecomputer-ai-task-binding"
++    _AI_USAGE_TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
++
++    def _parse_ai_usage_task_binding_header(
++        self, request: "web.Request"
++    ) -> tuple[Optional[str], Optional["web.Response"]]:
++        """Return ONEComputer's bounded signed per-turn usage binding."""
++        raw = request.headers.get(self._AI_USAGE_TASK_BINDING_HEADER, "").strip()
++        if not raw:
++            return None, None
++        if (
++            not 32 <= len(raw) <= 4096
++            or self._AI_USAGE_TASK_BINDING_PATTERN.fullmatch(raw) is None
++        ):
++            return None, web.json_response(
++                _openai_error(
++                    "Invalid AI usage task binding",
++                    code="invalid_ai_usage_task_binding",
++                ),
++                status=400,
++            )
++        return raw, None
++
+     def _parse_session_key_header(
+         self, request: "web.Request"
+     ) -> tuple[Optional[str], Optional["web.Response"]]:
+@@ -1754,6 +1777,7 @@ class APIServerAdapter(BasePlatformAdapter):
+         tool_complete_callback=None,
+         gateway_session_key: Optional[str] = None,
+         route: Optional[Dict[str, Any]] = None,
++        usage_task_binding: Optional[str] = None,
+     ) -> Any:
+         """
+         Create an AIAgent instance using the gateway's runtime config.
+@@ -1786,6 +1810,17 @@ class APIServerAdapter(BasePlatformAdapter):
+         from hermes_cli.tools_config import _get_platform_tools
+ 
+         runtime_kwargs = _resolve_runtime_agent_kwargs()
++        raw_request_overrides = runtime_kwargs.pop("request_overrides", None)
++        if raw_request_overrides is not None and not isinstance(raw_request_overrides, dict):
++            raise TypeError("runtime request_overrides must be a mapping")
++        request_overrides = dict(raw_request_overrides or {})
++        if usage_task_binding:
++            raw_extra_headers = request_overrides.get("extra_headers")
++            if raw_extra_headers is not None and not isinstance(raw_extra_headers, dict):
++                raise TypeError("runtime request_overrides.extra_headers must be a mapping")
++            extra_headers = dict(raw_extra_headers or {})
++            extra_headers[self._AI_USAGE_TASK_BINDING_HEADER] = usage_task_binding
++            request_overrides["extra_headers"] = extra_headers
+         reasoning_config = GatewayRunner._load_reasoning_config()
+         model = _resolve_gateway_model()
+ 
+@@ -1872,6 +1907,7 @@ class APIServerAdapter(BasePlatformAdapter):
+             session_db=self._ensure_session_db(),
+             fallback_model=fallback_model,
+             reasoning_config=reasoning_config,
++            request_overrides=request_overrides or None,
+             gateway_session_key=gateway_session_key,
+         )
+         return agent
+@@ -2472,6 +2508,9 @@ class APIServerAdapter(BasePlatformAdapter):
+         gateway_session_key, key_err = self._parse_session_key_header(request)
+         if key_err is not None:
+             return key_err
++        usage_task_binding, binding_err = self._parse_ai_usage_task_binding_header(request)
++        if binding_err is not None:
++            return binding_err
+         session_id = request.match_info["session_id"]
+         _, err = await self._get_existing_session_or_404(session_id)
+         if err:
+@@ -2492,6 +2531,7 @@ class APIServerAdapter(BasePlatformAdapter):
+             ephemeral_system_prompt=system_prompt,
+             session_id=session_id,
+             gateway_session_key=gateway_session_key,
++            usage_task_binding=usage_task_binding,
+         )
+         effective_session_id = result.get("session_id") if isinstance(result, dict) else session_id
+         final_response = _resolve_media_to_data_urls(result.get("final_response", "") if isinstance(result, dict) else "")
+@@ -2514,6 +2554,9 @@ class APIServerAdapter(BasePlatformAdapter):
+         gateway_session_key, key_err = self._parse_session_key_header(request)
+         if key_err is not None:
+             return key_err
++        usage_task_binding, binding_err = self._parse_ai_usage_task_binding_header(request)
++        if binding_err is not None:
++            return binding_err
+         session_id = request.match_info["session_id"]
+         _, err = await self._get_existing_session_or_404(session_id)
+         if err:
+@@ -2581,6 +2624,7 @@ class APIServerAdapter(BasePlatformAdapter):
+                     stream_delta_callback=_delta,
+                     tool_progress_callback=_tool_progress,
+                     gateway_session_key=gateway_session_key,
++                    usage_task_binding=usage_task_binding,
+                 )
+                 final_response = _resolve_media_to_data_urls(result.get("final_response", "") if isinstance(result, dict) else "")
+                 effective_session_id = result.get("session_id", session_id) if isinstance(result, dict) else session_id
+@@ -4632,6 +4676,7 @@ class APIServerAdapter(BasePlatformAdapter):
+         agent_ref: Optional[list] = None,
+         gateway_session_key: Optional[str] = None,
+         route: Optional[Dict[str, Any]] = None,
++        usage_task_binding: Optional[str] = None,
+     ) -> tuple:
+         """
+         Create an agent and run a conversation in a thread executor.
+@@ -4673,6 +4718,7 @@ class APIServerAdapter(BasePlatformAdapter):
+                         tool_complete_callback=tool_complete_callback,
+                         gateway_session_key=gateway_session_key,
+                         route=route,
++                        usage_task_binding=usage_task_binding,
+                     )
+                     if agent_ref is not None:
+                         agent_ref[0] = agent

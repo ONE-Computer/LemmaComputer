@@ -165,7 +165,8 @@ test("Control pumps workspace events independently of the browser response", asy
   const pathIndex = control.lastIndexOf(path);
   const route = control.slice(control.lastIndexOf("app.post", pathIndex), control.indexOf("app.delete", pathIndex));
   assert.match(route, /const pump = async \(\) =>/);
-  assert.match(route, /agentChat\.streamTurn\(access, sessionId, input\.message\)/);
+  assert.match(route, /agentChat\.streamTurn\(access, sessionId, input\.message, undefined, usageTaskBinding\)/);
+  assert.match(route, /issueUsageTaskBinding\(/);
   assert.match(route, /void pump\(\)/);
   assert.match(route, /chunks\.push\(\.\.\.mapper\.chunks\(projected\)\)/);
   assert.doesNotMatch(route, /browser-disconnected|abort\.signal/);

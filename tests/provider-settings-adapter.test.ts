@@ -182,10 +182,14 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.equal(requests.filter((request) => request.method === "PATCH" && request.url.startsWith("/credentials/")).length, 0, "First-use provider setup must create its stable credential instead of PATCHing a missing record");
     assert.equal(credentials.filter((request) => !String(request.body.credential_name).includes("-candidate-")).length, 4, "First-use provider setup must create one stable credential per tenant");
     const grants = requests.filter((request) => request.url === "/key/generate");
-    assert.equal(grants.length, 4);
+    assert.equal(grants.length, 8);
     for (const grant of grants) {
-      assert.match(String((grant.body.models as unknown[])[0]), /^ocp-/);
+      assert.match(String((grant.body.models as unknown[])[0]), /^(?:ocp-|onecomputer-)/);
       assert.match(grant.authorization, /^Bearer sk-provider-admin-/);
+      assert.equal(
+        (grant.body.metadata as Record<string, unknown>).onecomputer_non_billable_exemption,
+        "provider-route-test-v1",
+      );
     }
     const stableProbes = requests.filter((request) => (
       request.url === "/chat/completions"
@@ -342,7 +346,7 @@ test("Bedrock managed provider routes are tenant-scoped, write-only, and reject 
       return;
     }
     if (item.method === "POST" && item.url === "/chat/completions") {
-      if (rejectCandidate && item.authorization.includes("sk-provider-admin-key")) {
+      if (rejectCandidate && item.authorization.includes("sk-ocp-")) {
         response.statusCode = 401;
         response.end(JSON.stringify({ error: { message: "Authentication failed for " + rejectedKey } }));
         return;

@@ -344,24 +344,25 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   private async probe(model: string, accessGroup: string | undefined, provider: ManagedProviderName) {
-    const credential = accessGroup ? `sk-ocp-${randomBytes(24).toString("base64url")}` : this.masterKey;
+    const credential = `sk-ocp-${randomBytes(24).toString("base64url")}`;
     try {
-      if (accessGroup) {
-        const grant = await this.call("/key/generate", {
-          method: "POST",
-          body: {
-            key: credential,
-            key_alias: `onecomputer-provider-probe-${randomBytes(12).toString("hex")}`,
-            key_type: "llm_api",
-            duration: "60s",
-            models: [accessGroup],
-            rpm_limit: 2,
-            max_parallel_requests: 1,
-            metadata: { onecomputer_purpose: "provider-route-test" },
+      const grant = await this.call("/key/generate", {
+        method: "POST",
+        body: {
+          key: credential,
+          key_alias: `onecomputer-provider-probe-${randomBytes(12).toString("hex")}`,
+          key_type: "llm_api",
+          duration: "60s",
+          models: [accessGroup ?? model],
+          rpm_limit: 2,
+          max_parallel_requests: 1,
+          metadata: {
+            onecomputer_purpose: "provider-route-test",
+            onecomputer_non_billable_exemption: "provider-route-test-v1",
           },
-        });
-        if (!grant.ok) throw this.providerFailure(grant.status, "route", provider, grant.payload);
-      }
+        },
+      });
+      if (!grant.ok) throw this.providerFailure(grant.status, "route", provider, grant.payload);
       const result = await this.call("/chat/completions", {
         method: "POST",
         credential,
@@ -372,7 +373,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       });
       if (!result.ok) throw this.providerFailure(result.status, "credential", provider, result.payload);
     } finally {
-      if (accessGroup) await this.call("/key/delete", { method: "POST", body: { keys: [credential] } }).catch(() => undefined);
+      await this.call("/key/delete", { method: "POST", body: { keys: [credential] } }).catch(() => undefined);
     }
   }
 
@@ -441,6 +442,12 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       },
       model_info: {
         id: deployment.id,
+        onecomputer_provider: deployment.provider,
+        onecomputer_provider_account_id: deployment.credentialName,
+        onecomputer_base_model: deployment.model.model,
+        onecomputer_deployment_id: deployment.id,
+        onecomputer_provider_service_tier: "standard",
+        ...(bedrock ? { onecomputer_region: bedrock.region } : {}),
         supports_vision: deployment.model.vision,
         ...(bedrock ? {
           supports_function_calling: bedrock.profile.capabilities.toolCalls,

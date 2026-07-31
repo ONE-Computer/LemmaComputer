@@ -1000,6 +1000,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         max_parallel_requests: 1,
         metadata: {
           onecomputer_purpose: "bedrock-route-test",
+          onecomputer_non_billable_exemption: "provider-route-test-v1",
           onecomputer_model_alias: bedrockApiKeyRouteAlias,
         },
       },
@@ -1050,6 +1051,12 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       },
       model_info: {
         id: BEDROCK_MODEL_ID,
+        onecomputer_provider: "bedrock",
+        onecomputer_provider_account_id: credentialName,
+        onecomputer_base_model: profile.litellmModel,
+        onecomputer_deployment_id: BEDROCK_MODEL_ID,
+        onecomputer_region: region,
+        onecomputer_provider_service_tier: "standard",
         supports_vision: profile.capabilities.vision,
         supports_function_calling: profile.capabilities.toolCalls,
         supports_response_schema: profile.capabilities.structuredOutput,

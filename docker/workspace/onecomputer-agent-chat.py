@@ -181,6 +181,7 @@ def system_prompt() -> str:
         )
     return f"{BASE_SYSTEM_PROMPT} {temporal_context}"
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 OPERATION_PATTERN = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b"
 )
@@ -833,6 +834,7 @@ async def claude_vendor_events(
     attachments: list[dict[str, Any]],
     turn_id: str,
     return_artifacts: bool,
+    usage_task_binding: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
     from claude_agent_sdk import (
         AssistantMessage, ClaudeAgentOptions, ResultMessage, StreamEvent,
@@ -876,6 +878,9 @@ async def claude_vendor_events(
             "ANTHROPIC_AUTH_TOKEN": "onecomputer-loopback-broker",
             "CLAUDE_CONFIG_DIR": str(HOME / ".claude-chat-sdk"),
             "ONECOMPUTER_SITES_BROKER": BROKER,
+            **({
+                "ANTHROPIC_CUSTOM_HEADERS": json.dumps({"x-onecomputer-ai-task-binding": usage_task_binding}),
+            } if usage_task_binding else {}),
             "HOME": str(HOME),
             "PATH": "/usr/local/bin:/usr/bin:/bin",
         },
@@ -986,11 +991,21 @@ async def codex_vendor_events(
     attachments: list[dict[str, Any]],
     turn_id: str,
     return_artifacts: bool,
+    usage_task_binding: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
     from openai_codex import ApprovalMode, ImageInput, Sandbox, TextInput
 
     vendor_id = item.get("vendorSessionId")
     sandbox = Sandbox.danger_full_access if EXECUTION_MODE == "disposable-open" else Sandbox.read_only
+    usage_config = ({
+        "model_providers": {
+            "onecomputer": {
+                "http_headers": {
+                    "x-onecomputer-ai-task-binding": usage_task_binding,
+                },
+            },
+        },
+    } if usage_task_binding else None)
     if vendor_id:
         thread = await codex.thread_resume(
             vendor_id,
@@ -999,6 +1014,7 @@ async def codex_vendor_events(
             cwd=str(HOME),
             model=MODEL,
             sandbox=sandbox,
+            config=usage_config,
         )
     else:
         thread = await codex.thread_start(
@@ -1007,6 +1023,7 @@ async def codex_vendor_events(
             cwd=str(HOME),
             model=MODEL,
             sandbox=sandbox,
+            config=usage_config,
         )
     prompt_text = prompt_with_documents(text, attachments, return_artifacts)
     images = [attachment for attachment in attachments if attachment["mediaType"] in IMAGE_TYPES]
@@ -1158,6 +1175,7 @@ async def hermes_vendor_events(
     attachments: list[dict[str, Any]],
     turn_id: str,
     return_artifacts: bool,
+    usage_task_binding: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
     assert http is not None
     vendor_session_id = item.get("vendorSessionId")
@@ -1186,6 +1204,9 @@ async def hermes_vendor_events(
         headers={
             "authorization": f"Bearer {HERMES_KEY}",
             "accept": "text/event-stream",
+            **({
+                "x-onecomputer-ai-task-binding": usage_task_binding,
+            } if usage_task_binding else {}),
         },
         json={"message": message, "instructions": system_prompt()},
         timeout=MAX_TURN_SECONDS,
@@ -1304,12 +1325,13 @@ def vendor_events(
     attachments: list[dict[str, Any]],
     turn_id: str,
     return_artifacts: bool,
+    usage_task_binding: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
     if AGENT == "claude-cli":
-        return claude_vendor_events(item, text, attachments, turn_id, return_artifacts)
+        return claude_vendor_events(item, text, attachments, turn_id, return_artifacts, usage_task_binding)
     if AGENT == "codex-cli":
-        return codex_vendor_events(item, text, attachments, turn_id, return_artifacts)
-    return hermes_vendor_events(item, text, attachments, turn_id, return_artifacts)
+        return codex_vendor_events(item, text, attachments, turn_id, return_artifacts, usage_task_binding)
+    return hermes_vendor_events(item, text, attachments, turn_id, return_artifacts, usage_task_binding)
 
 
 def upsert_session_message(item: dict[str, Any], message: dict[str, Any]) -> None:
@@ -1464,6 +1486,16 @@ async def turns(request: Request) -> Response:
     try:
         value = await body(request, MAX_TURN_BODY)
         user_message, text, attachments = validate_user_message(value.get("message"))
+        usage_task_binding = value.get("usageTaskBinding")
+        if (
+            usage_task_binding is not None
+            and (
+                not isinstance(usage_task_binding, str)
+                or len(usage_task_binding) > 4096
+                or not TASK_BINDING_PATTERN.fullmatch(usage_task_binding)
+            )
+        ):
+            raise ValueError("invalid AI usage task binding")
         return_artifacts = user_message["metadata"].get("source") == "telegram"
         outbox_before = snapshot_outbox() if return_artifacts else {}
     except ValueError:
@@ -1561,7 +1593,9 @@ async def turns(request: Request) -> Response:
             activity_id = f"progress-{turn_id}"
             progress_started = False
             terminal_state: str | None = None
-            events = vendor_events(snapshot, text, attachments, turn_id, return_artifacts).__aiter__()
+            events = vendor_events(
+                snapshot, text, attachments, turn_id, return_artifacts, usage_task_binding
+            ).__aiter__()
             next_event = asyncio.ensure_future(anext(events))
             try:
                 while True:
