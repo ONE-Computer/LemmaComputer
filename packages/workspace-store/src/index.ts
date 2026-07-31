@@ -10,6 +10,7 @@ export * from "./provider-settings.js";
 export * from "./schedules.js";
 export * from "./sites.js";
 export * from "./teams.js";
+export * from "./usage-ledger.js";
 
 export type WorkspaceRecord = {
   id: string;
