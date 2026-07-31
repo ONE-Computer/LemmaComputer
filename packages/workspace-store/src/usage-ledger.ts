@@ -101,7 +101,7 @@ export type UsageEventInput = {
   costDrivers?: UsageCostDrivers;
 };
 export type UsageEventResult = {
-  status: "created"|"duplicate"|"conflict"; eventId: string | null;
+  status: "created"|"duplicate"|"pending"|"conflict"; eventId: string | null;
   priceStatus?: PricedUsage["priceStatus"]; providerCost?: string | null; currency?: string | null;
 };
 export type EffectiveRateCard = {
@@ -240,13 +240,33 @@ export class PostgresUsageLedgerStore {
         await client.query(`INSERT INTO ai_usage_ingestion_conflicts (id,tenant_id,source_system,source_event_id,existing_fingerprint,received_fingerprint,conflict_type) VALUES ($1,$2,$3,$4,$5,$6,'event_fingerprint_mismatch') ON CONFLICT DO NOTHING`, [randomUUID(),input.tenantId,input.sourceSystem,input.sourceEventId,prior.rows[0].source_fingerprint,fingerprint]);
         await client.query("COMMIT"); return { status:"conflict", eventId:null };
       }
+      const pendingResult = await client.query(`SELECT id,source_fingerprint,admission_id,corrects_event_id FROM ai_usage_pending_corrections WHERE tenant_id=$1 AND source_system=$2 AND source_event_id=$3 FOR SHARE`, [input.tenantId,input.sourceSystem,input.sourceEventId]);
+      const pending = pendingResult.rows[0];
+      if (pending && (
+        input.eventType !== "correction"
+        || pending.source_fingerprint !== fingerprint
+        || String(pending.admission_id) !== input.admissionId
+        || String(pending.corrects_event_id) !== input.correctsEventId
+      )) {
+        await client.query(`INSERT INTO ai_usage_ingestion_conflicts (id,tenant_id,source_system,source_event_id,existing_fingerprint,received_fingerprint,conflict_type) VALUES ($1,$2,$3,$4,$5,$6,'event_fingerprint_mismatch') ON CONFLICT DO NOTHING`, [randomUUID(),input.tenantId,input.sourceSystem,input.sourceEventId,pending.source_fingerprint,fingerprint]);
+        await client.query("COMMIT"); return { status:"conflict", eventId:null };
+      }
       const admissionResult = await client.query(`SELECT * FROM ai_usage_attempt_admissions WHERE tenant_id=$1 AND id=$2 FOR SHARE`, [input.tenantId,input.admissionId]);
       if (!admissionResult.rowCount) throw new Error("Usage admission not found in tenant");
       const admission = admissionResult.rows[0];
       let correctionRateCardId: string | null | undefined;
       if (input.eventType === "correction") {
-        const original = await client.query(`SELECT id,rate_card_id FROM ai_usage_events WHERE tenant_id=$1 AND id=$2 AND admission_id=$3 AND event_type='usage' FOR SHARE`, [input.tenantId,input.correctsEventId,input.admissionId]);
-        if (!original.rowCount) throw new Error("Correction target must be an existing original usage event for the same attempt");
+        const original = await client.query(`SELECT id,rate_card_id,admission_id,event_type FROM ai_usage_events WHERE tenant_id=$1 AND id=$2 FOR SHARE`, [input.tenantId,input.correctsEventId]);
+        if (!original.rowCount) {
+          if (!pending) {
+            await client.query(`INSERT INTO ai_usage_pending_corrections (id,tenant_id,admission_id,source_system,source_event_id,source_fingerprint,corrects_event_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [randomUUID(),input.tenantId,input.admissionId,input.sourceSystem,input.sourceEventId,fingerprint,input.correctsEventId,input.occurredAt]);
+          }
+          await client.query("COMMIT");
+          return { status:"pending", eventId:null };
+        }
+        if (original.rows[0].event_type !== "usage" || String(original.rows[0].admission_id) !== input.admissionId) {
+          throw new Error("Correction target must be an existing original usage event for the same attempt");
+        }
         correctionRateCardId = original.rows[0].rate_card_id;
       }
       const rateCard = input.eventType === "correction" ? (correctionRateCardId ? await this.readRateCardById(client,input.tenantId,correctionRateCardId) : null) : await this.readEffectiveRateCard(client, {
@@ -254,6 +274,9 @@ export class PostgresUsageLedgerStore {
         baseModel:String(admission.resolved_model), deploymentId:String(admission.resolved_deployment_id),
         region:admission.region ?? undefined, providerServiceTier:admission.provider_service_tier ?? undefined, at:input.occurredAt,
       });
+      if (rateCard && input.providerConfirmedCurrency && input.providerConfirmedCurrency !== rateCard.currency) {
+        throw new Error("Provider-confirmed currency must match the selected rate-card currency");
+      }
       const priced = priceUsage(input.units, rateCard?.rates ?? []);
       const currency = rateCard?.currency ?? input.providerConfirmedCurrency ?? null;
       const costStatus = input.providerConfirmedCost !== undefined ? "provider_confirmed" : priced.priceStatus === "priced" ? "estimated" : "unpriced";
@@ -320,6 +343,8 @@ export class PostgresUsageLedgerStore {
       const runId=randomUUID();
       await client.query(`INSERT INTO ai_usage_reconciliation_runs (id,tenant_id,source_system,window_start,window_end,expected_fingerprint,started_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,[runId,input.tenantId,input.sourceSystem,input.windowStart,input.windowEnd,expectedFingerprint,input.startedBy]);
       const observed=await client.query(`SELECT id,source_event_id,source_fingerprint,price_status,occurred_at,received_at FROM ai_usage_events WHERE tenant_id=$1 AND source_system=$2 AND occurred_at >= $3 AND occurred_at < $4 ORDER BY source_event_id,id`,[input.tenantId,input.sourceSystem,input.windowStart,input.windowEnd]);
+      const missingCompletions=await client.query(`SELECT admission.id FROM ai_usage_attempt_admissions admission WHERE admission.tenant_id=$1 AND admission.source_system=$2 AND admission.admitted_at >= $3 AND admission.admitted_at < $4 AND NOT EXISTS (SELECT 1 FROM ai_usage_events event WHERE event.tenant_id=admission.tenant_id AND event.admission_id=admission.id AND event.event_type='usage') ORDER BY admission.id`,[input.tenantId,input.sourceSystem,input.windowStart,input.windowEnd]);
+      const pendingCorrections=await client.query(`SELECT pending.source_event_id,pending.source_fingerprint,pending.corrects_event_id FROM ai_usage_pending_corrections pending WHERE pending.tenant_id=$1 AND pending.source_system=$2 AND pending.occurred_at >= $3 AND pending.occurred_at < $4 AND NOT EXISTS (SELECT 1 FROM ai_usage_events event WHERE event.tenant_id=pending.tenant_id AND event.source_system=pending.source_system AND event.source_event_id=pending.source_event_id) ORDER BY pending.source_event_id,pending.id`,[input.tenantId,input.sourceSystem,input.windowStart,input.windowEnd]);
       const bySource=new Map<string,typeof observed.rows>();
       for(const row of observed.rows){const key=String(row.source_event_id);bySource.set(key,[...(bySource.get(key)??[]),row]);}
       const findings:ReconciliationFinding[]=[];
@@ -336,6 +361,11 @@ export class PostgresUsageLedgerStore {
         }
       }
       for(const row of observed.rows)if(!expectedBySource.has(String(row.source_event_id)))findings.push({findingType:"inconsistent",sourceEventId:String(row.source_event_id),ledgerEventId:String(row.id),expectedFingerprint:null,observedFingerprint:String(row.source_fingerprint),details:"Ledger event has no matching expected evidence"});
+      for(const row of missingCompletions.rows){
+        const sourceEventId=`${row.id}:completion`;
+        if(!findings.some((finding)=>finding.findingType==="missing"&&finding.sourceEventId===sourceEventId))findings.push({findingType:"missing",sourceEventId,ledgerEventId:null,expectedFingerprint:null,observedFingerprint:null,details:"Admitted provider attempt has no immutable usage completion event"});
+      }
+      for(const row of pendingCorrections.rows)if(!findings.some((finding)=>finding.findingType==="missing"&&finding.sourceEventId===String(row.source_event_id)))findings.push({findingType:"missing",sourceEventId:String(row.source_event_id),ledgerEventId:null,expectedFingerprint:String(row.source_fingerprint),observedFingerprint:null,details:`Correction is pending original usage event ${row.corrects_event_id}`});
       const conflicts=await client.query(`SELECT source_event_id,existing_fingerprint,received_fingerprint FROM ai_usage_ingestion_conflicts WHERE tenant_id=$1 AND source_system=$2 AND detected_at >= $3 AND detected_at < $4 ORDER BY source_event_id,id`,[input.tenantId,input.sourceSystem,input.windowStart,input.windowEnd]);
       for(const row of conflicts.rows)findings.push({findingType:"inconsistent",sourceEventId:String(row.source_event_id),ledgerEventId:null,expectedFingerprint:String(row.existing_fingerprint),observedFingerprint:String(row.received_fingerprint),details:"Conflicting replay was quarantined"});
       for(const finding of findings)await client.query(`INSERT INTO ai_usage_reconciliation_findings (id,tenant_id,run_id,finding_type,source_event_id,ledger_event_id,expected_fingerprint,observed_fingerprint,details) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[randomUUID(),input.tenantId,runId,finding.findingType,finding.sourceEventId,finding.ledgerEventId,finding.expectedFingerprint,finding.observedFingerprint,finding.details]);

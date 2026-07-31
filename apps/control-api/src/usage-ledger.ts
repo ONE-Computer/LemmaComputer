@@ -1,4 +1,4 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { OneComputerError } from "@onecomputer/contracts";
 import {
   AllowUsageAttemptAdmission,
@@ -31,6 +31,16 @@ export const internalUsageAdmissionSchema = z.object({
   region:optionalBoundedId, providerServiceTier:optionalBoundedId, admittedAt:z.iso.datetime(),
 }).strict();
 export type InternalUsageAdmission = z.infer<typeof internalUsageAdmissionSchema>;
+
+const unboundTaskId = (input: Pick<InternalUsageAdmission,"tenantId"|"sourceSystem"|"sourceAttemptId">) => {
+  const digest = createHash("sha256")
+    .update("onecomputer-ai-unbound-task/v1\0")
+    .update(input.tenantId).update("\0")
+    .update(input.sourceSystem).update("\0")
+    .update(input.sourceAttemptId)
+    .digest("base64url");
+  return `unbound:${digest}`;
+};
 
 const costDrivers = z.object({
   conversationHistoryCount:z.number().int().min(0).max(1_000_000).optional(),
@@ -131,7 +141,7 @@ export class UsageLedgerService {
     const attempt: AttemptAdmissionInput = {
       tenantId:input.tenantId,sourceSystem:input.sourceSystem,sourceAttemptId:input.sourceAttemptId,subjectId:input.subjectId,team,
       ...(input.workspaceId?{workspaceId:input.workspaceId}:{}),...(input.agentId?{agentId:input.agentId}:{}),
-      ...(binding?.sessionId?{sessionId:binding.sessionId}:{}),taskId:binding?.taskId??`unbound:${randomUUID()}`,
+      ...(binding?.sessionId?{sessionId:binding.sessionId}:{}),taskId:binding?.taskId??unboundTaskId(input),
       ...(binding?.turnId?{turnId:binding.turnId}:{}),taskBindingProvenance:binding?"explicit_signed":"unbound_generated",contextKind:binding?.contextKind??"background",
       ...(input.policyVersionId?{policyVersionId:input.policyVersionId}:{}),...(input.policyHash?{policyHash:input.policyHash}:{}),
       requestedAlias:input.requestedAlias,...(input.requestedServiceClass?{requestedServiceClass:input.requestedServiceClass}:{}),

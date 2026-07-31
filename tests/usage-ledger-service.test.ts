@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MinimalSpendingTeam } from "@onecomputer/contracts";
-import { MemoryWorkspaceStore, type AttemptAdmissionInput, type PostgresUsageLedgerStore, type TeamStore, type UsageAttemptAdmissionHook, type UsageEventInput } from "@onecomputer/workspace-store";
+import { MemoryWorkspaceStore, usageFingerprint, type AttemptAdmissionInput, type PostgresUsageLedgerStore, type TeamStore, type UsageAttemptAdmissionHook, type UsageEventInput } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 import { UsageLedgerService, UsageTaskBindingAuthority, internalUsageAdmissionSchema, type InternalUsageAdmission } from "../apps/control-api/src/usage-ledger.js";
@@ -27,6 +27,16 @@ class FakeLedger {
   events: UsageEventInput[] = [];
   hookTransactions: unknown[] = [];
   async admitAttempt(input: AttemptAdmissionInput, hook: UsageAttemptAdmissionHook) {
+    const prior = this.admissions.find((item) => (
+      item.tenantId === input.tenantId
+      && item.sourceSystem === input.sourceSystem
+      && item.sourceAttemptId === input.sourceAttemptId
+    ));
+    if (prior) {
+      return usageFingerprint(prior) === usageFingerprint(input)
+        ? { status: "duplicate" as const, admissionId: "00000000-0000-4000-8000-000000000001" }
+        : { status: "conflict" as const, admissionId: null };
+    }
     this.admissions.push(input);
     const transaction = { transaction: true };
     this.hookTransactions.push(transaction);
@@ -81,6 +91,24 @@ test("binding identity mismatches fail before Team resolution or admission", asy
   await assert.rejects(() => service.admit(admission({ taskBinding: token })), /does not match/);
   assert.equal(teams.calls.length, 0);
   assert.equal(ledger.admissions.length, 0);
+});
+
+test("unbound task identity is deterministic across a lost admission response replay", async () => {
+  const ledger = new FakeLedger();
+  const teams = new FakeTeams();
+  const bindings = new UsageTaskBindingAuthority(taskSecret);
+  const service = new UsageLedgerService(ledger as unknown as PostgresUsageLedgerStore, teams as unknown as TeamStore, bindings);
+
+  const first = await service.admit(admission());
+  const replay = await service.admit(admission());
+  await service.admit(admission({ sourceAttemptId: "call-2" }));
+
+  assert.equal(first.status, "created");
+  assert.equal(replay.status, "duplicate");
+  assert.equal(ledger.admissions.length, 2);
+  assert.match(ledger.admissions[0]?.taskId ?? "", /^unbound:[A-Za-z0-9_-]{43}$/);
+  assert.equal(first.taskId, replay.taskId);
+  assert.notEqual(ledger.admissions[0]?.taskId, ledger.admissions[1]?.taskId);
 });
 
 test("internal usage endpoints require their dedicated token and reject raw payload fields", async () => {

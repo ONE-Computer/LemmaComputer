@@ -24,7 +24,9 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     await pool.query(`INSERT INTO user_roles (user_id,role,assigned_by) VALUES ($1,'employee',$1),($1,'administrator',$1),($2,'employee',$1),($3,'employee',$3)`, [adminId,userId,outsiderId]);
     const finance = await teams.createTeam({ tenantId,createdBy:adminId,displayName:"Finance",description:"",ownerUserId:adminId,costCenterCode:"CC-100" });
     const engineering = await teams.createTeam({ tenantId,createdBy:adminId,displayName:"Engineering",description:"",ownerUserId:adminId,costCenterCode:"CC-200" });
+    const outsiderTeam = await teams.createTeam({ tenantId:outsiderTenantId,createdBy:outsiderId,displayName:"Outside",description:"",ownerUserId:outsiderId,costCenterCode:"OUT-100" });
     await teams.assignMembership({ tenantId,teamId:finance.id,userId,assignedBy:adminId,makeDefault:true });
+    await teams.assignMembership({ tenantId:outsiderTenantId,teamId:outsiderTeam.id,userId:outsiderId,assignedBy:outsiderId,makeDefault:true });
 
     const january = new Date("2026-01-01T00:00:00.000Z");
     const february = new Date("2026-02-01T00:00:00.000Z");
@@ -51,6 +53,12 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     assert.equal((await ledger.admitAttempt({ ...admissionInput,resolvedDeploymentId:"other" })).status,"conflict");
     assert.equal((await ledger.admitAttempt({ ...admissionInput,resolvedDeploymentId:"other" })).status,"conflict");
     assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_usage_ingestion_conflicts WHERE tenant_id=$1 AND source_event_id=$2`, [tenantId,admissionInput.sourceAttemptId])).rows[0].count,1);
+    const outsiderSnapshot = (await teams.getCurrentDefaultSpendingTeam(outsiderTenantId,outsiderId))!;
+    const outsiderAdmission = await ledger.admitAttempt({
+      ...admissionInput,tenantId:outsiderTenantId,sourceAttemptId:`outsider-attempt-${suffix}`,
+      subjectId:outsiderId,team:outsiderSnapshot,workspaceId:`outsider-workspace-${suffix}`,
+    });
+    assert.equal(outsiderAdmission.status,"created");
 
     await teams.assignMembership({ tenantId,teamId:engineering.id,userId,assignedBy:adminId,makeDefault:true });
     const usageInput = {
@@ -75,9 +83,16 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     assert.equal(snapshot.rows[0].rate_card_source_version,"contract-v1");
     assert.equal(snapshot.rows[0].conversation_history_count,8);
 
-    await assert.rejects(ledger.appendUsageEvent({ ...usageInput,sourceEventId:`correction-before-${suffix}`,eventType:"correction",correctsEventId:crypto.randomUUID(),providerReportedTotalTokens:"-1",units:[{ unit:"output_token",quantity:"-1" }],costDrivers:{} }),/Correction target/);
+    const missingTargetId = crypto.randomUUID();
+    const pendingInput = { ...usageInput,sourceEventId:`correction-before-${suffix}`,eventType:"correction" as const,correctsEventId:missingTargetId,providerReportedTotalTokens:"-1",units:[{ unit:"output_token" as const,quantity:"-1" }],costDrivers:{} };
+    assert.equal((await ledger.appendUsageEvent(pendingInput)).status,"pending");
+    assert.equal((await ledger.appendUsageEvent(pendingInput)).status,"pending");
+    assert.equal((await ledger.appendUsageEvent({ ...pendingInput,units:[{ unit:"output_token",quantity:"-2" }] })).status,"conflict");
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_usage_pending_corrections WHERE tenant_id=$1 AND source_event_id=$2`, [tenantId,pendingInput.sourceEventId])).rows[0].count,1);
+    assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_usage_pending_corrections WHERE tenant_id=$1`, [outsiderTenantId])).rows[0].count,0);
     await assert.rejects(ledger.appendUsageEvent({ ...usageInput,sourceEventId:`correction-drivers-${suffix}`,eventType:"correction",correctsEventId:usage.eventId!,units:[{ unit:"output_token",quantity:"-1" }] }),/cannot repeat cost-driver/);
     await assert.rejects(ledger.appendUsageEvent({ ...usageInput,sourceEventId:`confirmed-pair-${suffix}`,providerConfirmedCost:"1.00" }),/cost and currency/);
+    await assert.rejects(ledger.appendUsageEvent({ ...usageInput,sourceEventId:`confirmed-currency-${suffix}`,providerConfirmedCost:"1.00",providerConfirmedCurrency:"EUR" }),/must match the selected rate-card currency/);
     const correction = await ledger.appendUsageEvent({ ...usageInput,sourceEventId:`correction-${suffix}`,eventType:"correction",correctsEventId:usage.eventId!,occurredAt:new Date("2026-03-01T00:00:00.000Z"),providerReportedTotalTokens:"-10",units:[{ unit:"output_token",quantity:"-10" }],costDrivers:{} });
     assert.equal(correction.providerCost,"-0.000005000000");
     const total = await pool.query(`SELECT sum(provider_cost)::text AS total FROM ai_usage_events WHERE tenant_id=$1 AND admission_id=$2`, [tenantId,admitted.admissionId]);
@@ -93,10 +108,20 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     assert.equal(unknownEvent.priceStatus,"unknown");
     assert.equal(unknownEvent.providerCost,null);
     await assert.rejects(ledger.appendUsageEvent({ ...usageInput,tenantId:outsiderTenantId,admissionId:admitted.admissionId!,sourceEventId:`cross-${suffix}` }),/not found in tenant/);
+    await assert.rejects(ledger.appendUsageEvent({ ...pendingInput,tenantId:outsiderTenantId,sourceEventId:`cross-pending-${suffix}` }),/not found in tenant/);
+
+    const reconciliation = await ledger.reconcile({
+      tenantId,sourceSystem:"litellm",windowStart:january,windowEnd:february,startedBy:adminId,expected:[],
+    });
+    const missingSourceIds = reconciliation.findings.filter((finding) => finding.findingType === "missing").map((finding) => finding.sourceEventId);
+    assert.ok(missingSourceIds.includes(`${retry.admissionId}:completion`));
+    assert.ok(missingSourceIds.includes(pendingInput.sourceEventId));
+    assert.equal(missingSourceIds.includes(`${outsiderAdmission.admissionId}:completion`),false);
 
     await assert.rejects(pool.query(`UPDATE ai_usage_events SET outcome='failure' WHERE tenant_id=$1 AND id=$2`, [tenantId,usage.eventId]),/immutable/);
     await assert.rejects(pool.query(`DELETE FROM ai_usage_events WHERE tenant_id=$1 AND id=$2`, [tenantId,usage.eventId]),/immutable/);
     await assert.rejects(pool.query(`UPDATE ai_deployment_rate_cards SET currency='EUR' WHERE tenant_id=$1 AND id=$2`, [tenantId,overrideId]),/immutable/);
+    await assert.rejects(pool.query(`DELETE FROM ai_usage_pending_corrections WHERE tenant_id=$1 AND source_event_id=$2`, [tenantId,pendingInput.sourceEventId]),/immutable/);
     assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_usage_events WHERE tenant_id=$1`, [outsiderTenantId])).rows[0].count,0);
   } finally {
     await Promise.all([pool.end(),teams.close(),ledger.close()]);
