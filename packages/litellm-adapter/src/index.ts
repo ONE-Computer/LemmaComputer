@@ -12,6 +12,7 @@ import {
 } from "@onecomputer/contracts";
 import { managedProviderForAlias, managedProviderModels, tenantManagedModelAccessGroup } from "./provider-settings.js";
 export * from "./provider-settings.js";
+export * from "./model-router.js";
 
 export type GatewayGrant = {
   baseUrl: string;

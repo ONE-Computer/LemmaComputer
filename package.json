@@ -15,6 +15,7 @@
     "test:activity:e2e:update": "playwright test tests/e2e/activity-panel.spec.ts --update-snapshots",
     "qualify:oauth": "tsx scripts/qualify-oauth-renewal.mts",
     "qualify:providers": "tsx scripts/qualify-provider-settings.mts",
+    "qualify:auto-routing": "docker run --rm --entrypoint python --mount type=bind,src=./scripts/qualify-litellm-auto-routing.py,dst=/qualification.py,readonly ghcr.io/berriai/litellm:v1.94.0@sha256:65d84a2282137b4dc73bbe184650a7c807177c533e4223b3bfbc87963fe3fabe /qualification.py",
     "env:init": "node scripts/initialize-env.mjs",
     "env:check": "node scripts/update-env.mjs --check",
     "env:update": "node scripts/update-env.mjs --write",
