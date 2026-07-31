@@ -431,7 +431,7 @@ let fixtureTeams = [{
   id: fixtureSpendTeamId,
   displayName: "Finance",
   description: "Finance allocation and reporting",
-  ownerUserId: "fixture-admin",
+  ownerUserId: session.user.id,
   costCenterCode: "FIN-100",
   status: "active",
   isRolloutFallback: false,
@@ -440,7 +440,14 @@ let fixtureTeams = [{
   updatedAt: "2026-07-01T00:00:00.000Z",
   archivedAt: null,
 }];
-let fixtureTeamMemberships = new Map([[fixtureSpendTeamId, []]]);
+let fixtureTeamMemberships = new Map([[fixtureSpendTeamId, [{
+  id: "11111111-1111-4111-8111-222222222222",
+  teamId: fixtureSpendTeamId,
+  userId: session.user.id,
+  effectiveFrom: "2026-07-01T00:00:00.000Z",
+  effectiveTo: null,
+  isDefaultSpendingTeam: true,
+}]]]);
 let fixtureTeamBudgets = new Map();
 const emptyBudgetStatus = { budget:null,period:null,effectiveLimitAmount:null,settledProviderCost:null,outstandingReservations:null,remainingAmount:null,percentConsumed:null,priceStatus:"unknown",enforcement:"none",alerts:[],lastReconciliation:null };
 const fixtureBudgetStatus = (teamId) => fixtureTeamBudgets.get(teamId) ?? emptyBudgetStatus;

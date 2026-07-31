@@ -134,6 +134,38 @@ test("PostgreSQL Team budgets reserve atomically, fail closed, and preserve immu
     await pool.query(`INSERT INTO ai_usage_events(id,tenant_id,admission_id,source_system,source_event_id,source_fingerprint,event_type,occurred_at,outcome,price_status,cost_status,currency,provider_cost,rate_card_id,rate_card_source,rate_card_source_version,rate_card_source_hash,rate_card_effective_from) VALUES($1,$2,$3,'litellm',$4,$5,'usage',$6,'success','priced','estimated','USD','-0.1',$7,'pinned_catalogue','2026-03',$8,$9)`,[negativeEvent,tenantId,negativeAdmission.admissionId,"negative-original-event",usageFingerprint({event:"negative"}),now,pinnedCard,"1".repeat(64),new Date("2026-01-01T00:00:00Z")]);
     await assert.rejects(first.settleUsageEvent({tenantId,usageEventId:negativeEvent,settledAt:now}),/cannot be negative/);
 
+    // Foreign-currency facts never enter configured-budget arithmetic and force hard admission stale.
+    const mixedTeam=await teams.createTeam({tenantId,createdBy:administratorId,displayName:"Mixed currency",description:"",ownerUserId:administratorId,costCenterCode:"MIX"});
+    await first.createBudgetVersion({tenantId,teamId:mixedTeam.id,limitAmount:"10",currency:"USD",periodType:"calendar_month",timezone:"UTC",mode:"hard",thresholds:["50"],effectiveFrom:new Date("2026-03-01T00:00:00Z"),createdBy:administratorId});
+    await ledger.createRateCard({tenantId,provider:"openai",providerAccountId:"euro",baseModel:"gpt-euro",deploymentId:"deployment-euro",currency:"EUR",source:"contract_override",sourceVersion:"eur-v1",sourceHash:"e".repeat(64),effectiveFrom:new Date("2026-01-01T00:00:00Z"),approvedBy:administratorId,overrideReason:"Test EUR contract",rates:[{unit:"input_uncached_token",amountPerUnit:"1",unitScale:"1"},{unit:"output_token",amountPerUnit:"1",unitScale:"1"}]});
+    const euroAttempt={...attempt("mixed-eur","Auto",mixedTeam),providerAccountId:"euro",resolvedModel:"gpt-euro",resolvedDeploymentId:"deployment-euro"};
+    const euroAdmission=await ledger.admitAttempt(euroAttempt);
+    const euroEvent=await ledger.appendUsageEvent({tenantId,admissionId:euroAdmission.admissionId!,sourceSystem:"litellm",sourceEventId:"mixed-eur-event",eventType:"usage",occurredAt:now,outcome:"success",units:[{unit:"input_uncached_token",quantity:"1"}]});
+    assert.equal(euroEvent.currency,"EUR");
+    const mixedStatus=await first.getBudgetStatus(tenantId,mixedTeam.id,now);
+    assert.equal(mixedStatus.settledProviderCost,"0.000000000000");
+    assert.equal(mixedStatus.priceStatus,"unknown");
+    assert.equal((await first.reserveAttempt(attempt("mixed-usd","Auto",mixedTeam))).code,"BUDGET_LEDGER_STALE");
+
+    // A hard budget can materialize a supported pinned Bedrock card on its first request.
+    const catalogueNow=new Date("2026-07-31T12:00:00Z");
+    const bedrockTeam=await teams.createTeam({tenantId,createdBy:administratorId,displayName:"Bedrock first use",description:"",ownerUserId:administratorId,costCenterCode:"BRK"});
+    await first.createBudgetVersion({tenantId,teamId:bedrockTeam.id,limitAmount:"1",currency:"USD",periodType:"calendar_month",timezone:"UTC",mode:"hard",thresholds:["50"],effectiveFrom:new Date("2026-07-31T00:00:00Z"),createdBy:administratorId});
+    const bedrockModel="bedrock/converse/global.anthropic.claude-sonnet-4-5-20250929-v1:0";
+    const bedrockDeployment="global.anthropic.claude-sonnet-4-5-20250929-v1:0";
+    const bedrockAttempt:AttemptAdmissionInput={
+      ...attempt("bedrock-first","Auto",bedrockTeam),admittedAt:catalogueNow,resolvedProvider:"bedrock",providerAccountId:"bedrock-first-account",
+      resolvedModel:bedrockModel,resolvedDeploymentId:bedrockDeployment,region:"ap-southeast-1",providerServiceTier:"standard",
+      budgetBounds:{inputTokens:"1",maximumOutputTokens:"1",cacheStatus:"unknown",maxRetries:0,maxFallbacks:0,maxAgentSteps:1,reservationTtlSeconds:30,providerDeadlineAt:new Date(catalogueNow.getTime()+120_000)},
+    };
+    assert.equal(Number((await pool.query("SELECT count(*) count FROM ai_deployment_rate_cards WHERE tenant_id=$1 AND provider_account_id=$2",[tenantId,bedrockAttempt.providerAccountId])).rows[0].count),0);
+    const firstBedrockReservation=await first.reserveAttempt(bedrockAttempt,catalogueNow);
+    assert.equal(firstBedrockReservation.decision,"allow");
+    assert.equal(firstBedrockReservation.quotedAmount,"0.000018000000");
+    assert.equal(Number((await pool.query("SELECT count(*) count FROM ai_deployment_rate_cards WHERE tenant_id=$1 AND provider_account_id=$2 AND source='pinned_catalogue'",[tenantId,bedrockAttempt.providerAccountId])).rows[0].count),1);
+    const unsupportedBedrock={...bedrockAttempt,sourceAttemptId:"bedrock-unsupported",taskId:"task-bedrock-unsupported",resolvedModel:"bedrock/converse/future-model",resolvedDeploymentId:"future-model"};
+    assert.equal((await first.reserveAttempt(unsupportedBedrock,catalogueNow)).code,"BUDGET_PRICE_UNAVAILABLE");
+
     // Composite keys reject same-tenant Team/version mismatches; tenant queries do not leak.
     await assert.rejects(pool.query(`INSERT INTO team_budget_reservations(id,tenant_id,budget_version_id,team_id,source_system,source_attempt_id,source_fingerprint,period_start,period_end,quoted_amount,currency,rate_card_id,rate_card_source_hash,cache_assumption,max_attempts,max_agent_steps,expires_at) VALUES($1,$2,$3,$4,'test','mismatch',$5,$6,$7,'1','USD',$8,$9,'known_miss',1,1,$10)`,[crypto.randomUUID(),tenantId,budget.id,otherTeam.id,"a".repeat(64),new Date("2026-03-01T05:00:00Z"),new Date("2026-04-01T04:00:00Z"),pinnedCard,"1".repeat(64),new Date(Date.now()+60_000)]),(error)=>error instanceof Error&&"code" in error&&error.code==="23503");
     assert.equal((await first.getBudgetStatus(outsiderTenantId,team.id,now)).budget,null);

@@ -268,7 +268,7 @@ export class PostgresUsageLedgerStore {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const selected = await this.readEffectiveRateCard(client,input);
+      const selected = await this.selectEffectiveRateCardInTransaction(client,input);
       await client.query("COMMIT");
       return selected;
     } catch (error) {
@@ -346,7 +346,7 @@ export class PostgresUsageLedgerStore {
         }
         correctionRateCardId = original.rows[0].rate_card_id;
       }
-      const rateCard = input.eventType === "correction" ? (correctionRateCardId ? await this.readRateCardById(client,input.tenantId,correctionRateCardId) : null) : await this.readEffectiveRateCard(client, {
+      const rateCard = input.eventType === "correction" ? (correctionRateCardId ? await this.readRateCardById(client,input.tenantId,correctionRateCardId) : null) : await this.selectEffectiveRateCardInTransaction(client, {
         tenantId:input.tenantId, provider:String(admission.resolved_provider), providerAccountId:String(admission.provider_account_id),
         baseModel:String(admission.resolved_model), deploymentId:String(admission.resolved_deployment_id),
         region:admission.region ?? undefined, providerServiceTier:admission.provider_service_tier ?? undefined, at:input.occurredAt,
@@ -449,7 +449,7 @@ export class PostgresUsageLedgerStore {
       await client.query("COMMIT");return {runId,expectedFingerprint,findings};
     }catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
   }
-  private async readEffectiveRateCard(client: pg.PoolClient, input: {
+  async selectEffectiveRateCardInTransaction(client: pg.PoolClient, input: {
     tenantId: string; provider: string; providerAccountId: string; baseModel: string;
     deploymentId: string; region?: string; providerServiceTier?: string; at: Date;
   }): Promise<EffectiveRateCard | null> {

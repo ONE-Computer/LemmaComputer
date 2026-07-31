@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { priceUsage, usageFingerprint, type AttemptAdmissionInput, type AttemptBudgetBounds, type RateAmount, type UsageAmount, type UsageAttemptAdmissionHook } from "./usage-ledger.js";
+import { PostgresUsageLedgerStore, priceUsage, usageFingerprint, type AttemptAdmissionInput, type AttemptBudgetBounds, type RateAmount, type UsageAmount, type UsageAttemptAdmissionHook } from "./usage-ledger.js";
 
 export type BudgetPeriodType = "calendar_month" | "calendar_week";
 export type BudgetMode = "soft" | "hard";
@@ -149,7 +149,10 @@ const versionFrom = (row: Record<string, unknown>, thresholds: string[]): Budget
 });
 
 export class PostgresTeamBudgetStore implements TeamBudgetStore {
-  constructor(private readonly pool: pg.Pool) {}
+  private readonly rateCards: PostgresUsageLedgerStore;
+  constructor(private readonly pool: pg.Pool) {
+    this.rateCards = new PostgresUsageLedgerStore(pool);
+  }
   static fromConnectionString(connectionString: string) { return new PostgresTeamBudgetStore(new pg.Pool({ connectionString, max: 8 })); }
   async close() { await this.pool.end(); }
 
@@ -192,15 +195,19 @@ export class PostgresTeamBudgetStore implements TeamBudgetStore {
     const bypass = override.rows.some((row) => row.override_type === "hard_limit_bypass");
     const increases = override.rows.filter((row) => row.override_type === "limit_increase").map((row) => asScaled(String(row.new_limit_amount)));
     const effectiveLimit = increases.length ? increases.reduce((maximum,value) => value > maximum ? value : maximum,asScaled(budget.limitAmount)) : asScaled(budget.limitAmount);
-    const costs = await client.query(`SELECT COALESCE(SUM(e.provider_cost),0)::text settled,COUNT(*) FILTER (WHERE e.price_status<>'priced')::int unknown FROM ai_usage_events e JOIN ai_usage_attempt_admissions a ON a.tenant_id=e.tenant_id AND a.id=e.admission_id WHERE e.tenant_id=$1 AND a.team_id=$2 AND e.occurred_at>=$3 AND e.occurred_at<$4`, [budget.tenantId,budget.teamId,period.start,period.end]);
-    const reservations = await client.query(`SELECT COALESCE(SUM(r.quoted_amount),0)::text outstanding FROM team_budget_reservations r LEFT JOIN team_budget_reservation_settlements s ON s.tenant_id=r.tenant_id AND s.reservation_id=r.id LEFT JOIN team_budget_reservation_releases x ON x.tenant_id=r.tenant_id AND x.reservation_id=r.id WHERE r.tenant_id=$1 AND r.team_id=$2 AND r.period_start=$3 AND r.period_end=$4 AND s.id IS NULL AND x.id IS NULL`, [budget.tenantId,budget.teamId,period.start,period.end]);
+    const costs = await client.query(`SELECT COALESCE(SUM(e.provider_cost) FILTER (WHERE e.price_status='priced' AND e.currency=$5),0)::text settled,
+      COUNT(*) FILTER (WHERE e.price_status<>'priced' OR e.currency IS DISTINCT FROM $5)::int unknown
+      FROM ai_usage_events e JOIN ai_usage_attempt_admissions a ON a.tenant_id=e.tenant_id AND a.id=e.admission_id
+      WHERE e.tenant_id=$1 AND a.team_id=$2 AND e.occurred_at>=$3 AND e.occurred_at<$4`, [budget.tenantId,budget.teamId,period.start,period.end,budget.currency]);
+    const reservations = await client.query(`SELECT COALESCE(SUM(r.quoted_amount) FILTER (WHERE r.currency=$5),0)::text outstanding,COUNT(*) FILTER (WHERE r.currency IS DISTINCT FROM $5)::int foreign_currency FROM team_budget_reservations r LEFT JOIN team_budget_reservation_settlements s ON s.tenant_id=r.tenant_id AND s.reservation_id=r.id LEFT JOIN team_budget_reservation_releases x ON x.tenant_id=r.tenant_id AND x.reservation_id=r.id WHERE r.tenant_id=$1 AND r.team_id=$2 AND r.period_start=$3 AND r.period_end=$4 AND s.id IS NULL AND x.id IS NULL`, [budget.tenantId,budget.teamId,period.start,period.end,budget.currency]);
     const settled = asSignedScaled(String(costs.rows[0].settled));
     const outstanding = asScaled(String(reservations.rows[0].outstanding));
     const remaining = effectiveLimit-settled-outstanding;
     const percent = effectiveLimit === 0n ? (settled > 0n ? 100n*moneyScale : 0n) : (settled*100n*moneyScale)/effectiveLimit;
     const alerts = await client.query(`SELECT threshold_percent::text,created_at FROM team_budget_alerts WHERE tenant_id=$1 AND budget_version_id=$2 AND period_start=$3 ORDER BY threshold_percent`, [budget.tenantId,budget.id,period.start]);
     const projection = await client.query(`SELECT status,checked_at,detail FROM team_budget_gateway_projections WHERE tenant_id=$1 AND budget_version_id=$2`, [budget.tenantId,budget.id]);
-    return { budget,period,effectiveLimitAmount:asMoney(effectiveLimit),settledProviderCost:asMoney(settled),outstandingReservations:asMoney(outstanding),remainingAmount:asMoney(remaining),percentConsumed:asMoney(percent),priceStatus:Number(costs.rows[0].unknown)>0?"unknown":"priced",enforcement:bypass?"override":budget.mode,alerts:alerts.rows.map((row)=>({thresholdPercent:String(row.threshold_percent),createdAt:new Date(row.created_at)})),lastReconciliation:projection.rowCount?{status:String(projection.rows[0].status),checkedAt:new Date(projection.rows[0].checked_at),detail:projection.rows[0].detail?String(projection.rows[0].detail):null}:null };
+    const priceStatus = Number(costs.rows[0].unknown)+Number(reservations.rows[0].foreign_currency)>0?"unknown":"priced";
+    return { budget,period,effectiveLimitAmount:asMoney(effectiveLimit),settledProviderCost:asMoney(settled),outstandingReservations:asMoney(outstanding),remainingAmount:asMoney(remaining),percentConsumed:asMoney(percent),priceStatus,enforcement:bypass?"override":budget.mode,alerts:alerts.rows.map((row)=>({thresholdPercent:String(row.threshold_percent),createdAt:new Date(row.created_at)})),lastReconciliation:projection.rowCount?{status:String(projection.rows[0].status),checkedAt:new Date(projection.rows[0].checked_at),detail:projection.rows[0].detail?String(projection.rows[0].detail):null}:null };
   }
 
   private async emitThresholdAlerts(client:pg.PoolClient,status:BudgetStatus){
@@ -231,17 +238,19 @@ export class PostgresTeamBudgetStore implements TeamBudgetStore {
     const fingerprint=usageFingerprint({...input,admittedAt:input.admittedAt.toISOString(),budgetBounds:input.budgetBounds?{...input.budgetBounds,providerDeadlineAt:input.budgetBounds.providerDeadlineAt?.toISOString()}:undefined,budgetVersionId:budget.id});
     if(prior.rowCount)return prior.rows[0].source_fingerprint===fingerprint?{decision:"allow",reservationId:String(prior.rows[0].id),quotedAmount:String(prior.rows[0].quoted_amount)}:{decision:"deny",code:"BUDGET_RESERVATION_CONFLICT"};
     if(!input.budgetBounds)return budget.mode==="hard"?{decision:"deny",code:"BUDGET_QUOTE_REQUIRED"}:{decision:"allow",warning:"unpriced"};
-    const card=await client.query(`SELECT c.* FROM ai_deployment_rate_cards c WHERE c.tenant_id=$1 AND c.provider=$2 AND c.provider_account_id=$3 AND c.deployment_id=$4 AND c.base_model=$5 AND c.effective_from<=$6 AND (c.effective_to IS NULL OR c.effective_to>$6) AND c.region IS NOT DISTINCT FROM $7 AND c.provider_service_tier IS NOT DISTINCT FROM $8 ORDER BY CASE c.source WHEN 'contract_override' THEN 0 WHEN 'pinned_catalogue' THEN 1 ELSE 2 END,c.effective_from DESC LIMIT 1`,[input.tenantId,input.resolvedProvider,input.providerAccountId,input.resolvedDeploymentId,input.resolvedModel,now,input.region??null,input.providerServiceTier??null]);
-    if(!card.rowCount||String(card.rows[0].currency)!==budget.currency)return budget.mode==="hard"?{decision:"deny",code:"BUDGET_PRICE_UNAVAILABLE"}:{decision:"allow",warning:"unpriced"};
-    const ratesResult=await client.query("SELECT unit,amount_per_unit::text,unit_scale::text FROM ai_deployment_rate_card_rates WHERE tenant_id=$1 AND rate_card_id=$2",[input.tenantId,card.rows[0].id]);
-    const quote=quoteBudgetAttempt(input.budgetBounds,ratesResult.rows.map((row)=>({unit:row.unit,amountPerUnit:String(row.amount_per_unit),unitScale:String(row.unit_scale)}) as RateAmount));
+    const card=await this.rateCards.selectEffectiveRateCardInTransaction(client,{
+      tenantId:input.tenantId,provider:input.resolvedProvider,providerAccountId:input.providerAccountId,baseModel:input.resolvedModel,
+      deploymentId:input.resolvedDeploymentId,...(input.region?{region:input.region}:{}),...(input.providerServiceTier?{providerServiceTier:input.providerServiceTier}:{}),at:now,
+    });
+    if(!card||card.currency!==budget.currency)return budget.mode==="hard"?{decision:"deny",code:"BUDGET_PRICE_UNAVAILABLE"}:{decision:"allow",warning:"unpriced"};
+    const quote=quoteBudgetAttempt(input.budgetBounds,card.rates);
     if(quote.priceStatus!=="priced"||quote.providerCost===null)return budget.mode==="hard"?{decision:"deny",code:"BUDGET_PRICE_INCOMPLETE"}:{decision:"allow",warning:"unpriced"};
     const status=await this.calculateStatus(client,budget,now);const bypass=status.enforcement==="override";
     if(budget.mode==="hard"&&status.priceStatus!=="priced")return{decision:"deny",code:"BUDGET_LEDGER_STALE"};
     const enough=asSignedScaled(status.remainingAmount!)>=asScaled(quote.providerCost);
     if(budget.mode==="hard"&&!bypass&&!enough)return{decision:"deny",code:"TEAM_BUDGET_EXHAUSTED",remainingAmount:status.remainingAmount!};
     const id=randomUUID();const ttl=Math.min(Math.max(input.budgetBounds.reservationTtlSeconds??900,30),3600);const expiry=new Date(Math.max(now.getTime()+ttl*1000,(input.budgetBounds.providerDeadlineAt?.getTime()??now.getTime())+300_000));
-    await client.query(`INSERT INTO team_budget_reservations (id,tenant_id,budget_version_id,team_id,source_system,source_attempt_id,source_fingerprint,period_start,period_end,quoted_amount,currency,rate_card_id,rate_card_source_hash,cache_assumption,max_attempts,max_agent_steps,expires_at,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,[id,input.tenantId,budget.id,input.team.id,input.sourceSystem,input.sourceAttemptId,fingerprint,status.period!.start,status.period!.end,quote.providerCost,budget.currency,card.rows[0].id,card.rows[0].source_hash,quote.cacheAssumption,quote.maxAttempts,quote.maxAgentSteps,expiry,now]);
+    await client.query(`INSERT INTO team_budget_reservations (id,tenant_id,budget_version_id,team_id,source_system,source_attempt_id,source_fingerprint,period_start,period_end,quoted_amount,currency,rate_card_id,rate_card_source_hash,cache_assumption,max_attempts,max_agent_steps,expires_at,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,[id,input.tenantId,budget.id,input.team.id,input.sourceSystem,input.sourceAttemptId,fingerprint,status.period!.start,status.period!.end,quote.providerCost,budget.currency,card.id,card.sourceHash,quote.cacheAssumption,quote.maxAttempts,quote.maxAgentSteps,expiry,now]);
     return{decision:"allow",reservationId:id,quotedAmount:quote.providerCost,remainingAmount:asMoney(asSignedScaled(status.remainingAmount!)-asScaled(quote.providerCost)),warning:enough?undefined:"over_limit"};
   }
 
