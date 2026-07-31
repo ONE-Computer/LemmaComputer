@@ -187,20 +187,6 @@ test(
         team: null,
         createdBy: admin,
       });
-      const review = await routing.createReview({
-        tenantId: tenant,
-        teamId: team.id,
-        sampleSize: 10,
-        evaluationPassed: true,
-        expectedSavings: "1",
-        currency: "USD",
-        fallbackRate: "0",
-        errorRate: "0",
-        regretRate: "0",
-        reviewerUserId: admin,
-        reviewNote: "Representative routing evidence passed",
-        reviewedAt: new Date(),
-      });
       await assert.rejects(
         routing.createRollout({
           tenantId: tenant,
@@ -209,7 +195,6 @@ test(
           mappingVersionId: otherMapping,
           mode: "enabled",
           fixedDeploymentId: deployment,
-          evidenceReviewId: review.id,
           reason: "mismatch",
           createdBy: admin,
         }),
@@ -222,7 +207,6 @@ test(
         mappingVersionId: mapping,
         mode: "shadow",
         fixedDeploymentId: deployment,
-        evidenceReviewId: review.id,
         reason: "qualify",
         createdBy: admin,
       });
@@ -243,6 +227,7 @@ test(
         requestedAlias: "onecomputer-auto",
         requestedServiceClass: "auto",
         selectedServiceClass: "lite",
+        selectionStatus: "selected",
         taskClass: "short",
         confidence: "0.900000",
         signals: ["short_prompt"],
@@ -423,9 +408,15 @@ test(
           { unit: "output_token", quantity: "100" },
         ],
       );
-      assert.equal(effectiveAfterFailure?.policy.deployments[0]?.healthy, false);
+      assert.equal(
+        effectiveAfterFailure?.policy.deployments[0]?.healthy,
+        false,
+      );
       await assert.rejects(
-        pool.query("UPDATE ai_routing_deployment_health_observations SET status='healthy' WHERE tenant_id=$1 AND id=$2", [tenant, health.rows[0].id]),
+        pool.query(
+          "UPDATE ai_routing_deployment_health_observations SET status='healthy' WHERE tenant_id=$1 AND id=$2",
+          [tenant, health.rows[0].id],
+        ),
         /immutable/,
       );
       await assert.rejects(
@@ -456,7 +447,7 @@ test(
         /immutable/,
       );
       const availabilityDecision: ModelRoutingDecision = {
-        ...decision(`availability-${suffix}`, "EUR", []),
+        ...decision(`availability-${suffix}`, "USD", []),
         reasonCode: "availability_escalation",
         escalationReason: "availability",
         ineligible: [{ deploymentId: deployment, reasonCode: "health" }],
@@ -469,19 +460,87 @@ test(
         rolloutVersionId: rollout.id,
         decision: availabilityDecision,
       });
-      const availabilityEvidence = await routing.decision(tenant, availabilityRecord.id);
-      assert.equal(availabilityEvidence?.reason_code, "availability_escalation");
+      const availabilityEvidence = await routing.decision(
+        tenant,
+        availabilityRecord.id,
+      );
+      assert.equal(
+        availabilityEvidence?.reason_code,
+        "availability_escalation",
+      );
       assert.equal(availabilityEvidence?.escalation_reason, "availability");
       assert.deepEqual(
-        (availabilityEvidence?.candidates as Array<Record<string, unknown>>).map((candidate) => candidate.reason_code),
+        (
+          availabilityEvidence?.candidates as Array<Record<string, unknown>>
+        ).map((candidate) => candidate.reason_code),
         ["health"],
       );
       const report = await routing.shadowReport(tenant, team.id);
-      assert.equal(report.sampleSize, 1);
+      assert.equal(report.sampleSize, 2);
       assert.equal(report.currency, "USD");
-      assert.equal(report.expectedCost, "0.001200000000");
-      assert.equal(report.actualCost, "0.001200000000");
-
+      assert.equal(report.expectedCost, "0.002400000000");
+      const review = await routing.createReview({
+        tenantId: tenant,
+        teamId: team.id,
+        evaluationPassed: true,
+        reviewerUserId: admin,
+        reviewNote: "Representative persisted shadow evidence passed",
+        reviewedAt: new Date(),
+      });
+      assert.equal(review.shadowRolloutVersionId, rollout.id);
+      assert.equal(review.policyVersionId, policy);
+      assert.equal(review.mappingVersionId, mapping);
+      assert.equal(review.fixedDeploymentId, deployment);
+      assert.equal(review.sampleSize, 2);
+      const linked = await pool.query(
+        "SELECT decision_id FROM ai_routing_evidence_review_decisions WHERE tenant_id=$1 AND review_id=$2 ORDER BY ordinal",
+        [tenant, review.id],
+      );
+      assert.equal(linked.rowCount, 2);
+      await assert.rejects(
+        pool.query(
+          "UPDATE ai_routing_evidence_review_decisions SET ordinal=3 WHERE tenant_id=$1 AND review_id=$2 AND ordinal=0",
+          [tenant, review.id],
+        ),
+        /immutable/,
+      );
+      const enabled = await routing.createRollout({
+        tenantId: tenant,
+        teamId: team.id,
+        policyVersionId: policy,
+        mappingVersionId: mapping,
+        mode: "enabled",
+        fixedDeploymentId: deployment,
+        evidenceReviewId: review.id,
+        reason: "Enable reviewed exact shadow sample",
+        createdBy: admin,
+      });
+      assert.equal(enabled.mode, "enabled");
+      const newerShadow = await routing.createRollout({
+        tenantId: tenant,
+        teamId: team.id,
+        policyVersionId: policy,
+        mappingVersionId: mapping,
+        mode: "shadow",
+        fixedDeploymentId: deployment,
+        reason: "Begin a fresh shadow evidence window",
+        createdBy: admin,
+      });
+      assert.equal(newerShadow.mode, "shadow");
+      await assert.rejects(
+        routing.createRollout({
+          tenantId: tenant,
+          teamId: team.id,
+          policyVersionId: policy,
+          mappingVersionId: mapping,
+          mode: "enabled",
+          fixedDeploymentId: deployment,
+          evidenceReviewId: review.id,
+          reason: "Reject stale review from prior window",
+          createdBy: admin,
+        }),
+        /does not match this shadowed rollout/,
+      );
       const mismatchCases = [
         {
           label: "task",

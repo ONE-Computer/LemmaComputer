@@ -36,7 +36,13 @@ export type RoutingEvidenceReview = {
   id: string;
   tenantId: string;
   teamId: string;
+  shadowRolloutVersionId: string | null;
+  policyVersionId: string | null;
+  mappingVersionId: string | null;
+  fixedDeploymentId: string | null;
   sampleSize: number;
+  sampleWindowStart: Date | null;
+  sampleWindowEnd: Date | null;
   evaluationPassed: boolean;
   expectedSavings: string | null;
   currency: string | null;
@@ -74,6 +80,12 @@ export type RoutingAdminReadModel = {
 };
 export type RoutingShadowReport = {
   teamId: string;
+  rolloutVersionId: string | null;
+  policyVersionId: string | null;
+  mappingVersionId: string | null;
+  fixedDeploymentId: string | null;
+  sampleWindowStart: Date | null;
+  sampleWindowEnd: Date | null;
   sampleSize: number;
   selectedDistribution: Record<string, number>;
   executedDistribution: Record<string, number>;
@@ -89,10 +101,11 @@ export type RoutingShadowReport = {
     id: string;
     createdAt: Date;
     selectedServiceClass: string;
+    selectionStatus: string;
     reasonCode: string;
     shadow: boolean;
-    expectedCost: string;
-    currency: string;
+    expectedCost: string | null;
+    currency: string | null;
     outcome: string | null;
   }>;
 };
@@ -127,13 +140,7 @@ export interface RoutingStore extends RoutingAffinityStore {
   createReview(input: {
     tenantId: string;
     teamId: string;
-    sampleSize: number;
     evaluationPassed: boolean;
-    expectedSavings?: string;
-    currency?: string;
-    fallbackRate: string;
-    errorRate: string;
-    regretRate: string;
     reviewerUserId: string;
     reviewNote: string;
     reviewedAt: Date;
@@ -203,7 +210,23 @@ const reviewFrom = (row: Record<string, unknown>): RoutingEvidenceReview => ({
   id: String(row.id),
   tenantId: String(row.tenant_id),
   teamId: String(row.team_id),
+  shadowRolloutVersionId: row.shadow_rollout_version_id
+    ? String(row.shadow_rollout_version_id)
+    : null,
+  policyVersionId: row.policy_version_id ? String(row.policy_version_id) : null,
+  mappingVersionId: row.mapping_version_id
+    ? String(row.mapping_version_id)
+    : null,
+  fixedDeploymentId: row.fixed_deployment_id
+    ? String(row.fixed_deployment_id)
+    : null,
   sampleSize: Number(row.sample_size),
+  sampleWindowStart: row.sample_window_start
+    ? new Date(String(row.sample_window_start))
+    : null,
+  sampleWindowEnd: row.sample_window_end
+    ? new Date(String(row.sample_window_end))
+    : null,
   evaluationPassed: Boolean(row.evaluation_passed),
   expectedSavings:
     row.expected_savings === null ? null : String(row.expected_savings),
@@ -343,26 +366,76 @@ export class PostgresRoutingStore implements RoutingStore {
     }
   }
   async createReview(input: Parameters<RoutingStore["createReview"]>[0]) {
+    const report = await this.shadowReport(input.tenantId, input.teamId);
+    if (
+      !report.rolloutVersionId ||
+      !report.policyVersionId ||
+      !report.mappingVersionId ||
+      !report.fixedDeploymentId ||
+      !report.sampleSize
+    )
+      throw new Error(
+        "A non-empty current shadow rollout is required for review",
+      );
+    const client = await this.pool.connect();
     const id = randomUUID();
-    const result = await this.pool.query(
-      "INSERT INTO ai_routing_evidence_reviews(id,tenant_id,team_id,sample_size,evaluation_passed,expected_savings,currency,fallback_rate,error_rate,regret_rate,reviewer_user_id,review_note,reviewed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *",
-      [
-        id,
-        input.tenantId,
-        input.teamId,
-        input.sampleSize,
-        input.evaluationPassed,
-        input.expectedSavings ?? null,
-        input.currency ?? null,
-        input.fallbackRate,
-        input.errorRate,
-        input.regretRate,
-        input.reviewerUserId,
-        input.reviewNote,
-        input.reviewedAt,
-      ],
-    );
-    return reviewFrom(result.rows[0]);
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+        [`routing-rollout:${input.tenantId}:${input.teamId}`],
+      );
+      const current = await client.query(
+        "SELECT * FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1",
+        [input.tenantId, input.teamId],
+      );
+      if (
+        !current.rowCount ||
+        String(current.rows[0].id) !== report.rolloutVersionId ||
+        current.rows[0].mode !== "shadow" ||
+        String(current.rows[0].policy_version_id) !== report.policyVersionId ||
+        String(current.rows[0].mapping_version_id) !==
+          report.mappingVersionId ||
+        String(current.rows[0].fixed_deployment_id) !== report.fixedDeploymentId
+      )
+        throw new Error("The shadow rollout changed before evidence review");
+      const result = await client.query(
+        "INSERT INTO ai_routing_evidence_reviews(id,tenant_id,team_id,shadow_rollout_version_id,policy_version_id,mapping_version_id,fixed_deployment_id,sample_size,sample_window_start,sample_window_end,evaluation_passed,expected_savings,currency,fallback_rate,error_rate,regret_rate,reviewer_user_id,review_note,reviewed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *",
+        [
+          id,
+          input.tenantId,
+          input.teamId,
+          report.rolloutVersionId,
+          report.policyVersionId,
+          report.mappingVersionId,
+          report.fixedDeploymentId,
+          report.sampleSize,
+          report.sampleWindowStart,
+          report.sampleWindowEnd,
+          input.evaluationPassed,
+          report.estimatedSavings,
+          report.currency,
+          report.fallbackRate,
+          report.errorRate,
+          report.regretRate,
+          input.reviewerUserId,
+          input.reviewNote,
+          input.reviewedAt,
+        ],
+      );
+      for (const [ordinal, decision] of report.decisions.entries())
+        await client.query(
+          "INSERT INTO ai_routing_evidence_review_decisions(tenant_id,review_id,decision_id,ordinal) VALUES($1,$2,$3,$4)",
+          [input.tenantId, id, decision.id, ordinal],
+        );
+      await client.query("COMMIT");
+      return reviewFrom(result.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async createRollout(input: Parameters<RoutingStore["createRollout"]>[0]) {
     const client = await this.pool.connect();
@@ -393,21 +466,44 @@ export class PostgresRoutingStore implements RoutingStore {
         throw new Error(
           "Fixed deployment does not belong to the rollout mapping",
         );
-      if (input.evidenceReviewId) {
+      if (input.mode === "enabled") {
+        if (!input.evidenceReviewId)
+          throw new Error(
+            "Production routing requires a reviewed evidence record",
+          );
         const review = await client.query(
-          "SELECT evaluation_passed FROM ai_routing_evidence_reviews WHERE tenant_id=$1 AND id=$2 AND team_id=$3",
+          `SELECT er.evaluation_passed FROM ai_routing_evidence_reviews er
+           JOIN ai_routing_rollout_versions sr ON sr.tenant_id=er.tenant_id AND sr.id=er.shadow_rollout_version_id
+           WHERE er.tenant_id=$1 AND er.id=$2 AND er.team_id=$3
+             AND er.policy_version_id=$4 AND er.mapping_version_id=$5 AND er.fixed_deployment_id=$6
+             AND er.sample_size>0 AND sr.mode='shadow'
+             AND er.shadow_rollout_version_id=(SELECT id FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$3 ORDER BY created_at DESC,id DESC LIMIT 1)
+             AND sr.policy_version_id=$4 AND sr.mapping_version_id=$5 AND sr.fixed_deployment_id=$6`,
+          [
+            input.tenantId,
+            input.evidenceReviewId,
+            input.teamId,
+            input.policyVersionId,
+            input.mappingVersionId,
+            input.fixedDeploymentId,
+          ],
+        );
+        if (!review.rowCount)
+          throw new Error(
+            "Routing evidence does not match this shadowed rollout",
+          );
+        if (!review.rows[0].evaluation_passed)
+          throw new Error("Production routing evidence has not passed review");
+      } else if (input.evidenceReviewId) {
+        const review = await client.query(
+          "SELECT 1 FROM ai_routing_evidence_reviews WHERE tenant_id=$1 AND id=$2 AND team_id=$3",
           [input.tenantId, input.evidenceReviewId, input.teamId],
         );
         if (!review.rowCount)
           throw new Error(
             "Routing evidence review does not belong to the Team",
           );
-        if (input.mode === "enabled" && !review.rows[0].evaluation_passed)
-          throw new Error("Production routing evidence has not passed review");
-      } else if (input.mode === "enabled")
-        throw new Error(
-          "Production routing requires a reviewed evidence record",
-        );
+      }
       const prior = await client.query(
         "SELECT id FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$2 ORDER BY created_at DESC LIMIT 1",
         [input.tenantId, input.teamId],
@@ -442,7 +538,7 @@ export class PostgresRoutingStore implements RoutingStore {
     tenantId: string,
     teamId: string,
   ): Promise<RoutingAdminReadModel> {
-    const [policy, rollout, review] = await Promise.all([
+    const [policy, rollout] = await Promise.all([
       this.pool.query(
         "SELECT * FROM ai_routing_policy_versions WHERE tenant_id=$1 AND team_id=$2 ORDER BY created_at DESC LIMIT 1",
         [tenantId, teamId],
@@ -451,12 +547,28 @@ export class PostgresRoutingStore implements RoutingStore {
         "SELECT * FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$2 ORDER BY created_at DESC LIMIT 1",
         [tenantId, teamId],
       ),
-      this.pool.query(
-        "SELECT * FROM ai_routing_evidence_reviews WHERE tenant_id=$1 AND team_id=$2 ORDER BY reviewed_at DESC LIMIT 1",
-        [tenantId, teamId],
-      ),
     ]);
     const policyRow = policy.rows[0];
+    const rolloutRow = rollout.rows[0];
+    const review =
+      rolloutRow?.mode === "shadow"
+        ? await this.pool.query(
+            "SELECT * FROM ai_routing_evidence_reviews WHERE tenant_id=$1 AND team_id=$2 AND shadow_rollout_version_id=$3 ORDER BY reviewed_at DESC,id DESC LIMIT 1",
+            [tenantId, teamId, rolloutRow.id],
+          )
+        : rolloutRow?.mode === "enabled" && rolloutRow.evidence_review_id
+          ? await this.pool.query(
+              "SELECT * FROM ai_routing_evidence_reviews WHERE tenant_id=$1 AND team_id=$2 AND id=$3 AND policy_version_id=$4 AND mapping_version_id=$5 AND fixed_deployment_id=$6 LIMIT 1",
+              [
+                tenantId,
+                teamId,
+                rolloutRow.evidence_review_id,
+                rolloutRow.policy_version_id,
+                rolloutRow.mapping_version_id,
+                rolloutRow.fixed_deployment_id,
+              ],
+            )
+          : null;
     const deployments = policyRow
       ? await this.pool.query(
           "SELECT * FROM ai_routing_deployments WHERE tenant_id=$1 AND mapping_version_id=$2 ORDER BY service_class,id",
@@ -480,7 +592,7 @@ export class PostgresRoutingStore implements RoutingStore {
           }
         : null,
       rollout: rollout.rowCount ? rolloutFrom(rollout.rows[0]) : null,
-      review: review.rowCount ? reviewFrom(review.rows[0]) : null,
+      review: review?.rowCount ? reviewFrom(review.rows[0]) : null,
       deployments: deployments.rows.map((row: Record<string, unknown>) => ({
         id: String(row.id),
         serviceClass: row.service_class as ProductServiceClass,
@@ -620,7 +732,7 @@ export class PostgresRoutingStore implements RoutingStore {
     try {
       await client.query("BEGIN");
       const result = await client.query(
-        `INSERT INTO ai_routing_decisions(id,tenant_id,request_id,task_id,team_id,user_id,policy_version_id,mapping_version_id,rollout_version_id,requested_service_class,selected_service_class,selected_deployment_id,executed_deployment_id,rate_card_id,expected_cost,currency,confidence,reason_code,safe_signals,escalation_reason,session_affinity_hash,affinity_moved_reason,router_overhead_ms,shadow,outcome,actual_cost,actual_currency,usage_event_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) ON CONFLICT(tenant_id,request_id) DO NOTHING RETURNING id`,
+        `INSERT INTO ai_routing_decisions(id,tenant_id,request_id,task_id,team_id,user_id,policy_version_id,mapping_version_id,rollout_version_id,requested_service_class,selected_service_class,selection_status,selected_deployment_id,executed_deployment_id,rate_card_id,expected_cost,currency,confidence,reason_code,safe_signals,escalation_reason,session_affinity_hash,affinity_moved_reason,router_overhead_ms,shadow,outcome,actual_cost,actual_currency,usage_event_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT(tenant_id,request_id) DO NOTHING RETURNING id`,
         [
           id,
           input.tenantId,
@@ -633,11 +745,12 @@ export class PostgresRoutingStore implements RoutingStore {
           input.rolloutVersionId,
           d.requestedServiceClass,
           d.selectedServiceClass,
+          d.selectionStatus,
           d.selectedDeployment.id,
           d.executedDeployment.id,
           d.selectedDeployment.rateCardId,
-          d.selectedDeployment.expectedCost.amount,
-          d.selectedDeployment.expectedCost.currency,
+          d.selectedDeployment.expectedCost?.amount ?? null,
+          d.selectedDeployment.expectedCost?.currency ?? null,
           d.confidence,
           d.reasonCode,
           d.signals,
@@ -721,7 +834,9 @@ export class PostgresRoutingStore implements RoutingStore {
             (input.currency ?? null) ||
           (row.latency_ms === null ? null : Number(row.latency_ms)) !==
             (input.latencyMs ?? null) ||
-          (row.deployment_health === null ? null : String(row.deployment_health)) !==
+          (row.deployment_health === null
+            ? null
+            : String(row.deployment_health)) !==
             (input.deploymentHealth ?? null)
         )
           throw new Error(
@@ -843,13 +958,41 @@ export class PostgresRoutingStore implements RoutingStore {
     tenantId: string,
     teamId: string,
   ): Promise<RoutingShadowReport> {
-    const result = await this.pool.query(
-      "SELECT d.*,o.outcome observation_outcome,o.actual_cost observation_actual_cost,o.currency observation_currency FROM ai_routing_decisions d LEFT JOIN LATERAL (SELECT outcome,actual_cost,currency FROM ai_routing_decision_observations WHERE tenant_id=d.tenant_id AND decision_id=d.id ORDER BY observed_at DESC LIMIT 1) o ON true WHERE d.tenant_id=$1 AND d.team_id=$2 AND d.shadow=true ORDER BY d.created_at DESC LIMIT 1000",
+    const rolloutResult = await this.pool.query(
+      "SELECT * FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$2 AND mode='shadow' ORDER BY created_at DESC,id DESC LIMIT 1",
       [tenantId, teamId],
+    );
+    if (!rolloutResult.rowCount)
+      return {
+        teamId,
+        rolloutVersionId: null,
+        policyVersionId: null,
+        mappingVersionId: null,
+        fixedDeploymentId: null,
+        sampleWindowStart: null,
+        sampleWindowEnd: null,
+        sampleSize: 0,
+        selectedDistribution: {},
+        executedDistribution: {},
+        expectedCost: null,
+        actualCost: null,
+        currency: null,
+        estimatedSavings: null,
+        fallbackRate: "0",
+        errorRate: "0",
+        regretRate: "0",
+        routerOverheadMs: "0",
+        decisions: [],
+      };
+    const rollout = rolloutFrom(rolloutResult.rows[0]);
+    const result = await this.pool.query(
+      "SELECT d.*,o.outcome observation_outcome,o.actual_cost observation_actual_cost,o.currency observation_currency FROM ai_routing_decisions d LEFT JOIN LATERAL (SELECT outcome,actual_cost,currency FROM ai_routing_decision_observations WHERE tenant_id=d.tenant_id AND decision_id=d.id ORDER BY observed_at DESC LIMIT 1) o ON true WHERE d.tenant_id=$1 AND d.team_id=$2 AND d.rollout_version_id=$3 AND d.shadow=true ORDER BY d.created_at DESC,id DESC LIMIT 1000",
+      [tenantId, teamId, rollout.id],
     );
     const selectedDistribution: Record<string, number> = {};
     const executedDistribution: Record<string, number> = {};
     let expected = 0n,
+      expectedCount = 0,
       actual = 0n,
       actualCount = 0,
       overhead = 0n,
@@ -865,9 +1008,15 @@ export class PostgresRoutingStore implements RoutingStore {
         (selectedDistribution[row.selected_service_class] ?? 0) + 1;
       executedDistribution[String(row.executed_deployment_id)] =
         (executedDistribution[String(row.executed_deployment_id)] ?? 0) + 1;
-      currencies.add(String(row.currency));
-      expected += parse(String(row.expected_cost));
-      if (row.observation_actual_cost !== null) {
+      if (row.expected_cost !== null && row.currency !== null) {
+        currencies.add(String(row.currency));
+        expected += parse(String(row.expected_cost));
+        expectedCount++;
+      }
+      if (
+        row.observation_actual_cost !== null &&
+        row.observation_currency !== null
+      ) {
         actual += parse(String(row.observation_actual_cost));
         actualCount++;
         currencies.add(String(row.observation_currency ?? row.currency));
@@ -883,10 +1032,17 @@ export class PostgresRoutingStore implements RoutingStore {
     const format = (value: bigint) =>
       `${value / 10n ** 12n}.${String(value % 10n ** 12n).padStart(12, "0")}`;
     const size = result.rowCount ?? 0;
-    const comparable = size > 0 && currencies.size === 1;
+    const comparable =
+      size > 0 && expectedCount === size && currencies.size === 1;
     const currency = comparable ? [...currencies][0]! : null;
     return {
       teamId,
+      rolloutVersionId: rollout.id,
+      policyVersionId: rollout.policyVersionId,
+      mappingVersionId: rollout.mappingVersionId,
+      fixedDeploymentId: rollout.fixedDeploymentId,
+      sampleWindowStart: size ? new Date(result.rows.at(-1).created_at) : null,
+      sampleWindowEnd: size ? new Date(result.rows[0].created_at) : null,
       sampleSize: size,
       selectedDistribution,
       executedDistribution,
@@ -905,14 +1061,16 @@ export class PostgresRoutingStore implements RoutingStore {
       errorRate: size ? String(failures / size) : "0",
       regretRate: size ? String(regrets / size) : "0",
       routerOverheadMs: size ? format(overhead / BigInt(size)) : "0",
-      decisions: result.rows.slice(0, 100).map((row) => ({
+      decisions: result.rows.map((row) => ({
         id: String(row.id),
         createdAt: new Date(row.created_at),
         selectedServiceClass: String(row.selected_service_class),
+        selectionStatus: String(row.selection_status),
         reasonCode: String(row.reason_code),
         shadow: Boolean(row.shadow),
-        expectedCost: String(row.expected_cost),
-        currency: String(row.currency),
+        expectedCost:
+          row.expected_cost === null ? null : String(row.expected_cost),
+        currency: row.currency === null ? null : String(row.currency),
         outcome: row.observation_outcome
           ? String(row.observation_outcome)
           : null,

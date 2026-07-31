@@ -58,6 +58,10 @@ An observation is accepted only when its immutable usage event belongs to the sa
 
 Start every Team in shadow mode. The fixed deployment executes while the router records its hypothetical choice, expected cost, candidate evidence, fallback rate, errors, regret, and overhead.
 
+Shadow mode never blocks the fixed route when the hypothetical policy has no eligible, priced, or budget-feasible candidate; it records an explicit `no_candidate` decision instead. Disabled mode bypasses hypothetical policy, budget, and pricing selection entirely and executes the rollout's validated fixed deployment.
+
+Each review is derived server-side from an immutable set of decisions belonging to one exact shadow rollout, policy, mapping, and fixed route. Production enablement rejects reviews from older shadow windows even when their mapping happens to be unchanged.
+
 1. Review a representative evidence window in the administrator UI.
 2. Record the reviewer, note, sample size, and pass or fail result.
 3. Enable production routing only after a passing review and typed confirmation.
