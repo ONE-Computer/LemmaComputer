@@ -80,6 +80,21 @@ export type RateCardInput = {
   sourceVersion: string; sourceHash: string; catalogueRelease?: string; effectiveFrom: Date; effectiveTo?: Date;
   approvedBy?: string; overrideReason?: string; rates: RateAmount[];
 };
+export type AttemptBudgetBounds = {
+  inputTokens: string;
+  cacheReadTokens?: string;
+  cacheWriteTokens?: string;
+  maximumOutputTokens: string;
+  maximumReasoningTokens?: string;
+  requestUnits?: string;
+  cacheStatus: "known_hit"|"known_miss"|"unknown";
+  maxRetries: number;
+  maxFallbacks: number;
+  maxAgentSteps: number;
+  routingOverhead?: UsageAmount[];
+  reservationTtlSeconds?: number;
+  providerDeadlineAt?: Date;
+};
 export type AttemptAdmissionInput = {
   tenantId: string; sourceSystem: string; sourceAttemptId: string; subjectId: string; team: MinimalSpendingTeam;
   workspaceId?: string; agentId?: string; sessionId?: string; taskId: string; turnId?: string;
@@ -87,8 +102,21 @@ export type AttemptAdmissionInput = {
   requestedAlias: string; requestedServiceClass?: "auto"|"lite"|"balanced"|"pro"; selectedServiceClass?: "lite"|"balanced"|"pro";
   routeMappingVersion?: string; attemptKind: "inference"|"router"|"classifier"|"embedding"|"retry"|"fallback"; parentAttemptId?: string;
   resolvedProvider: string; providerAccountId: string; resolvedModel: string; resolvedDeploymentId: string; region?: string; providerServiceTier?: string; admittedAt: Date;
+  budgetBounds?: AttemptBudgetBounds;
 };
-export type AdmissionResult = { status: "created"|"duplicate"|"conflict"|"denied"; admissionId: string | null; denialCode?:string };
+export type AttemptAdmissionSemanticInput = Omit<AttemptAdmissionInput,"team"|"admittedAt">;
+export type AdmissionTeamSnapshot = Pick<MinimalSpendingTeam,"id"|"displayName"|"costCenterCode">;
+export type AdmissionResult =
+  | { status:"created"|"duplicate"; admissionId:string; team:AdmissionTeamSnapshot }
+  | { status:"conflict"; admissionId:null }
+  | { status:"denied"; admissionId:null; denialCode:string };
+
+export const attemptAdmissionFingerprint = (input: AttemptAdmissionInput | AttemptAdmissionSemanticInput) => {
+  const { team: _team,admittedAt: _admittedAt,budgetBounds,...semantic } = input as AttemptAdmissionInput;
+  if (!budgetBounds) return usageFingerprint(semantic);
+  const { reservationTtlSeconds: _reservationTtlSeconds,providerDeadlineAt: _providerDeadlineAt,...economicBounds } = budgetBounds;
+  return usageFingerprint({ ...semantic,budgetBounds:economicBounds });
+};
 
 export type UsageCostDrivers = {
   conversationHistoryCount?: number; attachmentCount?: number; retrievalCount?: number;
@@ -163,6 +191,49 @@ export class PostgresUsageLedgerStore {
   static fromConnectionString(connectionString: string) { return new PostgresUsageLedgerStore(new pg.Pool({ connectionString, max: 5 })); }
   async close() { await this.pool.end(); }
 
+  private async readAttemptReplay(
+    client: pg.PoolClient,
+    input: AttemptAdmissionSemanticInput,
+    fingerprint: string,
+  ): Promise<AdmissionResult | null> {
+    const prior = await client.query(
+      `SELECT id,source_fingerprint,team_id,team_display_name,cost_center_code
+       FROM ai_usage_attempt_admissions
+       WHERE tenant_id=$1 AND source_system=$2 AND source_attempt_id=$3`,
+      [input.tenantId,input.sourceSystem,input.sourceAttemptId],
+    );
+    if (!prior.rowCount) return null;
+    if (prior.rows[0].source_fingerprint === fingerprint) {
+      return {
+        status:"duplicate",admissionId:String(prior.rows[0].id),
+        team:{
+          id:String(prior.rows[0].team_id),
+          displayName:String(prior.rows[0].team_display_name),
+          costCenterCode:prior.rows[0].cost_center_code === null ? null : String(prior.rows[0].cost_center_code),
+        },
+      };
+    }
+    await client.query(
+      `INSERT INTO ai_usage_ingestion_conflicts (
+         id,tenant_id,source_system,source_event_id,existing_fingerprint,received_fingerprint,conflict_type
+       ) VALUES ($1,$2,$3,$4,$5,$6,'attempt_fingerprint_mismatch') ON CONFLICT DO NOTHING`,
+      [randomUUID(),input.tenantId,input.sourceSystem,input.sourceAttemptId,prior.rows[0].source_fingerprint,fingerprint],
+    );
+    return { status:"conflict",admissionId:null };
+  }
+
+  async replayAttempt(input: AttemptAdmissionSemanticInput): Promise<AdmissionResult | null> {
+    const fingerprint = attemptAdmissionFingerprint(input);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`ai-attempt:${input.tenantId}:${input.sourceSystem}:${input.sourceAttemptId}`]);
+      const replay = await this.readAttemptReplay(client,input,fingerprint);
+      await client.query("COMMIT");
+      return replay;
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+
   async createRateCard(input: RateCardInput) {
     validateRateCard(input);
     const client = await this.pool.connect();
@@ -175,24 +246,20 @@ export class PostgresUsageLedgerStore {
   }
 
   async admitAttempt(input: AttemptAdmissionInput,hook:UsageAttemptAdmissionHook=new AllowUsageAttemptAdmission()): Promise<AdmissionResult> {
-    const fingerprint = usageFingerprint(input);
+    const fingerprint = attemptAdmissionFingerprint(input);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`ai-attempt:${input.tenantId}:${input.sourceSystem}:${input.sourceAttemptId}`]);
-      const prior = await client.query(`SELECT id,source_fingerprint FROM ai_usage_attempt_admissions WHERE tenant_id=$1 AND source_system=$2 AND source_attempt_id=$3`, [input.tenantId,input.sourceSystem,input.sourceAttemptId]);
-      if (prior.rowCount) {
-        if (prior.rows[0].source_fingerprint === fingerprint) { await client.query("COMMIT"); return { status:"duplicate", admissionId:String(prior.rows[0].id) }; }
-        await client.query(`INSERT INTO ai_usage_ingestion_conflicts (id,tenant_id,source_system,source_event_id,existing_fingerprint,received_fingerprint,conflict_type) VALUES ($1,$2,$3,$4,$5,$6,'attempt_fingerprint_mismatch') ON CONFLICT DO NOTHING`, [randomUUID(),input.tenantId,input.sourceSystem,input.sourceAttemptId,prior.rows[0].source_fingerprint,fingerprint]);
-        await client.query("COMMIT"); return { status:"conflict", admissionId:null };
-      }
+      const replay = await this.readAttemptReplay(client,input,fingerprint);
+      if (replay) { await client.query("COMMIT"); return replay; }
       const decision=await hook.admit(input,client);
       if(decision.decision==="deny"){await client.query("ROLLBACK");return {status:"denied",admissionId:null,denialCode:decision.code};}
       const id = randomUUID();
       await client.query(`INSERT INTO ai_usage_attempt_admissions (id,tenant_id,source_system,source_attempt_id,source_fingerprint,subject_id,team_id,team_display_name,cost_center_code,workspace_id,agent_id,session_id,task_id,turn_id,task_binding_provenance,context_kind,policy_version_id,policy_hash,requested_alias,requested_service_class,selected_service_class,route_mapping_version,attempt_kind,parent_attempt_id,resolved_provider,provider_account_id,resolved_model,resolved_deployment_id,region,provider_service_tier,admitted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)`, [id,input.tenantId,input.sourceSystem,input.sourceAttemptId,fingerprint,input.subjectId,input.team.id,input.team.displayName,input.team.costCenterCode,input.workspaceId??null,input.agentId??null,input.sessionId??null,input.taskId,input.turnId??null,input.taskBindingProvenance,input.contextKind,input.policyVersionId??null,input.policyHash??null,input.requestedAlias,input.requestedServiceClass??null,input.selectedServiceClass??null,input.routeMappingVersion??null,input.attemptKind,input.parentAttemptId??null,input.resolvedProvider,input.providerAccountId,input.resolvedModel,input.resolvedDeploymentId,input.region??null,input.providerServiceTier??null,input.admittedAt]);
-      await client.query("COMMIT"); return { status:"created", admissionId:id };
+      await client.query("COMMIT");
+      return { status:"created",admissionId:id,team:{ id:input.team.id,displayName:input.team.displayName,costCenterCode:input.team.costCenterCode } };
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
-
   }
   async selectEffectiveRateCard(input: {
     tenantId: string; provider: string; providerAccountId: string; baseModel: string;

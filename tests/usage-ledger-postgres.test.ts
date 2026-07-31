@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import pg from "pg";
-import { PostgresTeamStore, PostgresUsageLedgerStore } from "@onecomputer/workspace-store";
+import { PostgresTeamStore, PostgresUsageLedgerStore, type UsageAttemptAdmissionHook } from "@onecomputer/workspace-store";
+import { UsageLedgerService, UsageTaskBindingAuthority, internalUsageAdmissionSchema, type InternalUsageAdmission } from "../apps/control-api/src/usage-ledger.js";
 
 const connectionString = process.env.USAGE_LEDGER_TEST_DATABASE_URL;
 const hash = (character: string) => character.repeat(64);
@@ -125,6 +126,95 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
     assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_usage_events WHERE tenant_id=$1`, [outsiderTenantId])).rows[0].count,0);
   } finally {
     await Promise.all([pool.end(),teams.close(),ledger.close()]);
+  }
+});
+
+test("PostgreSQL admission replay preserves the original Team and runs hard reservation once", { skip:!connectionString }, async () => {
+  const pool = new pg.Pool({ connectionString });
+  const teams = PostgresTeamStore.fromConnectionString(connectionString!);
+  const secondTeams = PostgresTeamStore.fromConnectionString(connectionString!);
+  const ledger = PostgresUsageLedgerStore.fromConnectionString(connectionString!);
+  const secondLedger = PostgresUsageLedgerStore.fromConnectionString(connectionString!);
+  const suffix = crypto.randomUUID();
+  const tenantId = `replay-tenant-${suffix}`;
+  const administratorId = `replay-admin-${suffix}`;
+  const userId = `replay-user-${suffix}`;
+  const reservationTable = `test_usage_replay_${suffix.replaceAll("-","")}`;
+  let concurrentSource = "";
+  let signalConcurrent = () => undefined;
+  let releaseConcurrent = () => undefined;
+  const concurrentEntered = new Promise<void>((resolve) => { signalConcurrent = resolve; });
+  const concurrentRelease = new Promise<void>((resolve) => { releaseConcurrent = resolve; });
+  const hook: UsageAttemptAdmissionHook = {
+    admit: async (input,transaction) => {
+      await transaction.query(`INSERT INTO ${reservationTable} (source_attempt_id,team_id,enforcement) VALUES ($1,$2,'hard')`, [input.sourceAttemptId,input.team.id]);
+      if (input.sourceAttemptId === concurrentSource) {
+        signalConcurrent();
+        await concurrentRelease;
+      }
+      return { decision:"allow" };
+    },
+  };
+  try {
+    await pool.query(`CREATE TABLE ${reservationTable} (source_attempt_id text NOT NULL,team_id uuid NOT NULL,enforcement text NOT NULL)`);
+    await pool.query(`INSERT INTO tenants (id,external_tenant_id,display_name) VALUES ($1,$2,'Replay tenant')`, [tenantId,`external-${tenantId}`]);
+    await pool.query(`INSERT INTO users (id,tenant_id,email,display_name) VALUES ($1,$2,$3,'Replay admin'),($4,$2,$5,'Replay user')`, [administratorId,tenantId,`${administratorId}@test.invalid`,userId,`${userId}@test.invalid`]);
+    await pool.query(`INSERT INTO user_roles (user_id,role,assigned_by) VALUES ($1,'employee',$1),($1,'administrator',$1),($2,'employee',$1)`, [administratorId,userId]);
+    const teamA = await teams.createTeam({ tenantId,createdBy:administratorId,displayName:"Team A",description:"",ownerUserId:administratorId,costCenterCode:"A-100" });
+    const teamB = await teams.createTeam({ tenantId,createdBy:administratorId,displayName:"Team B",description:"",ownerUserId:administratorId,costCenterCode:"B-200" });
+    const teamC = await teams.createTeam({ tenantId,createdBy:administratorId,displayName:"Team C",description:"",ownerUserId:administratorId,costCenterCode:"C-300" });
+    await teams.assignMembership({ tenantId,teamId:teamA.id,userId,assignedBy:administratorId,makeDefault:true });
+    await teams.assignMembership({ tenantId,teamId:teamB.id,userId,assignedBy:administratorId });
+    await teams.assignMembership({ tenantId,teamId:teamC.id,userId,assignedBy:administratorId });
+    const bindingSecret = `replay-binding-${suffix}-at-least-32-characters`;
+    const service = new UsageLedgerService(ledger,teams,new UsageTaskBindingAuthority(bindingSecret),hook);
+    const secondService = new UsageLedgerService(secondLedger,secondTeams,new UsageTaskBindingAuthority(bindingSecret),hook);
+    const payload = (sourceAttemptId:string,overrides:Partial<InternalUsageAdmission>={}) => internalUsageAdmissionSchema.parse({
+      schemaVersion:1,sourceSystem:"litellm",sourceAttemptId,tenantId,subjectId:userId,workspaceId:`workspace-${suffix}`,agentId:"agent-replay",
+      policyVersionId:"policy-v1",policyHash:hash("a"),requestedAlias:"balanced",requestedServiceClass:"balanced",selectedServiceClass:"balanced",routeMappingVersion:"mapping-v1",
+      attemptKind:"inference",resolvedProvider:"openai",providerAccountId:"account-a",resolvedModel:"gpt-test",resolvedDeploymentId:"deployment-a",region:"eastus",providerServiceTier:"standard",
+      budgetBounds:{ inputTokens:"128",maximumOutputTokens:"256",maximumReasoningTokens:"64",cacheStatus:"unknown",maxRetries:1,maxFallbacks:1,maxAgentSteps:2,reservationTtlSeconds:300,providerDeadlineAt:"2026-07-31T10:05:00.000Z" },
+      admittedAt:"2026-07-31T10:00:00.000Z",...overrides,
+    });
+
+    const sourceAttemptId = `sequential-${suffix}`;
+    const first = await service.admit(payload(sourceAttemptId));
+    await teams.setDefaultSpendingTeam({ tenantId,teamId:teamB.id,userId,assignedBy:administratorId });
+    await teams.archiveTeam({ tenantId,teamId:teamA.id,archivedBy:administratorId });
+    const replay = await secondService.admit(payload(sourceAttemptId,{
+      admittedAt:"2026-07-31T10:02:00.000Z",
+      budgetBounds:{ ...payload(sourceAttemptId).budgetBounds!,reservationTtlSeconds:900,providerDeadlineAt:"2026-07-31T10:17:00.000Z" },
+    }));
+    assert.equal(first.status,"created");
+    assert.equal(replay.status,"duplicate");
+    assert.deepEqual(first.team,replay.team);
+    assert.equal(replay.team.id,teamA.id);
+    await assert.rejects(() => secondService.admit(payload(sourceAttemptId,{ resolvedDeploymentId:"deployment-b" })),/reused with different facts/);
+    await assert.rejects(() => secondService.admit(payload(sourceAttemptId,{ budgetBounds:{ ...payload(sourceAttemptId).budgetBounds!,maximumOutputTokens:"257" } })),/reused with different facts/);
+    const sequentialReservations = await pool.query(`SELECT team_id,count(*)::integer count FROM ${reservationTable} WHERE source_attempt_id=$1 GROUP BY team_id`, [sourceAttemptId]);
+    assert.deepEqual(sequentialReservations.rows,[{ team_id:teamA.id,count:1 }]);
+    assert.equal((await pool.query(`SELECT count(*)::integer count FROM ai_usage_attempt_admissions WHERE tenant_id=$1 AND source_attempt_id=$2`, [tenantId,sourceAttemptId])).rows[0].count,1);
+
+    concurrentSource = `concurrent-${suffix}`;
+    const concurrentFirstPromise = service.admit(payload(concurrentSource));
+    await concurrentEntered;
+    await teams.setDefaultSpendingTeam({ tenantId,teamId:teamC.id,userId,assignedBy:administratorId });
+    const concurrentReplayPromise = secondService.admit(payload(concurrentSource,{
+      admittedAt:"2026-07-31T10:04:00.000Z",
+      budgetBounds:{ ...payload(concurrentSource).budgetBounds!,reservationTtlSeconds:1200,providerDeadlineAt:"2026-07-31T10:24:00.000Z" },
+    }));
+    releaseConcurrent();
+    const concurrentResults = await Promise.all([concurrentFirstPromise,concurrentReplayPromise]);
+    assert.deepEqual(concurrentResults.map((result) => result.status).sort(),["created","duplicate"]);
+    assert.ok(concurrentResults.every((result) => result.team.id === teamB.id));
+    const concurrentReservations = await pool.query(`SELECT team_id,count(*)::integer count FROM ${reservationTable} WHERE source_attempt_id=$1 GROUP BY team_id`, [concurrentSource]);
+    assert.deepEqual(concurrentReservations.rows,[{ team_id:teamB.id,count:1 }]);
+    assert.equal((await pool.query(`SELECT count(*)::integer count FROM ${reservationTable} WHERE team_id=$1`, [teamC.id])).rows[0].count,0);
+    assert.equal((await pool.query(`SELECT count(*)::integer count FROM ai_usage_attempt_admissions WHERE tenant_id=$1`, [tenantId])).rows[0].count,2);
+  } finally {
+    releaseConcurrent();
+    await pool.query(`DROP TABLE IF EXISTS ${reservationTable}`).catch(() => undefined);
+    await Promise.all([pool.end(),teams.close(),secondTeams.close(),ledger.close(),secondLedger.close()]);
   }
 });
 

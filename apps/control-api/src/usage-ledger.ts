@@ -3,6 +3,8 @@ import { OneComputerError } from "@onecomputer/contracts";
 import {
   AllowUsageAttemptAdmission,
   type AttemptAdmissionInput,
+  type AttemptAdmissionSemanticInput,
+  type AttemptBudgetBounds,
   type PostgresUsageLedgerStore,
   type TeamStore,
   type UsageAttemptAdmissionHook,
@@ -18,6 +20,15 @@ const usageUnit = z.string().refine((value) => [
   "image","audio_second","request","character","second",
 ].includes(value) || /^provider:[a-z0-9][a-z0-9_.:-]{0,79}$/.test(value), "Invalid usage unit");
 const serviceClass = z.enum(["auto","lite","balanced","pro"]);
+const nonnegativeDecimal = decimal.refine((value) => !value.startsWith("-"), "Quantity cannot be negative");
+const budgetBounds = z.object({
+  inputTokens:nonnegativeDecimal,cacheReadTokens:nonnegativeDecimal.optional(),cacheWriteTokens:nonnegativeDecimal.optional(),
+  maximumOutputTokens:nonnegativeDecimal,maximumReasoningTokens:nonnegativeDecimal.optional(),requestUnits:nonnegativeDecimal.optional(),
+  cacheStatus:z.enum(["known_hit","known_miss","unknown"]),
+  maxRetries:z.number().int().min(0).max(100),maxFallbacks:z.number().int().min(0).max(100),maxAgentSteps:z.number().int().min(1).max(1000),
+  routingOverhead:z.array(z.object({ unit:usageUnit,quantity:nonnegativeDecimal,diagnostic:z.boolean().optional() }).strict()).max(64).optional(),
+  reservationTtlSeconds:z.number().int().min(30).max(3600).optional(),providerDeadlineAt:z.iso.datetime().optional(),
+}).strict();
 
 export const internalUsageAdmissionSchema = z.object({
   schemaVersion:z.literal(1), sourceSystem:z.literal("litellm"), sourceAttemptId:boundedId,
@@ -28,7 +39,7 @@ export const internalUsageAdmissionSchema = z.object({
   routeMappingVersion:optionalBoundedId, attemptKind:z.enum(["inference","router","classifier","embedding","retry","fallback"]),
   parentAttemptId:z.uuid().nullable().optional(), resolvedProvider:boundedId, providerAccountId:boundedId,
   resolvedModel:z.string().trim().min(1).max(300), resolvedDeploymentId:boundedId,
-  region:optionalBoundedId, providerServiceTier:optionalBoundedId, admittedAt:z.iso.datetime(),
+  region:optionalBoundedId, providerServiceTier:optionalBoundedId, admittedAt:z.iso.datetime(), budgetBounds:budgetBounds.optional(),
 }).strict();
 export type InternalUsageAdmission = z.infer<typeof internalUsageAdmissionSchema>;
 
@@ -137,9 +148,8 @@ export class UsageLedgerService {
       binding.tenantId !== input.tenantId || binding.subjectId !== input.subjectId
       || binding.workspaceId !== input.workspaceId || binding.agentId !== input.agentId
     )) throw new OneComputerError("AI_USAGE_TASK_BINDING_MISMATCH","AI task binding does not match the authenticated gateway identity",403);
-    const team = await this.teams.resolveDefaultSpendingTeam({ tenantId:input.tenantId,userId:input.subjectId,actorUserId:input.subjectId });
-    const attempt: AttemptAdmissionInput = {
-      tenantId:input.tenantId,sourceSystem:input.sourceSystem,sourceAttemptId:input.sourceAttemptId,subjectId:input.subjectId,team,
+    const attempt: AttemptAdmissionSemanticInput = {
+      tenantId:input.tenantId,sourceSystem:input.sourceSystem,sourceAttemptId:input.sourceAttemptId,subjectId:input.subjectId,
       ...(input.workspaceId?{workspaceId:input.workspaceId}:{}),...(input.agentId?{agentId:input.agentId}:{}),
       ...(binding?.sessionId?{sessionId:binding.sessionId}:{}),taskId:binding?.taskId??unboundTaskId(input),
       ...(binding?.turnId?{turnId:binding.turnId}:{}),taskBindingProvenance:binding?"explicit_signed":"unbound_generated",contextKind:binding?.contextKind??"background",
@@ -148,12 +158,18 @@ export class UsageLedgerService {
       ...(input.selectedServiceClass?{selectedServiceClass:input.selectedServiceClass}:{}),...(input.routeMappingVersion?{routeMappingVersion:input.routeMappingVersion}:{}),
       attemptKind:input.attemptKind,...(input.parentAttemptId?{parentAttemptId:input.parentAttemptId}:{}),resolvedProvider:input.resolvedProvider,
       providerAccountId:input.providerAccountId,resolvedModel:input.resolvedModel,resolvedDeploymentId:input.resolvedDeploymentId,
-      ...(input.region?{region:input.region}:{}),...(input.providerServiceTier?{providerServiceTier:input.providerServiceTier}:{}),admittedAt:new Date(input.admittedAt),
+      ...(input.region?{region:input.region}:{}),...(input.providerServiceTier?{providerServiceTier:input.providerServiceTier}:{}),
+      ...(input.budgetBounds?{budgetBounds:{...input.budgetBounds,routingOverhead:input.budgetBounds.routingOverhead as AttemptBudgetBounds["routingOverhead"],providerDeadlineAt:input.budgetBounds.providerDeadlineAt?new Date(input.budgetBounds.providerDeadlineAt):undefined}}:{}),
     };
-    const result = await this.store.admitAttempt(attempt,this.admissionHook);
-    if (result.status === "denied") throw new OneComputerError(result.denialCode??"AI_USAGE_ADMISSION_DENIED","AI usage admission was denied",429,true);
-    if (result.status === "conflict") throw new OneComputerError("AI_USAGE_ATTEMPT_CONFLICT","The source attempt key was reused with different facts",409);
-    return { schemaVersion:1,admissionId:result.admissionId,status:result.status,taskId:attempt.taskId,taskBindingProvenance:attempt.taskBindingProvenance,contextKind:attempt.contextKind,team:{ id:team.id,displayName:team.displayName,costCenterCode:team.costCenterCode } };
+    const finish = (result: Awaited<ReturnType<PostgresUsageLedgerStore["admitAttempt"]>>) => {
+      if (result.status === "denied") throw new OneComputerError(result.denialCode,"AI usage admission was denied",429,true);
+      if (result.status === "conflict") throw new OneComputerError("AI_USAGE_ATTEMPT_CONFLICT","The source attempt key was reused with different facts",409);
+      return { schemaVersion:1,admissionId:result.admissionId,status:result.status,taskId:attempt.taskId,taskBindingProvenance:attempt.taskBindingProvenance,contextKind:attempt.contextKind,team:result.team };
+    };
+    const replay = await this.store.replayAttempt(attempt);
+    if (replay) return finish(replay);
+    const team = await this.teams.resolveDefaultSpendingTeam({ tenantId:input.tenantId,userId:input.subjectId,actorUserId:input.subjectId });
+    return finish(await this.store.admitAttempt({ ...attempt,team,admittedAt:new Date(input.admittedAt) },this.admissionHook));
   }
 
   async complete(input: InternalUsageCompletion) {
