@@ -44,3 +44,21 @@ workspace image and set the governed routes before running
 
 This result is an infrastructure prerequisite failure, not an application
 test failure. It does not authorize bypassing the live gate with fixtures.
+
+## Workspace image build attempt
+
+The actual multi-stage `docker/Dockerfile.workspace` was then built locally
+with the pinned `linux/amd64` target. Docker downloaded the large Kasm base
+layers, but BuildKit failed before producing an image:
+
+```text
+mount callback failed ... input/output error
+unable to sync new file ... Input/output error
+failed to compute cache key ... metadata_v2.db: input/output error
+```
+
+After the failure, Docker Desktop reported that it was unable to start and the
+macOS data volume had approximately 136 MiB free. No image digest or E2B
+template ID exists, and no E2B sandbox was created. Recovery requires freeing
+Docker Desktop storage (or moving its data root) and restarting Docker before
+repeating the build; broad pruning/deletion was intentionally not performed.
