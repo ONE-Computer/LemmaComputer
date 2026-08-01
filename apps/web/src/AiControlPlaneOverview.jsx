@@ -20,17 +20,6 @@ const percent = new Intl.NumberFormat("en", { style: "percent", maximumFractionD
 
 const money = formatOverviewMoney;
 
-const signedMoney = (value, currency) => {
-  if (value === null || value === undefined || !currency) return "—";
-  const amount = number(value);
-  return `${amount > 0 ? "+" : ""}${money(amount, currency, { compact: true })}`;
-};
-
-const signedCount = (value) => {
-  const amount = number(value);
-  return `${amount > 0 ? "+" : ""}${compactNumber.format(amount)}`;
-};
-
 const formatEmissions = (emissions) => {
   if (!emissions) return "Estimate not configured";
   const kg = emissions.amountKgCo2e ?? (number(emissions.amountTco2e) * 1_000);
@@ -167,52 +156,6 @@ const forecastFor = (spent, report) => {
   return spent * (period / elapsed);
 };
 
-const deltasFor = (report, priorReport, currency) => {
-  if (!report || !priorReport || !currency) return [];
-  const currentRoutes = new Map((report.breakdowns?.requestedRoutes ?? []).map((item) => [
-    item.requestedRoute,
-    number(amountFor(item.costs, currency)),
-  ]));
-  const priorRoutes = new Map((priorReport.breakdowns?.requestedRoutes ?? []).map((item) => [
-    item.requestedRoute,
-    number(amountFor(item.costs, currency)),
-  ]));
-  const routeDeltas = [...new Set([...currentRoutes.keys(), ...priorRoutes.keys()])]
-    .map((route) => ({
-      label: `${route.charAt(0).toUpperCase()}${route.slice(1)} route spend`,
-      value: (currentRoutes.get(route) ?? 0) - (priorRoutes.get(route) ?? 0),
-      description: "Compared with the same-length prior period",
-      tone: "money",
-    }))
-    .sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
-    .slice(0, 2);
-  const retryDelta = number(report.totals?.retryCount) - number(priorReport.totals?.retryCount);
-  const cacheRead = number(report.totals?.usage?.cache_read_token);
-  const input = number(report.totals?.usage?.input_uncached_token);
-  const cacheShare = (cacheRead + input) > 0 ? cacheRead / (cacheRead + input) : null;
-  return [
-    ...routeDeltas,
-    {
-      label: "Retry activity",
-      value: retryDelta,
-      description: "Retry attempts versus the prior period",
-      tone: "count",
-    },
-    {
-      label: "Cache-read share",
-      value: cacheShare,
-      description: "Usage signal only; not a savings claim",
-      tone: "percent",
-    },
-  ].slice(0, 4);
-};
-
-const displayDelta = (item, currency) => {
-  if (item.tone === "money") return signedMoney(item.value, currency);
-  if (item.tone === "percent") return item.value === null ? "—" : percent.format(item.value);
-  return signedCount(item.value);
-};
-
 function InlineLink({ onClick, children, className = "" }) {
   if (!onClick) return null;
   return (
@@ -260,7 +203,6 @@ export function AiControlPlaneOverview({
   const providerSpend = currency ? sumCosts(report?.totals?.costs, currency) : null;
   const spent = providerSpend;
   const forecast = estimates?.forecastAmount ?? forecastFor(spent, report);
-  const deltas = estimates?.explanations ?? deltasFor(report, data?.priorReport, currency);
   const activeUnpricedCount = report?.costCoverage?.unpricedUsage?.activeEventCount
     ?? number(report?.totals?.unknownCostEventCount) + number(report?.totals?.incompleteCostEventCount);
   const missingPriceCount = report?.costCoverage?.unpricedUsage?.missingPriceEventCount
@@ -401,22 +343,9 @@ export function AiControlPlaneOverview({
 
         <section className="ai-overview-section ai-cost-explanation" aria-labelledby="ai-cost-explanation-heading">
           <div className="ai-panel-heading">
-            <div><p>Explainability</p><h3 id="ai-cost-explanation-heading">Why spend changed</h3></div>
-            <span className="ai-safe-label">Safe signals only</span>
+            <h3 id="ai-cost-explanation-heading">Explainability</h3>
           </div>
-          <div className="ai-driver-rows">
-            {deltas.length ? deltas.map((item, index) => (
-              <div className="ai-driver-row" key={`${item.label}-${index}`}>
-                <span className={`ai-driver-mark ${number(item.value) > 0 ? "up" : number(item.value) < 0 ? "down" : ""}`} aria-hidden="true" />
-                <span><strong>{item.label}</strong><small>{item.description}</small></span>
-                <b>{displayDelta(item, currency)}</b>
-              </div>
-            )) : <p className="ai-overview-empty">{loading ? "Comparing ledger periods…" : "A prior period is required to explain changes."}</p>}
-            <div className="ai-routing-impact">
-              <span><strong>Routing impact</strong><small>Savings are not claimed without replay or provider evidence.</small></span>
-              <InlineLink onClick={onOpenRouting}>Review evidence</InlineLink>
-            </div>
-          </div>
+          <div className="ai-explainability-placeholder">Coming Soon</div>
         </section>
       </div>
 
