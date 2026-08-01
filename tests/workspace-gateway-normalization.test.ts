@@ -30,6 +30,10 @@ print(json.dumps({"requested": requested, "body": json.loads(body)}))
 
 const proxyPath = "docker/workspace/onecomputer-gateway-proxy.py";
 
+test("the packaged workspace gateway proxy compiles", () => {
+  execFileSync("python3", ["-c", "import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(), filename=sys.argv[1], feature_version=(3, 10))", proxyPath]);
+});
+
 const normalize = (assigned: string, payload: Record<string, unknown>, taskBinding?: string) => JSON.parse(execFileSync(
   "python3",
   ["-c", program, proxyPath, assigned, JSON.stringify(payload), taskBinding ?? "-"],

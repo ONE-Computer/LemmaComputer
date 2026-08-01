@@ -59,7 +59,8 @@ def task_service_class(task_binding: str) -> str:
 
 def issue_task_binding() -> str:
     payload = json.dumps({"requestedServiceClass": DEFAULT_SERVICE_CLASS, "taskId": f"workspace-native:{uuid.uuid4()}"}, separators=(",", ":")).encode()
-    path = f"{CONTROL.path.rstrip("/")}/internal/v1/agent/usage-bindings"
+    control_path = CONTROL.path.rstrip("/")
+    path = f"{control_path}/internal/v1/agent/usage-bindings"
     target = CONTROL._replace(path=path, query="", fragment="").geturl()
     request = urllib.request.Request(target, data=payload, method="POST", headers={
         "authorization": f"Bearer {AGENT_BRIDGE_TOKEN}",
