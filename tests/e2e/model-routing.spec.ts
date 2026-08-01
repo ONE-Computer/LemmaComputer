@@ -147,7 +147,7 @@ test("administrator can set up a published mapping for a Team and start first sh
     region: "sg",
     providerServiceTier: "standard",
     rateCardId: `99999999-9999-4999-8999-99999999999${index + 1}`,
-    capabilities: { vision: item.serviceClass !== "lite", tools: item.serviceClass !== "lite", streaming: true, contextTokens: item.contextTokens, outputTokens: 8192, residency: ["sg"] },
+    capabilities: { vision: item.serviceClass !== "lite", tools: item.serviceClass !== "lite", streaming: true, contextTokens: item.contextTokens, outputTokens: 32768, residency: ["sg"] },
     approved: true,
     evaluationPassed: true,
   }));

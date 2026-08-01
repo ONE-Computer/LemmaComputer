@@ -1115,7 +1115,7 @@ export class PostgresRoutingStore implements RoutingStore {
   async decision(tenantId: string, id: string) {
     const [result, candidates, observations] = await Promise.all([
       this.pool.query(
-        "SELECT d.*,s.provider,s.provider_model selected_model,s.provider_deployment selected_provider_deployment,e.provider executed_provider,e.provider_model executed_model,e.provider_deployment executed_provider_deployment FROM ai_routing_decisions d JOIN ai_routing_deployments s ON s.tenant_id=d.tenant_id AND s.id=d.selected_deployment_id JOIN ai_routing_deployments e ON e.tenant_id=d.tenant_id AND e.id=d.executed_deployment_id WHERE d.tenant_id=$1 AND d.id=$2",
+        "SELECT d.*,s.provider,s.provider_model selected_model,s.provider_deployment selected_provider_deployment,e.provider executed_provider,e.provider_model executed_model,e.provider_deployment executed_provider_deployment,e.capabilities executed_capabilities FROM ai_routing_decisions d JOIN ai_routing_deployments s ON s.tenant_id=d.tenant_id AND s.id=d.selected_deployment_id JOIN ai_routing_deployments e ON e.tenant_id=d.tenant_id AND e.id=d.executed_deployment_id WHERE d.tenant_id=$1 AND d.id=$2",
         [tenantId, id],
       ),
       this.pool.query(

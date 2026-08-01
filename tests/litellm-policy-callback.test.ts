@@ -456,6 +456,17 @@ authority_calls = []
 
 def usage_authority(path, payload):
     authority_calls.append((path, payload))
+    if path == "routing/decide":
+        return {
+            "decisionId": "decision-ceiling",
+            "executedDeploymentId": "routing-deployment-balanced",
+            "executedModelGroup": "onecomputer-openai-balanced",
+            "executedProviderDeployment": "ocp-tenant-real-balanced",
+            "requestedServiceClass": "auto",
+            "selectedServiceClass": "balanced",
+            "executedOutputTokenLimit": 8192,
+            "binding": {"requestId": "request-ceiling", "mappingVersionId": "mapping-real"},
+        }
     if path == "attempts/admit":
         return {"status": "created", "admissionId": "admission-boundary"}
     if path == "routing/verify":
@@ -473,6 +484,22 @@ class ProbeAuth:
     }
 
 async def assert_provider_boundary():
+    transport_request = {
+        "model": "onecomputer-auto",
+        "messages": [{"role": "user", "content": "large client ceiling"}],
+        "max_tokens": 32768,
+        "litellm_params": {"max_tokens": 32768},
+        "litellm_call_id": "route-ceiling-call",
+        "metadata": {"onecomputer_task_binding": "signed." + "z" * 64},
+    }
+    routed_transport = await callback.async_pre_call_hook(
+        AutoAuth(), None, transport_request, "acompletion"
+    )
+    assert routed_transport["model"] == "onecomputer-openai-balanced"
+    assert routed_transport["max_tokens"] == 8192
+    assert routed_transport["litellm_params"]["max_tokens"] == 8192
+    authority_calls.clear()
+
     probe = {
         "model": "openai/gpt-real",
         "messages": [{"role": "user", "content": "probe"}],
