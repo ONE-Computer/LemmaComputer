@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft24Regular } from "@fluentui/react-icons/svg/arrow-left";
+import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
 import { adminApi } from "./workspace-api.js";
 import { ModalDialog } from "./ui.jsx";
 import "./SpendDashboard.css";
@@ -184,7 +186,7 @@ export function SpendDashboard({ onBack }) {
   if (taskDetail) {
     return (
       <div className="secondary-screen spend-screen">
-        <button className="settings-back-button" type="button" onClick={() => setTaskDetail(null)}>← Back to spend</button>
+        <button className="settings-back-button" type="button" onClick={() => setTaskDetail(null)}><ArrowLeft24Regular aria-hidden="true" />Back to spend</button>
         <header className="page-heading compact">
           <p>Sanitized task explanation</p>
           <h1>{taskDetail.task.taskId}</h1>
@@ -219,10 +221,9 @@ export function SpendDashboard({ onBack }) {
 
   return (
     <div className="secondary-screen spend-screen">
-      <button className="settings-back-button" type="button" onClick={onBack}>← Back to overview</button>
+      <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to overview</button>
       <header className="page-heading compact">
-        <p>AI spend governance</p>
-        <h1>Organization spend</h1>
+        <h1>Spend Details</h1>
         <span>Provider cost by Team, user, and task. Prompts, responses, hidden reasoning, tool arguments, and secrets are never shown.</span>
       </header>
       <form className="spend-filter-bar" onSubmit={(event) => { event.preventDefault(); setAppliedDates(dates); }}>
@@ -256,9 +257,9 @@ export function SpendDashboard({ onBack }) {
               <small>{unpricedUsage.missingPriceEventCount} missing price · {unpricedUsage.partialPriceEventCount} partial price</small>
             </article>
             <article>
-              <span>Delayed reporting</span>
+              <span>Pending usage records</span>
               <strong>{delayedAttemptCount}</strong>
-              <small>Admitted attempts awaiting a usage record</small>
+              <small>Model attempts without final usage data</small>
             </article>
             <article>
               <span>Acknowledged history</span>
@@ -267,7 +268,6 @@ export function SpendDashboard({ onBack }) {
             </article>
           </div>
           {unpricedUsage.activeEventCount > 0 && <div className="spend-state-banner" role="status"><strong>Active unpriced usage is excluded from spend.</strong><span>{unpricedUsage.activeEventCount} usage {unpricedUsage.activeEventCount === 1 ? "record has" : "records have"} incomplete pricing. Monetary totals include only fully priced usage.</span></div>}
-          {delayedAttemptCount > 0 && <div className="spend-state-banner" role="status"><strong>Some attempts have not reported usage yet.</strong><span>{delayedAttemptCount} admitted {delayedAttemptCount === 1 ? "attempt is" : "attempts are"} tracked separately from unpriced usage.</span></div>}
           {unpricedUsage.activeEventCount === 0 && unpricedUsage.acknowledgedEventCount > 0 && <div className="spend-state-banner corrected" role="status"><strong>Historical unpriced usage acknowledged.</strong><span>The ledger is unchanged; these records no longer appear as active cost-coverage risk.</span></div>}
         </section>
         {report.trend && <section className="spend-trend" aria-labelledby="spend-trend-heading"><div><p>Compared with {new Date(report.trend.previousRange.from).toLocaleDateString()}–{new Date(report.trend.previousRange.to).toLocaleDateString()}</p><h2 id="spend-trend-heading">Previous-period trend</h2></div><strong>{money(report.trend.costDeltas)} cost change</strong><span>{report.trend.attemptCountDelta >= 0 ? "+" : ""}{report.trend.attemptCountDelta} attempts</span></section>}
@@ -284,15 +284,15 @@ export function SpendDashboard({ onBack }) {
         </nav>
         {!selectedTeam && <section className="spend-table-card" aria-labelledby="team-spend-heading">
           <div className="spend-section-heading"><div><p>Allocation</p><h2 id="team-spend-heading">Teams</h2></div><span>{teams.length}</span></div>
-          <div className="spend-row-list">{teams.map((team) => <button type="button" key={team.teamId} onClick={() => { setSelectedTeam(team.teamId); setSelectedUser(""); }}><span><strong>{team.teamDisplayName}</strong><small>{team.costCenterCode ?? (team.allocation === "unallocated" ? "Unallocated" : "No cost-center code")}</small></span><span><strong>{money(team.costs)}</strong><small>{team.attemptCount} attempts</small></span><b>›</b></button>)}</div>
+          <div className="spend-row-list">{teams.map((team) => <button type="button" key={team.teamId} onClick={() => { setSelectedTeam(team.teamId); setSelectedUser(""); }}><span><strong>{team.teamDisplayName}</strong><small>{team.costCenterCode ?? (team.allocation === "unallocated" ? "Unallocated" : "No cost-center code")}</small></span><span><strong>{money(team.costs)}</strong><small>{team.attemptCount} attempts</small></span><ChevronRight16Regular aria-hidden="true" /></button>)}</div>
         </section>}
         {selectedTeam && !selectedUser && <section className="spend-table-card" aria-labelledby="user-spend-heading">
           <div className="spend-section-heading"><div><p>{selectedTeamName}</p><h2 id="user-spend-heading">Users</h2></div><span>{users.length}</span></div>
-          <div className="spend-row-list">{users.map((user) => <button type="button" key={`${user.teamId}:${user.userId}`} onClick={() => setSelectedUser(user.userId)}><span><strong>{user.userDisplayName}</strong><small>{user.userId}</small></span><span><strong>{money(user.costs)}</strong><small>{user.attemptCount} attempts</small></span><b>›</b></button>)}</div>
+          <div className="spend-row-list">{users.map((user) => <button type="button" key={`${user.teamId}:${user.userId}`} onClick={() => setSelectedUser(user.userId)}><span><strong>{user.userDisplayName}</strong><small>{user.userId}</small></span><span><strong>{money(user.costs)}</strong><small>{user.attemptCount} attempts</small></span><ChevronRight16Regular aria-hidden="true" /></button>)}</div>
         </section>}
         {(selectedUser || selectedTeam) && <section className="spend-table-card" aria-labelledby="task-spend-heading">
           <div className="spend-section-heading"><div><p>{selectedUserName ?? selectedTeamName}</p><h2 id="task-spend-heading">Tasks</h2></div><span>{tasks.length}{(drillPage ?? page)?.totalTasks > tasks.length ? ` of ${(drillPage ?? page).totalTasks}` : ""}</span></div>
-          <div className="spend-row-list">{tasks.length ? tasks.map((task) => <button type="button" key={task.taskKey} onClick={() => openTask(task)}><span><strong>{task.taskId}</strong><small>{task.requestedRoute} → {task.resolvedRoutes.join(", ")}</small></span><span><strong>{money(task.costs)}</strong><small>{task.dominantDriver?.label ?? "Driver unavailable"} · {task.priceState}{task.corrected ? " · corrected" : ""}</small></span><b>›</b></button>) : <p className="spend-empty-row">No tasks match this drilldown.</p>}</div>
+          <div className="spend-row-list">{tasks.length ? tasks.map((task) => <button type="button" key={task.taskKey} onClick={() => openTask(task)}><span><strong>{task.taskId}</strong><small>{task.requestedRoute} → {task.resolvedRoutes.join(", ")}</small></span><span><strong>{money(task.costs)}</strong><small>{task.dominantDriver?.label ?? "Driver unavailable"} · {task.priceState}{task.corrected ? " · corrected" : ""}</small></span><ChevronRight16Regular aria-hidden="true" /></button>) : <p className="spend-empty-row">No tasks match this drilldown.</p>}</div>
           {drillPage?.nextCursor && <div className="spend-load-more"><button className="secondary-button" type="button" disabled={loading} onClick={loadMoreTasks}>{loading ? "Loading tasks…" : "Load more tasks"}</button></div>}
         </section>}
       </>}

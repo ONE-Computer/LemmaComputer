@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
 import { Globe20Regular } from "@fluentui/react-icons/svg/globe";
 import { Info20Regular } from "@fluentui/react-icons/svg/info";
-import { Pulse20Regular } from "@fluentui/react-icons/svg/pulse";
 import { adminApi } from "./workspace-api.js";
 import { AI_EMISSIONS_METHOD, estimateAiTokenEmissions } from "./ai-emissions.js";
 import { formatOverviewMoney } from "./format-money.js";
@@ -168,16 +167,6 @@ const forecastFor = (spent, report) => {
   return spent * (period / elapsed);
 };
 
-const routeSummaryFor = (routing = []) => {
-  const deployments = routing.flatMap((item) => item.settings?.deployments ?? []);
-  const classes = new Set(deployments.map((item) => item.serviceClass));
-  const pricingGaps = deployments.filter((item) => !item.rateCardId).length;
-  const ready = deployments.filter((item) => (
-    item.rateCardId && item.approved && item.evaluationPassed
-  )).length;
-  return { classCount: classes.size, deploymentCount: deployments.length, pricingGaps, ready };
-};
-
 const deltasFor = (report, priorReport, currency) => {
   if (!report || !priorReport || !currency) return [];
   const currentRoutes = new Map((report.breakdowns?.requestedRoutes ?? []).map((item) => [
@@ -271,7 +260,6 @@ export function AiControlPlaneOverview({
   const providerSpend = currency ? sumCosts(report?.totals?.costs, currency) : null;
   const spent = providerSpend;
   const forecast = estimates?.forecastAmount ?? forecastFor(spent, report);
-  const routeSummary = routeSummaryFor(data?.routing);
   const deltas = estimates?.explanations ?? deltasFor(report, data?.priorReport, currency);
   const activeUnpricedCount = report?.costCoverage?.unpricedUsage?.activeEventCount
     ?? number(report?.totals?.unknownCostEventCount) + number(report?.totals?.incompleteCostEventCount);
@@ -312,23 +300,6 @@ export function AiControlPlaneOverview({
         </div>
       )}
 
-      <div className="ai-route-health">
-        <span className="ai-route-health-icon"><Pulse20Regular aria-hidden="true" /></span>
-        <div>
-          <small>Route readiness</small>
-          {loading ? <strong>Checking configured routes…</strong> : routeSummary.deploymentCount ? (
-            <strong>
-              {routeSummary.classCount} service {routeSummary.classCount === 1 ? "class" : "classes"}
-              <i aria-hidden="true">·</i>
-              {routeSummary.ready} ready
-              <i aria-hidden="true">·</i>
-              {routeSummary.pricingGaps} pricing {routeSummary.pricingGaps === 1 ? "gap" : "gaps"}
-            </strong>
-          ) : <strong>Runtime health signal is not available</strong>}
-        </div>
-        <InlineLink onClick={onOpenRouting}>View Model routes</InlineLink>
-      </div>
-
       <section className="ai-budget-panel" aria-labelledby="ai-budget-heading">
         <div className="ai-budget-summary">
           <div className="ai-panel-heading">
@@ -362,9 +333,9 @@ export function AiControlPlaneOverview({
                 <small>{missingPriceCount} missing price · {partialPriceCount} partial price</small>
               </div>
               <div>
-                <dt>Delayed reporting</dt>
+                <dt>Pending usage records</dt>
                 <dd>{loading ? "—" : compactNumber.format(delayedAttemptCount)}</dd>
-                <small>Attempts awaiting usage records</small>
+                <small>Attempts without final usage data</small>
               </div>
             </dl>
           </div>

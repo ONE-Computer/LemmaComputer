@@ -3,10 +3,11 @@ import { expect, test } from "@playwright/test";
 test("administrator filters spend, drills Team to user to 201 tasks, explains cost, and exports the snapshot", async ({ page }) => {
   await page.goto("/?view=ai-control-plane&section=spend");
 
-  await expect(page.getByRole("heading", { name: "Organization spend" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Spend Details" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Cost coverage" })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Active unpriced usage" })).toContainText("1 usage record");
-  await expect(page.getByRole("status").filter({ hasText: "Some attempts have not reported usage" })).toContainText("1 admitted attempt");
+  await expect(page.getByText("Pending usage records", { exact: true })).toBeVisible();
+  await expect(page.getByText("Model attempts without final usage data", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to overview" })).toBeVisible();
   await page.getByRole("button", { name: "Clear historical unpriced usage" }).click();
   const coverageDialog = page.getByRole("dialog", { name: "Clear historical unpriced usage?" });
