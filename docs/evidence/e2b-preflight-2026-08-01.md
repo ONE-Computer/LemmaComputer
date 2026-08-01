@@ -59,6 +59,13 @@ failed to compute cache key ... metadata_v2.db: input/output error
 
 After the failure, Docker Desktop reported that it was unable to start and the
 macOS data volume had approximately 136 MiB free. No image digest or E2B
-template ID exists, and no E2B sandbox was created. Recovery requires freeing
-Docker Desktop storage (or moving its data root) and restarting Docker before
-repeating the build; broad pruning/deletion was intentionally not performed.
+template ID exists, and no E2B sandbox was created. The user then explicitly
+authorized removal of Docker images/cache and Podman state. Docker Desktop was
+stopped and its exact VM data directory was removed; the Podman machine and
+storage/config directories were removed as well. This recovered approximately
+23 GiB on the host while preserving repositories, research, and application
+data outside those container stores. A subsequent amd64 retry reached the
+Hermes build stage but failed again with a Docker BuildKit metadata I/O error
+after exhausting the Docker VM. The next build must use a remote/relocated
+builder or a deliberately bounded local cache; no image digest or E2B template
+ID exists yet.
