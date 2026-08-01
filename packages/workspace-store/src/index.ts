@@ -23,6 +23,40 @@ export type WorkspaceRecord = {
   updatedAt: Date;
 };
 
+export type OneVibeTaskStatus = "running" | "completed" | "failed" | "cancelled";
+export type OneVibeTaskEventKind = "system" | "chat" | "tool" | "approval" | "workspace-frame" | "artifact";
+
+export type OneVibeTaskRecord = {
+  id: string;
+  tenantId: string;
+  subjectId: string;
+  workspaceId: string;
+  status: OneVibeTaskStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type OneVibeTaskEventRecord = {
+  taskId: string;
+  sequence: number;
+  kind: OneVibeTaskEventKind;
+  payloadHash: string;
+  previousEventHash: string | null;
+  createdAt: Date;
+};
+
+export interface OneVibeTaskStore {
+  createOneVibeTask(identity: IdentityContext, workspaceId: string): Promise<OneVibeTaskRecord | null>;
+  getOwnedOneVibeTask(identity: IdentityContext, workspaceId: string, taskId: string): Promise<OneVibeTaskRecord | null>;
+  appendOneVibeTaskEvent(identity: IdentityContext, input: {
+    workspaceId: string;
+    taskId: string;
+    kind: OneVibeTaskEventKind;
+    payloadHash: string;
+  }): Promise<OneVibeTaskEventRecord | null>;
+  listOwnedOneVibeTaskEvents(identity: IdentityContext, workspaceId: string, taskId: string): Promise<OneVibeTaskEventRecord[] | null>;
+}
+
 export type SandboxSettingsRecord = {
   tenantId: string;
   subjectId: string;
@@ -600,7 +634,7 @@ const mapOpenVtcCompanionSubscriptionRow = (row: Record<string, unknown>): OpenV
   lastFailureCode: row.last_failure_code ? String(row.last_failure_code) : null,
 });
 
-export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore, ActivityStore {
+export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore, ActivityStore, OneVibeTaskStore {
   constructor(private readonly pool: pg.Pool) {}
 
   static fromConnectionString(connectionString: string) {
@@ -693,9 +727,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       throw error;
     } finally {
       client.release();
-    }
-  }
-
   async replayActivityEvents(
     identity: IdentityContext,
     scope: ActivityEventScope,
@@ -1835,6 +1866,80 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     }
   }
 
+  async createOneVibeTask(identity: IdentityContext, workspaceId: string) {
+    const result = await this.pool.query(
+      `INSERT INTO onevibe_task_runs (id,tenant_id,subject_id,workspace_id,status,created_at,updated_at)
+       SELECT $1,$2,$3,w.id,'running',$4,$4
+       FROM workspaces w
+       WHERE w.id=$5 AND w.tenant_id=$2 AND w.subject_id=$3
+       RETURNING *`,
+      [randomUUID(), identity.tenantId, identity.subjectId, new Date(), workspaceId],
+    );
+    if (!result.rowCount) return null;
+    const row = result.rows[0] as Record<string, unknown>;
+    return {
+      id: String(row.id), tenantId: String(row.tenant_id), subjectId: String(row.subject_id), workspaceId: String(row.workspace_id),
+      status: row.status as OneVibeTaskStatus, createdAt: new Date(String(row.created_at)), updatedAt: new Date(String(row.updated_at)),
+    };
+  }
+
+  async getOwnedOneVibeTask(identity: IdentityContext, workspaceId: string, taskId: string) {
+    const result = await this.pool.query(
+      "SELECT * FROM onevibe_task_runs WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND workspace_id=$4",
+      [taskId, identity.tenantId, identity.subjectId, workspaceId],
+    );
+    if (!result.rowCount) return null;
+    const row = result.rows[0] as Record<string, unknown>;
+    return {
+      id: String(row.id), tenantId: String(row.tenant_id), subjectId: String(row.subject_id), workspaceId: String(row.workspace_id),
+      status: row.status as OneVibeTaskStatus, createdAt: new Date(String(row.created_at)), updatedAt: new Date(String(row.updated_at)),
+    };
+  }
+
+  async appendOneVibeTaskEvent(identity: IdentityContext, input: {
+    workspaceId: string; taskId: string; kind: OneVibeTaskEventKind; payloadHash: string;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const task = await client.query(
+        "SELECT id FROM onevibe_task_runs WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND workspace_id=$4 FOR UPDATE",
+        [input.taskId, identity.tenantId, identity.subjectId, input.workspaceId],
+      );
+      if (!task.rowCount) { await client.query("COMMIT"); return null; }
+      const previous = await client.query(
+        "SELECT sequence,payload_hash FROM onevibe_task_events WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1",
+        [input.taskId],
+      );
+      const previousRow = previous.rows[0] as Record<string, unknown> | undefined;
+      const sequence = previousRow ? Number(previousRow.sequence) + 1 : 1;
+      const inserted = await client.query(
+        `INSERT INTO onevibe_task_events (task_id,sequence,kind,payload_hash,previous_event_hash,created_at)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [input.taskId, sequence, input.kind, input.payloadHash, previousRow ? String(previousRow.payload_hash) : null, new Date()],
+      );
+      await client.query("UPDATE onevibe_task_runs SET updated_at=now() WHERE id=$1", [input.taskId]);
+      await client.query("COMMIT");
+      const row = inserted.rows[0] as Record<string, unknown>;
+      return { taskId: String(row.task_id), sequence: Number(row.sequence), kind: row.kind as OneVibeTaskEventKind,
+        payloadHash: String(row.payload_hash), previousEventHash: row.previous_event_hash ? String(row.previous_event_hash) : null,
+        createdAt: new Date(String(row.created_at)) };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async listOwnedOneVibeTaskEvents(identity: IdentityContext, workspaceId: string, taskId: string) {
+    if (!await this.getOwnedOneVibeTask(identity, workspaceId, taskId)) return null;
+    const result = await this.pool.query(
+      "SELECT * FROM onevibe_task_events WHERE task_id=$1 ORDER BY sequence ASC", [taskId],
+    );
+    return result.rows.map((row) => ({ taskId: String(row.task_id), sequence: Number(row.sequence), kind: row.kind as OneVibeTaskEventKind,
+      payloadHash: String(row.payload_hash), previousEventHash: row.previous_event_hash ? String(row.previous_event_hash) : null,
+      createdAt: new Date(String(row.created_at)) }));
+  }
+
   async remove(identity: IdentityContext, workspaceId: string) {
     const result = await this.pool.query(
       "DELETE FROM workspaces WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
@@ -1844,7 +1949,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   }
 }
 
-export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore, ActivityStore {
+export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore, ActivityStore, OneVibeTaskStore {
   private records = new Map<string, WorkspaceRecord>();
   private channelConnections = new Map<string, ChannelConnectionRecord>();
   private channelCredentials = new Map<string, ChannelCredentialRecord>();
@@ -1942,6 +2047,8 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       terminalSequence: scoped.find((record) => record.event.kind === "terminal")?.event.sequence ?? null,
     };
   }
+  private oneVibeTasks = new Map<string, OneVibeTaskRecord>();
+  private oneVibeTaskEvents = new Map<string, OneVibeTaskEventRecord[]>();
 
   async getCurrent(identity: IdentityContext, grantId: string) {
     return [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId) ?? null;
@@ -2701,6 +2808,43 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     this.operations.set(operation.id, nextOperation);
     return nextOperation;
   }
+
+  async createOneVibeTask(identity: IdentityContext, workspaceId: string) {
+    if (!await this.getOwned(identity, workspaceId)) return null;
+    const now = new Date();
+    const task: OneVibeTaskRecord = {
+      id: randomUUID(), tenantId: identity.tenantId, subjectId: identity.subjectId, workspaceId,
+      status: "running", createdAt: now, updatedAt: now,
+    };
+    this.oneVibeTasks.set(task.id, task);
+    return task;
+  }
+
+  async getOwnedOneVibeTask(identity: IdentityContext, workspaceId: string, taskId: string) {
+    const task = this.oneVibeTasks.get(taskId);
+    return task?.tenantId === identity.tenantId && task.subjectId === identity.subjectId && task.workspaceId === workspaceId ? task : null;
+  }
+
+  async appendOneVibeTaskEvent(identity: IdentityContext, input: {
+    workspaceId: string; taskId: string; kind: OneVibeTaskEventKind; payloadHash: string;
+  }) {
+    if (!await this.getOwnedOneVibeTask(identity, input.workspaceId, input.taskId)) return null;
+    const events = this.oneVibeTaskEvents.get(input.taskId) ?? [];
+    const event: OneVibeTaskEventRecord = {
+      taskId: input.taskId, sequence: events.length + 1, kind: input.kind, payloadHash: input.payloadHash,
+      previousEventHash: events.at(-1)?.payloadHash ?? null, createdAt: new Date(),
+    };
+    this.oneVibeTaskEvents.set(input.taskId, [...events, event]);
+    const task = this.oneVibeTasks.get(input.taskId)!;
+    this.oneVibeTasks.set(task.id, { ...task, updatedAt: event.createdAt });
+    return event;
+  }
+
+  async listOwnedOneVibeTaskEvents(identity: IdentityContext, workspaceId: string, taskId: string) {
+    if (!await this.getOwnedOneVibeTask(identity, workspaceId, taskId)) return null;
+    return [...(this.oneVibeTaskEvents.get(taskId) ?? [])];
+  }
+
   private save(record: WorkspaceRecord, patch: Partial<WorkspaceRecord>) {
     const next = { ...record, ...patch, updatedAt: new Date() };
     this.records.set(record.id, next);

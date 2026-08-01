@@ -1,10 +1,11 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type WorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresScheduleStore, PostgresSiteStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OneVibeTaskStore, type ProviderSettingsStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type WorkspaceStore } from "@onecomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
 import { z } from "zod";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
@@ -31,6 +32,7 @@ import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient }
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
+import { createOneVibePresentation, getOneVibePresentation } from "./onevibe-artifacts.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -179,6 +181,11 @@ const saveBedrockProviderApiKeySchema = z.strictObject({
   modelProfileId: bedrockApiKeyModelProfileIdSchema,
 });
 
+const oneVibePresentationSchema = z.strictObject({
+  title: z.string().trim().min(1).max(180),
+  body: z.string().trim().min(1).max(4_000),
+});
+
 const envSchema = z.object({
   CONTROL_HOST: z.string().default("127.0.0.1"),
   CONTROL_PORT: z.coerce.number().int().positive().default(4100),
@@ -235,6 +242,7 @@ const sameSecret = (received: string | undefined, expected: string) => {
 
 export function createControlServer(
   store: WorkspaceStore & GovernanceStore & ActivityStore & Partial<ChannelStore>,
+  store: WorkspaceStore & GovernanceStore & ActivityStore & Partial<ChannelStore> & Partial<OneVibeTaskStore>,
   controller: ControllerClient,
   proxyToken: string,
   gateway?: GatewayClient & Partial<GovernedToolExecutor>,
@@ -353,6 +361,12 @@ export function createControlServer(
   const requireChannelBroker = () => {
     if (!channelBroker) throw new OneComputerError("CHANNEL_BROKER_NOT_CONFIGURED", "Messaging connections are not configured", 503, true);
     return channelBroker;
+  };
+  const requireOneVibeTasks = () => {
+    if (!store.createOneVibeTask || !store.getOwnedOneVibeTask || !store.appendOneVibeTaskEvent || !store.listOwnedOneVibeTaskEvents) {
+      throw new OneComputerError("ONEVIBE_TASKS_NOT_CONFIGURED", "ONEVibe task evidence storage is not configured", 503, true);
+    }
+    return store as WorkspaceStore & GovernanceStore & OneVibeTaskStore;
   };
   const workspaceManifest = (
     configuration: SandboxConfiguration,
@@ -1934,6 +1948,78 @@ export function createControlServer(
     return reply.send(Readable.fromWeb(response.body! as never));
     },
   );
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks", async (request, reply) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    await requireWorkspacePolicy(request, workspaceId);
+    const taskStore = requireOneVibeTasks();
+    const task = await taskStore.createOneVibeTask(identity(request), workspaceId);
+    if (!task) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task workspace not found", 404);
+    const event = await taskStore.appendOneVibeTaskEvent(identity(request), {
+      workspaceId, taskId: task.id, kind: "system",
+      payloadHash: createHash("sha256").update(`task-started:${task.id}`).digest("hex"),
+    });
+    if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    return reply.code(201).header("cache-control", "no-store").send({
+      task: { id: task.id, status: task.status, createdAt: task.createdAt },
+    });
+  });
+  app.get<{ Params: { workspaceId: string; taskId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/events", async (request, reply) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    const taskId = z.uuid().parse(request.params.taskId);
+    await requireWorkspacePolicy(request, workspaceId);
+    const events = await requireOneVibeTasks().listOwnedOneVibeTaskEvents(identity(request), workspaceId, taskId);
+    if (!events) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    return reply.header("cache-control", "no-store").send({ events });
+  });
+  app.post<{ Params: { workspaceId: string; taskId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/presentations", async (request, reply) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    const taskId = z.uuid().parse(request.params.taskId);
+    await requireWorkspacePolicy(request, workspaceId);
+    const input = oneVibePresentationSchema.parse(request.body ?? {});
+    const actor = identity(request);
+    const taskStore = requireOneVibeTasks();
+    if (!await taskStore.getOwnedOneVibeTask(actor, workspaceId, taskId)) {
+      throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    }
+    const artifact = await createOneVibePresentation(input, {
+      tenantId: actor.tenantId,
+      subjectId: actor.subjectId,
+      workspaceId,
+      taskId,
+    });
+    const event = await taskStore.appendOneVibeTaskEvent(actor, { workspaceId, taskId, kind: "artifact", payloadHash: artifact.sha256 });
+    if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    return reply.code(201).header("cache-control", "no-store").send({
+      artifact: {
+        id: artifact.id,
+        name: artifact.name,
+        mimeType: artifact.mimeType,
+        sha256: artifact.sha256,
+        sizeBytes: artifact.sizeBytes,
+        createdAt: artifact.createdAt,
+        downloadUrl: `/v1/workspaces/${workspaceId}/onevibe/tasks/${taskId}/presentations/${artifact.id}`,
+      },
+    });
+  });
+  app.get<{ Params: { workspaceId: string; taskId: string; artifactId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/presentations/:artifactId", async (request, reply) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    const taskId = z.uuid().parse(request.params.taskId);
+    const artifactId = z.uuid().parse(request.params.artifactId);
+    await requireWorkspacePolicy(request, workspaceId);
+    const actor = identity(request);
+    const artifact = await getOneVibePresentation(artifactId, {
+      tenantId: actor.tenantId,
+      subjectId: actor.subjectId,
+      workspaceId,
+      taskId,
+    });
+    if (!artifact) throw new OneComputerError("ONEVIBE_ARTIFACT_NOT_FOUND", "Presentation artifact not found", 404);
+    reply.header("cache-control", "no-store");
+    reply.header("content-type", artifact.mimeType);
+    reply.header("content-length", artifact.sizeBytes);
+    reply.header("content-disposition", `attachment; filename="${artifact.name}"`);
+    return reply.send(createReadStream(artifact.path));
+  });
   app.delete<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId", async (request, reply) => {
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     await service.delete(identity(request), policy, request.params.workspaceId);

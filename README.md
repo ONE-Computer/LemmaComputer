@@ -132,6 +132,7 @@ configuration lives in `config/` and `integrations/`.
 
 ## Documentation
 
+- [ONEVibe-MonoRepo (Cowork) migration and acceptance](docs/ONEVIBE_MONOREPO.md)
 - [Architecture and trust model](docs/architecture.md)
 - [Service reference](docs/services.md)
 - [Local deployment and Entra setup](docs/local-deployment.md)

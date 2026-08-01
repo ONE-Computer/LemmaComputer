@@ -5,6 +5,10 @@
 - [ADR 0001](adr/0001-local-release-gates.md) records why enforcement is local and hosted/self-hosted share one codebase.
 
 
+- [ONEVibe-MonoRepo (Cowork) migration and acceptance](ONEVIBE_MONOREPO.md)
+  defines the additive product boundary, vertical-slice acceptance criteria,
+  and where durable changes belong. It does not replace this monorepo's
+  security, service, or deployment documentation.
 - [Local deployment and Entra setup](local-deployment.md) is the agent-oriented
   runbook for preparing `.env`, configuring Microsoft Entra, building the
   workspace image, starting Compose, and verifying the stack.
