@@ -326,6 +326,7 @@ test("live E2B Cowork qualification is explicit, credentialed, and fixture-resis
   assert.match(script, /ONECOMPUTER_CONTROLLER_INTERNAL_TOKEN/);
   assert.match(script, /E2B_API_KEY/);
   assert.match(script, /E2B_TEMPLATE_ID/);
+  assert.match(script, /ONECOMPUTER_E2B_DENY_HOST/);
   assert.match(script, /ONECOMPUTER_UI_FIXTURE === "1"/);
   assert.match(script, /E2B_REAL_ACP_OK/);
   assert.match(script, /workspace-frame|onevibe\/tasks/);

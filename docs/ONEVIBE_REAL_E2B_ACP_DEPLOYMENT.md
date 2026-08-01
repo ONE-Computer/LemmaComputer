@@ -73,6 +73,11 @@ that reaper and attach evidence that an expired E2B sandbox and volume are
 actually removed; an enabled timer or an expiry timestamp alone is not cleanup
 proof.
 
+Control-owned PNG/PPTX bytes have a separate governed retention timer
+(`ONEVIBE_ARTIFACT_RETENTION_DAYS`, default 90 days). It deletes expired bytes
+without deleting task/event evidence rows, so audit records remain available
+while download URLs eventually fail closed after the retention window.
+
 ## Provisioning
 
 1. Build and publish an immutable workspace template from the exact
@@ -113,13 +118,15 @@ ONECOMPUTER_CONTROLLER_URL=https://controller.example.com \
 ONECOMPUTER_CONTROLLER_INTERNAL_TOKEN=... \
 E2B_API_KEY=... \
 E2B_TEMPLATE_ID=... \
+ONECOMPUTER_E2B_DENY_HOST=example.com \
 npm run qualify:e2b:cowork
 ```
 
 `qualify-e2b-cowork.mts` creates two real task-scoped conversations, verifies
 the selected ACP agent and provider metadata, performs two turns in one
 session, checks unauthenticated provider-host access, records a PNG and PPTX,
-and explicitly stops/purges both workspaces. It writes only redacted hashes
+probes a caller-supplied non-allowlisted hostname, and explicitly stops/purges
+both workspaces. It writes only redacted hashes
 and IDs under `.artifacts/e2b-live/`; it refuses fixture mode or missing
 credentials before allocating anything.
 
@@ -171,7 +178,7 @@ is completed, production must fail closed rather than claim an ACP result.
 
 The next hardening items are explicit: add durable session/replay persistence;
 qualify the existing TTL reaper's destroy/revoke/purge behavior against E2B;
-add governed artifact retention/deletion; and maintain the gated live E2B
+and maintain the gated live E2B
 acceptance harness covering two real conversations, follow-up session reuse,
 frame hash deduplication, PPTX magic bytes, and cleanup. The existing
 fixture Playwright suite remains a UI contract test, not a substitute for that

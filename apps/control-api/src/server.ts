@@ -32,7 +32,7 @@ import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient }
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
-import { createOneVibePresentation, createOneVibeVcrFrame, getOneVibePresentation, getOneVibeVcrFrame } from "./onevibe-artifacts.js";
+import { cleanupOneVibeArtifacts, createOneVibePresentation, createOneVibeVcrFrame, getOneVibePresentation, getOneVibeVcrFrame } from "./onevibe-artifacts.js";
 import { OneVibeCaptureAuthority } from "./onevibe-vcr.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
@@ -248,6 +248,7 @@ const envSchema = z.object({
   POLICY_BUNDLE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(86_400),
   GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   ONEVIBE_EPHEMERAL_REAPER_INTERVAL_SECONDS: z.coerce.number().int().min(30).max(3_600).default(60),
+  ONEVIBE_ARTIFACT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(90),
   BOOTSTRAP_TENANT_ID: z.string().min(1).default("acme"),
   BOOTSTRAP_USER_ID: z.string().min(1).default("alex-morgan"),
   TENANT_DISPLAY_NAME: z.string().min(1).default("ME TECH"),
@@ -300,6 +301,10 @@ export function createControlServer(
       tenantId: string;
       intervalMs: number;
       ttlMs: number;
+    };
+    oneVibeArtifactRetention?: {
+      intervalMs: number;
+      maxAgeMs: number;
     };
   } = {},
 ) {
@@ -2420,6 +2425,31 @@ export function createControlServer(
       if (ephemeralReaperTimer) clearInterval(ephemeralReaperTimer);
     });
   }
+  let artifactRetentionTimer: NodeJS.Timeout | undefined;
+  let artifactRetentionRunning = false;
+  const reapExpiredOneVibeArtifacts = async () => {
+    const configuration = security.oneVibeArtifactRetention;
+    if (artifactRetentionRunning || !configuration) return;
+    artifactRetentionRunning = true;
+    try {
+      const removed = await cleanupOneVibeArtifacts(undefined, configuration.maxAgeMs);
+      if (removed) app.log.info({ event: "onevibe_artifact_retention", removed }, "expired ONEVibe artifact bytes removed");
+    } catch (error) {
+      app.log.warn({ event: "onevibe_artifact_retention_failed", code: error instanceof OneComputerError ? error.code : "ARTIFACT_RETENTION_FAILED" }, "ONEVibe artifact retention will retry");
+    } finally {
+      artifactRetentionRunning = false;
+    }
+  };
+  if (security.oneVibeArtifactRetention) {
+    app.addHook("onReady", async () => {
+      await reapExpiredOneVibeArtifacts();
+      artifactRetentionTimer = setInterval(() => { void reapExpiredOneVibeArtifacts(); }, security.oneVibeArtifactRetention!.intervalMs);
+      artifactRetentionTimer.unref();
+    });
+    app.addHook("onClose", async () => {
+      if (artifactRetentionTimer) clearInterval(artifactRetentionTimer);
+    });
+  }
   return app;
 }
 
@@ -2552,6 +2582,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         tenantId: env.BOOTSTRAP_TENANT_ID,
         intervalMs: env.ONEVIBE_EPHEMERAL_REAPER_INTERVAL_SECONDS * 1000,
         ttlMs: ONEVIBE_EPHEMERAL_TTL_MS,
+      },
+      oneVibeArtifactRetention: {
+        intervalMs: 24 * 60 * 60 * 1000,
+        maxAgeMs: env.ONEVIBE_ARTIFACT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
       },
     },
   );

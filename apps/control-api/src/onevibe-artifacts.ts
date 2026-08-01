@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import pptxgen from "pptxgenjs";
 
@@ -222,4 +222,33 @@ export async function getOneVibePresentation(
   } catch {
     return null;
   }
+}
+
+/** Remove expired Control-owned VCR/PPTX bytes without touching evidence rows. */
+export async function cleanupOneVibeArtifacts(
+  artifactDirectory = process.env.ONEVIBE_ARTIFACT_DIRECTORY ?? "/tmp/onecomputer-onevibe-artifacts",
+  maxAgeMs = 90 * 24 * 60 * 60 * 1000,
+) {
+  if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) throw new Error("ONEVIBE_ARTIFACT_RETENTION_INVALID");
+  const root = resolve(artifactDirectory);
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
+  const cutoff = Date.now() - maxAgeMs;
+  let removed = 0;
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^(?:vcr-[a-z0-9-]+-[a-f0-9]{64}\.(?:png|jpg)|[a-f0-9-]+\.(?:pptx|json))$/.test(entry.name)) continue;
+    const path = resolve(root, entry.name);
+    const metadata = await stat(path).catch(() => undefined);
+    if (!metadata || metadata.mtimeMs >= cutoff) continue;
+    await unlink(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+    removed += 1;
+  }
+  return removed;
 }

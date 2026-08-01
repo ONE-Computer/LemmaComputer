@@ -33,6 +33,10 @@ const controllerUrl = required("ONECOMPUTER_CONTROLLER_URL").replace(/\/$/, "");
 const controllerToken = required("ONECOMPUTER_CONTROLLER_INTERNAL_TOKEN");
 const e2bApiKey = required("E2B_API_KEY");
 const expectedTemplateId = required("E2B_TEMPLATE_ID");
+const deniedHost = required("ONECOMPUTER_E2B_DENY_HOST");
+if (!/^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(deniedHost)) {
+  throw new Error("ONECOMPUTER_E2B_DENY_HOST must be a hostname");
+}
 const agentCatalogId = process.env.ONECOMPUTER_E2B_AGENT?.trim() || "opencode-cli";
 const timeoutMs = Number(process.env.ONECOMPUTER_E2B_LIVE_TIMEOUT_MS ?? 600_000);
 if (!Number.isInteger(timeoutMs) || timeoutMs < 30_000 || timeoutMs > 1_800_000) {
@@ -217,6 +221,13 @@ async function runTask(label: string): Promise<TaskRun> {
   const connected = await E2bSandbox.connect(sandbox.sandboxId, { apiKey: e2bApiKey, timeoutMs });
   const health = await fetch(`https://${connected.getHost(port)}/health`, { signal: AbortSignal.timeout(timeoutMs) });
   assert.ok([401, 403, 404].includes(health.status), "provider ACP endpoint must reject an unauthenticated request");
+  let denied = false;
+  try {
+    await connected.commands.run(`set -eu; timeout 12 curl -fsS --max-time 10 https://${deniedHost}/ >/dev/null`);
+  } catch {
+    denied = true;
+  }
+  assert.equal(denied, true, `direct traffic to ${deniedHost} must be denied by E2B network policy`);
 
   const capture = await controlJson(`/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks/${encodeURIComponent(taskId)}/capture`, {
     method: "POST",
