@@ -114,12 +114,45 @@ tests, but never for the successful path.
    mutations fail closed, the E2B sandbox is killed, and no durable workspace
    or credential remains.
 
+### Conversation-history contract
+
+Conversation history is owned by Control and survives provider boundaries. The
+E2B filesystem, ACP process, browser, and vendor session are caches or runtime
+state—not the authoritative transcript.
+
+- Persist user-visible user messages, assistant messages, tool-call summaries,
+  tool results, artifact references, turn status, and sequence metadata in the
+  session's redacted, append-only history.
+- Never persist hidden chain-of-thought, provider credentials, auth headers,
+  raw browser cookies, or unbounded diagnostic output.
+- Bind every history record to tenant, subject, session, turn, agent, policy
+  hash, and an integrity predecessor; enforce the same ownership checks on
+  history reads as on event and artifact reads.
+- A reconnecting SSE client can replay history and activity from a cursor and
+  reconstruct the same conversation without duplicate turns or missing
+  terminal events.
+- After an ACP process restart or E2B pause/resume, Control attempts the
+  negotiated vendor `session/load` path with the exact provider session id. If
+  the harness cannot restore context, the API fails explicitly; it must never
+  silently start a blank session or fabricate continuity.
+- The canonical Control history remains readable under the documented audit
+  retention policy after the sandbox is destroyed, while all new mutations are
+  rejected after expiry.
+
+The acceptance run must perform at least three dependent turns, force an SSE
+disconnect/replay, restart or resume the provider, and verify that the same
+user-visible history and turn ordering are returned through the API before and
+after recovery.
+
 ### Gold Path exit criteria
 
 The goal is achieved only when all of the following are true in one API E2E
 run:
 
 - Codex and OpenCode each pass the chat and artifact scenario;
+- three dependent turns, provider restart/resume, and SSE replay preserve the
+  same canonical conversation history without gaps, duplicates, or silent
+  context loss;
 - SSE replay has monotonic sequence numbers, correct session/turn binding, and
   an explicit terminal event;
 - the answer, Office files, and PNG are non-empty real outputs, not fixtures;
