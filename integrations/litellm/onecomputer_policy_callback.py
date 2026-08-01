@@ -1008,7 +1008,18 @@ class OneComputerMcpPolicyCallback(CustomLogger):
                 detail={"error": "AI_USAGE_ADMISSION_DENIED" if status != 503 else "AI_USAGE_ADMISSION_UNAVAILABLE"},
             ) from None
         except (OSError, ValueError, RuntimeError, urllib.error.URLError) as error:
-            LOGGER.warning("AI usage admission authority failed (%s): %.240s", type(error).__name__, str(error))
+            metadata_values = _metadata_dicts(kwargs)
+            has_signed_chain = any(_verified_usage_chain(value.get(USAGE_CHAIN_KEY)) is not None for value in metadata_values)
+            has_usage_state = any(isinstance(value.get(USAGE_STATE_KEY), dict) for value in metadata_values)
+            LOGGER.warning(
+                "AI usage admission authority failed (%s): %.240s; call_type=%s; model=%s; signed_chain=%s; usage_state=%s",
+                type(error).__name__,
+                str(error),
+                str(getattr(call_type, "value", call_type) or ""),
+                str(kwargs.get("model") or "")[:120],
+                has_signed_chain,
+                has_usage_state,
+            )
             raise HTTPException(
                 status_code=503,
                 detail={"error": "AI_USAGE_ADMISSION_UNAVAILABLE"},
