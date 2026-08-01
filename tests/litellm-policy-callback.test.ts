@@ -515,10 +515,15 @@ async def assert_provider_boundary():
     assert "user_api_key_dict" not in provider_admitted
     assert "user_api_key_metadata" not in provider_admitted
     assert provider_admitted["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
-    assert "onecomputer_usage_chain" in provider_admitted["metadata"]
+    assert all(not key.startswith("onecomputer_") for key in provider_admitted["metadata"])
+    signed_reentry = {
+        **provider_admitted,
+        "metadata": dict(routed_admitted["metadata"]),
+        "onecomputer_usage_state": routed_admitted["onecomputer_usage_state"],
+    }
     authority_count = len(authority_calls)
     provider_reentry = await callback.async_pre_call_deployment_hook(
-        provider_admitted, "acompletion"
+        signed_reentry, "acompletion"
     )
     assert len(authority_calls) == authority_count
     assert provider_reentry["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
@@ -551,11 +556,11 @@ async def assert_provider_boundary():
     assert len(authority_calls) == authority_count
 
     tampered_reentry = {
-        **provider_admitted,
+        **signed_reentry,
         "metadata": {
-            **provider_admitted["metadata"],
+            **signed_reentry["metadata"],
             "onecomputer_usage_state": {
-                **provider_admitted["metadata"]["onecomputer_usage_state"],
+                **signed_reentry["metadata"]["onecomputer_usage_state"],
                 "admissionId": "tampered-admission",
             },
         },

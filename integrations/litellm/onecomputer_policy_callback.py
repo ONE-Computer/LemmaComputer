@@ -238,6 +238,24 @@ def _provider_request(kwargs):
     request = dict(kwargs)
     for name in _PROVIDER_INTERNAL_FIELDS:
         request.pop(name, None)
+    metadata = request.get("metadata")
+    if isinstance(metadata, dict):
+        request["metadata"] = {
+            name: value
+            for name, value in metadata.items()
+            if not (isinstance(name, str) and name.startswith("onecomputer_"))
+        }
+    params = request.get("litellm_params")
+    if isinstance(params, dict):
+        params = dict(params)
+        nested_metadata = params.get("metadata")
+        if isinstance(nested_metadata, dict):
+            params["metadata"] = {
+                name: value
+                for name, value in nested_metadata.items()
+                if not (isinstance(name, str) and name.startswith("onecomputer_"))
+            }
+        request["litellm_params"] = params
     return request
 
 
