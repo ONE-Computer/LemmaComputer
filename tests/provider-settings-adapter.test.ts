@@ -167,6 +167,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
       const groups = document.model_info.access_groups as unknown[];
       assert.equal(groups.length, 1);
       assert.match(String(groups[0]), /^ocp-[A-Za-z0-9_-]+-/);
+      assert.equal(document.model_info.onecomputer_deployment_id, groups[0]);
     }
     const assistantRoutes = stableModels.filter((document) => document.model_name === "onecomputer-assistant");
     assert.equal(assistantRoutes.length, 2);

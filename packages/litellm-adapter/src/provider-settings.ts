@@ -597,7 +597,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         onecomputer_provider: deployment.provider,
         onecomputer_provider_account_id: deployment.credentialName,
         onecomputer_base_model: deployment.model.model,
-        onecomputer_deployment_id: deployment.id,
+        onecomputer_deployment_id: deployment.accessGroups[0],
         onecomputer_provider_service_tier: "standard",
         ...(bedrock ? { onecomputer_region: bedrock.region } : {}),
         ...(deployment.upstreamModelId ? { onecomputer_upstream_model_id: deployment.upstreamModelId } : {}),
