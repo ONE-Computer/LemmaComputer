@@ -2314,9 +2314,23 @@ export function createControlServer(
     try {
       const users = await policyStore.listUsers(configuration.tenantId);
       const results = await Promise.allSettled(users.map(async (user) => {
-        if (user.status === "disabled") return 0;
-        const actor = await policyStore!.getPrincipal(user.userId);
-        if (!actor || actor.tenantId !== configuration.tenantId) return 0;
+        // `getPrincipal()` intentionally excludes disabled users. Reaping is
+        // an internal, tenant-scoped cleanup operation, so construct the
+        // minimal identity from the already-authorized admin summary instead
+        // of allowing a disabled user's provider to survive indefinitely.
+        const actor: SessionPrincipal = {
+          userId: user.userId,
+          tenantId: configuration.tenantId,
+          email: user.email,
+          displayName: user.displayName,
+          tenantDisplayName: configuration.tenantId,
+          roles: user.roles,
+          identity: {
+            tenantId: configuration.tenantId,
+            subjectId: user.userId,
+            audience: "onecomputer-control",
+          },
+        };
         const workspaces = await store.listCurrent(actor.identity);
         let removed = 0;
         for (const workspace of workspaces) {
