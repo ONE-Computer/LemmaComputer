@@ -86,6 +86,7 @@ test("the pinned LiteLLM callback normalizes provider units and preserves govern
   const callback = path.resolve(import.meta.dirname, "../integrations/litellm/onecomputer_policy_callback.py");
   const script = String.raw`
 import asyncio
+import copy
 import json
 import os
 import runpy
@@ -119,6 +120,7 @@ set_usage_state = module["_set_usage_state"]
 request_context = module["_request_usage_context_and_strip_reserved"]
 source_attempt_id = module["_source_attempt_id"]
 verified_usage_chain = module["_verified_usage_chain"]
+trusted_key_metadata = module["_trusted_key_metadata"]
 completion_payload = module["_completion_payload"]
 routing_payload = module["_routing_payload"]
 callback_type = module["OneComputerMcpPolicyCallback"]
@@ -506,6 +508,7 @@ async def assert_provider_boundary():
     routed_admitted = await callback.async_pre_call_hook(
         Auth(), None, admitted, "acompletion"
     )
+    authenticated_retry = copy.deepcopy(routed_admitted)
     provider_admitted = await callback.async_pre_call_deployment_hook(
         routed_admitted, "acompletion"
     )
@@ -523,6 +526,19 @@ async def assert_provider_boundary():
     assert len(authority_calls) == authority_count
     assert provider_reentry["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
     assert "user_api_key_dict" not in provider_reentry
+
+    authenticated_retry.pop("user_api_key_dict")
+    authenticated_retry["metadata"]["attempted_retries"] = 1
+    assert "onecomputer_authenticated_context" in authenticated_retry["metadata"]
+    assert trusted_key_metadata(authenticated_retry)["onecomputer_tenant_id"] == "tenant-real"
+    retry_provider = await callback.async_pre_call_deployment_hook(
+        authenticated_retry, "acompletion"
+    )
+    assert authority_calls[-1][0] == "attempts/admit"
+    assert authority_calls[-1][1]["tenantId"] == "tenant-real"
+    assert authority_calls[-1][1]["sourceAttemptId"] != authority_calls[0][1]["sourceAttemptId"]
+    assert "onecomputer_authenticated_context" not in retry_provider["metadata"]
+    authority_count = len(authority_calls)
 
     tampered_reentry = {
         **provider_admitted,
