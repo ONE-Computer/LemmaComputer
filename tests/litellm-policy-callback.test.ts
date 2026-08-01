@@ -120,6 +120,7 @@ request_context = module["_request_usage_context_and_strip_reserved"]
 source_attempt_id = module["_source_attempt_id"]
 verified_usage_chain = module["_verified_usage_chain"]
 completion_payload = module["_completion_payload"]
+routing_payload = module["_routing_payload"]
 callback_type = module["OneComputerMcpPolicyCallback"]
 
 # These are the supported callback names in the pinned LiteLLM v1.93 image.
@@ -217,6 +218,22 @@ class Auth:
         "onecomputer_policy_version_id": "policy-real",
         "onecomputer_route_mapping_version": "mapping-real",
     }
+
+class AutoAuth:
+    metadata = {**Auth.metadata, "onecomputer_policy_model_alias": "onecomputer-auto"}
+
+routing = routing_payload({
+    "user_api_key_dict": AutoAuth(),
+    "model": "onecomputer-auto",
+    "litellm_call_id": "route-call",
+    "messages": [{"role": "user", "content": "hi"}],
+    "max_tokens": 8,
+    "metadata": {"onecomputer_task_binding": "b" * 64},
+})
+assert routing["expectedUsage"] == [
+    {"unit": "input_uncached_token", "quantity": "7"},
+    {"unit": "output_token", "quantity": "8"},
+]
 
 openai_route = {
     "onecomputer_provider": "openai",

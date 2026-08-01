@@ -510,7 +510,6 @@ def _routing_payload(kwargs):
         "expectedUsage": [
             {"unit": "input_uncached_token", "quantity": str(estimated)},
             {"unit": "output_token", "quantity": str(maximum_output)},
-            {"unit": "request", "quantity": "1"},
         ],
     }
     unavailable = _unavailable_deployment_ids(tenant_id)
