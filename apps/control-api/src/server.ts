@@ -582,11 +582,18 @@ export function createControlServer(
       grantId,
     }) ?? effective?.egressSecurityGroup ?? null
   );
+  const governedRoutingAvailableFor = async (tenantId: string) => {
+    const routeMapping = await security.routingStore?.latestMappingVersion(tenantId);
+    return ["lite", "balanced", "pro"].every((serviceClass) => (
+      routeMapping?.deployments.some((deployment) => deployment.serviceClass === serviceClass)
+    ));
+  };
   const policyForGrant = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId = "personal") => {
     let policy = testRuntimePolicy;
     if (effective) {
       const saved = await store.getSandboxSettings?.(value.identity, grantId);
       const workspaceEgress = await workspaceEgressFor(value, effective, grantId);
+      const governedRoutingAvailable = await governedRoutingAvailableFor(value.tenantId);
       const document = effective.document as Record<string, unknown>;
       const availableAgentIds = assignedAgentIds(document);
       policy = {
@@ -597,6 +604,7 @@ export function createControlServer(
           saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
           saved?.applicationIds ?? defaultApplicationIds(document),
           workspaceEgress,
+          governedRoutingAvailable ? ["onecomputer-auto"] : [],
         ),
         requestedServiceClass: saved?.requestedServiceClass ?? "auto",
       };
@@ -1359,6 +1367,7 @@ export function createControlServer(
     const actor = requireAdministrator(request);
     if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
+    const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     return {
       users: await Promise.all(users.map(async (user) => {
         const targetIdentity = identityContextSchema.parse({
@@ -1384,6 +1393,7 @@ export function createControlServer(
                   settings?.agentIds,
                   settings?.applicationIds,
                   workspaceEgress,
+                  governedRoutingAvailable ? ["onecomputer-auto"] : [],
                 )
               : null;
             return {
@@ -1783,8 +1793,7 @@ export function createControlServer(
     const availableProfiles = sandboxProfiles.filter((profile) => assignedProfiles.includes(profile.id));
     const assignedApplications = assignedApplicationIds(document);
     const availableApplications = sandboxApplications.filter((application) => assignedApplications.includes(application.id));
-    const routeMapping = await security.routingStore?.latestMappingVersion(actor.tenantId);
-    const governedRoutingAvailable = ["lite", "balanced", "pro"].every((serviceClass) => routeMapping?.deployments.some((deployment) => deployment.serviceClass === serviceClass));
+    const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "onecomputer-auto" : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
     if (!availableProfiles.length || !availableModels.length || !availableAgents.length) throw new OneComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, or agent", 500);
@@ -1799,7 +1808,15 @@ export function createControlServer(
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
     const workspaceEgress = await workspaceEgressFor(actor, effective, grantId);
     const runtime = effective
-      ? runtimePolicyFor(effective, modelAlias, profileId, selectedAgentIds, selectedApplicationIds, workspaceEgress)
+      ? runtimePolicyFor(
+          effective,
+          modelAlias,
+          profileId,
+          selectedAgentIds,
+          selectedApplicationIds,
+          workspaceEgress,
+          governedRoutingAvailable ? ["onecomputer-auto"] : [],
+        )
       : undefined;
     const egress = runtime?.egress;
     const availableSecurityGroups = includeAdministratorOptions && security.identityPolicyStore?.listEgressSecurityGroups
@@ -1852,8 +1869,7 @@ export function createControlServer(
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
     const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
-    const routeMapping = await security.routingStore?.latestMappingVersion(actor.tenantId);
-    const governedRoutingAvailable = ["lite", "balanced", "pro"].every((serviceClass) => routeMapping?.deployments.some((deployment) => deployment.serviceClass === serviceClass));
+    const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     const modelAlias = governedRoutingAvailable ? "onecomputer-auto" : input.modelAlias;
     const agents = Array.isArray(document.agents) ? document.agents : ownedAgentCatalog.map((agent) => agent.id);
     if (!profiles.includes(input.profileId)) throw new OneComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);

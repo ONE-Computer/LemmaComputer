@@ -178,6 +178,17 @@ test("an assigned sandbox selection can narrow a multi-model policy but cannot b
   assert.equal(selected.modelAlias, "onecomputer-glm");
   assert.equal(selected.workspaceProfile, "claude-desktop-standard-v1");
   assert.throws(() => runtimePolicyFor(effective, "unassigned-model", "claude-desktop-standard-v1"), /not assigned/);
+  assert.throws(() => runtimePolicyFor(effective, "onecomputer-auto", "claude-desktop-standard-v1"), /not assigned/);
+  const governed = runtimePolicyFor(
+    effective,
+    "onecomputer-auto",
+    "claude-desktop-standard-v1",
+    undefined,
+    undefined,
+    undefined,
+    ["onecomputer-auto"],
+  );
+  assert.equal(governed.modelAlias, "onecomputer-auto");
 });
 
 test("policy-selected Claude and Hermes clients receive distinct governed identities", () => {

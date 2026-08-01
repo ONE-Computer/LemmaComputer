@@ -64,6 +64,7 @@ export const runtimePolicyFor = (
   selectedAgentIds?: AgentCatalogId[],
   selectedApplicationIds?: SandboxApplicationId[],
   workspaceEgressSecurityGroup?: EgressSecurityGroupVersion | null,
+  additionalAllowedModelAliases: readonly string[] = [],
 ): RuntimePolicy => {
   const document = policy.document as Record<string, unknown>;
   const mcp = document.mcp as Record<string, unknown> | undefined;
@@ -78,7 +79,8 @@ export const runtimePolicyFor = (
     return [name, configuredToolPolicies?.[name] ?? m365ToolCatalog[name]?.decision ?? "deny"];
   }));
   const modelAliases = document.modelAliases;
-  const allowedModelAliases = Array.isArray(modelAliases) ? modelAliases.filter((value): value is string => typeof value === "string") : [];
+  const policyModelAliases = Array.isArray(modelAliases) ? modelAliases.filter((value): value is string => typeof value === "string") : [];
+  const allowedModelAliases = [...new Set([...policyModelAliases, ...additionalAllowedModelAliases])];
   const workspaceProfiles = Array.isArray(document.workspaceProfiles)
     ? document.workspaceProfiles.filter((value): value is string => typeof value === "string")
     : typeof document.workspaceProfile === "string" ? [document.workspaceProfile] : [];

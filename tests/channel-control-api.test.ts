@@ -11,6 +11,7 @@ import {
   MemoryWorkspaceStore,
   type EffectivePolicy,
   type IdentityPolicyStore,
+  type RoutingStore,
   type SessionPrincipal,
 } from "@onecomputer/workspace-store";
 import type { AgentChatClient } from "../apps/control-api/src/agent-chat.js";
@@ -294,6 +295,28 @@ test("workspace channel APIs bind an owned credential and policy-check the defau
       },
     });
     assert.equal(unavailable.statusCode, 400);
+  } finally {
+    await app.close();
+  }
+});
+
+test("workspace settings authorize governed Auto only when a complete mapping exists", async () => {
+  const store = new MemoryWorkspaceStore();
+  const routingStore = {
+    latestMappingVersion: async () => ({
+      deployments: ["lite", "balanced", "pro"].map((serviceClass) => ({ serviceClass })),
+    }),
+  } as unknown as RoutingStore;
+  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    identityPolicyStore: policyStore(effectivePolicy()),
+    routingStore,
+  });
+  try {
+    const response = await app.inject({ method: "GET", url: "/v1/sandbox-settings?grantId=personal", headers });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().modelAlias, "onecomputer-auto");
+    assert.deepEqual(response.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["auto", "lite", "balanced", "pro"]);
   } finally {
     await app.close();
   }
