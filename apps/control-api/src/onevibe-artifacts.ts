@@ -213,7 +213,8 @@ export async function getOneVibePresentation(
     if (stored.id !== id
       || stored.tenantId !== owner.tenantId
       || stored.subjectId !== owner.subjectId
-      || stored.workspaceId !== owner.workspaceId) return null;
+      || stored.workspaceId !== owner.workspaceId
+      || stored.taskId !== owner.taskId) return null;
     const bytes = await readFile(stored.path);
     if (bytes.byteLength !== stored.sizeBytes
       || createHash("sha256").update(bytes).digest("hex") !== stored.sha256) return null;

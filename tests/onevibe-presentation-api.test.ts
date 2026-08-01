@@ -80,6 +80,15 @@ test("ONEVibe API creates an owned PPTX and only its workspace owner can downloa
     assert.equal(download.headers["content-type"], "application/vnd.openxmlformats-officedocument.presentationml.presentation");
     assert.equal(download.rawPayload.subarray(0, 2).toString("utf8"), "PK");
 
+    const siblingTask = await store.createOneVibeTask(identity, workspace.id);
+    assert.ok(siblingTask);
+    const crossTaskDownload = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${workspace.id}/onevibe/tasks/${siblingTask.id}/presentations/${artifact.id}`,
+      headers,
+    });
+    assert.equal(crossTaskDownload.statusCode, 404);
+
     const denied = await app.inject({
       method: "GET",
       url: artifact.downloadUrl,
