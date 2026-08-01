@@ -131,6 +131,31 @@ run:
 - the browser E2E is then run as a projection of this already-passing API
   session.
 
+### API streaming and lifecycle qualification matrix
+
+The Gold Path is not green until the API tests exercise these transitions
+against the real adapter (and the same transitions against a deterministic
+provider double for fast regression):
+
+| Area | Required proof |
+| --- | --- |
+| SSE connection | `Content-Type: text/event-stream`, no buffering, heartbeat/reconnect behavior, and `Last-Event-ID`/`after` replay without duplicates |
+| Event ordering | Monotonic sequence numbers, one session/turn binding, bounded event size, and an explicit terminal event for success, cancellation, timeout, and failure |
+| Backpressure | Slow consumer does not reorder or silently drop events; bounded buffers terminate with a typed retryable error |
+| Disconnects | Client disconnect and ACP process exit are recorded, cancellable, and reconciled; no synthetic final answer is emitted |
+| E2B create | Provider sandbox is created from the pinned Cowork template with signed policy, scoped grants, route allowlist, and no durable workspace mount |
+| Readiness | ACP and browser capability checks complete before the session is reported ready; partial startup fails closed and is cleaned up |
+| Resume | A provider pause/resume reconnects the ACP transport without extending the session deadline or losing the canonical event cursor |
+| Cancellation | Control cancellation stops the ACP process, closes the stream with a terminal event, revokes active grants, and kills the sandbox when no longer needed |
+| Expiry | Creation-anchored TTL rejects new turns/captures/artifact writes even if E2B auto-resumes |
+| Cleanup | Sandbox kill, grant revocation, scratch-state purge, and orphan reconciliation are all observed and recorded; retries are idempotent |
+| Isolation | A second identity cannot read events, frames, artifacts, provider status, or stream cursors and receives `404` |
+
+The live evidence bundle must include the redacted SSE transcript, event-count
+and sequence assertions, provider sandbox/template identifiers, lifecycle
+timestamps, and final cleanup result. It must not include prompts containing
+secrets, provider credentials, raw ACP diagnostics, or hidden reasoning.
+
 This is the first meaningful Manus-like milestone: a user can ask, converse,
 and receive useful Word/Excel/PowerPoint deliverables from a disposable Cowork
 session while Control retains truthful streaming, evidence, ownership, and
