@@ -97,9 +97,16 @@ test("PostgreSQL Team budgets reserve atomically, fail closed, and preserve immu
     await ledger.admitAttempt(correctionAttempt);
     await assert.rejects(first.settleReservation({tenantId,sourceSystem:"litellm",sourceAttemptId:"correction-settlement",usageEventId:correctionId,settledAt:now}),/original attempt/);
 
-    // Unknown ledger cost is visible and hard admission fails closed.
+    // Diagnostic-only provider failures remain auditable without poisoning hard-budget freshness.
+    const diagnosticEvent=crypto.randomUUID();
+    await pool.query(`INSERT INTO ai_usage_events(id,tenant_id,admission_id,source_system,source_event_id,source_fingerprint,event_type,occurred_at,outcome,price_status,cost_status) VALUES($1,$2,$3,'litellm',$4,$5,'usage',$6,'failure','unknown','unpriced')`,[diagnosticEvent,tenantId,admission.admissionId,"event-diagnostic-only",usageFingerprint({event:"diagnostic-only"}),now]);
+    await pool.query(`INSERT INTO ai_usage_event_units(tenant_id,event_id,unit,quantity,is_provider_diagnostic) VALUES($1,$2,'request',1,true)`,[tenantId,diagnosticEvent]);
+    assert.equal((await first.getBudgetStatus(tenantId,team.id,now)).priceStatus,"priced");
+
+    // Unknown billable ledger cost is visible and hard admission fails closed.
     const unknownEvent=crypto.randomUUID();
     await pool.query(`INSERT INTO ai_usage_events(id,tenant_id,admission_id,source_system,source_event_id,source_fingerprint,event_type,occurred_at,outcome,price_status,cost_status) VALUES($1,$2,$3,'litellm',$4,$5,'usage',$6,'success','unknown','unpriced')`,[unknownEvent,tenantId,admission.admissionId,"event-unknown",usageFingerprint({event:"unknown"}),now]);
+    await pool.query(`INSERT INTO ai_usage_event_units(tenant_id,event_id,unit,quantity,is_provider_diagnostic) VALUES($1,$2,'output_token',1,false)`,[tenantId,unknownEvent]);
     assert.equal((await first.reserveAttempt(attempt("stale-ledger"))).code,"BUDGET_LEDGER_STALE");
 
     // Soft mode visibly warns but does not block an unmatched deployment.
