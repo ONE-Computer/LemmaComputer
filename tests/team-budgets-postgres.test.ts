@@ -63,6 +63,14 @@ test("PostgreSQL Team budgets reserve atomically, fail closed, and preserve immu
     assert.equal(await first.releaseReservation({tenantId,sourceSystem:"litellm",sourceAttemptId:"expiry-reservation",reason:"provider_not_dispatched",evidence:"gateway rejected before dispatch",releasedAt:new Date(now.getTime()+3_600_000)}),"released");
     assert.equal((await first.getBudgetStatus(tenantId,team.id,new Date(now.getTime()+3_600_000))).outstandingReservations,"0.000000000000");
 
+    // A provider failure with no billable usage releases its reservation instead of poisoning capacity.
+    const failedAttempt=attempt("failed-unbilled");
+    assert.equal((await first.reserveAttempt(failedAttempt)).decision,"allow");
+    const failedAdmission=await ledger.admitAttempt(failedAttempt);
+    const failedEvent=await ledger.appendUsageEvent({tenantId,admissionId:failedAdmission.admissionId!,sourceSystem:"litellm",sourceEventId:"failed-unbilled-event",eventType:"usage",occurredAt:now,outcome:"failure",errorClass:"provider_error",units:[{unit:"request",quantity:"1",diagnostic:true}]});
+    assert.equal((await first.settleUsageEvent({tenantId,usageEventId:failedEvent.eventId!,settledAt:now})).status,"released");
+    assert.equal((await first.getBudgetStatus(tenantId,team.id,now)).outstandingReservations,"0.000000000000");
+
     // Pinned catalogue beats a later conservative fallback; alias remapping is irrelevant.
     const settledAttempt=attempt("settled","Lite");
     assert.equal((await first.reserveAttempt(settledAttempt)).quotedAmount,"2.000000000000");

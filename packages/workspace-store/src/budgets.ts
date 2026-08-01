@@ -134,7 +134,7 @@ export interface TeamBudgetStore {
   getBudgetStatus(tenantId: string, teamId: string, now?: Date): Promise<BudgetStatus>;
   reserveAttempt(input: AttemptAdmissionInput, now?: Date): Promise<ReservationResult>;
   settleReservation(input: { tenantId: string; sourceSystem: string; sourceAttemptId: string; usageEventId: string; settledAt?: Date }): Promise<{ status: "settled" | "duplicate"; actualProviderCost: string }>;
-  settleUsageEvent(input: { tenantId:string; usageEventId:string; settledAt?:Date }): Promise<{ status:"settled"|"duplicate"|"not_reserved"; actualProviderCost:string|null }>;
+  settleUsageEvent(input: { tenantId:string; usageEventId:string; settledAt?:Date }): Promise<{ status:"settled"|"released"|"duplicate"|"not_reserved"; actualProviderCost:string|null }>;
   reserveAttemptInTransaction(input:AttemptAdmissionInput,transaction:pg.PoolClient,now?:Date):Promise<ReservationResult>;
   releaseReservation(input: { tenantId:string; sourceSystem:string; sourceAttemptId:string; reason:"provider_not_dispatched"|"cancelled"|"failed_unbilled"|"reconciled_terminal"; evidence:string; releasedAt?:Date }): Promise<"released"|"duplicate">;
   createOverride(input: CreateBudgetOverrideInput): Promise<string>;
@@ -264,11 +264,18 @@ export class PostgresTeamBudgetStore implements TeamBudgetStore {
     const client=await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const found=await client.query(`SELECT r.*,r.id reservation_id,e.provider_cost::text,e.price_status,e.event_type FROM ai_usage_events e JOIN ai_usage_attempt_admissions a ON a.tenant_id=e.tenant_id AND a.id=e.admission_id LEFT JOIN team_budget_reservations r ON r.tenant_id=a.tenant_id AND r.source_system=a.source_system AND r.source_attempt_id=a.source_attempt_id WHERE e.tenant_id=$1 AND e.id=$2`,[input.tenantId,input.usageEventId]);
+      const found=await client.query(`SELECT r.*,r.id reservation_id,e.provider_cost::text,e.price_status,e.event_type,e.outcome FROM ai_usage_events e JOIN ai_usage_attempt_admissions a ON a.tenant_id=e.tenant_id AND a.id=e.admission_id LEFT JOIN team_budget_reservations r ON r.tenant_id=a.tenant_id AND r.source_system=a.source_system AND r.source_attempt_id=a.source_attempt_id WHERE e.tenant_id=$1 AND e.id=$2`,[input.tenantId,input.usageEventId]);
       if(!found.rowCount) throw new Error("Ledger event not found");
       const row=found.rows[0];
       if(row.reservation_id===null){await client.query("COMMIT");return{status:"not_reserved" as const,actualProviderCost:row.provider_cost===null?null:String(row.provider_cost)};}
-      if(row.event_type!=="usage"||row.price_status!=="priced"||row.provider_cost===null) throw new Error("Ledger event does not price the reserved original attempt");
+      if(row.event_type!=="usage")throw new Error("Ledger event does not represent the reserved original attempt");
+      if(row.outcome==="failure"&&(row.price_status!=="priced"||row.provider_cost===null)){
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`team-budget-capacity:${input.tenantId}:${row.team_id}`]);
+        const released=await client.query(`INSERT INTO team_budget_reservation_releases (id,tenant_id,reservation_id,reason,evidence,released_at) SELECT $1,$2,$3,'failed_unbilled','Provider failure reported no billable usage',$4 WHERE NOT EXISTS (SELECT 1 FROM team_budget_reservation_settlements WHERE tenant_id=$2 AND reservation_id=$3) ON CONFLICT (tenant_id,reservation_id) DO NOTHING RETURNING id`,[randomUUID(),input.tenantId,row.reservation_id,input.settledAt??new Date()]);
+        await client.query("COMMIT");
+        return{status:released.rowCount?"released" as const:"duplicate" as const,actualProviderCost:null};
+      }
+      if(row.price_status!=="priced"||row.provider_cost===null)throw new Error("Ledger event does not price the reserved original attempt");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`team-budget-capacity:${input.tenantId}:${row.team_id}`]);
       if(asSignedScaled(String(row.provider_cost))<0n)throw new Error("Reservation settlement cost cannot be negative");
       const released=await client.query(`SELECT 1 FROM team_budget_reservation_releases WHERE tenant_id=$1 AND reservation_id=$2`,[input.tenantId,row.reservation_id]);
