@@ -158,8 +158,9 @@ const verifyGrantBindings = (
   const fallback = ({
     "claude-cli-managed-v1": "claude-cli",
     "codex-cli-managed-v1": "codex-cli",
+    "opencode-cli-managed-v1": "opencode-cli",
     "hermes-claw-managed-v1": "hermes-claw",
-  } as const)[verified.payload.policy.agentProfile as "claude-cli-managed-v1" | "codex-cli-managed-v1" | "hermes-claw-managed-v1"];
+  } as const)[verified.payload.policy.agentProfile as "claude-cli-managed-v1" | "codex-cli-managed-v1" | "opencode-cli-managed-v1" | "hermes-claw-managed-v1"];
   const expectedChatAgents = (verified.payload.policy.agents?.map((agent) => agent.catalogId) ?? [fallback])
     .flatMap((catalogId) => {
       const parsed = chatAgentCatalogIdSchema.safeParse(catalogId);

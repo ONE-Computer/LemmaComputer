@@ -39,6 +39,7 @@ export type AgentChatSessionPage = {
 const chatRuntimePorts: Readonly<Record<ChatAgentCatalogId, number>> = Object.freeze({
   "claude-cli": 8643,
   "codex-cli": 8644,
+  "opencode-cli": 8645,
   "hermes-claw": 8642,
 });
 
@@ -53,8 +54,9 @@ const chatDisplayNames: Readonly<Record<ChatAgentCatalogId, string>> = Object.fr
 const fallbackCatalogId = (policy: RuntimePolicy): ChatAgentCatalogId | undefined => ({
   "claude-cli-managed-v1": "claude-cli",
   "codex-cli-managed-v1": "codex-cli",
+  "opencode-cli-managed-v1": "opencode-cli",
   "hermes-claw-managed-v1": "hermes-claw",
-} as const)[policy.agentProfile as "claude-cli-managed-v1" | "codex-cli-managed-v1" | "hermes-claw-managed-v1"];
+} as const)[policy.agentProfile as "claude-cli-managed-v1" | "codex-cli-managed-v1" | "opencode-cli-managed-v1" | "hermes-claw-managed-v1"];
 
 export const assignedChatAgentIds = (policy: RuntimePolicy): ChatAgentCatalogId[] => {
   const selected = policy.agents?.map((agent) => agent.catalogId) ?? [fallbackCatalogId(policy)];

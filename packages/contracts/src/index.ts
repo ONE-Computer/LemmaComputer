@@ -208,11 +208,11 @@ export const sandboxProfileSchema = z.object({
 });
 export type SandboxProfile = z.infer<typeof sandboxProfileSchema>;
 
-export const agentCatalogIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"] as const;
+export const agentCatalogIds = ["claude-desktop", "claude-cli", "codex-cli", "opencode-cli", "hermes-desktop", "hermes-claw"] as const;
 export const agentCatalogIdSchema = z.enum(agentCatalogIds);
 export type AgentCatalogId = z.infer<typeof agentCatalogIdSchema>;
 
-export const chatAgentCatalogIds = ["claude-cli", "codex-cli", "hermes-claw"] as const;
+export const chatAgentCatalogIds = ["claude-cli", "codex-cli", "opencode-cli", "hermes-claw"] as const;
 export const chatAgentCatalogIdSchema = z.enum(chatAgentCatalogIds);
 export type ChatAgentCatalogId = z.infer<typeof chatAgentCatalogIdSchema>;
 
@@ -310,6 +310,7 @@ export const agentProfileSchema = z.enum([
   "claude-desktop-managed-v1",
   "claude-cli-managed-v1",
   "codex-cli-managed-v1",
+  "opencode-cli-managed-v1",
   "hermes-desktop-managed-v1",
   "hermes-claw-managed-v1",
 ]);
@@ -356,6 +357,16 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
     license: "Apache-2.0",
     source: "https://pypi.org/project/openai-codex/0.144.4/",
     artifactSha256: "de1513a6e94b9a8d7728a3b74298bc1469428ade10ba0ef2d5db47dd1cb606f5",
+    resources: { memoryMiB: 1024 },
+  }),
+  agentCatalogEntrySchema.parse({
+    id: "opencode-cli",
+    displayName: "OpenCode CLI",
+    clientVersion: "1.18.10",
+    description: "Pinned OpenCode ACP runtime routed through its own governed ONEComputer identity.",
+    license: "MIT",
+    source: "https://www.npmjs.com/package/opencode-ai/v/1.18.10",
+    artifactSha256: "c135d5cb88407888f7d67ddb4a2e30f27109a8b9e8922282674b8abb34226bd8",
     resources: { memoryMiB: 1024 },
   }),
   agentCatalogEntrySchema.parse({
@@ -515,11 +526,11 @@ export type SandboxConfiguration = z.infer<typeof sandboxConfigurationSchema>;
 // The runtime still uses the historical `hermes-claw` catalog identifier.
 // Workspace manifests deliberately expose the product name instead, so an
 // exported workspace never leaks that implementation detail.
-export const workspaceManifestAgentCatalogIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-agent"] as const;
+export const workspaceManifestAgentCatalogIds = ["claude-desktop", "claude-cli", "codex-cli", "opencode-cli", "hermes-desktop", "hermes-agent"] as const;
 export const workspaceManifestAgentCatalogIdSchema = z.enum(workspaceManifestAgentCatalogIds);
 export type WorkspaceManifestAgentCatalogId = z.infer<typeof workspaceManifestAgentCatalogIdSchema>;
 
-export const workspaceManifestChatAgentCatalogIds = ["claude-cli", "codex-cli", "hermes-agent"] as const;
+export const workspaceManifestChatAgentCatalogIds = ["claude-cli", "codex-cli", "opencode-cli", "hermes-agent"] as const;
 export const workspaceManifestChatAgentCatalogIdSchema = z.enum(workspaceManifestChatAgentCatalogIds);
 export type WorkspaceManifestChatAgentCatalogId = z.infer<typeof workspaceManifestChatAgentCatalogIdSchema>;
 

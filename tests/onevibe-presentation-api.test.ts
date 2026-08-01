@@ -90,3 +90,34 @@ test("ONEVibe API creates an owned PPTX and only its workspace owner can downloa
     await app.close();
   }
 });
+
+test("ONEVibe can bootstrap a task-scoped ephemeral sandbox without a durable workspace", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = {
+    async create(input) { return { providerId: `ephemeral-${input.workspaceId}`, state: "ready", failureCode: null }; },
+    async status(providerId) { return { providerId, state: "ready", failureCode: null }; },
+    async open() { return { launchUrl: "https://vcr.example", expiresAt: new Date().toISOString() }; },
+    async destroy() {},
+    async purgeWorkspace() {},
+  } as ControllerClient;
+  const app = createControlServer(store, controller, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    oneVibeCaptureSecret: captureSecret,
+  });
+  try {
+    const created = await app.inject({ method: "POST", url: "/v1/onevibe/tasks", headers: { ...headers, "idempotency-key": "ephemeral-cowork-test-0001" } });
+    assert.equal(created.statusCode, 201);
+    assert.equal(created.json().workspace.ephemeral, true);
+    assert.match(created.json().workspace.grantId, /^cowork-ephemeral-/);
+    const taskId = created.json().task.id as string;
+    const workspaceId = created.json().workspace.id as string;
+    const events = await app.inject({ method: "GET", url: `/v1/workspaces/${workspaceId}/onevibe/tasks/${taskId}/events`, headers });
+    assert.equal(events.statusCode, 200);
+    assert.equal(events.json().events[0].kind, "system");
+    const listed = await app.inject({ method: "GET", url: "/v1/workspaces", headers });
+    assert.equal(listed.statusCode, 200);
+    assert.equal(listed.json().workspaces.some((workspace: { id: string }) => workspace.id === workspaceId), false);
+  } finally {
+    await app.close();
+  }
+});

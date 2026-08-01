@@ -307,3 +307,48 @@ test("managed provider live egress rotation replaces the broker grant without ex
   assert.equal(command.includes("signed-egress-grant"), false);
   assert.match(command, /onecomputer-egress-broker/);
 });
+
+test("E2B captures a PNG inside the sandbox boundary for VCR upload", async () => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL1WQAAAABJRU5ErkJggg==", "base64");
+  const sdk = {
+    connect: async () => ({
+      sandboxId: "e2b-vcr-sandbox",
+      commands: { run: async () => ({ stdout: png.toString("base64") }) },
+      files: { write: async () => undefined },
+      getHost: () => "host",
+    }),
+  } as unknown as E2bSdk;
+  const adapter = new E2bSandboxAdapter({
+    apiKey: "e2b-key",
+    templateId: "onecomputer-template",
+    egressProxyUrlTemplate: "https://egress.example.com",
+  }, sdk);
+  const captured = await adapter.captureFrame("e2b-vcr-sandbox", "browser");
+  assert.equal(captured.sourceApplication, "browser");
+  assert.equal(captured.mimeType, "image/png");
+  assert.deepEqual(Buffer.from(captured.imageBase64, "base64"), png);
+});
+
+test("E2B starts Codex/OpenCode ACP as a provider-local streaming process", async () => {
+  const commands: string[] = [];
+  const sdk = {
+    connect: async () => ({
+      sandboxId: "e2b-acp-sandbox",
+      commands: {
+        async run(command: string, options?: { background?: boolean; stdin?: boolean; onStdout?: (chunk: string) => void }) {
+          commands.push(command);
+          options?.onStdout?.("{\\\"jsonrpc\\\":\\\"2.0\\\"}\\n");
+          return { pid: 42, sendStdin: async () => undefined, closeStdin: async () => undefined, kill: async () => true, wait: async () => ({ exitCode: 0, stdout: "", stderr: "" }) };
+        },
+      },
+      getHost: () => "host",
+      files: { write: async () => undefined },
+    }),
+  } as unknown as E2bSdk;
+  const adapter = new E2bSandboxAdapter({ apiKey: "e2b-key", templateId: "onecomputer-template", egressProxyUrlTemplate: "https://egress.example.com" }, sdk);
+  const chunks: string[] = [];
+  const process = await adapter.startAcp("e2b-acp-sandbox", { agentCatalogId: "opencode-cli", cwd: "/workspace/task", environment: { HOME: "/home/kasm-user" }, onStdout: (chunk) => chunks.push(chunk) });
+  assert.equal(process.pid, 42);
+  assert.match(commands[0]!, /opencode acp/);
+  assert.deepEqual(chunks, ["{\\\"jsonrpc\\\":\\\"2.0\\\"}\\n"]);
+});

@@ -51,6 +51,7 @@ for enabled_agent in "${enabled_agents[@]}"; do
   [[ "$enabled_agent" == "claude-desktop" \
     || "$enabled_agent" == "claude-cli" \
     || "$enabled_agent" == "codex-cli" \
+    || "$enabled_agent" == "opencode-cli" \
     || "$enabled_agent" == "hermes-desktop" \
     || "$enabled_agent" == "hermes-claw" ]] || {
     echo "unrecognized agent selection" >&2
@@ -162,6 +163,7 @@ require_agent_environment() {
 agent_enabled claude-desktop && require_agent_environment ONECOMPUTER "Claude Desktop"
 agent_enabled claude-cli && require_agent_environment ONECOMPUTER_CLAUDE_CLI "Claude CLI"
 agent_enabled codex-cli && require_agent_environment ONECOMPUTER_CODEX_CLI "Codex CLI"
+agent_enabled opencode-cli && require_agent_environment ONECOMPUTER_OPENCODE_CLI "OpenCode CLI"
 agent_enabled hermes-claw && require_agent_environment ONECOMPUTER_HERMES "Hermes Agent CLI"
 agent_enabled hermes-desktop && require_agent_environment ONECOMPUTER_HERMES_DESKTOP "Hermes Agent Desktop"
 if agent_enabled hermes-claw; then

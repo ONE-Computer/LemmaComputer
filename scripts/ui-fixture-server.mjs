@@ -5,6 +5,8 @@ const now = new Date().toISOString();
 const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
 const digest = "a".repeat(64);
 const bundleDigest = "b".repeat(64);
+const onePixelPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL1WQAAAABJRU5ErkJggg==";
+const oneVibeTasks = new Map();
 
 const session = {
   user: {
@@ -51,6 +53,22 @@ const workspace = {
     network: "gateway-only",
   },
 };
+
+const ephemeralCoworkWorkspace = {
+  ...workspace,
+  id: "fixture-ephemeral-workspace",
+  grantId: "cowork-ephemeral-fixture",
+  state: "ready",
+  profile: {
+    ...workspace.profile,
+    executionMode: "disposable-open",
+    egressMode: "restricted",
+    persistence: "persistent-home",
+  },
+};
+const fixtureCoworkWorkspaceIds = new Set([workspaceId, ephemeralCoworkWorkspace.id]);
+const fixtureChatAgentIds = new Set(["hermes-claw", "codex-cli", "opencode-cli"]);
+const fixtureChatAgentNames = { "hermes-claw": "Hermes Agent CLI", "codex-cli": "Codex CLI", "opencode-cli": "OpenCode CLI" };
 
 const sandboxWorkspace = {
   ...workspace,
@@ -660,8 +678,8 @@ const server = http.createServer((request, response) => {
   const activityMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/([^/]+)\/sessions\/([^/]+)\/turns\/([^/]+)\/activity(\/stream)?$/);
   if (request.method === "GET" && activityMatch) {
     const [, requestedWorkspaceId, requestedAgentId, requestedSessionId, requestedTurnId, streamPath] = activityMatch.map((value) => value ? decodeURIComponent(value) : value);
-    const owned = requestedWorkspaceId === workspaceId
-      && requestedAgentId === "hermes-claw"
+    const owned = fixtureCoworkWorkspaceIds.has(requestedWorkspaceId)
+      && fixtureChatAgentIds.has(requestedAgentId)
       && requestedSessionId === chatSession.id;
     const events = owned ? activityByTurn.get(requestedTurnId) : undefined;
     if (!events) {
@@ -697,8 +715,123 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ workspaces: fixtureWorkspaces }));
     return;
   }
+  const oneVibeTaskMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/onevibe\/tasks(?:\/([^/]+))?(?:\/(events|vcr|presentations))?$/);
+  if (key === "POST /v1/onevibe/tasks") {
+    const taskId = `fixture-ephemeral-cowork-${Date.now()}`;
+    const createdAt = new Date().toISOString();
+    const task = { id: taskId, status: "running", createdAt };
+    oneVibeTasks.set(taskId, {
+      task,
+      events: [
+        { taskId, sequence: 1, kind: "system", payloadHash: "e".repeat(64), previousEventHash: null, createdAt },
+        { taskId, sequence: 2, kind: "workspace-frame", payloadHash: "d".repeat(64), previousEventHash: "e".repeat(64), createdAt },
+        { taskId, sequence: 3, kind: "workspace-frame", payloadHash: "c".repeat(64), previousEventHash: "d".repeat(64), createdAt },
+        { taskId, sequence: 4, kind: "workspace-frame", payloadHash: "b".repeat(64), previousEventHash: "c".repeat(64), createdAt },
+      ],
+      frames: [2, 3, 4].map((eventSequence) => ({ taskId, eventSequence, sourceApplication: "browser", imageSha256: String.fromCharCode(102 - eventSequence).repeat(64), width: 1, height: 1, capturedAt: createdAt })),
+      artifact: null,
+    });
+    response.statusCode = 201;
+    response.end(JSON.stringify({ task, workspace: { ...ephemeralCoworkWorkspace, ephemeral: true, expiresAt: new Date(Date.now() + 3_600_000).toISOString() } }));
+    return;
+  }
+  if (oneVibeTaskMatch && request.method === "POST" && oneVibeTaskMatch[2] === undefined) {
+    const taskId = `fixture-cowork-${Date.now()}`;
+    const createdAt = new Date().toISOString();
+    const task = { id: taskId, status: "running", createdAt };
+    oneVibeTasks.set(taskId, {
+      task,
+      events: [
+        { taskId, sequence: 1, kind: "system", payloadHash: "e".repeat(64), previousEventHash: null, createdAt },
+        { taskId, sequence: 2, kind: "workspace-frame", payloadHash: "d".repeat(64), previousEventHash: "e".repeat(64), createdAt },
+        { taskId, sequence: 3, kind: "workspace-frame", payloadHash: "c".repeat(64), previousEventHash: "d".repeat(64), createdAt },
+        { taskId, sequence: 4, kind: "workspace-frame", payloadHash: "b".repeat(64), previousEventHash: "c".repeat(64), createdAt },
+      ],
+      frames: [2, 3, 4].map((eventSequence) => ({ taskId, eventSequence, sourceApplication: "browser", imageSha256: String.fromCharCode(102 - eventSequence).repeat(64), width: 1, height: 1, capturedAt: createdAt })),
+      artifact: null,
+    });
+    response.statusCode = 201;
+    response.end(JSON.stringify({ task }));
+    return;
+  }
+  if (oneVibeTaskMatch && request.method === "GET" && oneVibeTaskMatch[2]) {
+    const taskState = oneVibeTasks.get(oneVibeTaskMatch[2]);
+    if (!taskState) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "ONEVIBE_TASK_NOT_FOUND", message: "Cowork fixture task not found", retryable: false } }));
+      return;
+    }
+    if (oneVibeTaskMatch[3] === "events") {
+      response.end(JSON.stringify({ events: taskState.events }));
+      return;
+    }
+    if (oneVibeTaskMatch[3] === "vcr") {
+      response.end(JSON.stringify({ frames: taskState.frames.map((frame) => ({ ...frame, frameUrl: `/v1/workspaces/${workspaceId}/onevibe/tasks/${taskState.task.id}/vcr/frames/${frame.eventSequence}` })) }));
+      return;
+    }
+  }
+  const oneVibeFrameMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/onevibe\/tasks\/([^/]+)\/vcr\/frames\/([^/]+)$/);
+  if (oneVibeFrameMatch && request.method === "GET") {
+    const taskState = oneVibeTasks.get(oneVibeFrameMatch[2]);
+    const frame = taskState?.frames.find((candidate) => String(candidate.eventSequence) === oneVibeFrameMatch[3]);
+    if (!frame) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "ONEVIBE_VCR_FRAME_NOT_FOUND", message: "Cowork fixture frame not found", retryable: false } }));
+      return;
+    }
+    response.setHeader("content-type", "image/png");
+    response.end(Buffer.from(onePixelPngBase64, "base64"));
+    return;
+  }
+  const oneVibePresentationMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/onevibe\/tasks\/([^/]+)\/presentations(?:\/([^/]+))?$/);
+  if (oneVibePresentationMatch && request.method === "POST" && !oneVibePresentationMatch[3]) {
+    const taskState = oneVibeTasks.get(oneVibePresentationMatch[2]);
+    if (!taskState) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "ONEVIBE_TASK_NOT_FOUND", message: "Cowork fixture task not found", retryable: false } }));
+      return;
+    }
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body || "{}");
+      const createdAt = new Date().toISOString();
+      const artifactId = `fixture-artifact-${Date.now()}`;
+      const artifact = { id: artifactId, name: `${String(input.title || "Cowork task update").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 64) || "cowork-task-update"}.pptx`, mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", sha256: "f".repeat(64), sizeBytes: 20480, createdAt, downloadUrl: `/v1/workspaces/${workspaceId}/onevibe/tasks/${taskState.task.id}/presentations/${artifactId}` };
+      taskState.artifact = artifact;
+      taskState.events.push({ taskId: taskState.task.id, sequence: taskState.events.length + 1, kind: "artifact", payloadHash: artifact.sha256, previousEventHash: taskState.events.at(-1)?.payloadHash ?? null, createdAt });
+      response.statusCode = 201;
+      response.end(JSON.stringify({ artifact }));
+    });
+    return;
+  }
+  if (oneVibePresentationMatch && request.method === "GET" && oneVibePresentationMatch[3]) {
+    const taskState = oneVibeTasks.get(oneVibePresentationMatch[2]);
+    if (!taskState?.artifact || taskState.artifact.id !== oneVibePresentationMatch[3]) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "ONEVIBE_ARTIFACT_NOT_FOUND", message: "Cowork fixture artifact not found", retryable: false } }));
+      return;
+    }
+    response.setHeader("content-type", taskState.artifact.mimeType);
+    response.end(Buffer.from("PK\\x03\\x04ONECOMPUTER-FIXTURE-PPTX"));
+    return;
+  }
   if (key === "GET /v1/sites") {
     response.end(JSON.stringify({ sites: fixtureSites }));
+    return;
+  }
+  const chatAgentsMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents(?:\/([^/]+))?(?:\/(status))?$/);
+  if (request.method === "GET" && chatAgentsMatch && fixtureCoworkWorkspaceIds.has(chatAgentsMatch[1])) {
+    const agentIds = chatAgentsMatch[1] === ephemeralCoworkWorkspace.id ? ["opencode-cli", "codex-cli"] : ["hermes-claw"];
+    if (!chatAgentsMatch[2]) response.end(JSON.stringify({ workspaceId: chatAgentsMatch[1], agents: agentIds.map((catalogId) => ({ catalogId, displayName: fixtureChatAgentNames[catalogId], state: "ready", reasonCode: "CHAT_AGENT_READY" })) }));
+    else if (agentIds.includes(chatAgentsMatch[2])) response.end(JSON.stringify({ workspaceId: chatAgentsMatch[1], catalogId: chatAgentsMatch[2], displayName: fixtureChatAgentNames[chatAgentsMatch[2]], state: "ready", reasonCode: "CHAT_AGENT_READY" }));
+    else { response.statusCode = 404; response.end(JSON.stringify({ error: { code: "CHAT_AGENT_NOT_SELECTED", message: "Agent not selected", retryable: false } })); }
+    return;
+  }
+  const chatSessionsMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/([^/]+)\/sessions(?:\/([^/]+)\/messages)?$/);
+  if (request.method === "GET" && chatSessionsMatch && fixtureCoworkWorkspaceIds.has(chatSessionsMatch[1]) && fixtureChatAgentIds.has(chatSessionsMatch[2])) {
+    if (chatSessionsMatch[3]) response.end(JSON.stringify({ messages: chatMessages }));
+    else response.end(JSON.stringify({ sessions: [chatSession], nextCursor: null }));
     return;
   }
   if (request.method === "GET" && /^\/v1\/sites\/[0-9a-f-]+\/preview$/.test(url.pathname)) {
@@ -959,13 +1092,14 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
-  if (key === `POST /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`) {
+  if (request.method === "POST" && /^\/v1\/workspaces\/[^/]+\/chat\/agents\/(?:hermes-claw|codex-cli|opencode-cli)\/sessions$/.test(url.pathname)) {
     response.statusCode = 201;
-    response.end(JSON.stringify({ ...chatSession, id: `fixture-session-${Date.now()}`, title: null }));
+    response.end(JSON.stringify({ ...chatSession, title: null }));
     return;
   }
-  if (key.startsWith(`POST /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/`) && key.endsWith("/messages")) {
+  if (request.method === "POST" && /^\/v1\/workspaces\/[^/]+\/chat\/agents\/(?:hermes-claw|codex-cli|opencode-cli)\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
     let body = "";
+    const requestedAgentId = url.pathname.split("/")[6];
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
       const input = JSON.parse(body);
@@ -1000,7 +1134,7 @@ const server = http.createServer((request, response) => {
         }];
       }
       const openingChunks = [
-        { type: "start", messageId, messageMetadata: { agentCatalogId: "hermes-claw", turnId, state: "streaming", createdAt } },
+        { type: "start", messageId, messageMetadata: { agentCatalogId: requestedAgentId, turnId, state: "streaming", createdAt } },
         { type: "text-start", id: `${turnId}-text` },
         { type: "text-delta", id: `${turnId}-text`, delta: openingText },
       ];
@@ -1020,7 +1154,7 @@ const server = http.createServer((request, response) => {
         chatMessages.push({
           id: messageId,
           role: "assistant",
-          metadata: { agentCatalogId: "hermes-claw", turnId, state: "completed", createdAt },
+          metadata: { agentCatalogId: requestedAgentId, turnId, state: "completed", createdAt },
           parts: [
             { type: "text", text: `${openingText}${closingText}`, state: "done" },
             { type: "data-terminal", id: `${turnId}-terminal`, data: { turnId, state: "completed" } },

@@ -175,8 +175,9 @@ RUN npm ci \
       --no-fund \
     && test -x /opt/onecomputer/acp-runtime/node_modules/.bin/claude-agent-acp \
     && test -x /opt/onecomputer/acp-runtime/node_modules/.bin/codex-acp \
+    && test -x /opt/onecomputer/acp-runtime/node_modules/.bin/opencode \
     && node -e \
-      'for (const name of ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp"]) require.resolve(name + "/package.json", { paths: ["/opt/onecomputer/acp-runtime"] })' \
+      'for (const name of ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp", "opencode-ai"]) require.resolve(name + "/package.json", { paths: ["/opt/onecomputer/acp-runtime"] })' \
     && npm cache clean --force
 
 RUN uv pip install \

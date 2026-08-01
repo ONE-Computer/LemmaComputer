@@ -91,6 +91,7 @@ export const siteApi = {
 };
 
 export const oneVibeApi = {
+  createEphemeralTask: () => request("/api/v1/onevibe/tasks", mutation()),
   createTask: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks`, mutation()),
   events: (workspaceId, taskId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks/${encodeURIComponent(taskId)}/events`, { cache: "no-store" }),
   vcr: (workspaceId, taskId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks/${encodeURIComponent(taskId)}/vcr`, { cache: "no-store" }),

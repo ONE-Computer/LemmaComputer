@@ -53,6 +53,29 @@ type E2bInstance = {
   files: { write(path: string, data: string): Promise<unknown> };
 };
 
+export type ManagedVcrSource = "browser" | "document" | "desktop";
+export type ManagedVcrCapture = {
+  sourceApplication: ManagedVcrSource;
+  mimeType: "image/png";
+  imageBase64: string;
+};
+
+export type E2bAcpProcess = {
+  pid: number;
+  sendStdin(data: string): Promise<void>;
+  closeStdin(): Promise<void>;
+  kill(): Promise<boolean>;
+  wait(): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+};
+
+export type E2bAcpStartInput = {
+  agentCatalogId: "codex-cli" | "opencode-cli";
+  cwd: string;
+  environment?: Readonly<Record<string, string>>;
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
+};
+
 export type E2bSdk = {
   create(template: string, options: SandboxOpts): Promise<E2bInstance>;
   connect(id: string, options: { apiKey: string; timeoutMs: number }): Promise<E2bInstance>;
@@ -75,7 +98,9 @@ const defaultE2bSdk: E2bSdk = {
       query: { metadata: { "onecomputer.workspaceId": workspaceId } },
       limit: 100,
     });
-    return paginator.hasNext ? paginator.nextItems() : [];
+    const sandboxes: SandboxInfo[] = [];
+    while (paginator.hasNext) sandboxes.push(...await paginator.nextItems({ apiKey }));
+    return sandboxes;
   },
   listVolumes: (options) => E2bVolume.list(options),
   createVolume: (name, options) => E2bVolume.create(name, options),
@@ -216,6 +241,7 @@ const workspaceEnvironment = (
     "claude-desktop-managed-v1": "claude-desktop",
     "claude-cli-managed-v1": "claude-cli",
     "codex-cli-managed-v1": "codex-cli",
+    "opencode-cli-managed-v1": "opencode-cli",
     "hermes-desktop-managed-v1": "hermes-desktop",
     "hermes-claw-managed-v1": "hermes-claw",
   } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";
@@ -430,6 +456,44 @@ export class E2bSandboxAdapter implements SandboxAdapter {
       url.username = "kasm_user";
       url.password = password;
       return buildKasmClipboardLaunch(url.toString(), clipboardFromMetadata(metadata));
+    } catch (error) {
+      return providerFailure("E2B", error);
+    }
+  }
+
+  /** Capture inside the provider boundary; callers upload the returned bytes through the Control-owned VCR grant. */
+  async captureFrame(providerId: string, sourceApplication: ManagedVcrSource): Promise<ManagedVcrCapture> {
+    try {
+      const sandbox = await this.sdk.connect(providerId, { apiKey: this.config.apiKey, timeoutMs: this.timeoutMs });
+      const framePath = `/tmp/onecomputer-vcr-${sourceApplication}.png`;
+      const result = await sandbox.commands.run(
+        `set -eu; DISPLAY=:1 gnome-screenshot -f ${framePath}; base64 -w0 ${framePath}`,
+      );
+      const imageBase64 = result.stdout.trim();
+      const bytes = Buffer.from(imageBase64, "base64");
+      if (bytes.length < 8 || bytes.subarray(0, 8).compare(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) !== 0 || bytes.length > 3 * 1024 * 1024) {
+        throw new OneComputerError("E2B_VCR_CAPTURE_INVALID", "The E2B screenshot was not a bounded PNG", 502, true);
+      }
+      return { sourceApplication, mimeType: "image/png", imageBase64 };
+    } catch (error) {
+      return providerFailure("E2B", error);
+    }
+  }
+
+  /** Start the ACP harness in E2B; stdin/stdout remain inside the provider boundary and are callback-streamed to Control. */
+  async startAcp(providerId: string, input: E2bAcpStartInput): Promise<E2bAcpProcess> {
+    try {
+      const sandbox = await this.sdk.connect(providerId, { apiKey: this.config.apiKey, timeoutMs: this.timeoutMs });
+      const command = input.agentCatalogId === "opencode-cli" ? "opencode acp" : "codex-acp";
+      const env = Object.entries(input.environment ?? {}).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(" ");
+      const commandLine = `cd ${JSON.stringify(input.cwd)} && ${env ? `${env} ` : ""}${command}`;
+      const run = sandbox.commands.run as unknown as (command: string, options: {
+        background: true;
+        stdin: true;
+        onStdout?: (chunk: string) => void;
+        onStderr?: (chunk: string) => void;
+      }) => Promise<{ pid: number; sendStdin(data: string): Promise<void>; closeStdin(): Promise<void>; kill(): Promise<boolean>; wait(): Promise<{ exitCode: number; stdout: string; stderr: string }> }>;
+      return await run(commandLine, { background: true, stdin: true, onStdout: input.onStdout, onStderr: input.onStderr });
     } catch (error) {
       return providerFailure("E2B", error);
     }

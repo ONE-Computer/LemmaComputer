@@ -2038,6 +2038,7 @@ function CoworkScreen({
   activeSessionId, onSessionsChange, onSessionChange, preferredAgentId, onAgentChange,
   sessions, historyHasMore, historyLoadingMore, onLoadOlder,
 }) {
+  const [ephemeralWorkspace, setEphemeralWorkspace] = useState(null);
   const [task, setTask] = useState(() => {
     const id = new URL(window.location.href).searchParams.get("coworkTask");
     return id ? { id } : null;
@@ -2048,12 +2049,15 @@ function CoworkScreen({
   const [artifact, setArtifact] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [coworkAgentId, setCoworkAgentId] = useState(preferredAgentId ?? "");
+  const activeWorkspace = ephemeralWorkspace ?? workspace;
+  const selectedCoworkAgentId = coworkAgentId || preferredAgentId;
 
   const refreshEvidence = async (taskId = task?.id) => {
-    if (!workspace || !taskId) return;
+    if (!activeWorkspace || !taskId) return;
     const [timeline, replay] = await Promise.all([
-      oneVibeApi.events(workspace.id, taskId),
-      oneVibeApi.vcr(workspace.id, taskId),
+      oneVibeApi.events(activeWorkspace.id, taskId),
+      oneVibeApi.vcr(activeWorkspace.id, taskId),
     ]);
     setEvents(timeline.events ?? []);
     setFrames(replay.frames ?? []);
@@ -2078,35 +2082,52 @@ function CoworkScreen({
   }, [workspace?.id]);
 
   useEffect(() => {
-    if (!task?.id || !workspace) return undefined;
+    if (!task?.id || !activeWorkspace) return undefined;
     void refreshEvidence(task.id).catch((requestError) => setError(requestError.message));
     const timer = window.setInterval(() => { void refreshEvidence(task.id).catch(() => undefined); }, 2_500);
     return () => window.clearInterval(timer);
-  }, [task?.id, workspace?.id]);
+  }, [task?.id, activeWorkspace?.id]);
 
   useEffect(() => {
     setSelectedFrameIndex((current) => Math.min(current, Math.max(0, frames.length - 1)));
   }, [frames.length]);
 
   const startTask = async () => {
-    if (!workspace) return;
+    if (!workspace && !ephemeralWorkspace) {
+      await startEphemeralTask();
+      return;
+    }
+    if (!activeWorkspace) return;
     setBusy(true); setError(""); setArtifact(null);
     try {
-      const created = await oneVibeApi.createTask(workspace.id);
+      const created = await oneVibeApi.createTask(activeWorkspace.id);
       setActiveTask(created.task);
       await refreshEvidence(created.task.id);
     } catch (requestError) { setError(requestError.message); }
     finally { setBusy(false); }
   };
 
+  const startEphemeralTask = async () => {
+    setBusy(true); setError(""); setArtifact(null);
+    try {
+      const created = await oneVibeApi.createEphemeralTask();
+      setEphemeralWorkspace(created.workspace);
+      setCoworkAgentId("opencode-cli");
+      setActiveTask(created.task);
+      setEvents([]); setFrames([]); setSelectedFrameIndex(0);
+    } catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+
   const generatePresentation = async () => {
-    if (!workspace || !activeSessionId || !preferredAgentId) {
+    const presentationSessionId = activeSessionId ?? sessions.at(0)?.id;
+    if (!activeWorkspace || !presentationSessionId || !selectedCoworkAgentId) {
       setError("Ask the selected Cowork agent to prepare the slide, then generate it from that conversation.");
       return;
     }
     setBusy(true); setError("");
     try {
-      const transcript = await chatApi.messages(workspace.id, preferredAgentId, activeSessionId);
+      const transcript = await chatApi.messages(activeWorkspace.id, selectedCoworkAgentId, presentationSessionId);
       const messages = transcript.messages ?? [];
       const latestUser = [...messages].reverse().find((message) => message.role === "user");
       const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
@@ -2114,7 +2135,7 @@ function CoworkScreen({
       const title = textFor(latestUser).replace(/\s+/g, " ").slice(0, 180) || "Cowork task update";
       const body = textFor(latestAssistant).slice(0, 4_000) || "The Cowork agent has not produced a slide-ready response yet.";
       if (!task) throw new Error("Start a Cowork task before generating its artifact.");
-      const created = await oneVibeApi.createPresentation(workspace.id, task.id, { title, body });
+      const created = await oneVibeApi.createPresentation(activeWorkspace.id, task.id, { title, body });
       setArtifact(created.artifact);
       await refreshEvidence(task.id);
     } catch (requestError) { setError(requestError.message); }
@@ -2122,7 +2143,8 @@ function CoworkScreen({
   };
 
   const workspaceOptions = workspaces?.map((item) => ({ value: item.id, label: workspaceName(item) })) ?? [];
-  const workspaceReady = workspace && ["ready", "open"].includes(workspaceState);
+  const effectiveWorkspaceState = ephemeralWorkspace?.state ?? workspaceState;
+  const workspaceReady = activeWorkspace && ["ready", "open"].includes(effectiveWorkspaceState);
   const selectedFrame = frames[selectedFrameIndex];
   return (
     <section className="cowork-screen" aria-labelledby="cowork-heading">
@@ -2132,24 +2154,26 @@ function CoworkScreen({
       </header>
       <div className="cowork-context">
         <SelectMenu value={workspace?.id ?? ""} onValueChange={onWorkspaceChange} ariaLabel="Choose Cowork workspace" options={workspaceOptions} />
+        {ephemeralWorkspace && <span className="cowork-ephemeral-badge">Ephemeral E2B sandbox · task-scoped</span>}
         {!workspaceReady && workspace && <button className="secondary-button" type="button" onClick={onStartWorkspace} disabled={busy}>Start workspace</button>}
+        {!task && <button className="secondary-button" type="button" onClick={startEphemeralTask} disabled={busy}>{busy ? "Starting…" : "Start ephemeral sandbox"}</button>}
       </div>
-      {!workspace && <div className="cowork-empty">Choose a workspace to begin a Cowork task.</div>}
-      {workspace && <div className="cowork-grid">
+      {!activeWorkspace && <div className="cowork-empty">Start an ephemeral sandbox or choose a durable workspace to begin.</div>}
+      {activeWorkspace && <div className="cowork-grid">
         <section className="cowork-chat-pane">
           {task ? <ChatScreen
             embedded
             taskId={task.id}
-            workspace={workspace}
+            workspace={activeWorkspace}
             workspaces={workspaces}
-            workspaceState={workspaceState}
+            workspaceState={effectiveWorkspaceState}
             onWorkspaceChange={onWorkspaceChange}
-            onStartWorkspace={onStartWorkspace}
+            onStartWorkspace={ephemeralWorkspace ? undefined : onStartWorkspace}
             activeSessionId={activeSessionId}
             onSessionsChange={onSessionsChange}
             onSessionChange={onSessionChange}
-            preferredAgentId={preferredAgentId}
-            onAgentChange={onAgentChange}
+            preferredAgentId={selectedCoworkAgentId}
+            onAgentChange={(workspaceId, agentId) => { setCoworkAgentId(agentId); onAgentChange?.(workspaceId, agentId); }}
             historyLoadRequest={0}
             onHistoryMetadataChange={() => undefined}
             sessions={sessions}
@@ -2930,7 +2954,7 @@ export function ChatScreen({
 
   return (
     <div className={`secondary-screen chat-screen${embedded ? " cowork-chat-screen" : ""}`}>
-      {!companionComposer && !embedded && contextSelector}
+      {!companionComposer && contextSelector}
       <ChatConversation
         key={`${workspace.id}:${activeAgentId}`}
         workspaceId={workspace.id}

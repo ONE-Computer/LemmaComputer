@@ -702,6 +702,7 @@ const displayNames: Readonly<Record<ChatAgentCatalogId, string>> = Object.freeze
   "hermes-claw": "Hermes Agent",
   "claude-cli": "Claude CLI",
   "codex-cli": "Codex CLI",
+  "opencode-cli": "OpenCode CLI",
 });
 
 const acknowledgementMessage = "Message received.";
@@ -711,7 +712,7 @@ const unavailableAttachmentMessage = "I could not download that Telegram attachm
 const safeFailureMessage = "I started the task, but the agent could not complete it. Try again, or use /agent to select another available agent.";
 const approvalFailureMessage = "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.";
 const telegramAgentCallbackPrefix = "onecomputer:agent:";
-const switchableAgentIds = ["hermes-claw", "claude-cli", "codex-cli"] as const;
+const switchableAgentIds = ["hermes-claw", "claude-cli", "codex-cli", "opencode-cli"] as const;
 const telegramMessageLimit = 4_000;
 const telegramStreamStartCharacters = 24;
 const telegramStreamEditCharacters = 160;
@@ -1065,7 +1066,7 @@ export class ChannelBrokerService {
       } catch {
         return undefined;
       }
-    }))).filter((agentCatalogId): agentCatalogId is ChatAgentCatalogId => Boolean(agentCatalogId));
+    }))).filter((agentCatalogId): agentCatalogId is ChatAgentCatalogId => agentCatalogId !== undefined);
     if (!available.length) {
       await this.telegram.sendMessage(token, update.chatId, "No alternative agents are available for this workspace.");
       return false;

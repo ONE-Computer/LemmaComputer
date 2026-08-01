@@ -54,7 +54,7 @@ export type SandboxCreateInput = {
     token: string;
   };
   chatRuntimes?: Array<{
-    catalogId: "claude-cli" | "codex-cli" | "hermes-claw";
+    catalogId: "claude-cli" | "codex-cli" | "opencode-cli" | "hermes-claw";
     key: string;
   }>;
   agentGrants?: Array<{
@@ -119,6 +119,7 @@ export const agentEnvironment = (
     "claude-desktop": "ONECOMPUTER",
     "claude-cli": "ONECOMPUTER_CLAUDE_CLI",
     "codex-cli": "ONECOMPUTER_CODEX_CLI",
+    "opencode-cli": "ONECOMPUTER_OPENCODE_CLI",
     "hermes-desktop": "ONECOMPUTER_HERMES_DESKTOP",
     "hermes-claw": "ONECOMPUTER_HERMES",
   } as const)[grant.catalogId];
@@ -148,7 +149,9 @@ export const chatRuntimeEnvironment = (
   }
   const variable = runtime.catalogId === "claude-cli"
     ? "ONECOMPUTER_CLAUDE_CHAT_API_KEY"
-    : "ONECOMPUTER_CODEX_CHAT_API_KEY";
+    : runtime.catalogId === "codex-cli"
+      ? "ONECOMPUTER_CODEX_CHAT_API_KEY"
+      : "ONECOMPUTER_OPENCODE_CHAT_API_KEY";
   return [`${variable}=${runtime.key}`];
 };
 
@@ -313,6 +316,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       "claude-desktop-managed-v1": "claude-desktop",
       "claude-cli-managed-v1": "claude-cli",
       "codex-cli-managed-v1": "codex-cli",
+      "opencode-cli-managed-v1": "opencode-cli",
       "hermes-desktop-managed-v1": "hermes-desktop",
       "hermes-claw-managed-v1": "hermes-claw",
     } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";

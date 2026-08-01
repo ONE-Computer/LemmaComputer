@@ -149,7 +149,7 @@ const hermesPolicy: RuntimePolicy = {
 };
 
 class FakeController implements ControllerClient {
-  lastChatRuntimes: Array<{ catalogId: "claude-cli" | "codex-cli" | "hermes-claw"; key: string }> | undefined;
+  lastChatRuntimes: Array<{ catalogId: "claude-cli" | "codex-cli" | "opencode-cli" | "hermes-claw"; key: string }> | undefined;
   async create(input: Parameters<ControllerClient["create"]>[0]): Promise<Sandbox> {
     this.lastChatRuntimes = input.chatRuntimes;
     return { providerId: `sandbox-${input.workspaceId}`, state: "ready", failureCode: null };

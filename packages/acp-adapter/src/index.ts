@@ -124,7 +124,7 @@ export interface AcpHarnessConfiguration {
   provider?: SetProviderRequest;
 }
 
-export type OfficialAcpAgent = Extract<ChatAgentCatalogId, "claude-cli" | "codex-cli">;
+export type OfficialAcpAgent = Extract<ChatAgentCatalogId, "claude-cli" | "codex-cli" | "opencode-cli">;
 
 export interface OfficialAcpHarnessInput {
   agentCatalogId: OfficialAcpAgent;
@@ -141,6 +141,7 @@ export interface OfficialAcpHarnessInput {
 const officialAcpExecutables: Readonly<Record<OfficialAcpAgent, string>> = Object.freeze({
   "claude-cli": "claude-agent-acp",
   "codex-cli": "codex-acp",
+  "opencode-cli": "opencode",
 });
 
 export const officialAcpHarnessConfiguration = (
@@ -149,12 +150,12 @@ export const officialAcpHarnessConfiguration = (
   const home = resolve(input.home ?? "/home/kasm-user");
   const runtimeRoot = resolve(input.runtimeRoot ?? "/opt/onecomputer/acp-runtime");
   const executable = officialAcpExecutables[input.agentCatalogId];
-  if (input.agentCatalogId === "codex-cli" && !input.gateway) {
-    throw new Error("The governed Codex ACP runtime requires a broker gateway");
+  if (input.agentCatalogId !== "claude-cli" && !input.gateway) {
+    throw new Error(`The governed ${input.agentCatalogId} ACP runtime requires a broker gateway`);
   }
   return {
     command: resolve(runtimeRoot, "node_modules", ".bin", executable),
-    args: [],
+    args: input.agentCatalogId === "opencode-cli" ? ["acp"] : [],
     cwd: resolve(input.cwd),
     agentCatalogId: input.agentCatalogId,
     environment: input.agentCatalogId === "claude-cli"
@@ -163,7 +164,8 @@ export const officialAcpHarnessConfiguration = (
         CLAUDE_CONFIG_DIR: resolve(home, ".claude-cli"),
         NO_BROWSER: "1",
       }
-      : {
+      : input.agentCatalogId === "codex-cli"
+        ? {
         HOME: home,
         CODEX_HOME: resolve(home, ".codex-cli"),
         ...(input.model ? {
@@ -173,8 +175,14 @@ export const officialAcpHarnessConfiguration = (
           }),
         } : {}),
         NO_BROWSER: "1",
-      },
-    ...(input.agentCatalogId === "codex-cli" && input.gateway ? {
+        }
+        : {
+          HOME: home,
+          OPENCODE_CONFIG_DIR: resolve(home, ".config", "opencode"),
+          OPENCODE_DISABLE_TUI: "1",
+          NO_BROWSER: "1",
+        },
+    ...(input.agentCatalogId !== "claude-cli" && input.gateway ? {
       provider: {
         providerId: "custom-gateway",
         apiType: "openai",

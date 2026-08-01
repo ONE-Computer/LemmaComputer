@@ -152,6 +152,7 @@ export class PolicyBundleSigner {
       "claude-desktop-managed-v1": "claude-desktop",
       "claude-cli-managed-v1": "claude-cli",
       "codex-cli-managed-v1": "codex-cli",
+      "opencode-cli-managed-v1": "opencode-cli",
       "hermes-desktop-managed-v1": "hermes-desktop",
       "hermes-claw-managed-v1": "hermes-claw",
     } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";

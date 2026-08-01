@@ -1,5 +1,7 @@
 # ONEVibe-MonoRepo: E2B + ACP final execution plan
 
+> Current execution addendum: see [ONEVIBE_EPHEMERAL_COWORK_ACP.md](./ONEVIBE_EPHEMERAL_COWORK_ACP.md) for the task-scoped sandbox philosophy and API-first ACP/VCR qualification order.
+
 **Status:** approved architecture plan  
 **Date:** 2026-08-01  
 **Target branch:** `codex/onevibe-computer`
@@ -64,9 +66,10 @@ The R&D evidence has three caveats:
 2. Codex ACP has a qualification lane through LiteLLM. Claude ACP is packaged,
    but intentionally remains disabled until broker-provided governed authority
    works without a provider secret in the agent profile/filesystem.
-3. OpenCode is not yet packaged in those branches. It must enter through the
-   same `HarnessAdapter`/ACP conformance contract; its existence or ACP claim
-   is not runtime evidence.
+3. OpenCode is now pinned in the ACP runtime image and launched as the
+   official `opencode acp` command. The deterministic adapter/API gates pass;
+   live E2B evidence still requires the immutable image/template and provider
+   credentials described above.
 
 ## Runtime model
 
@@ -224,13 +227,13 @@ closed.
 **Exit:** current Kasm and existing Cowork PPTX/VCR journey pass unchanged;
 new provider conformance tests pass against the fake provider.
 
-### Phase 1 — E2B + Codex ACP vertical slice
+### Phase 1 — E2B + Codex/OpenCode ACP vertical slice
 
 - Port managed E2B adapter and policy-bound egress checks.
 - Build/pin image and ACP runtime in CI.
 - Implement create/resume/pause/kill, usage, budget reservation, backpressure,
   and reconciliation.
-- Run one multi-turn Codex ACP conversation through LiteLLM.
+- Run multi-turn Codex and OpenCode ACP conversations through LiteLLM.
 - Render canonical streaming activity in Cowork.
 
 **Exit:** API and browser E2E prove a fresh E2B conversation, streamed ACP

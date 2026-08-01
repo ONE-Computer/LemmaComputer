@@ -90,6 +90,21 @@ test("ACP v1 negotiates capabilities and produces one canonical ordered stream",
   }
 });
 
+test("official ACP configuration keeps Codex and OpenCode broker-bound and starts OpenCode in ACP mode", () => {
+  assert.throws(
+    () => officialAcpHarnessConfiguration({ agentCatalogId: "opencode-cli", cwd: "/tmp/onecomputer" }),
+    /requires a broker gateway/,
+  );
+  const configured = officialAcpHarnessConfiguration({
+    agentCatalogId: "opencode-cli",
+    cwd: "/tmp/onecomputer",
+    gateway: { baseUrl: "https://gateway.example.com/v1", headers: { authorization: "Bearer scoped" } },
+  });
+  assert.deepEqual(configured.args, ["acp"]);
+  assert.equal(configured.environment?.OPENCODE_DISABLE_TUI, "1");
+  assert.equal(configured.provider?.baseUrl, "https://gateway.example.com/v1");
+});
+
 test("ACP permission selection requires and emits a governed operation", async () => {
   const operationId = "11111111-1111-4111-8111-111111111111";
   const session = await start({

@@ -45,6 +45,7 @@ const agentProfileFor = (catalogId: AgentCatalogId): AgentProfile => ({
   "claude-desktop": "claude-desktop-managed-v1",
   "claude-cli": "claude-cli-managed-v1",
   "codex-cli": "codex-cli-managed-v1",
+  "opencode-cli": "opencode-cli-managed-v1",
   "hermes-desktop": "hermes-desktop-managed-v1",
   "hermes-claw": "hermes-claw-managed-v1",
 })[catalogId] as AgentProfile;
@@ -53,6 +54,7 @@ const agentCatalogIdFor = (profile: unknown): AgentCatalogId => ({
   "claude-desktop-managed-v1": "claude-desktop",
   "claude-cli-managed-v1": "claude-cli",
   "codex-cli-managed-v1": "codex-cli",
+  "opencode-cli-managed-v1": "opencode-cli",
   "hermes-desktop-managed-v1": "hermes-desktop",
   "hermes-claw-managed-v1": "hermes-claw",
 })[String(profile)] as AgentCatalogId | undefined ?? "claude-desktop";
@@ -240,7 +242,7 @@ export interface IdentityPolicyStore {
   assignWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string; assignedBy: string; securityGroupVersionId: string }): Promise<EgressSecurityGroupVersion>;
 }
 
-const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"] as const;
+const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "opencode-cli", "hermes-desktop", "hermes-claw"] as const;
 const mvpDefaultAgentIds = ["claude-desktop", "hermes-claw"] as const;
 const mvpApplicationIds = ["firefox", "google-chrome"] as const;
 const mvpDefaultApplicationIds = ["firefox"] as const;

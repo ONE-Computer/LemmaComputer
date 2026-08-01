@@ -129,6 +129,7 @@ const assignedAgentIds = (document: Record<string, unknown>): AgentCatalogId[] =
     : [{
       "claude-cli-managed-v1": "claude-cli",
       "codex-cli-managed-v1": "codex-cli",
+      "opencode-cli-managed-v1": "opencode-cli",
       "hermes-claw-managed-v1": "hermes-claw",
     }[String(document.agentProfile)] ?? "claude-desktop"] as AgentCatalogId[];
   return configured.length ? configured : ["claude-desktop"];
@@ -1666,7 +1667,8 @@ export function createControlServer(
   });
   app.get("/v1/workspaces", async (request) => {
     const { principal: actor, effective } = await assignedPolicy(request);
-    return { workspaces: await service.list(actor.identity, async (grantId) => (await policyForGrant(actor, effective, grantId)).policy) };
+    const workspaces = await service.list(actor.identity, async (grantId) => (await policyForGrant(actor, effective, grantId)).policy);
+    return { workspaces: workspaces.filter((workspace) => !workspace.grantId.startsWith("cowork-ephemeral-")) };
   });
   app.post("/v1/workspaces", async (request, reply) => {
     const input = createWorkspaceSchema.parse(request.body ?? {});
@@ -1675,6 +1677,26 @@ export function createControlServer(
     await assertProviderConfiguration(actor, policy);
     const workspace = await service.create(identity(request), policy, input.grantId, idempotency(request.headers), request.id);
     return reply.code(201).send(workspace);
+  });
+  app.post("/v1/onevibe/tasks", async (request, reply) => {
+    const taskStore = requireOneVibeTasks();
+    const { principal: actor, effective } = await assignedPolicy(request);
+    const { policy } = await policyForGrant(actor, effective, "personal");
+    const ephemeralGrantId = `cowork-ephemeral-${randomUUID()}`;
+    const workspace = await service.create(identity(request), policy, ephemeralGrantId, idempotency(request.headers), request.id);
+    const task = await taskStore.createOneVibeTask(identity(request), workspace.id);
+    if (!task) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "Ephemeral Cowork sandbox could not be bound", 503, true);
+    const event = await taskStore.appendOneVibeTaskEvent(identity(request), {
+      workspaceId: workspace.id,
+      taskId: task.id,
+      kind: "system",
+      payloadHash: createHash("sha256").update(`task-started:${task.id}`).digest("hex"),
+    });
+    if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "Ephemeral Cowork task could not be recorded", 503, true);
+    return reply.code(201).header("cache-control", "no-store").send({
+      task: { id: task.id, status: task.status, createdAt: task.createdAt },
+      workspace: { ...workspace, ephemeral: true, expiresAt: new Date(Date.now() + 60 * 60_000).toISOString() },
+    });
   });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/open", async (request) => {
     const actor = principal(request);
