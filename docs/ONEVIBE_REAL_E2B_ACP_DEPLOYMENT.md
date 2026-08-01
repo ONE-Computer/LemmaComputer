@@ -51,7 +51,8 @@ that supports secured access.
 
 Control also fail-closes all task-mutating paths after the one-hour ephemeral
 Cowork deadline: new chat turns, provider VCR uploads, and PPTX creation return
-`ONEVIBE_TASK_EXPIRED`. Read-only evidence replay remains available for audit.
+`ONEVIBE_TASK_EXPIRED`. Task/event/VCR rows remain retained for governed audit
+access (the owner-facing route still requires an active identity).
 This is a capability boundary, not cleanup proof. Control now includes an
 identity-policy-backed ephemeral reaper (`ONEVIBE_EPHEMERAL_REAPER_INTERVAL_SECONDS`)
 that stops the provider, revokes grants, and purges the disposable volume while
