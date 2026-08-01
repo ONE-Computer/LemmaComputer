@@ -23,6 +23,9 @@ if (!Array.isArray(templates)) throw new Error("E2B template listing returned an
 const selected = expectedTemplateId
   ? templates.find((item) => item && typeof item === "object" && (item as JsonObject).templateID === expectedTemplateId) as JsonObject | undefined
   : undefined;
+const envdVersion = selected && typeof selected.envdVersion === "string" ? selected.envdVersion : undefined;
+const envdParts = envdVersion?.match(/^(\d+)\.(\d+)(?:\.(\d+))?/);
+const secureEnvdSupported = Boolean(envdParts && (Number(envdParts[1]) > 0 || Number(envdParts[2]) >= 2));
 const missing = [
   "ONECOMPUTER_CONTROL_URL",
   "ONECOMPUTER_PROXY_TOKEN",
@@ -41,17 +44,18 @@ const report = {
     templateId: selected.templateID ?? null,
     names: Array.isArray(selected.names) ? selected.names : [],
     envdVersion: selected.envdVersion ?? null,
+    secureEnvdSupported,
     buildStatus: selected.buildStatus ?? null,
     public: selected.public ?? null,
   } : null,
   missingQualificationVariables: missing,
-  ready: Boolean(selected && selected.buildStatus === "ready" && !missing.length),
+  ready: Boolean(selected && selected.buildStatus === "ready" && secureEnvdSupported && !missing.length),
 };
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
 if (!selected) {
   process.exitCode = 2;
-} else if (selected.buildStatus !== "ready") {
+} else if (selected.buildStatus !== "ready" || !secureEnvdSupported) {
   process.exitCode = 3;
 } else if (missing.length) {
   process.exitCode = 4;
