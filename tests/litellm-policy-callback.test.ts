@@ -524,18 +524,24 @@ async def assert_provider_boundary():
     assert provider_reentry["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
     assert "user_api_key_dict" not in provider_reentry
 
-    internal_responses = {**provider_admitted, "litellm_call_id": "internal-responses-call"}
+    internal_responses = {
+        key: value
+        for key, value in provider_admitted.items()
+        if key != "onecomputer_usage_state"
+    }
+    internal_responses["litellm_call_id"] = "internal-responses-call"
+    internal_responses["metadata"] = {
+        key: value
+        for key, value in provider_admitted["metadata"].items()
+        if key not in ("onecomputer_usage_state", "onecomputer_usage_chain")
+    }
     internal_provider = await callback.async_pre_call_deployment_hook(
         internal_responses, "aresponses"
     )
     assert len(authority_calls) == authority_count
     assert internal_provider["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
 
-    ordinary_changed_call = {
-        **provider_admitted,
-        "litellm_call_id": "ordinary-changed-call",
-        "metadata": dict(provider_admitted["metadata"]),
-    }
+    ordinary_changed_call = {**internal_responses, "litellm_call_id": "ordinary-changed-call"}
     try:
         await callback.async_pre_call_deployment_hook(ordinary_changed_call, "acompletion")
     except Exception:

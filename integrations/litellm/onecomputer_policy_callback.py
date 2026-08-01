@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import contextvars
 import hashlib
 import hmac
 import json
@@ -40,6 +41,9 @@ USAGE_CHAIN_KEY = "onecomputer_usage_chain"
 ROUTING_HEALTH_TTL_SECONDS = 60
 _ROUTING_HEALTH_LOCK = threading.Lock()
 _ROUTING_UNAVAILABLE_UNTIL = {}
+_INTERNAL_ADMISSION_CONTEXT = contextvars.ContextVar(
+    "onecomputer_internal_admission_context", default=None
+)
 USAGE_CHAIN_SECRET = hmac.new(
     USAGE_TOKEN.encode("utf-8"),
     b"onecomputer-usage-chain-secret/v1",
@@ -344,6 +348,27 @@ def _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
             and bool(state.get("provider"))
             and state.get("provider") == route_provider
         ):
+            return True
+    context = _INTERNAL_ADMISSION_CONTEXT.get()
+    if internal_responses_conversion and isinstance(context, dict):
+        state = context.get("state")
+        signed_chain = context.get("signedChain")
+        chain = _verified_usage_chain(signed_chain)
+        if (
+            isinstance(state, dict)
+            and isinstance(signed_chain, str)
+            and isinstance(chain, dict)
+            and chain.get("admissionId") == state.get("admissionId")
+            and context.get("provider") == route_provider
+            and context.get("deploymentId") == route.get("onecomputer_deployment_id")
+        ):
+            kwargs[USAGE_STATE_KEY] = state
+            metadata = kwargs.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                kwargs["metadata"] = metadata
+            metadata[USAGE_STATE_KEY] = state
+            metadata[USAGE_CHAIN_KEY] = signed_chain
             return True
     return False
 
@@ -1027,14 +1052,23 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         admission_id = result.get("admissionId")
         if result.get("status") not in ("created", "duplicate") or not isinstance(admission_id, str):
             raise HTTPException(status_code=503, detail={"error": "AI_USAGE_ADMISSION_UNAVAILABLE"})
-        _set_usage_state(kwargs, {
+        usage_state = {
             "admissionId": admission_id,
             "tenantId": payload["tenantId"],
             "provider": payload["resolvedProvider"],
             "billableRequestUnit": route.get("onecomputer_billable_request_unit") is True,
             "routingDecisionId": routing_state.get("decisionId") if routing_state else None,
             "deploymentId": routing_state.get("executedDeploymentId") if routing_state else None,
-        }, task_binding, payload["sourceAttemptId"], payload.get("parentAttemptId"))
+        }
+        _set_usage_state(
+            kwargs, usage_state, task_binding, payload["sourceAttemptId"], payload.get("parentAttemptId")
+        )
+        _INTERNAL_ADMISSION_CONTEXT.set({
+            "state": usage_state,
+            "signedChain": kwargs["metadata"][USAGE_CHAIN_KEY],
+            "provider": route.get("onecomputer_provider"),
+            "deploymentId": route.get("onecomputer_deployment_id"),
+        })
         return _provider_request(kwargs)
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
