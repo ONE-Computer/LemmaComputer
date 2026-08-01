@@ -4,8 +4,14 @@ test("administrator filters spend, drills Team to user to 201 tasks, explains co
   await page.goto("/?view=ai-control-plane&section=spend");
 
   await expect(page.getByRole("heading", { name: "Organization spend" })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Some cost data is unavailable");
-  await expect(page.getByRole("status")).toContainText("1 unknown-price");
+  await expect(page.getByRole("heading", { name: "Cost coverage" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Active unpriced usage" })).toContainText("1 usage record");
+  await expect(page.getByRole("status").filter({ hasText: "Some attempts have not reported usage" })).toContainText("1 admitted attempt");
+  await expect(page.getByRole("button", { name: "Back to overview" })).toBeVisible();
+  await page.getByRole("button", { name: "Clear historical unpriced usage" }).click();
+  const coverageDialog = page.getByRole("dialog", { name: "Clear historical unpriced usage?" });
+  await expect(coverageDialog).toContainText("does not delete usage, change monetary totals, or retroactively price");
+  await coverageDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("heading", { name: "Teams" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Previous-period trend" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Spend dimensions" })).toBeVisible();

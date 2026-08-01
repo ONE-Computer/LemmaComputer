@@ -8,6 +8,7 @@ import {
   decodeSpendTaskKey,
   MemoryWorkspaceStore,
   type IdentityPolicyStore,
+  type CostCoverageAcknowledgement,
   type SessionPrincipal,
   type SpendEventRow,
   type SpendObservabilityStore,
@@ -93,6 +94,7 @@ class FakeSpendStore implements SpendObservabilityStore {
     event("two", "7", "2026-07-20T10:00:01.000Z"),
     event("three", "5", "2026-07-20T10:00:01.000Z"),
   ];
+  acknowledgements = new Map<string, CostCoverageAcknowledgement>();
   calls: Array<{ method: string; tenantId: string; range: SpendRange }> = [];
 
   async report(tenantId: string, range: SpendRange) {
@@ -101,7 +103,18 @@ class FakeSpendStore implements SpendObservabilityStore {
     const rows = tenantId === "acme"
       ? this.rows.filter((row) => new Date(row.receivedAt).getTime() <= cutoff)
       : [];
-    return buildSpendReport(rows, range);
+    return buildSpendReport(rows, range, 0, undefined, this.acknowledgements.get(tenantId) ?? null);
+  }
+
+  async acknowledgeUnpricedUsage(input: { tenantId: string; receivedBefore: Date; acknowledgedBy: string }) {
+    const acknowledgement: CostCoverageAcknowledgement = {
+      receivedBefore: input.receivedBefore.toISOString(),
+      acknowledgedAt: "2026-08-01T12:00:00.000Z",
+      acknowledgedBy: input.acknowledgedBy,
+      reason: "historical_usage_before_pricing",
+    };
+    this.acknowledgements.set(input.tenantId, acknowledgement);
+    return acknowledgement;
   }
 
   async task(tenantId: string, taskKey: string, range: SpendRange) {
@@ -171,6 +184,54 @@ test("spend API derives tenant, validates ranges, and makes role/cross-tenant de
     assert.deepEqual(employeeDenied.json().error, otherDenied.json().error);
   } finally {
     await Promise.all([adminApp.close(), employeeApp.close(), otherApp.close()]);
+  }
+});
+
+test("administrator can acknowledge historical unpriced usage without deleting ledger facts", async () => {
+  const store = new FakeSpendStore();
+  store.rows[0] = event("one", "9", "2026-07-20T10:00:01.000Z", {
+    priceStatus: "unknown",
+    costStatus: "unpriced",
+    currency: null,
+    providerCost: null,
+    rateCardId: null,
+    rateCardSource: null,
+    rateCardSourceVersion: null,
+    rateCardSourceHash: null,
+    rateCardEffectiveFrom: null,
+  });
+  const adminApp = appFor(administrator, store);
+  const employeeApp = appFor(employee, store);
+  const reportUrl = "/v1/admin/spend?from=2026-07-01T00%3A00%3A00.000Z&to=2026-08-01T00%3A00%3A00.000Z&asOf=2026-07-31T00%3A00%3A00.000Z";
+  try {
+    const before = await adminApp.inject({ method: "GET", url: reportUrl, headers });
+    assert.equal(before.json().report.costCoverage.unpricedUsage.activeEventCount, 1);
+
+    const denied = await employeeApp.inject({
+      method: "POST",
+      url: "/v1/admin/spend/cost-coverage/acknowledgements",
+      headers,
+      payload: { receivedBefore: "2026-07-31T00:00:00.000Z" },
+    });
+    assert.equal(denied.statusCode, 404);
+
+    const acknowledged = await adminApp.inject({
+      method: "POST",
+      url: "/v1/admin/spend/cost-coverage/acknowledgements",
+      headers,
+      payload: { receivedBefore: "2026-07-31T00:00:00.000Z" },
+    });
+    assert.equal(acknowledged.statusCode, 201);
+    assert.equal(acknowledged.headers["cache-control"], "no-store");
+    assert.equal(acknowledged.json().acknowledgement.acknowledgedBy, administrator.userId);
+
+    const after = await adminApp.inject({ method: "GET", url: reportUrl, headers });
+    assert.equal(after.json().report.costCoverage.unpricedUsage.activeEventCount, 0);
+    assert.equal(after.json().report.costCoverage.unpricedUsage.acknowledgedEventCount, 1);
+    assert.equal(after.json().report.costCoverage.status, "acknowledged_history");
+    assert.equal(after.json().report.totals.unknownCostEventCount, 1);
+  } finally {
+    await Promise.all([adminApp.close(), employeeApp.close()]);
   }
 });
 

@@ -21,6 +21,15 @@ const querySchema = z.strictObject({
   format: z.enum(["csv", "json"]).optional(),
 });
 
+export const parseUnpricedUsageAcknowledgement = (input: unknown, now = new Date()) => {
+  const parsed = z.strictObject({ receivedBefore: dateTime }).parse(input ?? {});
+  const receivedBefore = new Date(parsed.receivedBefore);
+  if (receivedBefore.getTime() > now.getTime() + 60_000) {
+    throw new OneComputerError("COST_COVERAGE_BASELINE_INVALID", "The acknowledgement cutoff cannot be in the future", 400);
+  }
+  return { receivedBefore };
+};
+
 type CursorSnapshot = {
   from: string; to: string; asOf: string;
   teamId?: string; userId?: string; workspaceId?: string; agentId?: string;

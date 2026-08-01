@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { adminApi } from "./workspace-api.js";
+import { ModalDialog } from "./ui.jsx";
 import "./SpendDashboard.css";
 
 const day = (value) => value.toISOString().slice(0, 10);
 const initialRange = () => {
-  const to = new Date();
-  to.setUTCDate(to.getUTCDate() + 1);
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - 30);
+  const now = new Date();
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   return { from: day(from), to: day(to) };
 };
 const isoDate = (value) => new Date(`${value}T00:00:00.000Z`).toISOString();
@@ -36,6 +36,9 @@ export function SpendDashboard({ onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const [coverageDialogOpen, setCoverageDialogOpen] = useState(false);
+  const [coverageBusy, setCoverageBusy] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const query = useMemo(() => ({
     from: isoDate(appliedDates.from),
     to: isoDate(appliedDates.to),
@@ -60,7 +63,7 @@ export function SpendDashboard({ onBack }) {
       .catch((caught) => { if (active) setError(caught.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [query]);
+  }, [query, refreshVersion]);
 
   useEffect(() => {
     if (!report || !selectedTeam) {
@@ -124,6 +127,15 @@ export function SpendDashboard({ onBack }) {
       label: (row) => row.agentId ?? "Unbound agent",
     },
   ] : [];
+  const unpricedUsage = report?.costCoverage?.unpricedUsage ?? {
+    activeEventCount: Number(report?.totals?.unknownCostEventCount ?? 0) + Number(report?.totals?.incompleteCostEventCount ?? 0),
+    missingPriceEventCount: Number(report?.totals?.unknownCostEventCount ?? 0),
+    partialPriceEventCount: Number(report?.totals?.incompleteCostEventCount ?? 0),
+    acknowledgedEventCount: 0,
+  };
+  const delayedAttemptCount = report?.costCoverage?.delayedReporting?.attemptCount
+    ?? Number(report?.totals?.delayedAttemptCount ?? 0);
+  const latestCoverageAcknowledgement = report?.costCoverage?.latestAcknowledgement ?? null;
   const openTask = async (task) => {
     setLoading(true);
     setError("");
@@ -151,6 +163,21 @@ export function SpendDashboard({ onBack }) {
       setError(caught.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const acknowledgeHistoricalUsage = async () => {
+    if (!report || coverageBusy) return;
+    setCoverageBusy(true);
+    setError("");
+    try {
+      await adminApi.acknowledgeUnpricedUsage({ receivedBefore: report.asOf });
+      setCoverageDialogOpen(false);
+      setRefreshVersion((current) => current + 1);
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setCoverageBusy(false);
     }
   };
 
@@ -192,7 +219,7 @@ export function SpendDashboard({ onBack }) {
 
   return (
     <div className="secondary-screen spend-screen">
-      <button className="settings-back-button" type="button" onClick={onBack}>← Back to Settings</button>
+      <button className="settings-back-button" type="button" onClick={onBack}>← Back to overview</button>
       <header className="page-heading compact">
         <p>AI spend governance</p>
         <h1>Organization spend</h1>
@@ -217,6 +244,32 @@ export function SpendDashboard({ onBack }) {
           <article><span>Allocation</span><strong>{report.totals.allocatedAttemptCount} allocated</strong><small>{report.totals.unallocatedAttemptCount} unallocated</small></article>
           <article><span>Usage</span><strong>{usageQuantity(report.totals.usage, "input_uncached_token")} input · {usageQuantity(report.totals.usage, "output_token")} output</strong><small>{usageQuantity(report.totals.usage, "cache_read_token")} cache read · {usageQuantity(report.totals.usage, "cache_write_token")} cache write · {usageQuantity(report.totals.usage, "reasoning_token")} reasoning{otherUsage(report.totals.usage) ? ` · ${otherUsage(report.totals.usage)}` : ""}</small></article>
         </section>
+        <section className="spend-coverage-card" aria-labelledby="cost-coverage-heading">
+          <div className="spend-section-heading">
+            <div><p>Accounting completeness</p><h2 id="cost-coverage-heading">Cost coverage</h2></div>
+            {unpricedUsage.activeEventCount > 0 && <button className="secondary-button" type="button" onClick={() => setCoverageDialogOpen(true)}>Clear historical unpriced usage</button>}
+          </div>
+          <div className="spend-coverage-grid">
+            <article>
+              <span>Unpriced usage</span>
+              <strong>{unpricedUsage.activeEventCount}</strong>
+              <small>{unpricedUsage.missingPriceEventCount} missing price · {unpricedUsage.partialPriceEventCount} partial price</small>
+            </article>
+            <article>
+              <span>Delayed reporting</span>
+              <strong>{delayedAttemptCount}</strong>
+              <small>Admitted attempts awaiting a usage record</small>
+            </article>
+            <article>
+              <span>Acknowledged history</span>
+              <strong>{unpricedUsage.acknowledgedEventCount}</strong>
+              <small>{latestCoverageAcknowledgement ? `Latest baseline ${new Date(latestCoverageAcknowledgement.receivedBefore).toLocaleDateString()}` : "No historical baseline"}</small>
+            </article>
+          </div>
+          {unpricedUsage.activeEventCount > 0 && <div className="spend-state-banner" role="status"><strong>Active unpriced usage is excluded from spend.</strong><span>{unpricedUsage.activeEventCount} usage {unpricedUsage.activeEventCount === 1 ? "record has" : "records have"} incomplete pricing. Monetary totals include only fully priced usage.</span></div>}
+          {delayedAttemptCount > 0 && <div className="spend-state-banner" role="status"><strong>Some attempts have not reported usage yet.</strong><span>{delayedAttemptCount} admitted {delayedAttemptCount === 1 ? "attempt is" : "attempts are"} tracked separately from unpriced usage.</span></div>}
+          {unpricedUsage.activeEventCount === 0 && unpricedUsage.acknowledgedEventCount > 0 && <div className="spend-state-banner corrected" role="status"><strong>Historical unpriced usage acknowledged.</strong><span>The ledger is unchanged; these records no longer appear as active cost-coverage risk.</span></div>}
+        </section>
         {report.trend && <section className="spend-trend" aria-labelledby="spend-trend-heading"><div><p>Compared with {new Date(report.trend.previousRange.from).toLocaleDateString()}–{new Date(report.trend.previousRange.to).toLocaleDateString()}</p><h2 id="spend-trend-heading">Previous-period trend</h2></div><strong>{money(report.trend.costDeltas)} cost change</strong><span>{report.trend.attemptCountDelta >= 0 ? "+" : ""}{report.trend.attemptCountDelta} attempts</span></section>}
         {dimensions.length > 0 && <section className="spend-table-card" aria-labelledby="spend-dimensions-heading">
           <div className="spend-section-heading"><div><p>Organization view</p><h2 id="spend-dimensions-heading">Spend dimensions</h2></div></div>
@@ -224,7 +277,6 @@ export function SpendDashboard({ onBack }) {
             {dimensions.map((dimension) => <article key={dimension.title}><h3>{dimension.title}</h3>{dimension.rows.slice(0, 5).map((row) => <div key={dimension.key(row)}><span><strong>{dimension.label(row)}</strong>{dimension.detail?.(row) && <small>{dimension.detail(row)}</small>}</span><span><strong>{money(row.costs)}</strong><small>{row.attemptCount} attempts</small></span></div>)}</article>)}
           </div>
         </section>}
-        {(report.state === "partial") && <div className="spend-state-banner" role="status"><strong>Some cost data is unavailable.</strong><span>{report.totals.unknownCostEventCount} unknown-price, {report.totals.incompleteCostEventCount} partial-price, and {report.totals.delayedAttemptCount} delayed attempts are excluded from monetary totals, not counted as zero.</span></div>}
         <nav className="spend-breadcrumbs" aria-label="Spend drilldown">
           <button type="button" className={!selectedTeam ? "active" : ""} onClick={() => { setSelectedTeam(""); setSelectedUser(""); }}>All Teams</button>
           {selectedTeam && <><span>›</span><button type="button" className={!selectedUser ? "active" : ""} onClick={() => setSelectedUser("")}>{selectedTeamName}</button></>}
@@ -244,6 +296,22 @@ export function SpendDashboard({ onBack }) {
           {drillPage?.nextCursor && <div className="spend-load-more"><button className="secondary-button" type="button" disabled={loading} onClick={loadMoreTasks}>{loading ? "Loading tasks…" : "Load more tasks"}</button></div>}
         </section>}
       </>}
+      {coverageDialogOpen && <ModalDialog
+        title="Clear historical unpriced usage?"
+        description={`Acknowledge every unpriced usage record received through ${new Date(report.asOf).toLocaleString()}.`}
+        eyebrow="Cost coverage baseline"
+        labelledBy="cost-coverage-acknowledgement-title"
+        onClose={coverageBusy ? () => undefined : () => setCoverageDialogOpen(false)}
+      >
+        <div className="spend-coverage-confirmation">
+          <p>This clears the existing backlog from active cost-coverage risk. It does not delete usage, change monetary totals, or retroactively price ledger records.</p>
+          <p>New unpriced usage received after this baseline will appear as active risk again.</p>
+        </div>
+        <div className="modal-actions">
+          <button className="secondary-button" type="button" disabled={coverageBusy} onClick={() => setCoverageDialogOpen(false)}>Cancel</button>
+          <button className="primary-button" type="button" disabled={coverageBusy} onClick={acknowledgeHistoricalUsage}>{coverageBusy ? "Clearing…" : "Acknowledge and clear"}</button>
+        </div>
+      </ModalDialog>}
     </div>
   );
 }

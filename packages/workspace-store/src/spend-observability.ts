@@ -83,6 +83,23 @@ export type SpendEventRow = {
 
 export type CurrencyTotal = { currency: string; amount: string };
 export type UsageTotals = Record<string, string>;
+export type CostCoverageAcknowledgement = {
+  receivedBefore: string;
+  acknowledgedAt: string;
+  acknowledgedBy: string;
+  reason: "historical_usage_before_pricing";
+};
+export type CostCoverageSummary = {
+  status: "complete" | "unpriced_usage" | "delayed_reporting" | "multiple_gaps" | "acknowledged_history";
+  unpricedUsage: {
+    activeEventCount: number;
+    missingPriceEventCount: number;
+    partialPriceEventCount: number;
+    acknowledgedEventCount: number;
+  };
+  delayedReporting: { attemptCount: number };
+  latestAcknowledgement: CostCoverageAcknowledgement | null;
+};
 export type SafeCostDriver = {
   code:
     | "conversation_history"
@@ -131,6 +148,7 @@ export type SpendReport = {
     turnId: string | null;
   };
   state: "empty" | "complete" | "partial";
+  costCoverage: CostCoverageSummary;
   totals: GroupTotals & {
     delayedAttemptCount: number;
     allocatedAttemptCount: number;
@@ -217,6 +235,11 @@ export type SpendTaskDetail = {
 export interface SpendObservabilityStore {
   report(tenantId: string, range: SpendRange): Promise<SpendReport>;
   task(tenantId: string, taskKey: string, range: Omit<SpendRange, "teamId" | "taskId" | "userId" | "workspaceId" | "agentId" | "sessionId" | "turnId">): Promise<SpendTaskDetail | null>;
+  acknowledgeUnpricedUsage(input: {
+    tenantId: string;
+    receivedBefore: Date;
+    acknowledgedBy: string;
+  }): Promise<CostCoverageAcknowledgement>;
 }
 
 export class SpendReadLimitError extends Error {
@@ -404,6 +427,7 @@ export const buildSpendReport = (
   range: SpendRange,
   delayedAttemptCount = 0,
   previousRows?: SpendEventRow[],
+  latestAcknowledgement: CostCoverageAcknowledgement | null = null,
 ): SpendReport => {
   const all = mutableGroup();
   const teamGroups = new Map<string, MutableGroup>();
@@ -499,6 +523,38 @@ export const buildSpendReport = (
     };
   }).sort((a, b) => groupSort(a, b) || a.taskKey.localeCompare(b.taskKey));
   const totals = finalized(all);
+  const acknowledgementCutoff = latestAcknowledgement
+    ? new Date(latestAcknowledgement.receivedBefore).getTime()
+    : null;
+  const unpricedRows = rows.filter((row) => row.priceStatus !== "priced");
+  const acknowledgedUnpricedRows = acknowledgementCutoff === null
+    ? []
+    : unpricedRows.filter((row) => new Date(row.receivedAt).getTime() <= acknowledgementCutoff);
+  const activeUnpricedRows = acknowledgementCutoff === null
+    ? unpricedRows
+    : unpricedRows.filter((row) => new Date(row.receivedAt).getTime() > acknowledgementCutoff);
+  const missingPriceEventCount = activeUnpricedRows.filter((row) => row.priceStatus === "unknown").length;
+  const partialPriceEventCount = activeUnpricedRows.filter((row) => row.priceStatus === "incomplete").length;
+  const activeUnpricedEventCount = missingPriceEventCount + partialPriceEventCount;
+  const costCoverage: CostCoverageSummary = {
+    status: activeUnpricedEventCount > 0 && delayedAttemptCount > 0
+      ? "multiple_gaps"
+      : activeUnpricedEventCount > 0
+        ? "unpriced_usage"
+        : delayedAttemptCount > 0
+          ? "delayed_reporting"
+          : acknowledgedUnpricedRows.length > 0
+            ? "acknowledged_history"
+            : "complete",
+    unpricedUsage: {
+      activeEventCount: activeUnpricedEventCount,
+      missingPriceEventCount,
+      partialPriceEventCount,
+      acknowledgedEventCount: acknowledgedUnpricedRows.length,
+    },
+    delayedReporting: { attemptCount: delayedAttemptCount },
+    latestAcknowledgement,
+  };
   const breakdowns = {
     requestedRoutes: [...requestedRouteGroups].map(([requestedRoute, group]) => ({
       ...finalized(group),
@@ -562,6 +618,7 @@ export const buildSpendReport = (
       : totals.unknownCostEventCount > 0 || totals.incompleteCostEventCount > 0 || delayedAttemptCount > 0
         ? "partial"
         : "complete",
+    costCoverage,
     totals: { ...totals, delayedAttemptCount, allocatedAttemptCount, unallocatedAttemptCount },
     teams,
     users,
@@ -681,6 +738,70 @@ export class PostgresSpendObservabilityStore implements SpendObservabilityStore 
     return new PostgresSpendObservabilityStore(new pg.Pool({ connectionString, max: 5 }));
   }
   async close() { await this.pool.end(); }
+  private async latestCostCoverageAcknowledgement(tenantId: string, asOf: Date): Promise<CostCoverageAcknowledgement | null> {
+    const result = await this.pool.query(`
+      SELECT unpriced_events_received_before,acknowledged_at,acknowledged_by
+      FROM ai_cost_coverage_acknowledgements
+      WHERE tenant_id=$1 AND acknowledged_at <= $2
+      ORDER BY unpriced_events_received_before DESC,acknowledged_at DESC
+      LIMIT 1
+    `, [tenantId, asOf]);
+    const row = result.rows[0];
+    return row ? {
+      receivedBefore: new Date(row.unpriced_events_received_before).toISOString(),
+      acknowledgedAt: new Date(row.acknowledged_at).toISOString(),
+      acknowledgedBy: String(row.acknowledged_by),
+      reason: "historical_usage_before_pricing",
+    } : null;
+  }
+
+  async acknowledgeUnpricedUsage(input: {
+    tenantId: string;
+    receivedBefore: Date;
+    acknowledgedBy: string;
+  }): Promise<CostCoverageAcknowledgement> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`cost-coverage:${input.tenantId}`]);
+      const existing = await client.query(`
+        SELECT unpriced_events_received_before,acknowledged_at,acknowledged_by
+        FROM ai_cost_coverage_acknowledgements
+        WHERE tenant_id=$1
+        ORDER BY unpriced_events_received_before DESC,acknowledged_at DESC
+        LIMIT 1
+      `, [input.tenantId]);
+      const current = existing.rows[0];
+      if (current && new Date(current.unpriced_events_received_before).getTime() >= input.receivedBefore.getTime()) {
+        await client.query("COMMIT");
+        return {
+          receivedBefore: new Date(current.unpriced_events_received_before).toISOString(),
+          acknowledgedAt: new Date(current.acknowledged_at).toISOString(),
+          acknowledgedBy: String(current.acknowledged_by),
+          reason: "historical_usage_before_pricing",
+        };
+      }
+      const inserted = await client.query(`
+        INSERT INTO ai_cost_coverage_acknowledgements(
+          tenant_id,unpriced_events_received_before,reason,acknowledged_by
+        ) VALUES ($1,$2,'historical_usage_before_pricing',$3)
+        RETURNING unpriced_events_received_before,acknowledged_at,acknowledged_by
+      `, [input.tenantId, input.receivedBefore, input.acknowledgedBy]);
+      await client.query("COMMIT");
+      const row = inserted.rows[0];
+      return {
+        receivedBefore: new Date(row.unpriced_events_received_before).toISOString(),
+        acknowledgedAt: new Date(row.acknowledged_at).toISOString(),
+        acknowledgedBy: String(row.acknowledged_by),
+        reason: "historical_usage_before_pricing",
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 
   private conditions(tenantId: string, range: SpendRange, prefix = "e") {
     const values: unknown[] = [tenantId, range.from, range.to, range.receivedBefore ?? new Date()];
@@ -756,12 +877,13 @@ export class PostgresSpendObservabilityStore implements SpendObservabilityStore 
       from: new Date(range.from.getTime() - duration),
       to: range.from,
     };
-    const [rows, delayed, previousRows] = await Promise.all([
+    const [rows, delayed, previousRows, latestAcknowledgement] = await Promise.all([
       this.rows(tenantId, range),
       this.delayed(tenantId, range),
       this.rows(tenantId, previousRange),
+      this.latestCostCoverageAcknowledgement(tenantId, range.receivedBefore ?? new Date()),
     ]);
-    return buildSpendReport(rows, range, delayed, previousRows);
+    return buildSpendReport(rows, range, delayed, previousRows, latestAcknowledgement);
   }
 
   async task(tenantId: string, taskKey: string, range: Omit<SpendRange, "teamId" | "taskId" | "userId" | "workspaceId" | "agentId" | "sessionId" | "turnId">) {

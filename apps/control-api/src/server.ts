@@ -38,7 +38,7 @@ import { SitesService } from "./sites.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
 import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
 
-import { paginateSpendReport, parseSpendQuery } from "./spend-observability.js";
+import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
 const workspaceMemoryGiB = 4;
@@ -1231,6 +1231,17 @@ export function createControlServer(
     const report = await readSpendReport(actor.tenantId, query.range);
     reply.header("cache-control", "no-store");
     return paginateSpendReport(report, query);
+  });
+  app.post("/v1/admin/spend/cost-coverage/acknowledgements", async (request, reply) => {
+    const { actor, store: spendStore } = requireSpendObservability(request);
+    const input = parseUnpricedUsageAcknowledgement(request.body);
+    const acknowledgement = await spendStore.acknowledgeUnpricedUsage({
+      tenantId: actor.tenantId,
+      receivedBefore: input.receivedBefore,
+      acknowledgedBy: actor.userId,
+    });
+    reply.header("cache-control", "no-store");
+    return reply.code(201).send({ acknowledgement });
   });
   app.get<{ Params: { taskKey: string } }>("/v1/admin/spend/tasks/:taskKey", async (request, reply) => {
     const { actor, store: spendStore } = requireSpendObservability(request);

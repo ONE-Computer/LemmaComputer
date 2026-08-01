@@ -176,6 +176,7 @@ export const adminApi = {
   teams: (includeArchived = true) => request(`/api/v1/admin/teams?${new URLSearchParams({ includeArchived: String(includeArchived) })}`, { cache: "no-store" }),
   team: (teamId) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}`, { cache: "no-store" }),
   spend: (filters = {}) => request(`/api/v1/admin/spend?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))}`, { cache: "no-store" }),
+  acknowledgeUnpricedUsage: (input) => request("/api/v1/admin/spend/cost-coverage/acknowledgements", mutation("POST", input)),
   spendTask: (taskKey, filters = {}) => request(`/api/v1/admin/spend/tasks/${encodeURIComponent(taskKey)}?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))}`, { cache: "no-store" }),
   spendExportUrl: (filters = {}, format = "csv") => `/api/v1/admin/spend/export?${new URLSearchParams([...Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]), ["format", format]])}`,
   createTeam: (input) => request("/api/v1/admin/teams", mutation("POST", input)),

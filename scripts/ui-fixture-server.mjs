@@ -639,6 +639,17 @@ const fixtureSpendReport = (tasks = fixtureSpendTasks, empty = false) => ({
   asOf: "2026-07-31T00:00:00.000Z",
   filters: { teamId: null, userId: null, workspaceId: null, agentId: null, taskId: null, turnId: null },
   state: empty ? "empty" : "partial",
+  costCoverage: {
+    status: empty ? "complete" : "multiple_gaps",
+    unpricedUsage: {
+      activeEventCount: empty ? 0 : 1,
+      missingPriceEventCount: empty ? 0 : 1,
+      partialPriceEventCount: 0,
+      acknowledgedEventCount: 0,
+    },
+    delayedReporting: { attemptCount: empty ? 0 : 1 },
+    latestAcknowledgement: null,
+  },
   totals: {
     costs: empty ? [] : [{ currency: "USD", amount: "173.75" }], providerConfirmedCosts: [],
     usage: empty ? {} : { input_uncached_token: "20100", cache_read_token: "8040", cache_write_token: "1608", output_token: "4020", reasoning_token: "1005", image: "2" }, latency: { sampleCount: empty ? 0 : 202, averageMs: empty ? null : 910, p95Ms: empty ? null : 1450 },

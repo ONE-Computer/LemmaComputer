@@ -5,6 +5,7 @@ import { Info20Regular } from "@fluentui/react-icons/svg/info";
 import { Pulse20Regular } from "@fluentui/react-icons/svg/pulse";
 import { adminApi } from "./workspace-api.js";
 import { AI_EMISSIONS_METHOD, estimateAiTokenEmissions } from "./ai-emissions.js";
+import { formatOverviewMoney } from "./format-money.js";
 import "./AiControlPlaneOverview.css";
 
 const DAY_MS = 86_400_000;
@@ -18,15 +19,7 @@ const amountFor = (costs = [], currency) => costs.find((item) => item.currency =
 const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 0 });
 
-const money = (value, currency, { compact = false } = {}) => {
-  if (value === null || value === undefined || !currency) return "—";
-  return new Intl.NumberFormat("en", {
-    style: "currency",
-    currency,
-    notation: compact ? "compact" : "standard",
-    maximumFractionDigits: compact ? 1 : 0,
-  }).format(number(value));
-};
+const money = formatOverviewMoney;
 
 const signedMoney = (value, currency) => {
   if (value === null || value === undefined || !currency) return "—";
@@ -280,9 +273,14 @@ export function AiControlPlaneOverview({
   const forecast = estimates?.forecastAmount ?? forecastFor(spent, report);
   const routeSummary = routeSummaryFor(data?.routing);
   const deltas = estimates?.explanations ?? deltasFor(report, data?.priorReport, currency);
-  const unpricedCount = number(report?.totals?.unknownCostEventCount)
-    + number(report?.totals?.incompleteCostEventCount)
-    + number(report?.totals?.delayedAttemptCount);
+  const activeUnpricedCount = report?.costCoverage?.unpricedUsage?.activeEventCount
+    ?? number(report?.totals?.unknownCostEventCount) + number(report?.totals?.incompleteCostEventCount);
+  const missingPriceCount = report?.costCoverage?.unpricedUsage?.missingPriceEventCount
+    ?? number(report?.totals?.unknownCostEventCount);
+  const partialPriceCount = report?.costCoverage?.unpricedUsage?.partialPriceEventCount
+    ?? number(report?.totals?.incompleteCostEventCount);
+  const delayedAttemptCount = report?.costCoverage?.delayedReporting?.attemptCount
+    ?? number(report?.totals?.delayedAttemptCount);
   const budgetRatio = spent !== null && budget.limit ? Math.max(0, spent / budget.limit) : null;
   const series = estimates?.spendSeries ?? (data?.series ?? []).map((item) => (
     currency ? sumCosts(item.costs, currency) : 0
@@ -339,7 +337,7 @@ export function AiControlPlaneOverview({
               <h3 id="ai-budget-heading">Spend this month</h3>
             </div>
             <div className="ai-budget-actions">
-              <InlineLink onClick={onOpenSpend}>Review budget risks</InlineLink>
+              <InlineLink onClick={onOpenSpend}>View spend details</InlineLink>
               {exportRange && (
                 <a className="ai-overview-link" href={adminApi.spendExportUrl(exportRange, "csv")} download>
                   <span>Export report</span>
@@ -350,7 +348,7 @@ export function AiControlPlaneOverview({
           <div className="ai-budget-numbers">
             <div className="ai-budget-primary">
               <strong>{loading ? "—" : money(spent, currency)}</strong>
-              <span>{budget.limit === null ? "No organization budget total" : `of ${money(budget.limit, currency)}`}</span>
+              <span>{budget.limit === null ? "Budget not set" : `of ${money(budget.limit, currency)}`}</span>
             </div>
             <dl>
               <div>
@@ -360,8 +358,13 @@ export function AiControlPlaneOverview({
               </div>
               <div>
                 <dt>Unpriced usage</dt>
-                <dd>{loading ? "—" : compactNumber.format(unpricedCount)}</dd>
-                <small>Excluded from monetary totals</small>
+                <dd>{loading ? "—" : compactNumber.format(activeUnpricedCount)}</dd>
+                <small>{missingPriceCount} missing price · {partialPriceCount} partial price</small>
+              </div>
+              <div>
+                <dt>Delayed reporting</dt>
+                <dd>{loading ? "—" : compactNumber.format(delayedAttemptCount)}</dd>
+                <small>Attempts awaiting usage records</small>
               </div>
             </dl>
           </div>
@@ -478,7 +481,7 @@ export function AiControlPlaneOverview({
       </section>
 
       <footer className="ai-overview-footer">
-        <span>Costs exclude unpriced usage and are never treated as zero.</span>
+        <span>Costs exclude unpriced usage; delayed reporting is tracked separately.</span>
         <InlineLink onClick={onOpenPricing}>Manage pricing</InlineLink>
       </footer>
     </section>

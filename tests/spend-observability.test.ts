@@ -68,7 +68,7 @@ test("spend aggregation applies correction deltas once, keeps currencies separat
 });
 
 test("missing, incomplete, delayed, corrected, and price snapshots stay distinguishable from zero", () => {
-  const report = buildSpendReport([
+  const rows = [
     event({
       eventId: "unknown", admissionId: "unknown-attempt", taskId: "unknown-task", priceStatus: "unknown", costStatus: "unpriced",
       currency: null, providerCost: null, rateCardId: null, rateCardSource: null, rateCardSourceVersion: null,
@@ -79,12 +79,27 @@ test("missing, incomplete, delayed, corrected, and price snapshots stay distingu
       currency: null, providerCost: null, rateCardId: null, rateCardSource: null, rateCardSourceVersion: null,
       rateCardSourceHash: null, rateCardEffectiveFrom: null,
     }),
-  ], range, 2);
+  ];
+  const report = buildSpendReport(rows, range, 2);
   assert.equal(report.state, "partial");
   assert.equal(report.totals.unknownCostEventCount, 1);
   assert.equal(report.totals.incompleteCostEventCount, 1);
   assert.equal(report.totals.delayedAttemptCount, 2);
   assert.equal(report.tasks.find((task) => task.taskId === "unknown-task")?.priceState, "missing");
+  assert.deepEqual(report.costCoverage.unpricedUsage, {
+    activeEventCount: 2, missingPriceEventCount: 1, partialPriceEventCount: 1, acknowledgedEventCount: 0,
+  });
+  assert.equal(report.costCoverage.status, "multiple_gaps");
+  const acknowledged = buildSpendReport(rows, range, 2, undefined, {
+    receivedBefore: "2026-07-21T00:00:00.000Z",
+    acknowledgedAt: "2026-07-21T01:00:00.000Z",
+    acknowledgedBy: "admin",
+    reason: "historical_usage_before_pricing",
+  });
+  assert.equal(acknowledged.costCoverage.status, "delayed_reporting");
+  assert.equal(acknowledged.costCoverage.unpricedUsage.activeEventCount, 0);
+  assert.equal(acknowledged.costCoverage.unpricedUsage.acknowledgedEventCount, 2);
+  assert.equal(acknowledged.totals.unknownCostEventCount, 1);
   assert.deepEqual(buildSpendTaskDetail([event()], range)?.attempts[0]?.priceBasis, {
     rateCardId: "rate-1", source: "pinned_catalogue", version: "2026-07",
     sourceHash: "a".repeat(64), effectiveFrom: "2026-07-01T00:00:00.000Z",
