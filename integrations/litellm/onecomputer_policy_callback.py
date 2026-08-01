@@ -319,23 +319,30 @@ def _request_usage_context_and_strip_reserved(kwargs, source_attempt_id=None):
     return task_binding, parent_attempt_id
 
 
-def _verified_usage_reentry(kwargs, source_attempt_id):
-    """Accept only callback-signed re-entry for the same concrete invocation."""
+def _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
+    """Accept a signed same attempt or LiteLLM's internal Responses conversion."""
     if not isinstance(source_attempt_id, str) or not source_attempt_id:
         return False
+    route_provider = route.get("onecomputer_provider") if isinstance(route, dict) else None
+    call_type_value = str(getattr(call_type, "value", call_type) or "").lower()
+    internal_responses_conversion = "response" in call_type_value
     for metadata in _metadata_dicts(kwargs):
         chain = _verified_usage_chain(metadata.get(USAGE_CHAIN_KEY))
         state = metadata.get(USAGE_STATE_KEY)
         if (
             isinstance(chain, dict)
             and isinstance(state, dict)
-            and chain.get("sourceAttemptId") == source_attempt_id
+            and (
+                chain.get("sourceAttemptId") == source_attempt_id
+                or internal_responses_conversion
+            )
             and isinstance(chain.get("admissionId"), str)
             and chain.get("admissionId") == state.get("admissionId")
             and isinstance(state.get("tenantId"), str)
             and bool(state.get("tenantId"))
             and isinstance(state.get("provider"), str)
             and bool(state.get("provider"))
+            and state.get("provider") == route_provider
         ):
             return True
     return False
@@ -974,7 +981,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
                     "binding": routing_state.get("binding"), "actual": actual,
                 })
             source_attempt_id = _source_attempt_id(kwargs, route) if route else None
-            if _verified_usage_reentry(kwargs, source_attempt_id):
+            if _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
                 return _provider_request(kwargs)
             task_binding, parent_attempt_id = _request_usage_context_and_strip_reserved(
                 kwargs, source_attempt_id

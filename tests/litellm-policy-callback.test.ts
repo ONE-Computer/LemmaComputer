@@ -524,6 +524,26 @@ async def assert_provider_boundary():
     assert provider_reentry["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
     assert "user_api_key_dict" not in provider_reentry
 
+    internal_responses = {**provider_admitted, "litellm_call_id": "internal-responses-call"}
+    internal_provider = await callback.async_pre_call_deployment_hook(
+        internal_responses, "aresponses"
+    )
+    assert len(authority_calls) == authority_count
+    assert internal_provider["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
+
+    ordinary_changed_call = {
+        **provider_admitted,
+        "litellm_call_id": "ordinary-changed-call",
+        "metadata": dict(provider_admitted["metadata"]),
+    }
+    try:
+        await callback.async_pre_call_deployment_hook(ordinary_changed_call, "acompletion")
+    except Exception:
+        pass
+    else:
+        raise AssertionError("ordinary changed-call re-entry must fail closed")
+    assert len(authority_calls) == authority_count
+
     tampered_reentry = {
         **provider_admitted,
         "metadata": {
