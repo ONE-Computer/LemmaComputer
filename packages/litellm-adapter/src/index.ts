@@ -884,7 +884,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       this.dataCall("/mcp-rest/tools/list", credential),
       this.modelRoute(credential, workspaceId, effectiveAgentId, modelAlias),
     ]);
-    if (!models.ok || !tools.ok) this.workspaceGrantStates.delete(credential);
+    if (!models.ok) this.workspaceGrantStates.delete(credential);
     const modelIds = Array.isArray(asObject(models.payload).data)
       ? (asObject(models.payload).data as unknown[]).map((item) => String(asObject(item).id ?? ""))
       : [];
@@ -904,6 +904,14 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async modelCapabilities(modelAlias: string): Promise<GatewayModelCapabilities> {
     const cached = this.modelCapabilityStates.get(modelAlias);
     if (cached && cached.expiresAt > Date.now()) return cached.capabilities;
+    if (modelAlias === "onecomputer-auto") {
+      // Auto is a synthetic governed route rather than a LiteLLM provider
+      // model. The router includes image requirements in task classification
+      // and selects only an eligible vision-capable deployment for them.
+      const capabilities = { vision: true };
+      this.modelCapabilityStates.set(modelAlias, { expiresAt: Date.now() + 60_000, capabilities });
+      return capabilities;
+    }
     const managedProvider = managedProviderForAlias(modelAlias);
     const managedModel = managedProvider && managedProviderModels[managedProvider].find((model) => model.alias === modelAlias);
     if (managedModel) {

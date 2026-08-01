@@ -36,6 +36,59 @@ test("Claude clients keep a compatible model name while governed routing uses Au
   assert.deepEqual(projection.grantModels, ["onecomputer-auto"]);
 });
 
+test("Auto model readiness stays healthy when an optional connector is unavailable", async () => {
+  let liveAdapter: LiteLLMGatewayAdapter;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain request bodies so the local HTTP connection can be reused.
+    }
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/models") {
+      response.end(JSON.stringify({ data: [{ id: "onecomputer-auto" }] }));
+      return;
+    }
+    if (request.url === "/mcp-rest/tools/list") {
+      response.statusCode = 401;
+      response.end(JSON.stringify({ error: "connector authentication required" }));
+      return;
+    }
+    if (request.url?.startsWith("/key/list?")) {
+      const credential = liveAdapter.credentialFor("workspace-a", "claude-cli");
+      response.end(JSON.stringify({
+        keys: [{
+          token: createHash("sha256").update(credential).digest("hex"),
+          rpm_limit: 30,
+          max_parallel_requests: 30,
+        }],
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: "http://127.0.0.1:" + address.port,
+    workspaceUrl: "http://127.0.0.1:" + address.port,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const readiness = await liveAdapter.readiness("workspace-a", "claude-cli", {
+      modelAlias: "onecomputer-auto",
+      agentId: "claude-cli",
+      allowedTools: ["list_issues"],
+    } as never);
+    assert.equal(readiness.models, "ready");
+    assert.equal(readiness.tools, "failed");
+    assert.equal(readiness.modelRoute?.status, "ready");
+    assert.deepEqual(readiness.modelRoute?.capabilities, { vision: true });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("gateway identity separates OAuth owner, agent actor, and workspace", () => {
   const sameUser = adapter.userIdFor(identity);
   assert.equal(sameUser, adapter.userIdFor(identity));
