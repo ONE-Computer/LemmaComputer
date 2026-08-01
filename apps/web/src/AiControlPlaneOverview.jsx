@@ -4,7 +4,7 @@ import { Globe20Regular } from "@fluentui/react-icons/svg/globe";
 import { Info20Regular } from "@fluentui/react-icons/svg/info";
 import { Pulse20Regular } from "@fluentui/react-icons/svg/pulse";
 import { adminApi } from "./workspace-api.js";
-import { estimateAiTokenEmissions } from "./ai-emissions.js";
+import { AI_EMISSIONS_METHOD, estimateAiTokenEmissions } from "./ai-emissions.js";
 import "./AiControlPlaneOverview.css";
 
 const DAY_MS = 86_400_000;
@@ -51,6 +51,8 @@ const formatEmissions = (emissions) => {
 const emissionsComparison = (emissions) => emissions?.changePercent === null || emissions?.changePercent === undefined
   ? "no comparable prior-period estimate"
   : `${emissions.changePercent > 0 ? "+" : ""}${emissions.changePercent}% from prior period`;
+
+const emissionsRegionName = (label = "") => label.split(" · ")[0] || label;
 
 const currentMonthRange = (now = new Date()) => {
   const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
@@ -447,7 +449,23 @@ export function AiControlPlaneOverview({
       <section className="ai-emissions" aria-labelledby="ai-emissions-heading">
         <span className="ai-emissions-icon"><Globe20Regular aria-hidden="true" /></span>
         <div className="ai-emissions-copy">
-          <p>Estimated AI-related emissions</p>
+          <div className="ai-emissions-label">
+            <p>Estimated AI-related emissions</p>
+            <span className="ai-emissions-tooltip-wrap">
+              <button type="button" aria-label="How estimated AI emissions are calculated" aria-describedby="ai-emissions-tooltip"><Info20Regular aria-hidden="true" /></button>
+              <span className="ai-emissions-tooltip" id="ai-emissions-tooltip" role="tooltip">
+                <strong>How this estimate is calculated</strong>
+                <span>Covered text tokens ÷ 1,000,000 × {AI_EMISSIONS_METHOD.energyKwhPerMillionTextTokens} kWh × the selected grid factor. Regional results are added together.</span>
+                {emissions?.regionSources?.length ? emissions.regionSources.map((source) => (
+                  <span className="ai-emissions-tooltip-region" key={source.region}>
+                    <b>{emissionsRegionName(source.label)}</b>
+                    {number(source.tokens).toLocaleString("en")} tokens × {AI_EMISSIONS_METHOD.regions[source.region].kgCo2ePerKwh} kg CO₂e/kWh
+                  </span>
+                )) : <span className="ai-emissions-tooltip-region">Choose an estimated serving grid on a configured provider to apply a regional factor.</span>}
+                <small>Includes input, output, cache-read, cache-write, and reasoning text tokens. This is an operational estimate, not an assured provider location.</small>
+              </span>
+            </span>
+          </div>
           <h3 id="ai-emissions-heading">{formatEmissions(emissions)}</h3>
           <span>{emissions ? `${emissions.coveragePercent ?? 0}% token coverage · ${emissionsComparison(emissions)}` : "Choose an estimated serving grid on at least one configured provider before reporting a number."}</span>
         </div>

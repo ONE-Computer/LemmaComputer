@@ -462,6 +462,92 @@
   gap: 3px;
 }
 
+.ai-emissions-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ai-emissions-label > p {
+  margin: 0;
+}
+
+.ai-emissions-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.ai-emissions-tooltip-wrap > button {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #506579;
+  background: transparent;
+  cursor: help;
+}
+
+.ai-emissions-tooltip-wrap > button:hover,
+.ai-emissions-tooltip-wrap > button:focus-visible {
+  color: #174ea6;
+  background: #eaf2fc;
+  outline: 2px solid transparent;
+}
+
+.ai-emissions-tooltip-wrap > button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ai-emissions-tooltip {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 8px);
+  left: -12px;
+  display: grid;
+  width: min(370px, calc(100vw - 56px));
+  gap: 7px;
+  padding: 13px 14px;
+  border: 1px solid #cad5e1;
+  border-radius: 9px;
+  color: #25384b;
+  background: #fff;
+  box-shadow: 0 12px 30px rgb(30 48 67 / 16%);
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.ai-emissions-tooltip-wrap:hover .ai-emissions-tooltip,
+.ai-emissions-tooltip-wrap:focus-within .ai-emissions-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ai-emissions-tooltip > strong {
+  color: #172334;
+  font-size: 12px;
+}
+
+.ai-emissions-tooltip-region {
+  display: grid;
+  gap: 1px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: #f5f8fb;
+}
+
+.ai-emissions-tooltip small {
+  color: var(--overview-muted);
+  font-size: 10px;
+}
+
 .ai-emissions-copy h3 {
   margin: 0;
   font-size: 23px;
