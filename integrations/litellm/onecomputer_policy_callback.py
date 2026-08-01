@@ -37,17 +37,6 @@ USAGE_TOKEN = os.environ.get("ONECOMPUTER_AI_USAGE_TOKEN", "")
 ROUTING_STATE_KEY = "onecomputer_routing_state"
 USAGE_STATE_KEY = "onecomputer_usage_state"
 USAGE_CHAIN_KEY = "onecomputer_usage_chain"
-AUTH_CONTEXT_KEY = "onecomputer_authenticated_context"
-AUTH_CONTEXT_FIELDS = (
-    "onecomputer_tenant_id",
-    "onecomputer_subject_id",
-    "onecomputer_workspace_id",
-    "onecomputer_agent_id",
-    "onecomputer_policy_version_id",
-    "onecomputer_policy_hash",
-    "onecomputer_policy_model_alias",
-    "onecomputer_non_billable_exemption",
-)
 ROUTING_HEALTH_TTL_SECONDS = 60
 _ROUTING_HEALTH_LOCK = threading.Lock()
 _ROUTING_UNAVAILABLE_UNTIL = {}
@@ -234,38 +223,10 @@ def _metadata_dicts(kwargs):
     return values
 
 
-def _litellm_call_id(kwargs):
-    value = kwargs.get("litellm_call_id")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    params = kwargs.get("litellm_params")
-    value = params.get("litellm_call_id") if isinstance(params, dict) else None
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
 def _trusted_key_metadata(kwargs):
-    """Read identity only from the key projection or a same-call signed copy."""
+    """Read identity only from LiteLLM's authenticated key projection."""
     auth = kwargs.get("user_api_key_dict")
-    projected = _metadata(auth) if auth is not None else {}
-    if projected:
-        return projected
-    call_id = _litellm_call_id(kwargs)
-    if call_id is None:
-        return {}
-    for metadata in _metadata_dicts(kwargs):
-        context = _verified_usage_chain(metadata.get(AUTH_CONTEXT_KEY))
-        if (
-            isinstance(context, dict)
-            and context.get("kind") == "authenticated_context_v1"
-            and context.get("litellmCallId") == call_id
-            and isinstance(context.get("metadata"), dict)
-        ):
-            return {
-                name: context["metadata"][name]
-                for name in AUTH_CONTEXT_FIELDS
-                if name in context["metadata"]
-            }
-    return {}
+    return _metadata(auth) if auth is not None else {}
 
 
 def _provider_request(kwargs):
@@ -273,25 +234,7 @@ def _provider_request(kwargs):
     request = dict(kwargs)
     for name in _PROVIDER_INTERNAL_FIELDS:
         request.pop(name, None)
-    for metadata in _metadata_dicts(request):
-        metadata.pop(AUTH_CONTEXT_KEY, None)
     return request
-
-
-def _set_authenticated_context(kwargs, metadata):
-    call_id = _litellm_call_id(kwargs)
-    if call_id is None:
-        return
-    snapshot = {name: metadata[name] for name in AUTH_CONTEXT_FIELDS if name in metadata}
-    request_metadata = kwargs.get("metadata")
-    if not isinstance(request_metadata, dict):
-        request_metadata = {}
-        kwargs["metadata"] = request_metadata
-    request_metadata[AUTH_CONTEXT_KEY] = _signed_usage_chain({
-        "kind": "authenticated_context_v1",
-        "litellmCallId": call_id,
-        "metadata": snapshot,
-    })
 
 
 def _signed_usage_chain(value):
@@ -371,11 +314,7 @@ def _request_usage_context_and_strip_reserved(kwargs, source_attempt_id=None):
         if task_binding is None and isinstance(candidate, str):
             task_binding = candidate
         for name in list(metadata):
-            if (
-                isinstance(name, str)
-                and name.startswith("onecomputer_")
-                and name != AUTH_CONTEXT_KEY
-            ):
+            if isinstance(name, str) and name.startswith("onecomputer_"):
                 metadata.pop(name, None)
     return task_binding, parent_attempt_id
 
@@ -1106,7 +1045,6 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             # v1.93 invokes this owned callback after key authorization for the
             # sole synthetic alias and before Router model-group lookup.
             data["user_api_key_dict"] = user_api_key_dict
-            _set_authenticated_context(data, _metadata(user_api_key_dict))
             return await self.async_pre_routing_hook(data, call_type)
 
         metadata = _metadata(user_api_key_dict)
