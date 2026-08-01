@@ -258,6 +258,19 @@ but a live run still requires an approved E2B template ID, reachable governed
 egress/control routes, and valid runtime credentials. Until that qualification
 is completed, production must fail closed rather than claim an ACP result.
 
+Run the non-mutating preflight before the live gate to inspect the E2B API key,
+template readiness, `envd` version, and missing public-route variables:
+
+```bash
+E2B_API_KEY=... E2B_TEMPLATE_ID=... npm run preflight:e2b
+```
+
+Exit status `0` means the configured template is ready and all qualification
+variables are present. Status `2` means the template is absent, `3` means it
+is still building or failed, and `4` means the provider is ready but the
+ONEComputer route prerequisites are incomplete. The command never creates or
+deletes E2B resources.
+
 The next hardening items are explicit: qualify the existing TTL reaper's
 destroy/revoke/purge behavior against E2B and maintain the gated live E2B
 acceptance harness covering two real conversations, follow-up session reuse,
