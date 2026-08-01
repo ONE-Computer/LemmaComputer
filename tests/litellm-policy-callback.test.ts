@@ -122,6 +122,7 @@ verified_usage_chain = module["_verified_usage_chain"]
 completion_payload = module["_completion_payload"]
 routing_payload = module["_routing_payload"]
 callback_type = module["OneComputerMcpPolicyCallback"]
+set_routing_state = module["_set_routing_state"]
 
 # These are the supported callback names in the pinned LiteLLM v1.93 image.
 assert hasattr(callback_type, "async_pre_call_deployment_hook")
@@ -457,6 +458,8 @@ def usage_authority(path, payload):
     authority_calls.append((path, payload))
     if path == "attempts/admit":
         return {"status": "created", "admissionId": "admission-boundary"}
+    if path == "routing/verify":
+        return {"schemaVersion": 1, "status": "verified"}
     raise AssertionError(f"unexpected usage authority call: {path}")
 
 callback_type.async_pre_call_deployment_hook.__globals__["_usage_request"] = usage_authority
@@ -513,6 +516,37 @@ async def assert_provider_boundary():
     assert "user_api_key_metadata" not in provider_admitted
     assert provider_admitted["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
     assert "onecomputer_usage_chain" in provider_admitted["metadata"]
+
+    auto_route = {
+        **openai_route,
+        "access_groups": ["ocp-tenant-real-balanced"],
+    }
+    auto_request = {
+        "model": "onecomputer-openai-balanced",
+        "messages": [{"role": "user", "content": "auto-routed request"}],
+        "litellm_call_id": "auto-routed-call",
+        "litellm_params": {"model_info": auto_route},
+        "metadata": {"onecomputer_task_binding": "signed." + "y" * 64},
+    }
+    routed_auto = {**auto_request, "user_api_key_dict": AutoAuth()}
+    set_routing_state(routed_auto, {
+        "decisionId": "decision-auto",
+        "executedDeploymentId": "routing-deployment-balanced",
+        "executedProviderDeployment": "ocp-tenant-real-balanced",
+        "requestedServiceClass": "auto",
+        "selectedServiceClass": "balanced",
+        "binding": {
+            "requestId": "request-auto",
+            "mappingVersionId": "mapping-real",
+        },
+    })
+    await callback.async_pre_call_deployment_hook(routed_auto, "acompletion")
+    verify_call = next(item for item in authority_calls if item[0] == "routing/verify")
+    assert verify_call[1]["actual"] == {
+        "tenantId": "tenant-real",
+        "requestId": "request-auto",
+        "deploymentId": "routing-deployment-balanced",
+    }
 
 asyncio.run(assert_provider_boundary())
 `;

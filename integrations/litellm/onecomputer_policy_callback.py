@@ -902,7 +902,8 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             result = await asyncio.to_thread(_usage_request, "routing/decide", payload)
             required = {
                 "decisionId", "executedDeploymentId", "executedModelGroup",
-                "requestedServiceClass", "selectedServiceClass", "binding",
+                "executedProviderDeployment", "requestedServiceClass",
+                "selectedServiceClass", "binding",
             }
             if not required.issubset(result) or not isinstance(result.get("binding"), dict):
                 raise RuntimeError("Governed routing authority returned a malformed decision")
@@ -934,13 +935,17 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             if trusted.get("onecomputer_policy_model_alias") == "onecomputer-auto":
                 if not routing_state:
                     raise RuntimeError("Governed routing decision binding is missing")
+                access_groups = route.get("access_groups")
+                if (
+                    not isinstance(access_groups, list)
+                    or routing_state.get("executedProviderDeployment") not in access_groups
+                ):
+                    raise RuntimeError("LiteLLM selected a deployment outside the governed decision")
                 actual = {
                     "tenantId": trusted.get("onecomputer_tenant_id"),
                     "requestId": routing_state.get("binding", {}).get("requestId"),
-                    "deploymentId": route.get("onecomputer_deployment_id"),
+                    "deploymentId": routing_state.get("executedDeploymentId"),
                 }
-                if actual["deploymentId"] != routing_state.get("executedDeploymentId"):
-                    raise RuntimeError("LiteLLM selected a deployment outside the governed decision")
                 await asyncio.to_thread(_usage_request, "routing/verify", {
                     "binding": routing_state.get("binding"), "actual": actual,
                 })

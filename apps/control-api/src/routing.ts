@@ -369,6 +369,7 @@ export class RoutingExecutionService {
       selectedServiceClass: String(prior.selected_service_class),
       reasonCode: String(prior.reason_code),
       executedDeploymentId: deploymentId,
+      executedProviderDeployment: String(prior.executed_provider_deployment),
       executedModelGroup: executionModelGroup(tenantId, String(prior.executed_provider_deployment)),
       binding: this.bindings.issue({
         tenantId,
@@ -473,6 +474,7 @@ export class RoutingExecutionService {
       selectedServiceClass: decision.selectedServiceClass,
       reasonCode: decision.reasonCode,
       executedDeploymentId: decision.executedDeployment.id,
+      executedProviderDeployment: decision.executedDeployment.deployment,
       executedModelGroup: executionModelGroup(input.tenantId, decision.executedDeployment.deployment),
       binding: this.bindings.issue({
         tenantId: input.tenantId,
