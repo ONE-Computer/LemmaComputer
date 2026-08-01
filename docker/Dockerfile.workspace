@@ -46,12 +46,17 @@ COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/loc
 COPY --chmod=0755 docker/workspace/onecomputer-libreoffice /usr/local/libexec/onecomputer-libreoffice
 
 RUN export DEBIAN_FRONTEND=noninteractive \
-    && apt-get purge -y \
+    && purge_packages="$(for package in \
       code firefox gimp gimp-data google-chrome-stable \
       nextcloud-desktop nextcloud-desktop-common nextcloud-desktop-doc nextcloud-desktop-l10n \
       obs-studio obs-v4l2sink onlyoffice-desktopeditors \
       remmina remmina-common remmina-plugin-rdp remmina-plugin-secret remmina-plugin-spice remmina-plugin-vnc \
-      signal-desktop slack-desktop sublime-text thunderbird zoom \
+      signal-desktop slack-desktop sublime-text thunderbird zoom; do \
+      if dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q '^install ok installed$'; then \
+        printf '%s ' "$package"; \
+      fi; \
+    done)" \
+    && if [ -n "$purge_packages" ]; then apt-get purge -y $purge_packages; fi \
     && apt-get autoremove -y \
     && curl -fsSLo /tmp/claude-desktop.deb \
       "https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_${CLAUDE_DESKTOP_VERSION}_amd64.deb" \
@@ -278,6 +283,7 @@ RUN chmod 0755 \
       /usr/local/share/onecomputer/applications/onecomputer-google-chrome.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-hermes-agent-cli.desktop \
       /usr/local/share/onecomputer/applications/onecomputer-hermes-desktop.desktop \
+    && command -v npm soffice libreoffice pandoc pdftoppm pdftotext qpdf tesseract unzip zip \
     && test -f /opt/onecomputer/skills/make-a-site/SKILL.md \
     && test -f /opt/onecomputer/hermes-agent/skills/onecomputer/make-a-site/SKILL.md \
     && chmod 0644 /usr/share/kasmvnc/www/app/onecomputer-kasm-clipboard.js /opt/firefox/distribution/policies.json /etc/opt/chrome/policies/managed/onecomputer.json /usr/local/share/onecomputer/SCHEDULING.md \

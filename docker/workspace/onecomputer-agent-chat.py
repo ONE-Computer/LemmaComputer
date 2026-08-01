@@ -474,7 +474,9 @@ def persist_attachment(filename: str, media_type: str, data: bytes, source: str)
         shutil.rmtree(message_directory, ignore_errors=True)
         shutil.rmtree(ATTACHMENT_INBOX_ROOT / ("Telegram" if source == "telegram" else "Chat") / attachment_id, ignore_errors=True)
         raise
-    return str(path)
+    # macOS exposes the temporary directory through both /var and /private/var;
+    # return the canonical path so workspace references compare consistently.
+    return str(path.resolve())
 
 
 def snapshot_outbox() -> dict[str, tuple[int, int, int, int]]:
@@ -491,7 +493,7 @@ def snapshot_outbox() -> dict[str, tuple[int, int, int, int]]:
     return snapshot
 
 
-def persist_outbox_artifacts(before: dict[str, tuple[int, int, int, int]]) -> tuple[list[dict[str, Any]], str | None]:
+def persist_outbox_artifacts(before: dict[str, tuple[int, int, int, int]]):
     ARTIFACT_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(ARTIFACT_ROOT, 0o700)
     artifacts: list[dict[str, Any]] = []

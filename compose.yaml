@@ -464,6 +464,9 @@ services:
     profiles:
       - build
     image: ${ONECOMPUTER_WORKSPACE_IMAGE:-onecomputer/workspace:dev}
+    # E2B Firecracker qualification and the pinned desktop artifacts target
+    # x86_64. Keep local Apple Silicon builds deterministic under emulation.
+    platform: ${ONECOMPUTER_WORKSPACE_PLATFORM:-linux/amd64}
     build:
       context: .
       dockerfile: docker/Dockerfile.workspace

@@ -83,7 +83,8 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     os.chmod(temporary, 0o600)
-    os.chown(temporary, 1000, 1000)
+    if os.geteuid() == 0:
+        os.chown(temporary, 1000, 1000)
     os.replace(temporary, path)
 
 
