@@ -137,6 +137,8 @@ test("E2B projects policy, persistent storage, controlled egress, and authentica
     allowOut: ["egress.example.com", "models.example.com", "control.example.com"],
     denyOut: [],
   });
+  assert.equal(createOptions?.secure, true);
+  assert.equal(createOptions?.allowInternetAccess, true);
   assert.equal(createOptions?.volumeMounts?.["/home/kasm-user"], `oc-${workspaceId.replaceAll("-", "")}`);
   assert.equal(createOptions?.envs?.ONECOMPUTER_SIGNED_POLICY_B64?.length > 20, true);
   assert.equal(createOptions?.envs?.HTTPS_PROXY?.startsWith("https://onecomputer:signed-egress-grant@egress.example.com/"), true);
