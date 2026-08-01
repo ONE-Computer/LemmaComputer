@@ -36,7 +36,7 @@ The UI is therefore never the source of truth for a screenshot, approval, or art
 - Chat stream parsing rejects sequence gaps, wrong session/turn IDs, oversized frames, malformed JSON, and missing terminal events.
 - E2B capture returns a valid bounded PNG before VCR ingestion.
 - Cross-user/task/workspace reads return `404`.
-- Ephemeral task creation returns `task + ephemeral workspace handle`; the handle is hidden from durable workspace listings. A production TTL/reaper is still required to stop the provider sandbox, revoke its gateway grants, and purge its volume after expiry; the timestamp alone is not cleanup evidence.
+- Ephemeral task creation returns `task + ephemeral workspace handle`; the handle is hidden from durable workspace listings. Control now fail-closes all task-mutating paths (chat, provider capture, and PPTX creation) after the one-hour deadline; read-only evidence replay remains available. A production TTL/reaper is still required to stop the provider sandbox, revoke its gateway grants, and purge its volume after expiry; the timestamp and write gate are not cleanup evidence.
 
 ## Live qualification prerequisites
 

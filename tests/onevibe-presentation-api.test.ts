@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { IdentityContext } from "@onecomputer/contracts";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
-import { createControlServer } from "../apps/control-api/src/server.js";
+import { createControlServer, ONEVIBE_EPHEMERAL_TTL_MS } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 import { OneVibeCaptureAuthority } from "../apps/control-api/src/onevibe-vcr.js";
 
@@ -111,6 +111,34 @@ test("ONEVibe can bootstrap a task-scoped ephemeral sandbox without a durable wo
     assert.match(created.json().workspace.grantId, /^cowork-ephemeral-/);
     const taskId = created.json().task.id as string;
     const workspaceId = created.json().workspace.id as string;
+    const taskRecord = await store.getOwnedOneVibeTask(identity, workspaceId, taskId);
+    assert.ok(taskRecord);
+    taskRecord.createdAt = new Date(Date.now() - ONEVIBE_EPHEMERAL_TTL_MS - 1);
+
+    const expiredPresentation = await app.inject({
+      method: "POST",
+      url: `/v1/workspaces/${workspaceId}/onevibe/tasks/${taskId}/presentations`,
+      headers,
+      payload: { title: "Expired task", body: "This must not execute after the task deadline." },
+    });
+    assert.equal(expiredPresentation.statusCode, 410);
+    assert.equal(expiredPresentation.json().error.code, "ONEVIBE_TASK_EXPIRED");
+
+    const captureToken = new OneVibeCaptureAuthority(captureSecret).issue(identity, {
+      workspaceId,
+      taskId,
+      sourceApplication: "browser",
+      maximumBytes: 16_384,
+    });
+    const expiredCapture = await app.inject({
+      method: "POST",
+      url: `/internal/v1/onevibe/tasks/${taskId}/frames`,
+      headers: { "x-onecomputer-onevibe-capture-token": captureToken },
+      payload: { sourceApplication: "browser", imageBase64: onePixelPngBase64 },
+    });
+    assert.equal(expiredCapture.statusCode, 410);
+    assert.equal(expiredCapture.json().error.code, "ONEVIBE_TASK_EXPIRED");
+
     const events = await app.inject({ method: "GET", url: `/v1/workspaces/${workspaceId}/onevibe/tasks/${taskId}/events`, headers });
     assert.equal(events.statusCode, 200);
     assert.equal(events.json().events[0].kind, "system");

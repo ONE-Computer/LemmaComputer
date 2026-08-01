@@ -39,6 +39,15 @@ type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "comple
 
 const workspaceMemoryGiB = 4;
 
+/**
+ * Ephemeral Cowork is intentionally short-lived. The provider reaper is a
+ * separate deployment concern, but Control must never accept new work after
+ * this deadline (otherwise a dead reaper could turn a one-hour grant into an
+ * unbounded execution capability).
+ */
+export const ONEVIBE_EPHEMERAL_TTL_MS = 60 * 60_000;
+const ephemeralGrantPrefix = "cowork-ephemeral-";
+
 const sandboxProfiles = [
   sandboxProfileSchema.parse({
     id: "claude-desktop-standard-v1",
@@ -234,6 +243,7 @@ const envSchema = z.object({
   POLICY_VERIFICATION_KEYS_B64: z.string().min(32),
   POLICY_BUNDLE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(86_400),
   GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
+  ONEVIBE_EPHEMERAL_REAPER_INTERVAL_SECONDS: z.coerce.number().int().min(30).max(3_600).default(60),
   BOOTSTRAP_TENANT_ID: z.string().min(1).default("acme"),
   BOOTSTRAP_USER_ID: z.string().min(1).default("alex-morgan"),
   TENANT_DISPLAY_NAME: z.string().min(1).default("ME TECH"),
@@ -281,6 +291,11 @@ export function createControlServer(
     grantRenewal?: {
       tenantId: string;
       intervalMs: number;
+    };
+    ephemeralCoworkReaper?: {
+      tenantId: string;
+      intervalMs: number;
+      ttlMs: number;
     };
   } = {},
 ) {
@@ -375,6 +390,28 @@ export function createControlServer(
       throw new OneComputerError("ONEVIBE_TASKS_NOT_CONFIGURED", "ONEVibe task evidence storage is not configured", 503, true);
     }
     return store as WorkspaceStore & GovernanceStore & OneVibeTaskStore;
+  };
+  const assertOneVibeTaskWriteAllowed = async (
+    actor: IdentityContext,
+    taskStore: OneVibeTaskStore,
+    workspaceId: string,
+    taskId: string,
+  ) => {
+    const task = await taskStore.getOwnedOneVibeTask(actor, workspaceId, taskId);
+    if (!task) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    const workspace = await store.getOwned(actor, workspaceId);
+    if (!workspace) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    if (
+      workspace.grantId.startsWith(ephemeralGrantPrefix)
+      && task.createdAt.getTime() + ONEVIBE_EPHEMERAL_TTL_MS <= Date.now()
+    ) {
+      throw new OneComputerError(
+        "ONEVIBE_TASK_EXPIRED",
+        "This ephemeral Cowork sandbox has expired; start a new task to continue.",
+        410,
+      );
+    }
+    return task;
   };
   const requireOneVibeCapture = () => {
     if (!oneVibeCaptureAuthority) {
@@ -1695,7 +1732,7 @@ export function createControlServer(
     if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "Ephemeral Cowork task could not be recorded", 503, true);
     return reply.code(201).header("cache-control", "no-store").send({
       task: { id: task.id, status: task.status, createdAt: task.createdAt },
-      workspace: { ...workspace, ephemeral: true, expiresAt: new Date(Date.now() + 60 * 60_000).toISOString() },
+      workspace: { ...workspace, ephemeral: true, expiresAt: new Date(Date.now() + ONEVIBE_EPHEMERAL_TTL_MS).toISOString() },
     });
   });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/open", async (request) => {
@@ -1918,9 +1955,7 @@ export function createControlServer(
       ? undefined
       : z.uuid().parse(Array.isArray(taskIdHeader) ? taskIdHeader[0] : taskIdHeader);
     const oneVibeTaskStore = oneVibeTaskId ? requireOneVibeTasks() : undefined;
-    if (oneVibeTaskId && !await oneVibeTaskStore!.getOwnedOneVibeTask(owner, request.params.workspaceId, oneVibeTaskId)) {
-      throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
-    }
+    if (oneVibeTaskId) await assertOneVibeTaskWriteAllowed(owner, oneVibeTaskStore!, request.params.workspaceId, oneVibeTaskId);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
     const abort = new AbortController();
     request.raw.once("aborted", () => abort.abort("browser-disconnected"));
@@ -2067,14 +2102,15 @@ export function createControlServer(
     if (grant.taskId !== taskId) throw new OneComputerError("UNAUTHENTICATED", "ONEVibe capture authorization does not match this task", 401);
     const input = oneVibeVcrFrameSchema.parse(request.body ?? {});
     if (grant.sourceApplication !== input.sourceApplication) throw new OneComputerError("UNAUTHENTICATED", "ONEVibe capture authorization does not match this source", 401);
+    const taskStore = requireOneVibeTasks();
     const bytes = Buffer.from(input.imageBase64, "base64");
     if (!bytes.byteLength || bytes.byteLength > grant.maximumBytes) {
       throw new OneComputerError("ONEVIBE_VCR_FRAME_TOO_LARGE", "ONEVibe visual evidence exceeds the capture limit", 413);
     }
     const captureIdentity: IdentityContext = { tenantId: grant.tenantId, subjectId: grant.subjectId, audience: "onecomputer-control" };
+    await assertOneVibeTaskWriteAllowed(captureIdentity, taskStore, grant.workspaceId, taskId);
     const owner = { ...captureIdentity, workspaceId: grant.workspaceId, taskId };
     const image = await createOneVibeVcrFrame(bytes, owner, input.sourceApplication);
-    const taskStore = requireOneVibeTasks();
     const event = await taskStore.appendOneVibeTaskEvent(captureIdentity, { workspaceId: grant.workspaceId, taskId, kind: "workspace-frame", payloadHash: image.sha256 });
     if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
     const frame = await taskStore.saveOneVibeVcrFrame(captureIdentity, {
@@ -2091,9 +2127,7 @@ export function createControlServer(
     const input = oneVibePresentationSchema.parse(request.body ?? {});
     const actor = identity(request);
     const taskStore = requireOneVibeTasks();
-    if (!await taskStore.getOwnedOneVibeTask(actor, workspaceId, taskId)) {
-      throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
-    }
+    await assertOneVibeTaskWriteAllowed(actor, taskStore, workspaceId, taskId);
     const artifact = await createOneVibePresentation(input, {
       tenantId: actor.tenantId,
       subjectId: actor.subjectId,
@@ -2268,6 +2302,56 @@ export function createControlServer(
       if (grantRenewalTimer) clearInterval(grantRenewalTimer);
     });
   }
+
+  let ephemeralReaperTimer: NodeJS.Timeout | undefined;
+  let ephemeralReaperRunning = false;
+  const reapExpiredEphemeralCowork = async () => {
+    const configuration = security.ephemeralCoworkReaper;
+    const policyStore = security.identityPolicyStore;
+    if (ephemeralReaperRunning || !configuration || !policyStore) return;
+    ephemeralReaperRunning = true;
+    const cutoff = Date.now() - configuration.ttlMs;
+    try {
+      const users = await policyStore.listUsers(configuration.tenantId);
+      const results = await Promise.allSettled(users.map(async (user) => {
+        if (user.status === "disabled") return 0;
+        const actor = await policyStore!.getPrincipal(user.userId);
+        if (!actor || actor.tenantId !== configuration.tenantId) return 0;
+        const workspaces = await store.listCurrent(actor.identity);
+        let removed = 0;
+        for (const workspace of workspaces) {
+          if (
+            !workspace.grantId.startsWith(ephemeralGrantPrefix)
+            || workspace.updatedAt.getTime() > cutoff
+            || ["provisioning", "restarting", "stopping"].includes(workspace.state)
+          ) continue;
+          try {
+            const { policy } = await policyForGrant(actor, user.effectivePolicy, workspace.grantId);
+            await service.delete(actor.identity, policy, workspace.id);
+            removed += 1;
+          } catch (error) {
+            app.log.warn({ event: "ephemeral_cowork_cleanup_failed", workspaceId: workspace.id, code: error instanceof OneComputerError ? error.code : "CLEANUP_FAILED" }, "expired Cowork cleanup will be retried");
+          }
+        }
+        return removed;
+      }));
+      const removed = results.reduce((total, result) => total + (result.status === "fulfilled" ? result.value : 0), 0);
+      const failedUsers = results.filter((result) => result.status === "rejected").length;
+      if (removed || failedUsers) app.log.info({ event: "ephemeral_cowork_reaper", removed, failedUsers }, "expired Cowork sandboxes reconciled");
+    } finally {
+      ephemeralReaperRunning = false;
+    }
+  };
+  if (security.ephemeralCoworkReaper && security.identityPolicyStore) {
+    app.addHook("onReady", async () => {
+      await reapExpiredEphemeralCowork();
+      ephemeralReaperTimer = setInterval(() => { void reapExpiredEphemeralCowork(); }, security.ephemeralCoworkReaper!.intervalMs);
+      ephemeralReaperTimer.unref();
+    });
+    app.addHook("onClose", async () => {
+      if (ephemeralReaperTimer) clearInterval(ephemeralReaperTimer);
+    });
+  }
   return app;
 }
 
@@ -2395,6 +2479,11 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       grantRenewal: {
         tenantId: env.BOOTSTRAP_TENANT_ID,
         intervalMs: env.GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS * 1000,
+      },
+      ephemeralCoworkReaper: {
+        tenantId: env.BOOTSTRAP_TENANT_ID,
+        intervalMs: env.ONEVIBE_EPHEMERAL_REAPER_INTERVAL_SECONDS * 1000,
+        ttlMs: ONEVIBE_EPHEMERAL_TTL_MS,
       },
     },
   );

@@ -40,6 +40,13 @@ and the endpoint returns `404` rather than an empty synthetic conversation.
 Durable replay and restart recovery remain a release gate, not a hidden
 fallback.
 
+Control also fail-closes all task-mutating paths after the one-hour ephemeral
+Cowork deadline: new chat turns, provider VCR uploads, and PPTX creation return
+`ONEVIBE_TASK_EXPIRED`. Read-only evidence replay remains available for audit.
+This is a capability boundary, not cleanup proof; production still needs a
+provider reaper to stop the sandbox, revoke gateway grants, and purge its
+ephemeral volume.
+
 ## Provisioning
 
 1. Build and publish an immutable workspace template from the exact
