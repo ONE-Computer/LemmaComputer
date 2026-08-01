@@ -5,6 +5,7 @@ import type { IdentityContext } from "@onecomputer/contracts";
 import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
+import { OneVibeCaptureAuthority } from "../apps/control-api/src/onevibe-vcr.js";
 
 const proxyToken = "onevibe-api-proxy-token-at-least-24-characters";
 const identity: IdentityContext = { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" };
@@ -13,12 +14,17 @@ const headers = {
   "x-onecomputer-test-tenant-id": identity.tenantId,
   "x-onecomputer-test-user-id": identity.subjectId,
 };
+const captureSecret = "onevibe-capture-test-secret-at-least-32-characters";
+const onePixelPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL1WQAAAABJRU5ErkJggg==";
 
 test("ONEVibe API creates an owned PPTX and only its workspace owner can download it", async () => {
   const store = new MemoryWorkspaceStore();
   const workspace = await store.createOrGet(identity, "personal", randomUUID());
   await store.update(workspace.id, { state: "ready" });
-  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, { testIdentityMode: true });
+  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    oneVibeCaptureSecret: captureSecret,
+  });
   try {
     const taskCreated = await app.inject({
       method: "POST",
@@ -27,6 +33,29 @@ test("ONEVibe API creates an owned PPTX and only its workspace owner can downloa
     });
     assert.equal(taskCreated.statusCode, 201);
     const task = taskCreated.json().task as { id: string };
+
+    const captureToken = new OneVibeCaptureAuthority(captureSecret).issue(identity, {
+      workspaceId: workspace.id,
+      taskId: task.id,
+      sourceApplication: "browser",
+      maximumBytes: 16_384,
+    });
+    const captured = await app.inject({
+      method: "POST",
+      url: `/internal/v1/onevibe/tasks/${task.id}/frames`,
+      headers: { "x-onecomputer-onevibe-capture-token": captureToken },
+      payload: { sourceApplication: "browser", imageBase64: onePixelPngBase64 },
+    });
+    assert.equal(captured.statusCode, 201);
+    const vcr = await app.inject({ method: "GET", url: `/v1/workspaces/${workspace.id}/onevibe/tasks/${task.id}/vcr`, headers });
+    assert.equal(vcr.statusCode, 200);
+    const frameUrl = (vcr.json().frames as Array<{ frameUrl: string; sourceApplication: string }>)[0]?.frameUrl;
+    assert.equal((vcr.json().frames as Array<{ sourceApplication: string }>)[0]?.sourceApplication, "browser");
+    assert.ok(frameUrl);
+    const frame = await app.inject({ method: "GET", url: frameUrl!, headers });
+    assert.equal(frame.statusCode, 200);
+    assert.equal(frame.headers["content-type"], "image/png");
+    assert.deepEqual(frame.rawPayload.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
 
     const created = await app.inject({
       method: "POST",
@@ -43,7 +72,7 @@ test("ONEVibe API creates an owned PPTX and only its workspace owner can downloa
     const events = await app.inject({ method: "GET", url: `/v1/workspaces/${workspace.id}/onevibe/tasks/${task.id}/events`, headers });
     assert.equal(events.statusCode, 200);
     assert.deepEqual((events.json().events as Array<{ kind: string; sequence: number }>).map(({ kind, sequence }) => ({ kind, sequence })), [
-      { kind: "system", sequence: 1 }, { kind: "artifact", sequence: 2 },
+      { kind: "system", sequence: 1 }, { kind: "workspace-frame", sequence: 2 }, { kind: "artifact", sequence: 3 },
     ]);
 
     const download = await app.inject({ method: "GET", url: artifact.downloadUrl, headers });

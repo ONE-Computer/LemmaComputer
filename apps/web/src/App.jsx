@@ -30,7 +30,7 @@ import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { PlugConnected24Regular } from "@fluentui/react-icons/svg/plug-connected";
 import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
-import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
+import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, oneVibeApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
 import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
@@ -72,6 +72,7 @@ const navByView = Object.freeze({
   home: "Workspace",
   schedules: "Schedules",
   sites: "Sites",
+  cowork: "Cowork",
   chat: "Chat",
   trail: "Trail",
   firewall: "Firewall",
@@ -2028,6 +2029,104 @@ function ChatPart({ part, markdown = false }) {
     return <div className={`chat-terminal ${part.data.state}`} role="status">{part.data.message || `Turn ${part.data.state}`}</div>;
   }
   return null;
+}
+
+function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange, onStartWorkspace }) {
+  const [title, setTitle] = useState("Executive update");
+  const [body, setBody] = useState("Summarize the completed work and its next decisions.");
+  const [task, setTask] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [frames, setFrames] = useState([]);
+  const [artifact, setArtifact] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const refreshEvidence = async (taskId = task?.id) => {
+    if (!workspace || !taskId) return;
+    const [timeline, replay] = await Promise.all([
+      oneVibeApi.events(workspace.id, taskId),
+      oneVibeApi.vcr(workspace.id, taskId),
+    ]);
+    setEvents(timeline.events ?? []);
+    setFrames(replay.frames ?? []);
+  };
+
+  useEffect(() => {
+    setTask(null);
+    setEvents([]);
+    setFrames([]);
+    setArtifact(null);
+    setError("");
+  }, [workspace?.id]);
+
+  useEffect(() => {
+    if (!task?.id || !workspace) return undefined;
+    void refreshEvidence(task.id).catch((requestError) => setError(requestError.message));
+    const timer = window.setInterval(() => { void refreshEvidence(task.id).catch(() => undefined); }, 2_500);
+    return () => window.clearInterval(timer);
+  }, [task?.id, workspace?.id]);
+
+  const startTask = async () => {
+    if (!workspace) return;
+    setBusy(true); setError(""); setArtifact(null);
+    try {
+      const created = await oneVibeApi.createTask(workspace.id);
+      setTask(created.task);
+      await refreshEvidence(created.task.id);
+    } catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+
+  const generatePresentation = async () => {
+    if (!workspace) return;
+    setBusy(true); setError("");
+    try {
+      let currentTask = task;
+      if (!currentTask) {
+        const created = await oneVibeApi.createTask(workspace.id);
+        currentTask = created.task;
+        setTask(currentTask);
+      }
+      const created = await oneVibeApi.createPresentation(workspace.id, currentTask.id, { title, body });
+      setArtifact(created.artifact);
+      await refreshEvidence(currentTask.id);
+    } catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+
+  const workspaceOptions = workspaces?.map((item) => ({ value: item.id, label: workspaceName(item) })) ?? [];
+  const workspaceReady = workspace && ["ready", "open"].includes(workspaceState);
+  return (
+    <section className="cowork-screen" aria-labelledby="cowork-heading">
+      <header className="page-heading">
+        <p>ONEVibe</p><h1 id="cowork-heading">Cowork</h1>
+        <span>Direct a governed task, inspect its visual evidence, and collect its editable output.</span>
+      </header>
+      <div className="cowork-context">
+        <SelectMenu value={workspace?.id ?? ""} onValueChange={onWorkspaceChange} ariaLabel="Choose Cowork workspace" options={workspaceOptions} />
+        {!workspaceReady && workspace && <button className="secondary-button" type="button" onClick={onStartWorkspace} disabled={busy}>Start workspace</button>}
+      </div>
+      {!workspace && <div className="cowork-empty">Choose a workspace to begin a Cowork task.</div>}
+      {workspace && <div className="cowork-grid">
+        <section className="cowork-card cowork-task">
+          <div><span className="cowork-eyebrow">Task output</span><h2>Create a PowerPoint</h2></div>
+          <label>Slide title<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength="180" disabled={busy || !workspaceReady} /></label>
+          <label>Slide content<textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength="4000" rows="7" disabled={busy || !workspaceReady} /></label>
+          <div className="cowork-actions">
+            <button className="secondary-button" type="button" onClick={startTask} disabled={busy || !workspaceReady}>{task ? "Start new task" : "Start task"}</button>
+            <button className="primary-button" type="button" onClick={generatePresentation} disabled={busy || !workspaceReady}>{busy ? "Working…" : "Generate PowerPoint"}</button>
+          </div>
+          {artifact && <a className="cowork-artifact" href={`/api${artifact.downloadUrl}`}><Document24Regular aria-hidden="true" /><span><strong>{artifact.name}</strong><small>Editable PowerPoint · {Math.ceil(artifact.sizeBytes / 1024)} KB</small></span><ChevronRight16Regular aria-hidden="true" /></a>}
+          {error && <p className="cowork-error" role="alert">{error}</p>}
+        </section>
+        <section className="cowork-card cowork-replay" aria-live="polite">
+          <div><span className="cowork-eyebrow">VCR</span><h2>Execution replay</h2></div>
+          {frames.length > 0 ? <div className="cowork-frame-strip">{frames.map((frame) => <a key={frame.eventSequence} href={`/api${frame.frameUrl}`} target="_blank" rel="noreferrer"><img src={`/api${frame.frameUrl}`} alt={`${frame.sourceApplication} frame at event ${frame.eventSequence}`} /><small>{frame.sourceApplication}</small></a>)}</div> : <p className="cowork-muted">Visual evidence appears here when the task’s browser or desktop capture sidecar records an authorized frame.</p>}
+          <ol className="cowork-timeline">{events.map((event) => <li key={event.sequence}><span>{event.sequence}</span><strong>{event.kind.replaceAll("-", " ")}</strong><time>{new Date(event.createdAt).toLocaleTimeString()}</time></li>)}</ol>
+        </section>
+      </div>}
+    </section>
+  );
 }
 
 function ChatConversation({
@@ -4132,6 +4231,7 @@ export function App() {
           <NavButton active={activeNav === "Trail"} icon={Clock24Regular} label="Trail" onClick={() => selectNav("Trail")} />
           {session.roles.includes("administrator") && <NavButton active={activeNav === "Firewall"} icon={ShieldCheckmark24Regular} label="Firewall" onClick={() => selectNav("Firewall")} />}
           <NavButton active={activeNav === "Connections"} icon={PlugConnected24Regular} label="Connections" onClick={() => selectNav("Connections")} />
+          <NavButton active={activeNav === "Cowork"} icon={Document24Regular} label="Cowork" onClick={() => selectNav("Cowork")} />
           <NavButton active={activeNav === "Chat"} icon={Bot24Regular} label="Chat" onClick={() => selectNav("Chat")} />
           {activeNav === "Chat" && <div className="sidebar-chat-history" aria-label="Recent chat threads">
             <div className="sidebar-chat-history-heading"><span>Recent</span><button type="button" aria-label="Start a new chat" title="Start a new chat" onClick={() => { selectChatSession(""); setMobileNavOpen(false); }}><Add24Regular aria-hidden="true" /></button></div>
@@ -4210,6 +4310,13 @@ export function App() {
           onDelete={deleteSchedule}
           onRunNow={runScheduleNow}
           onLoadRuns={async (scheduleId) => (await scheduleApi.runs(scheduleId)).runs}
+        />}
+        {activeNav === "Cowork" && <CoworkScreen
+          workspace={workspace}
+          workspaces={homeWorkspaces}
+          workspaceState={workspaceState}
+          onWorkspaceChange={selectActiveWorkspace}
+          onStartWorkspace={openWorkspace}
         />}
         {activeNav === "Chat" && <ChatScreen
           workspace={workspace}

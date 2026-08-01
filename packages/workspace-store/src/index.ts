@@ -45,6 +45,16 @@ export type OneVibeTaskEventRecord = {
   createdAt: Date;
 };
 
+export type OneVibeVcrFrameRecord = {
+  taskId: string;
+  eventSequence: number;
+  sourceApplication: "browser" | "document" | "desktop";
+  imageSha256: string;
+  width: number;
+  height: number;
+  capturedAt: Date;
+};
+
 export interface OneVibeTaskStore {
   createOneVibeTask(identity: IdentityContext, workspaceId: string): Promise<OneVibeTaskRecord | null>;
   getOwnedOneVibeTask(identity: IdentityContext, workspaceId: string, taskId: string): Promise<OneVibeTaskRecord | null>;
@@ -55,6 +65,8 @@ export interface OneVibeTaskStore {
     payloadHash: string;
   }): Promise<OneVibeTaskEventRecord | null>;
   listOwnedOneVibeTaskEvents(identity: IdentityContext, workspaceId: string, taskId: string): Promise<OneVibeTaskEventRecord[] | null>;
+  saveOneVibeVcrFrame(identity: IdentityContext, input: OneVibeVcrFrameRecord): Promise<OneVibeVcrFrameRecord | null>;
+  listOwnedOneVibeVcrFrames(identity: IdentityContext, workspaceId: string, taskId: string): Promise<OneVibeVcrFrameRecord[] | null>;
 }
 
 export type SandboxSettingsRecord = {
@@ -1940,6 +1952,32 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       createdAt: new Date(String(row.created_at)) }));
   }
 
+  async saveOneVibeVcrFrame(identity: IdentityContext, input: OneVibeVcrFrameRecord) {
+    const owned = await this.pool.query(
+      "SELECT id FROM onevibe_task_runs WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
+      [input.taskId, identity.tenantId, identity.subjectId],
+    );
+    if (!owned.rowCount) return null;
+    const result = await this.pool.query(
+      `INSERT INTO onevibe_vcr_frames (task_id,event_sequence,source_application,image_sha256,width,height,captured_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (task_id,event_sequence) DO NOTHING
+       RETURNING *`,
+      [input.taskId, input.eventSequence, input.sourceApplication, input.imageSha256, input.width, input.height, input.capturedAt],
+    );
+    if (!result.rowCount) return null;
+    const row = result.rows[0] as Record<string, unknown>;
+    return { taskId: String(row.task_id), eventSequence: Number(row.event_sequence), sourceApplication: row.source_application as OneVibeVcrFrameRecord["sourceApplication"],
+      imageSha256: String(row.image_sha256), width: Number(row.width), height: Number(row.height), capturedAt: new Date(String(row.captured_at)) };
+  }
+
+  async listOwnedOneVibeVcrFrames(identity: IdentityContext, workspaceId: string, taskId: string) {
+    if (!await this.getOwnedOneVibeTask(identity, workspaceId, taskId)) return null;
+    const result = await this.pool.query("SELECT * FROM onevibe_vcr_frames WHERE task_id=$1 ORDER BY event_sequence ASC", [taskId]);
+    return result.rows.map((row) => ({ taskId: String(row.task_id), eventSequence: Number(row.event_sequence), sourceApplication: row.source_application as OneVibeVcrFrameRecord["sourceApplication"],
+      imageSha256: String(row.image_sha256), width: Number(row.width), height: Number(row.height), capturedAt: new Date(String(row.captured_at)) }));
+  }
+
   async remove(identity: IdentityContext, workspaceId: string) {
     const result = await this.pool.query(
       "DELETE FROM workspaces WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
@@ -2049,6 +2087,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   }
   private oneVibeTasks = new Map<string, OneVibeTaskRecord>();
   private oneVibeTaskEvents = new Map<string, OneVibeTaskEventRecord[]>();
+  private oneVibeVcrFrames = new Map<string, OneVibeVcrFrameRecord[]>();
 
   async getCurrent(identity: IdentityContext, grantId: string) {
     return [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId) ?? null;
@@ -2843,6 +2882,20 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async listOwnedOneVibeTaskEvents(identity: IdentityContext, workspaceId: string, taskId: string) {
     if (!await this.getOwnedOneVibeTask(identity, workspaceId, taskId)) return null;
     return [...(this.oneVibeTaskEvents.get(taskId) ?? [])];
+  }
+
+  async saveOneVibeVcrFrame(identity: IdentityContext, input: OneVibeVcrFrameRecord) {
+    const task = this.oneVibeTasks.get(input.taskId);
+    if (!task || task.tenantId !== identity.tenantId || task.subjectId !== identity.subjectId) return null;
+    const frames = this.oneVibeVcrFrames.get(input.taskId) ?? [];
+    if (frames.some((frame) => frame.eventSequence === input.eventSequence)) return null;
+    this.oneVibeVcrFrames.set(input.taskId, [...frames, input]);
+    return input;
+  }
+
+  async listOwnedOneVibeVcrFrames(identity: IdentityContext, workspaceId: string, taskId: string) {
+    if (!await this.getOwnedOneVibeTask(identity, workspaceId, taskId)) return null;
+    return [...(this.oneVibeVcrFrames.get(taskId) ?? [])];
   }
 
   private save(record: WorkspaceRecord, patch: Partial<WorkspaceRecord>) {

@@ -49,9 +49,65 @@ export type OneVibeArtifactOwner = {
   taskId: string;
 };
 
+export type OneVibeVcrFrame = {
+  taskId: string;
+  sourceApplication: "browser" | "document" | "desktop";
+  path: string;
+  mimeType: "image/png";
+  sha256: string;
+  width: number;
+  height: number;
+  capturedAt: string;
+};
+
 type StoredOneVibePresentationArtifact = OneVibePresentationArtifact & OneVibeArtifactOwner;
 
 const lineLimit = (value: string, maximum: number) => value.trim().slice(0, maximum);
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+const pngDimensions = (bytes: Uint8Array) => {
+  if (bytes.byteLength < 24 || !Buffer.from(bytes.subarray(0, 8)).equals(pngSignature)
+    || Buffer.from(bytes.subarray(12, 16)).toString("ascii") !== "IHDR") return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  return width > 0 && height > 0 && width <= 16_384 && height <= 16_384 ? { width, height } : null;
+};
+
+/** Stores a verified screenshot submitted by an internal, task-bound capture sidecar. */
+export async function createOneVibeVcrFrame(
+  bytes: Uint8Array,
+  owner: OneVibeArtifactOwner,
+  sourceApplication: OneVibeVcrFrame["sourceApplication"],
+  artifactDirectory = process.env.ONEVIBE_ARTIFACT_DIRECTORY ?? "/tmp/onecomputer-onevibe-artifacts",
+): Promise<OneVibeVcrFrame> {
+  if (bytes.byteLength > 2 * 1024 * 1024) throw new Error("ONEVIBE_VCR_FRAME_TOO_LARGE");
+  const dimensions = pngDimensions(bytes);
+  if (!dimensions) throw new Error("ONEVIBE_VCR_FRAME_INVALID");
+  const root = resolve(artifactDirectory);
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const path = resolve(root, `vcr-${owner.taskId}-${sha256}.png`);
+  await writeFile(path, bytes, { mode: 0o600, flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "EEXIST") throw error;
+  });
+  return { taskId: owner.taskId, sourceApplication, path, mimeType: "image/png", sha256, ...dimensions, capturedAt: new Date().toISOString() };
+}
+
+export async function getOneVibeVcrFrame(
+  sha256: string,
+  owner: OneVibeArtifactOwner,
+  artifactDirectory = process.env.ONEVIBE_ARTIFACT_DIRECTORY ?? "/tmp/onecomputer-onevibe-artifacts",
+): Promise<OneVibeVcrFrame | null> {
+  if (!/^[a-f0-9]{64}$/.test(sha256)) return null;
+  try {
+    const path = resolve(artifactDirectory, `vcr-${owner.taskId}-${sha256}.png`);
+    const bytes = await readFile(path);
+    const dimensions = pngDimensions(bytes);
+    if (!dimensions || createHash("sha256").update(bytes).digest("hex") !== sha256) return null;
+    return { taskId: owner.taskId, sourceApplication: "desktop", path, mimeType: "image/png", sha256, ...dimensions, capturedAt: new Date().toISOString() };
+  } catch { return null; }
+}
 
 /**
  * Produces a single editable slide in Control-owned artifact storage. The

@@ -88,6 +88,16 @@ export const siteApi = {
   delete: (id) => request(`/api/v1/sites/${encodeURIComponent(id)}`, mutation("DELETE")),
 };
 
+export const oneVibeApi = {
+  createTask: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks`, mutation()),
+  events: (workspaceId, taskId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks/${encodeURIComponent(taskId)}/events`, { cache: "no-store" }),
+  vcr: (workspaceId, taskId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks/${encodeURIComponent(taskId)}/vcr`, { cache: "no-store" }),
+  createPresentation: (workspaceId, taskId, input) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks/${encodeURIComponent(taskId)}/presentations`,
+    mutation("POST", input),
+  ),
+};
+
 export const scheduleApi = {
   list: () => request("/api/v1/schedules", { cache: "no-store" }),
   create: (input) => request("/api/v1/schedules", mutation("POST", input)),

@@ -32,7 +32,8 @@ import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient }
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
-import { createOneVibePresentation, getOneVibePresentation } from "./onevibe-artifacts.js";
+import { createOneVibePresentation, createOneVibeVcrFrame, getOneVibePresentation, getOneVibeVcrFrame } from "./onevibe-artifacts.js";
+import { OneVibeCaptureAuthority } from "./onevibe-vcr.js";
 
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 
@@ -185,6 +186,10 @@ const oneVibePresentationSchema = z.strictObject({
   title: z.string().trim().min(1).max(180),
   body: z.string().trim().min(1).max(4_000),
 });
+const oneVibeVcrFrameSchema = z.strictObject({
+  sourceApplication: z.enum(["browser", "document", "desktop"]),
+  imageBase64: z.string().min(4).max(2_796_204).regex(/^[A-Za-z0-9+/]+={0,2}$/),
+});
 
 const envSchema = z.object({
   CONTROL_HOST: z.string().default("127.0.0.1"),
@@ -218,6 +223,7 @@ const envSchema = z.object({
   WORKSPACE_INGRESS_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
   EGRESS_GRANT_SECRET: z.string().min(32).optional(),
   AGENT_CHAT_SECRET: z.string().min(32),
+  ONEVIBE_CAPTURE_SECRET: z.string().min(32),
   CHANNEL_BROKER_URL: optionalEnvString(),
   CHANNEL_BROKER_INTERNAL_TOKEN: optionalEnvString(32),
   SCHEDULER_INTERNAL_TOKEN: z.string().min(32),
@@ -257,6 +263,7 @@ export function createControlServer(
     egressGrantSecret?: string;
     policyBundleAuthority?: PolicyBundleAuthority;
     agentChatSecret?: string;
+    oneVibeCaptureSecret?: string;
     agentChatClient?: AgentChatClient;
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
@@ -303,6 +310,7 @@ export function createControlServer(
   });
   const agentBridgeAuthority = new AgentBridgeAuthority(security.mcpPolicyToken ?? proxyToken);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
+  const oneVibeCaptureAuthority = security.oneVibeCaptureSecret ? new OneVibeCaptureAuthority(security.oneVibeCaptureSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
   const activityEvents = new ActivityEventService(store);
   const sites = security.siteStore ? new SitesService(security.siteStore) : undefined;
@@ -368,6 +376,12 @@ export function createControlServer(
     }
     return store as WorkspaceStore & GovernanceStore & OneVibeTaskStore;
   };
+  const requireOneVibeCapture = () => {
+    if (!oneVibeCaptureAuthority) {
+      throw new OneComputerError("ONEVIBE_CAPTURE_NOT_CONFIGURED", "ONEVibe visual capture is not configured", 503, true);
+    }
+    return oneVibeCaptureAuthority;
+  };
   const workspaceManifest = (
     configuration: SandboxConfiguration,
     telegram: TelegramChannelConnectionStatus | null,
@@ -425,6 +439,7 @@ export function createControlServer(
       }
       return;
     }
+    if (request.url.startsWith("/internal/v1/onevibe/tasks/")) return;
     if (
       request.url.startsWith("/internal/v1/agent/operations/")
       || request.url.startsWith("/internal/v1/agent/uploads")
@@ -1996,6 +2011,58 @@ export function createControlServer(
     if (!events) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
     return reply.header("cache-control", "no-store").send({ events });
   });
+  app.get<{ Params: { workspaceId: string; taskId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/vcr", async (request, reply) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    const taskId = z.uuid().parse(request.params.taskId);
+    await requireWorkspacePolicy(request, workspaceId);
+    const frames = await requireOneVibeTasks().listOwnedOneVibeVcrFrames(identity(request), workspaceId, taskId);
+    if (!frames) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    return reply.header("cache-control", "no-store").send({
+      frames: frames.map((frame) => ({
+        ...frame,
+        frameUrl: `/v1/workspaces/${workspaceId}/onevibe/tasks/${taskId}/vcr/frames/${frame.eventSequence}`,
+      })),
+    });
+  });
+  app.get<{ Params: { workspaceId: string; taskId: string; eventSequence: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/vcr/frames/:eventSequence", async (request, reply) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    const taskId = z.uuid().parse(request.params.taskId);
+    const eventSequence = z.coerce.number().int().positive().parse(request.params.eventSequence);
+    await requireWorkspacePolicy(request, workspaceId);
+    const actor = identity(request);
+    const frames = await requireOneVibeTasks().listOwnedOneVibeVcrFrames(actor, workspaceId, taskId);
+    const frame = frames?.find((candidate) => candidate.eventSequence === eventSequence);
+    if (!frame) throw new OneComputerError("ONEVIBE_VCR_FRAME_NOT_FOUND", "ONEVibe visual evidence was not found", 404);
+    const image = await getOneVibeVcrFrame(frame.imageSha256, { tenantId: actor.tenantId, subjectId: actor.subjectId, workspaceId, taskId });
+    if (!image) throw new OneComputerError("ONEVIBE_VCR_FRAME_NOT_FOUND", "ONEVibe visual evidence was not found", 404);
+    reply.header("cache-control", "private, no-store");
+    reply.header("content-type", image.mimeType);
+    return reply.send(createReadStream(image.path));
+  });
+  app.post<{ Params: { taskId: string } }>("/internal/v1/onevibe/tasks/:taskId/frames", { bodyLimit: 3 * 1024 * 1024 }, async (request, reply) => {
+    const taskId = z.uuid().parse(request.params.taskId);
+    const received = request.headers["x-onecomputer-onevibe-capture-token"];
+    const grant = requireOneVibeCapture().verify(Array.isArray(received) ? received[0] ?? "" : received ?? "");
+    if (grant.taskId !== taskId) throw new OneComputerError("UNAUTHENTICATED", "ONEVibe capture authorization does not match this task", 401);
+    const input = oneVibeVcrFrameSchema.parse(request.body ?? {});
+    if (grant.sourceApplication !== input.sourceApplication) throw new OneComputerError("UNAUTHENTICATED", "ONEVibe capture authorization does not match this source", 401);
+    const bytes = Buffer.from(input.imageBase64, "base64");
+    if (!bytes.byteLength || bytes.byteLength > grant.maximumBytes) {
+      throw new OneComputerError("ONEVIBE_VCR_FRAME_TOO_LARGE", "ONEVibe visual evidence exceeds the capture limit", 413);
+    }
+    const captureIdentity: IdentityContext = { tenantId: grant.tenantId, subjectId: grant.subjectId, audience: "onecomputer-control" };
+    const owner = { ...captureIdentity, workspaceId: grant.workspaceId, taskId };
+    const image = await createOneVibeVcrFrame(bytes, owner, input.sourceApplication);
+    const taskStore = requireOneVibeTasks();
+    const event = await taskStore.appendOneVibeTaskEvent(captureIdentity, { workspaceId: grant.workspaceId, taskId, kind: "workspace-frame", payloadHash: image.sha256 });
+    if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    const frame = await taskStore.saveOneVibeVcrFrame(captureIdentity, {
+      taskId, eventSequence: event.sequence, sourceApplication: input.sourceApplication,
+      imageSha256: image.sha256, width: image.width, height: image.height, capturedAt: new Date(image.capturedAt),
+    });
+    if (!frame) throw new OneComputerError("ONEVIBE_VCR_FRAME_REJECTED", "ONEVibe visual evidence could not be recorded", 409);
+    return reply.code(201).header("cache-control", "no-store").send({ frame: { ...frame, frameUrl: `/v1/workspaces/${grant.workspaceId}/onevibe/tasks/${taskId}/vcr/frames/${event.sequence}` } });
+  });
   app.post<{ Params: { workspaceId: string; taskId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/presentations", async (request, reply) => {
     const workspaceId = z.uuid().parse(request.params.workspaceId);
     const taskId = z.uuid().parse(request.params.taskId);
@@ -2296,6 +2363,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       egressGrantSecret: env.EGRESS_GRANT_SECRET,
       policyBundleAuthority,
       agentChatSecret: env.AGENT_CHAT_SECRET,
+      oneVibeCaptureSecret: env.ONEVIBE_CAPTURE_SECRET,
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
       scheduleStore,
