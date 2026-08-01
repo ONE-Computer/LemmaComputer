@@ -879,7 +879,7 @@ async def claude_vendor_events(
             "CLAUDE_CONFIG_DIR": str(HOME / ".claude-chat-sdk"),
             "ONECOMPUTER_SITES_BROKER": BROKER,
             **({
-                "ANTHROPIC_CUSTOM_HEADERS": json.dumps({"x-onecomputer-ai-task-binding": usage_task_binding}),
+                "ANTHROPIC_CUSTOM_HEADERS": f"x-onecomputer-ai-task-binding: {usage_task_binding}",
             } if usage_task_binding else {}),
             "HOME": str(HOME),
             "PATH": "/usr/local/bin:/usr/bin:/bin",
