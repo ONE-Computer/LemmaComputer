@@ -471,6 +471,14 @@ def usage_authority(path, payload):
         return {"status": "created", "admissionId": "admission-boundary"}
     if path == "routing/verify":
         return {"schemaVersion": 1, "status": "verified"}
+    if path == "events":
+        return {
+            "schemaVersion": 1,
+            "status": "created",
+            "eventId": "event-boundary",
+            "providerCost": "0.000078",
+            "currency": "USD",
+        }
     raise AssertionError(f"unexpected usage authority call: {path}")
 
 callback_type.async_pre_call_deployment_hook.__globals__["_usage_request"] = usage_authority
@@ -541,7 +549,7 @@ async def assert_provider_boundary():
     assert "user_api_key_dict" in routed_admitted
     assert "user_api_key_dict" not in provider_admitted
     assert "user_api_key_metadata" not in provider_admitted
-    assert provider_admitted["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
+    assert all(not key.startswith("onecomputer_") for key in provider_admitted)
     assert all(not key.startswith("onecomputer_") for key in provider_admitted["metadata"])
     signed_reentry = {
         **provider_admitted,
@@ -553,7 +561,7 @@ async def assert_provider_boundary():
         signed_reentry, "acompletion"
     )
     assert len(authority_calls) == authority_count
-    assert provider_reentry["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
+    assert all(not key.startswith("onecomputer_") for key in provider_reentry)
     assert "user_api_key_dict" not in provider_reentry
 
     internal_responses = {
@@ -571,7 +579,7 @@ async def assert_provider_boundary():
         internal_responses, "aresponses"
     )
     assert len(authority_calls) == authority_count
-    assert internal_provider["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
+    assert all(not key.startswith("onecomputer_") for key in internal_provider)
 
     ordinary_changed_call = {**internal_responses, "litellm_call_id": "ordinary-changed-call"}
     try:
@@ -600,6 +608,25 @@ async def assert_provider_boundary():
         raise AssertionError("tampered usage state must not reuse a signed admission")
     assert len(authority_calls) == authority_count
 
+    # Anthropic-compatible requests can reach the completion hook with all
+    # callback-owned kwargs stripped. The signed request context must still
+    # settle the admitted usage event, while provider-bound kwargs stay clean.
+    await callback.async_log_success_event(
+        internal_provider,
+        {"usage": {"input_tokens": 9, "output_tokens": 5}},
+        None,
+        None,
+    )
+    event_call = next(item for item in authority_calls if item[0] == "events")
+    assert event_call[1]["admissionId"] == "admission-boundary"
+    assert event_call[1]["providerReportedTotalTokens"] == "14"
+    assert event_call[1]["units"] == [
+        {"unit": "input_uncached_token", "quantity": "9"},
+        {"unit": "output_token", "quantity": "5"},
+        {"unit": "request", "quantity": "1", "diagnostic": True},
+        {"unit": "provider:total_tokens", "quantity": "14", "diagnostic": True},
+    ]
+
     auto_route = {
         **openai_route,
         "access_groups": ["ocp-tenant-real-balanced"],
@@ -623,7 +650,9 @@ async def assert_provider_boundary():
             "mappingVersionId": "mapping-real",
         },
     })
-    await callback.async_pre_call_deployment_hook(routed_auto, "acompletion")
+    auto_provider = await callback.async_pre_call_deployment_hook(routed_auto, "acompletion")
+    assert all(not key.startswith("onecomputer_") for key in auto_provider)
+    assert all(not key.startswith("onecomputer_") for key in auto_provider["litellm_params"])
     verify_call = next(item for item in authority_calls if item[0] == "routing/verify")
     assert verify_call[1]["actual"] == {
         "tenantId": "tenant-real",
