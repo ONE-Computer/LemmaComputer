@@ -82,6 +82,60 @@ model-provider keys, enterprise OAuth tokens, E2B credentials, or registry
 passwords. E2B template build credentials are short-lived and supplied only to
 the build command.
 
+## Near-term acceptance goal: Cowork API Gold Path
+
+Before investing further in UI polish, qualify one complete session through the
+real API. The session must use the E2B Cowork profile, a real Codex or OpenCode
+ACP process, and the governed LiteLLM route. Fixtures may be used for negative
+tests, but never for the successful path.
+
+### Required scenario
+
+1. Create one owned Cowork session with an idempotency key and receive a
+   session-scoped identifier (not a durable workspace launch).
+2. Send a basic question and receive an ordered streaming response containing
+   a real assistant answer and a terminal event.
+3. Send a follow-up question that depends on the first turn; prove that the
+   same ACP session retains context.
+4. Ask the agent to use the sandbox Python interpreter to create:
+   - a valid `.docx` using the pinned `python-docx` runtime;
+   - a valid `.xlsx` using the pinned `openpyxl` runtime; and
+   - a valid `.pptx` using the existing presentation toolchain.
+5. Register each file as a session-owned artifact with byte size, SHA-256
+   digest, MIME type, and provenance linking it to the generating turn.
+6. Retrieve each artifact through the authenticated API and validate the Office
+   ZIP/package structure. The browser must not be the source of truth for file
+   validity.
+7. Capture at least one real browser PNG from inside E2B, hash-link it to an
+   activity sequence, and retrieve it through the session VCR endpoint.
+8. Cancel a second turn and prove that the ACP process terminates without a
+   fabricated assistant message or dangling stream.
+9. Destroy/expire the session and prove that new turns, captures, and artifact
+   mutations fail closed, the E2B sandbox is killed, and no durable workspace
+   or credential remains.
+
+### Gold Path exit criteria
+
+The goal is achieved only when all of the following are true in one API E2E
+run:
+
+- Codex and OpenCode each pass the chat and artifact scenario;
+- SSE replay has monotonic sequence numbers, correct session/turn binding, and
+  an explicit terminal event;
+- the answer, Office files, and PNG are non-empty real outputs, not fixtures;
+- Python execution is path-confined, bounded, and has no host filesystem or
+  provider-key access;
+- cross-user reads return `404`, expired-session mutations fail closed, and no
+  secret appears in events, artifacts, logs, or ACP transcript records;
+- the E2B sandbox cleanup and grant revocation are evidenced after the run;
+- the browser E2E is then run as a projection of this already-passing API
+  session.
+
+This is the first meaningful Manus-like milestone: a user can ask, converse,
+and receive useful Word/Excel/PowerPoint deliverables from a disposable Cowork
+session while Control retains truthful streaming, evidence, ownership, and
+cleanup guarantees.
+
 ### Application-scoped VCR
 
 Cowork VCR means “what the agent did in the application,” not “a streamed
