@@ -22,6 +22,7 @@ if BROKER not in {
     "http://127.0.0.1:4315",
     "http://127.0.0.1:4316",
     "http://127.0.0.1:4317",
+    "http://127.0.0.1:4318",
 }:
     raise SystemExit("invalid ONEComputer connectors broker")
 PROTOCOL_VERSION = "2024-11-05"

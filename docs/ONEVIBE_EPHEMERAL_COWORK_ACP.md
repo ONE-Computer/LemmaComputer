@@ -10,6 +10,8 @@ The selected execution provider is policy-controlled. The first short-lived prov
 
 Codex ACP and OpenCode ACP run inside the task-scoped E2B sandbox. Control owns the user session, policy, approval authority, event sequence, VCR manifest, and artifact ownership. The sandbox receives only scoped gateway/control credentials. No host process, host filesystem, or host provider key crosses into the E2B process.
 
+The provider-hosted chat bridge is `/usr/local/libexec/onecomputer-acp-chat.mjs`. It launches the pinned `codex-acp` or `opencode acp` binary, performs ACP initialization and governed provider configuration, and exposes only the bounded canonical NDJSON chat contract. Control obtains the E2B-hosted endpoint from the signed controller response; it does not use the Docker-only `onecomputer-sandbox-*` DNS route for managed sandboxes. Permission requests default to cancellation until a Control-owned approval resolver is connected, so the bridge cannot silently approve a protected action.
+
 OpenCode is launched as `opencode acp` (nd-JSON over stdin/stdout); it does not require a separate `*-acp` package. Codex uses the pinned `codex-acp` runtime. Both require a broker gateway in governed mode.
 
 ## Evidence ordering
@@ -34,8 +36,8 @@ The UI is therefore never the source of truth for a screenshot, approval, or art
 - Chat stream parsing rejects sequence gaps, wrong session/turn IDs, oversized frames, malformed JSON, and missing terminal events.
 - E2B capture returns a valid bounded PNG before VCR ingestion.
 - Cross-user/task/workspace reads return `404`.
-- Ephemeral task creation returns `task + ephemeral workspace handle`; the handle is hidden from durable workspace listings and must carry a TTL/reaper in production.
+- Ephemeral task creation returns `task + ephemeral workspace handle`; the handle is hidden from durable workspace listings. A production TTL/reaper is still required to stop the provider sandbox, revoke its gateway grants, and purge its volume after expiry; the timestamp alone is not cleanup evidence.
 
 ## Live qualification prerequisites
 
-The repository contains deterministic contract tests and an E2B adapter capture test. A real-provider gate still requires an approved pinned E2B template containing the ONEComputer image, ACP runtimes, OpenCode, browser capture utility, and the public TLS egress/control routes. No API key is committed or placed in local environment files by this change.
+The repository contains deterministic contract tests and an E2B adapter capture test. Those tests are explicitly fixtures and are not provider evidence. A real-provider gate still requires an approved pinned E2B template containing the ONEComputer image, ACP runtimes, OpenCode, browser capture utility, and the public TLS egress/control routes. The live gate must prove a non-empty model response through LiteLLM, ordered ACP events, a real in-sandbox PNG, and cleanup. No API key is committed or placed in local environment files by this change.

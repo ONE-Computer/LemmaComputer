@@ -74,6 +74,7 @@ export class AgentChatAuthority {
     workspaceId: string,
     policy: RuntimePolicy,
     catalogId: ChatAgentCatalogId,
+    baseUrl?: string,
   ): AgentChatAccess | undefined {
     if (!assignedChatAgentIds(policy).includes(catalogId)) return undefined;
     const key = createHmac("sha256", this.rootSecret)
@@ -89,7 +90,7 @@ export class AgentChatAuthority {
       catalogId,
       displayName: chatDisplayNames[catalogId],
       key,
-      baseUrl: `http://onecomputer-sandbox-${workspaceId}:${chatRuntimePorts[catalogId]}`,
+      baseUrl: baseUrl ?? `http://onecomputer-sandbox-${workspaceId}:${chatRuntimePorts[catalogId]}`,
     };
   }
 

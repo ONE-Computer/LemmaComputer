@@ -226,6 +226,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   const gatewayProxy = await source("docker/workspace/onecomputer-gateway-proxy.py");
   const mcpBridge = await source("docker/workspace/onecomputer-connectors-stdio.py");
   const chatAdapter = await source("docker/workspace/onecomputer-agent-chat.py");
+  const acpChatAdapter = await source("docker/workspace/onecomputer-acp-chat.mjs");
   const chatRequirements = await source("docker/workspace/agent-chat-requirements.txt");
   const chromePolicies = JSON.parse(await source("docker/workspace/google-chrome-policies.json"));
   const claudeLauncher = await source("docker/workspace/onecomputer-claude");
@@ -269,6 +270,10 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(mcpBridge, /RESPONSE_LOCK = threading\.Lock\(\)/);
   assert.match(chatAdapter, /MAX_TURN_SECONDS = 15 \* 60/);
   assert.match(chatAdapter, /STREAM_HEARTBEAT_SECONDS = 15/);
+  assert.match(acpChatAdapter, /agent === "opencode-cli" \? \["acp"\]/);
+  assert.match(acpChatAdapter, /providers\.set/);
+  assert.match(acpChatAdapter, /application\/x-ndjson/);
+  assert.doesNotMatch(acpChatAdapter, /fixture|simulat|fake/i);
   assert.match(chatAdapter, /timeout=MAX_TURN_SECONDS/);
   assert.match(chatAdapter, /asyncio\.wait\(\s*\{next_event\}, timeout=STREAM_HEARTBEAT_SECONDS/);
   assert.match(chatAdapter, /\^API call failed after \\d\+ retries:/);
@@ -279,7 +284,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(entrypoint, /Hermes-Claw\.desktop/);
   assert.match(entrypoint, /onecomputer-hermes-agent-cli\.desktop.*Hermes-Agent-CLI\.desktop/);
   assert.doesNotMatch(entrypoint, /onecomputer-hermes-claw\.desktop/);
-  for (const selection of ["google-chrome", "claude-cli", "codex-cli", "hermes-desktop"]) {
+  for (const selection of ["google-chrome", "claude-cli", "codex-cli", "opencode-cli", "hermes-desktop"]) {
     assert.match(entrypoint, new RegExp(selection));
   }
   assert.match(entrypoint, /chmod 0700 \/opt\/google\/chrome\/google-chrome/);
@@ -290,8 +295,8 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(entrypoint, /pgrep -u 1000/);
   assert.match(entrypoint, /chmod 0700 \/usr\/local\/bin\/onecomputer-claude/);
   assert.match(entrypoint, /chmod 0700 \/usr\/local\/bin\/onecomputer-hermes-desktop/);
-  assert.match(gatewayProxy, /\{4312, 4314, 4315, 4316, 4317\}/);
-  for (const port of [4312, 4314, 4315, 4316, 4317]) {
+  assert.match(gatewayProxy, /\{4312, 4314, 4315, 4316, 4317, 4318\}/);
+  for (const port of [4312, 4314, 4315, 4316, 4317, 4318]) {
     assert.match(mcpBridge, new RegExp(`127\\.0\\.0\\.1:${port}`));
   }
   assert.match(mcpBridge, /server_label\.removeprefix\("onecomputer_"\)/);

@@ -5,6 +5,7 @@
   "description": "Pinned official ACP agent runtimes for the governed ONEComputer workspace",
   "license": "UNLICENSED",
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.3.0",
     "@agentclientprotocol/claude-agent-acp": "0.63.0",
     "@agentclientprotocol/codex-acp": "1.1.7",
     "opencode-ai": "1.18.10"

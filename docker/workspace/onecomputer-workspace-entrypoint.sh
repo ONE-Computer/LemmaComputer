@@ -190,6 +190,13 @@ if agent_enabled codex-cli; then
     exit 78
   }
 fi
+if agent_enabled opencode-cli; then
+  opencode_chat_api_key="${ONECOMPUTER_OPENCODE_CHAT_API_KEY:-}"
+  [[ "${#opencode_chat_api_key}" -ge 32 ]] || {
+    echo "OpenCode Chat API configuration is required" >&2
+    exit 78
+  }
+fi
 
 for clipboard_boolean in \
   "$ONECOMPUTER_CLIPBOARD_ENABLED" \
@@ -609,13 +616,15 @@ agent_enabled hermes-claw && start_agent_broker ONECOMPUTER_HERMES 4314 hermes-g
 agent_enabled claude-cli && start_agent_broker ONECOMPUTER_CLAUDE_CLI 4315 claude-cli-gateway-proxy
 agent_enabled hermes-desktop && start_agent_broker ONECOMPUTER_HERMES_DESKTOP 4316 hermes-desktop-gateway-proxy
 agent_enabled codex-cli && start_agent_broker ONECOMPUTER_CODEX_CLI 4317 codex-cli-gateway-proxy
+agent_enabled opencode-cli && start_agent_broker ONECOMPUTER_OPENCODE_CLI 4318 opencode-cli-gateway-proxy
 
 for credential_variable in \
   ONECOMPUTER_GATEWAY_CREDENTIAL ONECOMPUTER_GATEWAY_UPSTREAM ONECOMPUTER_AGENT_BRIDGE_TOKEN ONECOMPUTER_CONTROL_UPSTREAM \
   ONECOMPUTER_HERMES_GATEWAY_CREDENTIAL ONECOMPUTER_HERMES_GATEWAY_UPSTREAM ONECOMPUTER_HERMES_AGENT_BRIDGE_TOKEN ONECOMPUTER_HERMES_CONTROL_UPSTREAM \
   ONECOMPUTER_CLAUDE_CLI_GATEWAY_CREDENTIAL ONECOMPUTER_CLAUDE_CLI_GATEWAY_UPSTREAM ONECOMPUTER_CLAUDE_CLI_AGENT_BRIDGE_TOKEN ONECOMPUTER_CLAUDE_CLI_CONTROL_UPSTREAM \
   ONECOMPUTER_HERMES_DESKTOP_GATEWAY_CREDENTIAL ONECOMPUTER_HERMES_DESKTOP_GATEWAY_UPSTREAM ONECOMPUTER_HERMES_DESKTOP_AGENT_BRIDGE_TOKEN ONECOMPUTER_HERMES_DESKTOP_CONTROL_UPSTREAM \
-  ONECOMPUTER_CODEX_CLI_GATEWAY_CREDENTIAL ONECOMPUTER_CODEX_CLI_GATEWAY_UPSTREAM ONECOMPUTER_CODEX_CLI_AGENT_BRIDGE_TOKEN ONECOMPUTER_CODEX_CLI_CONTROL_UPSTREAM; do
+  ONECOMPUTER_CODEX_CLI_GATEWAY_CREDENTIAL ONECOMPUTER_CODEX_CLI_GATEWAY_UPSTREAM ONECOMPUTER_CODEX_CLI_AGENT_BRIDGE_TOKEN ONECOMPUTER_CODEX_CLI_CONTROL_UPSTREAM \
+  ONECOMPUTER_OPENCODE_CLI_GATEWAY_CREDENTIAL ONECOMPUTER_OPENCODE_CLI_GATEWAY_UPSTREAM ONECOMPUTER_OPENCODE_CLI_AGENT_BRIDGE_TOKEN ONECOMPUTER_OPENCODE_CLI_CONTROL_UPSTREAM; do
   unset "$credential_variable"
 done
 
@@ -642,6 +651,7 @@ for enabled_agent in "${enabled_agents[@]}"; do
     claude-cli) broker_port=4315 ;;
     hermes-desktop) broker_port=4316 ;;
     codex-cli) broker_port=4317 ;;
+    opencode-cli) broker_port=4318 ;;
   esac
   for _ in $(seq 1 50); do
     if curl -fsS "http://127.0.0.1:${broker_port}/healthz" >/dev/null; then break; fi
@@ -743,13 +753,46 @@ if agent_enabled claude-cli; then
     "$claude_chat_api_key"
   unset ONECOMPUTER_CLAUDE_CHAT_API_KEY claude_chat_api_key
 fi
+start_acp_chat_adapter() {
+  local agent="$1"
+  local port="$2"
+  local api_key="$3"
+  local prefix="$4"
+  local broker_port="$5"
+  local gateway_upstream="http://127.0.0.1:${broker_port}/v1"
+  local gateway_credential="onecomputer-loopback-broker"
+  local model_alias="${!prefix}_MODEL_ALIAS"
+  [[ -n "$gateway_upstream" && -n "$gateway_credential" && -n "$model_alias" ]] || {
+    echo "${agent} ACP gateway configuration is required" >&2
+    exit 78
+  }
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    env -i \
+      PATH=/opt/onecomputer/acp-runtime/node_modules/.bin:/usr/local/bin:/usr/bin:/bin \
+      HOME=/home/kasm-user \
+      USER=kasm-user \
+      ONECOMPUTER_ACP_AGENT="$agent" \
+      ONECOMPUTER_ACP_API_KEY="$api_key" \
+      ONECOMPUTER_ACP_MODEL_ALIAS="$model_alias" \
+      ONECOMPUTER_ACP_GATEWAY_UPSTREAM="$gateway_upstream" \
+      ONECOMPUTER_ACP_GATEWAY_CREDENTIAL="$gateway_credential" \
+      ONECOMPUTER_ACP_PORT="$port" \
+      /usr/local/bin/node /usr/local/libexec/onecomputer-acp-chat.mjs \
+      >>"/run/onecomputer/${agent}-chat.log" 2>&1 &
+  printf '%s\n' "$!" > "/run/onecomputer/${agent}-chat.pid"
+  for _ in $(seq 1 200); do
+    if curl -fsS -H "authorization: Bearer ${api_key}" "http://127.0.0.1:${port}/health" >/dev/null; then break; fi
+    sleep 0.1
+  done
+  curl -fsS -H "authorization: Bearer ${api_key}" "http://127.0.0.1:${port}/health" >/dev/null
+}
 if agent_enabled codex-cli; then
-  start_sdk_chat_adapter \
-    codex-cli 8644 4317 \
-    "$ONECOMPUTER_CODEX_CLI_MODEL_ALIAS" \
-    "$ONECOMPUTER_CODEX_CLI_ALLOWED_TOOLS" \
-    "$codex_chat_api_key"
+  start_acp_chat_adapter codex-cli 8644 "$codex_chat_api_key" ONECOMPUTER_CODEX_CLI 4317
   unset ONECOMPUTER_CODEX_CHAT_API_KEY codex_chat_api_key
+fi
+if agent_enabled opencode-cli; then
+  start_acp_chat_adapter opencode-cli 8645 "$opencode_chat_api_key" ONECOMPUTER_OPENCODE_CLI 4318
+  unset ONECOMPUTER_OPENCODE_CHAT_API_KEY opencode_chat_api_key
 fi
 
 cron_supervisor_pid=""

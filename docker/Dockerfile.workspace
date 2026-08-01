@@ -180,6 +180,9 @@ RUN npm ci \
       'for (const name of ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp", "opencode-ai"]) require.resolve(name + "/package.json", { paths: ["/opt/onecomputer/acp-runtime"] })' \
     && npm cache clean --force
 
+COPY --chmod=0755 docker/workspace/onecomputer-acp-chat.mjs /usr/local/libexec/onecomputer-acp-chat
+RUN node --check /usr/local/libexec/onecomputer-acp-chat
+
 RUN uv pip install \
       --python /opt/onecomputer/hermes-venv/bin/python \
       mcp==1.26.0 \

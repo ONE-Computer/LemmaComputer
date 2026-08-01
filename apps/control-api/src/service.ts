@@ -566,9 +566,15 @@ export class WorkspaceService {
     if (!this.agentChatAuthority) {
       throw new OneComputerError("CHAT_NOT_CONFIGURED", "Sandbox Chat is not configured", 503, true);
     }
+    const endpoints = record.providerId
+      ? new Map((await this.controller.status(record.providerId)).chatEndpoints?.map((endpoint) => [endpoint.catalogId, endpoint.url]) ?? [])
+      : new Map();
     return {
       state: record.state,
-      accesses: this.agentChatAuthority.list(identity, record.id, policy),
+      accesses: this.agentChatAuthority.list(identity, record.id, policy).map((access) => ({
+        ...access,
+        ...(endpoints.get(access.catalogId) ? { baseUrl: endpoints.get(access.catalogId)! } : {}),
+      })),
     };
   }
 

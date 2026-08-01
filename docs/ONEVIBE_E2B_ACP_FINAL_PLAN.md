@@ -67,9 +67,11 @@ The R&D evidence has three caveats:
    but intentionally remains disabled until broker-provided governed authority
    works without a provider secret in the agent profile/filesystem.
 3. OpenCode is now pinned in the ACP runtime image and launched as the
-   official `opencode acp` command. The deterministic adapter/API gates pass;
-   live E2B evidence still requires the immutable image/template and provider
-   credentials described above.
+   official `opencode acp` command by the provider-hosted ACP chat bridge.
+   Control uses the E2B-hosted endpoint rather than the Docker-only chat DNS
+   route. The deterministic adapter/API gates pass; live E2B evidence still
+   requires the immutable image/template, real LiteLLM route, browser capture
+   utility, and provider credentials described above.
 
 ## Runtime model
 

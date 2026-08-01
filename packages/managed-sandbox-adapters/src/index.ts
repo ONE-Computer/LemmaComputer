@@ -5,6 +5,7 @@ import {
   OneComputerError,
   runtimePolicySchema,
   type RuntimePolicy,
+  type ChatAgentCatalogId,
   type Sandbox,
 } from "@onecomputer/contracts";
 import {
@@ -21,6 +22,7 @@ import { Sandbox as E2bSandbox, Volume as E2bVolume, type SandboxInfo, type Sand
 import { ModalClient, Probe, type App, type Image, type Sandbox as ModalSandbox, type Volume as ModalVolume } from "modal";
 
 const desktopPort = 6901;
+const chatPortFor = (catalogId: string) => ({ "claude-cli": 8643, "codex-cli": 8644, "opencode-cli": 8645, "hermes-claw": 8642 } as const)[catalogId as "claude-cli" | "codex-cli" | "opencode-cli" | "hermes-claw"];
 const homePath = "/home/kasm-user";
 const policyBundleMetadataKey = "oc_policy_bundle";
 
@@ -49,7 +51,14 @@ type E2bInstance = {
   sandboxId: string;
   trafficAccessToken?: string;
   getHost(port: number): string;
-  commands: { run(command: string, options?: { background?: boolean }): Promise<{ stdout: string }> };
+  commands: { run(command: string, options?: {
+    background?: boolean;
+    cwd?: string;
+    envs?: Record<string, string>;
+    stdin?: boolean;
+    onStdout?: (chunk: string) => void;
+    onStderr?: (chunk: string) => void;
+  }): Promise<{ stdout: string }> };
   files: { write(path: string, data: string): Promise<unknown> };
 };
 
@@ -325,7 +334,17 @@ const metadataFor = (input: SandboxCreateInput) => ({
   ...(input.policyBundle ? {
     [policyBundleMetadataKey]: Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url"),
   } : {}),
+  ...(input.chatRuntimes?.length ? {
+    "onecomputer.chatAgents": input.chatRuntimes.map((runtime) => runtime.catalogId).join(","),
+  } : {}),
 });
+
+const chatEndpointsFor = (sandbox: Pick<E2bInstance, "getHost">, metadata: Record<string, string>) => (
+  (metadata["onecomputer.chatAgents"] ?? "").split(",").filter(Boolean).flatMap((catalogId) => {
+    const port = chatPortFor(catalogId);
+    return port ? [{ catalogId: catalogId as ChatAgentCatalogId, url: `https://${sandbox.getHost(port)}` }] : [];
+  })
+);
 
 const clipboardFromMetadata = (metadata: Record<string, string>) => {
   const maxBytes = Number(metadata["onecomputer.clipboardMaxBytes"]);
@@ -392,7 +411,10 @@ export class E2bSandboxAdapter implements SandboxAdapter {
         if (existing.state === "paused") {
           await this.sdk.connect(existing.sandboxId, { apiKey: this.config.apiKey, timeoutMs: this.timeoutMs });
         }
-        return sandboxView(existing.sandboxId, "ready", existing.metadata);
+        const chatAgents = existing.metadata["onecomputer.chatAgents"];
+        if (!chatAgents) return sandboxView(existing.sandboxId, "ready", existing.metadata);
+        const connected = await this.sdk.connect(existing.sandboxId, { apiKey: this.config.apiKey, timeoutMs: this.timeoutMs });
+        return { ...sandboxView(existing.sandboxId, "ready", existing.metadata), chatEndpoints: chatEndpointsFor(connected, existing.metadata) };
       }
       if (existing) await this.sdk.kill(existing.sandboxId, { apiKey: this.config.apiKey });
       const volumes = await this.sdk.listVolumes({ apiKey: this.config.apiKey });
@@ -427,7 +449,7 @@ export class E2bSandboxAdapter implements SandboxAdapter {
         + "test -f /run/onecomputer/workspace-ready && exit 0; "
         + "sleep 0.2; done; exit 1",
       );
-      return sandboxView(sandbox.sandboxId, "ready", metadataFor(input));
+      return { ...sandboxView(sandbox.sandboxId, "ready", metadataFor(input)), chatEndpoints: chatEndpointsFor(sandbox, metadataFor(input)) };
     } catch (error) {
       return providerFailure("E2B", error);
     }
@@ -436,7 +458,10 @@ export class E2bSandboxAdapter implements SandboxAdapter {
   async status(providerId: string): Promise<Sandbox> {
     try {
       const info = await this.sdk.getInfo(providerId, { apiKey: this.config.apiKey });
-      return sandboxView(providerId, info.state === "running" ? "ready" : "stopped", info.metadata);
+      if (info.state !== "running") return sandboxView(providerId, "stopped", info.metadata);
+      if (!info.metadata["onecomputer.chatAgents"]) return sandboxView(providerId, "ready", info.metadata);
+      const connected = await this.sdk.connect(providerId, { apiKey: this.config.apiKey, timeoutMs: this.timeoutMs });
+      return { ...sandboxView(providerId, "ready", info.metadata), chatEndpoints: chatEndpointsFor(connected, info.metadata) };
     } catch (error) {
       if (error instanceof Error && /not found/i.test(error.message)) {
         return { providerId, state: "stopped", failureCode: null };
@@ -485,15 +510,25 @@ export class E2bSandboxAdapter implements SandboxAdapter {
     try {
       const sandbox = await this.sdk.connect(providerId, { apiKey: this.config.apiKey, timeoutMs: this.timeoutMs });
       const command = input.agentCatalogId === "opencode-cli" ? "opencode acp" : "codex-acp";
-      const env = Object.entries(input.environment ?? {}).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(" ");
-      const commandLine = `cd ${JSON.stringify(input.cwd)} && ${env ? `${env} ` : ""}${command}`;
       const run = sandbox.commands.run as unknown as (command: string, options: {
         background: true;
+        cwd: string;
+        envs: Record<string, string>;
         stdin: true;
         onStdout?: (chunk: string) => void;
         onStderr?: (chunk: string) => void;
       }) => Promise<{ pid: number; sendStdin(data: string): Promise<void>; closeStdin(): Promise<void>; kill(): Promise<boolean>; wait(): Promise<{ exitCode: number; stdout: string; stderr: string }> }>;
-      return await run(commandLine, { background: true, stdin: true, onStdout: input.onStdout, onStderr: input.onStderr });
+      // E2B provides structured working-directory and environment arguments.
+      // Do not interpolate either into a shell command: ACP prompts and future
+      // provider configuration may contain shell-significant characters.
+      return await run(command, {
+        background: true,
+        cwd: input.cwd,
+        envs: { ...(input.environment ?? {}) },
+        stdin: true,
+        onStdout: input.onStdout,
+        onStderr: input.onStderr,
+      });
     } catch (error) {
       return providerFailure("E2B", error);
     }

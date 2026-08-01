@@ -1465,6 +1465,10 @@ export const sandboxSchema = z.object({
   workspaceId: z.uuid().optional(),
   state: z.enum(["provisioning", "ready", "stopped", "failed"]),
   failureCode: z.string().nullable().default(null),
+  chatEndpoints: z.array(z.strictObject({
+    catalogId: chatAgentCatalogIdSchema,
+    url: z.url(),
+  })).max(chatAgentCatalogIds.length).optional(),
   egressPolicyProjection: z.strictObject({
     securityGroupVersionId: z.string().regex(/^egv_[a-z0-9_]{3,96}$/),
     documentHash: z.string().regex(/^[a-f0-9]{64}$/),

@@ -152,6 +152,27 @@ test("E2B projects policy, persistent storage, controlled egress, and authentica
   assert.equal(destroyedVolume, "vol-1");
 });
 
+test("E2B exposes provider-hosted ACP chat endpoints only for granted runtimes", async () => {
+  const sdk = {
+    create: async () => ({
+      sandboxId: "e2b-chat-sandbox",
+      getHost: (port: number) => `${port}-e2b-chat-sandbox.e2b.app`,
+      commands: { run: async () => ({ stdout: "" }) },
+      files: { write: async () => undefined },
+    }),
+    connect: async () => ({
+      sandboxId: "e2b-chat-sandbox",
+      getHost: (port: number) => `${port}-e2b-chat-sandbox.e2b.app`,
+      commands: { run: async () => ({ stdout: "" }) },
+      files: { write: async () => undefined },
+    }),
+    listSandboxes: async () => [], listVolumes: async () => [], createVolume: async () => ({ volumeId: "v" }),
+  } as unknown as E2bSdk;
+  const adapter = new E2bSandboxAdapter({ apiKey: "e2b-key", templateId: "onecomputer-template", egressProxyUrlTemplate: "https://egress.example.com" }, sdk);
+  const created = await adapter.create({ ...input(), chatRuntimes: [{ catalogId: "opencode-cli", key: "k".repeat(32) }] });
+  assert.deepEqual(created.chatEndpoints, [{ catalogId: "opencode-cli", url: "https://8645-e2b-chat-sandbox.e2b.app" }]);
+});
+
 test("managed providers reject Docker-local routes and missing governed egress", async () => {
   const sdk = {
     listVolumes: async () => [],
@@ -331,12 +352,14 @@ test("E2B captures a PNG inside the sandbox boundary for VCR upload", async () =
 
 test("E2B starts Codex/OpenCode ACP as a provider-local streaming process", async () => {
   const commands: string[] = [];
+  const starts: Array<{ cwd?: string; envs?: Record<string, string>; stdin?: boolean }> = [];
   const sdk = {
     connect: async () => ({
       sandboxId: "e2b-acp-sandbox",
       commands: {
-        async run(command: string, options?: { background?: boolean; stdin?: boolean; onStdout?: (chunk: string) => void }) {
+        async run(command: string, options?: { background?: boolean; cwd?: string; envs?: Record<string, string>; stdin?: boolean; onStdout?: (chunk: string) => void }) {
           commands.push(command);
+          starts.push(options ?? {});
           options?.onStdout?.("{\\\"jsonrpc\\\":\\\"2.0\\\"}\\n");
           return { pid: 42, sendStdin: async () => undefined, closeStdin: async () => undefined, kill: async () => true, wait: async () => ({ exitCode: 0, stdout: "", stderr: "" }) };
         },
@@ -350,5 +373,8 @@ test("E2B starts Codex/OpenCode ACP as a provider-local streaming process", asyn
   const process = await adapter.startAcp("e2b-acp-sandbox", { agentCatalogId: "opencode-cli", cwd: "/workspace/task", environment: { HOME: "/home/kasm-user" }, onStdout: (chunk) => chunks.push(chunk) });
   assert.equal(process.pid, 42);
   assert.match(commands[0]!, /opencode acp/);
+  assert.equal(starts[0]?.cwd, "/workspace/task");
+  assert.deepEqual(starts[0]?.envs, { HOME: "/home/kasm-user" });
+  assert.equal(starts[0]?.stdin, true);
   assert.deepEqual(chunks, ["{\\\"jsonrpc\\\":\\\"2.0\\\"}\\n"]);
 });
