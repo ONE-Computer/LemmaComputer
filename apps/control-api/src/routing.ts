@@ -3,6 +3,7 @@ import { managedProviderAliasForAccessGroup } from "@onecomputer/litellm-adapter
 import {
   DeterministicModelRouter,
   RoutingDecisionBindingAuthority,
+  type ModelRoutingPolicy,
   type SignedRoutingBinding,
 } from "@onecomputer/model-router";
 import type {
@@ -342,6 +343,57 @@ const scaled = (value: string) => {
     BigInt(match[2]!) * 10n ** 12n + BigInt((match[3] ?? "").padEnd(12, "0"));
   return match[1] ? -amount : amount;
 };
+
+const outputTokenLimit = (policy: ModelRoutingPolicy) => {
+  const identityClasses = new Set(policy.identity.allowedServiceClasses);
+  const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
+  const teamClasses = new Set(policy.team?.allowedServiceClasses ?? policy.identity.allowedServiceClasses);
+  const teamDeployments = new Set(policy.team?.allowedDeploymentIds ?? policy.identity.allowedDeploymentIds);
+  const fixedOnly = policy.mode !== "enabled";
+  const limits = policy.deployments
+    .filter((deployment) =>
+      (!fixedOnly || deployment.id === policy.fixedDeploymentId)
+      && identityClasses.has(deployment.serviceClass)
+      && teamClasses.has(deployment.serviceClass)
+      && identityDeployments.has(deployment.id)
+      && teamDeployments.has(deployment.id)
+      && deployment.approved
+      && deployment.healthy
+      && deployment.evaluationPassed
+      && policy.approvedProviders.includes(deployment.provider)
+      && policy.budgetEligibleDeploymentIds.includes(deployment.id)
+      && deployment.rateCardId !== null
+      && deployment.expectedCost !== null
+    )
+    .map((deployment) => deployment.capabilities.outputTokens);
+  return limits.length ? Math.max(...limits) : null;
+};
+
+const constrainOutputToPolicy = (
+  input: z.infer<typeof internalRoutingDecisionSchema>,
+  policy: ModelRoutingPolicy,
+) => {
+  const limit = outputTokenLimit(policy);
+  const requested = input.requiredCapabilities.outputTokens;
+  if (limit === null || requested === undefined || requested <= limit)
+    return { input, outputTokenLimit: limit };
+  return {
+    outputTokenLimit: limit,
+    input: {
+      ...input,
+      requiredCapabilities: {
+        ...input.requiredCapabilities,
+        outputTokens: limit,
+      },
+      expectedUsage: input.expectedUsage.map((amount) =>
+        amount.unit === "output_token" && scaled(amount.quantity) > scaled(String(limit))
+          ? { ...amount, quantity: String(limit) }
+          : amount,
+      ),
+    },
+  };
+};
+
 export class RoutingExecutionService {
   private readonly router: DeterministicModelRouter;
   constructor(
@@ -371,6 +423,9 @@ export class RoutingExecutionService {
       executedDeploymentId: deploymentId,
       executedProviderDeployment: String(prior.executed_provider_deployment),
       executedModelGroup: executionModelGroup(tenantId, String(prior.executed_provider_deployment)),
+      executedOutputTokenLimit: Number(
+        (prior.executed_capabilities as { outputTokens?: unknown } | null)?.outputTokens,
+      ),
       binding: this.bindings.issue({
         tenantId,
         requestId,
@@ -406,13 +461,24 @@ export class RoutingExecutionService {
       throw new Error(
         "A default spending Team is required for governed routing",
       );
-    const resolved = await this.store.resolveEffectivePolicy(
+    let resolved = await this.store.resolveEffectivePolicy(
       input.tenantId,
       team.id,
       input.expectedUsage as UsageAmount[],
     );
     if (!resolved)
       throw new Error("Governed routing is not configured for this Team");
+    let constrained = constrainOutputToPolicy(input, resolved.policy);
+    if (constrained.input !== input) {
+      resolved = await this.store.resolveEffectivePolicy(
+        input.tenantId,
+        team.id,
+        constrained.input.expectedUsage as UsageAmount[],
+      );
+      if (!resolved)
+        throw new Error("Governed routing is not configured for this Team");
+      constrained = constrainOutputToPolicy(constrained.input, resolved.policy);
+    }
     if (this.budgets && resolved.rollout.mode !== "disabled") {
       const status = await this.budgets.getBudgetStatus(
         input.tenantId,
@@ -436,18 +502,18 @@ export class RoutingExecutionService {
     }
     const decision = await this.router.route(
       {
-        requestId: input.requestId,
-        tenantId: input.tenantId,
-        userId: input.subjectId,
+        requestId: constrained.input.requestId,
+        tenantId: constrained.input.tenantId,
+        userId: constrained.input.subjectId,
         teamId: team.id,
         taskId: task.taskId,
-        requestedServiceClass: input.requestedServiceClass,
-        boundedSignals: input.boundedSignals,
-        estimatedInputTokens: input.estimatedInputTokens,
+        requestedServiceClass: constrained.input.requestedServiceClass,
+        boundedSignals: constrained.input.boundedSignals,
+        estimatedInputTokens: constrained.input.estimatedInputTokens,
         ...(task.sessionId ? { sessionId: task.sessionId } : {}),
-        requiredCapabilities: input.requiredCapabilities,
-        ...(input.unavailableDeploymentIds
-          ? { unavailableDeploymentIds: input.unavailableDeploymentIds }
+        requiredCapabilities: constrained.input.requiredCapabilities,
+        ...(constrained.input.unavailableDeploymentIds
+          ? { unavailableDeploymentIds: constrained.input.unavailableDeploymentIds }
           : {}),
       },
       resolved.policy,
@@ -476,6 +542,9 @@ export class RoutingExecutionService {
       executedDeploymentId: decision.executedDeployment.id,
       executedProviderDeployment: decision.executedDeployment.deployment,
       executedModelGroup: executionModelGroup(input.tenantId, decision.executedDeployment.deployment),
+      executedOutputTokenLimit: resolved.policy.deployments.find(
+        (deployment) => deployment.id === decision.executedDeployment.id,
+      )?.capabilities.outputTokens,
       binding: this.bindings.issue({
         tenantId: input.tenantId,
         requestId: input.requestId,

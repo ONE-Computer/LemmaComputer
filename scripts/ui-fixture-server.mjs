@@ -480,7 +480,7 @@ const routingMappingId="22222222-2222-4222-8222-222222222222";
 const routingPolicyId="33333333-3333-4333-8333-333333333333";
 const routingDeploymentIds={lite:"44444444-4444-4444-8444-444444444444",balanced:"55555555-5555-4555-8555-555555555555",pro:"66666666-6666-4666-8666-666666666666"};
 const routingScope={allowedServiceClasses:["lite","balanced","pro"],allowedDeploymentIds:Object.values(routingDeploymentIds),explicitSelectionAllowed:true,forceServiceClass:null,safeDefault:"balanced"};
-const routingClassPolicy=(serviceClass)=>({capabilityFloor:{vision:serviceClass!=="lite",tools:serviceClass!=="lite",streaming:true,contextTokens:serviceClass==="pro"?128000:32000,outputTokens:8192},evaluationThreshold:"0.800000",qualityPosture:serviceClass==="pro"?"premium":"standard",costPosture:serviceClass==="lite"?"lowest":"balanced",latencyPosture:"balanced",requiredModalities:["text"],requiredResidency:["sg"],eligibleDeploymentIds:[routingDeploymentIds[serviceClass]],safeDefault:serviceClass==="balanced"});
+const routingClassPolicy=(serviceClass)=>({capabilityFloor:{vision:serviceClass!=="lite",tools:serviceClass!=="lite",streaming:true,contextTokens:serviceClass==="pro"?128000:32000,outputTokens:32768},evaluationThreshold:"0.800000",qualityPosture:serviceClass==="pro"?"premium":"standard",costPosture:serviceClass==="lite"?"lowest":"balanced",latencyPosture:"balanced",requiredModalities:["text"],requiredResidency:["sg"],eligibleDeploymentIds:[routingDeploymentIds[serviceClass]],safeDefault:serviceClass==="balanced"});
 const routingClassPolicies={lite:routingClassPolicy("lite"),balanced:routingClassPolicy("balanced"),pro:routingClassPolicy("pro")};
 let fixtureRoutingReview=null;
 let fixtureRoutingMode="shadow";

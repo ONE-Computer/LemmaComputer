@@ -451,7 +451,7 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
           tools: policyCapabilities?.tools ?? capableByDefault,
           streaming: policyCapabilities?.streaming ?? true,
           contextTokens: policyCapabilities?.contextTokens ?? (selected.serviceClass === "pro" ? 128000 : 32000),
-          outputTokens: policyCapabilities?.outputTokens ?? 8192,
+          outputTokens: policyCapabilities?.outputTokens ?? 32768,
           residency: selected.region ? [selected.region] : settings?.policy?.requiredResidency ? [settings.policy.requiredResidency] : [],
         },
         approved: selected.approved ?? true,

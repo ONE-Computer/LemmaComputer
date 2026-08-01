@@ -977,12 +977,28 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             required = {
                 "decisionId", "executedDeploymentId", "executedModelGroup",
                 "executedProviderDeployment", "requestedServiceClass",
-                "selectedServiceClass", "binding",
+                "selectedServiceClass", "executedOutputTokenLimit", "binding",
             }
-            if not required.issubset(result) or not isinstance(result.get("binding"), dict):
+            if (
+                not required.issubset(result)
+                or not isinstance(result.get("binding"), dict)
+                or not isinstance(result.get("executedOutputTokenLimit"), int)
+                or result["executedOutputTokenLimit"] <= 0
+            ):
                 raise RuntimeError("Governed routing authority returned a malformed decision")
             _set_routing_state(kwargs, result)
             kwargs["model"] = result["executedModelGroup"]
+            output_limit = result["executedOutputTokenLimit"]
+            for name in ("max_tokens", "max_output_tokens"):
+                requested = kwargs.get(name)
+                if isinstance(requested, (int, float)) and requested > output_limit:
+                    kwargs[name] = output_limit
+            params = kwargs.get("litellm_params")
+            if isinstance(params, dict):
+                for name in ("max_tokens", "max_output_tokens"):
+                    requested = params.get(name)
+                    if isinstance(requested, (int, float)) and requested > output_limit:
+                        params[name] = output_limit
             return kwargs
         except urllib.error.HTTPError as error:
             status = error.code if error.code in (403, 409, 429) else 503
