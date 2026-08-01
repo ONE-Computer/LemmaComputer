@@ -319,6 +319,18 @@ test("Cowork does not bypass policy by hard-coding an unassigned ACP harness", a
   assert.match(app, /setCoworkAgentId\(preferredAgentId \?\? ""\)/);
 });
 
+test("live E2B Cowork qualification is explicit, credentialed, and fixture-resistant", async () => {
+  const script = await source("scripts/qualify-e2b-cowork.mts");
+  assert.match(script, /ONECOMPUTER_E2B_LIVE !== "1"/);
+  assert.match(script, /ONECOMPUTER_CONTROL_URL/);
+  assert.match(script, /ONECOMPUTER_CONTROLLER_INTERNAL_TOKEN/);
+  assert.match(script, /E2B_API_KEY/);
+  assert.match(script, /E2B_TEMPLATE_ID/);
+  assert.match(script, /ONECOMPUTER_UI_FIXTURE === "1"/);
+  assert.match(script, /E2B_REAL_ACP_OK/);
+  assert.match(script, /workspace-frame|onevibe\/tasks/);
+});
+
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");

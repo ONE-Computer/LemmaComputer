@@ -17,6 +17,7 @@
     "qualify:providers": "tsx scripts/qualify-provider-settings.mts",
     "qualify:codex-acp": "tsx scripts/qualify-codex-acp.mts",
     "qualify:opencode-acp": "tsx scripts/qualify-opencode-acp.mts",
+    "qualify:e2b:cowork": "tsx scripts/qualify-e2b-cowork.mts",
     "sandbox:e2b:template": "tsx scripts/build-e2b-template.mts",
     "env:init": "node scripts/initialize-env.mjs",
     "env:check": "node scripts/update-env.mjs --check",

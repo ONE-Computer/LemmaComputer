@@ -100,6 +100,27 @@ proof.
 8. Destroy the task, revoke the gateway grant, kill the sandbox, and purge its
    volume. Re-read the endpoint and VCR URL; both must fail closed.
 
+The repository now includes the guarded acceptance command:
+
+```bash
+ONECOMPUTER_E2B_LIVE=1 \
+ONECOMPUTER_CONTROL_URL=https://control.example.com \
+ONECOMPUTER_PROXY_TOKEN=... \
+ONECOMPUTER_SESSION_COOKIE='...' \
+ONECOMPUTER_CONTROLLER_URL=https://controller.example.com \
+ONECOMPUTER_CONTROLLER_INTERNAL_TOKEN=... \
+E2B_API_KEY=... \
+E2B_TEMPLATE_ID=... \
+npm run qualify:e2b:cowork
+```
+
+`qualify-e2b-cowork.mts` creates two real task-scoped conversations, verifies
+the selected ACP agent and provider metadata, performs two turns in one
+session, checks unauthenticated provider-host access, records a PNG and PPTX,
+and explicitly stops/purges both workspaces. It writes only redacted hashes
+and IDs under `.artifacts/e2b-live/`; it refuses fixture mode or missing
+credentials before allocating anything.
+
 For network qualification, inspect E2B `getInfo()` after creation and assert
 that `allowInternetAccess` and `network.allowOut` match the signed route set.
 Then prove a direct non-allowlisted destination fails while the governed
