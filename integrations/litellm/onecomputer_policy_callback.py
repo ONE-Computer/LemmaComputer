@@ -235,7 +235,11 @@ def _trusted_key_metadata(kwargs):
 
 def _provider_request(kwargs):
     """Return provider-bound kwargs without LiteLLM authentication internals."""
-    request = dict(kwargs)
+    request = {
+        name: value
+        for name, value in kwargs.items()
+        if not (isinstance(name, str) and name.startswith("onecomputer_"))
+    }
     for name in _PROVIDER_INTERNAL_FIELDS:
         request.pop(name, None)
     metadata = request.get("metadata")
@@ -247,7 +251,11 @@ def _provider_request(kwargs):
         }
     params = request.get("litellm_params")
     if isinstance(params, dict):
-        params = dict(params)
+        params = {
+            name: value
+            for name, value in params.items()
+            if not (isinstance(name, str) and name.startswith("onecomputer_"))
+        }
         nested_metadata = params.get("metadata")
         if isinstance(nested_metadata, dict):
             params["metadata"] = {
@@ -689,6 +697,25 @@ def _usage_state(kwargs):
         value = metadata.get(USAGE_STATE_KEY)
         if isinstance(value, dict):
             return value
+    # LiteLLM's Anthropic Messages -> Responses conversion builds fresh hook
+    # kwargs and removes callback-owned metadata before the completion hook.
+    # Context variables follow the request task, so recover only the state
+    # paired with the callback-signed chain created at admission.
+    context = _INTERNAL_ADMISSION_CONTEXT.get()
+    if isinstance(context, dict):
+        value = context.get("state")
+        chain = _verified_usage_chain(context.get("signedChain"))
+        if (
+            isinstance(value, dict)
+            and isinstance(chain, dict)
+            and isinstance(value.get("admissionId"), str)
+            and chain.get("admissionId") == value.get("admissionId")
+            and isinstance(value.get("tenantId"), str)
+            and bool(value.get("tenantId"))
+            and isinstance(value.get("provider"), str)
+            and bool(value.get("provider"))
+        ):
+            return value
     return None
 
 
@@ -1115,6 +1142,8 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         except Exception:
             # Completion telemetry must never replace a successful model response.
             return
+        finally:
+            _INTERNAL_ADMISSION_CONTEXT.set(None)
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
         try:
@@ -1125,6 +1154,8 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             await _record_routing_observation(kwargs, result, payload, response_obj)
         except Exception:
             return
+        finally:
+            _INTERNAL_ADMISSION_CONTEXT.set(None)
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
         if call_type != "call_mcp_tool":

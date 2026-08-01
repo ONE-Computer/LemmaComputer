@@ -65,6 +65,7 @@ try {
     "tests/usage-ledger-postgres.test.ts",
     "tests/routing-postgres.test.ts",
     "tests/openvtc-companion-push-postgres.test.ts",
+    "tests/provider-settings-postgres.test.ts",
     "tests/workspace-settings-postgres.test.ts",
     "tests/migration-ledger-baseline-postgres.test.ts",
   ], {
@@ -77,6 +78,7 @@ try {
       BUDGET_TEST_DATABASE_URL: postgresUrl,
       SCHEDULE_TEST_DATABASE_URL: postgresUrl,
       OPENVTC_PUSH_TEST_DATABASE_URL: postgresUrl,
+      PROVIDER_SETTINGS_TEST_DATABASE_URL: postgresUrl,
       WORKSPACE_SETTINGS_TEST_DATABASE_URL: postgresUrl,
       MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL: migrationLedgerLegacyUrl,
       MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL: migrationLedgerFreshUrl,
@@ -116,7 +118,7 @@ try {
 
   sql("postgres", "UPDATE onecomputer_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='028'");
   if (!migrate("postgres", false).includes("historical migrations are immutable")) throw new Error("checksum drift did not fail closed");
-  process.stdout.write("Database gate passed: fresh, no-op, concurrent, legacy baseline, mismatch, checksum, Activity, Teams, usage ledger, schedule, and Companion push cases.\n");
+  process.stdout.write("Database gate passed: fresh, no-op, concurrent, legacy baseline, mismatch, checksum, Activity, Teams, provider settings, usage ledger, schedule, and Companion push cases.\n");
 } finally {
   exec("docker", ["rm", "-f", container]);
 }
