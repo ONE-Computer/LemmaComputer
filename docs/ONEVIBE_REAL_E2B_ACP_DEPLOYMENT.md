@@ -221,6 +221,13 @@ implementation trivia:
   Control evidence and transcript persistence remain the source of record
   ([background commands](https://e2b.dev/docs/commands/background),
   [command execution](https://e2b.dev/docs/cli/exec-command)).
+- The provider adapter sets the ACP command connection timeout to `0` (no
+  transport-imposed cutoff) and bounds the separate request timeout. Cowork's
+  signed task deadline and turn budget remain the only authorities that can
+  terminate a run. The post-create workspace-ready poll likewise uses an
+  explicit 150-second timeout because E2B foreground command connections
+  otherwise default to 60 seconds ([streaming](https://e2b.dev/docs/commands/streaming),
+  [JavaScript command options](https://e2b.dev/docs/sdk-reference/js-sdk/v2.2.7/commands)).
 - Every create/connect response must be inspected for `envdVersion`, secure
   access state, lifecycle, metadata, network policy, and volume mounts. A
   locally requested option is not enforcement evidence; live qualification
