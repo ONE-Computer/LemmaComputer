@@ -43,9 +43,12 @@ fallback.
 Control also fail-closes all task-mutating paths after the one-hour ephemeral
 Cowork deadline: new chat turns, provider VCR uploads, and PPTX creation return
 `ONEVIBE_TASK_EXPIRED`. Read-only evidence replay remains available for audit.
-This is a capability boundary, not cleanup proof; production still needs a
-provider reaper to stop the sandbox, revoke gateway grants, and purge its
-ephemeral volume.
+This is a capability boundary, not cleanup proof. Control now includes an
+identity-policy-backed ephemeral reaper (`ONEVIBE_EPHEMERAL_REAPER_INTERVAL_SECONDS`)
+that calls the same destroy, grant-revocation, and volume-purge path as an
+explicit workspace delete. Live qualification must enable that reaper and
+attach evidence that an expired E2B sandbox and volume are actually removed;
+an enabled timer or an expiry timestamp alone is not cleanup proof.
 
 ## Provisioning
 
@@ -94,10 +97,10 @@ but a live run still requires an approved E2B template ID, reachable governed
 egress/control routes, and valid runtime credentials. Until that qualification
 is completed, production must fail closed rather than claim an ACP result.
 
-The next hardening items are explicit: add durable session/replay persistence
-and a TTL reaper that revokes grants and purges ephemeral volumes; expose
-provider-local, source-application PNG capture (Chrome/Word window targeting)
-through the controller capture-grant endpoint; and add a gated live E2B
+The next hardening items are explicit: add durable session/replay persistence;
+qualify the existing TTL reaper's destroy/revoke/purge behavior against E2B;
+expose provider-local, source-application PNG capture (Chrome/Word window
+targeting) through the controller capture-grant endpoint; and add a gated live E2B
 acceptance harness covering two real conversations, follow-up session reuse,
 frame hash deduplication, PPTX magic bytes, and cleanup. The existing fixture
 Playwright suite remains a UI contract test, not a substitute for that gate.
