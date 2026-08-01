@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import threading
@@ -16,6 +17,9 @@ import urllib.request
 from fastapi import HTTPException
 import litellm
 from litellm.integrations.custom_logger import CustomLogger
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 POLICY_URL = os.environ.get(
@@ -972,7 +976,8 @@ class OneComputerMcpPolicyCallback(CustomLogger):
                 status_code=status,
                 detail={"error": "AI_USAGE_ADMISSION_DENIED" if status != 503 else "AI_USAGE_ADMISSION_UNAVAILABLE"},
             ) from None
-        except (OSError, ValueError, RuntimeError, urllib.error.URLError):
+        except (OSError, ValueError, RuntimeError, urllib.error.URLError) as error:
+            LOGGER.warning("AI usage admission authority failed (%s): %.240s", type(error).__name__, str(error))
             raise HTTPException(
                 status_code=503,
                 detail={"error": "AI_USAGE_ADMISSION_UNAVAILABLE"},
