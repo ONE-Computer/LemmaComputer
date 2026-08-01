@@ -33,12 +33,19 @@ chat endpoints (`8644` Codex, `8645` OpenCode). Control uses those endpoints
 for the selected E2B workspace; the Docker-only `onecomputer-sandbox-*` DNS
 route is never used for managed sandboxes.
 
-The bridge keeps the canonical user/assistant transcript for the lifetime of
-the ACP process and rejects concurrent turns for one session. It does not
-invent history: after the provider process is lost, the session is unavailable
-and the endpoint returns `404` rather than an empty synthetic conversation.
-Durable replay and restart recovery remain a release gate, not a hidden
-fallback.
+The bridge keeps the canonical user/assistant transcript in a bounded,
+mode-`0600` record on the task volume and rejects concurrent turns for one
+session. The record contains user-visible messages only; ACP thought chunks,
+credentials, and raw diagnostics are never persisted. On provider-process
+restart, the bridge starts a fresh provider-local ACP process and calls
+`session/load` with the exact persisted vendor session ID. If the selected
+harness does not advertise `loadSession`, or the vendor rejects the load, the
+endpoint fails closed rather than creating a new context or returning an empty
+synthetic conversation. Control activity/SSE remains the authoritative replay
+source; the provider record exists to restore the vendor context for the next
+real turn. The record is atomically replaced, capped at 32 MiB, protected by a
+task-scoped HMAC derived from the chat capability key, and never contains that
+key itself.
 
 E2B’s lifecycle has an important implication for Cowork: `onTimeout: "pause"`
 preserves the full sandbox and can keep cycling indefinitely when auto-resume
@@ -224,9 +231,8 @@ but a live run still requires an approved E2B template ID, reachable governed
 egress/control routes, and valid runtime credentials. Until that qualification
 is completed, production must fail closed rather than claim an ACP result.
 
-The next hardening items are explicit: add durable session/replay persistence;
-qualify the existing TTL reaper's destroy/revoke/purge behavior against E2B;
-and maintain the gated live E2B
+The next hardening items are explicit: qualify the existing TTL reaper's
+destroy/revoke/purge behavior against E2B and maintain the gated live E2B
 acceptance harness covering two real conversations, follow-up session reuse,
 frame hash deduplication, PPTX magic bytes, and cleanup. The existing
 fixture Playwright suite remains a UI contract test, not a substitute for that

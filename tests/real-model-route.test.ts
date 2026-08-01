@@ -306,7 +306,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
 
 test("provider ACP bridge exposes real transcript state and rejects concurrent turns", async () => {
   const bridge = await source("docker/workspace/onecomputer-acp-chat.mjs");
-  assert.match(bridge, /messages: \[\], active: false/);
+  assert.match(bridge, /messages: persisted\?\.messages \?\? \[\],/);
   assert.match(bridge, /if \(item\.active\) return json\(res, 409/);
   assert.match(bridge, /return json\(res, 404, \{ error: "session not found" \}\)/);
   assert.match(bridge, /return json\(res, 200, \{ messages: item\.messages \}\)/);
@@ -330,6 +330,22 @@ test("live E2B Cowork qualification is explicit, credentialed, and fixture-resis
   assert.match(script, /ONECOMPUTER_UI_FIXTURE === "1"/);
   assert.match(script, /E2B_REAL_ACP_OK/);
   assert.match(script, /workspace-frame|onevibe\/tasks/);
+});
+
+test("provider ACP bridge persists bounded history and restores the exact vendor session", async () => {
+  const bridge = await source("docker/workspace/onecomputer-acp-chat.mjs");
+  assert.match(bridge, /\.onecomputer.*acp-sessions/);
+  assert.match(bridge, /maxPersistedSessionBytes/);
+  assert.match(bridge, /mode: 0o600/);
+  assert.match(bridge, /initialized\.agentCapabilities\?\.loadSession/);
+  assert.match(bridge, /connection\.agent\.loadSession/);
+  assert.match(bridge, /persistSession\(sessionId, item\)/);
+  assert.match(bridge, /createHmac\("sha256", apiKey\)/);
+  assert.match(bridge, /timingSafeEqual/);
+  assert.match(bridge, /recoverInterruptedMessages/);
+  assert.match(bridge, /ACP process restarted before this turn completed/);
+  assert.match(bridge, /Corrupt history is not exposed as an empty or fabricated conversation/);
+  assert.doesNotMatch(bridge, /hidden-reasoning/);
 });
 
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
