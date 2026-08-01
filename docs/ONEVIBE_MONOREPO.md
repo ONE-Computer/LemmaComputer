@@ -62,10 +62,12 @@ application, timestamp, and event sequence. Access must be checked on every
 retrieval. Sensitive visual evidence needs explicit retention and redaction
 policy before it can be considered production-ready.
 
-The initial implementation may use KasmVNC/session frames and Playwright
-screenshots or traces, but provider-specific capture remains behind an adapter.
-Chat-only animation, fabricated screenshots, or fixture events are not VCR
-evidence.
+The initial implementation accepts bounded PNG or JPEG screenshots from a
+policy-bound capture sidecar and exposes them at the task VCR endpoint. A
+capture grant is short-lived and bound to one tenant, subject, workspace, task,
+source application, and byte limit; it is never issued to the browser. The
+provider-specific capture remains behind an adapter. Chat-only animation,
+fabricated screenshots, or fixture events are not production VCR evidence.
 
 ## Delivery sequence and proof
 
@@ -74,8 +76,8 @@ Implement and verify in this order:
 1. API contract and ownership/integrity tests for the artifact flow.
 2. Governed runtime/harness dispatch with durable task-event replay.
 3. Visual-capture adapter and timeline authorization tests.
-4. Browser E2E: submit task, observe streaming activity and VCR, retrieve a
-   real PPTX, and validate the downloaded Office package.
+4. Browser E2E: submit task, observe streaming activity and VCR, scrub visual
+   evidence, retrieve a real PPTX, and validate the downloaded Office package.
 
 Do not claim the slice complete from unit tests alone. Completion requires an
 API E2E run and a browser E2E run against the same local stack, with a real

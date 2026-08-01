@@ -19,6 +19,10 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ""),
         headers: {
           "x-onecomputer-proxy-token": process.env.ONECOMPUTER_WEB_PROXY_TOKEN ?? "local-web-proxy-token-change-me",
+          ...(process.env.ONECOMPUTER_TEST_IDENTITY_MODE === "1" ? {
+            "x-onecomputer-test-tenant-id": "onevibe-browser",
+            "x-onecomputer-test-user-id": "qa-user",
+          } : {}),
         },
       },
     },

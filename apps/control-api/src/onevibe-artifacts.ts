@@ -53,7 +53,7 @@ export type OneVibeVcrFrame = {
   taskId: string;
   sourceApplication: "browser" | "document" | "desktop";
   path: string;
-  mimeType: "image/png";
+  mimeType: "image/png" | "image/jpeg";
   sha256: string;
   width: number;
   height: number;
@@ -74,6 +74,28 @@ const pngDimensions = (bytes: Uint8Array) => {
   return width > 0 && height > 0 && width <= 16_384 && height <= 16_384 ? { width, height } : null;
 };
 
+const jpegDimensions = (bytes: Uint8Array) => {
+  if (bytes.byteLength < 10 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 9 < bytes.byteLength) {
+    if (bytes[offset] !== 0xff) return null;
+    while (bytes[offset] === 0xff) offset += 1;
+    const marker = bytes[offset]!;
+    offset += 1;
+    if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > bytes.byteLength) return null;
+    const length = (bytes[offset]! << 8) | bytes[offset + 1]!;
+    if (length < 2 || offset + length > bytes.byteLength) return null;
+    if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+      const height = (bytes[offset + 3]! << 8) | bytes[offset + 4]!;
+      const width = (bytes[offset + 5]! << 8) | bytes[offset + 6]!;
+      return width > 0 && height > 0 && width <= 16_384 && height <= 16_384 ? { width, height } : null;
+    }
+    offset += length;
+  }
+  return null;
+};
+
 /** Stores a verified screenshot submitted by an internal, task-bound capture sidecar. */
 export async function createOneVibeVcrFrame(
   bytes: Uint8Array,
@@ -82,16 +104,18 @@ export async function createOneVibeVcrFrame(
   artifactDirectory = process.env.ONEVIBE_ARTIFACT_DIRECTORY ?? "/tmp/onecomputer-onevibe-artifacts",
 ): Promise<OneVibeVcrFrame> {
   if (bytes.byteLength > 2 * 1024 * 1024) throw new Error("ONEVIBE_VCR_FRAME_TOO_LARGE");
-  const dimensions = pngDimensions(bytes);
-  if (!dimensions) throw new Error("ONEVIBE_VCR_FRAME_INVALID");
+  const png = pngDimensions(bytes);
+  const jpeg = png ? null : jpegDimensions(bytes);
+  if (!png && !jpeg) throw new Error("ONEVIBE_VCR_FRAME_INVALID");
   const root = resolve(artifactDirectory);
   await mkdir(root, { recursive: true, mode: 0o700 });
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const path = resolve(root, `vcr-${owner.taskId}-${sha256}.png`);
+  const mimeType = png ? "image/png" as const : "image/jpeg" as const;
+  const path = resolve(root, `vcr-${owner.taskId}-${sha256}.${png ? "png" : "jpg"}`);
   await writeFile(path, bytes, { mode: 0o600, flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "EEXIST") throw error;
   });
-  return { taskId: owner.taskId, sourceApplication, path, mimeType: "image/png", sha256, ...dimensions, capturedAt: new Date().toISOString() };
+  return { taskId: owner.taskId, sourceApplication, path, mimeType, sha256, ...(png ?? jpeg!), capturedAt: new Date().toISOString() };
 }
 
 export async function getOneVibeVcrFrame(
@@ -101,11 +125,17 @@ export async function getOneVibeVcrFrame(
 ): Promise<OneVibeVcrFrame | null> {
   if (!/^[a-f0-9]{64}$/.test(sha256)) return null;
   try {
-    const path = resolve(artifactDirectory, `vcr-${owner.taskId}-${sha256}.png`);
-    const bytes = await readFile(path);
-    const dimensions = pngDimensions(bytes);
-    if (!dimensions || createHash("sha256").update(bytes).digest("hex") !== sha256) return null;
-    return { taskId: owner.taskId, sourceApplication: "desktop", path, mimeType: "image/png", sha256, ...dimensions, capturedAt: new Date().toISOString() };
+    for (const extension of ["png", "jpg"] as const) {
+      const path = resolve(artifactDirectory, `vcr-${owner.taskId}-${sha256}.${extension}`);
+      try {
+        const bytes = await readFile(path);
+        const png = pngDimensions(bytes);
+        const jpeg = png ? null : jpegDimensions(bytes);
+        if ((!png && !jpeg) || createHash("sha256").update(bytes).digest("hex") !== sha256) continue;
+        return { taskId: owner.taskId, sourceApplication: "desktop", path, mimeType: png ? "image/png" : "image/jpeg", sha256, ...(png ?? jpeg!), capturedAt: new Date().toISOString() };
+      } catch { continue; }
+    }
+    return null;
   } catch { return null; }
 }
 

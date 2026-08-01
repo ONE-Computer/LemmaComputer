@@ -2034,9 +2034,13 @@ function ChatPart({ part, markdown = false }) {
 function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange, onStartWorkspace }) {
   const [title, setTitle] = useState("Executive update");
   const [body, setBody] = useState("Summarize the completed work and its next decisions.");
-  const [task, setTask] = useState(null);
+  const [task, setTask] = useState(() => {
+    const id = new URL(window.location.href).searchParams.get("coworkTask");
+    return id ? { id } : null;
+  });
   const [events, setEvents] = useState([]);
   const [frames, setFrames] = useState([]);
+  const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [artifact, setArtifact] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -2051,10 +2055,20 @@ function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange
     setFrames(replay.frames ?? []);
   };
 
+  const setActiveTask = (nextTask) => {
+    setTask(nextTask);
+    const url = new URL(window.location.href);
+    if (nextTask?.id) url.searchParams.set("coworkTask", nextTask.id);
+    else url.searchParams.delete("coworkTask");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  };
+
   useEffect(() => {
-    setTask(null);
+    const taskId = new URL(window.location.href).searchParams.get("coworkTask");
+    setTask(taskId ? { id: taskId } : null);
     setEvents([]);
     setFrames([]);
+    setSelectedFrameIndex(0);
     setArtifact(null);
     setError("");
   }, [workspace?.id]);
@@ -2066,12 +2080,16 @@ function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange
     return () => window.clearInterval(timer);
   }, [task?.id, workspace?.id]);
 
+  useEffect(() => {
+    setSelectedFrameIndex((current) => Math.min(current, Math.max(0, frames.length - 1)));
+  }, [frames.length]);
+
   const startTask = async () => {
     if (!workspace) return;
     setBusy(true); setError(""); setArtifact(null);
     try {
       const created = await oneVibeApi.createTask(workspace.id);
-      setTask(created.task);
+      setActiveTask(created.task);
       await refreshEvidence(created.task.id);
     } catch (requestError) { setError(requestError.message); }
     finally { setBusy(false); }
@@ -2085,7 +2103,7 @@ function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange
       if (!currentTask) {
         const created = await oneVibeApi.createTask(workspace.id);
         currentTask = created.task;
-        setTask(currentTask);
+        setActiveTask(currentTask);
       }
       const created = await oneVibeApi.createPresentation(workspace.id, currentTask.id, { title, body });
       setArtifact(created.artifact);
@@ -2096,6 +2114,7 @@ function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange
 
   const workspaceOptions = workspaces?.map((item) => ({ value: item.id, label: workspaceName(item) })) ?? [];
   const workspaceReady = workspace && ["ready", "open"].includes(workspaceState);
+  const selectedFrame = frames[selectedFrameIndex];
   return (
     <section className="cowork-screen" aria-labelledby="cowork-heading">
       <header className="page-heading">
@@ -2121,7 +2140,11 @@ function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange
         </section>
         <section className="cowork-card cowork-replay" aria-live="polite">
           <div><span className="cowork-eyebrow">VCR</span><h2>Execution replay</h2></div>
-          {frames.length > 0 ? <div className="cowork-frame-strip">{frames.map((frame) => <a key={frame.eventSequence} href={`/api${frame.frameUrl}`} target="_blank" rel="noreferrer"><img src={`/api${frame.frameUrl}`} alt={`${frame.sourceApplication} frame at event ${frame.eventSequence}`} /><small>{frame.sourceApplication}</small></a>)}</div> : <p className="cowork-muted">Visual evidence appears here when the task’s browser or desktop capture sidecar records an authorized frame.</p>}
+          {selectedFrame ? <div className="cowork-vcr-player">
+            <img src={`/api${selectedFrame.frameUrl}`} alt={`${selectedFrame.sourceApplication} frame at event ${selectedFrame.eventSequence}`} />
+            <div className="cowork-scrubber"><input aria-label="Scrub VCR timeline" type="range" min="0" max={Math.max(0, frames.length - 1)} value={selectedFrameIndex} onChange={(event) => setSelectedFrameIndex(Number(event.target.value))} /><span>Event {selectedFrame.eventSequence} · {selectedFrame.sourceApplication}</span></div>
+            <div className="cowork-frame-strip">{frames.map((frame, index) => <button key={frame.eventSequence} className={index === selectedFrameIndex ? "active" : ""} type="button" onClick={() => setSelectedFrameIndex(index)}><img src={`/api${frame.frameUrl}`} alt="" /><small>Event {frame.eventSequence}</small></button>)}</div>
+          </div> : <p className="cowork-muted">Visual evidence appears here when the task’s browser or desktop capture sidecar records an authorized frame.</p>}
           <ol className="cowork-timeline">{events.map((event) => <li key={event.sequence}><span>{event.sequence}</span><strong>{event.kind.replaceAll("-", " ")}</strong><time>{new Date(event.createdAt).toLocaleTimeString()}</time></li>)}</ol>
         </section>
       </div>}
