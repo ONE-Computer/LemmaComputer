@@ -16,6 +16,13 @@ test("administrator enters the AI control plane from the account menu and naviga
   await expect(page.getByRole("heading", { name: "0.92 gCO₂e" })).toBeVisible();
   await expect(page.getByText(/19% token coverage/)).toBeVisible();
   await expect(page.getByRole("link", { name: "US grid factor" })).toHaveAttribute("href", "https://www.epa.gov/egrid/summary-data");
+  const emissionsInfo = page.getByRole("button", { name: "How estimated AI emissions are calculated" });
+  await emissionsInfo.hover();
+  const emissionsTooltip = page.getByRole("tooltip", { name: /How this estimate is calculated/ });
+  await expect(emissionsTooltip).toBeVisible();
+  await expect(emissionsTooltip).toContainText("United States");
+  await expect(emissionsTooltip).toContainText("0.349667 kg CO₂e/kWh");
+  await expect(emissionsTooltip).toContainText("input, output, cache-read, cache-write, and reasoning text tokens");
   await tabs.getByRole("button", { name: "Pricing" }).click();
   await expect(page).toHaveURL(/\?view=ai-control-plane&section=pricing$/);
   await expect(page.getByRole("heading", { name: "Pricing", exact: true })).toBeVisible();
