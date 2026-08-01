@@ -402,6 +402,8 @@ export class E2bSandboxAdapter implements SandboxAdapter {
   }
 
   async create(input: SandboxCreateInput): Promise<Sandbox> {
+    let createdSandboxId: string | undefined;
+    let createdVolumeId: string | undefined;
     try {
       input = { ...input, policy: runtimePolicySchema.parse(input.policy) };
       const proxy = proxyUrlFor(input, this.config.egressProxyUrlTemplate);
@@ -420,7 +422,9 @@ export class E2bSandboxAdapter implements SandboxAdapter {
       const volumes = await this.sdk.listVolumes({ apiKey: this.config.apiKey });
       const volumeName = safeName("oc", input.workspaceId);
       const existingVolume = volumes.find((volume) => volume.name === volumeName);
-      if (!existingVolume) await this.sdk.createVolume(volumeName, { apiKey: this.config.apiKey });
+      if (!existingVolume) {
+        createdVolumeId = (await this.sdk.createVolume(volumeName, { apiKey: this.config.apiKey })).volumeId;
+      }
       const password = randomBytes(24).toString("base64url");
       const sandbox = await this.sdk.create(this.config.templateId, {
         apiKey: this.config.apiKey,
@@ -440,6 +444,7 @@ export class E2bSandboxAdapter implements SandboxAdapter {
         envs: workspaceEnvironment(input, this.config, proxy, password),
         volumeMounts: { [homePath]: volumeName },
       });
+      createdSandboxId = sandbox.sandboxId;
       await sandbox.commands.run(
         "/usr/local/sbin/onecomputer-workspace-entrypoint --tail-log >/run/onecomputer/workspace-bootstrap.log 2>&1",
         { background: true },
@@ -451,6 +456,14 @@ export class E2bSandboxAdapter implements SandboxAdapter {
       );
       return { ...sandboxView(sandbox.sandboxId, "ready", metadataFor(input)), chatEndpoints: chatEndpointsFor(sandbox, metadataFor(input)) };
     } catch (error) {
+      // E2B allocates resources before workspace readiness is proven. Roll back
+      // only resources created by this attempt and preserve the original error.
+      if (createdSandboxId) {
+        await this.sdk.kill(createdSandboxId, { apiKey: this.config.apiKey }).catch(() => undefined);
+      }
+      if (createdVolumeId) {
+        await this.sdk.destroyVolume(createdVolumeId, { apiKey: this.config.apiKey }).catch(() => undefined);
+      }
       return providerFailure("E2B", error);
     }
   }

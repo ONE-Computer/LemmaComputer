@@ -175,6 +175,42 @@ test("E2B exposes provider-hosted ACP chat endpoints only for granted runtimes",
   assert.deepEqual(created.chatEndpoints, [{ catalogId: "opencode-cli", url: "https://8645-e2b-chat-sandbox.e2b.app" }]);
 });
 
+test("E2B rolls back resources when workspace bootstrap cannot become ready", async () => {
+  let killedSandbox = "";
+  let destroyedVolume = "";
+  const sdk: E2bSdk = {
+    async create() {
+      return {
+        sandboxId: "e2b-orphan-candidate",
+        getHost: (port) => `${port}-e2b-orphan-candidate.e2b.app`,
+        commands: {
+          async run(command) {
+            if (command.includes("workspace-ready")) throw new Error("workspace readiness timeout");
+            return { stdout: "" };
+          },
+        },
+        files: { async write() {} },
+      };
+    },
+    async connect() { throw new Error("not used"); },
+    async getInfo() { throw new Error("not used"); },
+    async kill(id) { killedSandbox = id; return true; },
+    async listSandboxes() { return []; },
+    async listVolumes() { return []; },
+    async createVolume() { return { volumeId: "e2b-created-volume" }; },
+    async destroyVolume(id) { destroyedVolume = id; return true; },
+  };
+  const adapter = new E2bSandboxAdapter({
+    apiKey: "e2b-key",
+    templateId: "onecomputer-template",
+    egressProxyUrlTemplate: "https://egress.example.com",
+  }, sdk);
+
+  await assert.rejects(adapter.create(input()), /E2B sandbox operation failed/);
+  assert.equal(killedSandbox, "e2b-orphan-candidate");
+  assert.equal(destroyedVolume, "e2b-created-volume");
+});
+
 test("managed providers reject Docker-local routes and missing governed egress", async () => {
   const sdk = {
     listVolumes: async () => [],
