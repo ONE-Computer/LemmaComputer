@@ -249,6 +249,8 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(entrypoint, /supports_websockets = false/);
   assert.match(entrypoint, /default_tools_approval_mode = "approve"/);
   assert.match(chatRequirements, /claude-agent-sdk==0\.2\.128/);
+  assert.match(chatAdapter, /"ANTHROPIC_CUSTOM_HEADERS": f"x-onecomputer-ai-task-binding: \{usage_task_binding\}"/);
+  assert.doesNotMatch(chatAdapter, /"ANTHROPIC_CUSTOM_HEADERS": json\.dumps/);
   assert.match(chatRequirements, /openai-codex==0\.144\.4/);
   assert.match(dockerfile, /openai-codex"\)\)'\)" = "0\.144\.4"/);
   assert.match(chatAdapter, /approval\\s\+\(\?:is\\s\+\)\?required/);
