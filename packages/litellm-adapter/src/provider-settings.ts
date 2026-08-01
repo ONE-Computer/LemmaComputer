@@ -159,6 +159,16 @@ export const tenantManagedModelAccessGroup = (tenantId: string, alias: string) =
   return `ocp-${tenantRouteHash(tenantId)}-${alias}`;
 };
 
+const managedProviderAliases = [
+  ...managedProviderNames.flatMap((provider) => managedProviderModels[provider].map(({ alias }) => alias)),
+  ...(["openai", "anthropic", "glm"] as const).flatMap((provider) =>
+    managedProviderModelProfiles[provider].map(({ id }) => managedProviderModelAlias(provider, id)),
+  ),
+];
+
+export const managedProviderAliasForAccessGroup = (tenantId: string, accessGroup: string) =>
+  managedProviderAliases.find((alias) => tenantManagedModelAccessGroup(tenantId, alias) === accessGroup) ?? null;
+
 const tenantCredentialName = (tenantId: string, provider: ManagedProviderName) => `onecomputer-provider-${tenantRouteHash(tenantId)}-${provider}`;
 const tenantModelId = (tenantId: string, provider: ManagedProviderName, alias: string) => `onecomputer-provider-${tenantRouteHash(tenantId)}-${provider}-${alias}`;
 

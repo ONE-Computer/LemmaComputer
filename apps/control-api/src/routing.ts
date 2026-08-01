@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { managedProviderAliasForAccessGroup } from "@onecomputer/litellm-adapter";
 import {
   DeterministicModelRouter,
   RoutingDecisionBindingAuthority,
@@ -331,6 +332,9 @@ export class RoutingAdministrationService {
     });
   }
 }
+const executionModelGroup = (tenantId: string, providerDeployment: string) =>
+  managedProviderAliasForAccessGroup(tenantId, providerDeployment) ?? providerDeployment;
+
 const scaled = (value: string) => {
   const match = /^(-?)(\d+)(?:\.(\d{1,12}))?$/.exec(value);
   if (!match) throw new Error("Invalid exact decimal");
@@ -365,7 +369,7 @@ export class RoutingExecutionService {
       selectedServiceClass: String(prior.selected_service_class),
       reasonCode: String(prior.reason_code),
       executedDeploymentId: deploymentId,
-      executedModelGroup: String(prior.executed_provider_deployment),
+      executedModelGroup: executionModelGroup(tenantId, String(prior.executed_provider_deployment)),
       binding: this.bindings.issue({
         tenantId,
         requestId,
@@ -469,7 +473,7 @@ export class RoutingExecutionService {
       selectedServiceClass: decision.selectedServiceClass,
       reasonCode: decision.reasonCode,
       executedDeploymentId: decision.executedDeployment.id,
-      executedModelGroup: decision.executedDeployment.deployment,
+      executedModelGroup: executionModelGroup(input.tenantId, decision.executedDeployment.deployment),
       binding: this.bindings.issue({
         tenantId: input.tenantId,
         requestId: input.requestId,

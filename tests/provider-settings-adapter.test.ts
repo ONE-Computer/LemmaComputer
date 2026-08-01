@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { OneComputerError } from "@onecomputer/contracts";
-import { LiteLLMProviderAdministration, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
+import { LiteLLMProviderAdministration, managedProviderAliasForAccessGroup, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
 
 const alphaKey = "sk-provider-alpha-never-log-000000000001";
 const betaKey = "sk-provider-beta-never-log-000000000002";
@@ -293,6 +293,11 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.equal(modelSet.deployments[0]!.primary, true);
     assert.ok(modelSet.deployments[0]!.aliases.includes("onecomputer-assistant"));
     assert.match(modelSet.deployments[0]!.providerDeployment, /^ocp-/);
+    assert.equal(
+      managedProviderAliasForAccessGroup("tenant-alpha", modelSet.deployments[0]!.providerDeployment),
+      "onecomputer-openai-gpt-5-6-sol",
+    );
+    assert.equal(managedProviderAliasForAccessGroup("tenant-beta", modelSet.deployments[0]!.providerDeployment), null);
     assert.notEqual(modelSet.deployments[0]!.id, modelSet.deployments[1]!.id);
     const modelSetUpdates = requests.slice(modelSetStart)
       .filter((request) => request.method === "PATCH" && request.url.startsWith("/model/"))
