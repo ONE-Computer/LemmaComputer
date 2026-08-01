@@ -40,15 +40,25 @@ and the endpoint returns `404` rather than an empty synthetic conversation.
 Durable replay and restart recovery remain a release gate, not a hidden
 fallback.
 
+E2B’s lifecycle has an important implication for Cowork: `onTimeout: "pause"`
+preserves the full sandbox and can keep cycling indefinitely when auto-resume
+is enabled, while `kill` is terminal. The adapter therefore uses pause/resume
+only as a provider-level optimization and relies on the Control reaper’s fixed
+task-creation deadline to call destroy and volume purge. Every live run must
+record both the E2B `sandboxId`/`templateId` and the final `killed`/volume state.
+E2B secure access must remain enabled; custom templates need an envd version
+that supports secured access.
+
 Control also fail-closes all task-mutating paths after the one-hour ephemeral
 Cowork deadline: new chat turns, provider VCR uploads, and PPTX creation return
 `ONEVIBE_TASK_EXPIRED`. Read-only evidence replay remains available for audit.
 This is a capability boundary, not cleanup proof. Control now includes an
 identity-policy-backed ephemeral reaper (`ONEVIBE_EPHEMERAL_REAPER_INTERVAL_SECONDS`)
-that calls the same destroy, grant-revocation, and volume-purge path as an
-explicit workspace delete. Live qualification must enable that reaper and
-attach evidence that an expired E2B sandbox and volume are actually removed;
-an enabled timer or an expiry timestamp alone is not cleanup proof.
+that stops the provider, revokes grants, and purges the disposable volume while
+retaining task/event/VCR rows for audit replay. Live qualification must enable
+that reaper and attach evidence that an expired E2B sandbox and volume are
+actually removed; an enabled timer or an expiry timestamp alone is not cleanup
+proof.
 
 ## Provisioning
 
@@ -59,6 +69,10 @@ an enabled timer or an expiry timestamp alone is not cleanup proof.
    controller policy verification keys.
 3. Configure LiteLLM as the only model gateway. Do not put provider API keys
    in the template, E2B environment, or agent filesystem.
+   E2B command-scoped environment variables are not private in the guest OS;
+   only short-lived, policy-scoped broker grants may be projected, and the
+   bridge itself receives the loopback broker credential rather than a
+   provider key.
 4. Start a task with an OpenCode or Codex policy and verify the controller
    response contains the matching provider-hosted chat endpoint.
 5. `GET /health` on that endpoint with the scoped chat key. It must report
@@ -74,6 +88,12 @@ an enabled timer or an expiry timestamp alone is not cleanup proof.
    the Control-owned VCR event before presenting it to the UI.
 8. Destroy the task, revoke the gateway grant, kill the sandbox, and purge its
    volume. Re-read the endpoint and VCR URL; both must fail closed.
+
+For network qualification, inspect E2B `getInfo()` after creation and assert
+that `allowInternetAccess` and `network.allowOut` match the signed route set.
+Then prove a direct non-allowlisted destination fails while the governed
+egress/model/control routes succeed; the configuration alone is not evidence
+of enforcement.
 
 ## Required live qualification evidence
 

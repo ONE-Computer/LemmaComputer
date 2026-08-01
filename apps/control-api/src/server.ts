@@ -2330,7 +2330,12 @@ export function createControlServer(
           ) continue;
           try {
             const { policy } = await policyForGrant(actor, user.effectivePolicy, workspace.grantId);
-            await service.delete(actor.identity, policy, workspace.id);
+            // Preserve the task/event/VCR rows for audit replay. `delete()`
+            // cascades through the workspace and would erase that evidence;
+            // expiry only needs to stop the provider, revoke grants, and purge
+            // its disposable volume.
+            await service.stop(actor.identity, policy, workspace.id);
+            await controller.purgeWorkspace(workspace.id);
             removed += 1;
           } catch (error) {
             app.log.warn({ event: "ephemeral_cowork_cleanup_failed", workspaceId: workspace.id, code: error instanceof OneComputerError ? error.code : "CLEANUP_FAILED" }, "expired Cowork cleanup will be retried");
