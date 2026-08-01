@@ -174,12 +174,13 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
       method: "PUT",
       url: "/v1/admin/provider-settings/openai",
       headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-configure-0001" },
-      payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-terra" },
+      payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-terra", emissionsRegion: "sg" },
     });
     assert.equal(configured.statusCode, 200);
     assert.equal(configured.json().provider.state, "active");
     assert.equal(configured.json().provider.fingerprint, "fp_acme_openai");
     assert.equal(configured.json().provider.modelId, "gpt-5.6-terra");
+    assert.equal(configured.json().provider.emissionsRegion, "sg");
     assert.deepEqual(configured.json().provider.modelOptions, [
       { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol" },
       { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra" },
@@ -251,7 +252,7 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
 
     const stored = await settingsStore.getProviderSetting(identity.tenantId, "openai");
     assert.ok(stored);
-    assert.deepEqual(stored.configuration, { modelId: "gpt-5.6-terra" });
+    assert.deepEqual(stored.configuration, { modelId: "gpt-5.6-terra", emissionsRegion: "sg" });
     assert.equal(JSON.stringify(stored).includes(rawOpenAiKey), false);
     assert.equal("apiKey" in stored, false);
 
@@ -263,7 +264,7 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(tested.statusCode, 200);
     assert.equal(tested.json().provider.lastErrorCode, null);
     assert.ok(tested.json().provider.lastTestedAt);
-    assert.deepEqual(providerAdministration.tested[0]!.configuration, { modelId: "gpt-5.6-terra" });
+    assert.deepEqual(providerAdministration.tested[0]!.configuration, { modelId: "gpt-5.6-terra", emissionsRegion: "sg" });
 
     const changedModel = await app.inject({
       method: "PUT",
@@ -274,7 +275,8 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(changedModel.statusCode, 200);
     assert.equal(changedModel.json().provider.modelId, "gpt-5.6-sol");
     assert.equal(changedModel.json().provider.upstreamModelDisplayName, "OpenAI GPT-5.6 Sol");
-    assert.deepEqual(providerAdministration.configured.at(-1)!.configuration, { modelId: "gpt-5.6-terra" });
+    assert.deepEqual(providerAdministration.configured.at(-1)!.configuration, { modelId: "gpt-5.6-terra", emissionsRegion: "sg" });
+    assert.equal(changedModel.json().provider.emissionsRegion, "sg");
 
     const disabled = await app.inject({
       method: "POST",
@@ -525,6 +527,7 @@ test("provider settings accept model sets and expose concrete deployment descrip
     assert.notEqual(provider.deployments[0].id, provider.deployments[1].id);
 
     const invalidPayloads = [
+      { apiKey: rawOpenAiKey, modelId: "gpt-5.6-sol", emissionsRegion: "eu" },
       { apiKey: rawOpenAiKey, modelIds: [] },
       { apiKey: rawOpenAiKey, modelIds: ["gpt-5.6-sol", "gpt-5.6-sol"] },
       { apiKey: rawOpenAiKey, modelIds: ["claude-opus-4-8"] },

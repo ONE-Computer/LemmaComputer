@@ -1,8 +1,9 @@
-import { OneComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderModelId } from "@onecomputer/contracts";
+import { OneComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@onecomputer/contracts";
 import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import type { ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
 
-type DirectProviderInput<T extends ProviderModelId> = { apiKey: string } & (
+type EmissionsSelection = { emissionsRegion?: ProviderEmissionsRegion };
+type DirectProviderInput<T extends ProviderModelId> = { apiKey: string } & EmissionsSelection & (
   | { modelId: T; modelIds?: never }
   | { modelId?: never; modelIds: T[] }
 );
@@ -11,7 +12,7 @@ export type ProviderSettingInput =
   | ({ provider: "openai" } & DirectProviderInput<OpenAiProviderModelId>)
   | ({ provider: "anthropic" } & DirectProviderInput<AnthropicProviderModelId>)
   | ({ provider: "glm" } & DirectProviderInput<GlmProviderModelId>)
-  | { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
+  | ({ provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId } & EmissionsSelection);
 
 type BedrockSelection = { region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
 
@@ -27,6 +28,7 @@ export type ProviderSettingView = {
   selectedModelIds: ProviderModelId[];
   deployments: ManagedProviderDeploymentDescriptor[];
   region: BedrockApiKeyRegion | null;
+  emissionsRegion: ProviderEmissionsRegion | null;
   modelProfileId: BedrockApiKeyModelProfileId | null;
   lastTestedAt: string | null;
   lastErrorCode: string | null;
@@ -74,6 +76,7 @@ const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | n
     modelId,
     modelOptions: provider === "bedrock" ? [] : managedProviderModelOptions(provider),
     region: selection?.region ?? null,
+    emissionsRegion: configuration.success ? configuration.data.emissionsRegion ?? null : null,
     selectedModelIds,
     deployments,
     modelProfileId: selection?.modelProfileId ?? null,
@@ -232,12 +235,18 @@ export class ProviderSettingsService {
       throw safeProviderError(error, "PROVIDER_CONFIGURATION_FAILED", "The provider configuration could not be validated");
     }
 
+    const currentMetadata = providerSettingMetadataSchema.safeParse(current?.configuration ?? {});
+    const emissionsRegion = input.emissionsRegion
+      ?? (currentMetadata.success ? currentMetadata.data.emissionsRegion : undefined);
     try {
       const saved = await this.store.saveProviderSetting({
         tenantId: actor.tenantId,
         provider,
         modelIds: route.modelIds,
-        configuration: route.configuration,
+        configuration: {
+          ...route.configuration,
+          ...(emissionsRegion ? { emissionsRegion } : {}),
+        },
         state: "active",
         credentialFingerprint: route.credentialFingerprint,
         lastTestedAt: new Date(),

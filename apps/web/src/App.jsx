@@ -35,6 +35,7 @@ import { SpendDashboard } from "./SpendDashboard.jsx";
 import { RoutingAdmin } from "./RoutingAdmin.jsx";
 import { AiControlPlane, aiControlPlaneTabs } from "./AiControlPlane.jsx";
 import { AiControlPlaneOverview } from "./AiControlPlaneOverview.jsx";
+import { emissionsRegionOptions } from "./ai-emissions.js";
 import { clipboardStatusForBrowser } from "./clipboard-status.js";
 import {
   clearBrowserApprover,
@@ -54,6 +55,9 @@ const providerTitle = (provider) => ({
   glm: "GLM (Z.ai)",
   bedrock: "Amazon Bedrock",
 }[provider] ?? provider);
+const emissionsRegionLabel = (region) => emissionsRegionOptions.find((option) => option.value === region)?.label ?? null;
+const inferredBedrockEmissionsRegion = (region) => region === "ap-southeast-1" ? "sg" : region?.startsWith("us-") ? "us" : "";
+const accountingRegionOptions = [{ value: "", label: "Choose an estimated serving grid" }, ...emissionsRegionOptions];
 const bedrockRegionOptions = [
   { value: "ap-southeast-1", label: "Asia Pacific (Singapore) · ap-southeast-1" },
   { value: "us-east-1", label: "US East (N. Virginia) · us-east-1" },
@@ -985,6 +989,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
       ...provider,
       selectedModelIds,
       region: provider.region ?? "ap-southeast-1",
+      emissionsRegion: provider.emissionsRegion ?? (provider.provider === "bedrock" ? inferredBedrockEmissionsRegion(provider.region ?? "ap-southeast-1") : ""),
       modelProfileId: provider.modelProfileId ?? "claude-sonnet-4-5-global",
     });
   };
@@ -996,11 +1001,11 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
   }));
   const save = async () => {
     const submitted = apiKey.trim();
-    if (!editor || !submitted || (editor.provider !== "bedrock" && !editor.selectedModelIds.length)) return;
+    if (!editor || !submitted || !editor.emissionsRegion || (editor.provider !== "bedrock" && !editor.selectedModelIds.length)) return;
     setApiKey("");
     const input = editor.provider === "bedrock"
-      ? { apiKey: submitted, region: editor.region, modelProfileId: editor.modelProfileId }
-      : { apiKey: submitted, modelIds: editor.selectedModelIds };
+      ? { apiKey: submitted, region: editor.region, modelProfileId: editor.modelProfileId, emissionsRegion: editor.emissionsRegion }
+      : { apiKey: submitted, modelIds: editor.selectedModelIds, emissionsRegion: editor.emissionsRegion };
     const saved = await onSave(editor.provider, input);
     if (saved) setEditor(null);
   };
@@ -1033,6 +1038,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
                 </ul> : <small>{provider.primaryAlias} · {provider.upstreamModelDisplayName}</small>}
                 <span>{stateLabel}{provider.fingerprint ? <> · {provider.fingerprint}</> : null}</span>
                 {provider.provider === "bedrock" && provider.region && <span>Region {provider.region} · Profile {provider.modelProfileId}</span>}
+                <span>{provider.emissionsRegion ? "Emissions grid " + emissionsRegionLabel(provider.emissionsRegion) : "Emissions estimate not configured"}</span>
                 {provider.lastTestedAt && <span>Last tested {new Date(provider.lastTestedAt).toLocaleString()}</span>}
                 {provider.lastErrorCode && <span>Last safe error: {provider.lastErrorCode}</span>}
               </div>
@@ -1059,8 +1065,9 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
           <label className="modal-field"><span>Approved region</span><SelectMenu value={editor.region} options={bedrockRegionOptions} ariaLabel="Approved Bedrock region" disabled={busy || editor.state === "active"} onValueChange={(region) => setEditor((current) => ({ ...current, region }))} /></label>
           <label className="modal-field"><span>Approved inference profile</span><SelectMenu value={editor.modelProfileId} options={bedrockProfileOptions} ariaLabel="Approved Bedrock inference profile" disabled={busy || editor.state === "active"} onValueChange={(modelProfileId) => setEditor((current) => ({ ...current, modelProfileId }))} /></label>
         </>}
+        <label className="modal-field"><span>Estimated serving grid</span><SelectMenu value={editor.emissionsRegion} options={accountingRegionOptions} ariaLabel="Estimated serving grid for emissions" disabled={busy} onValueChange={(emissionsRegion) => setEditor((current) => ({ ...current, emissionsRegion }))} /><small>Accounting assumption only; this does not control or guarantee the provider’s inference location.</small></label>
         <label className="modal-field"><span>{providerTitle(editor.provider)} API key</span><input name="provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste the provider API key" disabled={busy} /></label>
-        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={closeEditor}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim() || (editor.provider !== "bedrock" && !editor.selectedModelIds.length)} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Apply configuration" : "Connect provider"}</button></div>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={closeEditor}>Cancel</button><button className="primary-button" type="button" disabled={busy || !apiKey.trim() || !editor.emissionsRegion || (editor.provider !== "bedrock" && !editor.selectedModelIds.length)} onClick={save}>{busy ? "Validating" : editor.state === "active" ? "Apply configuration" : "Connect provider"}</button></div>
       </ModalDialog>}
     </div>
   );
