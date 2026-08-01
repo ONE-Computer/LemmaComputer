@@ -43,6 +43,124 @@ The session is the authorization and retention boundary. The E2B sandbox is an
 implementation detail behind an `EphemeralExecutionAdapter`; it is never
 returned as a launch URL or treated as a workspace by the UI.
 
+## Dependency tree and migration seam
+
+The current implementation is a useful compatibility baseline, but its
+dependency direction is still workspace-shaped:
+
+```text
+POST /v1/onevibe/tasks
+  └─ Control server
+      └─ WorkspaceService.create(cowork-ephemeral-* grant)
+          ├─ WorkspaceStore.workspaces
+          ├─ ControllerClient → workspace-controller → SandboxAdapter
+          │    └─ E2B adapter currently provisions the full workspace image
+          └─ task header on workspace chat message
+               ├─ AgentChatAuthority(workspaceId)
+               ├─ provider NDJSON → ActivityStore(activity_events)
+               ├─ OneVibeTaskStore(onevibe_task_runs/events)
+               └─ VCR/artifacts on workspace/task routes
+```
+
+This baseline is retained until the new path is proven, but it must not grow.
+Its known coupling points are: task ownership through `workspaces`, two event
+stores without a canonical message ledger, provider-owned conversation history,
+and an E2B adapter that assumes Kasm paths, volumes, and desktop capture.
+
+The target dependency direction is additive and explicit:
+
+```text
+POST /v1/cowork/sessions
+  └─ CoworkSessionService
+      ├─ CoworkSessionStore
+      │    ├─ cowork_sessions (owner, policy, deadline, provider state)
+      │    ├─ cowork_turns (budget, cursor, terminal state)
+      │    ├─ cowork_messages (redacted canonical history)
+      │    └─ cowork_events (ordered SSE/activity ledger)
+      ├─ EphemeralExecutionAdapter
+      │    ├─ E2B Firecracker implementation
+      │    └─ (later) Modal/gVisor implementation
+      ├─ Governed ACP bridge (Codex/OpenCode)
+      ├─ Application capture adapter (Playwright/document)
+      └─ Artifact registry + retention/cleanup coordinator
+```
+
+The new adapter deliberately has no `open()` or `purgeWorkspace()` method. Its
+minimum contract is `create`, `status`, `startAcp`, `captureApplication`,
+`cancel`, `destroy`, and `reconcile`, with capability metadata that says
+whether browser/document capture is available. A Computer `SandboxAdapter`
+continues to own Kasm lifecycle and desktop launch. The Control API chooses the
+contract from the product mode, never from a provider response.
+
+### Implementation dependency order
+
+1. **Contracts:** session/profile/capability schemas, event and message
+   envelopes, lifecycle states, and typed failure codes.
+2. **Persistence:** additive migrations and `MemoryWorkspaceStore` parity for
+   session, turn, message, event, artifact, and cleanup records.
+3. **Runtime:** minimal E2B image, ACP bridge, Python artifact toolchain,
+   browser capture, and provider adapter conformance tests.
+4. **Orchestration:** session service, grant binding, budgets, cancellation,
+   history writes, SSE replay, and reaper/reconciliation.
+5. **Evidence:** VCR frame validation, artifact package validation, retention,
+   and audit receipts.
+6. **Compatibility:** route the existing `/v1/onevibe/tasks` path through the
+   new service only after the new session path is green; remove workspace
+   dependencies once migration and replay tests pass.
+
+No later layer may bypass an earlier one: UI work starts only after the real
+API gate, and live E2B qualification starts only after local adapter and ACP
+contract gates.
+
+## Wave-1 architecture review and go/no-go decisions
+
+The dependency tree was reviewed against the current Control routes, store
+migrations, E2B adapter, ACP bridge, and qualification runner. The review
+result is:
+
+- **Do not extend `SandboxAdapter`.** It is the Computer/Kasm contract and its
+  `open`/volume assumptions make a Cowork implementation unsafe. Add a separate
+  provider-neutral `EphemeralExecutionAdapter` and a `CoworkControllerClient`.
+- **Do not reuse `workspaceId` as a public Cowork identifier.** Existing signed
+  policy, agent-bridge, and egress claims are workspace-bound. The first
+  compatibility alias may remain internal, but the session API needs a
+  versioned `resourceKind/resourceId` binding before it is production-ready.
+- **Do not treat provider history as canonical.** The current bridge stores
+  message arrays on provider volumes while Control stores only hash/evidence
+  projections. Add Control-owned session, turn, message, provider-binding, and
+  event records; provider `session/load` is recovery, not the source of truth.
+- **Do not call the existing presentation endpoint an agent artifact.** It
+  currently creates a Control-owned synthetic PPTX. The Gold Path is blocked
+  until the E2B bridge can safely discover, validate, upload, and emit events
+  for agent-created `.docx`, `.xlsx`, and `.pptx` files in a confined artifact
+  directory.
+- **Do not call the current live runner Gold Path evidence.** It lacks robust
+  UI-SSE parsing, three-turn context proof, provider restart/cancel coverage,
+  VCR retrieval assertions, cross-identity checks, and explicit secret
+  non-disclosure. It remains a compatibility smoke gate until Wave 2 extends
+  it.
+- **Do not assert `envdAccessToken` from E2B `getInfo()`.** The SDK does not
+  return that token there; qualification must assert secure creation/network
+  evidence without logging or inspecting the token.
+
+### Wave-2 implementation assignments
+
+The next implementation wave is intentionally split by ownership to prevent
+context drift and merge collisions:
+
+1. **Execution seam:** add the ephemeral contract, Cowork controller routes,
+   minimal E2B adapter, capability metadata, and negative no-Kasm tests.
+2. **History/persistence:** add additive Cowork session/turn/message/provider
+   binding/event migrations, store methods, canonical transcript writes, and
+   restart/recovery tests.
+3. **Qualification/artifacts:** fix and extend the live runner to parse both
+   AI SDK SSE and Activity SSE, prove dependent turns/history replay, validate
+   real agent-created Office packages, capture/retrieve VCR PNGs, and assert
+   cleanup/isolation/secret non-disclosure.
+
+The root agent integrates these tracks only after each reports tests and a
+reviewable diff. No track may silently change the Computer/Kasm contract.
+
 ### Target endpoints
 
 The compatibility endpoints remain read-only/deprecation paths while the
