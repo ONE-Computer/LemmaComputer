@@ -2322,7 +2322,10 @@ export function createControlServer(
         for (const workspace of workspaces) {
           if (
             !workspace.grantId.startsWith(ephemeralGrantPrefix)
-            || workspace.updatedAt.getTime() > cutoff
+            // `current()` may refresh updatedAt while a client is polling. An
+            // ephemeral lease is anchored to creation, never activity, so a
+            // polling client cannot keep the provider alive indefinitely.
+            || workspace.createdAt.getTime() > cutoff
             || ["provisioning", "restarting", "stopping"].includes(workspace.state)
           ) continue;
           try {
