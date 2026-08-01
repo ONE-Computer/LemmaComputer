@@ -14,6 +14,16 @@ test("ephemeral Cowork streams chat, exposes E2B VCR frames, and creates PPTX", 
   await expect(page.getByRole("button", { name: "Event 4" })).toBeVisible();
   await page.getByRole("button", { name: "Event 4" }).click();
   await expect(page.getByAltText("browser frame at event 4")).toBeVisible();
+  await page.getByRole("button", { name: "Previous VCR frame" }).click();
+  await expect(page.getByAltText("browser frame at event 3")).toBeVisible();
+  await page.getByRole("button", { name: "Next VCR frame" }).click();
+  await expect(page.getByAltText("browser frame at event 4")).toBeVisible();
+  await page.getByRole("button", { name: "Event 2" }).click();
+  await page.getByRole("button", { name: "Play VCR replay" }).click();
+  await expect(page.getByRole("button", { name: "Pause VCR replay" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Jump to live" })).toBeVisible();
+  await page.getByRole("button", { name: "Jump to live" }).click();
+  await expect(page.getByText("Following live evidence")).toBeVisible();
 
   await page.getByRole("button", { name: "Generate PowerPoint" }).click();
   const artifact = page.getByRole("link", { name: /Editable PowerPoint/ });

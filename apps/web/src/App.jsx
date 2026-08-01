@@ -2046,6 +2046,10 @@ function CoworkScreen({
   const [events, setEvents] = useState([]);
   const [frames, setFrames] = useState([]);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
+  const [followLive, setFollowLive] = useState(true);
+  const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replayRefreshing, setReplayRefreshing] = useState(false);
+  const [replayError, setReplayError] = useState("");
   const [artifact, setArtifact] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -2055,12 +2059,21 @@ function CoworkScreen({
 
   const refreshEvidence = async (taskId = task?.id) => {
     if (!activeWorkspace || !taskId) return;
-    const [timeline, replay] = await Promise.all([
-      oneVibeApi.events(activeWorkspace.id, taskId),
-      oneVibeApi.vcr(activeWorkspace.id, taskId),
-    ]);
-    setEvents(timeline.events ?? []);
-    setFrames(replay.frames ?? []);
+    setReplayRefreshing(true);
+    try {
+      const [timeline, replay] = await Promise.all([
+        oneVibeApi.events(activeWorkspace.id, taskId),
+        oneVibeApi.vcr(activeWorkspace.id, taskId),
+      ]);
+      setEvents(timeline.events ?? []);
+      setFrames(replay.frames ?? []);
+      setReplayError("");
+    } catch (requestError) {
+      setReplayError(requestError instanceof Error ? requestError.message : "VCR evidence could not be refreshed");
+      throw requestError;
+    } finally {
+      setReplayRefreshing(false);
+    }
   };
 
   const setActiveTask = (nextTask) => {
@@ -2077,6 +2090,9 @@ function CoworkScreen({
     setEvents([]);
     setFrames([]);
     setSelectedFrameIndex(0);
+    setFollowLive(true);
+    setReplayPlaying(false);
+    setReplayError("");
     setArtifact(null);
     setError("");
   }, [workspace?.id]);
@@ -2089,8 +2105,26 @@ function CoworkScreen({
   }, [task?.id, activeWorkspace?.id]);
 
   useEffect(() => {
-    setSelectedFrameIndex((current) => Math.min(current, Math.max(0, frames.length - 1)));
-  }, [frames.length]);
+    setSelectedFrameIndex((current) => followLive
+      ? Math.max(0, frames.length - 1)
+      : Math.min(current, Math.max(0, frames.length - 1)));
+  }, [frames.length, followLive]);
+
+  useEffect(() => {
+    if (!replayPlaying || frames.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setSelectedFrameIndex((current) => {
+        if (current >= frames.length - 1) {
+          setReplayPlaying(false);
+          setFollowLive(true);
+          return current;
+        }
+        setFollowLive(false);
+        return current + 1;
+      });
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [frames.length, replayPlaying]);
 
   const startTask = async () => {
     if (!workspace && !ephemeralWorkspace) {
@@ -2118,6 +2152,7 @@ function CoworkScreen({
       setCoworkAgentId(preferredAgentId ?? "");
       setActiveTask(created.task);
       setEvents([]); setFrames([]); setSelectedFrameIndex(0);
+      setFollowLive(true); setReplayPlaying(false); setReplayError("");
     } catch (requestError) { setError(requestError.message); }
     finally { setBusy(false); }
   };
@@ -2149,6 +2184,14 @@ function CoworkScreen({
   const effectiveWorkspaceState = ephemeralWorkspace?.state ?? workspaceState;
   const workspaceReady = activeWorkspace && ["ready", "open"].includes(effectiveWorkspaceState);
   const selectedFrame = frames[selectedFrameIndex];
+  const atFirstFrame = selectedFrameIndex <= 0;
+  const atLastFrame = selectedFrameIndex >= frames.length - 1;
+  const setFrameIndex = (index, shouldFollow = false) => {
+    setSelectedFrameIndex(Math.max(0, Math.min(index, Math.max(0, frames.length - 1))));
+    setFollowLive(shouldFollow);
+    setReplayPlaying(false);
+  };
+  const jumpToLive = () => setFrameIndex(Math.max(0, frames.length - 1), true);
   return (
     <section className="cowork-screen" aria-labelledby="cowork-heading">
       <header className="page-heading">
@@ -2189,9 +2232,18 @@ function CoworkScreen({
           <div><span className="cowork-eyebrow">VCR</span><h2>Execution replay</h2></div>
           {selectedFrame ? <div className="cowork-vcr-player">
             <img src={`/api${selectedFrame.frameUrl}`} alt={`${selectedFrame.sourceApplication} frame at event ${selectedFrame.eventSequence}`} />
-            <div className="cowork-scrubber"><input aria-label="Scrub VCR timeline" type="range" min="0" max={Math.max(0, frames.length - 1)} value={selectedFrameIndex} onChange={(event) => setSelectedFrameIndex(Number(event.target.value))} /><span>Event {selectedFrame.eventSequence} · {selectedFrame.sourceApplication}</span></div>
-            <div className="cowork-frame-strip">{frames.map((frame, index) => <button key={frame.eventSequence} className={index === selectedFrameIndex ? "active" : ""} type="button" onClick={() => setSelectedFrameIndex(index)}><img src={`/api${frame.frameUrl}`} alt="" /><small>Event {frame.eventSequence}</small></button>)}</div>
-          </div> : <p className="cowork-muted">Visual evidence appears here when the task’s browser or desktop capture sidecar records an authorized frame.</p>}
+            <div className="cowork-scrubber" aria-label="VCR controls">
+              <button className="icon-button" type="button" aria-label="Previous VCR frame" onClick={() => setFrameIndex(selectedFrameIndex - 1)} disabled={atFirstFrame}>‹</button>
+              <input aria-label="Scrub VCR timeline" type="range" min="0" max={Math.max(0, frames.length - 1)} value={selectedFrameIndex} onChange={(event) => setFrameIndex(Number(event.target.value))} />
+              <button className="icon-button" type="button" aria-label={replayPlaying ? "Pause VCR replay" : "Play VCR replay"} onClick={() => { setFollowLive(false); setReplayPlaying((current) => !current); }} disabled={frames.length < 2}>{replayPlaying ? "Ⅱ" : "▶"}</button>
+              <button className="icon-button" type="button" aria-label="Next VCR frame" onClick={() => setFrameIndex(selectedFrameIndex + 1)} disabled={atLastFrame}>›</button>
+              <span>Event {selectedFrame.eventSequence} · {selectedFrame.sourceApplication}</span>
+              <button className={`cowork-live-button${followLive ? " active" : ""}`} type="button" onClick={jumpToLive} disabled={atLastFrame && followLive}>Jump to live</button>
+            </div>
+            <div className="cowork-vcr-status" role="status">{followLive ? "Following live evidence" : "Reviewing recorded evidence"}{replayRefreshing ? " · refreshing" : ""}</div>
+            <div className="cowork-frame-strip">{frames.map((frame, index) => <button key={frame.eventSequence} className={index === selectedFrameIndex ? "active" : ""} type="button" aria-label={`Event ${frame.eventSequence}`} onClick={() => setFrameIndex(index)}><img src={`/api${frame.frameUrl}`} alt="" /><small>Event {frame.eventSequence}</small></button>)}</div>
+          </div> : <p className="cowork-muted">{replayRefreshing ? "Waiting for visual evidence…" : "Visual evidence appears here when the task’s browser or desktop capture sidecar records an authorized frame."}</p>}
+          {replayError && <p className="cowork-error" role="status">VCR reconnect pending: {replayError}</p>}
           <ol className="cowork-timeline">{events.map((event) => <li key={event.sequence}><span>{event.sequence}</span><strong>{event.kind.replaceAll("-", " ")}</strong><time>{new Date(event.createdAt).toLocaleTimeString()}</time></li>)}</ol>
           <div className="cowork-artifact-panel"><span className="cowork-eyebrow">Artifact</span><h3>PowerPoint from chat</h3><p>Uses the latest Cowork request and agent response in this task.</p><button className="primary-button" type="button" onClick={generatePresentation} disabled={busy || !task || !workspaceReady}>{busy ? "Working…" : "Generate PowerPoint"}</button>{artifact && <a className="cowork-artifact" href={`/api${artifact.downloadUrl}`}><Document24Regular aria-hidden="true" /><span><strong>{artifact.name}</strong><small>Editable PowerPoint · {Math.ceil(artifact.sizeBytes / 1024)} KB</small></span><ChevronRight16Regular aria-hidden="true" /></a>}</div>
           {error && <p className="cowork-error" role="alert">{error}</p>}

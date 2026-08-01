@@ -66,7 +66,7 @@ Observed controls and states:
 | Task workspace | Mature, compact task page | Cowork task, chat and evidence exist | Make Cowork the cohesive task surface |
 | Streaming chat | Clear thinking/response/completion cycle | Governed chat stream and safe event persistence | Interleave observable work cards with messages |
 | Work trace | Compact steps and completion markers | Raw event timeline | Rich, expandable event cards and event-to-frame links |
-| VCR | Live state, replay, previous/next, jump-to-live | Authorized persisted frames, slider and thumbnails | Production capture sidecars, live-follow and replay controls |
+| VCR | Live state, replay, previous/next, jump-to-live | Authorized persisted frames, labelled slider/thumbnails, live-follow, previous/next, play/pause, and Jump to live in the Cowork viewer; real E2B capture still pending | Production capture sidecars, reconnect/backpressure, and live browser/document qualification |
 | Computer control | Explicit human takeover | Workspace/security plumbing exists | Add authorized control handoff UX |
 | Artifacts | Files presented as task outcome | PPTX artifact endpoint and task card | Artifact shelf, previews and clear provenance |
 | Follow-on work | Contextual suggested actions | One presentation action | Task-aware suggestions and retry/refine actions |
