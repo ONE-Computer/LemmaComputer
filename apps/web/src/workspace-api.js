@@ -1,4 +1,6 @@
 const jsonHeaders = { "content-type": "application/json" };
+const idempotencyKey = () => globalThis.crypto?.randomUUID?.()
+  ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 
 async function request(path, options = {}) {
   const response = await fetch(path, options);
@@ -16,7 +18,7 @@ async function request(path, options = {}) {
 
 const mutation = (method = "POST", body) => ({
   method,
-  headers: { ...(body === undefined ? {} : jsonHeaders), "idempotency-key": crypto.randomUUID() },
+  headers: { ...(body === undefined ? {} : jsonHeaders), "idempotency-key": idempotencyKey() },
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 

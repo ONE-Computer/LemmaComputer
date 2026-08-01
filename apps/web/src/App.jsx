@@ -85,6 +85,8 @@ const viewByNav = Object.freeze(Object.fromEntries(
 const chatAttachmentMaxFiles = 4;
 const chatAttachmentMaxBytes = 8 * 1024 * 1024;
 const chatAttachmentMaxTotalBytes = 16 * 1024 * 1024;
+const idempotencyKey = () => globalThis.crypto?.randomUUID?.()
+  ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 const chatAttachmentTypes = new Set([
   "image/png",
   "image/jpeg",
@@ -2031,9 +2033,11 @@ function ChatPart({ part, markdown = false }) {
   return null;
 }
 
-function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange, onStartWorkspace }) {
-  const [title, setTitle] = useState("Executive update");
-  const [body, setBody] = useState("Summarize the completed work and its next decisions.");
+function CoworkScreen({
+  workspace, workspaces, workspaceState, onWorkspaceChange, onStartWorkspace,
+  activeSessionId, onSessionsChange, onSessionChange, preferredAgentId, onAgentChange,
+  sessions, historyHasMore, historyLoadingMore, onLoadOlder,
+}) {
   const [task, setTask] = useState(() => {
     const id = new URL(window.location.href).searchParams.get("coworkTask");
     return id ? { id } : null;
@@ -2096,18 +2100,23 @@ function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange
   };
 
   const generatePresentation = async () => {
-    if (!workspace) return;
+    if (!workspace || !activeSessionId || !preferredAgentId) {
+      setError("Ask the selected Cowork agent to prepare the slide, then generate it from that conversation.");
+      return;
+    }
     setBusy(true); setError("");
     try {
-      let currentTask = task;
-      if (!currentTask) {
-        const created = await oneVibeApi.createTask(workspace.id);
-        currentTask = created.task;
-        setActiveTask(currentTask);
-      }
-      const created = await oneVibeApi.createPresentation(workspace.id, currentTask.id, { title, body });
+      const transcript = await chatApi.messages(workspace.id, preferredAgentId, activeSessionId);
+      const messages = transcript.messages ?? [];
+      const latestUser = [...messages].reverse().find((message) => message.role === "user");
+      const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+      const textFor = (message) => (message?.parts ?? []).filter((part) => part.type === "text").map((part) => part.text).join("\n").trim();
+      const title = textFor(latestUser).replace(/\s+/g, " ").slice(0, 180) || "Cowork task update";
+      const body = textFor(latestAssistant).slice(0, 4_000) || "The Cowork agent has not produced a slide-ready response yet.";
+      if (!task) throw new Error("Start a Cowork task before generating its artifact.");
+      const created = await oneVibeApi.createPresentation(workspace.id, task.id, { title, body });
       setArtifact(created.artifact);
-      await refreshEvidence(currentTask.id);
+      await refreshEvidence(task.id);
     } catch (requestError) { setError(requestError.message); }
     finally { setBusy(false); }
   };
@@ -2127,16 +2136,27 @@ function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange
       </div>
       {!workspace && <div className="cowork-empty">Choose a workspace to begin a Cowork task.</div>}
       {workspace && <div className="cowork-grid">
-        <section className="cowork-card cowork-task">
-          <div><span className="cowork-eyebrow">Task output</span><h2>Create a PowerPoint</h2></div>
-          <label>Slide title<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength="180" disabled={busy || !workspaceReady} /></label>
-          <label>Slide content<textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength="4000" rows="7" disabled={busy || !workspaceReady} /></label>
-          <div className="cowork-actions">
-            <button className="secondary-button" type="button" onClick={startTask} disabled={busy || !workspaceReady}>{task ? "Start new task" : "Start task"}</button>
-            <button className="primary-button" type="button" onClick={generatePresentation} disabled={busy || !workspaceReady}>{busy ? "Working…" : "Generate PowerPoint"}</button>
-          </div>
-          {artifact && <a className="cowork-artifact" href={`/api${artifact.downloadUrl}`}><Document24Regular aria-hidden="true" /><span><strong>{artifact.name}</strong><small>Editable PowerPoint · {Math.ceil(artifact.sizeBytes / 1024)} KB</small></span><ChevronRight16Regular aria-hidden="true" /></a>}
-          {error && <p className="cowork-error" role="alert">{error}</p>}
+        <section className="cowork-chat-pane">
+          {task ? <ChatScreen
+            embedded
+            taskId={task.id}
+            workspace={workspace}
+            workspaces={workspaces}
+            workspaceState={workspaceState}
+            onWorkspaceChange={onWorkspaceChange}
+            onStartWorkspace={onStartWorkspace}
+            activeSessionId={activeSessionId}
+            onSessionsChange={onSessionsChange}
+            onSessionChange={onSessionChange}
+            preferredAgentId={preferredAgentId}
+            onAgentChange={onAgentChange}
+            historyLoadRequest={0}
+            onHistoryMetadataChange={() => undefined}
+            sessions={sessions}
+            historyHasMore={historyHasMore}
+            historyLoadingMore={historyLoadingMore}
+            onLoadOlder={onLoadOlder}
+          /> : <div className="cowork-start-card"><span className="cowork-eyebrow">Cowork chat</span><h2>Begin with a task</h2><p>Start a task to open the governed agent conversation. Its streaming activity, tools, and visual evidence will stay together.</p><button className="primary-button" type="button" onClick={startTask} disabled={busy || !workspaceReady}>{busy ? "Starting…" : "Start Cowork"}</button></div>}
         </section>
         <section className="cowork-card cowork-replay" aria-live="polite">
           <div><span className="cowork-eyebrow">VCR</span><h2>Execution replay</h2></div>
@@ -2146,6 +2166,8 @@ function CoworkScreen({ workspace, workspaces, workspaceState, onWorkspaceChange
             <div className="cowork-frame-strip">{frames.map((frame, index) => <button key={frame.eventSequence} className={index === selectedFrameIndex ? "active" : ""} type="button" onClick={() => setSelectedFrameIndex(index)}><img src={`/api${frame.frameUrl}`} alt="" /><small>Event {frame.eventSequence}</small></button>)}</div>
           </div> : <p className="cowork-muted">Visual evidence appears here when the task’s browser or desktop capture sidecar records an authorized frame.</p>}
           <ol className="cowork-timeline">{events.map((event) => <li key={event.sequence}><span>{event.sequence}</span><strong>{event.kind.replaceAll("-", " ")}</strong><time>{new Date(event.createdAt).toLocaleTimeString()}</time></li>)}</ol>
+          <div className="cowork-artifact-panel"><span className="cowork-eyebrow">Artifact</span><h3>PowerPoint from chat</h3><p>Uses the latest Cowork request and agent response in this task.</p><button className="primary-button" type="button" onClick={generatePresentation} disabled={busy || !task || !workspaceReady}>{busy ? "Working…" : "Generate PowerPoint"}</button>{artifact && <a className="cowork-artifact" href={`/api${artifact.downloadUrl}`}><Document24Regular aria-hidden="true" /><span><strong>{artifact.name}</strong><small>Editable PowerPoint · {Math.ceil(artifact.sizeBytes / 1024)} KB</small></span><ChevronRight16Regular aria-hidden="true" /></a>}</div>
+          {error && <p className="cowork-error" role="alert">{error}</p>}
         </section>
       </div>}
     </section>
@@ -2169,6 +2191,7 @@ function ChatConversation({
   historyHasMore = false,
   historyLoadingMore = false,
   onLoadOlder,
+  taskId,
 }) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState([]);
@@ -2203,7 +2226,8 @@ function ChatConversation({
       return {
         api: `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
         headers: {
-          "idempotency-key": crypto.randomUUID(),
+          "idempotency-key": idempotencyKey(),
+          ...(taskId ? { "x-onecomputer-onevibe-task-id": taskId } : {}),
         },
         body: { message: messages.at(-1) },
       };
@@ -2693,6 +2717,8 @@ export function ChatScreen({
   historyHasMore = false,
   historyLoadingMore = false,
   onLoadOlder,
+  taskId,
+  embedded = false,
 }) {
   const [agents, setAgents] = useState([]);
   const [activeAgentId, setActiveAgentId] = useState("");
@@ -2863,13 +2889,13 @@ export function ChatScreen({
     const workspaceBusy = ["loading", "provisioning", "restarting", "stopping"].includes(workspaceState);
     const restartRequired = offline && reasonCode === "CHAT_RUNTIME_UNAVAILABLE" && workspaceCanRetry;
     return (
-      <div className="secondary-screen chat-screen">
-        <header className="page-heading">
+      <div className={`secondary-screen chat-screen${embedded ? " cowork-chat-screen" : ""}`}>
+        {!embedded && <header className="page-heading">
           <p>Workspace agent</p>
           <h1>Chat</h1>
           <span>Work with any selected agent in your managed workspace. Files, tools, and app connections stay with that workspace.</span>
-        </header>
-        {contextSelector}
+        </header>}
+        {!embedded && contextSelector}
         <section className="chat-unavailable" aria-live="polite">
           <span className={`chat-agent-mark${status === "loading" ? " loading" : ""}`}><Bot24Regular aria-hidden="true" /></span>
           <div>
@@ -2903,8 +2929,8 @@ export function ChatScreen({
   }
 
   return (
-    <div className="secondary-screen chat-screen">
-      {!companionComposer && contextSelector}
+    <div className={`secondary-screen chat-screen${embedded ? " cowork-chat-screen" : ""}`}>
+      {!companionComposer && !embedded && contextSelector}
       <ChatConversation
         key={`${workspace.id}:${activeAgentId}`}
         workspaceId={workspace.id}
@@ -2929,6 +2955,7 @@ export function ChatScreen({
         historyHasMore={historyHasMore}
         historyLoadingMore={historyLoadingMore}
         onLoadOlder={onLoadOlder}
+        taskId={taskId}
       />
     </div>
   );
@@ -4340,6 +4367,15 @@ export function App() {
           workspaceState={workspaceState}
           onWorkspaceChange={selectActiveWorkspace}
           onStartWorkspace={openWorkspace}
+          activeSessionId={activeChatSessionId}
+          onSessionsChange={setChatSessions}
+          onSessionChange={(sessionId) => selectChatSession(sessionId, "replace")}
+          preferredAgentId={workspace ? chatAgentPreferences[workspace.id] ?? readPreference(chatAgentPreferenceKey(workspace.id)) : ""}
+          onAgentChange={saveChatAgentPreference}
+          sessions={chatSessions}
+          historyHasMore={chatHistoryHasMore}
+          historyLoadingMore={chatHistoryLoadingMore}
+          onLoadOlder={() => setChatHistoryLoadRequest((value) => value + 1)}
         />}
         {activeNav === "Chat" && <ChatScreen
           workspace={workspace}
