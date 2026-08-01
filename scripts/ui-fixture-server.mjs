@@ -1,5 +1,13 @@
 import http from "node:http";
 
+// This server deliberately returns deterministic data, fake VCR frames, and
+// placeholder PPTX bytes for browser-only tests. Requiring an explicit opt-in
+// prevents a normal local or deployed web process from being pointed at it by
+// accident and presenting fixture output as a governed Cowork result.
+if (process.env.ONECOMPUTER_UI_FIXTURE !== "1") {
+  throw new Error("Refusing to start the UI fixture without ONECOMPUTER_UI_FIXTURE=1");
+}
+
 const port = Number(process.env.UI_FIXTURE_PORT ?? 4199);
 const now = new Date().toISOString();
 const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";

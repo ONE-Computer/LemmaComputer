@@ -35,7 +35,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `UI_FIXTURE_PORT=${fixturePort} npm run dev:ui-fixture`,
+      command: `ONECOMPUTER_UI_FIXTURE=1 UI_FIXTURE_PORT=${fixturePort} npm run dev:ui-fixture`,
       url: `${fixtureUrl}/v1/auth/session`,
       timeout: 60_000,
       reuseExistingServer: false,
