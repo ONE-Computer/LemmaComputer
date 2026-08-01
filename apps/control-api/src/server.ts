@@ -247,7 +247,6 @@ const sameSecret = (received: string | undefined, expected: string) => {
 };
 
 export function createControlServer(
-  store: WorkspaceStore & GovernanceStore & ActivityStore & Partial<ChannelStore>,
   store: WorkspaceStore & GovernanceStore & ActivityStore & Partial<ChannelStore> & Partial<OneVibeTaskStore>,
   controller: ControllerClient,
   proxyToken: string,

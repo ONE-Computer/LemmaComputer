@@ -739,6 +739,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       throw error;
     } finally {
       client.release();
+    }
+  }
   async replayActivityEvents(
     identity: IdentityContext,
     scope: ActivityEventScope,
