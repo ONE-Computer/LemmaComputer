@@ -516,6 +516,31 @@ async def assert_provider_boundary():
     assert "user_api_key_metadata" not in provider_admitted
     assert provider_admitted["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
     assert "onecomputer_usage_chain" in provider_admitted["metadata"]
+    authority_count = len(authority_calls)
+    provider_reentry = await callback.async_pre_call_deployment_hook(
+        provider_admitted, "acompletion"
+    )
+    assert len(authority_calls) == authority_count
+    assert provider_reentry["onecomputer_usage_state"]["admissionId"] == "admission-boundary"
+    assert "user_api_key_dict" not in provider_reentry
+
+    tampered_reentry = {
+        **provider_admitted,
+        "metadata": {
+            **provider_admitted["metadata"],
+            "onecomputer_usage_state": {
+                **provider_admitted["metadata"]["onecomputer_usage_state"],
+                "admissionId": "tampered-admission",
+            },
+        },
+    }
+    try:
+        await callback.async_pre_call_deployment_hook(tampered_reentry, "acompletion")
+    except Exception:
+        pass
+    else:
+        raise AssertionError("tampered usage state must not reuse a signed admission")
+    assert len(authority_calls) == authority_count
 
     auto_route = {
         **openai_route,
