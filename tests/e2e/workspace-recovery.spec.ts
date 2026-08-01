@@ -61,15 +61,18 @@ test("workspace model route tiers persist after save and refresh", async ({ page
   const workspace = page.getByRole("article", { name: "Research" });
   await workspace.getByRole("button", { name: "Manage configuration" }).click();
 
-  await expect(page.getByRole("heading", { name: "Model route" })).toBeVisible();
-  const modelRoutes = page.getByRole("radiogroup", { name: "Model route" });
+  await expect(page.getByRole("heading", { name: "Default model mode" })).toBeVisible();
+  await expect(page.getByText("Choose the default quality and cost mode for this workspace. You can choose a different mode for each conversation in Chat.")).toBeVisible();
+  const modelRoutes = page.getByRole("radiogroup", { name: "Default model mode" });
   await expect(modelRoutes.getByRole("radio")).toHaveCount(4);
   await modelRoutes.getByText("Pro", { exact: true }).click();
   await expect(modelRoutes.getByRole("radio", { name: /^Pro/ })).toBeChecked();
   await page.getByRole("button", { name: "Save configuration" }).click();
-  await expect(page.getByText("Workspace configuration saved.")).toBeVisible();
+  await expect(page.getByText("Workspace configuration saved. Restart the workspace to apply changes.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your workspaces" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Restart required" })).toHaveCount(0);
 
   await page.reload();
   await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
-  await expect(page.getByRole("radiogroup", { name: "Model route" }).getByRole("radio", { name: /^Pro/ })).toBeChecked();
+  await expect(page.getByRole("radiogroup", { name: "Default model mode" }).getByRole("radio", { name: /^Pro/ })).toBeChecked();
 });

@@ -45,7 +45,7 @@ import {
   loadPendingApproval,
   signApprovalDecision,
 } from "./openvtc-browser-agent.js";
-import { ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog, useDismissOnOutside } from "./ui.jsx";
+import { ConfirmDialog, ModalDialog, SelectMenu, TextPromptDialog, useDismissOnOutside } from "./ui.jsx";
 import { ActivityPanel, ActivityToggle } from "./ActivityPanel.jsx";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
@@ -1406,7 +1406,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
           />}
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">Model route</h2><p>Choose a stable capability tier. Administrators can change the provider and model behind it without changing this workspace.</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">Default model mode</h2><p>Choose the default quality and cost mode for this workspace. You can choose a different mode for each conversation in Chat.</p></span></div>
             <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{settings.availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
           </section>
 
@@ -3124,7 +3124,6 @@ export function App() {
   const [sandboxLoading, setSandboxLoading] = useState(false);
   const [sandboxSaving, setSandboxSaving] = useState(false);
   const [sandboxCreateOpen, setSandboxCreateOpen] = useState(false);
-  const [restartNoticeOpen, setRestartNoticeOpen] = useState(false);
   const [selectedSandboxGrantId, setSelectedSandboxGrantId] = useState(null);
   const [sandboxError, setSandboxError] = useState("");
   const [confirmation, setConfirmation] = useState(null);
@@ -4021,7 +4020,7 @@ export function App() {
       if (securityGroupVersionId && securityGroupVersionId !== sandboxSettings?.securityGroup?.id) {
         await adminApi.assignWorkspaceEgressSecurityGroup(configuration.grantId, securityGroupVersionId);
       }
-      const saved = await sandboxApi.save(sandboxConfiguration);
+      await sandboxApi.save(sandboxConfiguration);
       const creatingWorkspace = !homeWorkspaces.some((item) => item.grantId === configuration.grantId);
       if (creatingWorkspace) {
         const created = await workspaceApi.create(configuration.grantId);
@@ -4030,10 +4029,13 @@ export function App() {
         setSandboxSettings(null);
         setToast(`${workspaceName(created)} is being prepared with your configuration.`);
       } else {
-        setSandboxSettings(saved);
+        setSelectedSandboxGrantId(null);
+        setSandboxSettings(null);
+        setTelegramConnection(null);
+        setTelegramError("");
         workspaceApi.list().then((value) => setHomeWorkspaces(value.workspaces)).catch(() => undefined);
-        setToast("Workspace configuration saved.");
-        setRestartNoticeOpen(true);
+        setToast("Workspace configuration saved. Restart the workspace to apply changes.");
+        window.requestAnimationFrame(() => mainContentRef.current?.focus());
       }
     } catch (error) {
       setSandboxError(error.message);
@@ -4487,7 +4489,7 @@ export function App() {
   if (authLoading) return <main className="signin-screen"><div className="signin-loading">Checking your work account…</div></main>;
   if (!session) return <SignInScreen error={authError} />;
   const firstName = session.user.displayName.split(" ")[0] || session.user.displayName;
-  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen || restartNoticeOpen);
+  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen);
 
   return (
     <div className="app-shell">
@@ -4764,13 +4766,6 @@ export function App() {
         />
       )}
 
-      {restartNoticeOpen && (
-        <NoticeDialog
-          title="Restart required"
-          description="Your changes are saved. Restart this workspace before using it again; its next launch will expose the selected applications and AI agent clients."
-          onClose={() => setRestartNoticeOpen(false)}
-        />
-      )}
 
       {drawer === "request" && operation && (
         <Drawer title="Governed operation" onClose={() => setDrawer(null)}>
