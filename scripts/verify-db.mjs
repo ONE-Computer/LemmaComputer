@@ -65,6 +65,7 @@ try {
     "tests/usage-ledger-postgres.test.ts",
     "tests/routing-postgres.test.ts",
     "tests/openvtc-companion-push-postgres.test.ts",
+    "tests/workspace-settings-postgres.test.ts",
     "tests/migration-ledger-baseline-postgres.test.ts",
   ], {
     env: {
@@ -76,6 +77,7 @@ try {
       BUDGET_TEST_DATABASE_URL: postgresUrl,
       SCHEDULE_TEST_DATABASE_URL: postgresUrl,
       OPENVTC_PUSH_TEST_DATABASE_URL: postgresUrl,
+      WORKSPACE_SETTINGS_TEST_DATABASE_URL: postgresUrl,
       MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL: migrationLedgerLegacyUrl,
       MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL: migrationLedgerFreshUrl,
     },
