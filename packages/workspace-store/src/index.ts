@@ -32,9 +32,15 @@ export type OneVibeTaskRecord = {
   subjectId: string;
   workspaceId: string;
   status: OneVibeTaskStatus;
+  turnLimit: number;
+  turnsUsed: number;
   createdAt: Date;
   updatedAt: Date;
 };
+
+export type OneVibeTaskTurnReservation =
+  | { granted: true; turnLimit: number; turnsUsed: number }
+  | { granted: false; reason: "budget_exhausted"; turnLimit: number; turnsUsed: number };
 
 export type OneVibeTaskEventRecord = {
   taskId: string;
@@ -56,7 +62,8 @@ export type OneVibeVcrFrameRecord = {
 };
 
 export interface OneVibeTaskStore {
-  createOneVibeTask(identity: IdentityContext, workspaceId: string): Promise<OneVibeTaskRecord | null>;
+  createOneVibeTask(identity: IdentityContext, workspaceId: string, options?: { turnLimit?: number }): Promise<OneVibeTaskRecord | null>;
+  reserveOneVibeTaskTurn(identity: IdentityContext, workspaceId: string, taskId: string): Promise<OneVibeTaskTurnReservation | null>;
   getOwnedOneVibeTask(identity: IdentityContext, workspaceId: string, taskId: string): Promise<OneVibeTaskRecord | null>;
   appendOneVibeTaskEvent(identity: IdentityContext, input: {
     workspaceId: string;
@@ -68,6 +75,12 @@ export interface OneVibeTaskStore {
   saveOneVibeVcrFrame(identity: IdentityContext, input: OneVibeVcrFrameRecord): Promise<OneVibeVcrFrameRecord | null>;
   listOwnedOneVibeVcrFrames(identity: IdentityContext, workspaceId: string, taskId: string): Promise<OneVibeVcrFrameRecord[] | null>;
 }
+
+const normalizeOneVibeTurnLimit = (value: number | undefined) => {
+  const limit = value ?? 32;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new Error("ONEVIBE_TURN_LIMIT_INVALID");
+  return limit;
+};
 
 export type SandboxSettingsRecord = {
   tenantId: string;
@@ -1880,20 +1893,22 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     }
   }
 
-  async createOneVibeTask(identity: IdentityContext, workspaceId: string) {
+  async createOneVibeTask(identity: IdentityContext, workspaceId: string, options: { turnLimit?: number } = {}) {
+    const turnLimit = normalizeOneVibeTurnLimit(options.turnLimit);
     const result = await this.pool.query(
-      `INSERT INTO onevibe_task_runs (id,tenant_id,subject_id,workspace_id,status,created_at,updated_at)
-       SELECT $1,$2,$3,w.id,'running',$4,$4
+      `INSERT INTO onevibe_task_runs (id,tenant_id,subject_id,workspace_id,status,turn_limit,turns_used,created_at,updated_at)
+       SELECT $1,$2,$3,w.id,'running',$5,0,$4,$4
        FROM workspaces w
-       WHERE w.id=$5 AND w.tenant_id=$2 AND w.subject_id=$3
+       WHERE w.id=$6 AND w.tenant_id=$2 AND w.subject_id=$3
        RETURNING *`,
-      [randomUUID(), identity.tenantId, identity.subjectId, new Date(), workspaceId],
+      [randomUUID(), identity.tenantId, identity.subjectId, new Date(), turnLimit, workspaceId],
     );
     if (!result.rowCount) return null;
     const row = result.rows[0] as Record<string, unknown>;
     return {
       id: String(row.id), tenantId: String(row.tenant_id), subjectId: String(row.subject_id), workspaceId: String(row.workspace_id),
       status: row.status as OneVibeTaskStatus, createdAt: new Date(String(row.created_at)), updatedAt: new Date(String(row.updated_at)),
+      turnLimit: Number(row.turn_limit), turnsUsed: Number(row.turns_used),
     };
   }
 
@@ -1907,7 +1922,45 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return {
       id: String(row.id), tenantId: String(row.tenant_id), subjectId: String(row.subject_id), workspaceId: String(row.workspace_id),
       status: row.status as OneVibeTaskStatus, createdAt: new Date(String(row.created_at)), updatedAt: new Date(String(row.updated_at)),
+      turnLimit: Number(row.turn_limit), turnsUsed: Number(row.turns_used),
     };
+  }
+
+  async reserveOneVibeTaskTurn(identity: IdentityContext, workspaceId: string, taskId: string) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `SELECT id,turn_limit,turns_used
+         FROM onevibe_task_runs
+         WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND workspace_id=$4
+         FOR UPDATE`,
+        [taskId, identity.tenantId, identity.subjectId, workspaceId],
+      );
+      if (!result.rowCount) {
+        await client.query("COMMIT");
+        return null;
+      }
+      const row = result.rows[0] as Record<string, unknown>;
+      const turnLimit = Number(row.turn_limit);
+      const turnsUsed = Number(row.turns_used);
+      if (turnsUsed >= turnLimit) {
+        await client.query("COMMIT");
+        return { granted: false as const, reason: "budget_exhausted" as const, turnLimit, turnsUsed };
+      }
+      const nextTurnsUsed = turnsUsed + 1;
+      await client.query(
+        "UPDATE onevibe_task_runs SET turns_used=$2,updated_at=now() WHERE id=$1",
+        [taskId, nextTurnsUsed],
+      );
+      await client.query("COMMIT");
+      return { granted: true as const, turnLimit, turnsUsed: nextTurnsUsed };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async appendOneVibeTaskEvent(identity: IdentityContext, input: {
@@ -2850,12 +2903,13 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     return nextOperation;
   }
 
-  async createOneVibeTask(identity: IdentityContext, workspaceId: string) {
+  async createOneVibeTask(identity: IdentityContext, workspaceId: string, options: { turnLimit?: number } = {}) {
     if (!await this.getOwned(identity, workspaceId)) return null;
+    const turnLimit = normalizeOneVibeTurnLimit(options.turnLimit);
     const now = new Date();
     const task: OneVibeTaskRecord = {
       id: randomUUID(), tenantId: identity.tenantId, subjectId: identity.subjectId, workspaceId,
-      status: "running", createdAt: now, updatedAt: now,
+      status: "running", turnLimit, turnsUsed: 0, createdAt: now, updatedAt: now,
     };
     this.oneVibeTasks.set(task.id, task);
     return task;
@@ -2864,6 +2918,17 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async getOwnedOneVibeTask(identity: IdentityContext, workspaceId: string, taskId: string) {
     const task = this.oneVibeTasks.get(taskId);
     return task?.tenantId === identity.tenantId && task.subjectId === identity.subjectId && task.workspaceId === workspaceId ? task : null;
+  }
+
+  async reserveOneVibeTaskTurn(identity: IdentityContext, workspaceId: string, taskId: string) {
+    const task = await this.getOwnedOneVibeTask(identity, workspaceId, taskId);
+    if (!task) return null;
+    if (task.turnsUsed >= task.turnLimit) {
+      return { granted: false as const, reason: "budget_exhausted" as const, turnLimit: task.turnLimit, turnsUsed: task.turnsUsed };
+    }
+    const next = { ...task, turnsUsed: task.turnsUsed + 1, updatedAt: new Date() };
+    this.oneVibeTasks.set(task.id, next);
+    return { granted: true as const, turnLimit: next.turnLimit, turnsUsed: next.turnsUsed };
   }
 
   async appendOneVibeTaskEvent(identity: IdentityContext, input: {

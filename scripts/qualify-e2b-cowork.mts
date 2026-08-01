@@ -196,6 +196,9 @@ async function runTask(label: string): Promise<TaskRun> {
   });
   const task = created.task as JsonRecord;
   const workspace = created.workspace as JsonRecord;
+  const budget = task.budget as JsonRecord | undefined;
+  assert.ok(Number(budget?.turnLimit) > 0, "live Cowork task must expose a positive execution turn budget");
+  assert.equal(Number(budget?.turnsUsed), 0, "live Cowork task must start with no reserved turns");
   const taskId = String(task.id);
   const workspaceId = String(workspace.id);
   allocatedWorkspaces.add(workspaceId);
@@ -223,6 +226,10 @@ async function runTask(label: string): Promise<TaskRun> {
   assert.match(sseReplay, /id: \d+/);
   if (sseReplay.includes("fixture") || sseReplay.includes("UI_FIXTURE")) throw new Error("Fixture output detected in live activity replay");
   const second = await runTurn(workspaceId, taskId, sessionId, `E2B_REAL_ACP_OK_${label}_2`);
+  const taskEvents = await controlJson(`/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks/${encodeURIComponent(taskId)}/events`);
+  const systemEvents = (Array.isArray(taskEvents.events) ? taskEvents.events : [])
+    .filter((event) => (event as JsonRecord).kind === "system");
+  assert.ok(systemEvents.length >= 3, "live Cowork turns must leave budget reservation evidence alongside task-start evidence");
 
   const port = agentCatalogId === "codex-cli" ? 8644 : 8645;
   const connected = await E2bSandbox.connect(sandbox.sandboxId, { apiKey: e2bApiKey, timeoutMs });

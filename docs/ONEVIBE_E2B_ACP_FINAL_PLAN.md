@@ -236,6 +236,8 @@ new provider conformance tests pass against the fake provider.
 - Implement create/resume/pause/kill, usage, budget reservation, backpressure,
   and reconciliation.
 - Run multi-turn Codex and OpenCode ACP conversations through LiteLLM.
+- Enforce a durable per-task execution-turn budget and fail closed under
+  backpressure before opening a provider stream.
 - Render canonical streaming activity in Cowork.
 
 **Exit:** API and browser E2E prove a fresh E2B conversation, streamed ACP

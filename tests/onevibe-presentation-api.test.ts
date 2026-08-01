@@ -100,6 +100,31 @@ test("ONEVibe API creates an owned PPTX and only its workspace owner can downloa
   }
 });
 
+test("ONEVibe task API exposes and atomically enforces the execution turn budget", async () => {
+  const store = new MemoryWorkspaceStore();
+  const workspace = await store.createOrGet(identity, "personal", randomUUID());
+  await store.update(workspace.id, { state: "ready" });
+  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    oneVibeTurnLimit: 2,
+  });
+  try {
+    const created = await app.inject({ method: "POST", url: `/v1/workspaces/${workspace.id}/onevibe/tasks`, headers });
+    assert.equal(created.statusCode, 201);
+    const taskId = created.json().task.id as string;
+    assert.deepEqual(created.json().task.budget, { turnLimit: 2, turnsUsed: 0 });
+
+    const first = await store.reserveOneVibeTaskTurn(identity, workspace.id, taskId);
+    const second = await store.reserveOneVibeTaskTurn(identity, workspace.id, taskId);
+    const exhausted = await store.reserveOneVibeTaskTurn(identity, workspace.id, taskId);
+    assert.deepEqual(first, { granted: true, turnLimit: 2, turnsUsed: 1 });
+    assert.deepEqual(second, { granted: true, turnLimit: 2, turnsUsed: 2 });
+    assert.deepEqual(exhausted, { granted: false, reason: "budget_exhausted", turnLimit: 2, turnsUsed: 2 });
+  } finally {
+    await app.close();
+  }
+});
+
 test("ONEVibe Cowork capture obtains a PNG from the provider and records provenance", async () => {
   const store = new MemoryWorkspaceStore();
   const workspace = await store.createOrGet(identity, "personal", randomUUID());

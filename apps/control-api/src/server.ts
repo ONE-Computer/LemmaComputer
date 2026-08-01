@@ -249,6 +249,7 @@ const envSchema = z.object({
   GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   ONEVIBE_EPHEMERAL_REAPER_INTERVAL_SECONDS: z.coerce.number().int().min(30).max(3_600).default(60),
   ONEVIBE_ARTIFACT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(90),
+  ONEVIBE_MAX_TURNS: z.coerce.number().int().min(1).max(10_000).default(32),
   BOOTSTRAP_TENANT_ID: z.string().min(1).default("acme"),
   BOOTSTRAP_USER_ID: z.string().min(1).default("alex-morgan"),
   TENANT_DISPLAY_NAME: z.string().min(1).default("ME TECH"),
@@ -306,6 +307,7 @@ export function createControlServer(
       intervalMs: number;
       maxAgeMs: number;
     };
+    oneVibeTurnLimit?: number;
   } = {},
 ) {
   const testRuntimePolicy: RuntimePolicy = {
@@ -336,6 +338,7 @@ export function createControlServer(
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
   const oneVibeCaptureAuthority = security.oneVibeCaptureSecret ? new OneVibeCaptureAuthority(security.oneVibeCaptureSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
+  const oneVibeTurnLimit = security.oneVibeTurnLimit ?? 32;
   const activityEvents = new ActivityEventService(store);
   const sites = security.siteStore ? new SitesService(security.siteStore) : undefined;
   const requireSites = () => {
@@ -395,7 +398,7 @@ export function createControlServer(
     return channelBroker;
   };
   const requireOneVibeTasks = () => {
-    if (!store.createOneVibeTask || !store.getOwnedOneVibeTask || !store.appendOneVibeTaskEvent || !store.listOwnedOneVibeTaskEvents) {
+    if (!store.createOneVibeTask || !store.reserveOneVibeTaskTurn || !store.getOwnedOneVibeTask || !store.appendOneVibeTaskEvent || !store.listOwnedOneVibeTaskEvents) {
       throw new OneComputerError("ONEVIBE_TASKS_NOT_CONFIGURED", "ONEVibe task evidence storage is not configured", 503, true);
     }
     return store as WorkspaceStore & GovernanceStore & OneVibeTaskStore;
@@ -1730,7 +1733,7 @@ export function createControlServer(
     const { policy } = await policyForGrant(actor, effective, "personal");
     const ephemeralGrantId = `cowork-ephemeral-${randomUUID()}`;
     const workspace = await service.create(identity(request), policy, ephemeralGrantId, idempotency(request.headers), request.id);
-    const task = await taskStore.createOneVibeTask(identity(request), workspace.id);
+    const task = await taskStore.createOneVibeTask(identity(request), workspace.id, { turnLimit: oneVibeTurnLimit });
     if (!task) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "Ephemeral Cowork sandbox could not be bound", 503, true);
     const event = await taskStore.appendOneVibeTaskEvent(identity(request), {
       workspaceId: workspace.id,
@@ -1740,7 +1743,12 @@ export function createControlServer(
     });
     if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "Ephemeral Cowork task could not be recorded", 503, true);
     return reply.code(201).header("cache-control", "no-store").send({
-      task: { id: task.id, status: task.status, createdAt: task.createdAt },
+      task: {
+        id: task.id,
+        status: task.status,
+        createdAt: task.createdAt,
+        budget: { turnLimit: task.turnLimit, turnsUsed: task.turnsUsed },
+      },
       workspace: { ...workspace, ephemeral: true, expiresAt: new Date(Date.now() + ONEVIBE_EPHEMERAL_TTL_MS).toISOString() },
     });
   });
@@ -1964,7 +1972,25 @@ export function createControlServer(
       ? undefined
       : z.uuid().parse(Array.isArray(taskIdHeader) ? taskIdHeader[0] : taskIdHeader);
     const oneVibeTaskStore = oneVibeTaskId ? requireOneVibeTasks() : undefined;
-    if (oneVibeTaskId) await assertOneVibeTaskWriteAllowed(owner, oneVibeTaskStore!, request.params.workspaceId, oneVibeTaskId);
+    if (oneVibeTaskId) {
+      await assertOneVibeTaskWriteAllowed(owner, oneVibeTaskStore!, request.params.workspaceId, oneVibeTaskId);
+      const reservation = await oneVibeTaskStore!.reserveOneVibeTaskTurn(owner, request.params.workspaceId, oneVibeTaskId);
+      if (!reservation) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+      if (!reservation.granted) {
+        throw new OneComputerError(
+          "ONEVIBE_BUDGET_EXHAUSTED",
+          `This Cowork task has reached its ${reservation.turnLimit}-turn execution budget. Start a new task to continue.`,
+          429,
+        );
+      }
+      const budgetEvent = await oneVibeTaskStore!.appendOneVibeTaskEvent(owner, {
+        workspaceId: request.params.workspaceId,
+        taskId: oneVibeTaskId,
+        kind: "system",
+        payloadHash: createHash("sha256").update(`turn-reserved:${reservation.turnsUsed}/${reservation.turnLimit}`).digest("hex"),
+      });
+      if (!budgetEvent) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    }
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
     const abort = new AbortController();
     request.raw.once("aborted", () => abort.abort("browser-disconnected"));
@@ -2057,7 +2083,7 @@ export function createControlServer(
     const workspaceId = z.uuid().parse(request.params.workspaceId);
     await requireWorkspacePolicy(request, workspaceId);
     const taskStore = requireOneVibeTasks();
-    const task = await taskStore.createOneVibeTask(identity(request), workspaceId);
+    const task = await taskStore.createOneVibeTask(identity(request), workspaceId, { turnLimit: oneVibeTurnLimit });
     if (!task) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task workspace not found", 404);
     const event = await taskStore.appendOneVibeTaskEvent(identity(request), {
       workspaceId, taskId: task.id, kind: "system",
@@ -2065,7 +2091,12 @@ export function createControlServer(
     });
     if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
     return reply.code(201).header("cache-control", "no-store").send({
-      task: { id: task.id, status: task.status, createdAt: task.createdAt },
+      task: {
+        id: task.id,
+        status: task.status,
+        createdAt: task.createdAt,
+        budget: { turnLimit: task.turnLimit, turnsUsed: task.turnsUsed },
+      },
     });
   });
   app.post<{ Params: { workspaceId: string; taskId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/capture", { bodyLimit: 16 * 1024 }, async (request, reply) => {
@@ -2587,6 +2618,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         intervalMs: 24 * 60 * 60 * 1000,
         maxAgeMs: env.ONEVIBE_ARTIFACT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
       },
+      oneVibeTurnLimit: env.ONEVIBE_MAX_TURNS,
     },
   );
   const pushRetryTimer = pushProvider && openVtc

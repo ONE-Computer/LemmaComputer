@@ -92,6 +92,15 @@ Control-owned PNG/PPTX bytes have a separate governed retention timer
 without deleting task/event evidence rows, so audit records remain available
 while download URLs eventually fail closed after the retention window.
 
+Each Cowork task also receives a durable execution turn budget
+(`ONEVIBE_MAX_TURNS`, default 32). Control reserves a turn atomically before
+opening the provider ACP stream, records a redacted budget-reservation evidence
+event, and returns `429 ONEVIBE_BUDGET_EXHAUSTED` once the limit is reached.
+The counter is stored in Postgres (and enforced by a lock-protected update), so
+parallel requests cannot overspend the task. This is deliberately a bounded
+execution budget rather than unverified token/cost accounting; provider token
+metering can be added later once ACP/LiteLLM usage receipts are available.
+
 ## Provisioning
 
 1. Build and publish an immutable workspace template from the exact
