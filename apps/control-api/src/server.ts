@@ -1877,6 +1877,14 @@ export function createControlServer(
       }
     }
     const owner = identity(request);
+    const taskIdHeader = request.headers["x-onecomputer-onevibe-task-id"];
+    const oneVibeTaskId = taskIdHeader === undefined
+      ? undefined
+      : z.uuid().parse(Array.isArray(taskIdHeader) ? taskIdHeader[0] : taskIdHeader);
+    const oneVibeTaskStore = oneVibeTaskId ? requireOneVibeTasks() : undefined;
+    if (oneVibeTaskId && !await oneVibeTaskStore!.getOwnedOneVibeTask(owner, request.params.workspaceId, oneVibeTaskId)) {
+      throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    }
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
     const abort = new AbortController();
     request.raw.once("aborted", () => abort.abort("browser-disconnected"));
@@ -1889,6 +1897,23 @@ export function createControlServer(
         let lastEvent: AgentChatEvent | undefined;
         try {
           for await (const event of agentChat.streamTurn(access, sessionId, input.message, abort.signal)) {
+            if (oneVibeTaskId) {
+              const evidence = event.type === "tool"
+                ? { type: event.type, sequence: event.sequence, turnId: event.turnId, toolCallId: event.toolCallId, name: event.name, state: event.state }
+                : event.type === "approval"
+                  ? { type: event.type, sequence: event.sequence, turnId: event.turnId, approvalId: event.approvalId, operationId: event.operationId, state: event.state }
+                  : event.type === "progress"
+                    ? { type: event.type, sequence: event.sequence, turnId: event.turnId, activityId: event.activityId, state: event.state }
+                    : { type: event.type, sequence: event.sequence, turnId: event.turnId };
+              const kind = event.type === "tool" ? "tool" : event.type === "approval" ? "approval" : "chat";
+              const recorded = await oneVibeTaskStore!.appendOneVibeTaskEvent(owner, {
+                workspaceId: request.params.workspaceId,
+                taskId: oneVibeTaskId,
+                kind,
+                payloadHash: createHash("sha256").update(JSON.stringify(evidence)).digest("hex"),
+              });
+              if (!recorded) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+            }
             let projected = event;
             if (event.type === "approval") {
               try {
