@@ -1,8 +1,10 @@
 # E2B and Modal sandbox implementation
 
-Status: implemented behind the workspace-controller provider contract; automated
-conformance is green. Live cloud qualification is pending provider credentials,
-a published workspace image/template, and a public governed egress endpoint.
+Status: implemented behind the workspace-controller provider contract for the
+durable-provider compatibility path; automated conformance is green. Live cloud
+qualification is pending provider credentials, a published image/template, and
+a public governed egress endpoint. The lightweight Cowork contract is defined
+separately in [COWORK_E2B_ACP_PLAN.md](COWORK_E2B_ACP_PLAN.md).
 
 ## Decision
 
@@ -10,12 +12,14 @@ ONEComputer now supports four controller drivers:
 
 - `kasm-local`: durable local Docker/KasmVNC workspaces.
 - `kasm`: Kasm Developer API sessions.
-- `e2b`: Firecracker microVM sandboxes through the official E2B TypeScript SDK.
+- `e2b`: Firecracker microVM sandboxes through the official E2B TypeScript SDK
+  for the existing durable-provider compatibility path.
 - `modal`: gVisor sandboxes through the official Modal JavaScript SDK.
 
-E2B and Modal run the same reviewed ONEComputer workspace image and KasmVNC
-desktop surface. This preserves the browser/Word/LibreOffice viewing model used
-by VCR instead of substituting a terminal-only sandbox.
+The existing E2B/Modal adapter tests cover the reviewed workspace contract. They
+do **not** define Cowork: Cowork uses a separate minimal image/profile with no
+KasmVNC, no desktop launch, and application-scoped browser/document capture.
+Kasm remains the full Computer visual surface.
 
 ## Contract parity
 
@@ -30,15 +34,16 @@ by VCR instead of substituting a terminal-only sandbox.
 | Restricted/full-web policy proxy | Local sidecar | External TLS proxy | External TLS proxy |
 | Live egress grant rotation | Yes | Yes | Yes |
 | Native provider egress backstop | Docker networks | E2B `allowOut` | Modal domain allowlist |
-| KasmVNC desktop/VCR | Private relay | Authenticated KasmVNC | Modal connect token |
+| Full desktop/VCR | Private relay | Computer-only compatibility path | Computer-only compatibility path |
 | Clipboard policy | Yes | Yes | Yes |
 | Idle suspension | Container stop | Firecracker pause/auto-resume | Timeout/recreate |
 | Nested KVM/Cowork | Optional local KVM | No | No |
 
 Nested KVM is an explicit routing constraint, not a silently degraded feature.
-Cowork workspaces remain on a Kasm-capable node. E2B and Modal are parity
-targets for browser, office, CLI-agent, chat-runtime, persistence, policy,
-egress, and VCR flows.
+Cowork sessions do not remain on a Kasm-capable node. They use the
+`cowork-e2b-ephemeral-v1` profile and are parity targets for ACP, browser
+evidence, policy, egress, artifacts, budgets, and cleanup—not desktop login,
+clipboard, or durable office state.
 
 ## Security behavior
 

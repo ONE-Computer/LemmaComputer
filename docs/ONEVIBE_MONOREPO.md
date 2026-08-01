@@ -3,7 +3,8 @@
 ONEVibe-MonoRepo is the **Cowork experience** implemented inside this
 ONEComputer monorepo. It is not a standalone deployment, a sibling runtime, or
 a second authority plane. ONEComputer remains authoritative for identity,
-policy, workspace lifecycle, model routing, audit, artifacts, and approvals.
+policy, Computer workspace lifecycle, Cowork session lifecycle, model routing,
+audit, artifacts, and approvals.
 
 This document is the migration entry point for work that brings ONEVibe product
 capabilities into the monorepo. It deliberately does not replace the security
@@ -23,7 +24,8 @@ ONEComputer has two product modes sharing one governed backend:
 - **Computer** is the workspace-centric experience: users configure, launch,
   and work in their governed computer.
 - **Cowork (ONEVibe)** is the task-centric experience: users direct agents,
-  observe execution, inspect artifacts, and resume work.
+  observe execution, inspect artifacts, and resume a bounded ephemeral session.
+  It is not a Kasm workspace and does not require a Computer workspace.
 
 Neither mode may bypass the Control API, signed policy projection, scoped
 credentials, OpenVTC approval path, or artifact ownership checks. The legacy
@@ -35,29 +37,30 @@ database, authentication, secrets, or infrastructure assumptions.
 The first supported ONEVibe-MonoRepo journey is intentionally narrow but
 end-to-end:
 
-1. an authenticated user selects an owned workspace and submits a task;
+1. an authenticated user creates an owned Cowork session and submits a task;
 2. the task is dispatched through the governed agent/harness path;
 3. task activity is emitted as durable, ordered events;
 4. an editable PowerPoint artifact is generated and stored with tenant,
-   subject, and workspace ownership plus an integrity digest;
+   subject, session, task, and policy ownership plus an integrity digest;
 5. the user can retrieve only their own artifact; and
 6. the Cowork UI renders activity, visual execution evidence, and the artifact
    download/preview.
 
-The first task/evidence endpoints are
+The current compatibility task/evidence endpoints are
 `/v1/workspaces/:workspaceId/onevibe/tasks`,
 `/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/events`, and
 `/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/presentations`. The
 artifact helper lives at `apps/control-api/src/onevibe-artifacts.ts`. These
-are implementation details, not a replacement for a general task/artifact
-contract.
+are implementation details retained during the session-store migration, not a
+reason to provision or expose a workspace for Cowork. The target session
+contract is defined in [COWORK_E2B_ACP_PLAN.md](COWORK_E2B_ACP_PLAN.md).
 
 ## VCR definition
 
 VCR is **not** a replay of model tokens. It is an authorized execution timeline
-that synchronizes task events with visual evidence from the selected workspace
-application (for example browser, document editor, or desktop). Each frame or
-trace reference must be bound to tenant, subject, workspace, task, source
+that synchronizes task events with visual evidence from the selected application
+(for example browser, document editor, or desktop). Each frame or
+trace reference must be bound to tenant, subject, session, task, source
 application, timestamp, and event sequence. Access must be checked on every
 retrieval. Sensitive visual evidence needs explicit retention and redaction
 policy before it can be considered production-ready.

@@ -35,17 +35,17 @@ unconfigured:
 - `ONECOMPUTER_E2B_DENY_HOST`
 - `MANAGED_SANDBOX_EGRESS_PROXY_URL_TEMPLATE`
 
-No sandbox or template build was created. A minimal public image would not be
-valid evidence for the ONEComputer goal because it would omit the pinned ACP,
-browser/document VCR, gateway, policy, and artifact runtime. The next
-authorized provisioning step is therefore to publish the actual immutable
-workspace image and set the governed routes before running
-`npm run qualify:e2b:cowork`.
+No sandbox or template build was created. A generic public image would not be
+valid evidence; the next artifact must be the immutable **minimal Cowork**
+image containing the pinned ACP runtimes, Playwright/browser capture, gateway,
+policy, and artifact hooks. The durable Kasm workspace image is not a
+substitute. The next authorized provisioning step is to publish that Cowork
+image and set the governed routes before running `npm run qualify:e2b:cowork`.
 
 This result is an infrastructure prerequisite failure, not an application
 test failure. It does not authorize bypassing the live gate with fixtures.
 
-## Workspace image build attempt
+## Durable Computer image build attempt
 
 The actual multi-stage `docker/Dockerfile.workspace` was then built locally
 with the pinned `linux/amd64` target. Docker downloaded the large Kasm base
@@ -69,3 +69,10 @@ Hermes build stage but failed again with a Docker BuildKit metadata I/O error
 after exhausting the Docker VM. The next build must use a remote/relocated
 builder or a deliberately bounded local cache; no image digest or E2B template
 ID exists yet.
+
+## Repeat preflight after temporary credential rotation
+
+After the user supplied a replacement temporary R&D credential, the key was
+stored only in the ignored, mode-0600 local file `.env.e2b.local`. A second
+non-mutating preflight reached the E2B API successfully and again reported
+`templateCount: 0`; no sandbox, template, or provider state was created.

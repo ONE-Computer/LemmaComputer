@@ -1,5 +1,12 @@
 # ONEVibe-MonoRepo: E2B + ACP final execution plan
 
+> **Canonical update (2026-08-01):** [COWORK_E2B_ACP_PLAN.md](./COWORK_E2B_ACP_PLAN.md)
+> is now the source of truth for the lightweight Cowork architecture. This
+> document retains the broader provider and ACP sequencing; any reference below
+> to a Cowork “workspace”, KasmVNC parity, or a persistent E2B volume applies
+> only to the durable Computer compatibility path and is not a Cowork
+> requirement.
+
 > Current execution addendum: see [ONEVIBE_EPHEMERAL_COWORK_ACP.md](./ONEVIBE_EPHEMERAL_COWORK_ACP.md) for the task-scoped sandbox philosophy and API-first ACP/VCR qualification order.
 
 **Status:** approved architecture plan  
@@ -9,7 +16,7 @@
 ## Executive decision
 
 Use E2B Firecracker microVMs as the first managed execution provider for
-conversation-scoped Cowork tasks. Run an allow-listed agent harness inside the
+conversation-scoped Cowork sessions. Run an allow-listed agent harness inside the
 microVM through the Agent Client Protocol (ACP), and normalize all output into
 ONEComputer's canonical governed event stream.
 
@@ -25,7 +32,7 @@ User / Cowork UI
 ONEComputer Control + durable coordinator
        │ signed policy, budget, broker grant
        ├── execution provider: E2B (conversation microVM)
-       │       └── workspace image + OpenCode/Claude/Codex ACP harness
+       │       └── minimal Cowork image + OpenCode/Codex ACP harness
        ├── execution provider: Kasm (persistent visual workspace)
        └── execution provider: Modal (later gVisor burst tier)
                │
@@ -61,7 +68,7 @@ merge old `App.jsx`, migrations, or provider routes.
 The R&D evidence has three caveats:
 
 1. E2B/Modal adapters are automated-conformance green but live qualification
-   still requires provider credentials, an immutable workspace image/template,
+   still requires provider credentials, an immutable image/template,
    public governed egress, and provider quotas.
 2. Codex ACP has a qualification lane through LiteLLM. Claude ACP is packaged,
    but intentionally remains disabled until broker-provided governed authority
@@ -82,9 +89,9 @@ Add an explicit execution scope to the task model:
 - `turn`: disposable environment for one request;
 - `conversation`: one E2B microVM per chat session, paused between turns;
 - `task`: environment retained across related Cowork interactions;
-- `workspace`: current Kasm-style durable desktop.
+- `workspace`: current Kasm-style durable Computer desktop.
 
-Default Manus-like web chat to `conversation` + E2B. Route to Kasm when the
+Default Manus-like web chat to `conversation` + E2B. Route to Kasm Computer when the
 user needs a long-lived desktop, durable GUI state, nested virtualization, or
 human takeover that E2B has not yet qualified. The model/agent cannot choose a
 weaker boundary or extend retention.
@@ -125,13 +132,14 @@ forks where policy permits, and usage-based spend controls.
 
 Required qualifications:
 
-- immutable `linux/amd64` workspace image and E2B template;
+- immutable `linux/amd64` minimal Cowork image and E2B template;
 - E2B API key held only by the controller secret boundary;
 - external TLS egress proxy reachable from the provider;
 - default-deny provider network and exact route allowlist;
 - scoped model/control grants injected through the broker;
 - ACP process, filesystem, and terminal confinement;
-- browser/office capability only after KasmVNC/WebSocket/clipboard qualification;
+- application-scoped browser/document capture; desktop/KasmVNC/clipboard remain
+  Computer-only capabilities;
 - frame capture sidecar with no raw prompts, cookies, secrets, or hidden
   reasoning in replay evidence;
 - create/resume/pause/kill reconciliation and explicit volume purge.
@@ -255,9 +263,10 @@ turn, cancellation, resume, owner isolation, spend limit, and destruction.
 **Exit:** harness choice changes runtime implementation only; event, policy,
 approval, VCR, artifact, and budget contracts remain identical.
 
-### Phase 3 — visual E2B/VCR qualification
+### Phase 3 — application-scoped E2B/VCR qualification
 
-- Prove KasmVNC or equivalent read-only computer view inside the E2B image.
+- Prove Playwright/application capture inside the minimal Cowork E2B image;
+  KasmVNC and desktop takeover remain Computer-only.
 - Add capture sidecar at semantic action boundaries and bounded active cadence.
 - Implement live-follow, previous/next, pause/play, scrub, event markers,
   frame availability, jump-to-live, and capture-degraded states.

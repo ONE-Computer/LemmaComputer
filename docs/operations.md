@@ -281,10 +281,11 @@ npm run image:workspace
 `ONECOMPUTER_WORKSPACE_IMAGE` may be a local tag for development. Production
 deployments should use an immutable digest.
 
-Claude Cowork local execution requires hardware virtualization. On every Docker
+Legacy Claude Desktop Computer execution requires hardware virtualization. On every Docker
 or Kasm Agent host, verify that `/dev/kvm` and `/dev/vhost-vsock` are character
 devices and that the host has at least 8 GB of RAM and approximately 25 GB of
-free disk space. The local driver gives Cowork workspaces an 8 GiB memory limit;
+free disk space. The local driver gives durable Computer workspaces an 8 GiB
+memory limit;
 allow additional host memory for Docker and the ONEComputer services. Opt in
 with:
 
@@ -294,10 +295,11 @@ KASM_LOCAL_KVM_ENABLED=true
 
 The local driver accepts this setting for customer-managed installations and
 isolated development worktrees. Hosted multi-tenant installations fail closed
-with `COWORK_HOST_ISOLATION_REQUIRED`. The adapter
+with `COWORK_HOST_ISOLATION_REQUIRED`. This legacy Computer path does not
+implement the lightweight E2B Cowork contract. The adapter
 maps only `/dev/kvm` and `/dev/vhost-vsock` into workspaces that include Claude
 Desktop; it does not make the container privileged or restore dropped
-capabilities. Cowork containers use the pinned Moby `seccomp/v0.2.1` default
+capabilities. Legacy Computer containers use the pinned Moby `seccomp/v0.2.1` default
 allowlist with one additional rule permitting only `socket(AF_VSOCK)`, which
 Claude's local execution VM requires. The base profile SHA-256 is
 `536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74`.

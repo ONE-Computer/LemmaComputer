@@ -1,5 +1,10 @@
 # Real E2B ACP deployment runbook
 
+> **Profile boundary:** this runbook qualifies the lightweight
+> `cowork-e2b-ephemeral-v1` profile. The durable Kasm Computer path is a
+> separate product and must not be used as a substitute for an E2B Cowork
+> qualification. See [COWORK_E2B_ACP_PLAN.md](./COWORK_E2B_ACP_PLAN.md).
+
 This is the deployment gate for real Cowork execution. Fixture servers and
 contract tests are not evidence that a model call occurred.
 
@@ -19,19 +24,21 @@ provider-neutral contracts, not commits to merge wholesale.
 
 ## Runtime contract
 
-The workspace image must contain:
+The **Cowork image** must contain:
 
 - the pinned `@agentclientprotocol/codex-acp` and `opencode-ai` packages;
 - `/usr/local/libexec/onecomputer-acp-chat`, which starts `codex-acp` or
   `opencode acp` and exposes the bounded NDJSON chat contract;
-- Chrome/Firefox and `gnome-screenshot` for provider-local VCR capture;
-- the ONEComputer gateway proxy and connector bridge.
+- Playwright plus a pinned browser for application-scoped PNG capture;
+- document tooling only if the selected profile declares it;
+- the ONEComputer gateway proxy and connector bridge. It must not contain
+  KasmVNC, a desktop login, nested KVM, or a durable home volume.
 
 At creation, Control passes only a signed policy, short-lived gateway grant,
 agent bridge grant, and chat API key. The E2B adapter returns provider-hosted
 chat endpoints (`8644` Codex, `8645` OpenCode). Control uses those endpoints
-for the selected E2B workspace; the Docker-only `onecomputer-sandbox-*` DNS
-route is never used for managed sandboxes.
+for the selected Cowork session; the Docker-only `onecomputer-sandbox-*` DNS
+route is never used for managed execution. No desktop endpoint is returned.
 
 The bridge keeps the canonical user/assistant transcript in a bounded,
 mode-`0600` record on the task volume and rejects concurrent turns for one
@@ -52,7 +59,9 @@ preserves the full sandbox and can keep cycling indefinitely when auto-resume
 is enabled, while `kill` is terminal. The adapter therefore uses pause/resume
 only as a provider-level optimization and relies on the Control reaper’s fixed
 task-creation deadline to call destroy and volume purge. Every live run must
-record both the E2B `sandboxId`/`templateId` and the final `killed`/volume state.
+record both the E2B `sandboxId`/`templateId` and the final `killed` state. A
+Cowork profile has no persistent volume to preserve; task scratch state is
+destroyed with the sandbox.
 E2B secure access must remain enabled; custom templates need an envd version
 that supports secured access.
 

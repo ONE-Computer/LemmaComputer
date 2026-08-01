@@ -27,15 +27,20 @@ flowchart LR
 
   Control --> Store[("Control PostgreSQL")]
   Control --> Controller["Workspace controller"]
-  Controller --> Sandbox["Kasm sandbox"]
+  Controller --> Computer["Kasm Computer sandbox"]
+  Control --> Cowork["Cowork session adapter"]
+  Cowork --> E2B["E2B Firecracker task VM"]
   Control --> Consent["OpenVTC consent service"]
   Control --> Gateway["LiteLLM gateway"]
   Control --> Broker["Channel broker"]
   Scheduler["Scheduler worker"] --> Control
 
-  Sandbox --> Gateway
-  Sandbox --> Control
-  Sandbox --> Egress["Per-workspace egress proxy"]
+  Computer --> Gateway
+  Computer --> Control
+  Computer --> Egress["Per-workspace egress proxy"]
+  E2B --> Gateway
+  E2B --> Control
+  E2B --> Egress
   Gateway --> Models["Model providers"]
   Gateway --> M365["Microsoft 365 MCP"]
   M365 --> Graph["Microsoft Graph"]
@@ -71,7 +76,8 @@ network isolation, policy integrity, and the approval protocol.
 | `workspace-ingress` | Serves the product origin and exchanges short-lived workspace launch links for scoped sessions | `127.0.0.1:4174` |
 | `web` | Static React application and authenticated reverse proxy to Control | Private |
 | `control-api` | Identity, policy, lifecycle orchestration, grants, governance, audit, and connection APIs | Private |
-| `workspace-controller` | Provisions Kasm workspaces through local Docker or the Kasm Developer API | Private |
+| `workspace-controller` | Provisions durable Computer/Kasm workspaces; managed providers are selected by policy | Private |
+| Cowork execution adapter | Creates disposable E2B task sessions for real ACP harnesses and application-scoped VCR | Private |
 | `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, and MCP dispatch | `127.0.0.1:4000` |
 | `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | OAuth bridge on `127.0.0.1:4311` |
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
