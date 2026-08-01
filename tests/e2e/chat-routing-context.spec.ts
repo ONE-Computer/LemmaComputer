@@ -16,8 +16,20 @@ const choose = async (page: Page, label: string, option: string) => {
 test("routes the next turn through the selected workspace, agent, and stable model mode", async ({ page }) => {
   await page.goto("/?view=chat");
 
+  let releaseProductAgents = () => {};
+  const productAgentsReleased = new Promise<void>((resolve) => {
+    releaseProductAgents = resolve;
+  });
+  await page.route(`**/workspaces/${productWorkspaceId}/chat/agents`, async (route) => {
+    await productAgentsReleased;
+    await route.continue();
+  });
+
   await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Auto/ }).click();
   await choose(page, "Choose workspace", "Product");
+  await expect(page.getByRole("heading", { name: "Chat", exact: true })).toHaveCount(0);
+  await expect(page.locator(".chat-runtime-state")).toBeVisible();
+  releaseProductAgents();
   await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto/ })).toBeVisible();
 
   await page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto/ }).click();
@@ -29,6 +41,21 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
 
   const composer = page.getByPlaceholder("Message Codex CLI");
+  await composer.fill("Line one\nLine two\nLine three\nLine four");
+  const [rowBox, actionsBox, contextBox, sendBox] = await Promise.all([
+    page.locator(".companion-chat-composer-row").boundingBox(),
+    page.getByRole("button", { name: "Chat actions" }).boundingBox(),
+    page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).boundingBox(),
+    page.getByRole("button", { name: "Send message" }).boundingBox(),
+  ]);
+  expect(rowBox).not.toBeNull();
+  expect(actionsBox).not.toBeNull();
+  expect(contextBox).not.toBeNull();
+  expect(sendBox).not.toBeNull();
+  const controlBottoms = [actionsBox!, contextBox!, sendBox!].map((box) => box.y + box.height);
+  expect(Math.max(...controlBottoms) - Math.min(...controlBottoms)).toBeLessThanOrEqual(1);
+  expect(rowBox!.height).toBeGreaterThan(sendBox!.height);
+
   await composer.fill("Prepare the launch analysis with the selected context.");
   const sent = page.waitForRequest((request) => (
     request.method() === "POST"

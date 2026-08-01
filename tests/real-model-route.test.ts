@@ -7,6 +7,20 @@ import { mvpPolicyDocument, upgradeHistoricMvpPolicyDocument } from "@onecompute
 const root = path.resolve(import.meta.dirname, "..");
 const source = (relativePath: string) => readFile(path.join(root, relativePath), "utf8");
 
+test("LiteLLM keeps independent request capacity for live MCP authorization callbacks", async () => {
+  const [compose, callback, connections] = await Promise.all([
+    source("compose.yaml"),
+    source("integrations/litellm/onecomputer_policy_callback.py"),
+    source("apps/control-api/src/connections.ts"),
+  ]);
+  const service = compose.split("  litellm:")[1]?.split("\n  openvtc-consent:")[0] ?? "";
+  assert.match(service, /--num_workers\s*\n\s*- "2"/);
+  assert.match(callback, /await asyncio\.to_thread\(_request_decision, payload\)/);
+  assert.match(callback, /POLICY_TIMEOUT_SECONDS = 15/);
+  assert.match(connections, /this\.connectionStatus\(identity, connector\)/);
+  assert.match(connections, /userOAuthConnectionTools\(identity, connector\.serverName\)/);
+});
+
 test("OpenAI, Anthropic, GLM, and Bedrock routes are database-managed", async () => {
   const [config, providerSettings, bootstrapPolicy] = await Promise.all([
     source("config/litellm/config.yaml"),

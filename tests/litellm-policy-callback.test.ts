@@ -59,7 +59,7 @@ def recover_after_timeout(request, timeout):
 
 request_decision.__globals__["urllib"].request.urlopen = recover_after_timeout
 assert request_decision({"toolName": "send-chat-message"}) == decision
-assert calls == [2, 2]
+assert calls == [15, 15]
 
 http_calls = []
 def terminal_http_error(request, timeout):
@@ -73,7 +73,7 @@ except urllib.error.HTTPError:
     pass
 else:
     raise AssertionError("HTTP errors must not be retried")
-assert http_calls == [2]
+assert http_calls == [15]
 `;
   const result = spawnSync("python3", ["-c", script, callback], {
     encoding: "utf8",
@@ -609,8 +609,9 @@ async def assert_provider_boundary():
     assert len(authority_calls) == authority_count
 
     # Anthropic-compatible requests can reach the completion hook with all
-    # callback-owned kwargs stripped. The signed request context must still
-    # settle the admitted usage event, while provider-bound kwargs stay clean.
+    # callback-owned kwargs and task context stripped. The bounded call-state
+    # registry must still settle the event while provider kwargs stay clean.
+    module["_INTERNAL_ADMISSION_CONTEXT"].set(None)
     await callback.async_log_success_event(
         internal_provider,
         {"usage": {"input_tokens": 9, "output_tokens": 5}},

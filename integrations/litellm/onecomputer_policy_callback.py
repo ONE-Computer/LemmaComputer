@@ -28,7 +28,7 @@ POLICY_URL = os.environ.get(
     "http://control-api:4100/internal/v1/mcp/authorize",
 )
 POLICY_TOKEN = os.environ.get("ONECOMPUTER_MCP_POLICY_TOKEN", "")
-POLICY_TIMEOUT_SECONDS = 2
+POLICY_TIMEOUT_SECONDS = 15
 POLICY_ATTEMPTS = 2
 USAGE_URL = os.environ.get(
     "ONECOMPUTER_AI_USAGE_URL",
@@ -38,9 +38,12 @@ USAGE_TOKEN = os.environ.get("ONECOMPUTER_AI_USAGE_TOKEN", "")
 ROUTING_STATE_KEY = "onecomputer_routing_state"
 USAGE_STATE_KEY = "onecomputer_usage_state"
 USAGE_CHAIN_KEY = "onecomputer_usage_chain"
+USAGE_STATE_TTL_SECONDS = 15 * 60
 ROUTING_HEALTH_TTL_SECONDS = 60
 _ROUTING_HEALTH_LOCK = threading.Lock()
 _ROUTING_UNAVAILABLE_UNTIL = {}
+_USAGE_STATE_LOCK = threading.Lock()
+_USAGE_STATES_BY_CALL = {}
 _INTERNAL_ADMISSION_CONTEXT = contextvars.ContextVar(
     "onecomputer_internal_admission_context", default=None
 )
@@ -227,6 +230,110 @@ def _metadata_dicts(kwargs):
     return values
 
 
+def _litellm_call_id(kwargs):
+    candidates = [kwargs.get("litellm_call_id")]
+    params = kwargs.get("litellm_params")
+    if isinstance(params, dict):
+        candidates.append(params.get("litellm_call_id"))
+    for metadata in _metadata_dicts(kwargs):
+        candidates.append(metadata.get("litellm_call_id"))
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _usage_provider_deployment_id(kwargs):
+    candidates = []
+    params = kwargs.get("litellm_params")
+    if isinstance(params, dict):
+        candidates.append(params.get("model_info"))
+    candidates.extend([kwargs.get("litellm_model_info"), kwargs.get("model_info")])
+    for metadata in _metadata_dicts(kwargs):
+        candidates.append(metadata.get("model_info"))
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            deployment_id = candidate.get("onecomputer_deployment_id")
+            if isinstance(deployment_id, str) and deployment_id:
+                return deployment_id
+    return None
+
+
+def _prune_usage_states(now):
+    for call_id in list(_USAGE_STATES_BY_CALL):
+        live = [
+            entry for entry in _USAGE_STATES_BY_CALL[call_id]
+            if entry["expiresAt"] > now
+        ]
+        if live:
+            _USAGE_STATES_BY_CALL[call_id] = live
+        else:
+            _USAGE_STATES_BY_CALL.pop(call_id, None)
+    while len(_USAGE_STATES_BY_CALL) > 4096:
+        oldest = min(
+            _USAGE_STATES_BY_CALL,
+            key=lambda call_id: _USAGE_STATES_BY_CALL[call_id][-1]["recordedAt"],
+        )
+        _USAGE_STATES_BY_CALL.pop(oldest, None)
+
+
+def _remember_usage_state(kwargs, state):
+    call_id = _litellm_call_id(kwargs)
+    admission_id = state.get("admissionId") if isinstance(state, dict) else None
+    if call_id is None or not isinstance(admission_id, str):
+        return
+    now = time.monotonic()
+    entry = {
+        "state": state,
+        "providerDeploymentId": _usage_provider_deployment_id(kwargs),
+        "recordedAt": now,
+        "expiresAt": now + USAGE_STATE_TTL_SECONDS,
+    }
+    with _USAGE_STATE_LOCK:
+        _prune_usage_states(now)
+        current = [
+            candidate for candidate in _USAGE_STATES_BY_CALL.get(call_id, [])
+            if candidate["state"].get("admissionId") != admission_id
+        ]
+        _USAGE_STATES_BY_CALL[call_id] = (current + [entry])[-8:]
+        _prune_usage_states(now)
+
+
+def _registered_usage_state(kwargs):
+    call_id = _litellm_call_id(kwargs)
+    if call_id is None:
+        return None
+    now = time.monotonic()
+    deployment_id = _usage_provider_deployment_id(kwargs)
+    with _USAGE_STATE_LOCK:
+        _prune_usage_states(now)
+        entries = _USAGE_STATES_BY_CALL.get(call_id, [])
+        if deployment_id is not None:
+            matches = [
+                entry for entry in entries
+                if entry["providerDeploymentId"] == deployment_id
+            ]
+            if matches:
+                return matches[-1]["state"]
+        return entries[-1]["state"] if entries else None
+
+
+def _forget_usage_state(state):
+    admission_id = state.get("admissionId") if isinstance(state, dict) else None
+    if not isinstance(admission_id, str):
+        return
+    with _USAGE_STATE_LOCK:
+        for call_id in list(_USAGE_STATES_BY_CALL):
+            remaining = [
+                entry for entry in _USAGE_STATES_BY_CALL[call_id]
+                if entry["state"].get("admissionId") != admission_id
+            ]
+            if remaining:
+                _USAGE_STATES_BY_CALL[call_id] = remaining
+            else:
+                _USAGE_STATES_BY_CALL.pop(call_id, None)
+
+
 def _trusted_key_metadata(kwargs):
     """Read identity only from LiteLLM's authenticated key projection."""
     auth = kwargs.get("user_api_key_dict")
@@ -374,6 +481,7 @@ def _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
             and bool(state.get("provider"))
             and state.get("provider") == route_provider
         ):
+            _remember_usage_state(kwargs, state)
             return True
     context = _INTERNAL_ADMISSION_CONTEXT.get()
     if internal_responses_conversion and isinstance(context, dict):
@@ -395,6 +503,7 @@ def _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
                 kwargs["metadata"] = metadata
             metadata[USAGE_STATE_KEY] = state
             metadata[USAGE_CHAIN_KEY] = signed_chain
+            _remember_usage_state(kwargs, state)
             return True
     return False
 
@@ -675,18 +784,20 @@ def _source_attempt_id(kwargs, route):
 def _set_usage_state(
     kwargs, state, task_binding, source_attempt_id, original_parent_attempt_id
 ):
-    kwargs[USAGE_STATE_KEY] = state
+    owned_state = {**state, "sourceAttemptId": source_attempt_id}
+    kwargs[USAGE_STATE_KEY] = owned_state
     metadata = kwargs.get("metadata")
     if not isinstance(metadata, dict):
         metadata = {}
         kwargs["metadata"] = metadata
-    metadata[USAGE_STATE_KEY] = state
+    metadata[USAGE_STATE_KEY] = owned_state
     metadata[USAGE_CHAIN_KEY] = _signed_usage_chain({
-        "admissionId": state["admissionId"],
+        "admissionId": owned_state["admissionId"],
         "taskBinding": task_binding,
         "sourceAttemptId": source_attempt_id,
         "originalParentAttemptId": original_parent_attempt_id,
     })
+    _remember_usage_state(kwargs, owned_state)
 
 
 def _usage_state(kwargs):
@@ -697,6 +808,9 @@ def _usage_state(kwargs):
         value = metadata.get(USAGE_STATE_KEY)
         if isinstance(value, dict):
             return value
+    registered = _registered_usage_state(kwargs)
+    if isinstance(registered, dict):
+        return registered
     # LiteLLM's Anthropic Messages -> Responses conversion builds fresh hook
     # kwargs and removes callback-owned metadata before the completion hook.
     # Context variables follow the request task, so recover only the state
@@ -1125,7 +1239,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             kwargs, usage_state, task_binding, payload["sourceAttemptId"], payload.get("parentAttemptId")
         )
         _INTERNAL_ADMISSION_CONTEXT.set({
-            "state": usage_state,
+            "state": kwargs[USAGE_STATE_KEY],
             "signedChain": kwargs["metadata"][USAGE_CHAIN_KEY],
             "provider": route.get("onecomputer_provider"),
             "deploymentId": route.get("onecomputer_deployment_id"),
@@ -1133,28 +1247,58 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         return _provider_request(kwargs)
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        state = _usage_state(kwargs)
+        recorded = False
         try:
             payload = _completion_payload(kwargs, response_obj, start_time, end_time, "success")
             if payload is None:
+                LOGGER.warning(
+                    "AI usage completion state missing; call_id=%s",
+                    _litellm_call_id(kwargs),
+                )
                 return
             result = await asyncio.to_thread(_usage_request, "events", payload)
+            recorded = True
             await _record_routing_observation(kwargs, result, payload, response_obj)
-        except Exception:
+        except Exception as error:
             # Completion telemetry must never replace a successful model response.
+            LOGGER.warning(
+                "AI usage success callback failed (%s): %.240s; call_id=%s",
+                type(error).__name__,
+                str(error),
+                _litellm_call_id(kwargs),
+            )
             return
         finally:
+            if recorded:
+                _forget_usage_state(state)
             _INTERNAL_ADMISSION_CONTEXT.set(None)
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        state = _usage_state(kwargs)
+        recorded = False
         try:
             payload = _completion_payload(kwargs, response_obj, start_time, end_time, "failure")
             if payload is None:
+                LOGGER.warning(
+                    "AI usage failure state missing; call_id=%s",
+                    _litellm_call_id(kwargs),
+                )
                 return
             result = await asyncio.to_thread(_usage_request, "events", payload)
+            recorded = True
             await _record_routing_observation(kwargs, result, payload, response_obj)
-        except Exception:
+        except Exception as error:
+            LOGGER.warning(
+                "AI usage failure callback failed (%s): %.240s; call_id=%s",
+                type(error).__name__,
+                str(error),
+                _litellm_call_id(kwargs),
+            )
             return
         finally:
+            if recorded:
+                _forget_usage_state(state)
             _INTERNAL_ADMISSION_CONTEXT.set(None)
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):

@@ -130,6 +130,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     authorization?: string;
     apiKey?: string;
     taskBindingHeader?: string;
+    litellmCallId?: string;
     body?: Record<string, unknown>;
   } = {};
   const upstream = createServer(async (request, response) => {
@@ -149,6 +150,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       authorization: request.headers.authorization,
       apiKey: request.headers["x-api-key"] as string | undefined,
       taskBindingHeader: request.headers["x-onecomputer-ai-task-binding"] as string | undefined,
+      litellmCallId: request.headers["x-litellm-call-id"] as string | undefined,
       body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
     };
     response.writeHead(200, { "content-type": "application/json" });
@@ -189,6 +191,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       headers: {
         "content-type": "application/json",
         "x-api-key": "client-supplied-key",
+        "x-litellm-call-id": "client-supplied-call-id",
       },
       body: JSON.stringify({
         model: "do-not-log\nsecret-value",
@@ -207,6 +210,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     assert.equal(received.authorization, "Bearer scoped-credential-at-least-24-characters");
     assert.equal(received.apiKey, undefined);
     assert.equal(received.taskBindingHeader, undefined);
+    assert.equal(received.litellmCallId, undefined);
     assert.equal(received.body?.model, "onecomputer-auto");
     assert.deepEqual(received.body?.metadata, {
       customer_tag: "preserved",

@@ -2972,12 +2972,7 @@ export function ChatScreen({
     const restartRequired = offline && reasonCode === "CHAT_RUNTIME_UNAVAILABLE" && workspaceCanRetry;
     return (
       <div className="secondary-screen chat-screen">
-        <header className="page-heading">
-          <p>Workspace agent</p>
-          <h1>Chat</h1>
-          <span>Work with any selected agent in your managed workspace. Files, tools, and app connections stay with that workspace.</span>
-        </header>
-        {contextSelector}
+        <div className="chat-stage chat-runtime-state" aria-label="Current conversation">
         <section className="chat-unavailable" aria-live="polite">
           <span className={`chat-agent-mark${status === "loading" ? " loading" : ""}`}><Bot24Regular aria-hidden="true" /></span>
           <div>
@@ -3006,6 +3001,7 @@ export function ChatScreen({
             )}
           </div>
         </section>
+        </div>
       </div>
     );
   }
@@ -4590,6 +4586,7 @@ export function App() {
           onLoadRuns={async (scheduleId) => (await scheduleApi.runs(scheduleId)).runs}
         />}
         {activeNav === "Chat" && <ChatScreen
+          key={workspace?.id ?? "no-workspace"}
           workspace={workspace}
           workspaces={homeWorkspaces}
           workspaceState={workspaceState}

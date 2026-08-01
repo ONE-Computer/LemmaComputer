@@ -118,7 +118,7 @@ services:
       - --port
       - "4000"
       - --num_workers
-      - "1"
+      - "2"
       - --log_config
       - /app/logging.yaml
     environment:

@@ -366,7 +366,7 @@ class Handler(BaseHTTPRequestHandler):
             for key, value in self.headers.items()
             if key.lower() not in HOP_BY_HOP | {
                 "host", "authorization", "x-api-key", "content-length",
-                "x-onecomputer-ai-task-binding",
+                "x-onecomputer-ai-task-binding", "x-litellm-call-id",
             }
         }
         target = CONTROL if is_operation else UPSTREAM

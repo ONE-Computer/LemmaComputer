@@ -159,7 +159,7 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
   assert.match(app, /className="companion-chat-composer-control actions-control"[\s\S]*\{messageField\}[\s\S]*className="companion-chat-composer-control context-control"/);
   assert.doesNotMatch(app, /companion-chat-composer-spacer/);
   assert.match(styles, /\.chat-composer\.companion-chat-composer\s*\{[\s\S]*max-width:\s*768px/);
-  assert.match(styles, /\.companion-chat-composer-row\s*\{[\s\S]*grid-template-columns:\s*36px minmax\(0, 1fr\) minmax\(0, auto\) 36px/);
+  assert.match(styles, /\.companion-chat-composer-row\s*\{[\s\S]*grid-template-columns:\s*36px minmax\(0, 1fr\) minmax\(0, auto\) 36px;[\s\S]*align-items:\s*end/);
   assert.match(companionStyles, /\.companion-mode-switch\s*\{/);
   assert.doesNotMatch(companionStyles, /\.companion-destinations/);
   assert.match(manifest, /Chat with workspace agents and review protected ONEComputer actions/);
@@ -446,6 +446,13 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
     source("apps/web/src/styles.css"),
   ]);
   const chatScreen = app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App"));
+  const nonReadyStart = chatScreen.indexOf('if (status !== "ready")');
+  const nonReadyEnd = chatScreen.indexOf("\n  return (\n", nonReadyStart);
+  const nonReadyBranch = chatScreen.slice(nonReadyStart, nonReadyEnd);
+  assert.match(nonReadyBranch, /chat-runtime-state/);
+  assert.doesNotMatch(nonReadyBranch, /page-heading|<h1>Chat<\/h1>|\{contextSelector\}/);
+  assert.match(app, /activeNav === "Chat" && <ChatScreen\s+key=\{workspace\?\.id \?\? "no-workspace"\}/);
+  assert.match(styles, /\.chat-runtime-state\s*\{[\s\S]*place-items:\s*center/);
   assert.match(chatScreen, /ariaLabel="Choose workspace"/);
   assert.match(chatScreen, /const workspaceOptions = workspaces\?\.length \? workspaces : workspace \? \[workspace\] : \[\];/);
   assert.doesNotMatch(chatScreen, /workspaces\?\.length > 1 && <div className="chat-agent-selector">/);
