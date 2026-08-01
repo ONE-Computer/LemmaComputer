@@ -486,9 +486,13 @@ export class E2bSandboxAdapter implements SandboxAdapter {
   async status(providerId: string): Promise<Sandbox> {
     try {
       const info = await this.sdk.getInfo(providerId, { apiKey: this.config.apiKey });
-      if (info.state !== "running") return sandboxView(providerId, "stopped", info.metadata);
-      if (!info.metadata["onecomputer.chatAgents"]) return sandboxView(providerId, "ready", info.metadata);
+      // E2B pause is a resumable state, not a terminal stop. Connecting is
+      // deliberately the status operation here: the SDK resumes a paused
+      // sandbox and refreshes its provider session before we expose chat
+      // endpoints. Only a killed/missing sandbox is terminal.
+      if (info.state !== "running" && info.state !== "paused") return sandboxView(providerId, "stopped", info.metadata);
       const connected = await this.sdk.connect(providerId, { apiKey: this.config.apiKey, timeoutMs: this.timeoutMs });
+      if (!info.metadata["onecomputer.chatAgents"]) return sandboxView(providerId, "ready", info.metadata);
       return { ...sandboxView(providerId, "ready", info.metadata), chatEndpoints: chatEndpointsFor(connected, info.metadata) };
     } catch (error) {
       if (error instanceof Error && /not found/i.test(error.message)) {

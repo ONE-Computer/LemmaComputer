@@ -56,6 +56,13 @@ record both the E2B `sandboxId`/`templateId` and the final `killed`/volume state
 E2B secure access must remain enabled; custom templates need an envd version
 that supports secured access.
 
+The adapter treats a paused sandbox as resumable in `status()` as well as in
+create retries: it reconnects once (which triggers E2B auto-resume) before
+returning chat endpoints. A paused conversation is therefore never replaced
+merely because a status poll ran while the provider was suspended. A missing
+or terminal provider object still returns `stopped` and is reconciled by
+Control.
+
 The provider-local screenshot path is now explicit: an authenticated Control
 request for a ready, task-owned workspace calls the controller's
 `/internal/v1/sandboxes/:providerId/vcr/frames` endpoint, which invokes the
@@ -183,8 +190,12 @@ implementation trivia:
 
 - Templates are immutable launch artifacts. The image build must install the
   ACP binaries, browser/document applications, `xdotool`, and screenshot
-  tooling, then use a start/ready check so a newly created sandbox is ready
-  without an unbounded bootstrap race ([template start and ready](https://e2b.dev/docs/template/start-ready-command)).
+  tooling. The task entrypoint is intentionally started after creation rather
+  than snapshotted by E2B: it requires a task-specific signed policy and
+  short-lived grants that are unavailable during template build. The adapter
+  uses a bounded `workspace-ready` wait after injecting those grants, which
+  preserves the same start/ready invariant without baking credentials into a
+  template ([template start and ready](https://e2b.dev/docs/template/start-ready-command)).
 - `pause` preserves filesystem and memory, including running processes, while
   `kill` is terminal. A paused sandbox is not a substitute for task retention:
   the Control deadline and reaper still own the deletion decision. Paused

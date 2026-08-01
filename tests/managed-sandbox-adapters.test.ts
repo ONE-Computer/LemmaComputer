@@ -282,6 +282,55 @@ test("E2B retries reuse the workspace sandbox only when the policy projection ma
   assert.equal(createCalls, 0);
 });
 
+test("E2B status resumes a paused conversation instead of reporting it stopped", async () => {
+  let connectCalls = 0;
+  const sdk: E2bSdk = {
+    async getInfo() {
+      return {
+        sandboxId: "paused-e2b",
+        templateId: "onecomputer-template",
+        metadata: {
+          "onecomputer.workspaceId": workspaceId,
+          "onecomputer.policyHash": policy.policyHash,
+          "onecomputer.chatAgents": "opencode-cli",
+        },
+        startedAt: new Date(),
+        endAt: new Date(Date.now() + 60_000),
+        state: "paused",
+        cpuCount: 2,
+        memoryMB: 4096,
+        envdVersion: "1",
+        diskSizeMB: 10_000,
+      };
+    },
+    async connect() {
+      connectCalls += 1;
+      return {
+        sandboxId: "paused-e2b",
+        getHost: (port: number) => `${port}-paused-e2b.e2b.app`,
+        commands: { run: async () => ({ stdout: "" }) },
+        files: { write: async () => undefined },
+      };
+    },
+    async listSandboxes() { return []; },
+    async listVolumes() { return []; },
+    async createVolume() { return { volumeId: "unused" }; },
+    async destroyVolume() { return true; },
+    async create() { throw new Error("must not create"); },
+    async kill() { return true; },
+  };
+  const adapter = new E2bSandboxAdapter({
+    apiKey: "e2b-key",
+    templateId: "onecomputer-template",
+    egressProxyUrlTemplate: "https://egress.example.com",
+  }, sdk);
+
+  const status = await adapter.status("paused-e2b");
+  assert.equal(status.state, "ready");
+  assert.deepEqual(status.chatEndpoints, [{ catalogId: "opencode-cli", url: "https://8645-paused-e2b.e2b.app" }]);
+  assert.equal(connectCalls, 1, "status must reconnect exactly once so E2B auto-resumes the sandbox");
+});
+
 test("Modal uses gVisor network controls, a persistent volume, secrets, readiness, and connect tokens", async () => {
   let createOptions: Parameters<ModalSdk["createSandbox"]>[2];
   let secretValues: Record<string, string> = {};
