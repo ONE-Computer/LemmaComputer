@@ -689,8 +689,6 @@ def _budget_bounds(kwargs, route):
     }
     if route.get("onecomputer_billable_request_unit") is True:
         bounds["requestUnits"] = "1"
-    if route.get("supports_reasoning") is True:
-        bounds["maximumReasoningTokens"] = str(maximum_output)
     return bounds
 
 
@@ -772,13 +770,13 @@ def _normalized_units(provider, response_obj, billable_request_unit=False):
     input_uncached = prompt - cache_read - cache_write
     if input_uncached < 0:
         raise ValueError("provider cache buckets exceed the normalized prompt total")
-    output = max(0, output_total - reasoning)
+    output = output_total
     values = [
         ("input_uncached_token", input_uncached, False),
         ("cache_read_token", cache_read, False),
         ("cache_write_token", cache_write, False),
         ("output_token", output, False),
-        ("reasoning_token", reasoning, False),
+        ("provider:reasoning_tokens", reasoning, True),
         ("request", 1, billable_request_unit is not True),
         ("provider:total_tokens", total, True),
     ]

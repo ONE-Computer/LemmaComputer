@@ -145,8 +145,8 @@ assert_units("openai", {
 }, [
     {"unit": "input_uncached_token", "quantity": "80"},
     {"unit": "cache_read_token", "quantity": "20"},
-    {"unit": "output_token", "quantity": "38"},
-    {"unit": "reasoning_token", "quantity": "12"},
+    {"unit": "output_token", "quantity": "50"},
+    {"unit": "provider:reasoning_tokens", "quantity": "12", "diagnostic": True},
     {"unit": "request", "quantity": "1", "diagnostic": True},
     {"unit": "provider:total_tokens", "quantity": "150", "diagnostic": True},
 ], "150")
@@ -176,8 +176,8 @@ assert_units("glm", {
 }, [
     {"unit": "input_uncached_token", "quantity": "36"},
     {"unit": "cache_read_token", "quantity": "4"},
-    {"unit": "output_token", "quantity": "10"},
-    {"unit": "reasoning_token", "quantity": "6"},
+    {"unit": "output_token", "quantity": "16"},
+    {"unit": "provider:reasoning_tokens", "quantity": "6", "diagnostic": True},
     {"unit": "request", "quantity": "1", "diagnostic": True},
     {"unit": "provider:total_tokens", "quantity": "56", "diagnostic": True},
 ], "56")
@@ -195,8 +195,8 @@ assert_units("bedrock", {
     {"unit": "input_uncached_token", "quantity": "70"},
     {"unit": "cache_read_token", "quantity": "10"},
     {"unit": "cache_write_token", "quantity": "5"},
-    {"unit": "output_token", "quantity": "23"},
-    {"unit": "reasoning_token", "quantity": "7"},
+    {"unit": "output_token", "quantity": "30"},
+    {"unit": "provider:reasoning_tokens", "quantity": "7", "diagnostic": True},
     {"unit": "request", "quantity": "1", "diagnostic": True},
     {"unit": "provider:total_tokens", "quantity": "100", "diagnostic": True},
 ], "100")
