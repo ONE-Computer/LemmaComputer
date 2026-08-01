@@ -47,6 +47,7 @@ const workspaceMemoryGiB = 4;
  */
 export const ONEVIBE_EPHEMERAL_TTL_MS = 60 * 60_000;
 const ephemeralGrantPrefix = "cowork-ephemeral-";
+const ephemeralCleanupCompleteCode = "EPHEMERAL_CLEANUP_COMPLETE";
 
 const sandboxProfiles = [
   sandboxProfileSchema.parse({
@@ -2341,6 +2342,7 @@ export function createControlServer(
             // polling client cannot keep the provider alive indefinitely.
             || workspace.createdAt.getTime() > cutoff
             || ["provisioning", "restarting", "stopping"].includes(workspace.state)
+            || (workspace.state === "stopped" && workspace.failureCode === ephemeralCleanupCompleteCode)
           ) continue;
           try {
             const { policy } = await policyForGrant(actor, user.effectivePolicy, workspace.grantId);
@@ -2350,6 +2352,7 @@ export function createControlServer(
             // its disposable volume.
             await service.stop(actor.identity, policy, workspace.id);
             await controller.purgeWorkspace(workspace.id);
+            await store.update(workspace.id, { state: "stopped", providerId: null, failureCode: ephemeralCleanupCompleteCode });
             removed += 1;
           } catch (error) {
             app.log.warn({ event: "ephemeral_cowork_cleanup_failed", workspaceId: workspace.id, code: error instanceof OneComputerError ? error.code : "CLEANUP_FAILED" }, "expired Cowork cleanup will be retried");
