@@ -251,6 +251,36 @@ redacted durable activity, replay, approvals, and cleanup proof. No E2B
 pause/resume or snapshot behavior is allowed to silently extend a Cowork task
 or fabricate a missing ACP transcript.
 
+## ACP and template R&D verification — 2026-08-01
+
+The current ACP sources and the older ONEVibe experiments were reviewed before
+the live foundation work. The official ACP repository states that protocol
+wire compatibility is determined by the negotiated `initialize` protocol
+version, not by the npm package version; optional features must be gated by
+the capabilities exchanged during initialization. The official Codex adapter
+is a stdio ACP server and supports client-provided custom OpenAI-compatible
+gateways. The legacy ONEVibe bridge used a similar stdio lifecycle, but its
+default auto-approval path and host-oriented workdir assumptions are not
+acceptable for governed E2B execution. The current bridge therefore keeps
+permission cancellation as the default, uses task-confined paths, and
+configures the gateway in memory before `session/new`.
+
+The ACP streamable-HTTP RFC was also checked. It defines a different transport
+shape (connection-scoped and session-scoped SSE streams, `Acp-Connection-Id`,
+and `Acp-Session-Id`) for remote ACP servers. ONEComputer does not expose that
+transport from the E2B guest: the guest runtime remains stdio, while Control's
+canonical SSE is the product-facing replay stream. This avoids treating ACP
+transport identifiers as user authentication or as the evidence sequence.
+
+E2B's current template SDK supports private registry credentials on
+`Template().fromImage(...)`, while `fromDockerfile(...)` does not support
+multi-stage Dockerfiles. The build path therefore publishes the exact
+multi-stage workspace image to an OCI registry and passes short-lived registry
+credentials only to the E2B template build; credentials are never baked into
+the image or committed. The repository's `scripts/build-e2b-template.mts`
+now accepts the paired `E2B_REGISTRY_USERNAME` and `E2B_REGISTRY_PASSWORD`
+variables for this purpose.
+
 ## Current known prerequisite
 
 The repository now contains the provider-hosted ACP bridge and routing logic,
