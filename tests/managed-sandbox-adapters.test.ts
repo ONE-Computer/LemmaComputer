@@ -461,7 +461,7 @@ test("E2B captures a PNG inside the sandbox boundary for VCR upload", async () =
 
 test("E2B starts Codex/OpenCode ACP as a provider-local streaming process", async () => {
   const commands: string[] = [];
-  const starts: Array<{ cwd?: string; envs?: Record<string, string>; stdin?: boolean }> = [];
+  const starts: Array<{ cwd?: string; envs?: Record<string, string>; stdin?: boolean; timeoutMs?: number; requestTimeoutMs?: number }> = [];
   const sdk = {
     connect: async () => ({
       sandboxId: "e2b-acp-sandbox",
@@ -485,5 +485,7 @@ test("E2B starts Codex/OpenCode ACP as a provider-local streaming process", asyn
   assert.equal(starts[0]?.cwd, "/workspace/task");
   assert.deepEqual(starts[0]?.envs, { HOME: "/home/kasm-user" });
   assert.equal(starts[0]?.stdin, true);
+  assert.equal(starts[0]?.timeoutMs, 0);
+  assert.equal(starts[0]?.requestTimeoutMs, 150_000);
   assert.deepEqual(chunks, ["{\\\"jsonrpc\\\":\\\"2.0\\\"}\\n"]);
 });

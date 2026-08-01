@@ -56,6 +56,8 @@ type E2bInstance = {
     cwd?: string;
     envs?: Record<string, string>;
     stdin?: boolean;
+    timeoutMs?: number;
+    requestTimeoutMs?: number;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
   }): Promise<{ stdout: string }> };
@@ -468,6 +470,9 @@ export class E2bSandboxAdapter implements SandboxAdapter {
         "for attempt in $(seq 1 600); do "
         + "test -f /run/onecomputer/workspace-ready && exit 0; "
         + "sleep 0.2; done; exit 1",
+        // E2B's foreground command connection defaults to 60s. Bootstrap is
+        // bounded at two minutes, so make the transport timeout explicit.
+        { timeoutMs: 150_000, requestTimeoutMs: 150_000 },
       );
       return { ...sandboxView(sandbox.sandboxId, "ready", metadataFor(input)), chatEndpoints: chatEndpointsFor(sandbox, metadataFor(input)) };
     } catch (error) {
@@ -547,6 +552,8 @@ export class E2bSandboxAdapter implements SandboxAdapter {
         cwd: string;
         envs: Record<string, string>;
         stdin: true;
+        timeoutMs?: number;
+        requestTimeoutMs?: number;
         onStdout?: (chunk: string) => void;
         onStderr?: (chunk: string) => void;
       }) => Promise<{ pid: number; sendStdin(data: string): Promise<void>; closeStdin(): Promise<void>; kill(): Promise<boolean>; wait(): Promise<{ exitCode: number; stdout: string; stderr: string }> }>;
@@ -558,6 +565,10 @@ export class E2bSandboxAdapter implements SandboxAdapter {
         cwd: input.cwd,
         envs: { ...(input.environment ?? {}) },
         stdin: true,
+        // ACP is a long-lived stdin/stdout transport. The Control task
+        // deadline, not E2B's command connection default, owns termination.
+        timeoutMs: 0,
+        requestTimeoutMs: 150_000,
         onStdout: input.onStdout,
         onStderr: input.onStderr,
       });
