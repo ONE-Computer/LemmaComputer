@@ -165,19 +165,16 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
   assert.match(manifest, /Chat with workspace agents and review protected ONEComputer actions/);
 });
 
-test("workspace options are editable, opt-in, and explain the required restart after save", async () => {
-  const [app, ui] = await Promise.all([
-    source("apps/web/src/App.jsx"),
-    source("apps/web/src/ui.jsx"),
-  ]);
+test("workspace options are editable, opt-in, and return to the overview with restart guidance after save", async () => {
+  const app = await source("apps/web/src/App.jsx");
   assert.match(app, /catalogId: "claude-cli"/);
   assert.match(app, /catalogId: "hermes-desktop"/);
   assert.doesNotMatch(app, /name: "Google Chrome"[\s\S]+Coming soon/);
-  assert.match(app, /setRestartNoticeOpen\(true\)/);
-  assert.match(app, /title="Restart required"/);
-  assert.match(app, /next launch will expose the selected applications and AI agent clients/);
-  assert.match(ui, /export function NoticeDialog/);
-  assert.match(ui, /source of truth for the next workspace launch/);
+  assert.match(app, /Default model mode/);
+  assert.match(app, /choose a different mode for each conversation in Chat/i);
+  assert.match(app, /setSelectedSandboxGrantId\(null\)/);
+  assert.match(app, /Workspace configuration saved\. Restart the workspace to apply changes\./);
+  assert.doesNotMatch(app, /setRestartNoticeOpen/);
 });
 
 test("top-level navigation is URL-backed and follows browser history", async () => {
@@ -504,7 +501,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
     source("apps/web/src/ui.jsx"),
     source("apps/web/src/ui.css"),
   ]);
-  assert.match(app, /import \{ ConfirmDialog, ModalDialog, NoticeDialog, SelectMenu, TextPromptDialog, useDismissOnOutside \}/);
+  assert.match(app, /import \{ ConfirmDialog, ModalDialog, SelectMenu, TextPromptDialog, useDismissOnOutside \}/);
   assert.ok((app.match(/<SelectMenu/g) ?? []).length >= 9);
   assert.doesNotMatch(app, /<select/);
   assert.match(ui, /export function SelectMenu/);
