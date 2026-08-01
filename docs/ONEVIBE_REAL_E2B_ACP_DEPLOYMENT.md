@@ -49,6 +49,16 @@ record both the E2B `sandboxId`/`templateId` and the final `killed`/volume state
 E2B secure access must remain enabled; custom templates need an envd version
 that supports secured access.
 
+The provider-local screenshot path is now explicit: an authenticated Control
+request for a ready, task-owned workspace calls the controller's
+`/internal/v1/sandboxes/:providerId/vcr/frames` endpoint, which invokes the
+managed adapter inside E2B. Control validates the PNG, stores it under the
+task owner, and appends a hash-linked `workspace-frame` event. Kasm adapters
+without a provider capture capability fail closed with `503`; they do not
+silently fall back to a host screenshot. The current E2B implementation still
+captures the desktop surface; Chrome/Word window targeting is a follow-up
+hardening item.
+
 Control also fail-closes all task-mutating paths after the one-hour ephemeral
 Cowork deadline: new chat turns, provider VCR uploads, and PPTX creation return
 `ONEVIBE_TASK_EXPIRED`. Task/event/VCR rows remain retained for governed audit
@@ -111,6 +121,24 @@ The release is not qualified until the following are attached to the build:
 Never substitute `scripts/ui-fixture-server.mjs` for this gate. It is only an
 explicitly opt-in Playwright contract fixture (`ONECOMPUTER_UI_FIXTURE=1`).
 
+## E2B operational practices applied
+
+The implementation follows E2B's documented lifecycle and security guidance:
+
+- Use `secure: true` for exposed sandbox hosts and validate the scoped bearer
+  token on every provider endpoint ([secured access](https://e2b.dev/docs/sandbox/secured-access)).
+- Treat `onTimeout: "pause"` as resumable state, not deletion; use an explicit
+  task deadline and reaper for terminal cleanup ([auto-resume](https://e2b.dev/docs/sandbox/auto-resume),
+  [persistence](https://e2b.dev/docs/sandbox/persistence)).
+- Inspect `getInfo()` and verify `allowInternetAccess`, `network.allowOut`,
+  metadata, and volume mounts rather than trusting local configuration
+  ([create](https://e2b.dev/docs/api-reference/sandboxes/create-sandbox),
+  [get](https://e2b.dev/docs/api-reference/sandboxes/get-sandbox)).
+- Keep secrets out of image layers and command-scoped environment variables;
+  the broker grants only short-lived credentials ([environment variables](https://e2b.dev/docs/sandbox/environment-variables)).
+- Keep the browser/desktop evidence inside the sandbox boundary and transfer
+  only bounded PNG bytes through the authenticated controller ([computer use](https://e2b.dev/docs/use-cases/computer-use)).
+
 ## Current known prerequisite
 
 The repository now contains the provider-hosted ACP bridge and routing logic,
@@ -120,8 +148,8 @@ is completed, production must fail closed rather than claim an ACP result.
 
 The next hardening items are explicit: add durable session/replay persistence;
 qualify the existing TTL reaper's destroy/revoke/purge behavior against E2B;
-expose provider-local, source-application PNG capture (Chrome/Word window
-targeting) through the controller capture-grant endpoint; and add a gated live E2B
-acceptance harness covering two real conversations, follow-up session reuse,
-frame hash deduplication, PPTX magic bytes, and cleanup. The existing fixture
-Playwright suite remains a UI contract test, not a substitute for that gate.
+add Chrome/Word window targeting to provider-local capture; and add a gated live
+E2B acceptance harness covering two real conversations, follow-up session
+reuse, frame hash deduplication, PPTX magic bytes, and cleanup. The existing
+fixture Playwright suite remains a UI contract test, not a substitute for that
+gate.

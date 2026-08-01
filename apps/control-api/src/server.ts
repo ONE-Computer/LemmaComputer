@@ -201,6 +201,9 @@ const oneVibeVcrFrameSchema = z.strictObject({
   sourceApplication: z.enum(["browser", "document", "desktop"]),
   imageBase64: z.string().min(4).max(2_796_204).regex(/^[A-Za-z0-9+/]+={0,2}$/),
 });
+const oneVibeCaptureRequestSchema = z.strictObject({
+  sourceApplication: z.enum(["browser", "document", "desktop"]),
+});
 
 const envSchema = z.object({
   CONTROL_HOST: z.string().default("127.0.0.1"),
@@ -2058,6 +2061,46 @@ export function createControlServer(
     if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
     return reply.code(201).header("cache-control", "no-store").send({
       task: { id: task.id, status: task.status, createdAt: task.createdAt },
+    });
+  });
+  app.post<{ Params: { workspaceId: string; taskId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/capture", { bodyLimit: 16 * 1024 }, async (request, reply) => {
+    const workspaceId = z.uuid().parse(request.params.workspaceId);
+    const taskId = z.uuid().parse(request.params.taskId);
+    await requireWorkspacePolicy(request, workspaceId);
+    const actor = identity(request);
+    const taskStore = requireOneVibeTasks();
+    await assertOneVibeTaskWriteAllowed(actor, taskStore, workspaceId, taskId);
+    const workspace = await store.getOwned(actor, workspaceId);
+    if (!workspace || !["ready", "open"].includes(workspace.state) || !workspace.providerId) {
+      throw new OneComputerError("WORKSPACE_NOT_READY", "The Cowork sandbox is not ready for visual capture", 409, true);
+    }
+    const capture = controller.captureFrame;
+    if (typeof capture !== "function") {
+      throw new OneComputerError("ONEVIBE_PROVIDER_CAPTURE_UNAVAILABLE", "The selected sandbox provider does not expose visual capture", 503, true);
+    }
+    const input = oneVibeCaptureRequestSchema.parse(request.body ?? {});
+    const captured = await capture.call(controller, workspace.providerId, input.sourceApplication);
+    if (captured.sourceApplication !== input.sourceApplication || captured.mimeType !== "image/png") {
+      throw new OneComputerError("ONEVIBE_PROVIDER_CAPTURE_INVALID", "The sandbox provider returned an invalid visual capture", 502, true);
+    }
+    const bytes = Buffer.from(captured.imageBase64, "base64");
+    if (!bytes.byteLength || bytes.byteLength > 2 * 1024 * 1024) {
+      throw new OneComputerError("ONEVIBE_VCR_FRAME_TOO_LARGE", "ONEVibe visual evidence exceeds the capture limit", 413);
+    }
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, workspaceId, taskId };
+    const image = await createOneVibeVcrFrame(bytes, owner, input.sourceApplication);
+    const event = await taskStore.appendOneVibeTaskEvent(actor, { workspaceId, taskId, kind: "workspace-frame", payloadHash: image.sha256 });
+    if (!event) throw new OneComputerError("ONEVIBE_TASK_NOT_FOUND", "ONEVibe task not found", 404);
+    if (typeof taskStore.saveOneVibeVcrFrame !== "function") {
+      throw new OneComputerError("ONEVIBE_TASKS_NOT_CONFIGURED", "ONEVibe visual evidence storage is not configured", 503, true);
+    }
+    const frame = await taskStore.saveOneVibeVcrFrame(actor, {
+      taskId, eventSequence: event.sequence, sourceApplication: input.sourceApplication,
+      imageSha256: image.sha256, width: image.width, height: image.height, capturedAt: new Date(image.capturedAt),
+    });
+    if (!frame) throw new OneComputerError("ONEVIBE_VCR_FRAME_REJECTED", "ONEVibe visual evidence could not be recorded", 409);
+    return reply.code(201).header("cache-control", "no-store").send({
+      frame: { ...frame, frameUrl: `/v1/workspaces/${workspaceId}/onevibe/tasks/${taskId}/vcr/frames/${event.sequence}` },
     });
   });
   app.get<{ Params: { workspaceId: string; taskId: string } }>("/v1/workspaces/:workspaceId/onevibe/tasks/:taskId/events", async (request, reply) => {

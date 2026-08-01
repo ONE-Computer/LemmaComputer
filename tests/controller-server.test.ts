@@ -117,6 +117,37 @@ test("bodyless open and destroy commands work with internal authentication", asy
   await app.close();
 });
 
+test("controller exposes provider-bound VCR capture only with internal authentication", async () => {
+  let capturedProviderId = "";
+  let capturedSource = "";
+  const captureAdapter = {
+    ...adapter,
+    async captureFrame(providerId: string, sourceApplication: "browser" | "document" | "desktop") {
+      capturedProviderId = providerId;
+      capturedSource = sourceApplication;
+      return { sourceApplication, mimeType: "image/png" as const, imageBase64: "iVBORw0KGgo=" };
+    },
+  };
+  const app = createControllerServer(captureAdapter, token, signedPolicy.keys);
+  const unauthorized = await app.inject({
+    method: "POST",
+    url: "/internal/v1/sandboxes/provider-vcr/vcr/frames",
+    payload: { sourceApplication: "browser" },
+  });
+  assert.equal(unauthorized.statusCode, 404);
+  const response = await app.inject({
+    method: "POST",
+    url: "/internal/v1/sandboxes/provider-vcr/vcr/frames",
+    headers: { "x-controller-token": token },
+    payload: { sourceApplication: "browser" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { sourceApplication: "browser", mimeType: "image/png", imageBase64: "iVBORw0KGgo=" });
+  assert.equal(capturedProviderId, "provider-vcr");
+  assert.equal(capturedSource, "browser");
+  await app.close();
+});
+
 test("controller passes a validated scoped gateway grant to the sandbox adapter", async () => {
   const app = createControllerServer(adapter, token, signedPolicy.keys);
   const response = await app.inject({

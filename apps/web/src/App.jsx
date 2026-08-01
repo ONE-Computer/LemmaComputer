@@ -2112,7 +2112,10 @@ function CoworkScreen({
     try {
       const created = await oneVibeApi.createEphemeralTask();
       setEphemeralWorkspace(created.workspace);
-      setCoworkAgentId("opencode-cli");
+      // The ephemeral policy, not the UI, is the authority for which ACP
+      // harnesses are enabled. ChatScreen will select the first ready assigned
+      // agent (or preserve the user's explicit preference) after provisioning.
+      setCoworkAgentId(preferredAgentId ?? "");
       setActiveTask(created.task);
       setEvents([]); setFrames([]); setSelectedFrameIndex(0);
     } catch (requestError) { setError(requestError.message); }

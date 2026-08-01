@@ -25,6 +25,16 @@ const timeZoneSchema = z.string().trim().min(1).max(100).refine((value) => {
   }
 }, "KASM_LOCAL_TIME_ZONE must be a valid IANA timezone");
 
+const vcrCaptureSourceSchema = z.enum(["browser", "document", "desktop"]);
+type VcrCaptureSource = z.infer<typeof vcrCaptureSourceSchema>;
+type VcrCaptureAdapter = SandboxAdapter & {
+  captureFrame?: (providerId: string, sourceApplication: VcrCaptureSource) => Promise<{
+    sourceApplication: VcrCaptureSource;
+    mimeType: "image/png";
+    imageBase64: string;
+  }>;
+};
+
 const envSchema = z.object({
   CONTROLLER_HOST: z.string().default("127.0.0.1"),
   CONTROLLER_PORT: z.coerce.number().int().positive().default(4101),
@@ -274,6 +284,18 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
     publicSandbox(await adapter.status(request.params.providerId), keys)
   ));
   app.post<{ Params: { providerId: string } }>("/internal/v1/sandboxes/:providerId/open", async (request) => adapter.open(request.params.providerId));
+  app.post<{ Params: { providerId: string } }>("/internal/v1/sandboxes/:providerId/vcr/frames", async (request) => {
+    const input = z.strictObject({ sourceApplication: vcrCaptureSourceSchema }).parse(request.body ?? {});
+    const capture = (adapter as VcrCaptureAdapter).captureFrame;
+    if (typeof capture !== "function") {
+      throw new OneComputerError("VCR_CAPTURE_UNAVAILABLE", "The selected sandbox provider does not expose visual capture", 503, true);
+    }
+    const frame = await capture(request.params.providerId, input.sourceApplication);
+    if (frame.sourceApplication !== input.sourceApplication || frame.mimeType !== "image/png") {
+      throw new OneComputerError("VCR_CAPTURE_INVALID", "The sandbox provider returned an invalid visual capture", 502, true);
+    }
+    return frame;
+  });
   app.delete<{ Params: { providerId: string } }>("/internal/v1/sandboxes/:providerId", async (request, reply) => {
     await adapter.destroy(request.params.providerId);
     return reply.code(204).send();

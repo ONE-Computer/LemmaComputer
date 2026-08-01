@@ -31,6 +31,13 @@ export type ControllerLaunch = Launch & {
   };
 };
 
+export type ControllerVcrSource = "browser" | "document" | "desktop";
+export type ControllerVcrCapture = {
+  sourceApplication: ControllerVcrSource;
+  mimeType: "image/png";
+  imageBase64: string;
+};
+
 export interface ControllerClient {
   create(input: {
     workspaceId: string;
@@ -51,6 +58,7 @@ export interface ControllerClient {
   }): Promise<void>;
   status(providerId: string): Promise<Sandbox>;
   open(providerId: string): Promise<ControllerLaunch>;
+  captureFrame?(providerId: string, sourceApplication: ControllerVcrSource): Promise<ControllerVcrCapture>;
   destroy(providerId: string): Promise<void>;
   purgeWorkspace(workspaceId: string): Promise<void>;
 }
@@ -153,6 +161,9 @@ export class HttpControllerClient implements ControllerClient {
   }
   async status(providerId: string) { return await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`) as Sandbox; }
   async open(providerId: string) { return await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}/open`, { method: "POST" }) as Launch; }
+  async captureFrame(providerId: string, sourceApplication: ControllerVcrSource) {
+    return (await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}/vcr/frames`, { method: "POST", body: JSON.stringify({ sourceApplication }) })) as ControllerVcrCapture;
+  }
   async destroy(providerId: string) { await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`, { method: "DELETE" }); }
   async purgeWorkspace(workspaceId: string) { await this.call(`/internal/v1/workspaces/${encodeURIComponent(workspaceId)}/storage`, { method: "DELETE" }); }
 }

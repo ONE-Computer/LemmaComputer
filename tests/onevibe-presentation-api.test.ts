@@ -100,6 +100,37 @@ test("ONEVibe API creates an owned PPTX and only its workspace owner can downloa
   }
 });
 
+test("ONEVibe Cowork capture obtains a PNG from the provider and records provenance", async () => {
+  const store = new MemoryWorkspaceStore();
+  const workspace = await store.createOrGet(identity, "personal", randomUUID());
+  await store.update(workspace.id, { state: "ready", providerId: "provider-vcr" });
+  const controller = {
+    async captureFrame(providerId: string, sourceApplication: "browser" | "document" | "desktop") {
+      assert.equal(providerId, "provider-vcr");
+      return { sourceApplication, mimeType: "image/png" as const, imageBase64: onePixelPngBase64 };
+    },
+  } as ControllerClient;
+  const app = createControlServer(store, controller, proxyToken, undefined, undefined, {}, { testIdentityMode: true });
+  try {
+    const taskCreated = await app.inject({ method: "POST", url: `/v1/workspaces/${workspace.id}/onevibe/tasks`, headers });
+    assert.equal(taskCreated.statusCode, 201);
+    const taskId = taskCreated.json().task.id as string;
+    const captured = await app.inject({
+      method: "POST",
+      url: `/v1/workspaces/${workspace.id}/onevibe/tasks/${taskId}/capture`,
+      headers,
+      payload: { sourceApplication: "browser" },
+    });
+    assert.equal(captured.statusCode, 201);
+    assert.equal(captured.json().frame.sourceApplication, "browser");
+    assert.match(captured.json().frame.imageSha256, /^[a-f0-9]{64}$/);
+    const events = await app.inject({ method: "GET", url: `/v1/workspaces/${workspace.id}/onevibe/tasks/${taskId}/events`, headers });
+    assert.deepEqual(events.json().events.map((event: { kind: string }) => event.kind), ["system", "workspace-frame"]);
+  } finally {
+    await app.close();
+  }
+});
+
 test("ONEVibe can bootstrap a task-scoped ephemeral sandbox without a durable workspace", async () => {
   const store = new MemoryWorkspaceStore();
   const controller = {

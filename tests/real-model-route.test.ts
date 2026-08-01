@@ -313,6 +313,12 @@ test("provider ACP bridge exposes real transcript state and rejects concurrent t
   assert.doesNotMatch(bridge, /return json\(res, 200, \{ messages: \[\] \}\)/);
 });
 
+test("Cowork does not bypass policy by hard-coding an unassigned ACP harness", async () => {
+  const app = await source("apps/web/src/App.jsx");
+  assert.doesNotMatch(app, /setCoworkAgentId\("opencode-cli"\)/);
+  assert.match(app, /setCoworkAgentId\(preferredAgentId \?\? ""\)/);
+});
+
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
