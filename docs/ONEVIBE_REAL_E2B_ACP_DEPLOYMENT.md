@@ -169,6 +169,54 @@ The implementation follows E2B's documented lifecycle and security guidance:
 - Keep the browser/desktop evidence inside the sandbox boundary and transfer
   only bounded PNG bytes through the authenticated controller ([computer use](https://e2b.dev/docs/use-cases/computer-use)).
 
+## E2B Cowork design notes from the current SDK documentation
+
+The following details are part of the runtime contract rather than optional
+implementation trivia:
+
+- Templates are immutable launch artifacts. The image build must install the
+  ACP binaries, browser/document applications, `xdotool`, and screenshot
+  tooling, then use a start/ready check so a newly created sandbox is ready
+  without an unbounded bootstrap race ([template start and ready](https://e2b.dev/docs/template/start-ready-command)).
+- `pause` preserves filesystem and memory, including running processes, while
+  `kill` is terminal. A paused sandbox is not a substitute for task retention:
+  the Control deadline and reaper still own the deletion decision. Paused
+  services also lose external connections and clients must reconnect after
+  resume ([persistence](https://e2b.dev/docs/sandbox/persistence),
+  [connect](https://e2b.dev/docs/api-reference/sandboxes/connect-to-sandbox)).
+- Auto-resume is persistent and can keep a sandbox cycling indefinitely while
+  requests arrive. This is useful for an interactive Cowork task only while
+  its signed task deadline is valid; the reaper must remain authoritative
+  ([auto-resume](https://e2b.dev/docs/sandbox/auto-resume)).
+- Long-running ACP processes and browser servers should be started as
+  background processes with an explicit command timeout. Their stdout/PTY
+  streams must be treated as reconnectable transport, not as durable history;
+  Control evidence and transcript persistence remain the source of record
+  ([background commands](https://e2b.dev/docs/commands/background),
+  [command execution](https://e2b.dev/docs/cli/exec-command)).
+- Every create/connect response must be inspected for `envdVersion`, secure
+  access state, lifecycle, metadata, network policy, and volume mounts. A
+  locally requested option is not enforcement evidence; live qualification
+  must compare the provider response with the signed route set
+  ([create](https://e2b.dev/docs/api-reference/sandboxes/create-sandbox),
+  [get](https://e2b.dev/docs/api-reference/sandboxes/get-sandbox)).
+- Secure access tokens are scoped to the sandbox controller and must never be
+  copied into the ACP transcript, task events, or artifact metadata. Direct
+  envd/file/process requests require that token, and the token should be
+  renewed on connect/resume rather than cached as a user credential
+  ([secured access](https://e2b.dev/docs/sandbox/secured-access),
+  [environment variables](https://e2b.dev/docs/api-reference/envd/get-the-environment-variables)).
+- If we later use E2B snapshots for warm-start performance, snapshot creation
+  briefly drops active connections. The Cowork transport must reconnect and
+  replay from the last acknowledged sequence; a snapshot is a performance
+  optimization, not a transcript store ([snapshots](https://e2b.dev/docs/sandbox/snapshots)).
+
+These notes explain two deliberate boundaries in this repository: E2B is the
+execution and visual-evidence boundary, while Control owns task deadlines,
+redacted durable activity, replay, approvals, and cleanup proof. No E2B
+pause/resume or snapshot behavior is allowed to silently extend a Cowork task
+or fabricate a missing ACP transcript.
+
 ## Current known prerequisite
 
 The repository now contains the provider-hosted ACP bridge and routing logic,
