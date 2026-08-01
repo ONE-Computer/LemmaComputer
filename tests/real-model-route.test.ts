@@ -141,6 +141,8 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(entrypoint, /agent_enabled claude-desktop && agent_enabled claude-cli/);
   assert.match(entrypoint, /"isClaudeCodeForDesktopEnabled": code_enabled == "true"/);
   assert.match(entrypoint, /ONECOMPUTER_MODEL_ALIAS="\$\{!model_variable\}"/);
+  assert.match(entrypoint, /ONECOMPUTER_TRANSPORT_MODEL_ALIAS="\$\{!transport_model_variable\}"/);
+  assert.match(entrypoint, /ONECOMPUTER_REQUESTED_SERVICE_CLASS="\$\{!service_class_variable\}"/);
   assert.match(entrypoint, /"allowedWorkspaceFolders": \["\/home\/kasm-user"\]/);
   assert.match(entrypoint, /grant_cowork_device_access \/dev\/kvm onecomputer-kvm/);
   assert.match(entrypoint, /grant_cowork_device_access \/dev\/vhost-vsock onecomputer-vhost-vsock/);
