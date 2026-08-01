@@ -22,6 +22,7 @@ const coworkSeccompProfile = readFileSync(
 ).trim();
 
 export interface SandboxAdapter {
+  reconcile?(): Promise<void>;
   create(input: SandboxCreateInput): Promise<Sandbox>;
   updateEgressPolicy(providerId: string, input: SandboxEgressPolicyUpdateInput): Promise<void>;
   status(providerId: string): Promise<Sandbox>;
@@ -298,6 +299,23 @@ export class KasmLocalAdapter implements SandboxAdapter {
       );
     }
     this.socketPath = config.socketPath ?? "/var/run/docker.sock";
+  }
+
+  async reconcile() {
+    const listed = await this.request("GET", "/containers/json?all=1");
+    for (const value of Object.values(asObject(listed))) {
+      const container = asObject(value);
+      const labels = asObject(container.Labels);
+      const workspaceNetwork = labels["com.onecomputer.workspace-network"];
+      const running = container.State === "running";
+      if (!running || typeof workspaceNetwork !== "string" || !this.isWorkspaceNetwork(workspaceNetwork)) continue;
+      if (labels["com.onecomputer.gateway-attached"] === "true") {
+        await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
+      }
+      if (labels["com.onecomputer.control-attached"] === "true" && this.config.controlContainer) {
+        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
+      }
+    }
   }
 
   async create(input: SandboxCreateInput): Promise<Sandbox> {
