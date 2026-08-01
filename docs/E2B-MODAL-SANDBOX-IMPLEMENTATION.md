@@ -78,11 +78,14 @@ The following resources must exist before a real qualification run:
 
    ```bash
    ONECOMPUTER_WORKSPACE_IMAGE_REF=ghcr.io/onecomputer/workspace@sha256:... \
+   E2B_TEMPLATE_NAME=onecomputer-workspace:qualification-2026-08-01 \
    E2B_API_KEY=... \
    npm run sandbox:e2b:template
    ```
 
-   Store the returned template identifier as `E2B_TEMPLATE_ID`.
+   Store the returned template identifier as `E2B_TEMPLATE_ID` and retain the
+   build identifier in the release record. Template names must carry an
+   immutable tag; do not qualify a mutable `default` tag.
 3. Provision a provider-reachable HTTPS model gateway and Control route. The
    current Docker-only `litellm:4000` and `onecomputer-control` routes are
    intentionally rejected.

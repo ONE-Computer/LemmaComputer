@@ -1,13 +1,16 @@
 import { Template, defaultBuildLogger } from "e2b";
 
 const image = process.env.ONECOMPUTER_WORKSPACE_IMAGE_REF?.trim();
-const name = process.env.E2B_TEMPLATE_NAME?.trim() || "onecomputer-workspace";
+const name = process.env.E2B_TEMPLATE_NAME?.trim() || "onecomputer-workspace:dev";
 
 if (!image || !image.includes("@sha256:")) {
   throw new Error("ONECOMPUTER_WORKSPACE_IMAGE_REF must be a linux/amd64 image pinned by digest");
 }
 if (!process.env.E2B_API_KEY?.trim()) {
   throw new Error("E2B_API_KEY is required");
+}
+if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name)) {
+  throw new Error("E2B_TEMPLATE_NAME must include an immutable tag, for example onecomputer-workspace:qualification");
 }
 
 const template = Template()
@@ -22,6 +25,8 @@ const build = await Template.build(template, name, {
 
 process.stdout.write(`${JSON.stringify({
   templateId: build.templateId,
+  buildId: build.buildId,
   name,
+  tags: build.tags,
   image,
 })}\n`);
