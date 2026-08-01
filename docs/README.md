@@ -6,6 +6,7 @@
 
 
 - [ONEVibe-MonoRepo (Cowork) migration and acceptance](ONEVIBE_MONOREPO.md)
+- [Manus UX benchmark and ONEVibe-MonoRepo implementation plan](MANUS_UX_BENCHMARK.md)
   defines the additive product boundary, vertical-slice acceptance criteria,
   and where durable changes belong. It does not replace this monorepo's
   security, service, or deployment documentation.
