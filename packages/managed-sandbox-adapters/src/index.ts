@@ -69,6 +69,21 @@ export type ManagedVcrCapture = {
   imageBase64: string;
 };
 
+const vcrWindowClasses: Record<Exclude<ManagedVcrSource, "desktop">, string[]> = {
+  browser: ["google-chrome", "Google-chrome", "firefox", "Firefox"],
+  document: ["libreoffice", "LibreOffice", "soffice", "Soffice"],
+};
+
+const vcrCaptureCommand = (sourceApplication: ManagedVcrSource, framePath: string) => {
+  if (sourceApplication === "desktop") {
+    return `set -eu; DISPLAY=:1 gnome-screenshot -f ${framePath}; base64 -w0 ${framePath}`;
+  }
+  const searches = vcrWindowClasses[sourceApplication]
+    .map((windowClass) => `xdotool search --onlyvisible --class ${windowClass} 2>/dev/null | head -n 1`)
+    .join(" || ");
+  return `set -eu; command -v xdotool >/dev/null; window=$(${searches}); test -n "$window"; xdotool windowactivate --sync "$window"; DISPLAY=:1 gnome-screenshot -w -f ${framePath}; base64 -w0 ${framePath}`;
+};
+
 export type E2bAcpProcess = {
   pid: number;
   sendStdin(data: string): Promise<void>;
@@ -505,7 +520,7 @@ export class E2bSandboxAdapter implements SandboxAdapter {
       const sandbox = await this.sdk.connect(providerId, { apiKey: this.config.apiKey, timeoutMs: this.timeoutMs });
       const framePath = `/tmp/onecomputer-vcr-${sourceApplication}.png`;
       const result = await sandbox.commands.run(
-        `set -eu; DISPLAY=:1 gnome-screenshot -f ${framePath}; base64 -w0 ${framePath}`,
+        vcrCaptureCommand(sourceApplication, framePath),
       );
       const imageBase64 = result.stdout.trim();
       const bytes = Buffer.from(imageBase64, "base64");

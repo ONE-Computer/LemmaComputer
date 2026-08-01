@@ -386,10 +386,11 @@ test("managed provider live egress rotation replaces the broker grant without ex
 
 test("E2B captures a PNG inside the sandbox boundary for VCR upload", async () => {
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL1WQAAAABJRU5ErkJggg==", "base64");
+  let captureCommand = "";
   const sdk = {
     connect: async () => ({
       sandboxId: "e2b-vcr-sandbox",
-      commands: { run: async () => ({ stdout: png.toString("base64") }) },
+      commands: { run: async (command: string) => { captureCommand = command; return { stdout: png.toString("base64") }; } },
       files: { write: async () => undefined },
       getHost: () => "host",
     }),
@@ -403,6 +404,9 @@ test("E2B captures a PNG inside the sandbox boundary for VCR upload", async () =
   assert.equal(captured.sourceApplication, "browser");
   assert.equal(captured.mimeType, "image/png");
   assert.deepEqual(Buffer.from(captured.imageBase64, "base64"), png);
+  assert.match(captureCommand, /xdotool search/);
+  assert.match(captureCommand, /windowactivate/);
+  assert.match(captureCommand, /gnome-screenshot -w/);
 });
 
 test("E2B starts Codex/OpenCode ACP as a provider-local streaming process", async () => {

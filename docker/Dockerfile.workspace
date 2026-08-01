@@ -91,6 +91,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       qpdf \
       tesseract-ocr \
       unzip \
+      xdotool \
       zip \
       zstd \
       /tmp/claude-desktop.deb \
@@ -132,7 +133,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && test "$(/opt/onecomputer/hermes-venv/bin/python -c 'import aiohttp; print(aiohttp.__version__)')" = "3.14.1" \
     && test "$(/opt/onecomputer/hermes-venv/bin/python -c 'from hermes_cli import __version__; print(__version__)')" = "${HERMES_AGENT_VERSION}" \
     && test "$(node --version)" = "v${NODE_VERSION}" \
-    && command -v npm soffice libreoffice pandoc pdftoppm pdftotext qpdf tesseract unzip zip \
+    && command -v npm soffice libreoffice pandoc pdftoppm pdftotext qpdf tesseract unzip xdotool zip \
     && soffice --headless --version \
     && test -f /opt/onecomputer/hermes-agent/skills/productivity/docx/SKILL.md \
     && test -f /opt/onecomputer/hermes-agent/skills/productivity/pdf/SKILL.md \

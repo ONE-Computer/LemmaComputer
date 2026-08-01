@@ -55,9 +55,11 @@ request for a ready, task-owned workspace calls the controller's
 managed adapter inside E2B. Control validates the PNG, stores it under the
 task owner, and appends a hash-linked `workspace-frame` event. Kasm adapters
 without a provider capture capability fail closed with `503`; they do not
-silently fall back to a host screenshot. The current E2B implementation still
-captures the desktop surface; Chrome/Word window targeting is a follow-up
-hardening item.
+silently fall back to a host screenshot. E2B browser and document captures
+select a visible Chrome/Firefox or LibreOffice window with `xdotool` and use
+`gnome-screenshot -w`; if no matching application window exists, capture fails
+closed. A desktop capture remains available explicitly as
+`sourceApplication: "desktop"`.
 
 Control also fail-closes all task-mutating paths after the one-hour ephemeral
 Cowork deadline: new chat turns, provider VCR uploads, and PPTX creation return
@@ -169,8 +171,8 @@ is completed, production must fail closed rather than claim an ACP result.
 
 The next hardening items are explicit: add durable session/replay persistence;
 qualify the existing TTL reaper's destroy/revoke/purge behavior against E2B;
-add Chrome/Word window targeting to provider-local capture; and add a gated live
-E2B acceptance harness covering two real conversations, follow-up session
-reuse, frame hash deduplication, PPTX magic bytes, and cleanup. The existing
+add governed artifact retention/deletion; and maintain the gated live E2B
+acceptance harness covering two real conversations, follow-up session reuse,
+frame hash deduplication, PPTX magic bytes, and cleanup. The existing
 fixture Playwright suite remains a UI contract test, not a substitute for that
 gate.
