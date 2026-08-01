@@ -77,7 +77,7 @@ const startSession = async () => {
     headers: { Authorization: `Bearer ${gatewayCredential}` },
   });
   const session = await connection.agent.buildSession({ cwd, mcpServers: [] }).start();
-  return { child, connection, session, vendorSessionId: session.sessionId, diagnostics, exited };
+  return { child, connection, session, vendorSessionId: session.sessionId, diagnostics, exited, messages: [], active: false, createdAt: null, updatedAt: null };
 };
 
 const closeSession = (item) => {
@@ -86,34 +86,71 @@ const closeSession = (item) => {
 };
 
 const streamTurn = async (res, item, sessionId, message) => {
+  if (item.active) return json(res, 409, { error: "turn already active" });
+  if (!message || message.role !== "user" || !Array.isArray(message.parts)) return json(res, 400, { error: "invalid user message" });
+  const text = message.parts.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join("\n").trim();
+  if (!text) return json(res, 400, { error: "ACP prompt is empty" });
+  item.active = true;
   const turnId = `turn-${randomUUID()}`;
   let sequence = 0;
+  let responseTextSize = 0;
   const emit = (type, values) => ({ version: 1, sequence: sequence++, sessionId, turnId, type, ...values });
+  const createdAt = now();
+  const assistant = { id: `msg-${randomUUID()}`, role: "assistant", metadata: { agentCatalogId: agent, turnId, state: "streaming", createdAt }, parts: [] };
+  const terminalPart = (state, message) => ({ type: "data-terminal", id: `terminal-${turnId}`, data: { turnId, state, ...(message ? { message } : {}) } });
+  item.messages.push(message);
+  item.updatedAt = createdAt;
   res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-store", "x-onecomputer-chat-protocol": "1" });
-  res.write(`${JSON.stringify(emit("turn-start", { messageId: message.id, createdAt: now() }))}\n`);
-  const text = message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n").trim();
-  if (!text) throw new Error("ACP prompt is empty");
-  const prompt = item.session.prompt(text);
+  res.write(`${JSON.stringify(emit("turn-start", { messageId: assistant.id, createdAt }))}\n`);
   try {
+    const prompt = item.session.prompt(text);
     for (;;) {
       const next = await Promise.race([item.session.nextUpdate(), item.exited.then(() => { throw new Error("ACP process exited during turn"); })]);
       if (next.kind === "stop") {
         await prompt;
-        res.write(`${JSON.stringify(emit("turn-finish", { state: next.stopReason === "end_turn" ? "completed" : next.stopReason === "cancelled" ? "cancelled" : "failed", completedAt: now() }))}\n`);
+        const state = next.stopReason === "end_turn" ? "completed" : next.stopReason === "cancelled" ? "cancelled" : "failed";
+        assistant.metadata.state = state;
+        assistant.parts = assistant.parts.map((part) => ({ ...part, state: "done" }));
+        assistant.parts.push(terminalPart(state, state === "failed" ? "ACP turn stopped before completion" : undefined));
+        item.messages.push(assistant);
+        item.updatedAt = now();
+        res.write(`${JSON.stringify(emit("turn-finish", { state, completedAt: item.updatedAt }))}\n`);
         return;
       }
       const update = next.update;
       if (update.sessionUpdate === "agent_message_chunk" && update.content?.type === "text") {
         const delta = String(update.content.text).slice(0, 16_000);
-        if (delta) res.write(`${JSON.stringify(emit("text-delta", { textId: identifier("text", turnId), delta }))}\n`);
+        if (delta) {
+          responseTextSize += delta.length;
+          if (responseTextSize > 128_000) throw new Error("ACP response exceeded the canonical text limit");
+          const textPart = assistant.parts.find((part) => part.type === "text");
+          if (textPart) textPart.text += delta;
+          else assistant.parts.push({ type: "text", text: delta, state: "streaming" });
+          item.updatedAt = now();
+          res.write(`${JSON.stringify(emit("text-delta", { textId: identifier("text", turnId), delta }))}\n`);
+        }
       } else if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
-        res.write(`${JSON.stringify(emit("tool", { toolCallId: identifier("tool", update.toolCallId ?? "tool"), name: String(update.title ?? update.name ?? "ACP tool").replace(/[^A-Za-z0-9_.:-]/g, "-").slice(0, 160) || "acp-tool", state: update.status === "completed" ? "completed" : update.status === "failed" ? "failed" : "running", summary: String(update.title ?? update.name ?? "ACP tool").slice(0, 500) }))}\n`);
+        const toolCallId = identifier("tool", update.toolCallId ?? "tool");
+        const name = String(update.title ?? update.name ?? "ACP tool").replace(/[^A-Za-z0-9_.:-]/g, "-").slice(0, 160) || "acp-tool";
+        const state = update.status === "completed" ? "completed" : update.status === "failed" ? "failed" : "running";
+        const summary = String(update.title ?? update.name ?? "ACP tool").slice(0, 500);
+        const toolPart = assistant.parts.find((part) => part.type === "data-tool" && part.id === toolCallId);
+        if (toolPart) toolPart.data = { ...toolPart.data, name, state, summary };
+        else assistant.parts.push({ type: "data-tool", id: toolCallId, data: { toolCallId, name, state, summary } });
+        item.updatedAt = now();
+        res.write(`${JSON.stringify(emit("tool", { toolCallId, name, state, summary }))}\n`);
       }
     }
   } catch (error) {
+    assistant.metadata.state = "failed";
+    assistant.parts = assistant.parts.map((part) => ({ ...part, state: "done" }));
+    assistant.parts.push(terminalPart("failed", "The ACP harness could not complete the turn"));
+    if (!item.messages.includes(assistant)) item.messages.push(assistant);
+    item.updatedAt = now();
     res.write(`${JSON.stringify(emit("error", { code: "ACP_TURN_FAILED", message: "The ACP harness could not complete the turn", retryable: true }))}\n`);
-    res.write(`${JSON.stringify(emit("turn-finish", { state: "failed", completedAt: now() }))}\n`);
+    res.write(`${JSON.stringify(emit("turn-finish", { state: "failed", completedAt: item.updatedAt }))}\n`);
   } finally {
+    item.active = false;
     res.end();
   }
 };
@@ -138,7 +175,11 @@ const server = createServer(async (req, res) => {
       return await streamTurn(res, item, turnMatch[1], value.message);
     }
     const messagesMatch = req.url?.match(/^\/api\/sessions\/([^/]+)\/messages$/);
-    if (req.method === "GET" && messagesMatch) return json(res, 200, { messages: [] });
+    if (req.method === "GET" && messagesMatch) {
+      const item = sessions.get(messagesMatch[1]);
+      if (!item) return json(res, 404, { error: "session not found" });
+      return json(res, 200, { messages: item.messages });
+    }
     return json(res, 404, { error: "not found" });
   } catch (error) {
     if (!res.headersSent) json(res, 503, { error: "ACP runtime unavailable" }); else res.end();

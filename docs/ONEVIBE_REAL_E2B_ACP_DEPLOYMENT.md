@@ -33,6 +33,13 @@ chat endpoints (`8644` Codex, `8645` OpenCode). Control uses those endpoints
 for the selected E2B workspace; the Docker-only `onecomputer-sandbox-*` DNS
 route is never used for managed sandboxes.
 
+The bridge keeps the canonical user/assistant transcript for the lifetime of
+the ACP process and rejects concurrent turns for one session. It does not
+invent history: after the provider process is lost, the session is unavailable
+and the endpoint returns `404` rather than an empty synthetic conversation.
+Durable replay and restart recovery remain a release gate, not a hidden
+fallback.
+
 ## Provisioning
 
 1. Build and publish an immutable workspace template from the exact
@@ -80,9 +87,10 @@ but a live run still requires an approved E2B template ID, reachable governed
 egress/control routes, and valid runtime credentials. Until that qualification
 is completed, production must fail closed rather than claim an ACP result.
 
-The next hardening items are explicit: add a durable TTL reaper that revokes
-grants and purges ephemeral volumes; expose provider-local PNG capture through
-the controller capture-grant endpoint; and add a gated live E2B acceptance
-harness covering two real conversations, follow-up session reuse, frame hash
-deduplication, PPTX magic bytes, and cleanup. The existing fixture Playwright
-suite remains a UI contract test, not a substitute for that gate.
+The next hardening items are explicit: add durable session/replay persistence
+and a TTL reaper that revokes grants and purges ephemeral volumes; expose
+provider-local, source-application PNG capture (Chrome/Word window targeting)
+through the controller capture-grant endpoint; and add a gated live E2B
+acceptance harness covering two real conversations, follow-up session reuse,
+frame hash deduplication, PPTX magic bytes, and cleanup. The existing fixture
+Playwright suite remains a UI contract test, not a substitute for that gate.

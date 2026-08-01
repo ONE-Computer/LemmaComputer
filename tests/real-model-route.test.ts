@@ -304,6 +304,15 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(mcpBridge, /visible_name = f"\{server_label\}__\{upstream_name\}"/);
 });
 
+test("provider ACP bridge exposes real transcript state and rejects concurrent turns", async () => {
+  const bridge = await source("docker/workspace/onecomputer-acp-chat.mjs");
+  assert.match(bridge, /messages: \[\], active: false/);
+  assert.match(bridge, /if \(item\.active\) return json\(res, 409/);
+  assert.match(bridge, /return json\(res, 404, \{ error: "session not found" \}\)/);
+  assert.match(bridge, /return json\(res, 200, \{ messages: item\.messages \}\)/);
+  assert.doesNotMatch(bridge, /return json\(res, 200, \{ messages: \[\] \}\)/);
+});
+
 test("the Hermes sandbox gateway includes its pinned private API runtime without a home-log ownership collision", async () => {
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
