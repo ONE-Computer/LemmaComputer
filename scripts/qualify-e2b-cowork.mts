@@ -199,6 +199,7 @@ async function runTask(label: string): Promise<TaskRun> {
   const taskId = String(task.id);
   const workspaceId = String(workspace.id);
   allocatedWorkspaces.add(workspaceId);
+  allocatedTasks.set(workspaceId, taskId);
   const sandbox = await waitForSandbox(workspaceId);
   const agentList = await controlJson(`/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents`);
   const agent = (Array.isArray(agentList.agents) ? agentList.agents as Array<JsonRecord> : [])
@@ -270,6 +271,7 @@ async function runTask(label: string): Promise<TaskRun> {
 
 const runs: TaskRun[] = [];
 const allocatedWorkspaces = new Set<string>();
+const allocatedTasks = new Map<string, string>();
 let cleanupFailed = false;
 try {
   runs.push(await runTask("one"));
@@ -302,4 +304,9 @@ try {
     }
   }
   if (cleanupFailed) throw new Error("Live E2B qualification cleanup did not complete");
+  for (const [workspaceId, taskId] of allocatedTasks) {
+    const retained = await controlJson(`/v1/workspaces/${encodeURIComponent(workspaceId)}/onevibe/tasks/${encodeURIComponent(taskId)}/events`);
+    const events = Array.isArray(retained.events) ? retained.events : [];
+    assert.ok(events.length > 0, `task evidence must remain queryable after provider cleanup for ${taskId}`);
+  }
 }
