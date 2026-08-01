@@ -330,6 +330,9 @@ test("live E2B Cowork qualification is explicit, credentialed, and fixture-resis
   assert.match(script, /ONECOMPUTER_UI_FIXTURE === "1"/);
   assert.match(script, /E2B_REAL_ACP_OK/);
   assert.match(script, /workspace-frame|onevibe\/tasks/);
+  assert.match(script, /envdAccessToken/);
+  assert.match(script, /lifecycle\?\.onTimeout, "pause"/);
+  assert.match(script, /lifecycle\?\.autoResume, true/);
 });
 
 test("provider ACP bridge persists bounded history and restores the exact vendor session", async () => {

@@ -112,10 +112,16 @@ async function waitForSandbox(workspaceId: string) {
   while (Date.now() < deadline) {
     const sandboxes = await listE2bSandboxes(workspaceId);
     if (sandboxes.length === 1) {
-      const sandbox = sandboxes[0]!;
+      const listed = sandboxes[0]!;
+      const sandbox = await E2bSandbox.getInfo(listed.sandboxId, { apiKey: e2bApiKey });
+      const secureInfo = sandbox as SandboxInfo & { envdAccessToken?: string | null };
       assert.equal(sandbox.templateId, expectedTemplateId, "live sandbox must use the pinned template");
+      assert.ok(sandbox.envdVersion, "live sandbox must expose an envd version");
+      assert.ok(secureInfo.envdAccessToken, "secure E2B access must return an envd access token");
       assert.equal(sandbox.allowInternetAccess, true, "E2B internet policy must be explicitly inspected");
       assert.ok(sandbox.network?.allowOut?.length, "E2B allowOut must contain governed routes");
+      assert.equal(sandbox.lifecycle?.onTimeout, "pause", "Cowork sandboxes must use provider pause before Control cleanup");
+      assert.equal(sandbox.lifecycle?.autoResume, true, "Cowork sandboxes must auto-resume only behind the signed task deadline");
       return sandbox;
     }
     if (sandboxes.length > 1) throw new Error(`Expected one E2B sandbox for ${workspaceId}, found ${sandboxes.length}`);
