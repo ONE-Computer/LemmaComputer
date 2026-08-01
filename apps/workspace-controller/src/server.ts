@@ -318,6 +318,12 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const verificationKeys = policyVerificationKeySetSchema.parse(JSON.parse(
     Buffer.from(env.POLICY_VERIFICATION_KEYS_B64, "base64").toString("utf8"),
   ));
-  const app = createControllerServer(adapterFromEnv(env), env.CONTROLLER_INTERNAL_TOKEN, verificationKeys);
+  const adapter = adapterFromEnv(env);
+  const app = createControllerServer(adapter, env.CONTROLLER_INTERNAL_TOKEN, verificationKeys);
+  const reconcile = () => adapter.reconcile?.().catch(() => undefined);
+  const reconciliationTimer = setInterval(reconcile, 5_000);
+  reconciliationTimer.unref();
+  app.addHook("onClose", async () => clearInterval(reconciliationTimer));
   await app.listen({ host: env.CONTROLLER_HOST, port: env.CONTROLLER_PORT });
+  void reconcile();
 }

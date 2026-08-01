@@ -53,6 +53,56 @@ test("Kasm operational states map to the canonical sandbox contract", () => {
   assert.equal(mapKasmState("error"), "failed");
 });
 
+test("local Kasm reconciliation restores governed endpoints after Compose replaces them", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const connections: Array<Record<string, unknown>> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const path = request.url?.replace(/^\/v1\.47/, "") ?? "";
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path === "/containers/json?all=1") {
+      response.end(JSON.stringify([{ State: "running", Labels: {
+        "com.onecomputer.workspace-network": workspaceNetwork,
+        "com.onecomputer.gateway-attached": "true",
+        "com.onecomputer.control-attached": "true",
+      } }]));
+      return;
+    }
+    if (request.method === "GET" && path === `/networks/${workspaceNetwork}`) {
+      response.end(JSON.stringify({ Containers: {} }));
+      return;
+    }
+    if (request.method === "POST" && path === `/networks/${workspaceNetwork}/connect`) connections.push(body);
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      controlContainer: "onecomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+    });
+    await adapter.reconcile();
+    assert.deepEqual(connections, [
+      { Container: "onecomputer-litellm", EndpointConfig: { Aliases: ["litellm"] } },
+      { Container: "onecomputer-control-api", EndpointConfig: { Aliases: ["onecomputer-control"] } },
+    ]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("local Kasm destroy tolerates a governed endpoint disappearing during disconnect", async () => {
   const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
