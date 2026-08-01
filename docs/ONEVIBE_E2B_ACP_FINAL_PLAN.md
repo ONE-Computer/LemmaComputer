@@ -131,6 +131,31 @@ Required qualifications:
   reasoning in replay evidence;
 - create/resume/pause/kill reconciliation and explicit volume purge.
 
+#### Temporary qualification result
+
+On 2026-08-01 a bounded provider test used the built-in `base` template only;
+no repository changes or persistent credentials were made. The test verified:
+
+- sandbox creation with `secure: true`, 2 vCPU, 512 MiB, and internet disabled;
+- a harmless command executing successfully;
+- outbound HTTPS being blocked when `allowInternetAccess` was false;
+- pause/resume preserving the filesystem and returning to `running`;
+- pause without memory retention returning `paused`;
+- snapshot creation, clone, marker-file verification, and snapshot deletion;
+- kill returning success, a subsequent direct lookup returning `404`, and final
+  sandbox, volume, and snapshot inventories all being empty.
+
+This proves the provider lifecycle hypothesis, not production parity. The
+account had no custom templates. Before any Cowork traffic is routed to E2B,
+build and promote an immutable ONEComputer image/template containing the ACP
+runtime, workspace tools, browser/office/VCR dependencies, and the approved
+egress broker. Qualification must also assert the exact scoped ingress/traffic
+token boundary; a successful `secure` request alone is not evidence that token
+handling is correct. Pause, snapshot, and resume can drop PTY/WebSocket/live
+VCR connections, so the coordinator must reconnect and emit truthful lifecycle
+events. Add orphan sweeping, snapshot TTL/deletion, timeout/kill-on-failure,
+and per-task usage metering before production enablement.
+
 ### Kasm/KasmVNC — durable visual tier
 
 Keep Kasm for long-running browser/office work, persistent profiles, desktop
