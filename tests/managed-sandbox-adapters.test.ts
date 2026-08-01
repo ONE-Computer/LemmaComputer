@@ -74,6 +74,8 @@ const input = (): SandboxCreateInput => ({
 test("E2B projects policy, persistent storage, controlled egress, and authenticated Kasm launch", async () => {
   let createOptions: Parameters<E2bSdk["create"]>[1] | undefined;
   let destroyedVolume = "";
+  const killedSandboxes: string[] = [];
+  let listSandboxCalls = 0;
   const sdk: E2bSdk = {
     async create(_template, options) {
       createOptions = options;
@@ -118,8 +120,22 @@ test("E2B projects policy, persistent storage, controlled egress, and authentica
         diskSizeMB: 10_000,
       };
     },
-    async kill() { return true; },
-    async listSandboxes() { return []; },
+    async kill(id) { killedSandboxes.push(id); return true; },
+    async listSandboxes() {
+      listSandboxCalls += 1;
+      return listSandboxCalls === 1 ? [] : [{
+        sandboxId: "orphaned-e2b-sandbox",
+        templateId: "onecomputer-template",
+        metadata: { "onecomputer.workspaceId": workspaceId },
+        startedAt: new Date(),
+        endAt: new Date(Date.now() + 60_000),
+        state: "running",
+        cpuCount: 2,
+        memoryMB: 4096,
+        envdVersion: "1",
+        diskSizeMB: 10_000,
+      }];
+    },
     async listVolumes() { return [{ volumeId: "vol-1", name: `oc-${workspaceId.replaceAll("-", "")}` }]; },
     async createVolume() { return { volumeId: "vol-new" }; },
     async destroyVolume(id) { destroyedVolume = id; return true; },
@@ -152,6 +168,7 @@ test("E2B projects policy, persistent storage, controlled egress, and authentica
 
   await adapter.purgeWorkspace(workspaceId);
   assert.equal(destroyedVolume, "vol-1");
+  assert.deepEqual(killedSandboxes, ["orphaned-e2b-sandbox"]);
 });
 
 test("E2B exposes provider-hosted ACP chat endpoints only for granted runtimes", async () => {

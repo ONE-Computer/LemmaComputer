@@ -573,6 +573,15 @@ export class E2bSandboxAdapter implements SandboxAdapter {
 
   async purgeWorkspace(workspaceId: string) {
     try {
+      // Reconcile every provider sandbox tagged to this workspace before
+      // deleting its volume. This also removes allocations left behind when
+      // bootstrap failed before Control persisted a providerId.
+      const sandboxes = await this.sdk.listSandboxes({ apiKey: this.config.apiKey, workspaceId });
+      await Promise.all(sandboxes.map(async (sandbox) => {
+        await this.sdk.kill(sandbox.sandboxId, { apiKey: this.config.apiKey }).catch((error: unknown) => {
+          if (!(error instanceof Error && /not found/i.test(error.message))) throw error;
+        });
+      }));
       const volume = (await this.sdk.listVolumes({ apiKey: this.config.apiKey }))
         .find((candidate) => candidate.name === safeName("oc", workspaceId));
       if (volume) await this.sdk.destroyVolume(volume.volumeId, { apiKey: this.config.apiKey });
