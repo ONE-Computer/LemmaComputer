@@ -39,7 +39,8 @@ flowchart LR
   Control --> Controller["Workspace controller"]
   Controller --> Sandbox["Kasm sandbox"]
   Control --> Consent["OpenVTC consent service"]
-  Control -->|"private administrator API"| Gateway["LiteLLM gateway"]
+  Control -->|"hosted mTLS administrator API"| AdminProxy["LiteLLM admin proxy"]
+  AdminProxy --> Gateway["LiteLLM gateway"]
   Gateway -->|"routing, usage, and MCP policy callback"| Control
   Control --> Broker["Channel broker"]
   Scheduler["Scheduler worker"] --> Control
@@ -92,6 +93,7 @@ paths and identifies which decisions remain authoritative in Control.
 | `db-migrate` | One-shot, checksummed Control-database migration job that must complete before Control starts | Private/job |
 | `workspace-controller` | Provisions Kasm workspaces through local Docker or the Kasm Developer API | Private |
 | `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, and MCP dispatch | `127.0.0.1:4000` |
+| `litellm-admin-proxy` | Dedicated Control-to-LiteLLM administration transport; requires mTLS in hosted deployments | Private |
 | `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | OAuth bridge on `127.0.0.1:4311` |
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |

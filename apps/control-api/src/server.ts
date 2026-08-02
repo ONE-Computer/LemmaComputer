@@ -2,7 +2,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
-import { LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
+import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import {RoutingDecisionBindingAuthority} from "@onecomputer/model-router";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
 import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
@@ -36,6 +36,7 @@ import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchem
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
+import { assertHostedLiteLlmAdminSecurity } from "./litellm-admin-security.js";
 import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
 
 import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
@@ -216,7 +217,12 @@ const envSchema = z.object({
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
   DATABASE_URL: z.string().min(1),
+  ONECOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
   LITELLM_ADMIN_URL: z.string().url().optional(),
+  LITELLM_ADMIN_TLS_CA_B64: optionalEnvString(),
+  LITELLM_ADMIN_TLS_CLIENT_CERT_B64: optionalEnvString(),
+  LITELLM_ADMIN_TLS_CLIENT_KEY_B64: optionalEnvString(),
+  LITELLM_ADMIN_TLS_SERVER_NAME: optionalEnvString(),
   LITELLM_WORKSPACE_URL: z.string().url().optional(),
   LITELLM_MASTER_KEY: z.string().min(24).optional(),
   LITELLM_CREDENTIAL_SECRET: z.string().min(32).optional(),
@@ -2546,12 +2552,25 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
   if (gatewayValues.some(Boolean) && !gatewayValues.every(Boolean)) throw new Error("All LiteLLM gateway settings must be configured together");
+  const liteLlmAdminTls = assertHostedLiteLlmAdminSecurity({
+    installationKind: env.ONECOMPUTER_INSTALLATION_KIND,
+    adminUrl: env.LITELLM_ADMIN_URL,
+    credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
+    sessionSecret: env.SESSION_SECRET,
+    workspaceIngressSecret: env.WORKSPACE_INGRESS_SECRET,
+    caBase64: env.LITELLM_ADMIN_TLS_CA_B64,
+    clientCertificateBase64: env.LITELLM_ADMIN_TLS_CLIENT_CERT_B64,
+    clientKeyBase64: env.LITELLM_ADMIN_TLS_CLIENT_KEY_B64,
+    serverName: env.LITELLM_ADMIN_TLS_SERVER_NAME,
+  });
+  const liteLlmAdminFetch = liteLlmAdminTls ? createMutualTlsFetch(liteLlmAdminTls) : undefined;
   const gateway = env.LITELLM_ADMIN_URL && env.LITELLM_WORKSPACE_URL && env.LITELLM_MASTER_KEY && env.LITELLM_CREDENTIAL_SECRET
     ? new LiteLLMGatewayAdapter({
         adminUrl: env.LITELLM_ADMIN_URL,
         workspaceUrl: env.LITELLM_WORKSPACE_URL,
         masterKey: env.LITELLM_MASTER_KEY,
         credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
+        adminFetch: liteLlmAdminFetch,
       })
     : undefined;
   const providerAdministration = env.LITELLM_ADMIN_URL && env.LITELLM_MASTER_KEY && env.LITELLM_CREDENTIAL_SECRET
@@ -2559,6 +2578,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         adminUrl: env.LITELLM_ADMIN_URL,
         masterKey: env.LITELLM_MASTER_KEY,
         credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
+        adminFetch: liteLlmAdminFetch,
       })
     : undefined;
   const channelBrokerValues = [env.CHANNEL_BROKER_URL, env.CHANNEL_BROKER_INTERNAL_TOKEN];
@@ -2568,7 +2588,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const channelBrokerClient = env.CHANNEL_BROKER_URL && env.CHANNEL_BROKER_INTERNAL_TOKEN
     ? new HttpChannelBrokerManagementClient(env.CHANNEL_BROKER_URL, env.CHANNEL_BROKER_INTERNAL_TOKEN)
     : undefined;
-  const budgetProjector=env.LITELLM_ADMIN_URL&&env.LITELLM_MASTER_KEY?new LiteLlmTeamBudgetProjector({adminUrl:env.LITELLM_ADMIN_URL,masterKey:env.LITELLM_MASTER_KEY}):undefined;
+  const budgetProjector=env.LITELLM_ADMIN_URL&&env.LITELLM_MASTER_KEY?new LiteLlmTeamBudgetProjector({adminUrl:env.LITELLM_ADMIN_URL,masterKey:env.LITELLM_MASTER_KEY,fetch:liteLlmAdminFetch}):undefined;
   const webPushValues = [env.WEB_PUSH_VAPID_SUBJECT, env.WEB_PUSH_VAPID_PUBLIC_KEY, env.WEB_PUSH_VAPID_PRIVATE_KEY, env.WEB_PUSH_SUBSCRIPTION_SECRET];
   if (webPushValues.some(Boolean) && !webPushValues.every(Boolean)) throw new Error("All Web Push settings must be configured together");
   const pushProvider = env.WEB_PUSH_VAPID_SUBJECT && env.WEB_PUSH_VAPID_PUBLIC_KEY

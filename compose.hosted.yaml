@@ -1,0 +1,21 @@
+# Hosted production overlay. Use with:
+# docker compose -f compose.yaml -f compose.hosted.yaml up -d --wait
+# TLS material is injected by the deployment secret manager; it is never
+# generated into or read from a repository file.
+services:
+  db-migrate:
+    environment:
+      ONECOMPUTER_INSTALLATION_KIND: hosted
+
+  workspace-controller:
+    environment:
+      ONECOMPUTER_INSTALLATION_KIND: hosted
+
+  control-api:
+    environment:
+      ONECOMPUTER_INSTALLATION_KIND: hosted
+      LITELLM_ADMIN_URL: https://litellm-admin-listener:8443
+
+  litellm-admin-proxy:
+    environment:
+      ONECOMPUTER_INSTALLATION_KIND: hosted
