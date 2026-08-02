@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("administrator enters the AI control plane from the account menu and navigates its tabs", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1200 });
   await page.goto("/");
   await page.locator(".sidebar-profile").click();
   const accountMenu = page.getByRole("group", { name: "Account menu" });
@@ -33,10 +34,15 @@ test("administrator enters the AI control plane from the account menu and naviga
   await emissionsInfo.hover();
   const emissionsTooltip = page.getByRole("tooltip", { name: /How this estimate is calculated/ });
   await expect(emissionsTooltip).toBeVisible();
-  await expect(page.locator(".ai-emissions")).toHaveCSS("overflow", "visible");
+  const [emissionsBox, tooltipBox] = await Promise.all([page.locator(".ai-emissions").boundingBox(), emissionsTooltip.boundingBox()]);
+  expect(emissionsBox).not.toBeNull();
+  expect(tooltipBox).not.toBeNull();
+  expect(tooltipBox!.y).toBeGreaterThan(emissionsBox!.y);
+  expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(emissionsBox!.y + emissionsBox!.height);
   await expect(emissionsTooltip).toContainText("United States");
   await expect(emissionsTooltip).toContainText("0.349667 kg CO₂e/kWh");
   await expect(emissionsTooltip).toContainText("input, output, cache-read, cache-write, and reasoning text tokens");
+  await expect(page).toHaveScreenshot("ai-emissions-tooltip-desktop.png");
   await tabs.getByRole("button", { name: "Pricing" }).click();
   await expect(page).toHaveURL(/\?view=ai-control-plane&section=pricing$/);
   await expect(page.getByRole("heading", { name: "Pricing", exact: true })).toBeVisible();

@@ -325,21 +325,21 @@ export function AiControlPlaneOverview({
         <section className="ai-overview-section ai-emissions" aria-label="Estimated AI-related emissions">
           <span className="ai-emissions-icon"><LeafThree20Regular aria-hidden="true" /></span>
           <div className="ai-emissions-copy">
-            <div className="ai-emissions-label">
-              <p>Estimated AI-related emissions</p>
-              <span className="ai-emissions-tooltip-wrap">
+            <div className="ai-emissions-tooltip-wrap">
+              <div className="ai-emissions-label">
+                <p>Estimated AI-related emissions</p>
                 <button type="button" aria-label="How estimated AI emissions are calculated" aria-describedby="ai-emissions-tooltip"><Info20Regular aria-hidden="true" /></button>
-                <span className="ai-emissions-tooltip" id="ai-emissions-tooltip" role="tooltip">
-                  <strong>How this estimate is calculated</strong>
-                  <span>Covered text tokens ÷ 1,000,000 × {AI_EMISSIONS_METHOD.energyKwhPerMillionTextTokens} kWh × the selected grid factor. Regional results are added together.</span>
-                  {emissions?.regionSources?.length ? emissions.regionSources.map((source) => (
-                    <span className="ai-emissions-tooltip-region" key={source.region}>
-                      <b>{emissionsRegionName(source.label)}</b>
-                      {number(source.tokens).toLocaleString("en")} tokens × {AI_EMISSIONS_METHOD.regions[source.region].kgCo2ePerKwh} kg CO₂e/kWh
-                    </span>
-                  )) : <span className="ai-emissions-tooltip-region">Choose an estimated serving grid on a configured provider to apply a regional factor.</span>}
-                  <small>Includes input, output, cache-read, cache-write, and reasoning text tokens. This is an operational estimate, not an assured provider location.</small>
-                </span>
+              </div>
+              <span className="ai-emissions-tooltip" id="ai-emissions-tooltip" role="tooltip">
+                <strong>How this estimate is calculated</strong>
+                <span>Covered text tokens ÷ 1,000,000 × {AI_EMISSIONS_METHOD.energyKwhPerMillionTextTokens} kWh × the selected grid factor. Regional results are added together.</span>
+                {emissions?.regionSources?.length ? emissions.regionSources.map((source) => (
+                  <span className="ai-emissions-tooltip-region" key={source.region}>
+                    <b>{emissionsRegionName(source.label)}</b>
+                    {number(source.tokens).toLocaleString("en")} tokens × {AI_EMISSIONS_METHOD.regions[source.region].kgCo2ePerKwh} kg CO₂e/kWh
+                  </span>
+                )) : <span className="ai-emissions-tooltip-region">Choose an estimated serving grid on a configured provider to apply a regional factor.</span>}
+                <small>Includes input, output, cache-read, cache-write, and reasoning text tokens. This is an operational estimate, not an assured provider location.</small>
               </span>
             </div>
             <h3 id="ai-emissions-heading">{formatEmissions(emissions)}</h3>
