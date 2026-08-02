@@ -1,3 +1,5 @@
+import { encryptTelegramBotTokenEnvelope } from "./telegram-token-intake.js";
+
 const jsonHeaders = { "content-type": "application/json" };
 
 async function request(path, options = {}) {
@@ -40,6 +42,25 @@ const retryableMutation = (path, method = "POST", body) => {
   // state-machine operations that safely resume from failed/cleanup states.
   const options = mutation(method, body);
   return retryRetryableRequest(() => request(path, options));
+};
+
+// The Control API authorizes and signs an intake grant, but never receives the
+// bot token. The browser encrypts it for the broker and submits only the
+// resulting envelope through the Web edge route. Do not wrap this in the
+// generic retry helper: a grant is deliberately single-use, so an uncertain
+// intake response must start again with a newly-issued grant.
+const redeemTelegramTokenIntake = async (grantPath, botToken) => {
+  const grant = await request(grantPath, mutation("POST", {}));
+  const envelope = await encryptTelegramBotTokenEnvelope({
+    grantId: grant.grantId,
+    encryptionPublicKeySpkiBase64: grant.encryption.publicKeySpkiBase64,
+    botToken,
+  });
+  return request(grant.intakeUrl, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ grant: grant.grant, envelope }),
+  });
 };
 
 export const workspaceApi = {
@@ -128,8 +149,11 @@ export const connectionApi = {
   microsoft365AuthorizeUrl: "/api/v1/connections/microsoft-365/authorize",
   disconnectMicrosoft365: () => request("/api/v1/connections/microsoft-365", mutation("DELETE")),
   credentials: () => request("/api/v1/credentials", { cache: "no-store" }),
-  createTelegramCredential: (botToken) => request("/api/v1/credentials/telegram", mutation("POST", { botToken })),
-  rotateTelegramCredential: (credentialId, botToken) => request(`/api/v1/credentials/${encodeURIComponent(credentialId)}/telegram`, mutation("PUT", { botToken })),
+  createTelegramCredential: (botToken) => redeemTelegramTokenIntake("/api/v1/credentials/telegram/intake-grants", botToken),
+  rotateTelegramCredential: (credentialId, botToken) => redeemTelegramTokenIntake(
+    `/api/v1/credentials/${encodeURIComponent(credentialId)}/telegram/intake-grants`,
+    botToken,
+  ),
   deleteCredential: (credentialId) => request(`/api/v1/credentials/${encodeURIComponent(credentialId)}`, mutation("DELETE")),
   telegram: (workspaceId) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/telegram`, { cache: "no-store" }),
   saveTelegram: (workspaceId, configuration) => request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/telegram`, mutation("PUT", configuration)),

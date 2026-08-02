@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 import {
   m365ToolCatalog,
+  TelegramTokenIntakeGrantIssuer,
+  TelegramTokenIntakeGrantVerifier,
   type AgentChatEvent,
   type ChannelTurnRequest,
   type IdentityContext,
@@ -137,6 +139,94 @@ class FakeBroker implements ChannelBrokerManagementClient {
 
   async disconnect() { this.connection = null; }
 }
+
+const tokenIntake = () => {
+  const signing = generateKeyPairSync("ed25519");
+  const encryption = generateKeyPairSync("rsa", { modulusLength: 3072 });
+  const privateKey = signing.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64");
+  return {
+    grantIssuer: new TelegramTokenIntakeGrantIssuer(privateKey),
+    verifier: new TelegramTokenIntakeGrantVerifier(signing.publicKey.export({ format: "der", type: "spki" }).toString("base64")),
+    encryptionPublicKeySpkiBase64: encryption.publicKey.export({ format: "der", type: "spki" }).toString("base64"),
+    intakeUrl: "/api/channel-intake/v1/telegram",
+    ttlSeconds: 300,
+  };
+};
+
+test("Control issues a bound Telegram intake grant without receiving a bot token", async () => {
+  const store = new MemoryWorkspaceStore();
+  const broker = new FakeBroker();
+  const intake = tokenIntake();
+  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    identityPolicyStore: policyStore(effectivePolicy()),
+    channelBrokerClient: broker,
+    telegramTokenIntake: intake,
+  });
+  try {
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/credentials/telegram/intake-grants",
+      headers: { ...headers, "content-type": "application/json", "idempotency-key": "telegram-intake-create-idempotency-key" },
+      payload: {},
+    });
+    assert.equal(created.statusCode, 201);
+    assert.equal(broker.savedToken, "");
+    assert.ok(!JSON.stringify(created.json()).includes("telegram-token"));
+    const grant = intake.verifier.verify(created.json().grant);
+    assert.deepEqual(
+      { tenantId: grant.tenantId, subjectId: grant.subjectId, action: grant.action, credentialId: grant.credentialId },
+      { tenantId: alpha.tenantId, subjectId: alpha.subjectId, action: "create", credentialId: created.json().credentialId },
+    );
+    assert.equal(created.json().intakeUrl, "/api/channel-intake/v1/telegram");
+
+    const invalidIdempotency = await app.inject({
+      method: "POST",
+      url: "/v1/credentials/telegram/intake-grants",
+      headers: { ...headers, "content-type": "application/json", "idempotency-key": "too-short" },
+      payload: {},
+    });
+    assert.equal(invalidIdempotency.statusCode, 400);
+    assert.equal(invalidIdempotency.json().error.code, "IDEMPOTENCY_KEY_REQUIRED");
+
+    const rotation = await app.inject({
+      method: "POST",
+      url: "/v1/credentials/72b8576c-83f1-4c7b-bbcb-6d4d50fbab24/telegram/intake-grants",
+      headers: { ...headers, "content-type": "application/json", "idempotency-key": "telegram-intake-rotate-idempotency-key" },
+      payload: {},
+    });
+    assert.equal(rotation.statusCode, 201);
+    assert.equal(intake.verifier.verify(rotation.json().grant).action, "rotate");
+    assert.equal(intake.verifier.verify(rotation.json().grant).credentialId, "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24");
+  } finally {
+    await app.close();
+  }
+});
+
+test("hosted Control rejects raw Telegram token payloads before the broker receives them", async () => {
+  const broker = new FakeBroker();
+  const app = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    identityPolicyStore: policyStore(effectivePolicy()),
+    channelBrokerClient: broker,
+    telegramRawTokenInputMode: "reject",
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/credentials/telegram",
+      headers: { ...headers, "content-type": "application/json" },
+      // Deliberately malformed JSON proves the hosted rejection happens in
+      // onRequest, before Fastify parses a raw token body.
+      payload: '{"botToken":"123456789:telegram-token-that-control-must-not-forward"',
+    });
+    assert.equal(response.statusCode, 410);
+    assert.equal(response.json().error.code, "TELEGRAM_RAW_TOKEN_INPUT_REJECTED");
+    assert.equal(broker.savedToken, "");
+  } finally {
+    await app.close();
+  }
+});
 
 test("credential APIs keep Telegram tokens write-only across create, rotate, list, and delete", async () => {
   const store = new MemoryWorkspaceStore();

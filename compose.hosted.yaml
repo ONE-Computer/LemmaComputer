@@ -16,6 +16,10 @@ services:
       ONECOMPUTER_INSTALLATION_KIND: hosted
       LITELLM_ADMIN_URL: https://litellm-admin-listener:8443
 
+  channel-broker:
+    environment:
+      ONECOMPUTER_INSTALLATION_KIND: hosted
+
   litellm-admin-proxy:
     environment:
       ONECOMPUTER_INSTALLATION_KIND: hosted

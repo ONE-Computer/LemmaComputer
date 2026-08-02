@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { createPrivateKey, createPublicKey } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   environmentParity,
+  initializeEnvironment,
   mergeEnvironment,
+  parseEnvironment,
 } from "../scripts/environment-template.mjs";
 import {
   runComposeDown,
@@ -58,6 +62,26 @@ test("environment updates refuse partially configured coupled signing keys", () 
     () => mergeEnvironment(template, current, template),
     /coupled environment group must be complete/,
   );
+});
+
+test("environment initialization creates separate Telegram grant and envelope key pairs", async () => {
+  const template = await readFile(new URL("../.env.example", import.meta.url), "utf8");
+  const values = parseEnvironment(initializeEnvironment(template, "Etc/UTC")).values;
+  const privateKey = (name: string) => createPrivateKey({
+    key: Buffer.from(values.get(name)!, "base64"),
+    format: "der",
+    type: "pkcs8",
+  });
+  const publicKey = (name: string) => createPublicKey({
+    key: Buffer.from(values.get(name)!, "base64"),
+    format: "der",
+    type: "spki",
+  });
+
+  assert.equal(privateKey("ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64").asymmetricKeyType, "ed25519");
+  assert.equal(publicKey("ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64").asymmetricKeyType, "ed25519");
+  assert.equal(privateKey("ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64").asymmetricKeyType, "rsa");
+  assert.equal(publicKey("ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64").asymmetricKeyType, "rsa");
 });
 
 test("compose shutdown refuses to bypass managed workspace lifecycle", () => {

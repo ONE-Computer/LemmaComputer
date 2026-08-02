@@ -13,6 +13,11 @@ export default defineConfig({
       clientFiles: ["./src/main.jsx"],
     },
     proxy: {
+      "/api/channel-intake": {
+        target: process.env.ONECOMPUTER_CHANNEL_BROKER_INTAKE_URL ?? "http://127.0.0.1:4102",
+        changeOrigin: false,
+        rewrite: (path) => path.replace(/^\/api\/channel-intake/, ""),
+      },
       "/api": {
         target: process.env.ONECOMPUTER_CONTROL_URL ?? "http://127.0.0.1:4100",
         changeOrigin: false,

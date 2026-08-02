@@ -1,7 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import {RoutingDecisionBindingAuthority} from "@onecomputer/model-router";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
@@ -253,6 +253,14 @@ const envSchema = z.object({
   AGENT_CHAT_SECRET: z.string().min(32),
   CHANNEL_BROKER_URL: optionalEnvString(),
   CHANNEL_BROKER_INTERNAL_TOKEN: optionalEnvString(32),
+  TELEGRAM_RAW_TOKEN_INPUT_MODE: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.enum(["legacy", "reject"]).optional(),
+  ),
+  TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64: optionalEnvString(32),
+  TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64: optionalEnvString(64),
+  TELEGRAM_INTAKE_URL: z.literal(telegramTokenIntakePath).default(telegramTokenIntakePath),
+  TELEGRAM_INTAKE_GRANT_TTL_SECONDS: z.coerce.number().int().min(30).max(600).default(300),
   SCHEDULER_INTERNAL_TOKEN: z.string().min(32),
   SCHEDULE_PROMPT_SECRET: z.string().min(32),
   POLICY_SIGNING_KEY_ID: z.string().regex(/^psk_[a-z0-9][a-z0-9_-]{2,63}$/),
@@ -308,6 +316,13 @@ export function createControlServer(
     agentChatClient?: AgentChatClient;
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
+    telegramTokenIntake?: {
+      grantIssuer: TelegramTokenIntakeGrantIssuer;
+      encryptionPublicKeySpkiBase64: string;
+      intakeUrl: string;
+      ttlSeconds: number;
+    };
+    telegramRawTokenInputMode?: "legacy" | "reject";
     scheduleStore?: ScheduleStore;
     siteStore?: SiteStore;
     teamStore?: TeamStore;
@@ -427,6 +442,7 @@ export function createControlServer(
   const routing=security.routingStore?new RoutingAdministrationService(security.routingStore):undefined;
   const requireRouting=()=>{if(!routing)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
   const channelBroker = security.channelBrokerClient;
+  const telegramRawTokenInputMode = security.telegramRawTokenInputMode ?? "legacy";
   const requireSpendObservability = (request: object) => {
     const actor = principal(request);
     if (!isAdministrator(actor)) {
@@ -500,6 +516,12 @@ export function createControlServer(
   const requireChannelBroker = () => {
     if (!channelBroker) throw new OneComputerError("CHANNEL_BROKER_NOT_CONFIGURED", "Messaging connections are not configured", 503, true);
     return channelBroker;
+  };
+  const requireTelegramTokenIntake = () => {
+    if (!security.telegramTokenIntake) {
+      throw new OneComputerError("TELEGRAM_INTAKE_NOT_CONFIGURED", "Telegram credential intake is unavailable", 503, true);
+    }
+    return security.telegramTokenIntake;
   };
   const workspaceManifest = (
     configuration: SandboxConfiguration,
@@ -606,6 +628,24 @@ export function createControlServer(
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Sign in with your work account", correlationId: request.id, retryable: false } });
     }
     principals.set(request, principal);
+    const rejectedRawTelegramRoute = (
+      request.method === "POST" && /^\/v1\/credentials\/telegram(?:\?|$)/.test(request.url)
+    ) || (
+      request.method === "PUT" && /^\/v1\/credentials\/[^/]+\/telegram(?:\?|$)/.test(request.url)
+    );
+    // This hook runs before Fastify parses a request body. Hosted deployments
+    // therefore reject deprecated raw-token routes without materializing the
+    // usable secret in Control's request handling path.
+    if (telegramRawTokenInputMode === "reject" && rejectedRawTelegramRoute) {
+      return reply.code(410).send({
+        error: {
+          code: "TELEGRAM_RAW_TOKEN_INPUT_REJECTED",
+          message: "Broker-only Telegram credential intake is required",
+          correlationId: request.id,
+          retryable: false,
+        },
+      });
+    }
   });
 
   const principal = (request: object) => {
@@ -825,6 +865,13 @@ export function createControlServer(
   const idempotency = (headers: Record<string, unknown>) => {
     const key = headers["idempotency-key"];
     if (typeof key !== "string" || key.length < 8 || key.length > 128) throw new OneComputerError("IDEMPOTENCY_KEY_REQUIRED", "A valid Idempotency-Key header is required", 400);
+    return key;
+  };
+  const telegramIntakeIdempotency = (headers: Record<string, unknown>) => {
+    const key = idempotency(headers);
+    if (!/^[A-Za-z0-9._~-]{16,128}$/.test(key)) {
+      throw new OneComputerError("IDEMPOTENCY_KEY_REQUIRED", "A valid Idempotency-Key header is required", 400);
+    }
     return key;
   };
   const browserAgentToken = (authorization: string | string[] | undefined) => {
@@ -1801,13 +1848,71 @@ export function createControlServer(
     await requirePolicy(request);
     return requireChannelBroker().listCredentials(identity(request));
   });
+  app.post("/v1/credentials/telegram/intake-grants", async (request, reply) => {
+    await requirePolicy(request);
+    z.object({}).strict().parse(request.body ?? {});
+    const intake = requireTelegramTokenIntake();
+    const credentialId = randomUUID();
+    const issued = intake.grantIssuer.issue({
+      identity: identity(request),
+      action: "create",
+      credentialId,
+      idempotencyKey: telegramIntakeIdempotency(request.headers),
+      ttlSeconds: intake.ttlSeconds,
+    });
+    return reply.code(201).send(telegramTokenIntakeGrantSchema.parse({
+      grant: issued.token,
+      grantId: issued.grantId,
+      credentialId,
+      action: "create",
+      expiresAt: issued.expiresAt.toISOString(),
+      intakeUrl: intake.intakeUrl,
+      encryption: {
+        algorithm: "RSA-OAEP-256+A256GCM",
+        keyId: "telegram-intake-rsa-oaep-256-v1",
+        publicKeySpkiBase64: intake.encryptionPublicKeySpkiBase64,
+      },
+    }));
+  });
   app.post("/v1/credentials/telegram", async (request, reply) => {
     await requirePolicy(request);
+    if (telegramRawTokenInputMode === "reject") {
+      throw new OneComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
+    }
     const input = saveTelegramCredentialSchema.parse(request.body ?? {});
     return reply.code(201).send(await requireChannelBroker().saveCredential(identity(request), input));
   });
+  app.post<{ Params: { credentialId: string } }>("/v1/credentials/:credentialId/telegram/intake-grants", async (request, reply) => {
+    await requirePolicy(request);
+    z.object({}).strict().parse(request.body ?? {});
+    const credentialId = z.uuid().parse(request.params.credentialId);
+    const intake = requireTelegramTokenIntake();
+    const issued = intake.grantIssuer.issue({
+      identity: identity(request),
+      action: "rotate",
+      credentialId,
+      idempotencyKey: telegramIntakeIdempotency(request.headers),
+      ttlSeconds: intake.ttlSeconds,
+    });
+    return reply.code(201).send(telegramTokenIntakeGrantSchema.parse({
+      grant: issued.token,
+      grantId: issued.grantId,
+      credentialId,
+      action: "rotate",
+      expiresAt: issued.expiresAt.toISOString(),
+      intakeUrl: intake.intakeUrl,
+      encryption: {
+        algorithm: "RSA-OAEP-256+A256GCM",
+        keyId: "telegram-intake-rsa-oaep-256-v1",
+        publicKeySpkiBase64: intake.encryptionPublicKeySpkiBase64,
+      },
+    }));
+  });
   app.put<{ Params: { credentialId: string } }>("/v1/credentials/:credentialId/telegram", async (request) => {
     await requirePolicy(request);
+    if (telegramRawTokenInputMode === "reject") {
+      throw new OneComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
+    }
     const credentialId = z.uuid().parse(request.params.credentialId);
     const input = saveTelegramCredentialSchema.parse(request.body ?? {});
     return requireChannelBroker().saveCredential(identity(request), input, credentialId);
@@ -2643,6 +2748,22 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     ? new HttpChannelBrokerManagementClient(env.CHANNEL_BROKER_URL, env.CHANNEL_BROKER_INTERNAL_TOKEN)
     : undefined;
   const budgetProjector=env.LITELLM_ADMIN_URL&&env.LITELLM_MASTER_KEY?new LiteLlmTeamBudgetProjector({adminUrl:env.LITELLM_ADMIN_URL,masterKey:env.LITELLM_MASTER_KEY,fetch:liteLlmAdminFetch}):undefined;
+  const telegramTokenIntakeValues = [env.TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64, env.TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64];
+  if (telegramTokenIntakeValues.some(Boolean) && !telegramTokenIntakeValues.every(Boolean)) {
+    throw new Error("Telegram intake signing and encryption keys must be configured together");
+  }
+  if (env.ONECOMPUTER_INSTALLATION_KIND === "hosted" && !telegramTokenIntakeValues.every(Boolean)) {
+    throw new Error("Hosted deployments require broker-only Telegram credential intake keys");
+  }
+  const telegramRawTokenInputMode = env.TELEGRAM_RAW_TOKEN_INPUT_MODE ?? (env.ONECOMPUTER_INSTALLATION_KIND === "hosted" ? "reject" : "legacy");
+  const telegramTokenIntake = env.TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64 && env.TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64
+    ? {
+        grantIssuer: new TelegramTokenIntakeGrantIssuer(env.TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64),
+        encryptionPublicKeySpkiBase64: env.TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64,
+        intakeUrl: env.TELEGRAM_INTAKE_URL,
+        ttlSeconds: env.TELEGRAM_INTAKE_GRANT_TTL_SECONDS,
+      }
+    : undefined;
   const webPushValues = [env.WEB_PUSH_VAPID_SUBJECT, env.WEB_PUSH_VAPID_PUBLIC_KEY, env.WEB_PUSH_VAPID_PRIVATE_KEY, env.WEB_PUSH_SUBSCRIPTION_SECRET];
   if (webPushValues.some(Boolean) && !webPushValues.every(Boolean)) throw new Error("All Web Push settings must be configured together");
   const pushProvider = env.WEB_PUSH_VAPID_SUBJECT && env.WEB_PUSH_VAPID_PUBLIC_KEY
@@ -2726,6 +2847,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       agentChatSecret: env.AGENT_CHAT_SECRET,
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
+      telegramTokenIntake,
+      telegramRawTokenInputMode,
       scheduleStore,
       siteStore,
       teamStore,
