@@ -16,6 +16,7 @@ import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "agent-deletion-proxy-token-at-least-24-characters";
+const agentBridgeSecret = "agent-deletion-bridge-secret-at-least-32-characters";
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "alex",
@@ -73,10 +74,13 @@ test("agent deletion endpoint preserves a human-facing filename without forwardi
   const workspace = await store.createOrGet(identity, "personal", "agent-delete-workspace");
   await store.update(workspace.id, { state: "ready" });
   const policy = runtimePolicyFor(effectivePolicy);
-  const token = new AgentBridgeAuthority(proxyToken).issue(identity, workspace.id, policy);
+  const token = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, policy, {
+    workspaceGeneration: workspace.bridgeGrantGeneration,
+  });
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
     identityPolicyStore: identityPolicies,
+    agentBridgeSecret,
   });
 
   try {

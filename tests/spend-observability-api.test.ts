@@ -151,7 +151,12 @@ const appFor = (actor: SessionPrincipal, spendObservabilityStore: SpendObservabi
   undefined,
   undefined,
   {},
-  { authentication: authentication(actor), identityPolicyStore: identityPolicies, spendObservabilityStore },
+  {
+    authentication: authentication(actor),
+    identityPolicyStore: identityPolicies,
+    spendObservabilityStore,
+    agentBridgeSecret: "spend-observability-agent-bridge-secret-at-least-32-characters",
+  },
 );
 
 test("spend API derives tenant, validates ranges, and makes role/cross-tenant denials indistinguishable", async () => {

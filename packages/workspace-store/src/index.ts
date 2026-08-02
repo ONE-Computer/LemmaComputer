@@ -25,6 +25,7 @@ export type WorkspaceRecord = {
   providerId: string | null;
   failureCode: string | null;
   operationToken: string | null;
+  bridgeGrantGeneration: number;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -403,6 +404,7 @@ export interface WorkspaceStore {
   claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState): Promise<WorkspaceRecord | null>;
   finish(workspaceId: string, operationToken: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
+  revokeBridgeGrants(workspaceId: string): Promise<WorkspaceRecord>;
   remove(identity: IdentityContext, workspaceId: string): Promise<boolean>;
   getSandboxSettings?(identity: IdentityContext, grantId: string): Promise<SandboxSettingsRecord | null>;
   saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
@@ -418,6 +420,7 @@ const mapRow = (row: Record<string, unknown>): WorkspaceRecord => ({
   providerId: row.provider_id ? String(row.provider_id) : null,
   failureCode: row.failure_code ? String(row.failure_code) : null,
   operationToken: row.operation_token ? String(row.operation_token) : null,
+  bridgeGrantGeneration: Number(row.bridge_grant_generation ?? 1),
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
 });
@@ -852,6 +855,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     const result = await this.pool.query(
       "UPDATE workspaces SET state=COALESCE($2,state), provider_id=CASE WHEN $4 THEN $3 ELSE provider_id END, failure_code=$5, updated_at=now() WHERE id=$1 RETURNING *",
       [workspaceId, patch.state ?? null, patch.providerId ?? null, Object.hasOwn(patch, "providerId"), patch.failureCode ?? null],
+    );
+    if (!result.rowCount) throw new Error("Workspace not found");
+    return mapRow(result.rows[0]);
+  }
+
+  async revokeBridgeGrants(workspaceId: string) {
+    const result = await this.pool.query(
+      "UPDATE workspaces SET bridge_grant_generation=bridge_grant_generation+1, updated_at=now() WHERE id=$1 RETURNING *",
+      [workspaceId],
     );
     if (!result.rowCount) throw new Error("Workspace not found");
     return mapRow(result.rows[0]);
@@ -1967,7 +1979,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     const existing = [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId);
     if (existing) return existing;
     const now = new Date();
-    const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", providerId: null, failureCode: null, operationToken: null, createdAt: now, updatedAt: now };
+    const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", providerId: null, failureCode: null, operationToken: null, bridgeGrantGeneration: 1, createdAt: now, updatedAt: now };
     this.records.set(record.id, record);
     return record;
   }
@@ -1987,6 +1999,11 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     const record = this.records.get(workspaceId);
     if (!record) throw new Error("Workspace not found");
     return this.save(record, patch);
+  }
+  async revokeBridgeGrants(workspaceId: string) {
+    const record = this.records.get(workspaceId);
+    if (!record) throw new Error("Workspace not found");
+    return this.save(record, { bridgeGrantGeneration: record.bridgeGrantGeneration + 1 });
   }
   async remove(identity: IdentityContext, workspaceId: string) {
     if (!await this.getOwned(identity, workspaceId)) return false;

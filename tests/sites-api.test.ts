@@ -15,6 +15,7 @@ import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "sites-api-proxy-token-at-least-24-characters";
+const agentBridgeSecret = "sites-api-bridge-secret-at-least-32-characters";
 const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "onecomputer-control" };
 const principal: SessionPrincipal = {
   userId: identity.subjectId,
@@ -79,11 +80,14 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
   const workspace = await workspaceStore.createOrGet(identity, "personal", "sites-workspace");
   await workspaceStore.update(workspace.id, { state: "ready" });
   const policy = runtimePolicyFor(effectivePolicy);
-  const token = new AgentBridgeAuthority(proxyToken).issue(identity, workspace.id, policy);
+  const token = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, policy, {
+    workspaceGeneration: workspace.bridgeGrantGeneration,
+  });
   const app = createControlServer(workspaceStore, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
     identityPolicyStore: identityPolicies,
     siteStore,
+    agentBridgeSecret,
   });
 
   try {
@@ -116,7 +120,9 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
     assert.equal(content.headers["cross-origin-opener-policy"], "same-origin");
     assert.equal(content.body, html.toString());
 
-    const staleToken = new AgentBridgeAuthority(proxyToken).issue(identity, workspace.id, { ...policy, policyHash: "b".repeat(64) });
+    const staleToken = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, { ...policy, policyHash: "b".repeat(64) }, {
+      workspaceGeneration: workspace.bridgeGrantGeneration,
+    });
     const rejected = await app.inject({
       method: "POST",
       url: "/internal/v1/agent/sites",

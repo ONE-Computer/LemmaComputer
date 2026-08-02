@@ -1,6 +1,7 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { RuntimePolicy } from "@onecomputer/contracts";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
+import { AgentBridgeAuthority } from "../apps/control-api/src/agent-bridge.js";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -10,6 +11,7 @@ const required = (name: string) => {
 
 const controllerUrl = required("CONTROLLER_URL");
 const controllerToken = required("CONTROLLER_INTERNAL_TOKEN");
+const agentBridgeSecret = required("AGENT_BRIDGE_SECRET");
 const keepFailedWorkspace = process.env.KEEP_FAILED_QUALIFICATION_WORKSPACE === "true";
 const signer = new PolicyBundleSigner({
   keyId: required("POLICY_SIGNING_KEY_ID"),
@@ -51,17 +53,9 @@ const policyBundle = signer.issue({
   policy,
   routes: { modelGateway, mcpControl },
 });
-const bridgePayload = Buffer.from(JSON.stringify({
-  version: 1,
-  tenantId: identity.tenantId,
-  subjectId: identity.subjectId,
-  workspaceId,
-  agentId,
-  policyHash: policy.policyHash,
-})).toString("base64url");
-const agentBridgeToken = `ocab_${bridgePayload}.${createHmac("sha256", controllerToken)
-  .update(`onecomputer:agent-bridge:${bridgePayload}`)
-  .digest("base64url")}`;
+const agentBridgeToken = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspaceId, policy, {
+  workspaceGeneration: 1,
+});
 const gatewayGrant = {
   baseUrl: modelGateway,
   credential: "release-workspace-gateway-key-at-least-32-characters",

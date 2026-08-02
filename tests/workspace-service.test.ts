@@ -12,11 +12,19 @@ class FakeController implements ControllerClient {
   destroys = 0;
   purges = 0;
   lastGateway: GatewayGrant | undefined;
+  lastAgentBridge: { baseUrl: string; token: string } | undefined;
   lastPolicy: RuntimePolicy | undefined;
   lastPolicyBundle: SignedPolicyBundle | undefined;
-  async create(input: { workspaceId: string; policy: RuntimePolicy; policyBundle?: SignedPolicyBundle; gateway?: GatewayGrant }): Promise<Sandbox> {
+  async create(input: {
+    workspaceId: string;
+    policy: RuntimePolicy;
+    policyBundle?: SignedPolicyBundle;
+    gateway?: GatewayGrant;
+    agentBridge?: { baseUrl: string; token: string };
+  }): Promise<Sandbox> {
     this.creates += 1;
     this.lastGateway = input.gateway;
+    this.lastAgentBridge = input.agentBridge;
     this.lastPolicy = input.policy;
     this.lastPolicyBundle = input.policyBundle;
     return { providerId: `sandbox-${input.workspaceId}`, state: "ready", failureCode: null };
@@ -206,6 +214,35 @@ test("restart destroys the prior sandbox and retains product identity", async ()
   assert.equal(restarted.state, "ready");
   assert.equal(controller.creates, 2);
   assert.equal(controller.destroys, 1);
+});
+
+test("workspace restart rotates the persisted bridge generation before projecting a replacement grant", async () => {
+  const controller = new FakeController();
+  const store = new MemoryWorkspaceStore();
+  const issuedGenerations: number[] = [];
+  const service = new WorkspaceService(
+    store,
+    controller,
+    undefined,
+    {
+      baseUrl: "http://onecomputer-control:4100",
+      issue: (_identity, workspace) => {
+        issuedGenerations.push(workspace.bridgeGrantGeneration);
+        return `v2-bridge-generation-${workspace.bridgeGrantGeneration}`;
+      },
+    },
+  );
+
+  const workspace = await service.create(alex, policy, "personal", "bridge-generation-create", "correlation-1");
+  assert.deepEqual(issuedGenerations, [1]);
+  assert.equal(controller.lastAgentBridge?.token, "v2-bridge-generation-1");
+
+  await service.restart(alex, policy, workspace.id, "correlation-2");
+  assert.deepEqual(issuedGenerations, [1, 2]);
+  assert.equal(controller.lastAgentBridge?.token, "v2-bridge-generation-2");
+
+  await service.stop(alex, policy, workspace.id);
+  assert.equal((await store.getOwned(alex, workspace.id))?.bridgeGrantGeneration, 3);
 });
 
 test("stop removes provider authority while retaining an owned stopped record", async () => {

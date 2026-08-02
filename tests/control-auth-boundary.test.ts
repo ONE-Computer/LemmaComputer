@@ -62,7 +62,10 @@ test("runtime identity comes only from the authenticated server session", async 
   const store = new MemoryWorkspaceStore();
   const owned = await store.createOrGet(alpha, "personal", "identity-boundary-workspace");
   await store.update(owned.id, { state: "ready" });
-  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, { authentication: authentication(principal) });
+  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    authentication: authentication(principal),
+    agentBridgeSecret: "control-auth-test-agent-bridge-secret-at-least-32-characters",
+  });
   try {
     const spoofedOnly = await app.inject({
       method: "GET",
@@ -285,6 +288,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   const connectorRegistry = new MemoryConnectorRegistryStore();
   const app = createControlServer(workspaceStore, {} as ControllerClient, proxyToken, gateway, undefined, {}, {
     authentication: authentication(administrator), identityPolicyStore, connectorRegistryStore: connectorRegistry,
+    agentBridgeSecret: "control-auth-policy-agent-bridge-secret-at-least-32-characters",
   });
   const headers = { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid" };
   try {

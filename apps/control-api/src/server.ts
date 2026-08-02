@@ -18,7 +18,7 @@ import { EntraAuthenticationService, isAdministrator, testPrincipalFromHeaders }
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
 import { HttpOpenVtcConsentClient } from "./openvtc-consent-client.js";
-import { AgentBridgeAuthority, type AgentBridgeIdentity } from "./agent-bridge.js";
+import { AgentBridgeAuthority, agentBridgeAudience, type AgentBridgeIdentity, type AgentBridgeScope } from "./agent-bridge.js";
 import { COMPANION_PUSH_PROTOCOL, WebPushProvider } from "./web-push.js";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import {
@@ -230,6 +230,8 @@ const envSchema = z.object({
   PUBLIC_WEB_URL: z.string().url().default("http://localhost:4174"),
   M365_AUTHORIZATION_ORIGIN: z.string().url().default("http://localhost:4311"),
   AGENT_BRIDGE_URL: z.string().url().default("http://onecomputer-control:4100"),
+  AGENT_BRIDGE_SECRET: z.string().min(32),
+  AGENT_BRIDGE_GRANT_TTL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   FIXTURE_APPROVAL_SECRET: z.string().min(32).default("local-disabled-fixture-approval-secret-32-chars"),
   OPENVTC_CONSENT_URL: z.string().url().optional(),
   OPENVTC_CONSENT_TOKEN: z.string().min(32).optional(),
@@ -271,6 +273,20 @@ const sameSecret = (received: string | undefined, expected: string) => {
   return left.length === right.length && timingSafeEqual(left, right);
 };
 
+const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeScope | null => {
+  const path = url.split("?", 1)[0];
+  if (method === "POST" && path === "/internal/v1/agent/grants/renew") return "agent:renew";
+  if (method === "POST" && path === "/internal/v1/agent/usage-bindings") return "agent:usage-bindings";
+  if (method === "POST" && path === "/internal/v1/agent/sites") return "agent:sites";
+  if (method === "GET" && /^\/internal\/v1\/agent\/operations\/[^/]+$/.test(path)) return "agent:operations:read";
+  if (method === "POST" && (
+    path === "/internal/v1/agent/uploads"
+    || /^\/internal\/v1\/agent\/uploads\/[^/]+\/(?:begin|complete|fail)$/.test(path)
+  )) return "agent:uploads";
+  if (method === "POST" && path === "/internal/v1/agent/deletions") return "agent:deletions";
+  return null;
+};
+
 export function createControlServer(
   store: WorkspaceStore & GovernanceStore & ActivityStore & Partial<ChannelStore>,
   controller: ControllerClient,
@@ -282,6 +298,8 @@ export function createControlServer(
     authentication?: AuthenticationBoundary;
     identityPolicyStore?: IdentityPolicyStore;
     mcpPolicyToken?: string;
+    agentBridgeSecret?: string;
+    agentBridgeGrantTtlSeconds?: number;
     testIdentityMode?: boolean;
     openVtc?: OpenVtcApprovalCoordinator;
     egressGrantSecret?: string;
@@ -342,7 +360,22 @@ export function createControlServer(
     bodyLimit: 32 * 1024,
     routerOptions: { maxParamLength: 2048 },
   });
-  const agentBridgeAuthority = new AgentBridgeAuthority(security.mcpPolicyToken ?? proxyToken);
+  if (!security.authentication && !security.testIdentityMode) {
+    throw new Error("Control requires Entra authentication; test identity mode must be enabled explicitly in tests");
+  }
+  // The fallback exists only for the explicit in-memory test identity mode. Runtime
+  // boot requires AGENT_BRIDGE_SECRET and never derives this key from another trust boundary.
+  const agentBridgeSecret = security.agentBridgeSecret ?? (
+    security.testIdentityMode ? "test-agent-bridge-secret-at-least-32-characters" : undefined
+  );
+  if (!agentBridgeSecret) throw new Error("AGENT_BRIDGE_SECRET is required");
+  if (sameSecret(agentBridgeSecret, proxyToken)) {
+    throw new Error("AGENT_BRIDGE_SECRET must differ from the web proxy token");
+  }
+  if (security.mcpPolicyToken && sameSecret(agentBridgeSecret, security.mcpPolicyToken)) {
+    throw new Error("AGENT_BRIDGE_SECRET must differ from the MCP policy token");
+  }
+  const agentBridgeAuthority = new AgentBridgeAuthority(agentBridgeSecret, security.agentBridgeGrantTtlSeconds);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
   const activityEvents = new ActivityEventService(store);
@@ -417,7 +450,9 @@ export function createControlServer(
 
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
-    issue: (identity, workspaceId, policy) => agentBridgeAuthority.issue(identity, workspaceId, policy),
+    issue: (identity, workspace, policy) => agentBridgeAuthority.issue(identity, workspace.id, policy, {
+      workspaceGeneration: workspace.bridgeGrantGeneration,
+    }),
   }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority, agentChatAuthority, security.workspaceIngress);
   const executor: GovernedToolExecutor = gateway?.executeGovernedTool
     ? { executeGovernedTool: (input) => gateway.executeGovernedTool!(input) }
@@ -497,9 +532,6 @@ export function createControlServer(
       }]
       : [],
   });
-  if (!security.authentication && !security.testIdentityMode) {
-    throw new Error("Control requires Entra authentication; test identity mode must be enabled explicitly in tests");
-  }
   const principals = new WeakMap<object, SessionPrincipal>();
   const agentPrincipals = new WeakMap<object, AgentBridgeIdentity>();
 
@@ -533,18 +565,28 @@ export function createControlServer(
       }
       return;
     }
-    if (
-      request.url.startsWith("/internal/v1/agent/operations/")
-      || request.url.startsWith("/internal/v1/agent/uploads")
-      || request.url.startsWith("/internal/v1/agent/deletions")
-      || request.url.startsWith("/internal/v1/agent/sites")
-      || request.url.startsWith("/internal/v1/agent/usage-bindings")
-    ) {
+    const agentBridgeScope = agentBridgeScopeForRequest(request.method, request.url);
+    if (agentBridgeScope) {
       const authorization = request.headers.authorization;
       const value = Array.isArray(authorization) ? authorization[0] : authorization;
       const match = typeof value === "string" ? /^Bearer (.+)$/.exec(value) : null;
       if (!match) return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Agent bridge authentication is required", correlationId: request.id, retryable: false } });
-      agentPrincipals.set(request, agentBridgeAuthority.verify(match[1]!));
+      const actor = agentBridgeAuthority.verify(match[1]!, {
+        audience: agentBridgeAudience,
+        scope: agentBridgeScope,
+      });
+      const workspace = await store.getOwned({
+        tenantId: actor.tenantId,
+        subjectId: actor.subjectId,
+        audience: "onecomputer-control",
+      }, actor.workspaceId);
+      if (!workspace || workspace.bridgeGrantGeneration !== actor.workspaceGeneration) {
+        throw new OneComputerError("AGENT_BRIDGE_GRANT_REVOKED", "Agent bridge authentication is no longer active", 403);
+      }
+      if (!["ready", "open"].includes(workspace.state)) {
+        throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not active for agent bridge access", 403);
+      }
+      agentPrincipals.set(request, actor);
       return;
     }
     if (request.url === "/internal/v1/mcp/authorize") {
@@ -940,6 +982,19 @@ export function createControlServer(
   app.post("/internal/v1/schedules/runs/execute", async (request) => {
     const input = executeScheduleRunSchema.parse(request.body ?? {});
     return requireSchedules().executeClaimed(input.runId, input.leaseToken);
+  });
+  app.post("/internal/v1/agent/grants/renew", async (request) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const token = agentBridgeAuthority.renew(actor);
+    const renewed = agentBridgeAuthority.verify(token, {
+      audience: agentBridgeAudience,
+      scope: "agent:renew",
+    });
+    return {
+      token,
+      expiresAt: new Date(renewed.expiresAt * 1_000).toISOString(),
+    };
   });
   app.post("/internal/v1/agent/usage-bindings", async (request) => {
     const actor = agentPrincipals.get(request);
@@ -1494,7 +1549,7 @@ export function createControlServer(
     if (!target) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
     const current = await security.identityPolicyStore.getEffectivePolicy(request.params.userId);
     const revoked = await security.identityPolicyStore.revokeMvpPolicy({ tenantId: actor.tenantId, targetUserId: request.params.userId, revokedBy: actor.userId });
-    if (revoked && current && gateway) {
+    if (revoked && current) {
       const targetIdentity: IdentityContext = {
         tenantId: actor.tenantId,
         subjectId: request.params.userId,
@@ -1506,10 +1561,9 @@ export function createControlServer(
         undefined,
         assignedAgentIds(current.document as Record<string, unknown>),
       );
-      const agentIds = runtime.agents?.map((agent) => agent.agentId) ?? [runtime.agentId];
       const workspaces = await store.listCurrent(targetIdentity);
-      await Promise.all(workspaces.flatMap((workspace) => (
-        agentIds.map((agentId) => gateway.revoke(workspace.id, agentId).catch(() => undefined))
+      await Promise.all(workspaces.map((workspace) => (
+        service.revokePolicyGrant(workspace.id, runtime).catch(() => undefined)
       )));
     }
     return revoked ? reply.code(204).send() : reply.code(404).send({ error: { code: "POLICY_ASSIGNMENT_NOT_FOUND", message: "Active policy assignment not found", correlationId: request.id, retryable: false } });
@@ -2653,6 +2707,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       providerSettingsStore,
       providerAdministration,
       mcpPolicyToken: env.CONTROLLER_INTERNAL_TOKEN,
+      agentBridgeSecret: env.AGENT_BRIDGE_SECRET,
+      agentBridgeGrantTtlSeconds: env.AGENT_BRIDGE_GRANT_TTL_SECONDS,
       authentication: new EntraAuthenticationService(identityPolicyStore, {
         tenantId: env.ENTRA_TENANT_ID,
         clientId: env.ENTRA_CLIENT_ID,

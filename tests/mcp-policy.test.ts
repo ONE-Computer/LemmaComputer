@@ -203,6 +203,34 @@ test("one user-scoped connector policy serves every owned workspace but no forei
   }, "foreign-workspace")).code, "MCP_POLICY_NOT_ASSIGNED");
 });
 
+test("MCP authorization requires the exact owned workspace to be active", async () => {
+  const { store, workspace, policy, base } = await setup();
+  await store.update(workspace.id, { state: "stopped" });
+  assert.equal((await policy.authorize(base, "stopped-workspace")).code, "MCP_WORKSPACE_NOT_READY");
+
+  await store.update(workspace.id, { state: "open" });
+  assert.equal((await policy.authorize(base, "open-workspace")).decision, "allow");
+
+  const hosted = async (): Promise<HostedToolPolicy> => ({
+    connectorId: "linear",
+    connectorName: "Linear",
+    serverId: "onecomputer_linear",
+    serverName: "onecomputer_linear",
+    toolName: "create_issue",
+    displayName: "Create Issue",
+    decision: "allow",
+  });
+  const hostedSetup = await setup(hosted);
+  await hostedSetup.store.update(hostedSetup.workspace.id, { state: "stopped" });
+  assert.equal((await hostedSetup.policy.authorize({
+    ...hostedSetup.base,
+    serverId: "onecomputer_linear",
+    serverName: "onecomputer_linear",
+    toolName: "create_issue",
+    arguments: { title: "Blocked while stopped" },
+  }, "stopped-hosted-workspace")).code, "MCP_WORKSPACE_NOT_READY");
+});
+
 test("Control permits bounded OneDrive discovery but rejects broad search", async () => {
   const { policy, base } = await setup();
   assert.equal((await policy.authorize({
