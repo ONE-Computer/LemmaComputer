@@ -182,9 +182,9 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configured.json().provider.modelId, "gpt-5.6-terra");
     assert.equal(configured.json().provider.emissionsRegion, "sg");
     assert.deepEqual(configured.json().provider.modelOptions, [
-      { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol" },
-      { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra" },
-      { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna" },
+      { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", modelCapabilities: { vision: true, tools: true, streaming: true } },
+      { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", modelCapabilities: { vision: true, tools: true, streaming: true } },
+      { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", modelCapabilities: { vision: true, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configured.json()).includes(rawOpenAiKey), false);
     assert.equal(providerAdministration.configured[0]!.apiKey, rawOpenAiKey);
@@ -228,8 +228,8 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configuredGlm.json().provider.upstreamModelDisplayName, "Z.ai GLM-5.2");
     assert.equal(configuredGlm.json().provider.modelId, "glm-5.2");
     assert.deepEqual(configuredGlm.json().provider.modelOptions, [
-      { id: "glm-5", displayName: "Z.ai GLM-5" },
-      { id: "glm-5.2", displayName: "Z.ai GLM-5.2" },
+      { id: "glm-5", displayName: "Z.ai GLM-5", modelCapabilities: { vision: false, tools: true, streaming: true } },
+      { id: "glm-5.2", displayName: "Z.ai GLM-5.2", modelCapabilities: { vision: false, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configuredGlm.json()).includes(rawGlmKey), false);
     assert.equal(providerAdministration.configured[1]!.provider, "glm");
@@ -245,8 +245,8 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configuredAnthropic.json().provider.modelId, "claude-opus-4-8");
     assert.equal(configuredAnthropic.json().provider.upstreamModelDisplayName, "Anthropic Claude Opus 4.8");
     assert.deepEqual(configuredAnthropic.json().provider.modelOptions, [
-      { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6" },
-      { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8" },
+      { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6", modelCapabilities: { vision: true, tools: true, streaming: true } },
+      { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8", modelCapabilities: { vision: true, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configuredAnthropic.json()).includes(rawAnthropicKey), false);
 
@@ -524,6 +524,7 @@ test("provider settings accept model sets and expose concrete deployment descrip
     assert.equal(provider.deployments[0].primary, true);
     assert.ok(provider.deployments[0].aliases.includes("onecomputer-openai"));
     assert.match(provider.deployments[0].providerDeployment, /^ocp-/);
+    assert.deepEqual(provider.deployments[1].modelCapabilities, { vision: true, tools: true, streaming: true });
     assert.notEqual(provider.deployments[0].id, provider.deployments[1].id);
 
     const invalidPayloads = [

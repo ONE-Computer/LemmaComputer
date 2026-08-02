@@ -733,9 +733,9 @@ const responses = new Map([
       selectedModelIds: [],
       deployments: [],
       modelOptions: [
-        { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol" },
-        { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra" },
-        { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna" },
+        { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", modelCapabilities: { vision: true, tools: true, streaming: true } },
+        { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", modelCapabilities: { vision: true, tools: true, streaming: true } },
+        { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", modelCapabilities: { vision: true, tools: true, streaming: true } },
       ],
       region: null,
       emissionsRegion: null,

@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { OneComputerError } from "@onecomputer/contracts";
-import { LiteLLMProviderAdministration, managedProviderAliasForAccessGroup, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
+import { LiteLLMProviderAdministration, managedProviderAliasForAccessGroup, managedProviderModelOptions, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
 
 const alphaKey = "sk-provider-alpha-never-log-000000000001";
 const betaKey = "sk-provider-beta-never-log-000000000002";
@@ -40,6 +40,17 @@ const modelDocument = (request: GatewayRequest) => request.body as {
   litellm_params: Record<string, unknown>;
   model_info: Record<string, unknown>;
 };
+
+test("all selectable provider models declare their routing capabilities", () => {
+  assert.deepEqual(managedProviderModelOptions("anthropic").map((model) => model.modelCapabilities), [
+    { vision: true, tools: true, streaming: true },
+    { vision: true, tools: true, streaming: true },
+  ]);
+  assert.deepEqual(managedProviderModelOptions("glm").map((model) => model.modelCapabilities), [
+    { vision: false, tools: true, streaming: true },
+    { vision: false, tools: true, streaming: true },
+  ]);
+});
 
 test("managed provider configuration isolates tenants, validates candidates, and rejects stale static routes", async () => {
   const requests: GatewayRequest[] = [];
@@ -294,6 +305,11 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.equal(modelSet.deployments[0]!.primary, true);
     assert.ok(modelSet.deployments[0]!.aliases.includes("onecomputer-assistant"));
     assert.match(modelSet.deployments[0]!.providerDeployment, /^ocp-/);
+    assert.deepEqual(modelSet.deployments[1]!.modelCapabilities, {
+      vision: true,
+      tools: true,
+      streaming: true,
+    });
     assert.equal(
       managedProviderAliasForAccessGroup("tenant-alpha", modelSet.deployments[0]!.providerDeployment),
       "onecomputer-openai-gpt-5-6-sol",
@@ -311,6 +327,9 @@ test("managed provider configuration isolates tenants, validates candidates, and
         .map((document) => document.model_info.onecomputer_upstream_model_id),
       ["gpt-5.6-sol", "gpt-5.6-luna"],
     );
+    assert.ok(modelSetUpdates
+      .filter((document) => document.model_info.onecomputer_legacy_alias === false)
+      .every((document) => document.model_info.supports_function_calling === true));
 
     const retireStart = requests.length;
     const retired = await gateway.configureManagedProvider({

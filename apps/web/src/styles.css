@@ -4540,6 +4540,12 @@ textarea:focus-visible,
   font-size: 11px;
 }
 
+.provider-deployment-list li .provider-model-capabilities,
+.provider-model-options .provider-model-capabilities {
+  color: #2d5c87;
+  font-weight: 620;
+}
+
 .provider-model-options {
   display: grid;
   gap: 9px;

@@ -9,6 +9,7 @@ import {
   latestRateCardForDeployment,
   providerDeploymentKey,
   providerDeploymentLabel,
+  providerModelCapabilityLabels,
   providerTitle,
   rateCardMatchesDeployment,
 } from "./provider-inventory.js";
@@ -260,7 +261,7 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
         };
         return <section key={deployment.id} className="route-mapping-editor-row" aria-labelledby={`route-editor-${deployment.serviceClass}`}>
           <header><span className={`route-alias ${deployment.serviceClass}`} id={`route-editor-${deployment.serviceClass}`}>{serviceClassLabels[deployment.serviceClass]}</span><small>{serviceClassDescriptions[deployment.serviceClass]}</small></header>
-          <label className="modal-field"><span>Provider deployment</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} provider deployment`} value={selectedDeployment?.id ?? ""} options={inventory.map((item) => ({ value: item.id, label: providerDeploymentLabel(item) }))} disabled={busy} onValueChange={selectProviderDeployment} /></label>
+          <label className="modal-field"><span>Provider deployment</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} provider deployment`} value={selectedDeployment?.id ?? ""} options={inventory.map((item) => ({ value: item.id, label: providerDeploymentLabel(item) }))} disabled={busy} onValueChange={selectProviderDeployment} />{providerModelCapabilityLabels(selectedDeployment?.modelCapabilities).length > 0 && <small className="route-model-capabilities">Inherited model capabilities: {providerModelCapabilityLabels(selectedDeployment.modelCapabilities).join(" · ")}</small>}</label>
           <label className="modal-field route-editor-rate"><span>Pinned price record</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} price record`} value={deployment.rateCardId ?? ""} options={[{ value: "", label: "No price record" }, ...compatibleCards.map((card) => ({ value: card.id, label: `${card.sourceVersion} · ${card.currency}` }))]} disabled={busy} onValueChange={(rateCardId) => updateDeployment(deployment.id, { rateCardId })} /></label>
         </section>;
       })}
@@ -440,20 +441,21 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
       const selected = inventoryDeployment ? { ...deployment, ...inventoryDeployment, id: deployment.id } : deployment;
       const card = cardById.get(selected.rateCardId) ?? latestRateCardForDeployment(rateCards, selected);
       const capableByDefault = selected.serviceClass !== "lite";
+      const routeDefaults = {
+        vision: policyCapabilities?.vision ?? capableByDefault,
+        tools: policyCapabilities?.tools ?? capableByDefault,
+        streaming: policyCapabilities?.streaming ?? true,
+        contextTokens: policyCapabilities?.contextTokens ?? (selected.serviceClass === "pro" ? 128000 : 32000),
+        outputTokens: policyCapabilities?.outputTokens ?? 32768,
+        residency: selected.region ? [selected.region] : settings?.policy?.requiredResidency ? [settings.policy.requiredResidency] : [],
+      };
       return {
         ...selected,
         providerAccountId: selected.providerAccountId ?? card?.providerAccountId ?? "",
         region: selected.region ?? card?.region ?? null,
         providerServiceTier: selected.providerServiceTier ?? card?.providerServiceTier ?? null,
         rateCardId: selected.rateCardId ?? card?.id ?? "",
-        capabilities: selected.capabilities ?? {
-          vision: policyCapabilities?.vision ?? capableByDefault,
-          tools: policyCapabilities?.tools ?? capableByDefault,
-          streaming: policyCapabilities?.streaming ?? true,
-          contextTokens: policyCapabilities?.contextTokens ?? (selected.serviceClass === "pro" ? 128000 : 32000),
-          outputTokens: policyCapabilities?.outputTokens ?? 32768,
-          residency: selected.region ? [selected.region] : settings?.policy?.requiredResidency ? [settings.policy.requiredResidency] : [],
-        },
+        capabilities: { ...routeDefaults, ...(selected.capabilities ?? {}), ...(selected.modelCapabilities ?? {}) },
         approved: selected.approved ?? true,
         evaluationPassed: selected.evaluationPassed ?? true,
       };
@@ -587,15 +589,16 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
       <div className="route-section-heading"><div><p>Alias map</p><h2 id="route-map-heading">Stable choices, private deployments</h2><span>Prices are the rate card pinned to this mapping version, shown per 1M tokens.</span></div><span className={`route-readonly-badge${draft ? " draft" : ""}`}>{mappingStatus}</span></div>
       <div className="route-table-scroll">
         <table className="route-table">
-          <thead><tr><th>Alias</th><th>Provider deployment</th><th>Health</th><th>Token prices / 1M</th><th>Pricing</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th>Alias</th><th>Provider deployment</th><th>Capabilities</th><th>Health</th><th>Token prices / 1M</th><th>Pricing</th><th><span className="sr-only">Actions</span></th></tr></thead>
           <tbody>
-            {!!mappedDeployments.length && <tr className="route-auto-row"><td><span className="route-alias auto">Auto</span><small>Recommended default</small></td><td><strong>Task-based route selection</strong><small>Chooses Lite, Balanced, or Pro within policy</small></td><td><span className={`route-health ${autoPolicyStatus.className}`}><AutoPolicyStatusIcon aria-hidden="true" />{autoPolicyStatus.label}</span></td><td><span className="route-auto-pricing">Uses the selected tier’s pinned price</span></td><td><span className="route-coverage complete"><CheckmarkCircle20Regular aria-hidden="true" />Inherited</span></td><td><button type="button" className="route-text-button" disabled={busy || !mappedDeployments.length} onClick={openMappingEditor}>Edit mapping</button></td></tr>}
+            {!!mappedDeployments.length && <tr className="route-auto-row"><td><span className="route-alias auto">Auto</span><small>Recommended default</small></td><td><strong>Task-based route selection</strong><small>Chooses Lite, Balanced, or Pro within policy</small></td><td><small className="route-capability-copy">Inherits the selected route</small></td><td><span className={`route-health ${autoPolicyStatus.className}`}><AutoPolicyStatusIcon aria-hidden="true" />{autoPolicyStatus.label}</span></td><td><span className="route-auto-pricing">Uses the selected tier’s pinned price</span></td><td><span className="route-coverage complete"><CheckmarkCircle20Regular aria-hidden="true" />Inherited</span></td><td><button type="button" className="route-text-button" disabled={busy || !mappedDeployments.length} onClick={openMappingEditor}>Edit mapping</button></td></tr>}
             {mappedDeployments.map((deployment) => {
               const card = cardById.get(deployment.rateCardId);
               const coverage = pricingCoverage(card);
               return <tr key={deployment.id}>
                 <td><span className={`route-alias ${deployment.serviceClass}`}>{serviceClassLabels[deployment.serviceClass] ?? deployment.serviceClass}</span><small>{serviceClassDescriptions[deployment.serviceClass]}</small></td>
                 <td><strong>{providerTitle(deployment.provider)} · {deployment.providerModel}</strong><small>{deployment.providerDeployment}</small></td>
+                <td><small className="route-capability-copy">{providerModelCapabilityLabels(deployment.capabilities).join(" · ") || "Not declared"}</small></td>
                 <td><RouteHealth deployment={deployment} /></td>
                 <td><div className="route-price-grid">{pricingUnits.map((item) => <span key={item.key}><small>{item.label}</small><PriceCell card={card} unit={item.key} /></span>)}</div></td>
                 <td>{coverage.complete ? <span className="route-coverage complete"><CheckmarkCircle20Regular aria-hidden="true" />Complete</span> : <span className="route-coverage gap"><ErrorCircle20Regular aria-hidden="true" />{card ? `${coverage.missing.length} gap${coverage.missing.length === 1 ? "" : "s"}` : "No card"}</span>}<small className="route-card-version" title={card?.id}>{card ? card.sourceVersion : "No pinned rate card"}</small></td>

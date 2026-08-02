@@ -1,5 +1,5 @@
 import { OneComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@onecomputer/contracts";
-import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
+import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import type { ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
 
 type EmissionsSelection = { emissionsRegion?: ProviderEmissionsRegion };
@@ -24,7 +24,7 @@ export type ProviderSettingView = {
   state: "active" | "disabled" | "not-configured" | "needs-reconfiguration";
   fingerprint: string | null;
   modelId: ProviderModelId | null;
-  modelOptions: Array<{ id: ProviderModelId; displayName: string }>;
+  modelOptions: Array<{ id: ProviderModelId; displayName: string; modelCapabilities?: ManagedProviderModelCapabilities }>;
   selectedModelIds: ProviderModelId[];
   deployments: ManagedProviderDeploymentDescriptor[];
   region: BedrockApiKeyRegion | null;
