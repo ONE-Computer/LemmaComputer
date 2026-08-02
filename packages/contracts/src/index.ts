@@ -1962,6 +1962,16 @@ export const saveMcpToolPolicySchema = z.strictObject({
   tools: z.record(z.string().min(1).max(128), mcpToolPolicyDecisionSchema),
 });
 
+/**
+ * Remote MCP tool reviews are bound to the exact discovered tool set and
+ * definitions. A stale browser submission must never approve a replacement
+ * tool that happened to keep the same name.
+ */
+export const saveHostedConnectorToolPolicySchema = z.strictObject({
+  expectedDocumentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  tools: z.record(z.string().min(1).max(128), mcpToolPolicyDecisionSchema),
+});
+
 export const readinessFor = (state: WorkspaceState, gateway?: { models: ReadinessState; tools: ReadinessState }) => ({
   identity: "ready" as const,
   network: (["ready", "open"].includes(state)

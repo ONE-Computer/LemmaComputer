@@ -600,6 +600,14 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
   const serviceLabels = mcpPolicy?.connectorId
     ? { tools: `${mcpPolicy.connectorName} tools` }
     : { mail: "Outlook Mail", calendar: "Calendar", onedrive: "OneDrive", teams: "Teams" };
+  const connectorChanges = mcpPolicy?.connectorId ? mcpPolicy.changes : null;
+  const changeSummary = connectorChanges
+    ? [
+      connectorChanges.added?.length ? `${connectorChanges.added.length} added` : "",
+      connectorChanges.changed?.length ? `${connectorChanges.changed.length} changed` : "",
+      connectorChanges.removed?.length ? `${connectorChanges.removed.length} removed` : "",
+    ].filter(Boolean).join(", ")
+    : "";
   const groupedTools = Object.entries(serviceLabels)
     .map(([service, label]) => ({ service, label, tools: mcpPolicy?.tools.filter((tool) => tool.service === service) ?? [] }))
     .filter((group) => group.tools.length);
@@ -610,14 +618,25 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
           <div><p>Organization tool policy</p><h2 id="tool-policy-heading">Tools &amp; approvals</h2></div>
           {mcpPolicy && <span>{mcpPolicy.version ? `Version ${mcpPolicy.version} · ` : ""}{mcpPolicy.documentHash.slice(0, 12)}…</span>}
         </div>
-        <p className="tool-policy-intro">Choose what assigned workspace agents may run immediately, what requires a signed approval, and what is blocked. Saving creates an immutable policy version and refreshes running workspace grants.</p>
+        <p className="tool-policy-intro">{mcpPolicy?.connectorId
+          ? "Review the provider-supplied definition before choosing what workspace agents may run. New or changed tools stay blocked until this exact definition is saved; a later provider change requires another review."
+          : "Choose what assigned workspace agents may run immediately, what requires a signed approval, and what is blocked. Saving creates an immutable policy version and refreshes running workspace grants."}</p>
+        {changeSummary && <p className="tool-policy-change-summary"><strong>Review required:</strong> {changeSummary}. Open each provider definition before allowing it.</p>}
         <div className="tool-policy-groups">
           {groupedTools.map((group) => <section key={group.service} className="tool-policy-group">
             <h3>{group.label}<span>{group.tools.length} tools</span></h3>
             <div className="tool-policy-list">
               {group.tools.map((tool) => (
                 <label key={tool.name}>
-                  <span><strong>{tool.displayName}</strong><small>{tool.description}</small><code>{tool.name}</code></span>
+                  <span>
+                    <strong>{tool.displayName}</strong>
+                    <small>{tool.description}</small>
+                    <code>{tool.name}</code>
+                    {tool.definitionPreview && <details className="tool-definition-preview">
+                      <summary>View current provider definition</summary>
+                      <pre>{tool.definitionPreview}</pre>
+                    </details>}
+                  </span>
                   <SelectMenu
                     value={tool.decision}
                     onValueChange={(value) => onPolicyChange(tool.name, value)}
@@ -2092,7 +2111,7 @@ function AddConnectorDialog({ onCreated, onClose }) {
           <label><span>Client secret</span><input name="connector-client-secret" type="password" autoComplete="new-password" value={draft.clientSecret} onChange={(event) => update("clientSecret", event.target.value)} disabled={Boolean(busy)} /></label>
         </div>
       </section>}
-      {checked && <div className="connector-discovery-result" role="status"><CheckmarkCircle24Regular aria-hidden="true" /><span><strong>Connection flow verified</strong>{checked.dynamicClientRegistration ? "Connection setup is automatic. No provider credentials are needed." : "The provider app is ready to use."}</span></div>}
+      {checked && <div className="connector-discovery-result" role="status"><CheckmarkCircle24Regular aria-hidden="true" /><span><strong>Connection flow verified</strong>{checked.dynamicClientRegistration ? "Connection setup is automatic. No provider credentials are needed." : "The provider app is ready to use."} Review the authorization destination before adding: <code>{checked.authorizationOrigin}</code>.</span></div>}
       {error && <p className="add-connector-error" role="alert">{error}</p>}
       <div className="modal-actions">
         <button className="secondary-button" type="button" onClick={onClose} disabled={Boolean(busy)}>Cancel</button>
@@ -4503,9 +4522,13 @@ export function App() {
     try {
       const decisions = Object.fromEntries(mcpPolicy.tools.map((tool) => [tool.name, tool.decision]));
       if (mcpPolicy.connectorId) {
-        const refreshed = await adminApi.saveConnectorToolPolicy(mcpPolicy.connectorId, decisions);
+        const refreshed = await adminApi.saveConnectorToolPolicy(mcpPolicy.connectorId, decisions, mcpPolicy.documentHash);
         setMcpPolicy(refreshed);
-        setToast(`${mcpPolicy.connectorName} tool and approval rules are active.`);
+        if (refreshed.tools?.some((tool) => tool.reviewRequired)) {
+          setToast(`${mcpPolicy.connectorName} changed again while it was being saved. Review the current definitions before they can be used.`);
+        } else {
+          setToast(`${mcpPolicy.connectorName} tool and approval rules are active.`);
+        }
         return;
       }
       const saved = await adminApi.saveMcpPolicy(decisions);

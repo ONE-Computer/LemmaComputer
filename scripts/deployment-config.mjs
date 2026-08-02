@@ -48,6 +48,9 @@ const sections = [
     variable("ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME", "litellm-admin-listener", "Expected TLS server name for Control's private admin client."),
     variable("ONECOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME", "onecomputer-control", "Required Control client certificate common name at the private admin listener."),
   ]),
+  section("Custom MCP egress", "Hosted custom MCP destinations are approved by the deployment and network owner, not by a tenant-local administrator.", [
+    variable("ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS", "", "Comma-separated exact HTTPS origins for hosted custom MCP and OAuth flows, including endpoint, metadata, authorization, token, and dynamic-client-registration origins. Customer-managed installations can leave this empty."),
+  ]),
   section("Runtime limits and security switches", "These are deployment controls, not Compose defaults. Keep the secure hosted Telegram setting explicit.", [
     variable("ONECOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS", "300", "Signed workspace-launch token lifetime in seconds.", { kind: "integer" }),
     variable("ONECOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS", "28800", "Workspace ingress session lifetime in seconds.", { kind: "integer" }),
@@ -76,6 +79,9 @@ const sections = [
     variable("ONECOMPUTER_SESSION_SECRET", generated, "Web session signing secret.", { secret: true, generated: "random" }),
     variable("ONECOMPUTER_WORKSPACE_INGRESS_SECRET", generated, "Workspace ingress signing secret.", { secret: true, generated: "random" }),
     variable("ONECOMPUTER_EGRESS_GRANT_SECRET", generated, "Egress grant derivation secret.", { secret: true, generated: "random" }),
+    variable("ONECOMPUTER_GATEWAY_EGRESS_PROXY_TOKEN", generated, "LiteLLM credential for the static model-provider egress proxy.", { secret: true, generated: "random" }),
+    variable("ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_TOKEN", generated, "LiteLLM credential for the strict remote-MCP egress proxy.", { secret: true, generated: "random" }),
+    variable("ONECOMPUTER_MCP_EGRESS_PROXY_TOKEN", generated, "Remote MCP proxy credential for its narrow Control authorization callback.", { secret: true, generated: "random" }),
     variable("ONECOMPUTER_AGENT_BRIDGE_SECRET", generated, "Dedicated agent bridge signing secret.", { secret: true, generated: "random" }),
     variable("ONECOMPUTER_HERMES_API_SECRET", generated, "Agent chat internal authentication secret.", { secret: true, generated: "random" }),
     variable("ONECOMPUTER_CHANNEL_CREDENTIAL_SECRET", generated, "Channel broker credential-vault encryption secret.", { secret: true, generated: "random" }),
@@ -400,6 +406,8 @@ const runtimeDefaults = Object.freeze({
 
 const controlDatabaseUrl = (v) => `postgres://onecomputer:${v("ONECOMPUTER_POSTGRES_PASSWORD")}@${runtimeDefaults.postgresHost}:5432/onecomputer`;
 const litellmDatabaseUrl = (v) => `postgres://litellm:${v("ONECOMPUTER_LITELLM_POSTGRES_PASSWORD")}@${runtimeDefaults.litellmPostgresHost}:5432/litellm`;
+const gatewayProviderEgressPolicy = '{"schemaVersion":2,"mode":"restricted","id":"egv_gateway_provider_egress_v1","securityGroupId":"esg_gateway_provider_egress","version":1,"name":"Gateway provider egress","description":"Exact outbound model provider destinations.","defaultAction":"deny","rules":[{"id":"openai-api","action":"allow","protocol":"https","host":"api.openai.com","includeSubdomains":false,"port":443,"purpose":"OpenAI model API"},{"id":"anthropic-api","action":"allow","protocol":"https","host":"api.anthropic.com","includeSubdomains":false,"port":443,"purpose":"Anthropic model API"},{"id":"zai-api","action":"allow","protocol":"https","host":"api.z.ai","includeSubdomains":false,"port":443,"purpose":"Z.ai model API"},{"id":"bedrock-use1","action":"allow","protocol":"https","host":"bedrock-runtime.us-east-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock us-east-1"},{"id":"bedrock-usw2","action":"allow","protocol":"https","host":"bedrock-runtime.us-west-2.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock us-west-2"},{"id":"bedrock-euw1","action":"allow","protocol":"https","host":"bedrock-runtime.eu-west-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock eu-west-1"},{"id":"bedrock-apse1","action":"allow","protocol":"https","host":"bedrock-runtime.ap-southeast-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock ap-southeast-1"}],"documentHash":"0f7d144fd2ecfe6704dbf8c02c9cdb1a949674bba3930560cad36c367465a52f"}';
+const remoteMcpEgressPolicy = '{"schemaVersion":2,"mode":"restricted","id":"egv_remote_mcp_egress_v1","securityGroupId":"esg_remote_mcp_egress","version":1,"name":"Remote MCP egress","description":"Control-approved public MCP and OAuth destinations.","defaultAction":"deny","rules":[],"documentHash":"1d9c9a090b1bd52ad16c6a4d47c6c2958a0bb7634f6efdfc7ffb1f8fe7e7a45f"}';
 
 /**
  * Render the reference service-local names once. Compose and another platform
@@ -417,6 +425,8 @@ export function projectServiceEnvironment(input = {}) {
   const litellmUrl = `http://${runtimeDefaults.litellmHost}:4000`;
   const ms365Url = `http://${runtimeDefaults.ms365Host}:3000`;
   const consentUrl = `http://${runtimeDefaults.consentHost}:8788`;
+  const gatewayEgressProxyUrl = `http://litellm-gateway:${encodeURIComponent(v("ONECOMPUTER_GATEWAY_EGRESS_PROXY_TOKEN"))}@gateway-egress-proxy:3128`;
+  const remoteMcpEgressProxyUrl = `http://litellm-gateway:${encodeURIComponent(v("ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_TOKEN"))}@remote-mcp-egress-proxy:3128`;
 
   return {
     postgres: {
@@ -457,6 +467,31 @@ export function projectServiceEnvironment(input = {}) {
       ONECOMPUTER_MCP_POLICY_TOKEN: v("ONECOMPUTER_CONTROLLER_TOKEN"),
       ONECOMPUTER_AI_USAGE_URL: `${controlUrl}/internal/v1/ai-usage`,
       ONECOMPUTER_AI_USAGE_TOKEN: v("ONECOMPUTER_AI_USAGE_TOKEN"),
+      // Model traffic uses the static allowlist proxy. The pinned strict
+      // remote-MCP extension selects its own explicit proxy and ignores these
+      // environment-controlled bypass settings.
+      HTTP_PROXY: gatewayEgressProxyUrl,
+      HTTPS_PROXY: gatewayEgressProxyUrl,
+      http_proxy: gatewayEgressProxyUrl,
+      https_proxy: gatewayEgressProxyUrl,
+      AIOHTTP_TRUST_ENV: "true",
+      NO_PROXY: "localhost,127.0.0.1,::1,litellm,litellm-postgres,ms365-mcp,control-api,workspace-ingress,litellm-admin-proxy",
+      no_proxy: "localhost,127.0.0.1,::1,litellm,litellm-postgres,ms365-mcp,control-api,workspace-ingress,litellm-admin-proxy",
+      ALL_PROXY: "",
+      all_proxy: "",
+      ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL: remoteMcpEgressProxyUrl,
+    },
+    "gateway-egress-proxy": {
+      EGRESS_PROXY_PORT: "3128",
+      EGRESS_PROXY_SERVICE_PASSWORD: v("ONECOMPUTER_GATEWAY_EGRESS_PROXY_TOKEN"),
+      EGRESS_POLICY_JSON: gatewayProviderEgressPolicy,
+    },
+    "remote-mcp-egress-proxy": {
+      EGRESS_PROXY_PORT: "3128",
+      EGRESS_PROXY_SERVICE_PASSWORD: v("ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_TOKEN"),
+      EGRESS_DYNAMIC_AUTHORIZATION_URL: `${controlUrl}/internal/v1/mcp-egress/authorize`,
+      EGRESS_DYNAMIC_AUTHORIZATION_TOKEN: v("ONECOMPUTER_MCP_EGRESS_PROXY_TOKEN"),
+      EGRESS_POLICY_JSON: remoteMcpEgressPolicy,
     },
     "litellm-admin-proxy": {
       ONECOMPUTER_INSTALLATION_KIND: v("ONECOMPUTER_INSTALLATION_KIND"),
@@ -512,6 +547,8 @@ export function projectServiceEnvironment(input = {}) {
       WEB_PROXY_TOKEN: v("ONECOMPUTER_WEB_PROXY_TOKEN"),
       CONTROLLER_URL: controllerUrl,
       CONTROLLER_INTERNAL_TOKEN: v("ONECOMPUTER_CONTROLLER_TOKEN"),
+      MCP_EGRESS_PROXY_TOKEN: v("ONECOMPUTER_MCP_EGRESS_PROXY_TOKEN"),
+      HOSTED_MCP_EGRESS_ORIGINS: v("ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS"),
       DATABASE_URL: controlDatabaseUrl(v),
       LITELLM_ADMIN_URL: v("ONECOMPUTER_LITELLM_ADMIN_URL"),
       LITELLM_ADMIN_TLS_CA_B64: v("ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64"),

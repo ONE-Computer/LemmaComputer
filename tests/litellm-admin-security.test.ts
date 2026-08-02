@@ -99,3 +99,47 @@ test("the shared projection routes LiteLLM administration through the dedicated 
   assert.ok(!("LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64" in controlEnvironment));
   assert.doesNotMatch(hostedCompose, /^\s+environment:/m);
 });
+
+test("Compose separates model egress from strict remote-MCP egress", async () => {
+  const compose = await readFile(new URL("../compose.yaml", import.meta.url), "utf8");
+  const litellm = compose.split("  litellm:")[1]?.split("\n  # The model-only internet-routed hop")[0] ?? "";
+  const modelProxy = compose.split("\n  gateway-egress-proxy:\n")[1]?.split("\n  # The only external path for custom/public MCP operations.")[0] ?? "";
+  const remoteProxy = compose.split("\n  remote-mcp-egress-proxy:\n")[1]?.split("\n  # Control uses this dedicated listener")[0] ?? "";
+  const dockerfile = await readFile(new URL("../docker/Dockerfile.litellm", import.meta.url), "utf8");
+  const patch = await readFile(new URL("../integrations/litellm/onecomputer_remote_mcp_egress.py", import.meta.url), "utf8");
+  const projected = projectServiceEnvironment();
+  const litellmEnvironment = projected.litellm;
+  const modelProxyEnvironment = projected["gateway-egress-proxy"];
+  const remoteProxyEnvironment = projected["remote-mcp-egress-proxy"];
+  const controlEnvironment = projected["control-api"];
+
+  assert.match(litellm, /image: onecomputer\/litellm:v1\.93\.0-onecomputer-egress/);
+  assert.match(litellm, /dockerfile: docker\/Dockerfile\.litellm/);
+  assert.match(litellm, /env_file:\s+- path: \.runtime-env\/litellm\.env\s+format: raw/);
+  assert.match(litellmEnvironment.HTTP_PROXY, /^http:\/\/litellm-gateway:.*@gateway-egress-proxy:3128$/);
+  assert.equal(litellmEnvironment.HTTPS_PROXY, litellmEnvironment.HTTP_PROXY);
+  assert.match(litellmEnvironment.ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL, /^http:\/\/litellm-gateway:.*@remote-mcp-egress-proxy:3128$/);
+  assert.equal(litellmEnvironment.AIOHTTP_TRUST_ENV, "true");
+  assert.match(litellmEnvironment.NO_PROXY, /ms365-mcp.*control-api/);
+  assert.match(litellm, /networks:\n\s+- gateway-private/);
+  assert.doesNotMatch(litellm, /\n\s+- model-egress/);
+  assert.match(modelProxy, /env_file:\s+- path: \.runtime-env\/gateway-egress-proxy\.env\s+format: raw/);
+  assert.match(modelProxy, /model-egress: \{\}/);
+  assert.equal(modelProxyEnvironment.EGRESS_PROXY_PORT, "3128");
+  assert.ok("EGRESS_PROXY_SERVICE_PASSWORD" in modelProxyEnvironment);
+  assert.ok(!("EGRESS_DYNAMIC_AUTHORIZATION_URL" in modelProxyEnvironment));
+  assert.match(remoteProxy, /env_file:\s+- path: \.runtime-env\/remote-mcp-egress-proxy\.env\s+format: raw/);
+  assert.match(remoteProxy, /mcp-egress-private: \{\}/);
+  assert.doesNotMatch(remoteProxy, /gateway-private/);
+  assert.match(remoteProxy, /model-egress: \{\}/);
+  assert.equal(remoteProxyEnvironment.EGRESS_DYNAMIC_AUTHORIZATION_URL, "http://control-api:4100/internal/v1/mcp-egress/authorize");
+  assert.ok("EGRESS_PROXY_SERVICE_PASSWORD" in remoteProxyEnvironment);
+  assert.ok("EGRESS_DYNAMIC_AUTHORIZATION_TOKEN" in remoteProxyEnvironment);
+  assert.ok("MCP_EGRESS_PROXY_TOKEN" in controlEnvironment);
+  assert.ok(!("ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL" in controlEnvironment));
+  assert.match(dockerfile, /FROM ghcr\.io\/berriai\/litellm:v1\.93\.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e/);
+  assert.match(dockerfile, /onecomputer_remote_mcp_egress\.py/);
+  assert.match(patch, /trust_env=False/);
+  assert.match(patch, /follow_redirects=True/);
+  assert.match(patch, /EXPECTED_LITELLM_VERSION = "1\.93\.0"/);
+});

@@ -7,6 +7,8 @@ mcp_servers:
   onecomputer_ms365:
     transport: http
     url: http://ms365-mcp:3000/mcp
+    mcp_info:
+      onecomputer_egress_profile: internal
     description: Governed Outlook Mail, Calendar, OneDrive, and Teams connector
     auth_type: oauth2
     oauth2_flow: authorization_code

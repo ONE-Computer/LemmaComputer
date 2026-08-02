@@ -286,9 +286,9 @@ are excluded from the user-controlled operation fingerprint.
 | `web-edge` | ingress, Web, Control | No |
 | `onecomputer-control` | Control, controller, channel broker, scheduler worker, ingress, dynamic relays | No |
 | `consent-private` | Control, OpenVTC | No |
-| `gateway-private` | Control, LiteLLM, gateway database, M365 MCP | No |
+| `gateway-private` | Control, LiteLLM, gateway database, M365 MCP, model egress proxy | No |
 | `identity-egress` | Control | Yes, for Entra discovery and token exchange |
-| `model-egress` | LiteLLM | Yes, for configured providers |
+| `model-egress` | model egress proxy, remote-MCP egress proxy | Yes, restricted by separate model and remote-MCP policies |
 | `microsoft-egress` | M365 MCP | Yes, for Microsoft identity and Graph |
 | `channel-egress` | channel broker | Yes, for configured channel providers |
 | dynamic workspace network | one sandbox plus selected gateway/control sidecars | No |
@@ -296,6 +296,24 @@ are excluded from the user-controlled operation fingerprint.
 
 Docker network membership limits reachability; application authentication and
 signed bindings remain mandatory even on private networks.
+
+LiteLLM is not attached to an internet-routed network. Normal model traffic
+uses the model egress proxy and its static provider allowlist. Public MCP
+servers use a separate, version-pinned strict client: it explicitly selects the
+remote-MCP egress proxy and ignores proxy environment variables and `NO_PROXY`.
+That applies to tool discovery, calls, OAuth metadata, dynamic registration,
+token exchange, refresh, and every redirect. The proxy resolves every DNS
+answer, rejects private or mixed answers, pins the selected public IP, checks
+TLS SNI, and evaluates every redirect connection independently. The private
+Microsoft MCP connector is explicitly classified as internal and stays on its
+private route.
+
+The remote-MCP proxy has its own LiteLLM service credential, a default-deny
+empty static policy, and an authenticated Control callback that receives only
+normalized protocol/host/port values. Errors and timeouts deny the connection.
+In hosted multi-tenant mode, custom MCP origins come from the deployment-owned
+`ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` allowlist rather than tenant connector
+records, so a tenant administrator cannot create a gateway-wide destination.
 
 ## State and recovery
 

@@ -5967,6 +5967,7 @@ textarea:focus-visible,
 .tool-policy-heading h2 { margin: 0; color: #0d1a2b; font-size: 24px; }
 .tool-policy-heading > span { color: #68727d; font-size: 13px; }
 .tool-policy-intro { max-width: 780px; margin: 14px 0 24px; color: #5d6670; line-height: 1.55; }
+.tool-policy-change-summary { margin: -10px 0 20px; color: #5d4a13; font-size: 13px; line-height: 1.5; }
 .tool-policy-groups { display: grid; gap: 24px; }
 .tool-policy-group { overflow: hidden; border: 1px solid #e2e2df; border-radius: 10px; }
 .tool-policy-group h3 { display: flex; align-items: center; justify-content: space-between; margin: 0; padding: 14px 18px; background: #f7f7f4; color: #172334; font-size: 16px; }
@@ -5985,6 +5986,9 @@ textarea:focus-visible,
 .tool-policy-list label > span { display: grid; gap: 5px; }
 .tool-policy-list small { color: #68727d; }
 .tool-policy-list code { width: fit-content; color: #39536e; font-size: 12px; }
+.tool-definition-preview { margin-top: 4px; color: #39536e; font-size: 12px; }
+.tool-definition-preview summary { width: fit-content; cursor: pointer; color: #24568f; }
+.tool-definition-preview pre { max-height: 220px; max-width: 100%; margin: 7px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #33485d; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .tool-policy-list .select-menu { width: 100%; }
 .tool-policy-list .select-menu-trigger {
   min-height: 44px;

@@ -74,6 +74,20 @@ export type OAuthConnectionStatus = {
   } | null;
 };
 
+// A tool review is bound to this digest, not solely to the provider-chosen
+// tool name. `definitionHash` is SHA-256 over a canonical form of every raw
+// `/mcp-rest/tools/list` field except LiteLLM's transport-only `mcp_info`.
+export type OAuthConnectionTool = {
+  name: string;
+  definitionHash: string;
+  description?: string;
+  /**
+   * Bounded, redacted current-definition context for an administrator. It is
+   * display-only; `definitionHash` remains the authorization binding.
+   */
+  definitionPreview?: string;
+};
+
 export interface OAuthConnectionGateway {
   beginUserOAuthConnection(input: {
     identity: IdentityContext;
@@ -92,7 +106,7 @@ export interface OAuthConnectionGateway {
   }): Promise<OAuthConnectionStatus>;
   userOAuthConnectionStatus(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus>;
   disconnectUserOAuthConnection(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus>;
-  userOAuthConnectionTools(identity: IdentityContext, serverName: string): Promise<string[]>;
+  userOAuthConnectionTools(identity: IdentityContext, serverName: string): Promise<OAuthConnectionTool[]>;
 }
 
 export type McpConnectorRegistrationInput = {
@@ -104,6 +118,11 @@ export type McpConnectorRegistrationInput = {
   scopes: string[];
   clientId?: string;
   clientSecret?: string;
+  /**
+   * Control-owned classification consumed only by the pinned LiteLLM egress
+   * extension. It is never accepted from a connector provider or browser.
+   */
+  egressProfile?: "strict_remote" | "internal";
 };
 
 export interface McpConnectorAdministrationGateway {
@@ -190,6 +209,82 @@ const asObject = (value: unknown): JsonObject => value && typeof value === "obje
 const stringArray = (value: unknown) => Array.isArray(value)
   ? value.filter((item): item is string => typeof item === "string")
   : [];
+const canonicalToolDefinition = (value: unknown): string => {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new OneComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalToolDefinition).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as JsonObject;
+    return `{${Object.keys(record).sort().map((key) => {
+      const item = record[key];
+      if (item === undefined) throw new OneComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
+      return `${JSON.stringify(key)}:${canonicalToolDefinition(item)}`;
+    }).join(",")}}`;
+  }
+  throw new OneComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
+};
+
+const maxToolDefinitionPreviewLength = 6_144;
+const maxToolDefinitionPreviewDepth = 12;
+const maxToolDefinitionPreviewEntries = 64;
+const maxToolDefinitionPreviewStringLength = 1_024;
+const isSensitiveToolDefinitionField = (field: string) => /(?:api[-_]?key|authorization|credential|password|secret|token)/i.test(field);
+
+/**
+ * Tool definitions are supplied by a remote provider, so give reviewers a
+ * useful but bounded representation. Transport metadata was removed before
+ * this point; likely secrets are redacted rather than echoed into Control's
+ * admin UI. The unredacted canonical definition is still what gets hashed.
+ */
+const redactToolDefinitionForPreview = (value: unknown, depth = 0): unknown => {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : "[invalid number]";
+  if (typeof value === "string") {
+    return value.length <= maxToolDefinitionPreviewStringLength
+      ? value
+      : `${value.slice(0, maxToolDefinitionPreviewStringLength)}…[truncated]`;
+  }
+  if (depth >= maxToolDefinitionPreviewDepth) return "[truncated: nesting limit]";
+  if (Array.isArray(value)) {
+    const entries = value.slice(0, maxToolDefinitionPreviewEntries)
+      .map((entry) => redactToolDefinitionForPreview(entry, depth + 1));
+    return value.length > maxToolDefinitionPreviewEntries ? [...entries, "[truncated: item limit]"] : entries;
+  }
+  if (value && typeof value === "object") {
+    const source = value as JsonObject;
+    const result: JsonObject = {};
+    const keys = Object.keys(source).sort();
+    for (const key of keys.slice(0, maxToolDefinitionPreviewEntries)) {
+      result[key] = isSensitiveToolDefinitionField(key)
+        ? "[redacted]"
+        : redactToolDefinitionForPreview(source[key], depth + 1);
+    }
+    if (keys.length > maxToolDefinitionPreviewEntries) result._truncated = "[property limit]";
+    return result;
+  }
+  return "[invalid value]";
+};
+
+const toolDefinitionPreview = (definition: JsonObject) => {
+  const preview = canonicalToolDefinition(redactToolDefinitionForPreview(definition));
+  return preview.length <= maxToolDefinitionPreviewLength
+    ? preview
+    : `${preview.slice(0, maxToolDefinitionPreviewLength)}…[truncated]`;
+};
+
+const oauthConnectionToolDescriptor = (tool: JsonObject): OAuthConnectionTool | null => {
+  if (typeof tool.name !== "string" || !tool.name) return null;
+  const definition = Object.fromEntries(Object.entries(tool).filter(([key]) => key !== "mcp_info"));
+  return {
+    name: tool.name,
+    definitionHash: createHash("sha256").update(canonicalToolDefinition(definition), "utf8").digest("hex"),
+    ...(typeof tool.description === "string" ? { description: tool.description } : {}),
+    definitionPreview: toolDefinitionPreview(definition),
+  };
+};
 const sameStrings = (left: string[], right: string[]) => {
   const sortedLeft = [...left].sort();
   const sortedRight = [...right].sort();
@@ -462,7 +557,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     }
   }
 
-  async userOAuthConnectionTools(identity: IdentityContext, serverName: string) {
+  async userOAuthConnectionTools(identity: IdentityContext, serverName: string): Promise<OAuthConnectionTool[]> {
     const grant = await this.ensureConnectionGrant(identity, serverName);
     try {
       const status = await this.readConnectionStatus(grant.credential, grant.serverId, serverName);
@@ -479,13 +574,35 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       // must not project stale tools into a new workspace grant.
       if (refreshedStatus.state !== "connected") return [];
       const tools = Array.isArray(asObject(result.payload).tools) ? asObject(result.payload).tools as unknown[] : [];
-      return [...new Set(tools.map(asObject)
-        .filter((tool) => {
-          const info = asObject(tool.mcp_info);
-          return !info.server_id || info.server_id === grant.serverId;
-        })
-        .map((tool) => typeof tool.name === "string" ? tool.name : "")
-        .filter(Boolean))].sort();
+      const descriptors = new Map<string, OAuthConnectionTool>();
+      for (const tool of tools.map(asObject)) {
+        const info = asObject(tool.mcp_info);
+        // `/mcp-rest/tools/list` can contain entries for more than one server.
+        // A tool without an exact server identity is not attributable to this
+        // connector and must never become reviewable or projectable.
+        if (typeof info.server_id !== "string") {
+          throw new OneComputerError(
+            "MCP_TOOL_DISCOVERY_INVALID",
+            "The connector returned a tool without its server identity. Reconnect and try again.",
+            502,
+            true,
+          );
+        }
+        if (info.server_id !== grant.serverId) continue;
+        const descriptor = oauthConnectionToolDescriptor(tool);
+        if (!descriptor) continue;
+        const existing = descriptors.get(descriptor.name);
+        if (existing && existing.definitionHash !== descriptor.definitionHash) {
+          throw new OneComputerError(
+            "MCP_TOOL_DISCOVERY_CONFLICT",
+            "The connector returned conflicting definitions for a tool. Reconnect and try again.",
+            502,
+            true,
+          );
+        }
+        descriptors.set(descriptor.name, descriptor);
+      }
+      return [...descriptors.values()].sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
     } finally {
       await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }
@@ -561,6 +678,18 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         if (exact.server_name !== input.serverName || exact.url !== input.url) {
           throw new OneComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector registration does not match the approved catalog`, 409);
         }
+        // Apply the Control-owned egress classification to records created by
+        // an earlier release. The LiteLLM extension also treats HTTPS MCP
+        // servers as strict by default, so a failed reconciliation cannot
+        // reopen a legacy connector's direct path.
+        const existingProfile = asObject(exact.mcp_info).onecomputer_egress_profile;
+        if (input.egressProfile && existingProfile !== input.egressProfile) {
+          const updated = await this.adminCall("/v1/mcp/server", {
+            method: "PUT",
+            body: this.mcpRegistrationPayload(input),
+          }, true);
+          if (!updated.ok) throw this.upstreamError("MCP_REGISTRATION_FAILED", updated.status, updated.payload);
+        }
         continue;
       }
       const nameConflict = servers.find((server) => server.server_name === input.serverName);
@@ -596,6 +725,9 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         ...(input.clientSecret ? { client_secret: input.clientSecret } : {}),
         scopes: input.scopes,
       },
+      ...(input.egressProfile ? {
+        mcp_info: { onecomputer_egress_profile: input.egressProfile },
+      } : {}),
       allow_all_keys: false,
       available_on_public_internet: true,
       delegate_auth_to_upstream: false,

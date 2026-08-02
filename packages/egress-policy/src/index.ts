@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { promises as dns } from "node:dns";
 import { isIP } from "node:net";
 import { domainToASCII } from "node:url";
 import {
@@ -54,6 +55,53 @@ export type EgressConnection = {
   port: number;
   resolvedAddresses: string[];
 };
+
+/** A resolver must return every A and AAAA answer it received for the hostname. */
+export type PublicHttpsTargetResolver = (hostname: string) => Promise<ReadonlyArray<{
+  address: string;
+  family: 4 | 6;
+}>>;
+
+export type PublicHttpsTargetValidationOptions = {
+  /**
+   * Override DNS lookup for tests or a controlled resolver. The default uses
+   * the host resolver and asks for all A and AAAA answers without reordering.
+   */
+  resolveHostname?: PublicHttpsTargetResolver;
+  /**
+   * Optional destination policy. Without one, the candidate host and port are
+   * evaluated as an exact, deny-by-default HTTPS rule solely to prove that the
+   * address is public. Callers with an approval allowlist should supply it.
+   */
+  policy?: CompiledEgressPolicy;
+};
+
+export type ValidatedPublicHttpsTarget = {
+  canonicalUrl: string;
+  origin: string;
+  host: string;
+  port: number;
+  resolvedAddresses: string[];
+  decision: EgressDecision;
+};
+
+export type PublicHttpsTargetValidationReason =
+  | "EGRESS_INVALID_URL"
+  | "EGRESS_HTTPS_REQUIRED"
+  | "EGRESS_URL_CREDENTIALS_DENIED"
+  | "EGRESS_URL_FRAGMENT_DENIED"
+  | EgressDecision["reasonCode"];
+
+export class PublicHttpsTargetValidationError extends Error {
+  constructor(
+    message: string,
+    readonly reasonCode: PublicHttpsTargetValidationReason,
+    readonly decision?: EgressDecision,
+  ) {
+    super(message);
+    this.name = "PublicHttpsTargetValidationError";
+  }
+}
 
 export type EgressProxyGrantClaims = {
   aud: "onecomputer-egress-proxy";
@@ -318,4 +366,126 @@ export function decideEgress(
   return rule
     ? egressDecisionSchema.parse({ decision: "allow", reasonCode: "EGRESS_ALLOWED", ruleId: rule.id })
     : deny("EGRESS_DEFAULT_DENY");
+}
+
+const defaultPublicHttpsTargetResolver: PublicHttpsTargetResolver = async (hostname) => {
+  const answers = await dns.lookup(hostname, { all: true, verbatim: true });
+  return answers.map(({ address, family }) => ({
+    address,
+    family: family === 6 ? 6 : 4,
+  }));
+};
+
+const exactPublicHttpsEndpointPolicy = (host: string, port: number): CompiledEgressSecurityGroup => ({
+  id: "egress_public_https_endpoint_validation",
+  securityGroupId: "egress_public_https_endpoint_validation",
+  version: 1,
+  name: "Public HTTPS endpoint validation",
+  defaultAction: "deny",
+  documentHash: "0".repeat(64),
+  rules: [{
+    id: "candidate-public-https-endpoint",
+    action: "allow",
+    protocol: "https",
+    host,
+    includeSubdomains: false,
+    port,
+    purpose: "Validate an exact public HTTPS endpoint candidate",
+  }],
+});
+
+const invalidTarget = (message: string, reasonCode: PublicHttpsTargetValidationReason) => (
+  new PublicHttpsTargetValidationError(message, reasonCode)
+);
+
+/**
+ * Parses and resolves an externally supplied HTTPS endpoint before admission.
+ *
+ * This is intentionally a validation primitive, not a complete SSRF boundary:
+ * a caller that subsequently connects must either pin the returned address or
+ * send the connection through an egress proxy that resolves and validates each
+ * hop again. That prevents DNS changes after this check from changing the
+ * destination.
+ */
+export async function validatePublicHttpsTarget(
+  endpointUrl: string,
+  options: PublicHttpsTargetValidationOptions = {},
+): Promise<ValidatedPublicHttpsTarget> {
+  if (typeof endpointUrl !== "string" || !endpointUrl || endpointUrl !== endpointUrl.trim()) {
+    throw invalidTarget("Endpoint URL must be a non-empty URL without surrounding whitespace", "EGRESS_INVALID_URL");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(endpointUrl);
+  } catch {
+    throw invalidTarget("Endpoint URL is invalid", "EGRESS_INVALID_URL");
+  }
+  if (url.protocol !== "https:") {
+    throw invalidTarget("Endpoint URL must use HTTPS", "EGRESS_HTTPS_REQUIRED");
+  }
+  if (url.username || url.password) {
+    throw invalidTarget("Endpoint URL credentials are not allowed", "EGRESS_URL_CREDENTIALS_DENIED");
+  }
+  // URL.hash is empty for a trailing bare '#', so check the source too.
+  if (url.hash || endpointUrl.includes("#")) {
+    throw invalidTarget("Endpoint URL fragments are not allowed", "EGRESS_URL_FRAGMENT_DENIED");
+  }
+
+  let host: string;
+  try {
+    host = normalizeEgressHost(url.hostname);
+  } catch (error) {
+    if (error instanceof EgressHostError) {
+      throw invalidTarget(error.message, error.reasonCode);
+    }
+    throw invalidTarget("Endpoint hostname is invalid", "EGRESS_INVALID_HOST");
+  }
+  const port = url.port ? Number(url.port) : 443;
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw invalidTarget("Endpoint URL has an invalid port", "EGRESS_INVALID_URL");
+  }
+
+  const resolver = options.resolveHostname ?? defaultPublicHttpsTargetResolver;
+  let answers: ReadonlyArray<{ address: string; family: 4 | 6 }>;
+  try {
+    answers = await resolver(host);
+  } catch {
+    throw invalidTarget("Endpoint hostname could not be resolved", "EGRESS_DNS_UNAVAILABLE");
+  }
+  if (
+    !Array.isArray(answers)
+    || answers.some((answer) => (
+      !answer
+      || (answer.family !== 4 && answer.family !== 6)
+      || typeof answer.address !== "string"
+      || isIP(answer.address) !== answer.family
+    ))
+  ) {
+    throw invalidTarget("Endpoint hostname returned an invalid DNS answer", "EGRESS_DNS_UNAVAILABLE");
+  }
+  const resolvedAddresses = answers.map((answer) => answer.address);
+
+  const decision = decideEgress(
+    options.policy ?? exactPublicHttpsEndpointPolicy(host, port),
+    { protocol: "https", host, port, resolvedAddresses },
+  );
+  if (decision.decision !== "allow") {
+    throw new PublicHttpsTargetValidationError(
+      "Endpoint URL is not an allowed public HTTPS destination",
+      decision.reasonCode,
+      decision,
+    );
+  }
+
+  url.hostname = host;
+  url.port = port === 443 ? "" : String(port);
+  return {
+    canonicalUrl: url.toString(),
+    origin: url.origin,
+    host,
+    port,
+    resolvedAddresses,
+    decision,
+  };
 }

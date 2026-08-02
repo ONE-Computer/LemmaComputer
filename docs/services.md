@@ -254,6 +254,16 @@ transport enforcement in `apps/egress-proxy`. Add tests for DNS rebinding,
 private ranges, IPv4/IPv6, malformed hosts, SNI mismatch, and deny-by-default
 behavior.
 
+The Compose gateway runs two separate service-authenticated instances for
+LiteLLM. The model proxy accepts only its static exact-host model-provider
+allowlist. The remote-MCP proxy starts with an empty default-deny policy and
+may ask Control about a normalized public MCP/OAuth destination. Strict remote
+MCP clients explicitly use that second proxy with environment proxy bypasses
+disabled, including for redirects; the private Microsoft connector stays on
+its internal route. Neither gateway mode accepts workspace grants or a
+full-web policy, both bound tunnel lifetime/idle time, and LiteLLM has no
+direct internet-routed network attachment.
+
 ## LiteLLM gateway
 
 **Configuration:** `config/litellm/config.yaml`

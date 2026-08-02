@@ -4,7 +4,15 @@ import type {
   McpConnectorAdministrationGateway,
   OAuthConnectionGateway,
   OAuthConnectionStatus,
+  OAuthConnectionTool,
 } from "@onecomputer/litellm-adapter";
+import {
+  normalizeEgressHost,
+  PublicHttpsTargetValidationError,
+  validatePublicHttpsTarget,
+  type PublicHttpsTargetResolver,
+  type ValidatedPublicHttpsTarget,
+} from "@onecomputer/egress-policy";
 import {
   MemoryConnectorRegistryStore,
   type ConnectorCategory,
@@ -32,6 +40,20 @@ type ConnectionServiceOptions = {
   authorizationOrigin: string;
   liteLlmPublicUrl?: string;
   registry?: ConnectorRegistryStore;
+  installationKind?: "customer-managed" | "hosted" | "worktree";
+  /**
+   * Deployment-owned exact origins for hosted custom MCP connectors. This is
+   * intentionally separate from a tenant administrator's catalog record: one
+   * shared LiteLLM/proxy cannot safely turn a tenant-local entry into a new
+   * gateway-wide internet destination.
+   */
+  hostedCustomConnectorEgressOrigins?: string[];
+  /**
+   * Test/control-plane DNS resolver used only to reject unsafe custom URLs at
+   * admission. The gateway proxy repeats the resolution and enforcement when
+   * it opens the real connection, so this never becomes the SSRF boundary.
+   */
+  resolveCustomConnectorHostname?: PublicHttpsTargetResolver;
   sessionTtlMs?: number;
   now?: () => number;
 };
@@ -67,6 +89,79 @@ const connectorInputDigest = (input: CreateConnectorInput) => createHash("sha256
   clientSecret: input.clientSecret,
 })).digest("base64url");
 
+const explicitToolPolicy = (toolPolicies: Record<string, McpToolPolicyDecision>, toolName: string): McpToolPolicyDecision => {
+  const decision = toolPolicies[toolName];
+  return decision === "allow" || decision === "approval_required" || decision === "deny" ? decision : "deny";
+};
+
+const hasCurrentToolReview = (
+  toolPolicies: Record<string, McpToolPolicyDecision>,
+  toolDefinitionHashes: Record<string, string>,
+  tool: OAuthConnectionTool,
+) => Object.hasOwn(toolPolicies, tool.name)
+  && ["allow", "approval_required", "deny"].includes(toolPolicies[tool.name])
+  && toolDefinitionHashes[tool.name] === tool.definitionHash;
+
+const toolRequiresReview = (
+  toolPolicies: Record<string, McpToolPolicyDecision>,
+  toolDefinitionHashes: Record<string, string>,
+  tool: OAuthConnectionTool,
+) => !hasCurrentToolReview(toolPolicies, toolDefinitionHashes, tool);
+
+const reviewedToolDecision = (
+  toolPolicies: Record<string, McpToolPolicyDecision>,
+  toolDefinitionHashes: Record<string, string>,
+  tool: OAuthConnectionTool,
+) => hasCurrentToolReview(toolPolicies, toolDefinitionHashes, tool)
+  ? explicitToolPolicy(toolPolicies, tool.name)
+  : "deny" as const;
+
+const toolsetDocumentHash = (tools: OAuthConnectionTool[]) => createHash("sha256")
+  .update(JSON.stringify(tools
+    .map(({ name, definitionHash }) => ({ name, definitionHash }))
+  .sort((left, right) => left.name.localeCompare(right.name))), "utf8")
+  .digest("hex");
+
+const sameToolNames = (left: string[], right: string[]) => {
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.length === sortedRight.length
+    && sortedLeft.every((value, index) => value === sortedRight[index]);
+};
+
+const canonicalHttpsOrigin = (input: string): string | null => {
+  try {
+    const url = new URL(input);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    const host = normalizeEgressHost(url.hostname);
+    const port = url.port ? Number(url.port) : 443;
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+    url.hostname = host;
+    url.port = port === 443 ? "" : String(port);
+    return url.origin;
+  } catch {
+    return null;
+  }
+};
+
+const canonicalConfiguredHttpsOrigin = (input: string): string | null => {
+  try {
+    const url = new URL(input);
+    if (url.pathname !== "/" || url.search || url.hash) return null;
+    return canonicalHttpsOrigin(input);
+  } catch {
+    return null;
+  }
+};
+
+const gatewayDestinationOrigin = (protocol: "https", host: string, port: number) => {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  const normalizedHost = normalizeEgressHost(host);
+  const url = new URL(`${protocol}://${normalizedHost}`);
+  url.port = port === 443 ? "" : String(port);
+  return url.origin;
+};
+
 export class McpConnectionService {
   private readonly sessions = new Map<string, PendingConnection>();
   private readonly connectorDiscoveries = new Map<string, PendingConnectorDiscovery>();
@@ -74,6 +169,9 @@ export class McpConnectionService {
   private readonly liteLlmPublicUrl: string;
   private readonly microsoftAuthorizationOrigin: string;
   private readonly registry: ConnectorRegistryStore;
+  private readonly resolveCustomConnectorHostname?: PublicHttpsTargetResolver;
+  private readonly installationKind: "customer-managed" | "hosted" | "worktree";
+  private readonly hostedCustomConnectorEgressOrigins: ReadonlySet<string>;
   private readonly projectionCache = new Map<string, { expiresAt: number; policy: RuntimePolicy }>();
   private readonly connectionStatusStates = new Map<string, Promise<OAuthConnectionStatus>>();
   private readonly sessionTtlMs: number;
@@ -89,6 +187,14 @@ export class McpConnectionService {
     this.liteLlmPublicUrl = new URL(options.liteLlmPublicUrl ?? "http://localhost:4000").toString().replace(/\/$/, "");
     this.microsoftAuthorizationOrigin = new URL(options.authorizationOrigin).origin;
     this.registry = options.registry ?? new MemoryConnectorRegistryStore();
+    this.resolveCustomConnectorHostname = options.resolveCustomConnectorHostname;
+    this.installationKind = options.installationKind ?? "customer-managed";
+    const configuredOrigins = options.hostedCustomConnectorEgressOrigins ?? [];
+    const normalizedOrigins = configuredOrigins.map((origin) => canonicalConfiguredHttpsOrigin(origin));
+    if (normalizedOrigins.some((origin) => !origin)) {
+      throw new Error("Hosted custom MCP egress origins must be exact public HTTPS origins");
+    }
+    this.hostedCustomConnectorEgressOrigins = new Set(normalizedOrigins.filter((origin): origin is string => Boolean(origin)));
     this.sessionTtlMs = options.sessionTtlMs ?? 10 * 60 * 1000;
     this.now = options.now ?? Date.now;
   }
@@ -253,45 +359,50 @@ export class McpConnectionService {
     return this.publicConnector(saved);
   }
 
-  async discoverConnector(input: CreateConnectorInput) {
-    this.validateCustomConnector(input);
+  async discoverConnector(identity: IdentityContext, input: CreateConnectorInput) {
+    const endpoint = await this.validateCustomConnector(input);
+    const validatedInput = { ...input, endpointUrl: endpoint.canonicalUrl };
     this.pruneExpired();
-    const discovered = await this.administratorGateway().discoverOAuthMcpServer({
-      name: input.name,
-      description: input.description,
-      url: input.endpointUrl,
-      scopes: input.scopes,
-      clientId: input.clientId,
-      clientSecret: input.clientSecret,
+    const discovered = await this.withDiscoveryEgressPermit(identity, [endpoint.origin], async () => this.administratorGateway().discoverOAuthMcpServer({
+      name: validatedInput.name,
+      description: validatedInput.description,
+      url: validatedInput.endpointUrl,
+      scopes: validatedInput.scopes,
+      clientId: validatedInput.clientId,
+      clientSecret: validatedInput.clientSecret,
+      egressProfile: "strict_remote",
       callbackUrl: `${this.liteLlmPublicUrl}/callback`,
-    });
+    }));
+    const authorization = await this.validateCustomAuthorizationOrigin(discovered.authorizationOrigin);
     const discoveryToken = randomBytes(32).toString("base64url");
     this.connectorDiscoveries.set(stateDigest(discoveryToken), {
-      inputDigest: connectorInputDigest(input),
-      authorizationOrigin: discovered.authorizationOrigin,
+      inputDigest: connectorInputDigest(validatedInput),
+      authorizationOrigin: authorization.origin,
       expiresAt: this.now() + this.sessionTtlMs,
     });
     return { ...discovered, discoveryToken };
   }
 
   async createConnector(identity: IdentityContext, createdBy: string, input: CreateConnectorInput) {
-    this.validateCustomConnector(input);
+    const endpoint = await this.validateCustomConnector(input);
+    const validatedInput = { ...input, endpointUrl: endpoint.canonicalUrl };
     this.pruneExpired();
     const administrator = this.administratorGateway();
-    if (!input.discoveryToken) {
+    if (!validatedInput.discoveryToken) {
       throw new OneComputerError("MCP_CONNECTOR_DISCOVERY_REQUIRED", "Check the connector server before adding it", 400);
     }
-    const discoveryKey = stateDigest(input.discoveryToken);
+    const discoveryKey = stateDigest(validatedInput.discoveryToken);
     const discovered = this.connectorDiscoveries.get(discoveryKey);
     this.connectorDiscoveries.delete(discoveryKey);
-    if (!discovered || discovered.expiresAt <= this.now() || discovered.inputDigest !== connectorInputDigest(input)) {
+    if (!discovered || discovered.expiresAt <= this.now() || discovered.inputDigest !== connectorInputDigest(validatedInput)) {
       throw new OneComputerError("MCP_CONNECTOR_DISCOVERY_INVALID", "The connector check expired or its details changed; check the server again", 400);
     }
-    const slug = input.name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
+    const authorization = await this.validateCustomAuthorizationOrigin(discovered.authorizationOrigin);
+    const slug = validatedInput.name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
     if (!slug) throw new OneComputerError("MCP_CONNECTOR_NAME_INVALID", "Enter a connector name using letters or numbers", 400);
     const existing = await this.connectors(identity.tenantId);
     const id = existing.some((connector) => connector.id === slug)
-      ? `${slug}-${createHash("sha256").update(input.endpointUrl).digest("hex").slice(0, 8)}`
+      ? `${slug}-${createHash("sha256").update(validatedInput.endpointUrl).digest("hex").slice(0, 8)}`
       : slug;
     const serverId = randomUUID();
     const serverName = `onecomputer_${id.replace(/-/g, "_")}`.slice(0, 96);
@@ -303,37 +414,40 @@ export class McpConnectionService {
       id,
       serverId,
       serverName,
-      name: input.name.trim(),
-      shortDescription: input.shortDescription.trim(),
-      description: input.description.trim(),
-      category: input.category,
-      services: input.services,
-      endpointUrl: new URL(input.endpointUrl).toString(),
-      authorizationOrigins: [discovered.authorizationOrigin],
-      scopes: input.scopes,
+      name: validatedInput.name.trim(),
+      shortDescription: validatedInput.shortDescription.trim(),
+      description: validatedInput.description.trim(),
+      category: validatedInput.category,
+      services: validatedInput.services,
+      endpointUrl: endpoint.canonicalUrl,
+      authorizationOrigins: [authorization.origin],
+      scopes: validatedInput.scopes,
       brand: "generic",
-      iconDataUrl: input.iconDataUrl ?? null,
+      iconDataUrl: validatedInput.iconDataUrl ?? null,
       policySupport: "automatic" as const,
       source: "custom" as const,
       createdBy,
     };
-    await administrator.registerOAuthMcpServer({
-      serverId,
-      serverName,
-      name: record.name,
-      description: record.description,
-      url: record.endpointUrl,
-      scopes: record.scopes,
-      clientId: input.clientId,
-      clientSecret: input.clientSecret,
+    return this.withDiscoveryEgressPermit(identity, [endpoint.origin, authorization.origin], async () => {
+      await administrator.registerOAuthMcpServer({
+        serverId,
+        serverName,
+        name: record.name,
+        description: record.description,
+        url: record.endpointUrl,
+        scopes: record.scopes,
+        clientId: validatedInput.clientId,
+        clientSecret: validatedInput.clientSecret,
+        egressProfile: "strict_remote",
+      });
+      try {
+        const saved = await this.registry.saveConnector(record);
+        return this.publicConnector(saved);
+      } catch (error) {
+        await administrator.removeMcpServer(serverId).catch(() => undefined);
+        throw error;
+      }
     });
-    try {
-      const saved = await this.registry.saveConnector(record);
-      return this.publicConnector(saved);
-    } catch (error) {
-      await administrator.removeMcpServer(serverId).catch(() => undefined);
-      throw error;
-    }
   }
 
   async deleteConnector(identity: IdentityContext, connectorId: string) {
@@ -368,21 +482,41 @@ export class McpConnectionService {
     if (status.state !== "connected") {
       throw new OneComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
     }
-    const toolNames = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
-    const tools = toolNames.map((name) => ({
-      name,
-      displayName: this.toolDisplayName(name),
-      description: `Use ${this.toolDisplayName(name)} in ${connector.name}.`,
-      service: "tools",
-      risk: "unknown" as const,
-      decision: (connector.toolPolicies[name] ?? "allow") as McpToolPolicyDecision,
-    }));
-    const decisions = Object.fromEntries(tools.map((tool) => [tool.name, tool.decision]));
+    const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
+    const discoveredToolNames = new Set(discoveredTools.map((tool) => tool.name));
+    const addedTools: string[] = [];
+    const changedTools: string[] = [];
+    const tools = discoveredTools.map((tool) => {
+      const reviewRequired = toolRequiresReview(connector.toolPolicies, connector.toolDefinitionHashes, tool);
+      if (reviewRequired) {
+        if (Object.hasOwn(connector.toolPolicies, tool.name)) changedTools.push(tool.name);
+        else addedTools.push(tool.name);
+      }
+      const providerDescription = tool.description?.trim().slice(0, 320);
+      return {
+        name: tool.name,
+        definitionHash: tool.definitionHash,
+        displayName: this.toolDisplayName(tool.name),
+        description: reviewRequired
+          ? `Blocked until an administrator reviews the current definition of ${this.toolDisplayName(tool.name)} in ${connector.name}.${providerDescription ? ` Provider description: ${providerDescription}` : " The provider did not supply a description."}`
+          : (providerDescription || `Use ${this.toolDisplayName(tool.name)} in ${connector.name}.`),
+        ...(tool.definitionPreview ? { definitionPreview: tool.definitionPreview } : {}),
+        service: "tools",
+        risk: "unknown" as const,
+        decision: reviewedToolDecision(connector.toolPolicies, connector.toolDefinitionHashes, tool),
+        reviewRequired,
+      };
+    });
     return {
       connectorId: connector.id,
       connectorName: connector.name,
       serverName: connector.serverName,
-      documentHash: createHash("sha256").update(JSON.stringify(decisions)).digest("hex"),
+      documentHash: toolsetDocumentHash(discoveredTools),
+      changes: {
+        added: addedTools.sort(),
+        changed: changedTools.sort(),
+        removed: Object.keys(connector.toolPolicies).filter((toolName) => !discoveredToolNames.has(toolName)).sort(),
+      },
       tools,
     };
   }
@@ -391,13 +525,22 @@ export class McpConnectionService {
     identity: IdentityContext,
     connectorId: string,
     tools: Record<string, McpToolPolicyDecision>,
+    expectedDocumentHash: string,
   ) {
     const current = await this.connectorToolPolicy(identity, connectorId);
+    if (current.documentHash !== expectedDocumentHash) {
+      throw new OneComputerError(
+        "TOOL_SET_CHANGED_REVIEW_AGAIN",
+        `${current.connectorName} changed while it was being reviewed. Refresh the tool list and review it again.`,
+        409,
+      );
+    }
     const expected = current.tools.map((tool) => tool.name).sort();
     if (Object.keys(tools).sort().join("\0") !== expected.join("\0")) {
       throw new OneComputerError("INVALID_TOOL_POLICY", `A decision is required for every ${current.connectorName} tool`, 400);
     }
-    const saved = await this.registry.updateToolPolicies(identity.tenantId, connectorId, tools);
+    const toolDefinitionHashes = Object.fromEntries(current.tools.map((tool) => [tool.name, tool.definitionHash]));
+    const saved = await this.registry.updateToolPolicies(identity.tenantId, connectorId, { toolPolicies: tools, toolDefinitionHashes });
     if (!saved) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
     this.invalidateTenantProjection(identity.tenantId);
     return this.connectorToolPolicy(identity, connectorId);
@@ -407,26 +550,64 @@ export class McpConnectionService {
     const connector = (await this.connectors(identity.tenantId))
       .find((candidate) => candidate.enabled && candidate.serverName === serverName && candidate.id !== "microsoft-365");
     if (!connector) return null;
+    if (!Object.hasOwn(connector.toolPolicies, toolName) || explicitToolPolicy(connector.toolPolicies, toolName) === "deny") return null;
     const stored = await this.registry.getConnectionState(identity.tenantId, identity.subjectId, connector.id);
     if (!stored) return null;
-    const decision = (connector.toolPolicies[toolName] ?? "allow") as McpToolPolicyDecision;
     try {
       if ((await this.connectionStatus(identity, connector)).state !== "connected") return null;
       const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
-      if (!discoveredTools.includes(toolName)) return null;
+      const tool = discoveredTools.find((candidate) => candidate.name === toolName);
+      if (!tool) return null;
+      const decision = reviewedToolDecision(connector.toolPolicies, connector.toolDefinitionHashes, tool);
       if (decision === "deny") return null;
+      return {
+        connectorId: connector.id,
+        connectorName: connector.name,
+        serverId: connector.serverId,
+        serverName: connector.serverName,
+        toolName,
+        displayName: this.toolDisplayName(toolName),
+        decision,
+      };
     } catch {
       return null;
     }
-    return {
-      connectorId: connector.id,
-      connectorName: connector.name,
-      serverId: connector.serverId,
-      serverName: connector.serverName,
-      toolName,
-      displayName: this.toolDisplayName(toolName),
-      decision,
-    };
+  }
+
+  /**
+   * Called only by the gateway egress proxy. The proxy has already resolved
+   * every A/AAAA record and rejected private addresses; this method decides
+   * whether that public HTTPS origin is one Control is willing to route to.
+   */
+  async isGatewayEgressDestinationAllowed(input: { protocol: "https"; host: string; port: number }) {
+    let destination: string;
+    try {
+      destination = gatewayDestinationOrigin(input.protocol, input.host, input.port)!;
+    } catch {
+      return false;
+    }
+    if (!destination) return false;
+
+    try {
+      const catalogOrigins = connectorCatalog("gateway-egress", this.microsoftAuthorizationOrigin)
+        .flatMap((connector) => [connector.endpointUrl, ...connector.authorizationOrigins])
+        .map(canonicalHttpsOrigin)
+        .filter((origin): origin is string => Boolean(origin));
+      if (catalogOrigins.includes(destination)) return true;
+
+      // Hosted LiteLLM is shared by tenants. A tenant-local connector record
+      // must not make an arbitrary host gateway-wide reachable, so hosted
+      // custom destinations are deployment/IT-owned exact origins. In a
+      // customer-managed single-tenant installation, the owner may opt into
+      // the registry-backed dynamic path below.
+      if (this.installationKind === "hosted") {
+        return this.hostedCustomConnectorEgressOrigins.has(destination);
+      }
+      return (await this.registry.listEnabledEgressOrigins()).includes(destination);
+    } catch {
+      // A control/database outage must never become an egress allow.
+      return false;
+    }
   }
 
   async projectConnectedConnectors(identity: IdentityContext, policy: RuntimePolicy) {
@@ -450,7 +631,12 @@ export class McpConnectionService {
         const connector = connectors.find((candidate) => candidate.enabled && candidate.serverName === serverName);
         if (!connector || !connectionStates.has(connector.id)) return false;
         try {
-          return (await currentStatus(connector)).state === "connected";
+          if ((await currentStatus(connector)).state !== "connected") return false;
+          const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
+          const current = this.reviewedToolsForProjection(connector, discoveredTools);
+          const cachedTools = cached.policy.mcpToolPermissions?.[serverName] ?? [];
+          return sameToolNames(current.tools, cachedTools)
+            && current.tools.every((toolName) => cached.policy.toolPolicies[toolName] === current.toolPolicies[toolName]);
         } catch {
           return false;
         }
@@ -469,8 +655,7 @@ export class McpConnectionService {
           const status = await currentStatus(connector);
           if (status.state !== "connected") return null;
           const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
-          const tools = discoveredTools.filter((tool) => (connector.toolPolicies[tool] ?? "allow") !== "deny");
-          const toolPolicies = Object.fromEntries(tools.map((tool) => [tool, connector.toolPolicies[tool] ?? "allow"]));
+          const { tools, toolPolicies } = this.reviewedToolsForProjection(connector, discoveredTools);
           return tools.length ? { connector, tools, toolPolicies } : null;
         } catch {
           return null;
@@ -508,6 +693,22 @@ export class McpConnectionService {
   private statusFromStoredState(state: ConnectorConnectionStateRecord | null | undefined): OAuthConnectionStatus {
     if (!state) return { state: "disconnected", connectedAt: null, expiresAt: null, account: null };
     return { state: state.state, connectedAt: state.connectedAt?.toISOString() ?? null, expiresAt: state.expiresAt?.toISOString() ?? null, account: null };
+  }
+
+  private reviewedToolsForProjection(
+    connector: Pick<ConnectorDefinition, "toolPolicies" | "toolDefinitionHashes">,
+    discoveredTools: OAuthConnectionTool[],
+  ) {
+    const reviewed = discoveredTools.filter((tool) => (
+      reviewedToolDecision(connector.toolPolicies, connector.toolDefinitionHashes, tool) !== "deny"
+    ));
+    return {
+      tools: reviewed.map((tool) => tool.name),
+      toolPolicies: Object.fromEntries(reviewed.map((tool) => [
+        tool.name,
+        reviewedToolDecision(connector.toolPolicies, connector.toolDefinitionHashes, tool),
+      ])),
+    };
   }
 
   private async connectionStatus(identity: IdentityContext, connector: Pick<ConnectorDefinition, "id" | "serverName">): Promise<OAuthConnectionStatus> {
@@ -595,6 +796,7 @@ export class McpConnectionService {
         description: connector.description,
         url: connector.endpointUrl,
         scopes: connector.scopes,
+        egressProfile: "strict_remote" as const,
       }));
     if (!managed.length) return;
     if (typeof this.gateway.ensureOAuthMcpServers !== "function") {
@@ -613,6 +815,7 @@ export class McpConnectionService {
       endpointUrl: _endpointUrl,
       scopes: _scopes,
       toolPolicies: _toolPolicies,
+      toolDefinitionHashes: _toolDefinitionHashes,
       tenantId: _tenantId,
       serverId: _serverId,
       createdBy: _createdBy,
@@ -650,26 +853,7 @@ export class McpConnectionService {
     return this.gateway as OAuthConnectionGateway & McpConnectorAdministrationGateway;
   }
 
-  private validateCustomConnector(input: CreateConnectorInput) {
-    let endpoint: URL;
-    try {
-      endpoint = new URL(input.endpointUrl);
-    } catch {
-      throw new OneComputerError("MCP_CONNECTOR_URL_INVALID", "Enter a valid connector address", 400);
-    }
-    if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) {
-      throw new OneComputerError("MCP_CONNECTOR_URL_INVALID", "Custom connectors must use a public HTTPS address", 400);
-    }
-    const hostname = endpoint.hostname.toLowerCase();
-    const privateHost = hostname === "localhost"
-      || hostname.endsWith(".local")
-      || /^127\./.test(hostname)
-      || /^10\./.test(hostname)
-      || /^192\.168\./.test(hostname)
-      || /^169\.254\./.test(hostname)
-      || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
-      || hostname === "::1";
-    if (privateHost) throw new OneComputerError("MCP_CONNECTOR_URL_PRIVATE", "Private and local connector addresses are not allowed", 400);
+  private async validateCustomConnector(input: CreateConnectorInput): Promise<ValidatedPublicHttpsTarget> {
     if (!input.name.trim() || !input.shortDescription.trim() || !input.description.trim()) {
       throw new OneComputerError("MCP_CONNECTOR_DETAILS_REQUIRED", "Name and descriptions are required", 400);
     }
@@ -677,6 +861,67 @@ export class McpConnectionService {
       throw new OneComputerError("MCP_CONNECTOR_CLIENT_INVALID", "Client ID is required when a client secret is supplied", 400);
     }
     if (input.iconDataUrl) this.validateConnectorIcon(input.iconDataUrl);
+    let endpoint: ValidatedPublicHttpsTarget;
+    try {
+      endpoint = await validatePublicHttpsTarget(input.endpointUrl, {
+        resolveHostname: this.resolveCustomConnectorHostname,
+      });
+    } catch (error) {
+      if (
+        error instanceof PublicHttpsTargetValidationError
+        && (error.reasonCode === "EGRESS_IP_LITERAL_DENIED" || error.reasonCode === "EGRESS_DESTINATION_RESERVED")
+      ) {
+        throw new OneComputerError("MCP_CONNECTOR_URL_PRIVATE", "Private and local connector addresses are not allowed", 400);
+      }
+      throw new OneComputerError("MCP_CONNECTOR_URL_INVALID", "Enter a valid public HTTPS connector address", 400);
+    }
+    this.requireCustomConnectorEgressApproval(endpoint.origin);
+    return endpoint;
+  }
+
+  private async validateCustomAuthorizationOrigin(origin: string): Promise<ValidatedPublicHttpsTarget> {
+    let authorization: ValidatedPublicHttpsTarget;
+    try {
+      authorization = await validatePublicHttpsTarget(origin, {
+        resolveHostname: this.resolveCustomConnectorHostname,
+      });
+    } catch {
+      throw new OneComputerError(
+        "MCP_CONNECTOR_AUTHORIZATION_ORIGIN_INVALID",
+        "The connector did not provide a valid public HTTPS authorization address",
+        400,
+      );
+    }
+    this.requireCustomConnectorEgressApproval(authorization.origin);
+    return authorization;
+  }
+
+  private requireCustomConnectorEgressApproval(origin: string) {
+    if (this.installationKind === "hosted" && !this.hostedCustomConnectorEgressOrigins.has(origin)) {
+      throw new OneComputerError(
+        "MCP_CONNECTOR_EGRESS_NOT_APPROVED",
+        `Deployment network approval is required for ${origin} before this connector can be added`,
+        403,
+      );
+    }
+  }
+
+  private async withDiscoveryEgressPermit<T>(
+    identity: IdentityContext,
+    origins: string[],
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const permit = await this.registry.createDiscoveryEgressPermit({
+      tenantId: identity.tenantId,
+      createdBy: identity.subjectId,
+      origins,
+      expiresAt: new Date(this.now() + Math.min(this.sessionTtlMs, 10 * 60 * 1_000)),
+    });
+    try {
+      return await operation();
+    } finally {
+      await this.registry.deleteDiscoveryEgressPermit(identity.tenantId, permit.id).catch(() => undefined);
+    }
   }
 
   private validateConnectorIcon(iconDataUrl: string) {

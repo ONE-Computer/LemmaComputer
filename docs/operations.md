@@ -177,6 +177,26 @@ Administrators can add another OAuth-capable remote connector from
    workspace MCP bridge then advertises the newly granted tools to all assigned
    workspace agents without rebuilding the workspace.
 
+Custom endpoints are admitted only after public-HTTPS parsing and resolution
+of every A and AAAA answer. IP literals, private/link-local/ULA answers,
+mixed public-and-private DNS answers, credentials, and fragments are rejected.
+That admission check is defense in depth: LiteLLM has no direct internet route.
+Its model and MCP requests go through the gateway egress proxy, which resolves
+and validates every `CONNECT` hop again, pins the approved IP, and rejects an
+unapproved redirect destination.
+
+For a hosted deployment, the platform/network owner must put every exact HTTPS
+origin used by the MCP and OAuth flow—endpoint, protected-resource and
+authorization-server metadata, authorization, token, and dynamic-client-
+registration origins—in
+`ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` before a tenant administrator can add
+the connector. This is deliberately deployment-owned rather than tenant-local:
+a shared LiteLLM gateway must not let one tenant create a new gateway-wide
+egress destination. Customer-managed installations can use their own
+connector-registry approval path. The check result shows the discovered
+authorization origin; adding the connector is the administrator's explicit
+confirmation of that origin.
+
 Disconnecting a service invalidates its connection projection and refreshes the
 same grants. If a grant cannot be refreshed, Control revokes it so an agent
 cannot keep stale connector access. Grant renewal also recomputes the projection
@@ -235,6 +255,15 @@ disable the connector for everyone or prevent members from changing their
 personal connection. Tool decisions remain `allow`, `approval_required`, or
 `deny`; denied tools are removed from workspace grants. These checks are
 enforced by Control and the runtime grant projection, not only by the Web UI.
+
+Remote tool reviews are tied to the provider's current descriptor, not just its
+name. An added tool or a same-name definition change is `deny` until an
+administrator reviews it. The review screen reports added, changed, and removed
+tools, and saving is conditional on the displayed tool-set digest; a provider
+change during review is rejected and must be reviewed again. Control repeats
+the descriptor check while authorizing a call and while refreshing the short
+projection cache, so a previously issued grant cannot retain a silently changed
+tool.
 
 Custom connector deletion removes the LiteLLM server and its catalog metadata.
 Built-in connectors cannot be deleted through the administration API.
@@ -615,6 +644,20 @@ Before network exposure:
 - use the remote Kasm adapter and remove the Docker socket;
 - configure trusted TLS between ingress and workspace relays;
 - isolate egress networks with host/cloud firewall policy;
+- give LiteLLM no direct NAT/Internet route; use separate model and remote-MCP
+  proxies, and make the remote-MCP client ignore environment proxy bypasses
+  for discovery, OAuth, tool calls, and redirects;
+- restrict the model proxy to exact model-provider hosts and the remote-MCP
+  proxy to Control-approved public origins; cloud security groups/NACLs and a
+  controlled egress firewall must deny VPC, metadata, loopback, link-local,
+  ULA, and other private destinations even if application code regresses;
+- in hosted mode, populate `ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` from an
+  IT-reviewed inventory before rollout, including every existing custom
+  endpoint plus every OAuth/metadata/token/registration origin; do not use a
+  tenant administrator's connector record as a cloud egress allowlist;
+- restrict the proxy-to-Control authorization endpoint to its private network,
+  use its dedicated secret (and workload mTLS/service-mesh identity in cloud),
+  and alert on denied proxy decisions;
 - send safe audit events to an append-protected sink;
 - define log retention, data residency, incident response, and key rotation;
 - validate resource limits for every service and workspace;

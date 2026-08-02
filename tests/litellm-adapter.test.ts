@@ -198,7 +198,16 @@ test("expired Microsoft 365 connection discovery re-reads status without a tool 
       }
       response.end(JSON.stringify({
         tools: [
-          { name: "list_issues", mcp_info: { server_id: "ms365-server-id" } },
+          {
+            name: "list_issues",
+            description: "List issues",
+            inputSchema: {
+              type: "object",
+              properties: { project: { type: "string" } },
+              required: ["project"],
+            },
+            mcp_info: { server_id: "ms365-server-id", upstream_credential: marker },
+          },
           { name: "foreign_tool", mcp_info: { server_id: "other-server-id" } },
         ],
       }));
@@ -216,7 +225,14 @@ test("expired Microsoft 365 connection discovery re-reads status without a tool 
   });
   try {
     const tools = await liveAdapter.userOAuthConnectionTools(identity, "onecomputer_ms365");
-    assert.deepEqual(tools, ["list_issues"]);
+    assert.deepEqual(tools.map(({ definitionPreview: _definitionPreview, ...tool }) => tool), [{
+      name: "list_issues",
+      description: "List issues",
+      definitionHash: createHash("sha256").update(
+        '{"description":"List issues","inputSchema":{"properties":{"project":{"type":"string"}},"required":["project"],"type":"object"},"name":"list_issues"}',
+        ).digest("hex"),
+    }]);
+    assert.match(tools[0]!.definitionPreview ?? "", /"inputSchema"/);
     assert.equal(statusReads, 2);
     assert.equal(requests.filter(({ url }) => url === "/mcp-rest/tools/list").length, 1);
     assert.equal(requests.filter(({ url }) => url === "/mcp-rest/tools/call").length, 0);
@@ -230,6 +246,125 @@ test("expired Microsoft 365 connection discovery re-reads status without a tool 
         assert.equal(failure.code, "MCP_TOOL_DISCOVERY_FAILED");
         assert.equal(failure.message, "The connector could not refresh its saved credentials. Reconnect and try again.");
         assert.equal(JSON.stringify(error).includes(marker), false);
+        return true;
+      },
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("OAuth tool discovery canonicalizes definitions, excludes transport metadata, and rejects untrusted entries", async () => {
+  let toolListReads = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain request bodies so the local HTTP connection can be reused.
+    }
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{ server_id: "connector-server-id", server_name: "onecomputer_connector" }]));
+      return;
+    }
+    if (request.url === "/v1/mcp/server/connector-server-id/oauth-user-credential/status") {
+      response.end(JSON.stringify({ has_credential: true, is_expired: false }));
+      return;
+    }
+    if (request.url === "/mcp-rest/tools/list") {
+      toolListReads += 1;
+      if (toolListReads === 1) {
+        response.end(JSON.stringify({
+          tools: [
+            {
+              name: "zeta",
+              description: "List zeta records",
+              inputSchema: { type: "object", properties: { limit: { type: "integer" } } },
+              mcp_info: { server_id: "connector-server-id", transport_session: "first" },
+            },
+            {
+              inputSchema: {
+                type: "object",
+                properties: { project: { type: "string", description: "Project identifier" } },
+                required: ["project"],
+              },
+              name: "alpha",
+              description: "Create alpha records",
+              mcp_info: { server_id: "connector-server-id", transport_session: "first" },
+            },
+            {
+              description: "Create alpha records",
+              name: "alpha",
+              inputSchema: {
+                required: ["project"],
+                properties: { project: { description: "Project identifier", type: "string" } },
+                type: "object",
+              },
+              mcp_info: { server_id: "connector-server-id", transport_session: "second" },
+            },
+          ],
+        }));
+        return;
+      }
+      response.end(JSON.stringify(toolListReads === 2
+        ? {
+          tools: [
+            { name: "alpha", description: "Read alpha records", mcp_info: { server_id: "connector-server-id" } },
+            { name: "alpha", description: "Delete alpha records", mcp_info: { server_id: "connector-server-id" } },
+          ],
+        }
+        : {
+          tools: [
+            { name: "alpha", description: "Current connector tool", mcp_info: { server_id: "connector-server-id" } },
+            // A same-name entry with no server identity must not be attributed
+            // to this connector, even if LiteLLM returned it in a global list.
+            { name: "alpha", description: "Foreign unscoped tool" },
+          ],
+        }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const tools = await liveAdapter.userOAuthConnectionTools(identity, "onecomputer_connector");
+    assert.deepEqual(tools.map(({ definitionPreview: _definitionPreview, ...tool }) => tool), [
+      {
+        name: "alpha",
+        description: "Create alpha records",
+        definitionHash: createHash("sha256").update(
+          '{"description":"Create alpha records","inputSchema":{"properties":{"project":{"description":"Project identifier","type":"string"}},"required":["project"],"type":"object"},"name":"alpha"}',
+        ).digest("hex"),
+      },
+      {
+        name: "zeta",
+        description: "List zeta records",
+        definitionHash: createHash("sha256").update(
+          '{"description":"List zeta records","inputSchema":{"properties":{"limit":{"type":"integer"}},"type":"object"},"name":"zeta"}',
+        ).digest("hex"),
+      },
+    ]);
+    assert.match(tools.find((tool) => tool.name === "alpha")?.definitionPreview ?? "", /"project"/);
+    await assert.rejects(
+      () => liveAdapter.userOAuthConnectionTools(identity, "onecomputer_connector"),
+      (error: unknown) => {
+        const failure = error as { code?: unknown; message?: unknown };
+        assert.equal(failure.code, "MCP_TOOL_DISCOVERY_CONFLICT");
+        assert.equal(failure.message, "The connector returned conflicting definitions for a tool. Reconnect and try again.");
+        return true;
+      },
+    );
+    await assert.rejects(
+      () => liveAdapter.userOAuthConnectionTools(identity, "onecomputer_connector"),
+      (error: unknown) => {
+        const failure = error as { code?: unknown; message?: unknown };
+        assert.equal(failure.code, "MCP_TOOL_DISCOVERY_INVALID");
+        assert.equal(failure.message, "The connector returned a tool without its server identity. Reconnect and try again.");
         return true;
       },
     );
@@ -278,6 +413,7 @@ test("connector discovery and registration keep provider credentials inside Lite
     scopes: ["projects:read", "projects:write"],
     clientId: "acme-client",
     clientSecret: "acme-secret",
+    egressProfile: "strict_remote" as const,
   };
   try {
     const discovered = await liveAdapter.discoverOAuthMcpServer({
@@ -303,10 +439,60 @@ test("connector discovery and registration keep provider credentials inside Lite
       scopes: ["projects:read", "projects:write"],
     });
     assert.deepEqual(registration.body.credentials, discovery.body.credentials);
+    assert.deepEqual(discovery.body.mcp_info, { onecomputer_egress_profile: "strict_remote" });
+    assert.deepEqual(registration.body.mcp_info, { onecomputer_egress_profile: "strict_remote" });
     assert.equal(registration.body.server_id, "acme-server-id");
     assert.equal(registration.body.server_name, "onecomputer_acme_projects");
     assert.equal("client_secret" in registration.body, false);
     assert.ok(requests.every((request) => request.authorization === "Bearer sk-master-test-not-used-00001"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("managed remote registrations repair the strict egress profile on legacy LiteLLM records", async () => {
+  const requests: Array<{ method: string; url: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({
+      method: request.method ?? "",
+      url: request.url ?? "",
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {},
+    });
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{
+        server_id: "legacy-remote-id",
+        server_name: "onecomputer_legacy_remote",
+        url: "https://mcp.example.com/mcp",
+        mcp_info: {},
+      }]));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await liveAdapter.ensureOAuthMcpServers([{
+      serverId: "legacy-remote-id",
+      serverName: "onecomputer_legacy_remote",
+      name: "Legacy remote",
+      description: "A legacy remote connector.",
+      url: "https://mcp.example.com/mcp",
+      scopes: ["read"],
+      egressProfile: "strict_remote",
+    }]);
+    const repair = requests.find((request) => request.method === "PUT" && request.url === "/v1/mcp/server");
+    assert.ok(repair);
+    assert.deepEqual(repair.body.mcp_info, { onecomputer_egress_profile: "strict_remote" });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

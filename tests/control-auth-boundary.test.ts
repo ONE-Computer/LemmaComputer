@@ -58,6 +58,67 @@ test("the authenticated MCP policy route accepts bounded upload-sized authorizat
   }
 });
 
+test("only the dedicated gateway credential can ask Control to authorize MCP egress", async () => {
+  const mcpEgressProxyToken = "mcp-egress-proxy-token-at-least-32-characters";
+  const gateway = {
+    beginUserOAuthConnection: async () => ({ location: "http://provider/authorize", cookies: [] }),
+    completeUserOAuthConnection: async () => ({ state: "disconnected" as const, connectedAt: null, expiresAt: null, account: null }),
+    disconnectUserOAuthConnection: async () => ({ state: "disconnected" as const, connectedAt: null, expiresAt: null, account: null }),
+    userOAuthConnectionStatus: async () => ({ state: "disconnected" as const, connectedAt: null, expiresAt: null, account: null }),
+    userOAuthConnectionTools: async () => [],
+  } as unknown as GatewayClient;
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    proxyToken,
+    gateway,
+    undefined,
+    {},
+    {
+      testIdentityMode: true,
+      connectorRegistryStore: new MemoryConnectorRegistryStore(),
+      agentBridgeSecret: "control-auth-egress-agent-bridge-secret-at-least-32-characters",
+      mcpEgressProxyToken,
+    },
+  );
+  try {
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/internal/v1/mcp-egress/authorize",
+      headers: { "content-type": "application/json", authorization: "Bearer incorrect" },
+      payload: { protocol: "https", host: "mcp.notion.com", port: 443 },
+    });
+    assert.equal(rejected.statusCode, 401);
+
+    const queryRejected = await app.inject({
+      method: "POST",
+      url: "/internal/v1/mcp-egress/authorize?probe=1",
+      headers: { "content-type": "application/json", authorization: "Bearer incorrect" },
+      payload: { protocol: "https", host: "mcp.notion.com", port: 443 },
+    });
+    assert.equal(queryRejected.statusCode, 401);
+
+    const allowed = await app.inject({
+      method: "POST",
+      url: "/internal/v1/mcp-egress/authorize",
+      headers: { "content-type": "application/json", authorization: `Bearer ${mcpEgressProxyToken}` },
+      payload: { protocol: "https", host: "mcp.notion.com", port: 443 },
+    });
+    assert.equal(allowed.statusCode, 200);
+    assert.deepEqual(allowed.json(), { allowed: true });
+
+    const malformed = await app.inject({
+      method: "POST",
+      url: "/internal/v1/mcp-egress/authorize",
+      headers: { "content-type": "application/json", authorization: `Bearer ${mcpEgressProxyToken}` },
+      payload: { protocol: "http", host: "mcp.notion.com", port: 443 },
+    });
+    assert.equal(malformed.statusCode, 400);
+  } finally {
+    await app.close();
+  }
+});
+
 test("runtime identity comes only from the authenticated server session", async () => {
   const store = new MemoryWorkspaceStore();
   const owned = await store.createOrGet(alpha, "personal", "identity-boundary-workspace");
@@ -283,7 +344,9 @@ test("only an administrator can assign and revoke the tenant policy through Cont
           account: null,
         }
       : { state: "disconnected" as const, connectedAt: null, expiresAt: null, account: null },
-    userOAuthConnectionTools: async (_identity: IdentityContext, serverName: string) => serverName === "onecomputer_linear" ? ["create_issue"] : [],
+    userOAuthConnectionTools: async (_identity: IdentityContext, serverName: string) => serverName === "onecomputer_linear"
+      ? [{ name: "create_issue", definitionHash: "a".repeat(64) }]
+      : [],
   } as unknown as GatewayClient;
   const connectorRegistry = new MemoryConnectorRegistryStore();
   const app = createControlServer(workspaceStore, {} as ControllerClient, proxyToken, gateway, undefined, {}, {
@@ -308,6 +371,10 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       state: "connected",
       connectedAt: new Date("2026-07-28T00:00:00.000Z"),
       expiresAt: new Date("2026-07-28T01:00:00.000Z"),
+    });
+    await connectorRegistry.updateToolPolicies(alpha.tenantId, "linear", {
+      toolPolicies: { create_issue: "allow" },
+      toolDefinitionHashes: { create_issue: "a".repeat(64) },
     });
     assert.equal(refreshedPolicies.length, 0, "a no-marker catalog entry must not refresh workspace grants");
 

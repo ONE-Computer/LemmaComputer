@@ -11,6 +11,8 @@ import {
   deriveEgressProxySecret,
   issueEgressProxyGrant,
   normalizeEgressHost,
+  PublicHttpsTargetValidationError,
+  validatePublicHttpsTarget,
   verifyEgressProxyGrant,
 } from "@onecomputer/egress-policy";
 
@@ -55,6 +57,91 @@ test("egress host normalization is deterministic and rejects literals or wildcar
   assert.throws(() => normalizeEgressHost("[::1]"), /IP literal/i);
   assert.throws(() => normalizeEgressHost("*.example.com"), /wildcard/i);
   assert.equal(normalizeEgressHost("example.com.evil.test."), "example.com.evil.test");
+});
+
+test("public HTTPS target validation canonicalizes a hostname and retains every resolved address", async () => {
+  let resolvedHost = "";
+  const target = await validatePublicHttpsTarget("HTTPS://BÜCHER.Example.:8443/mcp?version=1", {
+    resolveHostname: async (hostname) => {
+      resolvedHost = hostname;
+      return [
+        { address: "104.18.0.1", family: 4 },
+        { address: "2606:4700:4700::1111", family: 6 },
+      ];
+    },
+  });
+
+  assert.equal(resolvedHost, "xn--bcher-kva.example");
+  assert.equal(target.canonicalUrl, "https://xn--bcher-kva.example:8443/mcp?version=1");
+  assert.equal(target.origin, "https://xn--bcher-kva.example:8443");
+  assert.equal(target.host, "xn--bcher-kva.example");
+  assert.equal(target.port, 8443);
+  assert.deepEqual(target.resolvedAddresses, ["104.18.0.1", "2606:4700:4700::1111"]);
+  assert.deepEqual(target.decision, {
+    decision: "allow",
+    reasonCode: "EGRESS_ALLOWED",
+    ruleId: "candidate-public-https-endpoint",
+  });
+});
+
+test("public HTTPS target validation rejects unsafe URL forms before DNS", async () => {
+  const neverResolve = async () => {
+    throw new Error("DNS must not be reached for an invalid URL");
+  };
+  const cases: Array<[string, string]> = [
+    ["http://mcp.example.com", "EGRESS_HTTPS_REQUIRED"],
+    ["https://user:password@mcp.example.com", "EGRESS_URL_CREDENTIALS_DENIED"],
+    ["https://mcp.example.com/#fragment", "EGRESS_URL_FRAGMENT_DENIED"],
+    ["https://mcp.example.com/#", "EGRESS_URL_FRAGMENT_DENIED"],
+    ["https://127.0.0.1/mcp", "EGRESS_IP_LITERAL_DENIED"],
+    ["https://[::1]/mcp", "EGRESS_IP_LITERAL_DENIED"],
+  ];
+
+  for (const [endpointUrl, reasonCode] of cases) {
+    await assert.rejects(
+      validatePublicHttpsTarget(endpointUrl, { resolveHostname: neverResolve }),
+      (error: unknown) => (
+        error instanceof PublicHttpsTargetValidationError && error.reasonCode === reasonCode
+      ),
+      endpointUrl,
+    );
+  }
+});
+
+test("public HTTPS target validation denies private IPv4, IPv6, and mixed DNS answers", async () => {
+  const reservedAnswers: Array<Array<{ address: string; family: 4 | 6 }>> = [
+    [{ address: "169.254.169.254", family: 4 }],
+    [{ address: "::1", family: 6 }],
+    [{ address: "fc00::1", family: 6 }],
+    [{ address: "fe80::1", family: 6 }],
+    [
+      { address: "104.18.0.1", family: 4 },
+      { address: "10.0.0.5", family: 4 },
+    ],
+  ];
+
+  for (const answers of reservedAnswers) {
+    await assert.rejects(
+      validatePublicHttpsTarget("https://mcp.example.com", {
+        resolveHostname: async () => answers,
+      }),
+      (error: unknown) => (
+        error instanceof PublicHttpsTargetValidationError
+        && error.reasonCode === "EGRESS_DESTINATION_RESERVED"
+      ),
+      JSON.stringify(answers),
+    );
+  }
+
+  await assert.rejects(
+    validatePublicHttpsTarget("https://mcp.example.com", {
+      resolveHostname: async () => [],
+    }),
+    (error: unknown) => (
+      error instanceof PublicHttpsTargetValidationError
+      && error.reasonCode === "EGRESS_DNS_UNAVAILABLE"
+    ),
+  );
 });
 
 test("security groups compile to exact, deny-by-default rules", () => {

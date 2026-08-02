@@ -99,7 +99,10 @@ services:
 
   litellm:
     container_name: ${ONECOMPUTER_LITELLM_CONTAINER:?set ONECOMPUTER_LITELLM_CONTAINER in .env}
-    image: ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e
+    image: onecomputer/litellm:v1.93.0-onecomputer-egress
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.litellm
     command:
       - --config
       - /app/config.yaml
@@ -114,7 +117,6 @@ services:
         format: raw
     networks:
       - gateway-private
-      - model-egress
     ports:
       - "${ONECOMPUTER_HTTP_BIND_ADDRESS:?set ONECOMPUTER_HTTP_BIND_ADDRESS in .env}:${ONECOMPUTER_LITELLM_PORT:?set ONECOMPUTER_LITELLM_PORT in .env}:4000"
     volumes:
@@ -125,6 +127,10 @@ services:
       litellm-postgres:
         condition: service_healthy
       ms365-mcp:
+        condition: service_healthy
+      gateway-egress-proxy:
+        condition: service_healthy
+      remote-mcp-egress-proxy:
         condition: service_healthy
     healthcheck:
       test:
@@ -140,6 +146,55 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    restart: unless-stopped
+
+  # The model-only internet-routed hop for LiteLLM. It has a static provider
+  # policy and intentionally cannot use the custom-MCP Control callback.
+  gateway-egress-proxy:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["npm", "run", "start", "--workspace", "@onecomputer/egress-proxy"]
+    env_file:
+      - path: .runtime-env/gateway-egress-proxy.env
+        format: raw
+    networks:
+      gateway-private:
+        aliases:
+          - gateway-egress-proxy
+      model-egress: {}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('node:net').connect(3128,'127.0.0.1').once('connect',()=>process.exit(0)).once('error',()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # The only external path for custom/public MCP operations. LiteLLM's pinned
+  # strict client selects this proxy explicitly with trust_env disabled, so a
+  # redirect cannot use NO_PROXY to reach Control or the private M365 service.
+  remote-mcp-egress-proxy:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["npm", "run", "start", "--workspace", "@onecomputer/egress-proxy"]
+    env_file:
+      - path: .runtime-env/remote-mcp-egress-proxy.env
+        format: raw
+    networks:
+      mcp-egress-private: {}
+      model-egress: {}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('node:net').connect(3128,'127.0.0.1').once('connect',()=>process.exit(0)).once('error',()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
   # Control uses this dedicated listener for every LiteLLM administration call.
@@ -245,6 +300,7 @@ services:
       - consent-private
       - gateway-private
       - litellm-admin-private
+      - mcp-egress-private
       - identity-egress
     depends_on:
       db-migrate:
@@ -392,6 +448,10 @@ networks:
   consent-private:
     internal: true
   gateway-private:
+    internal: true
+  # Only the remote-MCP proxy and Control meet on this network. It prevents
+  # that proxy from dialing other gateway-private services directly.
+  mcp-egress-private:
     internal: true
   # The only intended consumer of the hosted admin listener is Control. The
   # proxy additionally verifies Control's dedicated client certificate.

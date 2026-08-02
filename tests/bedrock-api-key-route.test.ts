@@ -228,11 +228,13 @@ test("Bedrock API-key diagnostics distinguish safe remediation without reflectin
 });
 
 test("Bedrock stays out of static configuration and uses the pinned database-managed LiteLLM image", async () => {
-  const [compose, config] = await Promise.all([
+  const [compose, config, dockerfile] = await Promise.all([
     source("compose.yaml"),
     source("config/litellm/config.yaml"),
+    source("docker/Dockerfile.litellm"),
   ]);
-  assert.match(compose, /ghcr\.io\/berriai\/litellm:v1\.93\.0@sha256:/);
+  assert.match(compose, /image: onecomputer\/litellm:v1\.93\.0-onecomputer-egress/);
+  assert.match(dockerfile, /FROM ghcr\.io\/berriai\/litellm:v1\.93\.0@sha256:/);
   assert.match(config, /store_model_in_db: true/);
   assert.doesNotMatch(compose, /(?:AWS_BEARER_TOKEN_BEDROCK|ONECOMPUTER_BEDROCK_API_KEY)/);
   assert.doesNotMatch(config, /model_name: onecomputer-bedrock/);

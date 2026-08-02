@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import type { IdentityContext, RuntimeAgentPolicy, RuntimePolicy } from "@onecomputer/contracts";
-import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus } from "@onecomputer/litellm-adapter";
+import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@onecomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore } from "@onecomputer/workspace-store";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
 
@@ -14,6 +15,14 @@ const connected: OAuthConnectionStatus = {
   account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
 };
 
+type FixtureTool = string | OAuthConnectionTool;
+const fixtureTool = (tool: FixtureTool): OAuthConnectionTool => typeof tool === "string"
+  ? {
+    name: tool,
+    definitionHash: createHash("sha256").update(JSON.stringify({ name: tool })).digest("hex"),
+  }
+  : tool;
+
 class FakeConnectionGateway implements OAuthConnectionGateway {
   started: Parameters<OAuthConnectionGateway["beginUserOAuthConnection"]>[0][] = [];
   completed: Parameters<OAuthConnectionGateway["completeUserOAuthConnection"]>[0][] = [];
@@ -24,9 +33,11 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   discoveries = 0;
   toolServers: string[] = [];
   onStatus?: (identity: IdentityContext, serverName: string) => OAuthConnectionStatus | Promise<OAuthConnectionStatus>;
-  onTools?: (identity: IdentityContext, serverName: string) => string[] | Promise<string[]>;
+  onTools?: (identity: IdentityContext, serverName: string) => FixtureTool[] | Promise<FixtureTool[]>;
+  onDiscover?: () => { authorizationOrigin: string; dynamicClientRegistration: boolean } | Promise<{ authorizationOrigin: string; dynamicClientRegistration: boolean }>;
+  onRegister?: (input: McpConnectorRegistrationInput) => void | Promise<void>;
   statusByServer = new Map<string, OAuthConnectionStatus>();
-  toolsByServer = new Map<string, string[]>();
+  toolsByServer = new Map<string, FixtureTool[]>();
 
   async beginUserOAuthConnection(input: Parameters<OAuthConnectionGateway["beginUserOAuthConnection"]>[0]) {
     this.started.push(input);
@@ -46,17 +57,21 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
     this.disconnectedServers.push(serverName);
     return { state: "disconnected", connectedAt: null, expiresAt: null, account: null } as const;
   }
-  async userOAuthConnectionTools(identity: IdentityContext, serverName: string) {
+  async userOAuthConnectionTools(identity: IdentityContext, serverName: string): Promise<OAuthConnectionTool[]> {
     this.toolServers.push(serverName);
-    if (this.onTools) return this.onTools(identity, serverName);
-    return this.toolsByServer.get(serverName) ?? [];
+    const tools = this.onTools
+      ? await this.onTools(identity, serverName)
+      : this.toolsByServer.get(serverName) ?? [];
+    return tools.map(fixtureTool);
   }
   async discoverOAuthMcpServer() {
     this.discoveries += 1;
+    if (this.onDiscover) return this.onDiscover();
     return { authorizationOrigin: "https://auth.example.com", dynamicClientRegistration: true };
   }
   async registerOAuthMcpServer(input: McpConnectorRegistrationInput) {
     this.registered.push(input);
+    await this.onRegister?.(input);
   }
   async ensureOAuthMcpServers(inputs: McpConnectorRegistrationInput[]) {
     this.ensured.push(inputs);
@@ -74,6 +89,18 @@ const completeFixtureConnection = async (
   const request = gateway.started.at(-1)!;
   return service.complete(identity, connectorId, { state: request.state, code: "fixture-authorization-code" });
 };
+
+const saveCurrentConnectorToolPolicy = async (
+  service: McpConnectionService,
+  identity: IdentityContext,
+  connectorId: string,
+  tools: Record<string, "allow" | "approval_required" | "deny">,
+) => {
+  const current = await service.connectorToolPolicy(identity, connectorId);
+  return service.saveConnectorToolPolicy(identity, connectorId, tools, current.documentHash);
+};
+
+const publicConnectorResolver = async () => [{ address: "93.184.216.34", family: 4 as const }];
 
 test("owned Microsoft 365 flow binds state and PKCE to the initiating ONEComputer identity", async () => {
   const gateway = new FakeConnectionGateway();
@@ -274,7 +301,7 @@ test("catalog re-entry probes only durable markers and flags a changed connector
   assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
 });
 
-test("hosted tool policy requires a current explicit connection", async () => {
+test("hosted tool policy requires an explicit tool decision and a current connection", async () => {
   const gateway = new FakeConnectionGateway();
   gateway.statusByServer.set("onecomputer_linear", connected);
   gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
@@ -284,6 +311,13 @@ test("hosted tool policy requires a current explicit connection", async () => {
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
 
+  gateway.statusServers.length = 0;
+  gateway.toolServers.length = 0;
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.deepEqual(gateway.statusServers, []);
+  assert.deepEqual(gateway.toolServers, []);
+
+  await saveCurrentConnectorToolPolicy(service, alpha, "linear", { create_issue: "allow" });
   gateway.statusServers.length = 0;
   gateway.toolServers.length = 0;
   assert.equal((await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"))?.decision, "allow");
@@ -304,7 +338,7 @@ test("hosted tool policy requires a current explicit connection", async () => {
   assert.deepEqual(gateway.toolServers, []);
 });
 
-test("only explicitly connected catalog services contribute workspace tools", async () => {
+test("only explicitly approved connected catalog services contribute workspace tools", async () => {
   const gateway = new FakeConnectionGateway();
   gateway.statusByServer.set("onecomputer_linear", connected);
   gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
@@ -333,8 +367,8 @@ test("only explicitly connected catalog services contribute workspace tools", as
 
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
 
-  assert.deepEqual(projected.mcpServers, ["onecomputer_ms365", "onecomputer_linear"]);
-  assert.deepEqual(projected.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+  assert.deepEqual(projected.mcpServers, ["onecomputer_ms365"]);
+  assert.equal(projected.mcpToolPermissions?.onecomputer_linear, undefined);
   assert.equal(projected.mcpToolPermissions?.onecomputer_asana, undefined);
   assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
   assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
@@ -360,7 +394,7 @@ test("hosted connector OAuth binds the selected catalog entry and refuses cross-
   assert.equal(gateway.completed.length, 0);
 });
 
-test("hosted connector tools default to allow and persist explicit approval rules", async () => {
+test("new hosted connector tools are blocked pending review and persist explicit approval rules", async () => {
   const gateway = new FakeConnectionGateway();
   gateway.statusByServer.set("onecomputer_linear", connected);
   gateway.toolsByServer.set("onecomputer_linear", ["create_issue", "list_issues"]);
@@ -371,26 +405,98 @@ test("hosted connector tools default to allow and persist explicit approval rule
   await completeFixtureConnection(service, gateway, alpha, "linear");
 
   const initial = await service.connectorToolPolicy(alpha, "linear");
-  assert.deepEqual(initial.tools.map((tool) => [tool.name, tool.decision]), [
-    ["create_issue", "allow"],
-    ["list_issues", "allow"],
+  assert.deepEqual(initial.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [
+    ["create_issue", "deny", true],
+    ["list_issues", "deny", true],
   ]);
+  assert.match(initial.tools[0]!.description, /Blocked until an administrator reviews/i);
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
 
   const saved = await service.saveConnectorToolPolicy(alpha, "linear", {
     create_issue: "approval_required",
     list_issues: "deny",
-  });
-  assert.deepEqual(saved.tools.map((tool) => [tool.name, tool.decision]), [
-    ["create_issue", "approval_required"],
-    ["list_issues", "deny"],
+  }, initial.documentHash);
+  assert.deepEqual(saved.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [
+    ["create_issue", "approval_required", false],
+    ["list_issues", "deny", false],
   ]);
   assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "list_issues"), null);
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "delete_issue"), null);
   assert.equal((await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"))?.decision, "approval_required");
+
+  gateway.toolsByServer.set("onecomputer_linear", ["create_issue", "list_issues", "delete_issue"]);
+  const changed = await service.connectorToolPolicy(alpha, "linear");
+  assert.deepEqual(changed.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [
+    ["create_issue", "approval_required", false],
+    ["list_issues", "deny", false],
+    ["delete_issue", "deny", true],
+  ]);
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "delete_issue"), null);
+
+  const projected = await service.projectConnectedConnectors(alpha, {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: "agent-alpha",
+    agentProfile: "claude-desktop-managed-v1",
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  });
+  assert.deepEqual(projected.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+  assert.equal(projected.toolPolicies.delete_issue, undefined);
+
   await assert.rejects(
-    () => service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }),
+    () => service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }, changed.documentHash),
     { code: "INVALID_TOOL_POLICY" },
   );
+});
+
+test("a same-name provider tool change revokes cached projection and rejects a stale review", async () => {
+  const gateway = new FakeConnectionGateway();
+  gateway.statusByServer.set("onecomputer_linear", connected);
+  gateway.toolsByServer.set("onecomputer_linear", [{ name: "create_issue", definitionHash: "a".repeat(64) }]);
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  await completeFixtureConnection(service, gateway, alpha, "linear");
+  const review = await service.connectorToolPolicy(alpha, "linear");
+  await service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }, review.documentHash);
+  const policy: RuntimePolicy = {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: "agent-alpha",
+    agentProfile: "claude-desktop-managed-v1",
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "onecomputer-assistant",
+    mcpServer: "onecomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+  assert.deepEqual((await service.projectConnectedConnectors(alpha, policy)).mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+
+  gateway.toolsByServer.set("onecomputer_linear", [{ name: "create_issue", definitionHash: "b".repeat(64) }]);
+  const changed = await service.connectorToolPolicy(alpha, "linear");
+  assert.deepEqual(changed.changes, { added: [], changed: ["create_issue"], removed: [] });
+  assert.deepEqual(changed.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [["create_issue", "deny", true]]);
+  await assert.rejects(
+    () => service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }, review.documentHash),
+    { code: "TOOL_SET_CHANGED_REVIEW_AGAIN" },
+  );
+  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  const afterChange = await service.projectConnectedConnectors(alpha, policy);
+  assert.deepEqual(afterChange.mcpServers, ["onecomputer_ms365"], "a cache hit cannot retain a changed definition");
 });
 
 test("organization connector access policy locks member changes and removes disabled tools from grants", async () => {
@@ -402,7 +508,7 @@ test("organization connector access policy locks member changes and removes disa
     authorizationOrigin: "http://localhost:3001",
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
-  await service.saveConnectorToolPolicy(alpha, "linear", {
+  await saveCurrentConnectorToolPolicy(service, alpha, "linear", {
     create_issue: "approval_required",
     list_issues: "deny",
   });
@@ -450,12 +556,13 @@ test("organization connector access policy locks member changes and removes disa
   assert.equal(disabledProjection.toolPolicies.create_issue, undefined);
 });
 
-test("administrators can add a connector without code and connected tools are projected into agent grants", async () => {
+test("administrators can add a connector without code, then explicitly approve tools for agent grants", async () => {
   const gateway = new FakeConnectionGateway();
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
     liteLlmPublicUrl: "http://localhost:4000",
+    resolveCustomConnectorHostname: publicConnectorResolver,
   });
   const input = {
     name: "Acme Projects",
@@ -468,10 +575,10 @@ test("administrators can add a connector without code and connected tools are pr
     iconDataUrl: "data:image/png;base64,iVBORw0KGgo=",
   };
   await assert.rejects(
-    () => service.discoverConnector({ ...input, iconDataUrl: "data:image/svg+xml;base64,PHN2Zy8+" }),
+    () => service.discoverConnector(alpha, { ...input, iconDataUrl: "data:image/svg+xml;base64,PHN2Zy8+" }),
     { code: "MCP_CONNECTOR_ICON_INVALID" },
   );
-  const discovered = await service.discoverConnector(input);
+  const discovered = await service.discoverConnector(alpha, input);
   const created = await service.createConnector(alpha, "admin-alpha", {
     ...input,
     discoveryToken: discovered.discoveryToken,
@@ -481,6 +588,7 @@ test("administrators can add a connector without code and connected tools are pr
   assert.equal(gateway.discoveries, 1);
   assert.equal(gateway.registered[0]?.url, "https://mcp.example.com/mcp");
   assert.equal(gateway.registered[0]?.clientSecret, undefined);
+  assert.equal(gateway.registered[0]?.egressProfile, "strict_remote");
   await assert.rejects(
     () => service.createConnector(alpha, "admin-alpha", { ...input, discoveryToken: discovered.discoveryToken }),
     { code: "MCP_CONNECTOR_DISCOVERY_INVALID" },
@@ -514,11 +622,116 @@ test("administrators can add a connector without code and connected tools are pr
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
+  const unreviewed = await service.projectConnectedConnectors(alpha, basePolicy);
+  assert.deepEqual(unreviewed.mcpServers, ["onecomputer_ms365"]);
+  assert.equal(unreviewed.mcpToolPermissions?.[serverName], undefined);
+
+  await saveCurrentConnectorToolPolicy(service, alpha, created.id, {
+    create_task: "allow",
+    list_tasks: "approval_required",
+  });
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
   assert.deepEqual(projected.mcpServers, ["onecomputer_ms365", serverName]);
   assert.deepEqual(projected.mcpToolPermissions?.[serverName], ["create_task", "list_tasks"]);
+  assert.equal(projected.toolPolicies.create_task, "allow");
+  assert.equal(projected.toolPolicies.list_tasks, "approval_required");
   assert.deepEqual(projected.allowedTools, ["create_task", "list-mail-messages", "list_tasks"]);
   assert.match(projected.connectionProjectionHash ?? "", /^[a-f0-9]{64}$/);
+});
+
+test("custom connector admission rejects loopback, IPv6, and DNS-rebinding destinations before LiteLLM discovery", async () => {
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    resolveCustomConnectorHostname: async (host) => host === "mixed.example.com"
+      ? [{ address: "93.184.216.34", family: 4 }, { address: "fd00::1", family: 6 }]
+      : [{ address: "93.184.216.34", family: 4 }],
+  });
+  const input = {
+    name: "Unsafe connector",
+    shortDescription: "Unsafe test connector",
+    description: "Unsafe test connector description.",
+    category: "Other" as const,
+    services: [],
+    scopes: [],
+  };
+  await assert.rejects(
+    () => service.discoverConnector(alpha, { ...input, endpointUrl: "https://[::1]/mcp" }),
+    { code: "MCP_CONNECTOR_URL_PRIVATE" },
+  );
+  await assert.rejects(
+    () => service.discoverConnector(alpha, { ...input, endpointUrl: "https://mixed.example.com/mcp" }),
+    { code: "MCP_CONNECTOR_URL_PRIVATE" },
+  );
+  await assert.rejects(
+    () => service.discoverConnector(alpha, { ...input, endpointUrl: "http://public.example.com/mcp" }),
+    { code: "MCP_CONNECTOR_URL_INVALID" },
+  );
+  assert.equal(gateway.discoveries, 0, "Control never asks LiteLLM to probe a rejected URL");
+});
+
+test("custom connector discovery uses a short permit and hosted origins require deployment approval", async () => {
+  const registry = new MemoryConnectorRegistryStore();
+  const gateway = new FakeConnectionGateway();
+  gateway.onDiscover = async () => {
+    assert.deepEqual(await registry.listEnabledEgressOrigins(), ["https://mcp.example.com"]);
+    return { authorizationOrigin: "https://auth.example.com", dynamicClientRegistration: true };
+  };
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry,
+    resolveCustomConnectorHostname: publicConnectorResolver,
+  });
+  const input = {
+    name: "Permit connector",
+    shortDescription: "Permit test connector",
+    description: "Permit test connector description.",
+    category: "Other" as const,
+    services: [],
+    endpointUrl: "https://mcp.example.com/mcp",
+    scopes: [],
+  };
+  const discovered = await service.discoverConnector(alpha, input);
+  assert.equal(discovered.authorizationOrigin, "https://auth.example.com");
+  assert.deepEqual(await registry.listEnabledEgressOrigins(), [], "the discovery exception is deleted in finally");
+
+  const insecureAuthorization = new FakeConnectionGateway();
+  insecureAuthorization.onDiscover = () => ({ authorizationOrigin: "http://auth.example.com", dynamicClientRegistration: true });
+  const insecureAuthorizationService = new McpConnectionService(insecureAuthorization, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    resolveCustomConnectorHostname: publicConnectorResolver,
+  });
+  await assert.rejects(
+    () => insecureAuthorizationService.discoverConnector(alpha, input),
+    { code: "MCP_CONNECTOR_AUTHORIZATION_ORIGIN_INVALID" },
+  );
+
+  const hostedGateway = new FakeConnectionGateway();
+  const hosted = new McpConnectionService(hostedGateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    installationKind: "hosted",
+    hostedCustomConnectorEgressOrigins: ["https://mcp.example.com", "https://auth.example.com"],
+    resolveCustomConnectorHostname: publicConnectorResolver,
+  });
+  assert.equal(await hosted.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.example.com", port: 443 }), true);
+  assert.equal(await hosted.isGatewayEgressDestinationAllowed({ protocol: "https", host: "unapproved.example.com", port: 443 }), false);
+  assert.equal(await hosted.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.notion.com", port: 443 }), true, "built-in catalog origins stay available");
+
+  const missingAuthorizationApproval = new McpConnectionService(new FakeConnectionGateway(), {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    installationKind: "hosted",
+    hostedCustomConnectorEgressOrigins: ["https://mcp.example.com"],
+    resolveCustomConnectorHostname: publicConnectorResolver,
+  });
+  await assert.rejects(
+    () => missingAuthorizationApproval.discoverConnector(alpha, input),
+    { code: "MCP_CONNECTOR_EGRESS_NOT_APPROVED" },
+  );
 });
 
 test("expired connections share one safe renewal and re-read the connected state", async () => {
@@ -579,6 +792,7 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
+  await saveCurrentConnectorToolPolicy(service, alpha, "linear", { create_issue: "allow" });
   const initial = await service.projectConnectedConnectors(alpha, policy);
   assert.deepEqual(initial.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
 

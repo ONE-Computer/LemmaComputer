@@ -1,7 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
 import {RoutingDecisionBindingAuthority} from "@onecomputer/model-router";
 import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
@@ -226,6 +226,8 @@ const envSchema = z.object({
   LITELLM_WORKSPACE_URL: z.string().url().optional(),
   LITELLM_MASTER_KEY: z.string().min(24).optional(),
   LITELLM_CREDENTIAL_SECRET: z.string().min(32).optional(),
+  MCP_EGRESS_PROXY_TOKEN: z.string().min(32),
+  HOSTED_MCP_EGRESS_ORIGINS: z.string().default(""),
   LITELLM_PUBLIC_URL: z.string().url().default("http://localhost:4000"),
   PUBLIC_WEB_URL: z.string().url().default("http://localhost:4174"),
   M365_AUTHORIZATION_ORIGIN: z.string().url().default("http://localhost:4311"),
@@ -301,11 +303,19 @@ export function createControlServer(
   proxyToken: string,
   gateway?: GatewayClient & Partial<GovernedToolExecutor>,
   fixtureApprovalSecret = "local-test-fixture-approval-secret-32-characters",
-  connectionOptions: { publicWebUrl?: string; authorizationOrigin?: string; liteLlmPublicUrl?: string; agentBridgeUrl?: string } = {},
+  connectionOptions: {
+    publicWebUrl?: string;
+    authorizationOrigin?: string;
+    liteLlmPublicUrl?: string;
+    agentBridgeUrl?: string;
+    installationKind?: "customer-managed" | "hosted" | "worktree";
+    hostedCustomConnectorEgressOrigins?: string[];
+  } = {},
   security: {
     authentication?: AuthenticationBoundary;
     identityPolicyStore?: IdentityPolicyStore;
     mcpPolicyToken?: string;
+    mcpEgressProxyToken?: string;
     agentBridgeSecret?: string;
     agentBridgeGrantTtlSeconds?: number;
     testIdentityMode?: boolean;
@@ -389,6 +399,12 @@ export function createControlServer(
   }
   if (security.mcpPolicyToken && sameSecret(agentBridgeSecret, security.mcpPolicyToken)) {
     throw new Error("AGENT_BRIDGE_SECRET must differ from the MCP policy token");
+  }
+  if (security.mcpEgressProxyToken && sameSecret(agentBridgeSecret, security.mcpEgressProxyToken)) {
+    throw new Error("AGENT_BRIDGE_SECRET must differ from the MCP egress proxy token");
+  }
+  if (security.mcpEgressProxyToken && security.mcpPolicyToken && sameSecret(security.mcpEgressProxyToken, security.mcpPolicyToken)) {
+    throw new Error("MCP egress proxy token must differ from the MCP policy token");
   }
   const agentBridgeAuthority = new AgentBridgeAuthority(agentBridgeSecret, security.agentBridgeGrantTtlSeconds);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
@@ -486,6 +502,8 @@ export function createControlServer(
     authorizationOrigin: connectionOptions.authorizationOrigin ?? "http://localhost:4311",
     liteLlmPublicUrl: connectionOptions.liteLlmPublicUrl,
     registry: security.connectorRegistryStore,
+    installationKind: connectionOptions.installationKind,
+    hostedCustomConnectorEgressOrigins: connectionOptions.hostedCustomConnectorEgressOrigins,
   }) : undefined;
   if (Boolean(security.providerSettingsStore) !== Boolean(security.providerAdministration)) {
     throw new Error("Provider settings dependencies must be configured together");
@@ -560,9 +578,13 @@ export function createControlServer(
   const agentPrincipals = new WeakMap<object, AgentBridgeIdentity>();
 
   app.addHook("onRequest", async (request, reply) => {
-    if (request.url === "/healthz") return;
-    if (request.url === "/v1/openvtc/inbox" || request.url === "/trust-tasks") return;
-    if (request.url.startsWith("/internal/v1/channels/")) {
+    // Fastify's request.url includes the raw query string. Authenticate based
+    // on the route pathname so a query suffix cannot bypass an exact internal
+    // route check and fall through to a less-specific boundary below.
+    const requestPath = request.url.split("?", 1)[0] ?? request.url;
+    if (requestPath === "/healthz") return;
+    if (requestPath === "/v1/openvtc/inbox" || requestPath === "/trust-tasks") return;
+    if (requestPath.startsWith("/internal/v1/channels/")) {
       if (!security.channelBrokerInternalToken || !sameSecret(
         request.headers["x-onecomputer-channel-token"] as string | undefined,
         security.channelBrokerInternalToken,
@@ -571,7 +593,7 @@ export function createControlServer(
       }
       return;
     }
-    if (request.url.startsWith("/internal/v1/schedules/")) {
+    if (requestPath.startsWith("/internal/v1/schedules/")) {
       if (!security.schedulerInternalToken || !sameSecret(
         request.headers["x-onecomputer-scheduler-token"] as string | undefined,
         security.schedulerInternalToken,
@@ -580,7 +602,7 @@ export function createControlServer(
       }
       return;
     }
-    if (request.url.startsWith("/internal/v1/ai-usage/")) {
+    if (requestPath.startsWith("/internal/v1/ai-usage/")) {
       if (!security.usageInternalToken || !sameSecret(
         request.headers["x-onecomputer-ai-usage-token"] as string | undefined,
         security.usageInternalToken,
@@ -589,7 +611,16 @@ export function createControlServer(
       }
       return;
     }
-    const agentBridgeScope = agentBridgeScopeForRequest(request.method, request.url);
+    if (requestPath === "/internal/v1/mcp-egress/authorize") {
+      const authorization = request.headers.authorization;
+      const value = Array.isArray(authorization) ? authorization[0] : authorization;
+      const match = typeof value === "string" ? /^Bearer (.+)$/.exec(value) : null;
+      if (!security.mcpEgressProxyToken || !match || !sameSecret(match[1]!, security.mcpEgressProxyToken)) {
+        return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "MCP egress proxy authentication is required", correlationId: request.id, retryable: false } });
+      }
+      return;
+    }
+    const agentBridgeScope = agentBridgeScopeForRequest(request.method, requestPath);
     if (agentBridgeScope) {
       const authorization = request.headers.authorization;
       const value = Array.isArray(authorization) ? authorization[0] : authorization;
@@ -613,7 +644,7 @@ export function createControlServer(
       agentPrincipals.set(request, actor);
       return;
     }
-    if (request.url === "/internal/v1/mcp/authorize") {
+    if (requestPath === "/internal/v1/mcp/authorize") {
       if (!sameSecret(request.headers["x-onecomputer-mcp-policy-token"] as string | undefined, security.mcpPolicyToken ?? proxyToken)) {
         return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Internal policy authentication is required", correlationId: request.id, retryable: false } });
       }
@@ -622,7 +653,7 @@ export function createControlServer(
     if (!sameSecret(request.headers["x-onecomputer-proxy-token"] as string | undefined, proxyToken)) {
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Authentication is required", correlationId: request.id, retryable: false } });
     }
-    if (request.url.startsWith("/v1/auth/login") || request.url.startsWith("/v1/auth/callback")) return;
+    if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")) return;
     const principal = security.testIdentityMode
       ? testPrincipalFromHeaders(request.headers)
       : await security.authentication!.authenticate(request.headers.cookie);
@@ -904,6 +935,14 @@ export function createControlServer(
   app.post("/internal/v1/mcp/authorize", { bodyLimit: 6 * 1024 * 1024 }, async (request) => {
     if (!mcpPolicy) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "MCP policy storage is unavailable", 503, true);
     return mcpPolicy.authorize(mcpPolicyRequestSchema.parse(request.body ?? {}), request.id);
+  });
+  app.post("/internal/v1/mcp-egress/authorize", async (request) => {
+    const destination = z.strictObject({
+      protocol: z.literal("https"),
+      host: z.string().min(1).max(253),
+      port: z.number().int().min(1).max(65_535),
+    }).parse(request.body ?? {});
+    return { allowed: await requireConnections().isGatewayEgressDestinationAllowed(destination) };
   });
   app.post("/internal/v1/channels/routes/validate", async (request, reply) => {
     const route = channelRouteSchema.parse(request.body ?? {});
@@ -1773,8 +1812,8 @@ export function createControlServer(
     return requireConnections().adminList(actor.identity);
   });
   app.post("/v1/admin/connectors/discover", async (request) => {
-    requireAdministrator(request);
-    return requireConnections().discoverConnector(createConnectorSchema.parse(request.body ?? {}));
+    const actor = requireAdministrator(request);
+    return requireConnections().discoverConnector(actor.identity, createConnectorSchema.parse(request.body ?? {}));
   });
   app.post("/v1/admin/connectors", async (request, reply) => {
     const actor = requireAdministrator(request);
@@ -1791,8 +1830,13 @@ export function createControlServer(
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/tool-policy", async (request) => {
     const actor = requireAdministrator(request);
-    const input = saveMcpToolPolicySchema.parse(request.body ?? {});
-    const saved = await requireConnections().saveConnectorToolPolicy(actor.identity, request.params.connectorId, input.tools);
+    const input = saveHostedConnectorToolPolicySchema.parse(request.body ?? {});
+    const saved = await requireConnections().saveConnectorToolPolicy(
+      actor.identity,
+      request.params.connectorId,
+      input.tools,
+      input.expectedDocumentHash,
+    );
     return { ...saved, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/access-policy", async (request) => {
@@ -2831,13 +2875,21 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     env.WEB_PROXY_TOKEN,
     gateway,
     env.FIXTURE_APPROVAL_SECRET,
-    { publicWebUrl: env.PUBLIC_WEB_URL, authorizationOrigin: env.M365_AUTHORIZATION_ORIGIN, liteLlmPublicUrl: env.LITELLM_PUBLIC_URL, agentBridgeUrl: env.AGENT_BRIDGE_URL },
+    {
+      publicWebUrl: env.PUBLIC_WEB_URL,
+      authorizationOrigin: env.M365_AUTHORIZATION_ORIGIN,
+      liteLlmPublicUrl: env.LITELLM_PUBLIC_URL,
+      agentBridgeUrl: env.AGENT_BRIDGE_URL,
+      installationKind: env.ONECOMPUTER_INSTALLATION_KIND,
+      hostedCustomConnectorEgressOrigins: env.HOSTED_MCP_EGRESS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
+    },
     {
       identityPolicyStore,
       connectorRegistryStore,
       providerSettingsStore,
       providerAdministration,
       mcpPolicyToken: env.CONTROLLER_INTERNAL_TOKEN,
+      mcpEgressProxyToken: env.MCP_EGRESS_PROXY_TOKEN,
       agentBridgeSecret: env.AGENT_BRIDGE_SECRET,
       agentBridgeGrantTtlSeconds: env.AGENT_BRIDGE_GRANT_TTL_SECONDS,
       authentication: new EntraAuthenticationService(identityPolicyStore, {

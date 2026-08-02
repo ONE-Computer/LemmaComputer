@@ -1,0 +1,11 @@
+FROM ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e
+
+COPY integrations/litellm/onecomputer_remote_mcp_egress.py /app/onecomputer_remote_mcp_egress.py
+COPY integrations/litellm/sitecustomize.py /app/sitecustomize.py
+COPY docker/litellm-entrypoint.sh /app/onecomputer-litellm-entrypoint.sh
+
+ENV PYTHONPATH=/app
+
+RUN chmod 0555 /app/onecomputer-litellm-entrypoint.sh
+
+ENTRYPOINT ["/app/onecomputer-litellm-entrypoint.sh"]

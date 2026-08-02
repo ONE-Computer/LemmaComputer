@@ -96,7 +96,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
         if (renewalFails) throw new Error("provider refresh was denied");
         linearState = "connected";
       }
-      return ["create_issue"];
+      return [{ name: "create_issue", definitionHash: "a".repeat(64) }];
     },
     disconnectUserOAuthConnection: async () => disconnected(),
   };
@@ -151,6 +151,35 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     });
     assert.equal(callback.statusCode, 303);
     assert.equal(issuedPolicies.length, 2);
+    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["onecomputer_fixture"], "a connected provider is still fail-closed until its tools are reviewed");
+    assert.equal(issuedPolicies.at(-1)!.mcpToolPermissions?.onecomputer_linear, undefined);
+
+    const pendingReview = await app.inject({
+      method: "GET",
+      url: "/v1/admin/connectors/linear/tool-policy",
+      headers,
+    });
+    assert.equal(pendingReview.statusCode, 200);
+    const reviewed = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/connectors/linear/tool-policy",
+      headers,
+      payload: {
+        expectedDocumentHash: pendingReview.json().documentHash,
+        tools: { create_issue: "allow" },
+      },
+    });
+    assert.equal(reviewed.statusCode, 200);
+    // This fixture intentionally has no tenant identity directory, so its
+    // admin-wide refresh is a no-op. A normal owner refresh immediately picks
+    // up the invalidated, now-reviewed projection.
+    const reviewedStatus = await app.inject({
+      method: "GET",
+      url: "/v1/connections/linear",
+      headers,
+    });
+    assert.equal(reviewedStatus.statusCode, 200);
+    assert.equal(issuedPolicies.length, 3, "an administrator's current-definition review refreshes connected workspace grants");
     assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["onecomputer_fixture", "onecomputer_linear"]);
     assert.deepEqual(issuedPolicies.at(-1)!.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
 
@@ -158,7 +187,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     toolServers.length = 0;
     const stable = await app.inject({ method: "GET", url: "/v1/connections", headers });
     assert.equal(stable.statusCode, 200);
-    assert.equal(issuedPolicies.length, 2, "a stable connected marker must not reissue a workspace grant");
+    assert.equal(issuedPolicies.length, 3, "a stable connected marker must not reissue a workspace grant");
     const stableLinear = stable.json().connections.find((connector: { id: string }) => connector.id === "linear");
     assert.equal(stableLinear.state, "connected");
     assert.deepEqual(statusServers, ["onecomputer_linear"]);
@@ -181,7 +210,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     const staleLinear = stale.json().connections.find((connector: { id: string }) => connector.id === "linear");
     assert.equal(staleLinear.state, "expired");
     assert.ok(renewalAttempts >= 1);
-    assert.equal(issuedPolicies.length, 3, "an expired durable marker must remove its stale remote projection");
+    assert.equal(issuedPolicies.length, 4, "an expired durable marker must remove its stale remote projection");
     const staleReplacement = issuedPolicies.at(-1)!;
     assert.ok(!staleReplacement.mcpServers?.includes("onecomputer_linear"));
     assert.equal(staleReplacement.mcpToolPermissions?.onecomputer_linear, undefined);
@@ -196,7 +225,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.equal(recovered.statusCode, 200);
     const recoveredLinear = recovered.json().connections.find((connector: { id: string }) => connector.id === "linear");
     assert.equal(recoveredLinear.state, "connected");
-    assert.equal(issuedPolicies.length, 4, "a renewed marker must restore its remote projection");
+    assert.equal(issuedPolicies.length, 5, "a renewed marker must restore its remote projection");
     const restored = issuedPolicies.at(-1)!;
     assert.ok(restored.mcpServers?.includes("onecomputer_linear"));
     assert.deepEqual(restored.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
@@ -210,7 +239,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.equal(revoked.statusCode, 200);
     const revokedLinear = revoked.json().connections.find((connector: { id: string }) => connector.id === "linear");
     assert.equal(revokedLinear.state, "disconnected");
-    assert.equal(issuedPolicies.length, 5, "a revoked marker must remove its remote projection");
+    assert.equal(issuedPolicies.length, 6, "a revoked marker must remove its remote projection");
     const revokedReplacement = issuedPolicies.at(-1)!;
     assert.ok(!revokedReplacement.mcpServers?.includes("onecomputer_linear"));
     assert.equal(revokedReplacement.mcpToolPermissions?.onecomputer_linear, undefined);
@@ -223,7 +252,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     toolServers.length = 0;
     const noMarkerAgain = await app.inject({ method: "GET", url: "/v1/connections", headers });
     assert.equal(noMarkerAgain.statusCode, 200);
-    assert.equal(issuedPolicies.length, 5, "a removed marker must leave catalog re-entry local");
+    assert.equal(issuedPolicies.length, 6, "a removed marker must leave catalog re-entry local");
     assert.deepEqual(statusServers, []);
     assert.deepEqual(toolServers, []);
 
