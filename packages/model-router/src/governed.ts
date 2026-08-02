@@ -552,14 +552,10 @@ export class DeterministicModelRouter {
         !scope.explicitSelectionAllowed ||
         !scope.allowedServiceClasses.includes(requested)
       ) {
-        if (policy.mode !== "shadow")
-          throw new ModelRoutingError(
-            "SERVICE_CLASS_DENIED",
-            "The explicit service class is not allowed by policy",
-          );
-        selectionDenied = true;
-        reasonCode = "no_hypothetical_candidate";
-        escalationReason = "policy";
+        throw new ModelRoutingError(
+          "SERVICE_CLASS_DENIED",
+          "The explicit service class is not allowed by policy",
+        );
       } else {
         selectedClass = requested;
         reasonCode = "explicit_service_class";
@@ -689,7 +685,7 @@ export class DeterministicModelRouter {
       availabilityBlocked = availabilityBlocked || classHealthBlocked;
     }
     if (!selected?.expectedCost || !selected.rateCardId) {
-      if (policy.mode !== "shadow")
+      if (policy.mode !== "shadow" || requested !== "auto")
         throw new ModelRoutingError(
           "NO_ELIGIBLE_DEPLOYMENT",
           "No policy-approved, priced deployment satisfies the request",
@@ -730,8 +726,9 @@ export class DeterministicModelRouter {
         shadow: true,
       };
     }
-    const executed = policy.mode === "enabled" ? selected : fixed;
-    if (policy.mode === "shadow") reasonCode = "shadow_fixed_route";
+    const autoIsShadowed = policy.mode === "shadow" && requested === "auto";
+    const executed = autoIsShadowed ? fixed : selected;
+    if (autoIsShadowed) reasonCode = "shadow_fixed_route";
     if (key && requested === "auto")
       await this.affinities.put({
         tenantId: request.tenantId,
@@ -775,7 +772,7 @@ export class DeterministicModelRouter {
       affinityMovedReason,
       routerOverheadMs: (performance.now() - startedAt).toFixed(6),
       mode: policy.mode,
-      shadow: policy.mode === "shadow",
+      shadow: autoIsShadowed,
     };
   }
 }

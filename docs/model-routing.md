@@ -56,7 +56,7 @@ An observation is accepted only when its immutable usage event belongs to the sa
 
 ## Rollout and rollback
 
-Start every Team in shadow mode. The fixed deployment executes while the router records its hypothetical choice, expected cost, candidate evidence, fallback rate, errors, regret, and overhead.
+Start every Team's Auto classifier in shadow mode. Auto requests execute the fixed deployment while the router records its hypothetical choice, expected cost, candidate evidence, fallback rate, errors, regret, and overhead. Explicit Lite, Balanced, and Pro requests are not classifier experiments: they execute the eligible deployment mapped to the requested class and are excluded from Auto shadow evidence. A denied explicit class or one without an eligible deployment fails closed instead of silently executing the fixed route.
 
 Shadow mode never blocks the fixed route when the hypothetical policy has no eligible, priced, or budget-feasible candidate; it records an explicit `no_candidate` decision instead. Disabled mode bypasses hypothetical policy, budget, and pricing selection entirely and executes the rollout's validated fixed deployment.
 

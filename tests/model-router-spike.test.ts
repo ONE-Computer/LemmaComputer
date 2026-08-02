@@ -261,7 +261,7 @@ test("Auto covers simple, complex, reasoning, vision, tools, long context, and l
     "balanced",
   );
 });
-test("shadow records hypothetical route while executing the fixed route", async () => {
+test("shadow records an Auto hypothetical route while executing the fixed route", async () => {
   const decision = await new DeterministicModelRouter().route(
     request(),
     policy(),
@@ -272,7 +272,27 @@ test("shadow records hypothetical route while executing the fixed route", async 
   assert.equal(decision.reasonCode, "shadow_fixed_route");
   assert.equal(decision.shadow, true);
 });
-test("enabled executes selection and disabled keeps fixed route", async () => {
+test("explicit service classes execute their mapped deployment while Auto remains in shadow", async () => {
+  const router = new DeterministicModelRouter();
+  const lite = await router.route(
+    request({ requestedServiceClass: "lite" }),
+    policy(),
+  );
+  assert.equal(lite.selectedServiceClass, "lite");
+  assert.equal(lite.executedDeployment.id, "lite-b");
+  assert.equal(lite.reasonCode, "explicit_service_class");
+  assert.equal(lite.shadow, false);
+
+  const pro = await router.route(
+    request({ requestedServiceClass: "pro" }),
+    policy(),
+  );
+  assert.equal(pro.selectedServiceClass, "pro");
+  assert.equal(pro.executedDeployment.id, "pro");
+  assert.equal(pro.reasonCode, "explicit_service_class");
+  assert.equal(pro.shadow, false);
+});
+test("enabled executes selection and disabled keeps the emergency fixed route", async () => {
   assert.equal(
     (
       await new DeterministicModelRouter().route(
@@ -285,7 +305,7 @@ test("enabled executes selection and disabled keeps fixed route", async () => {
   assert.equal(
     (
       await new DeterministicModelRouter().route(
-        request(),
+        request({ requestedServiceClass: "pro" }),
         policy({ mode: "disabled" }),
       )
     ).executedDeployment.id,
@@ -304,19 +324,27 @@ test("shadow and disabled preserve the fixed route without an eligible hypotheti
   assert.equal(shadow.reasonCode, "no_hypothetical_candidate");
   assert.equal(shadow.selectedDeployment.expectedCost, null);
 
-  const policyDeniedShadow = await router.route(
-    request({ requestedServiceClass: "pro" }),
-    policy({
-      team: {
-        ...scope,
-        allowedServiceClasses: ["lite", "balanced"],
-        explicitSelectionAllowed: false,
-      },
-    }),
+  await assert.rejects(
+    router.route(
+      request({ requestedServiceClass: "pro" }),
+      policy({
+        team: {
+          ...scope,
+          allowedServiceClasses: ["lite", "balanced"],
+          explicitSelectionAllowed: false,
+        },
+      }),
+    ),
+    errorCode("SERVICE_CLASS_DENIED"),
   );
-  assert.equal(policyDeniedShadow.executedDeployment.id, "balanced");
-  assert.equal(policyDeniedShadow.selectionStatus, "no_candidate");
-  assert.equal(policyDeniedShadow.reasonCode, "no_hypothetical_candidate");
+
+  await assert.rejects(
+    router.route(
+      request({ requestedServiceClass: "pro" }),
+      policy({ budgetEligibleDeploymentIds: [] }),
+    ),
+    errorCode("NO_ELIGIBLE_DEPLOYMENT"),
+  );
 
   const disabled = await router.route(
     request(),

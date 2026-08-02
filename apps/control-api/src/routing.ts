@@ -344,12 +344,18 @@ const scaled = (value: string) => {
   return match[1] ? -amount : amount;
 };
 
-const outputTokenLimit = (policy: ModelRoutingPolicy) => {
+const outputTokenLimit = (
+  policy: ModelRoutingPolicy,
+  requestedServiceClass: z.infer<
+    typeof internalRoutingDecisionSchema
+  >["requestedServiceClass"],
+) => {
   const identityClasses = new Set(policy.identity.allowedServiceClasses);
   const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
   const teamClasses = new Set(policy.team?.allowedServiceClasses ?? policy.identity.allowedServiceClasses);
   const teamDeployments = new Set(policy.team?.allowedDeploymentIds ?? policy.identity.allowedDeploymentIds);
-  const fixedOnly = policy.mode !== "enabled";
+  const fixedOnly = policy.mode === "disabled"
+    || (policy.mode === "shadow" && requestedServiceClass === "auto");
   const limits = policy.deployments
     .filter((deployment) =>
       (!fixedOnly || deployment.id === policy.fixedDeploymentId)
@@ -373,7 +379,7 @@ const constrainOutputToPolicy = (
   input: z.infer<typeof internalRoutingDecisionSchema>,
   policy: ModelRoutingPolicy,
 ) => {
-  const limit = outputTokenLimit(policy);
+  const limit = outputTokenLimit(policy, input.requestedServiceClass);
   const requested = input.requiredCapabilities.outputTokens;
   if (limit === null || requested === undefined || requested <= limit)
     return { input, outputTokenLimit: limit };
