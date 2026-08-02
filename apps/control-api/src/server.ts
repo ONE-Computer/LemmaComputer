@@ -491,7 +491,9 @@ export function createControlServer(
     throw new Error("Provider settings dependencies must be configured together");
   }
   const providerSettings = security.providerSettingsStore && security.providerAdministration
-    ? new ProviderSettingsService(security.providerSettingsStore, security.providerAdministration)
+    ? new ProviderSettingsService(security.providerSettingsStore, security.providerAdministration, {
+      revokeWorkspaceGrants: async (tenantId, provider) => revokeTenantProviderWorkspaceGrants(tenantId, provider),
+    })
     : undefined;
   const mcpPolicy = security.identityPolicyStore ? new McpPolicyService(
     security.identityPolicyStore,
@@ -1733,23 +1735,31 @@ export function createControlServer(
   app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/disable", async (request) => {
     const actor = requireAdministrator(request);
     const provider = providerNameSchema.parse(request.params.provider);
-    const saved = await requireProviderSettings().disable(actor, provider);
-    const workspaceGrants = await revokeTenantProviderWorkspaceGrants(actor.tenantId, provider);
+    const disabled = await requireProviderSettings().disable(actor, provider);
     return {
-      provider: saved,
-      workspaceGrants,
-      restartRequired: workspaceGrants.revoked > 0 || workspaceGrants.failed > 0,
+      provider: disabled.provider,
+      workspaceGrants: disabled.workspaceGrants,
+      restartRequired: disabled.workspaceGrants.revoked > 0 || disabled.workspaceGrants.failed > 0,
+    };
+  });
+  app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/reconcile", async (request) => {
+    const actor = requireAdministrator(request);
+    const provider = providerNameSchema.parse(request.params.provider);
+    const reconciled = await requireProviderSettings().reconcile(actor, provider);
+    return {
+      provider: reconciled.provider,
+      workspaceGrants: reconciled.workspaceGrants,
+      restartRequired: reconciled.workspaceGrants.revoked > 0 || reconciled.workspaceGrants.failed > 0,
     };
   });
   app.delete<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
     const actor = requireAdministrator(request);
     const provider = providerNameSchema.parse(request.params.provider);
-    await requireProviderSettings().remove(actor, provider);
-    const workspaceGrants = await revokeTenantProviderWorkspaceGrants(actor.tenantId, provider);
+    const removed = await requireProviderSettings().remove(actor, provider);
     return {
       deleted: true,
-      workspaceGrants,
-      restartRequired: workspaceGrants.revoked > 0 || workspaceGrants.failed > 0,
+      workspaceGrants: removed.workspaceGrants,
+      restartRequired: removed.workspaceGrants.revoked > 0 || removed.workspaceGrants.failed > 0,
     };
   });
   app.get("/v1/connections", async (request) => {

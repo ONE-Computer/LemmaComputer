@@ -19,6 +19,7 @@ import {
   type SessionPrincipal,
 } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
+import { ProviderSettingsService } from "../apps/control-api/src/provider-settings.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "provider-settings-proxy-token-at-least-24-characters";
@@ -131,7 +132,42 @@ class FakeProviderAdministration implements ProviderAdministrationGateway {
   }
 
   async deleteManagedProvider(input: ManagedProviderOperation) {
+    if (this.failure) throw this.failure;
     this.deleted.push({ tenantId: input.tenantId, provider: input.provider, modelIds: [...input.existingModelIds] });
+  }
+}
+
+type Deferred = {
+  promise: Promise<void>;
+  resolve: () => void;
+};
+
+const deferred = (): Deferred => {
+  let resolve = () => undefined;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+};
+
+class DelayedProviderAdministration extends FakeProviderAdministration {
+  configureGate: Deferred | null = null;
+  deleteGate: Deferred | null = null;
+  configureStarted: Deferred | null = null;
+  deleteStarted: Deferred | null = null;
+
+  override async configureManagedProvider(input: ManagedProviderConfiguration) {
+    if (this.configureGate) {
+      this.configureStarted?.resolve();
+      await this.configureGate.promise;
+    }
+    return super.configureManagedProvider(input);
+  }
+
+  override async deleteManagedProvider(input: ManagedProviderOperation) {
+    if (this.deleteGate) {
+      this.deleteStarted?.resolve();
+      await this.deleteGate.promise;
+    }
+    return super.deleteManagedProvider(input);
   }
 }
 
@@ -319,6 +355,224 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
   }
 });
 
+test("a disable fences an in-flight provider rotation and revokes workspace grants before gateway cleanup", async () => {
+  const workspaceStore = new MemoryWorkspaceStore();
+  const existing = await workspaceStore.createOrGet(identity, "personal", "provider-disable-race-workspace");
+  await workspaceStore.update(existing.id, { state: "ready" });
+  const settingsStore = new MemoryProviderSettingsStore();
+  const providerAdministration = new DelayedProviderAdministration();
+  const revoked: string[] = [];
+  const revokeStarted = deferred();
+  const gateway = {
+    revoke: async (workspaceId: string, agentId?: string) => {
+      revoked.push(workspaceId + ":" + (agentId ?? ""));
+      revokeStarted.resolve();
+    },
+  } as GatewayClient;
+  const app = createControlServer(
+    workspaceStore,
+    {} as ControllerClient,
+    proxyToken,
+    gateway,
+    undefined,
+    {},
+    {
+      testIdentityMode: true,
+      identityPolicyStore: identityPolicies(),
+      providerSettingsStore: settingsStore,
+      providerAdministration,
+    },
+  );
+
+  try {
+    const initial = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/openai",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-race-initial-0001" },
+      payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-terra" },
+    });
+    assert.equal(initial.statusCode, 200);
+
+    providerAdministration.configureGate = deferred();
+    providerAdministration.configureStarted = deferred();
+    const rotate = app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/openai",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-race-rotate-0001" },
+      payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-sol" },
+    });
+    await providerAdministration.configureStarted.promise;
+
+    providerAdministration.deleteGate = deferred();
+    providerAdministration.deleteStarted = deferred();
+    const disable = app.inject({
+      method: "POST",
+      url: "/v1/admin/provider-settings/openai/disable",
+      headers: { ...testHeaders, "idempotency-key": "provider-race-disable-0001" },
+    });
+    await revokeStarted.promise;
+
+    const fencedBeforeCleanup = await settingsStore.getProviderSetting(identity.tenantId, "openai");
+    assert.equal(fencedBeforeCleanup?.state, "disabled");
+    assert.deepEqual(fencedBeforeCleanup?.modelIds, []);
+    assert.deepEqual(revoked, [existing.id + ":provider-agent:claude-desktop"]);
+
+    providerAdministration.configureGate.resolve();
+    await providerAdministration.deleteStarted.promise;
+    providerAdministration.deleteGate.resolve();
+    const [disabled, rotated] = await Promise.all([disable, rotate]);
+    assert.equal(disabled.statusCode, 200);
+    assert.equal(rotated.statusCode, 409);
+    assert.equal(rotated.json().error.code, "PROVIDER_LIFECYCLE_FENCED");
+
+    const final = await settingsStore.getProviderSetting(identity.tenantId, "openai");
+    assert.equal(final?.state, "disabled");
+    assert.deepEqual(final?.modelIds, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test("a configure that arrives during a disable epoch cannot reactivate the provider", async () => {
+  const settingsStore = new MemoryProviderSettingsStore();
+  const providerAdministration = new FakeProviderAdministration();
+  const revocationStarted = deferred();
+  const releaseRevocation = deferred();
+  const service = new ProviderSettingsService(settingsStore, providerAdministration, {
+    revokeWorkspaceGrants: async () => {
+      revocationStarted.resolve();
+      await releaseRevocation.promise;
+      return { revoked: 0, failed: 0 };
+    },
+  });
+  await service.configure(administrator, {
+    provider: "openai",
+    apiKey: rawOpenAiKey,
+    modelId: "gpt-5.6-terra",
+  });
+
+  const disabling = service.disable(administrator, "openai");
+  await revocationStarted.promise;
+  const fenced = await settingsStore.getProviderSetting(identity.tenantId, "openai");
+  assert.equal(fenced?.state, "disabled");
+
+  const reconfigure = service.configure(administrator, {
+    provider: "openai",
+    apiKey: rawOpenAiKey,
+    modelId: "gpt-5.6-sol",
+  });
+  try {
+    await assert.rejects(
+      reconfigure,
+      (error: unknown) => error instanceof OneComputerError && error.code === "PROVIDER_LIFECYCLE_FENCED",
+    );
+  } finally {
+    releaseRevocation.resolve();
+    await disabling;
+  }
+
+  const final = await settingsStore.getProviderSetting(identity.tenantId, "openai");
+  assert.equal(final?.state, "disabled");
+  assert.deepEqual(final?.modelIds, []);
+  assert.equal(providerAdministration.configured.length, 1, "the post-fence configure must not reach LiteLLM");
+
+  const explicitReenable = await service.configure(administrator, {
+    provider: "openai",
+    apiKey: rawOpenAiKey,
+    modelId: "gpt-5.6-sol",
+  });
+  assert.equal(explicitReenable.state, "active");
+  assert.equal(providerAdministration.configured.length, 2);
+});
+
+test("reconciliation retries gateway cleanup without re-enabling a disabled provider", async () => {
+  const settingsStore = new MemoryProviderSettingsStore();
+  const providerAdministration = new FakeProviderAdministration();
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    proxyToken,
+    undefined,
+    undefined,
+    {},
+    {
+      testIdentityMode: true,
+      identityPolicyStore: identityPolicies(),
+      providerSettingsStore: settingsStore,
+      providerAdministration,
+    },
+  );
+
+  try {
+    const configured = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/openai",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-reconcile-initial-0001" },
+      payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-terra" },
+    });
+    assert.equal(configured.statusCode, 200);
+
+    providerAdministration.failure = new OneComputerError("PROVIDER_GATEWAY_UNAVAILABLE", "gateway unavailable", 503, true);
+    const disabled = await app.inject({
+      method: "POST",
+      url: "/v1/admin/provider-settings/openai/disable",
+      headers: { ...testHeaders, "idempotency-key": "provider-reconcile-disable-0001" },
+    });
+    assert.equal(disabled.statusCode, 503);
+    assert.equal(disabled.json().error.code, "PROVIDER_LIFECYCLE_RECONCILIATION_REQUIRED");
+    const fenced = await settingsStore.getProviderSetting(identity.tenantId, "openai");
+    const pending = await settingsStore.getProviderLifecycle(identity.tenantId, "openai");
+    assert.equal(fenced?.state, "disabled");
+    assert.deepEqual(fenced?.modelIds, []);
+    assert.equal(pending?.desiredState, "disabled");
+    assert.equal(pending?.reconciliationStatus, "pending");
+
+    providerAdministration.failure = null;
+    const reconciled = await app.inject({
+      method: "POST",
+      url: "/v1/admin/provider-settings/openai/reconcile",
+      headers: { ...testHeaders, "idempotency-key": "provider-reconcile-retry-0001" },
+    });
+    assert.equal(reconciled.statusCode, 200);
+    assert.equal(reconciled.json().provider.state, "disabled");
+    const completed = await settingsStore.getProviderLifecycle(identity.tenantId, "openai");
+    assert.equal(completed?.desiredState, "disabled");
+    assert.equal(completed?.reconciliationStatus, "not_required");
+    assert.deepEqual(completed?.pendingCleanupModelIds, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test("removing a provider that was never configured preserves the not-configured response", async () => {
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    proxyToken,
+    undefined,
+    undefined,
+    {},
+    {
+      testIdentityMode: true,
+      identityPolicyStore: identityPolicies(),
+      providerSettingsStore: new MemoryProviderSettingsStore(),
+      providerAdministration: new FakeProviderAdministration(),
+    },
+  );
+
+  try {
+    const removed = await app.inject({
+      method: "DELETE",
+      url: "/v1/admin/provider-settings/openai",
+      headers: { ...testHeaders, "idempotency-key": "provider-never-configured-delete-0001" },
+    });
+    assert.equal(removed.statusCode, 404);
+    assert.equal(removed.json().error.code, "PROVIDER_NOT_CONFIGURED");
+  } finally {
+    await app.close();
+  }
+});
+
 test("Bedrock provider settings persist only approved selection metadata and fail closed when it is malformed", async () => {
   const settingsStore = new MemoryProviderSettingsStore();
   const providerAdministration = new FakeProviderAdministration();
@@ -418,6 +672,11 @@ test("Bedrock provider settings persist only approved selection metadata and fai
     assert.equal(deleted.statusCode, 200);
     assert.equal(await settingsStore.getProviderSetting(identity.tenantId, "bedrock"), null);
 
+    await settingsStore.beginProviderLifecycle({
+      tenantId: identity.tenantId,
+      provider: "bedrock",
+      updatedBy: administrator.userId,
+    });
     await settingsStore.saveProviderSetting({
       tenantId: identity.tenantId,
       provider: "bedrock",

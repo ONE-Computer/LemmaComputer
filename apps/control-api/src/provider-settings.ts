@@ -1,6 +1,6 @@
 import { OneComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@onecomputer/contracts";
 import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
-import type { ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
+import type { ProviderLifecycleExpectation, ProviderLifecycleRecord, ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
 
 type EmissionsSelection = { emissionsRegion?: ProviderEmissionsRegion };
 type DirectProviderInput<T extends ProviderModelId> = { apiKey: string } & EmissionsSelection & (
@@ -99,6 +99,8 @@ const safeProviderErrorCodes = new Set([
   "PROVIDER_CONFIGURATION_FAILED",
   "PROVIDER_TEST_FAILED",
   "PROVIDER_CONFIGURATION_INVALID",
+  "PROVIDER_LIFECYCLE_FENCED",
+  "PROVIDER_LIFECYCLE_RECONCILIATION_REQUIRED",
   "BEDROCK_ROUTE_UNAPPROVED",
   "BEDROCK_ROUTE_RECONFIGURATION_REQUIRED",
   "BEDROCK_API_KEY_INVALID",
@@ -125,6 +127,8 @@ const safeProviderMessage = (code: string, fallback: string) => ({
   PROVIDER_CONFIGURATION_FAILED: "The provider configuration could not be validated",
   PROVIDER_TEST_FAILED: "The provider test could not be completed",
   PROVIDER_CONFIGURATION_INVALID: "The Bedrock selection metadata is invalid; disable and reconnect the provider",
+  PROVIDER_LIFECYCLE_FENCED: "The provider changed state while this operation was running",
+  PROVIDER_LIFECYCLE_RECONCILIATION_REQUIRED: "The provider is disabled, but gateway cleanup needs reconciliation",
   BEDROCK_ROUTE_UNAPPROVED: "The selected Bedrock region or inference profile is not approved",
   BEDROCK_ROUTE_RECONFIGURATION_REQUIRED: "Disable and reconnect Bedrock to change its approved region or inference profile",
   BEDROCK_API_KEY_INVALID: "Bedrock rejected the API key",
@@ -158,10 +162,20 @@ const safeErrorCode = (error: unknown) => {
   return normalized.code;
 };
 
+const lifecycleErrorCode = (error: unknown) => (
+  error instanceof OneComputerError ? error.code : "PROVIDER_ROUTE_FAILED"
+);
+
+type WorkspaceGrantRevocation = { revoked: number; failed: number };
+type ProviderLifecycleOptions = {
+  revokeWorkspaceGrants?: (tenantId: string, provider: ManagedProviderName) => Promise<WorkspaceGrantRevocation>;
+};
+
 export class ProviderSettingsService {
   constructor(
     private readonly store: ProviderSettingsStore,
     private readonly gateway: ProviderAdministrationGateway,
+    private readonly lifecycleOptions: ProviderLifecycleOptions = {},
   ) {}
 
   async list(actor: Pick<SessionPrincipal, "tenantId">) {
@@ -175,207 +189,376 @@ export class ProviderSettingsService {
   async assertConfigured(actor: Pick<SessionPrincipal, "tenantId">, modelAlias: string) {
     const provider = managedProviderForAlias(modelAlias);
     if (!provider) return;
+    const lifecycle = await this.store.getProviderLifecycle(actor.tenantId, provider);
+    if (lifecycle && lifecycle.desiredState !== "active") {
+      throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
+    }
     await this.activeRecord(actor, provider);
   }
 
   async configure(actor: SessionPrincipal, input: ProviderSettingInput) {
     const provider = input.provider;
-    const current = await this.store.getProviderSetting(actor.tenantId, provider);
-    if (input.provider === "bedrock" && current?.state === "active") {
-      const existing = this.requireBedrockSelection(current);
-      if (existing.region !== input.region || existing.modelProfileId !== input.modelProfileId) {
-        throw new OneComputerError(
-          "BEDROCK_ROUTE_RECONFIGURATION_REQUIRED",
-          "Disable and reconnect Bedrock to change its approved region or inference profile",
-          409,
-        );
-      }
-    }
-    const existingModelIds = current?.state === "active" ? current.modelIds : [];
-    let route;
-    try {
-      const gatewayInput: ManagedProviderConfiguration = input.provider === "bedrock"
-        ? {
-          tenantId: actor.tenantId,
-          provider: input.provider,
-          apiKey: input.apiKey,
-          region: input.region,
-          modelProfileId: input.modelProfileId,
-          existingModelIds,
-          configuration: current?.configuration,
-        }
-        : input.provider === "openai"
-        ? {
-          tenantId: actor.tenantId,
-          provider: input.provider,
-          apiKey: input.apiKey,
-          ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
-          existingModelIds,
-          configuration: current?.configuration,
-        }
-        : input.provider === "anthropic"
-        ? {
-          tenantId: actor.tenantId,
-          provider: input.provider,
-          apiKey: input.apiKey,
-          ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
-          existingModelIds,
-          configuration: current?.configuration,
-        }
-        : {
-          tenantId: actor.tenantId,
-          provider: input.provider,
-          apiKey: input.apiKey,
-          ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
-          existingModelIds,
-          configuration: current?.configuration,
-        };
-      route = await this.gateway.configureManagedProvider(gatewayInput);
-    } catch (error) {
-      throw safeProviderError(error, "PROVIDER_CONFIGURATION_FAILED", "The provider configuration could not be validated");
-    }
-
-    const currentMetadata = providerSettingMetadataSchema.safeParse(current?.configuration ?? {});
-    const emissionsRegion = input.emissionsRegion
-      ?? (currentMetadata.success ? currentMetadata.data.emissionsRegion : undefined);
-    try {
-      const saved = await this.store.saveProviderSetting({
+    return this.store.withProviderLifecycleLock(actor.tenantId, provider, async () => {
+      const lifecycle = await this.store.beginProviderLifecycle({
         tenantId: actor.tenantId,
         provider,
-        modelIds: route.modelIds,
-        configuration: {
-          ...route.configuration,
-          ...(emissionsRegion ? { emissionsRegion } : {}),
-        },
-        state: "active",
-        credentialFingerprint: route.credentialFingerprint,
-        lastTestedAt: new Date(),
-        lastErrorCode: null,
         updatedBy: actor.userId,
       });
-      return toView(provider, saved);
-    } catch {
-      if (current?.state !== "active") {
-        await this.gateway.deleteManagedProvider({
-          tenantId: actor.tenantId,
-          provider,
-          existingModelIds: route.modelIds,
-        }).catch(() => undefined);
+      if (!lifecycle) {
+        throw new OneComputerError(
+          "PROVIDER_LIFECYCLE_FENCED",
+          "The provider is still being disabled; reconcile it before configuring again",
+          409,
+          true,
+        );
       }
-      throw new OneComputerError(
-        "PROVIDER_CONFIGURATION_RECONCILIATION_REQUIRED",
-        "The provider route changed but its settings could not be recorded. Reopen Provider settings before retrying.",
-        503,
-        true,
-      );
-    }
+      const current = await this.store.getProviderSetting(actor.tenantId, provider);
+      if (input.provider === "bedrock" && current?.state === "active") {
+        const existing = this.requireBedrockSelection(current);
+        if (existing.region !== input.region || existing.modelProfileId !== input.modelProfileId) {
+          throw new OneComputerError(
+            "BEDROCK_ROUTE_RECONFIGURATION_REQUIRED",
+            "Disable and reconnect Bedrock to change its approved region or inference profile",
+            409,
+          );
+        }
+      }
+      const existingModelIds = current?.state === "active" ? current.modelIds : [];
+      let route;
+      try {
+        const gatewayInput: ManagedProviderConfiguration = input.provider === "bedrock"
+          ? {
+            tenantId: actor.tenantId,
+            provider: input.provider,
+            apiKey: input.apiKey,
+            region: input.region,
+            modelProfileId: input.modelProfileId,
+            existingModelIds,
+            configuration: current?.configuration,
+          }
+          : input.provider === "openai"
+          ? {
+            tenantId: actor.tenantId,
+            provider: input.provider,
+            apiKey: input.apiKey,
+            ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
+            existingModelIds,
+            configuration: current?.configuration,
+          }
+          : input.provider === "anthropic"
+          ? {
+            tenantId: actor.tenantId,
+            provider: input.provider,
+            apiKey: input.apiKey,
+            ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
+            existingModelIds,
+            configuration: current?.configuration,
+          }
+          : {
+            tenantId: actor.tenantId,
+            provider: input.provider,
+            apiKey: input.apiKey,
+            ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
+            existingModelIds,
+            configuration: current?.configuration,
+          };
+        route = await this.gateway.configureManagedProvider(gatewayInput);
+      } catch (error) {
+        await this.recordLifecycleEvent(lifecycle, "configuration-failed", actor.userId, {
+          errorCode: lifecycleErrorCode(error),
+        });
+        throw safeProviderError(error, "PROVIDER_CONFIGURATION_FAILED", "The provider configuration could not be validated");
+      }
+
+      const currentMetadata = providerSettingMetadataSchema.safeParse(current?.configuration ?? {});
+      const emissionsRegion = input.emissionsRegion
+        ?? (currentMetadata.success ? currentMetadata.data.emissionsRegion : undefined);
+      let saved: ProviderSettingRecord | null;
+      try {
+        saved = await this.store.saveProviderSettingIfCurrent({
+          record: {
+            tenantId: actor.tenantId,
+            provider,
+            modelIds: route.modelIds,
+            configuration: {
+              ...route.configuration,
+              ...(emissionsRegion ? { emissionsRegion } : {}),
+            },
+            state: "active",
+            credentialFingerprint: route.credentialFingerprint,
+            lastTestedAt: new Date(),
+            lastErrorCode: null,
+            updatedBy: actor.userId,
+          },
+          expected: this.expectation(lifecycle),
+        });
+      } catch {
+        await this.cleanupFencedRoute(actor, provider, lifecycle, route.modelIds);
+        throw new OneComputerError(
+          "PROVIDER_CONFIGURATION_RECONCILIATION_REQUIRED",
+          "The provider route changed but its settings could not be recorded. Reopen Provider settings before retrying.",
+          503,
+          true,
+        );
+      }
+      if (!saved) {
+        await this.cleanupFencedRoute(actor, provider, lifecycle, route.modelIds);
+        throw new OneComputerError(
+          "PROVIDER_LIFECYCLE_FENCED",
+          "The provider changed state while this operation was running",
+          409,
+          true,
+        );
+      }
+      await this.recordLifecycleEvent(lifecycle, "configuration-recorded", actor.userId);
+      return toView(provider, saved);
+    });
   }
 
   async test(actor: SessionPrincipal, provider: ManagedProviderName) {
-    const current = await this.activeRecord(actor, provider);
-    try {
-      await this.gateway.testManagedProvider({
+    return this.store.withProviderLifecycleLock(actor.tenantId, provider, async () => {
+      const lifecycle = await this.store.ensureProviderLifecycle({
         tenantId: actor.tenantId,
         provider,
-        existingModelIds: current.modelIds,
-        configuration: current.configuration,
-      });
-    } catch (error) {
-      const normalized = safeProviderError(error, "PROVIDER_TEST_FAILED", "The provider test could not be completed");
-      await this.store.saveProviderSetting({
-        tenantId: current.tenantId,
-        provider,
-        modelIds: current.modelIds,
-        configuration: current.configuration,
-        state: current.state,
-        credentialFingerprint: current.credentialFingerprint,
-        lastTestedAt: current.lastTestedAt,
-        lastErrorCode: safeErrorCode(normalized),
         updatedBy: actor.userId,
-      }).catch(() => undefined);
-      throw normalized;
-    }
+      });
+      if (lifecycle.desiredState !== "active") {
+        throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
+      }
+      const current = await this.activeRecord(actor, provider);
+      try {
+        await this.gateway.testManagedProvider({
+          tenantId: actor.tenantId,
+          provider,
+          existingModelIds: current.modelIds,
+          configuration: current.configuration,
+        });
+      } catch (error) {
+        const normalized = safeProviderError(error, "PROVIDER_TEST_FAILED", "The provider test could not be completed");
+        const saved = await this.store.saveProviderSettingIfCurrent({
+          record: {
+            tenantId: current.tenantId,
+            provider,
+            modelIds: current.modelIds,
+            configuration: current.configuration,
+            state: current.state,
+            credentialFingerprint: current.credentialFingerprint,
+            lastTestedAt: current.lastTestedAt,
+            lastErrorCode: safeErrorCode(normalized),
+            updatedBy: actor.userId,
+          },
+          expected: this.expectation(lifecycle),
+        }).catch(() => null);
+        await this.recordLifecycleEvent(lifecycle, saved ? "test-failed" : "test-fenced", actor.userId, {
+          errorCode: safeErrorCode(normalized),
+        });
+        throw normalized;
+      }
 
-    try {
-      const saved = await this.store.saveProviderSetting({
-        tenantId: current.tenantId,
-        provider,
-        modelIds: current.modelIds,
-        configuration: current.configuration,
-        state: current.state,
-        credentialFingerprint: current.credentialFingerprint,
-        lastTestedAt: new Date(),
-        lastErrorCode: null,
-        updatedBy: actor.userId,
-      });
+      let saved: ProviderSettingRecord | null;
+      try {
+        saved = await this.store.saveProviderSettingIfCurrent({
+          record: {
+            tenantId: current.tenantId,
+            provider,
+            modelIds: current.modelIds,
+            configuration: current.configuration,
+            state: current.state,
+            credentialFingerprint: current.credentialFingerprint,
+            lastTestedAt: new Date(),
+            lastErrorCode: null,
+            updatedBy: actor.userId,
+          },
+          expected: this.expectation(lifecycle),
+        });
+      } catch {
+        throw new OneComputerError(
+          "PROVIDER_TEST_RECONCILIATION_REQUIRED",
+          "The provider test completed but its status could not be recorded.",
+          503,
+          true,
+        );
+      }
+      if (!saved) {
+        await this.recordLifecycleEvent(lifecycle, "test-fenced", actor.userId);
+        throw new OneComputerError(
+          "PROVIDER_LIFECYCLE_FENCED",
+          "The provider changed state while this operation was running",
+          409,
+          true,
+        );
+      }
+      await this.recordLifecycleEvent(lifecycle, "test-recorded", actor.userId);
       return toView(provider, saved);
-    } catch {
-      throw new OneComputerError(
-        "PROVIDER_TEST_RECONCILIATION_REQUIRED",
-        "The provider test completed but its status could not be recorded.",
-        503,
-        true,
-      );
-    }
+    });
   }
 
   async disable(actor: SessionPrincipal, provider: ManagedProviderName) {
-    const current = await this.activeRecord(actor, provider, false);
+    const fenced = await this.store.fenceProviderDisabled({
+      tenantId: actor.tenantId,
+      provider,
+      updatedBy: actor.userId,
+    });
+    const workspaceGrants = await this.revokeWorkspaceGrants(actor.tenantId, provider);
+    // The fence and grant revocation deliberately happen before this wait. The
+    // lock only serializes the subsequent upstream cleanup with an explicit
+    // later configure, so old cleanup cannot delete a newly enabled route.
+    await this.store.withProviderLifecycleLock(actor.tenantId, provider, async () => {
+      await this.reconcileFencedLifecycle(actor, provider, fenced.lifecycle);
+    });
+    return {
+      provider: toView(provider, fenced.setting),
+      workspaceGrants,
+    };
+  }
+
+  async remove(actor: SessionPrincipal, provider: ManagedProviderName) {
+    return this.store.withProviderLifecycleLock(actor.tenantId, provider, async () => {
+      const [current, lifecycle] = await Promise.all([
+        this.store.getProviderSetting(actor.tenantId, provider),
+        this.store.getProviderLifecycle(actor.tenantId, provider),
+      ]);
+      // Keep the established API contract for a provider that has never had
+      // either local state or a lifecycle fence. A pre-existing fence is
+      // intentionally retryable: it may still carry gateway cleanup work.
+      if (!current && !lifecycle) {
+        throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 404);
+      }
+      const fenced = await this.store.fenceProviderDeleted({
+        tenantId: actor.tenantId,
+        provider,
+        updatedBy: actor.userId,
+      });
+      const workspaceGrants = await this.revokeWorkspaceGrants(actor.tenantId, provider);
+      await this.reconcileFencedLifecycle(actor, provider, fenced.lifecycle);
+      return { workspaceGrants };
+    });
+  }
+
+  async reconcile(actor: SessionPrincipal, provider: ManagedProviderName) {
+    return this.store.withProviderLifecycleLock(actor.tenantId, provider, async () => {
+      const lifecycle = await this.store.getProviderLifecycle(actor.tenantId, provider);
+      if (!lifecycle || lifecycle.desiredState === "active") {
+        throw new OneComputerError("PROVIDER_LIFECYCLE_NOT_RECONCILABLE", "That provider does not require lifecycle reconciliation", 409);
+      }
+      const workspaceGrants = await this.revokeWorkspaceGrants(actor.tenantId, provider);
+      await this.reconcileFencedLifecycle(actor, provider, lifecycle);
+      const setting = await this.store.getProviderSetting(actor.tenantId, provider);
+      return { provider: toView(provider, setting), workspaceGrants };
+    });
+  }
+
+  private expectation(lifecycle: ProviderLifecycleRecord): ProviderLifecycleExpectation {
+    return {
+      tenantId: lifecycle.tenantId,
+      provider: lifecycle.provider,
+      generation: lifecycle.generation,
+      desiredState: lifecycle.desiredState,
+    };
+  }
+
+  private async cleanupFencedRoute(
+    actor: SessionPrincipal,
+    provider: ManagedProviderName,
+    source: ProviderLifecycleRecord,
+    modelIds: string[],
+  ) {
+    const current = await this.store.getProviderLifecycle(actor.tenantId, provider);
+    if (!current || current.generation === source.generation || current.desiredState === "active") return;
+    const expected = this.expectation(current);
+    const appended = await this.store.appendProviderLifecycleCleanup({
+      ...expected,
+      modelIds,
+      updatedBy: actor.userId,
+    });
+    if (!appended) return;
     try {
       await this.gateway.deleteManagedProvider({
         tenantId: actor.tenantId,
         provider,
-        existingModelIds: current.modelIds,
+        existingModelIds: modelIds,
+        configuration: undefined,
       });
-    } catch (error) {
-      throw safeProviderError(error, "PROVIDER_CONFIGURATION_FAILED", "The provider could not be disabled");
-    }
-    try {
-      const saved = await this.store.saveProviderSetting({
-        tenantId: current.tenantId,
-        provider,
-        modelIds: [],
-        configuration: current.configuration,
-        state: "disabled",
-        credentialFingerprint: null,
-        lastTestedAt: current.lastTestedAt,
-        lastErrorCode: null,
+      await this.store.completeProviderLifecycleCleanup({
+        ...expected,
+        modelIds,
         updatedBy: actor.userId,
       });
-      return toView(provider, saved);
-    } catch {
-      throw new OneComputerError(
-        "PROVIDER_LIFECYCLE_RECONCILIATION_REQUIRED",
-        "The provider route was removed but its settings could not be recorded.",
-        503,
-        true,
-      );
+    } catch (error) {
+      await this.store.markProviderLifecycleReconciliationPending({
+        ...expected,
+        errorCode: lifecycleErrorCode(error),
+        updatedBy: actor.userId,
+      }).catch(() => undefined);
     }
   }
 
-  async remove(actor: SessionPrincipal, provider: ManagedProviderName) {
-    const current = await this.store.getProviderSetting(actor.tenantId, provider);
-    if (!current) throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 404);
-    if (current.state === "active") {
-      try {
-        await this.gateway.deleteManagedProvider({
-          tenantId: actor.tenantId,
-          provider,
-          existingModelIds: current.modelIds,
-        });
-      } catch (error) {
-        throw safeProviderError(error, "PROVIDER_CONFIGURATION_FAILED", "The provider could not be removed");
-      }
+  private async reconcileFencedLifecycle(actor: SessionPrincipal, provider: ManagedProviderName, lifecycle: ProviderLifecycleRecord) {
+    const current = await this.store.getProviderLifecycle(actor.tenantId, provider);
+    if (!current || current.desiredState === "active" || !this.matchesLifecycle(current, lifecycle)) return;
+    const expected = this.expectation(current);
+    const pending = current.pendingCleanupModelIds;
+    if (!pending.length) {
+      await this.store.completeProviderLifecycleCleanup({
+        ...expected,
+        modelIds: [],
+        updatedBy: actor.userId,
+      }).catch(() => undefined);
+      return;
     }
-    const deleted = await this.store.deleteProviderSetting(actor.tenantId, provider);
-    if (!deleted) {
+    try {
+      await this.gateway.deleteManagedProvider({
+        tenantId: actor.tenantId,
+        provider,
+        existingModelIds: pending,
+      });
+    } catch (error) {
+      await this.store.markProviderLifecycleReconciliationPending({
+        ...expected,
+        errorCode: lifecycleErrorCode(error),
+        updatedBy: actor.userId,
+      }).catch(() => undefined);
       throw new OneComputerError(
         "PROVIDER_LIFECYCLE_RECONCILIATION_REQUIRED",
-        "The provider route was removed but its settings could not be recorded.",
+        "The provider is disabled, but gateway cleanup needs reconciliation",
         503,
         true,
       );
     }
+    await this.store.completeProviderLifecycleCleanup({
+      ...expected,
+      modelIds: pending,
+      updatedBy: actor.userId,
+    });
+  }
+
+  private async revokeWorkspaceGrants(tenantId: string, provider: ManagedProviderName) {
+    try {
+      return await this.lifecycleOptions.revokeWorkspaceGrants?.(tenantId, provider) ?? { revoked: 0, failed: 0 };
+    } catch {
+      return { revoked: 0, failed: 1 };
+    }
+  }
+
+  private async recordLifecycleEvent(
+    lifecycle: ProviderLifecycleRecord,
+    eventKey: string,
+    actorUserId: string,
+    details?: Record<string, unknown>,
+  ) {
+    await this.store.recordProviderLifecycleEvent({
+      ...this.expectation(lifecycle),
+      eventKey,
+      actorUserId,
+      ...(details ? { details } : {}),
+    }).catch(() => undefined);
+  }
+
+  private matchesLifecycle(current: ProviderLifecycleRecord, expected: ProviderLifecycleRecord) {
+    return current.tenantId === expected.tenantId
+      && current.provider === expected.provider
+      && current.generation === expected.generation
+      && current.desiredState === expected.desiredState;
   }
 
   private requireBedrockSelection(record: ProviderSettingRecord): BedrockSelection {
