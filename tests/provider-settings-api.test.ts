@@ -228,8 +228,8 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configuredGlm.json().provider.upstreamModelDisplayName, "Z.ai GLM-5.2");
     assert.equal(configuredGlm.json().provider.modelId, "glm-5.2");
     assert.deepEqual(configuredGlm.json().provider.modelOptions, [
-      { id: "glm-5", displayName: "Z.ai GLM-5" },
-      { id: "glm-5.2", displayName: "Z.ai GLM-5.2" },
+      { id: "glm-5", displayName: "Z.ai GLM-5", modelCapabilities: { vision: false, tools: true, streaming: true } },
+      { id: "glm-5.2", displayName: "Z.ai GLM-5.2", modelCapabilities: { vision: false, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configuredGlm.json()).includes(rawGlmKey), false);
     assert.equal(providerAdministration.configured[1]!.provider, "glm");
@@ -245,8 +245,8 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configuredAnthropic.json().provider.modelId, "claude-opus-4-8");
     assert.equal(configuredAnthropic.json().provider.upstreamModelDisplayName, "Anthropic Claude Opus 4.8");
     assert.deepEqual(configuredAnthropic.json().provider.modelOptions, [
-      { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6" },
-      { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8" },
+      { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6", modelCapabilities: { vision: true, tools: true, streaming: true } },
+      { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8", modelCapabilities: { vision: true, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configuredAnthropic.json()).includes(rawAnthropicKey), false);
 

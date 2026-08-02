@@ -87,25 +87,31 @@ type ProviderModelProfile = {
   modelCapabilities?: ManagedProviderModelCapabilities;
 };
 
-const openAiGpt56Capabilities: ManagedProviderModelCapabilities = Object.freeze({
+const toolCapableVisionModelCapabilities: ManagedProviderModelCapabilities = Object.freeze({
   vision: true,
+  tools: true,
+  streaming: true,
+});
+
+const toolCapableTextModelCapabilities: ManagedProviderModelCapabilities = Object.freeze({
+  vision: false,
   tools: true,
   streaming: true,
 });
 
 export const managedProviderModelProfiles = Object.freeze({
   openai: Object.freeze([
-    { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", model: "openai/gpt-5.6-sol", vision: true, modelCapabilities: openAiGpt56Capabilities },
-    { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", model: "openai/gpt-5.6-terra", vision: true, modelCapabilities: openAiGpt56Capabilities },
-    { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", model: "openai/gpt-5.6-luna", vision: true, modelCapabilities: openAiGpt56Capabilities },
+    { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", model: "openai/gpt-5.6-sol", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
+    { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", model: "openai/gpt-5.6-terra", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
+    { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", model: "openai/gpt-5.6-luna", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
   ]),
   anthropic: Object.freeze([
-    { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6", model: "anthropic/claude-sonnet-4-6", vision: true },
-    { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8", model: "anthropic/claude-opus-4-8", vision: true },
+    { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6", model: "anthropic/claude-sonnet-4-6", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
+    { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8", model: "anthropic/claude-opus-4-8", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
   ]),
   glm: Object.freeze([
-    { id: "glm-5", displayName: "Z.ai GLM-5", model: "zai/glm-5", vision: false },
-    { id: "glm-5.2", displayName: "Z.ai GLM-5.2", model: "zai/glm-5.2", vision: false },
+    { id: "glm-5", displayName: "Z.ai GLM-5", model: "zai/glm-5", vision: false, modelCapabilities: toolCapableTextModelCapabilities },
+    { id: "glm-5.2", displayName: "Z.ai GLM-5.2", model: "zai/glm-5.2", vision: false, modelCapabilities: toolCapableTextModelCapabilities },
   ]),
 } satisfies Record<SelectableProviderName, ReadonlyArray<ProviderModelProfile>>) as Readonly<Record<SelectableProviderName, ReadonlyArray<ProviderModelProfile>>>;
 

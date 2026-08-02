@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { OneComputerError } from "@onecomputer/contracts";
-import { LiteLLMProviderAdministration, managedProviderAliasForAccessGroup, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
+import { LiteLLMProviderAdministration, managedProviderAliasForAccessGroup, managedProviderModelOptions, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
 
 const alphaKey = "sk-provider-alpha-never-log-000000000001";
 const betaKey = "sk-provider-beta-never-log-000000000002";
@@ -40,6 +40,17 @@ const modelDocument = (request: GatewayRequest) => request.body as {
   litellm_params: Record<string, unknown>;
   model_info: Record<string, unknown>;
 };
+
+test("all selectable provider models declare their routing capabilities", () => {
+  assert.deepEqual(managedProviderModelOptions("anthropic").map((model) => model.modelCapabilities), [
+    { vision: true, tools: true, streaming: true },
+    { vision: true, tools: true, streaming: true },
+  ]);
+  assert.deepEqual(managedProviderModelOptions("glm").map((model) => model.modelCapabilities), [
+    { vision: false, tools: true, streaming: true },
+    { vision: false, tools: true, streaming: true },
+  ]);
+});
 
 test("managed provider configuration isolates tenants, validates candidates, and rejects stale static routes", async () => {
   const requests: GatewayRequest[] = [];
