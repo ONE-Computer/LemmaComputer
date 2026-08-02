@@ -89,6 +89,7 @@ test("missing, incomplete, delayed, corrected, and price snapshots stay distingu
   assert.deepEqual(report.costCoverage.unpricedUsage, {
     activeEventCount: 2, missingPriceEventCount: 1, partialPriceEventCount: 1, acknowledgedEventCount: 0,
   });
+  assert.deepEqual(report.costCoverage.failedWithoutUsage, { attemptCount: 0 });
   assert.equal(report.costCoverage.status, "multiple_gaps");
   const acknowledged = buildSpendReport(rows, range, 2, undefined, {
     receivedBefore: "2026-07-21T00:00:00.000Z",
@@ -104,6 +105,24 @@ test("missing, incomplete, delayed, corrected, and price snapshots stay distingu
     rateCardId: "rate-1", source: "pinned_catalogue", version: "2026-07",
     sourceHash: "a".repeat(64), effectiveFrom: "2026-07-01T00:00:00.000Z",
   });
+});
+
+test("diagnostic-only failed attempts stay in the ledger but are excluded from financial spend", () => {
+  const report = buildSpendReport([event({
+    eventId: "rejected", admissionId: "rejected-attempt", taskId: "rejected-task",
+    outcome: "failure", priceStatus: "unknown", costStatus: "unpriced",
+    currency: null, providerCost: null, rateCardId: null, rateCardSource: null,
+    rateCardSourceVersion: null, rateCardSourceHash: null, rateCardEffectiveFrom: null,
+    units: [{ unit: "request", quantity: "1", bucketCost: null, diagnostic: true }],
+  })], range);
+
+  assert.equal(report.state, "empty");
+  assert.equal(report.totals.attemptCount, 0);
+  assert.equal(report.tasks.length, 0);
+  assert.deepEqual(report.costCoverage.unpricedUsage, {
+    activeEventCount: 0, missingPriceEventCount: 0, partialPriceEventCount: 0, acknowledgedEventCount: 0,
+  });
+  assert.deepEqual(report.costCoverage.failedWithoutUsage, { attemptCount: 1 });
 });
 
 test("composite task identity prevents reused task IDs from merging and trend compares an equal prior period", () => {

@@ -4,15 +4,10 @@ test("administrator filters spend, drills Team to user to 201 tasks, explains co
   await page.goto("/?view=ai-control-plane&section=spend");
 
   await expect(page.getByRole("heading", { name: "Spend Details" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Cost coverage" })).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "Active unpriced usage" })).toContainText("1 usage record");
-  await expect(page.getByText("Pending usage records", { exact: true })).toBeVisible();
-  await expect(page.getByText("Model attempts without final usage data", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cost coverage" })).toHaveCount(0);
+  await expect(page.getByText("Pending usage records", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Clear historical unpriced usage" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Back to overview" })).toBeVisible();
-  await page.getByRole("button", { name: "Clear historical unpriced usage" }).click();
-  const coverageDialog = page.getByRole("dialog", { name: "Clear historical unpriced usage?" });
-  await expect(coverageDialog).toContainText("does not delete usage, change monetary totals, or retroactively price");
-  await coverageDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("heading", { name: "Teams" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Previous-period trend" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Spend dimensions" })).toBeVisible();
@@ -51,4 +46,17 @@ test("administrator filters spend, drills Team to user to 201 tasks, explains co
   await page.getByRole("button", { name: "Apply dates" }).click();
   await expect(page.getByRole("heading", { name: "No usage recorded" })).toBeVisible();
   await expect(page.getByText(/true empty state/i)).toBeVisible();
+});
+
+test("administrator reviews pricing and provider-reporting diagnostics outside spend", async ({ page }) => {
+  await page.goto("/?view=ai-control-plane&section=data-health");
+
+  await expect(page.getByRole("heading", { name: "Usage data health" })).toBeVisible();
+  await expect(page.getByText("Pricing review", { exact: true })).toBeVisible();
+  await expect(page.getByText("Awaiting usage reports", { exact: true })).toBeVisible();
+  await expect(page.getByText("Failed without usage", { exact: true })).toBeVisible();
+  await expect(page.getByText("Historical pricing baseline", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage pricing" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record historical review" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear historical unpriced usage" })).toHaveCount(0);
 });

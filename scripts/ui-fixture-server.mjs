@@ -648,6 +648,7 @@ const fixtureSpendReport = (tasks = fixtureSpendTasks, empty = false) => ({
       acknowledgedEventCount: 0,
     },
     delayedReporting: { attemptCount: empty ? 0 : 1 },
+    failedWithoutUsage: { attemptCount: 0 },
     latestAcknowledgement: null,
   },
   totals: {

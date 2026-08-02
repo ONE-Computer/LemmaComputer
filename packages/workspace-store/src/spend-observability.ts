@@ -98,6 +98,7 @@ export type CostCoverageSummary = {
     acknowledgedEventCount: number;
   };
   delayedReporting: { attemptCount: number };
+  failedWithoutUsage: { attemptCount: number };
   latestAcknowledgement: CostCoverageAcknowledgement | null;
 };
 export type SafeCostDriver = {
@@ -348,6 +349,17 @@ const include = (group: MutableGroup, row: SpendEventRow) => {
   if (row.priceStatus === "incomplete") group.incomplete += 1;
   if (row.eventType === "correction") group.corrected += 1;
 };
+// A failed provider call with no billable units is still retained in the
+// append-only ledger for investigation, but it is not financial usage. This
+// distinguishes an immediate provider rejection from a genuine pricing gap.
+export const failedWithoutBillableUsage = (row: SpendEventRow) => (
+  row.eventType === "usage"
+  && row.outcome === "failure"
+  && row.providerCost === null
+  && row.providerConfirmedCost === null
+  && row.units.length > 0
+  && row.units.every((unit) => unit.diagnostic)
+);
 const finalized = (group: MutableGroup): GroupTotals => ({
   costs: sortedTotals(group.costs),
   providerConfirmedCosts: sortedTotals(group.providerConfirmedCosts),
@@ -429,6 +441,11 @@ export const buildSpendReport = (
   previousRows?: SpendEventRow[],
   latestAcknowledgement: CostCoverageAcknowledgement | null = null,
 ): SpendReport => {
+  const financialRows = rows.filter((row) => !failedWithoutBillableUsage(row));
+  const financialPreviousRows = previousRows?.filter((row) => !failedWithoutBillableUsage(row));
+  const failedWithoutUsageAttemptCount = new Set(
+    rows.filter(failedWithoutBillableUsage).map((row) => row.admissionId),
+  ).size;
   const all = mutableGroup();
   const teamGroups = new Map<string, MutableGroup>();
   const userGroups = new Map<string, MutableGroup>();
@@ -437,7 +454,7 @@ export const buildSpendReport = (
   const resolvedModelGroups = new Map<string, MutableGroup>();
   const workspaceGroups = new Map<string, MutableGroup>();
   const agentGroups = new Map<string, MutableGroup>();
-  for (const row of rows) {
+  for (const row of financialRows) {
     include(all, row);
     const team = teamGroups.get(row.teamId) ?? mutableGroup();
     include(team, row);
@@ -468,7 +485,7 @@ export const buildSpendReport = (
     agentGroups.set(agentKey, agentGroup);
   }
   const uniqueAdmissions = new Map<string, SpendEventRow>();
-  rows.forEach((row) => uniqueAdmissions.set(row.admissionId, row));
+  financialRows.forEach((row) => uniqueAdmissions.set(row.admissionId, row));
   const allocatedAttemptCount = [...uniqueAdmissions.values()].filter((row) => !isUnallocated(row)).length;
   const unallocatedAttemptCount = uniqueAdmissions.size - allocatedAttemptCount;
   const groupSort = (a: GroupTotals, b: GroupTotals) => {
@@ -526,7 +543,7 @@ export const buildSpendReport = (
   const acknowledgementCutoff = latestAcknowledgement
     ? new Date(latestAcknowledgement.receivedBefore).getTime()
     : null;
-  const unpricedRows = rows.filter((row) => row.priceStatus !== "priced");
+  const unpricedRows = financialRows.filter((row) => row.priceStatus !== "priced");
   const acknowledgedUnpricedRows = acknowledgementCutoff === null
     ? []
     : unpricedRows.filter((row) => new Date(row.receivedAt).getTime() <= acknowledgementCutoff);
@@ -553,6 +570,7 @@ export const buildSpendReport = (
       acknowledgedEventCount: acknowledgedUnpricedRows.length,
     },
     delayedReporting: { attemptCount: delayedAttemptCount },
+    failedWithoutUsage: { attemptCount: failedWithoutUsageAttemptCount },
     latestAcknowledgement,
   };
   const breakdowns = {
@@ -578,9 +596,9 @@ export const buildSpendReport = (
       agentId: group.rows[0]!.agentId,
     })).sort(groupSort),
   };
-  const trend = previousRows === undefined ? null : (() => {
+  const trend = financialPreviousRows === undefined ? null : (() => {
     const previous = mutableGroup();
-    previousRows.forEach((row) => include(previous, row));
+    financialPreviousRows.forEach((row) => include(previous, row));
     const previousTotals = finalized(previous);
     const currentByCurrency = new Map(totals.costs.map((item) => [item.currency, decimal(item.amount)]));
     const previousByCurrency = new Map(previousTotals.costs.map((item) => [item.currency, decimal(item.amount)]));
@@ -613,7 +631,7 @@ export const buildSpendReport = (
       taskId: range.taskId ?? null,
       turnId: range.turnId ?? null,
     },
-    state: rows.length === 0 && delayedAttemptCount === 0
+    state: financialRows.length === 0 && delayedAttemptCount === 0
       ? "empty"
       : totals.unknownCostEventCount > 0 || totals.incompleteCostEventCount > 0 || delayedAttemptCount > 0
         ? "partial"
