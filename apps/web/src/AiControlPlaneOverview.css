@@ -460,19 +460,10 @@
   letter-spacing: -.03em;
 }
 
-.ai-emissions-copy > span,
-.ai-emissions-coverage {
+.ai-emissions-copy > span {
   color: var(--overview-muted);
   font-size: 10px;
   line-height: 1.45;
-}
-
-.ai-emissions-coverage {
-  margin-left: auto;
-  padding: 6px 9px;
-  border-radius: 999px;
-  background: #f0f2f4;
-  white-space: nowrap;
 }
 
 .ai-emissions-evidence {
@@ -541,10 +532,6 @@
     flex-wrap: wrap;
   }
 
-  .ai-emissions-coverage {
-    margin-left: auto;
-  }
-
   .ai-emissions-evidence {
     width: 100%;
     max-width: none;
@@ -608,11 +595,6 @@
   .ai-emissions-copy {
     min-width: 0;
     flex: 1;
-  }
-
-  .ai-emissions-coverage {
-    width: 100%;
-    margin: 8px 0 0 50px;
   }
 
   .ai-overview-footer {

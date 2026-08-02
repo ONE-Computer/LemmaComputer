@@ -10,8 +10,9 @@ test("administrator enters the AI control plane from the account menu and naviga
   await expect(page).toHaveURL(/\?view=ai-control-plane$/);
   await expect(page.getByRole("heading", { name: "AI control plane", exact: true })).toBeVisible();
   const tabs = page.getByRole("navigation", { name: "AI control plane" });
-  await expect(tabs.getByRole("button")).toHaveCount(5);
+  await expect(tabs.getByRole("button")).toHaveCount(6);
   await expect(tabs.getByRole("button", { name: "Audit log" })).toHaveCount(0);
+  await expect(tabs.getByRole("button", { name: "Data health" })).toBeVisible();
   await expect(tabs.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("Route readiness", { exact: true })).toHaveCount(0);
   const explainability = page.getByRole("region", { name: "Explainability" });
@@ -22,6 +23,7 @@ test("administrator enters the AI control plane from the account menu and naviga
   await expect(explainability.getByText("Routing impact")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "0.92 gCO₂e" })).toBeVisible();
   await expect(page.getByText(/19% token coverage/)).toBeVisible();
+  await expect(page.getByText(/evidence coverage/)).toHaveCount(0);
   await expect(page.getByRole("link", { name: "US grid factor" })).toHaveAttribute("href", "https://www.epa.gov/egrid/summary-data");
   const emissionsInfo = page.getByRole("button", { name: "How estimated AI emissions are calculated" });
   await emissionsInfo.hover();

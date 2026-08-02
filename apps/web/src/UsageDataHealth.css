@@ -1,0 +1,13 @@
+.usage-data-health { display: grid; gap: 18px; }
+.usage-data-health .page-heading { margin: 0; }
+.usage-data-health-loading, .usage-data-health-good { margin: 0; padding: 18px; border: 1px solid #dededb; border-radius: 8px; color: #68727d; background: #fff; }
+.usage-data-health-good { display: grid; gap: 4px; border-color: #b8d4c1; color: #285c39; background: #f4fbf6; }
+.usage-data-health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.usage-data-health-grid article { display: grid; align-content: start; gap: 8px; min-height: 174px; padding: 18px; border: 1px solid #dededb; border-radius: 8px; background: #fff; }
+.usage-data-health-grid span { color: #68727d; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.usage-data-health-grid strong { color: #172334; font-size: 28px; letter-spacing: -.025em; }
+.usage-data-health-grid p { margin: 0; color: #68727d; font-size: 13px; line-height: 1.45; }
+.usage-data-health-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.usage-data-health-review-copy { display: grid; gap: 10px; color: #4f5965; line-height: 1.5; }
+.usage-data-health-review-copy p { margin: 0; }
+@media (max-width: 620px) { .usage-data-health-grid { grid-template-columns: 1fr; } }

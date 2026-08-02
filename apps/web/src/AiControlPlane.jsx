@@ -6,6 +6,7 @@ export const aiControlPlaneTabs = [
   { id: "model-routes", label: "Model routes" },
   { id: "pricing", label: "Pricing" },
   { id: "teams-budgets", label: "Teams & budgets" },
+  { id: "data-health", label: "Data health" },
 ];
 
 export function AiControlPlane({ activeView, onViewChange, children }) {

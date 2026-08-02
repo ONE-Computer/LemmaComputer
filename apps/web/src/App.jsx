@@ -32,6 +32,7 @@ import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
 import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
 import { SpendDashboard } from "./SpendDashboard.jsx";
+import { UsageDataHealth } from "./UsageDataHealth.jsx";
 import { RoutingAdmin } from "./RoutingAdmin.jsx";
 import { AiControlPlane, aiControlPlaneTabs } from "./AiControlPlane.jsx";
 import { AiControlPlaneOverview } from "./AiControlPlaneOverview.jsx";
@@ -4661,6 +4662,7 @@ export function App() {
               onOpenPricing={() => selectAiControlPlaneView("pricing")}
             />}
             {aiControlPlaneView === "spend" && <SpendDashboard onBack={() => selectAiControlPlaneView("overview")} />}
+            {aiControlPlaneView === "data-health" && <UsageDataHealth onOpenPricing={() => selectAiControlPlaneView("pricing")} />}
             {aiControlPlaneView === "models-providers" && <ProviderSettingsScreen
               providers={providerSettings}
               loading={providerSettingsLoading}

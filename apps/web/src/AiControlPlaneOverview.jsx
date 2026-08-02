@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
-import { Globe20Regular } from "@fluentui/react-icons/svg/globe";
+import { LeafThree20Regular } from "@fluentui/react-icons/svg/leaf-three";
 import { Info20Regular } from "@fluentui/react-icons/svg/info";
 import { adminApi } from "./workspace-api.js";
 import { AI_EMISSIONS_METHOD, estimateAiTokenEmissions } from "./ai-emissions.js";
@@ -15,7 +15,6 @@ const sumCosts = (costs = [], currency) => costs
   .filter((item) => !currency || item.currency === currency)
   .reduce((sum, item) => sum + number(item.amount), 0);
 const amountFor = (costs = [], currency) => costs.find((item) => item.currency === currency)?.amount;
-const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 0 });
 
 const money = formatOverviewMoney;
@@ -203,14 +202,6 @@ export function AiControlPlaneOverview({
   const providerSpend = currency ? sumCosts(report?.totals?.costs, currency) : null;
   const spent = providerSpend;
   const forecast = estimates?.forecastAmount ?? forecastFor(spent, report);
-  const activeUnpricedCount = report?.costCoverage?.unpricedUsage?.activeEventCount
-    ?? number(report?.totals?.unknownCostEventCount) + number(report?.totals?.incompleteCostEventCount);
-  const missingPriceCount = report?.costCoverage?.unpricedUsage?.missingPriceEventCount
-    ?? number(report?.totals?.unknownCostEventCount);
-  const partialPriceCount = report?.costCoverage?.unpricedUsage?.partialPriceEventCount
-    ?? number(report?.totals?.incompleteCostEventCount);
-  const delayedAttemptCount = report?.costCoverage?.delayedReporting?.attemptCount
-    ?? number(report?.totals?.delayedAttemptCount);
   const budgetRatio = spent !== null && budget.limit ? Math.max(0, spent / budget.limit) : null;
   const series = estimates?.spendSeries ?? (data?.series ?? []).map((item) => (
     currency ? sumCosts(item.costs, currency) : 0
@@ -268,16 +259,6 @@ export function AiControlPlaneOverview({
                 <dt>Forecast</dt>
                 <dd>{money(forecast, currency)}</dd>
                 <small>Straight-line estimate</small>
-              </div>
-              <div>
-                <dt>Unpriced usage</dt>
-                <dd>{loading ? "—" : compactNumber.format(activeUnpricedCount)}</dd>
-                <small>{missingPriceCount} missing price · {partialPriceCount} partial price</small>
-              </div>
-              <div>
-                <dt>Pending usage records</dt>
-                <dd>{loading ? "—" : compactNumber.format(delayedAttemptCount)}</dd>
-                <small>Attempts without final usage data</small>
               </div>
             </dl>
           </div>
@@ -350,7 +331,7 @@ export function AiControlPlaneOverview({
       </div>
 
       <section className="ai-emissions" aria-labelledby="ai-emissions-heading">
-        <span className="ai-emissions-icon"><Globe20Regular aria-hidden="true" /></span>
+        <span className="ai-emissions-icon"><LeafThree20Regular aria-hidden="true" /></span>
         <div className="ai-emissions-copy">
           <div className="ai-emissions-label">
             <p>Estimated AI-related emissions</p>
@@ -372,7 +353,6 @@ export function AiControlPlaneOverview({
           <h3 id="ai-emissions-heading">{formatEmissions(emissions)}</h3>
           <span>{emissions ? `${emissions.coveragePercent ?? 0}% token coverage · ${emissionsComparison(emissions)}` : "Choose an estimated serving grid on at least one configured provider before reporting a number."}</span>
         </div>
-        <span className="ai-emissions-coverage">{emissions ? `${emissions.coveragePercent ?? 0}% evidence coverage` : "No assured emissions source"}</span>
         <div className="ai-emissions-evidence">
           <strong>Operational estimate · Scope 3 Category 1 candidate</strong>
           <span>{emissions?.methodologyVersion ? `${emissions.energyKwhPerMillionTextTokens} kWh / 1M text tokens · ${emissions.methodologyVersion}` : "Purchased cloud/AI services; confirm the reporting boundary with your sustainability policy."}</span>
@@ -380,10 +360,7 @@ export function AiControlPlaneOverview({
         </div>
       </section>
 
-      <footer className="ai-overview-footer">
-        <span>Costs exclude unpriced usage; delayed reporting is tracked separately.</span>
-        <InlineLink onClick={onOpenPricing}>Manage pricing</InlineLink>
-      </footer>
+      <footer className="ai-overview-footer"><InlineLink onClick={onOpenPricing}>Manage pricing</InlineLink></footer>
     </section>
   );
 }
