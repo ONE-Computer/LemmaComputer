@@ -152,17 +152,15 @@
 
 .ai-budget-numbers dl {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1px;
   margin: 0;
-  background: var(--overview-line);
+  padding-left: 18px;
+  border-left: 1px solid var(--overview-line);
 }
 
 .ai-budget-numbers dl > div {
   display: grid;
   gap: 4px;
-  padding: 2px 18px;
-  background: #fff;
+  padding: 2px 0;
 }
 
 .ai-budget-numbers dt {
@@ -336,20 +334,6 @@
   white-space: nowrap;
 }
 
-.ai-cost-explanation {
-  display: grid;
-  grid-template-rows: auto 1fr;
-}
-
-.ai-explainability-placeholder {
-  display: grid;
-  min-height: 248px;
-  place-items: center;
-  color: var(--overview-muted);
-  font-size: 14px;
-  font-weight: 650;
-}
-
 .ai-overview-empty {
   margin: 0;
   padding: 28px 20px;
@@ -358,7 +342,10 @@
 }
 
 .ai-emissions {
-  min-height: 108px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-content: start;
+  align-items: start;
   padding: 18px 20px;
 }
 
@@ -468,10 +455,11 @@
 
 .ai-emissions-evidence {
   display: grid;
-  max-width: 315px;
   gap: 4px;
-  padding-left: 20px;
-  border-left: 1px solid var(--overview-line);
+  grid-column: 2;
+  padding-top: 11px;
+  border-top: 1px solid var(--overview-line);
+  border-left: 0;
 }
 
 .ai-emissions-evidence strong {
@@ -527,18 +515,6 @@
     grid-template-columns: 1fr;
   }
 
-  .ai-emissions {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .ai-emissions-evidence {
-    width: 100%;
-    max-width: none;
-    padding: 14px 0 0;
-    border-top: 1px solid var(--overview-line);
-    border-left: 0;
-  }
 }
 
 @media (max-width: 680px) {

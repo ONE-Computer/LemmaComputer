@@ -322,43 +322,36 @@ export function AiControlPlaneOverview({
           </div>
         </section>
 
-        <section className="ai-overview-section ai-cost-explanation" aria-labelledby="ai-cost-explanation-heading">
-          <div className="ai-panel-heading">
-            <h3 id="ai-cost-explanation-heading">Explainability</h3>
+        <section className="ai-overview-section ai-emissions" aria-label="Estimated AI-related emissions">
+          <span className="ai-emissions-icon"><LeafThree20Regular aria-hidden="true" /></span>
+          <div className="ai-emissions-copy">
+            <div className="ai-emissions-label">
+              <p>Estimated AI-related emissions</p>
+              <span className="ai-emissions-tooltip-wrap">
+                <button type="button" aria-label="How estimated AI emissions are calculated" aria-describedby="ai-emissions-tooltip"><Info20Regular aria-hidden="true" /></button>
+                <span className="ai-emissions-tooltip" id="ai-emissions-tooltip" role="tooltip">
+                  <strong>How this estimate is calculated</strong>
+                  <span>Covered text tokens ÷ 1,000,000 × {AI_EMISSIONS_METHOD.energyKwhPerMillionTextTokens} kWh × the selected grid factor. Regional results are added together.</span>
+                  {emissions?.regionSources?.length ? emissions.regionSources.map((source) => (
+                    <span className="ai-emissions-tooltip-region" key={source.region}>
+                      <b>{emissionsRegionName(source.label)}</b>
+                      {number(source.tokens).toLocaleString("en")} tokens × {AI_EMISSIONS_METHOD.regions[source.region].kgCo2ePerKwh} kg CO₂e/kWh
+                    </span>
+                  )) : <span className="ai-emissions-tooltip-region">Choose an estimated serving grid on a configured provider to apply a regional factor.</span>}
+                  <small>Includes input, output, cache-read, cache-write, and reasoning text tokens. This is an operational estimate, not an assured provider location.</small>
+                </span>
+              </span>
+            </div>
+            <h3 id="ai-emissions-heading">{formatEmissions(emissions)}</h3>
+            <span>{emissions ? `${emissions.coveragePercent ?? 0}% token coverage · ${emissionsComparison(emissions)}` : "Choose an estimated serving grid on at least one configured provider before reporting a number."}</span>
           </div>
-          <div className="ai-explainability-placeholder">Coming Soon</div>
+          <div className="ai-emissions-evidence">
+            <strong>Operational estimate · Scope 3 Category 1 candidate</strong>
+            <span>{emissions?.methodologyVersion ? `${emissions.energyKwhPerMillionTextTokens} kWh / 1M text tokens · ${emissions.methodologyVersion}` : "Purchased cloud/AI services; confirm the reporting boundary with your sustainability policy."}</span>
+            {emissions?.methodologyUrl ? <div className="ai-emissions-links"><a href={emissions.methodologyUrl} target="_blank" rel="noreferrer">Energy method</a>{emissions.regionSources?.map((source) => <a key={source.region} href={source.sourceUrl} target="_blank" rel="noreferrer">{source.region.toUpperCase()} grid factor</a>)}</div> : <button type="button" disabled>Methodology required</button>}
+          </div>
         </section>
       </div>
-
-      <section className="ai-emissions" aria-labelledby="ai-emissions-heading">
-        <span className="ai-emissions-icon"><LeafThree20Regular aria-hidden="true" /></span>
-        <div className="ai-emissions-copy">
-          <div className="ai-emissions-label">
-            <p>Estimated AI-related emissions</p>
-            <span className="ai-emissions-tooltip-wrap">
-              <button type="button" aria-label="How estimated AI emissions are calculated" aria-describedby="ai-emissions-tooltip"><Info20Regular aria-hidden="true" /></button>
-              <span className="ai-emissions-tooltip" id="ai-emissions-tooltip" role="tooltip">
-                <strong>How this estimate is calculated</strong>
-                <span>Covered text tokens ÷ 1,000,000 × {AI_EMISSIONS_METHOD.energyKwhPerMillionTextTokens} kWh × the selected grid factor. Regional results are added together.</span>
-                {emissions?.regionSources?.length ? emissions.regionSources.map((source) => (
-                  <span className="ai-emissions-tooltip-region" key={source.region}>
-                    <b>{emissionsRegionName(source.label)}</b>
-                    {number(source.tokens).toLocaleString("en")} tokens × {AI_EMISSIONS_METHOD.regions[source.region].kgCo2ePerKwh} kg CO₂e/kWh
-                  </span>
-                )) : <span className="ai-emissions-tooltip-region">Choose an estimated serving grid on a configured provider to apply a regional factor.</span>}
-                <small>Includes input, output, cache-read, cache-write, and reasoning text tokens. This is an operational estimate, not an assured provider location.</small>
-              </span>
-            </span>
-          </div>
-          <h3 id="ai-emissions-heading">{formatEmissions(emissions)}</h3>
-          <span>{emissions ? `${emissions.coveragePercent ?? 0}% token coverage · ${emissionsComparison(emissions)}` : "Choose an estimated serving grid on at least one configured provider before reporting a number."}</span>
-        </div>
-        <div className="ai-emissions-evidence">
-          <strong>Operational estimate · Scope 3 Category 1 candidate</strong>
-          <span>{emissions?.methodologyVersion ? `${emissions.energyKwhPerMillionTextTokens} kWh / 1M text tokens · ${emissions.methodologyVersion}` : "Purchased cloud/AI services; confirm the reporting boundary with your sustainability policy."}</span>
-          {emissions?.methodologyUrl ? <div className="ai-emissions-links"><a href={emissions.methodologyUrl} target="_blank" rel="noreferrer">Energy method</a>{emissions.regionSources?.map((source) => <a key={source.region} href={source.sourceUrl} target="_blank" rel="noreferrer">{source.region.toUpperCase()} grid factor</a>)}</div> : <button type="button" disabled>Methodology required</button>}
-        </div>
-      </section>
 
       <footer className="ai-overview-footer"><InlineLink onClick={onOpenPricing}>Manage pricing</InlineLink></footer>
     </section>
