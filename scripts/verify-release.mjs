@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { releaseAttestationSchemaVersion, requiredReleaseGates } from "./release-gates.mjs";
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, { encoding: "utf8", stdio: "inherit", ...options });
@@ -18,18 +19,40 @@ const branch = capture("git", ["branch", "--show-current"]);
 if (branch !== "main" && !branch.startsWith("release/")) {
   throw new Error("Release verification must run on main or a release/* branch");
 }
+const env = await readFile(".env", "utf8");
+const envValue = (name) => env.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
+const composeProject = envValue("ONECOMPUTER_COMPOSE_PROJECT_NAME");
+const workspaceImage = envValue("ONECOMPUTER_WORKSPACE_IMAGE");
+const workspaceNetworkPrefix = envValue("KASM_LOCAL_NETWORK_PREFIX");
+if (
+  !composeProject
+  || composeProject === "onecomputer"
+  || !workspaceImage
+  || workspaceImage === "onecomputer/workspace:dev"
+  || !workspaceNetworkPrefix
+  || workspaceNetworkPrefix === "onecomputer-workspace"
+) {
+  throw new Error("Release verification requires an isolated worktree initialized with npm run worktree:init");
+}
 run("npm", ["run", "qualify:providers"]);
 run("npm", ["run", "qualify:oauth"]);
 run(process.execPath, ["scripts/verify-quick.mjs"]);
 run(process.execPath, ["scripts/verify-db.mjs"]);
 let composeAttempted = false;
 try {
+  run("docker", ["compose", "--profile", "build", "build", "workspace-image"]);
+  run("docker", ["image", "inspect", workspaceImage]);
   composeAttempted = true;
   run("docker", ["compose", "up", "-d", "--build", "--wait", "--wait-timeout", "300"]);
-  const env = await readFile(".env", "utf8");
   const webUrl = env.match(/^ONECOMPUTER_PUBLIC_WEB_URL=(.+)$/m)?.[1]?.trim();
   if (!webUrl) throw new Error("ONECOMPUTER_PUBLIC_WEB_URL is missing");
   run("curl", ["--fail", "--silent", "--show-error", `${webUrl}/__onecomputer/healthz`]);
+  const qualifier = `${process.cwd()}/scripts/qualify-workspace-startup.mts`;
+  run("docker", [
+    "compose", "run", "--rm", "--no-deps",
+    "-v", `${qualifier}:/app/qualify-workspace-startup.mts:ro`,
+    "control-api", "./node_modules/.bin/tsx", "/app/qualify-workspace-startup.mts",
+  ]);
 } finally {
   if (composeAttempted) run(process.execPath, ["scripts/compose-down.mjs", "--volumes"]);
 }
@@ -43,11 +66,11 @@ for (const file of migrationFiles) {
   migrations.push({ file, sha256: createHash("sha256").update(contents).digest("hex") });
 }
 const attestation = {
-  schemaVersion: 2,
+  schemaVersion: releaseAttestationSchemaVersion,
   sha,
   branch,
   verifiedAt: new Date().toISOString(),
-  gates: ["pinned-litellm-provider-settings-qualification", "pinned-litellm-oauth-renewal-qualification", "verify:quick", "verify:db", "isolated-compose-smoke"],
+  gates: requiredReleaseGates,
   migrations,
 };
 await mkdir(".artifacts/release-verification", { recursive: true });

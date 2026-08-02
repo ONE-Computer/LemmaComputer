@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { releaseAttestationSchemaVersion, requiredReleaseGates } from "./release-gates.mjs";
 
 const push = process.argv.includes("--push");
 const requestedTag = process.argv.find((argument) => argument.startsWith("--tag="))?.slice(6);
@@ -26,7 +27,13 @@ if (branch !== "main" && !branch.startsWith("release/")) {
 }
 
 const attestation = JSON.parse(await readFile(`.artifacts/release-verification/${sha}.json`, "utf8"));
-if (attestation.schemaVersion !== 2 || attestation.sha !== sha || attestation.branch !== branch) {
+if (
+  attestation.schemaVersion !== releaseAttestationSchemaVersion
+  || attestation.sha !== sha
+  || attestation.branch !== branch
+  || !Array.isArray(attestation.gates)
+  || requiredReleaseGates.some((gate) => !attestation.gates.includes(gate))
+) {
   throw new Error("Release verification attestation does not match the current commit and branch");
 }
 const ageMs = Date.now() - Date.parse(attestation.verifiedAt);
