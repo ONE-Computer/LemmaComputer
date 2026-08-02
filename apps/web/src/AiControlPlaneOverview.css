@@ -365,12 +365,7 @@
   margin: 0;
 }
 
-.ai-emissions-tooltip-wrap {
-  display: grid;
-  justify-items: start;
-}
-
-.ai-emissions-tooltip-wrap > button {
+.ai-emissions-info-button {
   display: inline-grid;
   width: 20px;
   height: 20px;
@@ -380,58 +375,44 @@
   border-radius: 50%;
   color: #506579;
   background: transparent;
-  cursor: help;
+  cursor: pointer;
 }
 
-.ai-emissions-tooltip-wrap > button:hover,
-.ai-emissions-tooltip-wrap > button:focus-visible {
+.ai-emissions-info-button:hover,
+.ai-emissions-info-button:focus-visible {
   color: #174ea6;
   background: #eaf2fc;
   outline: 2px solid transparent;
 }
 
-.ai-emissions-tooltip-wrap > button svg {
+.ai-emissions-info-button svg {
   width: 15px;
   height: 15px;
 }
 
-.ai-emissions-tooltip {
-  display: none;
-  width: min(370px, 100%);
-  gap: 7px;
-  margin-top: 7px;
-  padding: 13px 14px;
-  border: 1px solid #cad5e1;
-  border-radius: 9px;
+.modal-card.ai-emissions-method-modal {
+  width: min(100%, 600px);
+}
+
+.ai-emissions-method-details {
+  display: grid;
+  gap: 12px;
   color: #25384b;
-  background: #fff;
-  box-shadow: 0 12px 30px rgb(30 48 67 / 16%);
-  font-size: 11px;
-  line-height: 1.45;
-  pointer-events: none;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-.ai-emissions-tooltip-wrap:hover .ai-emissions-tooltip,
-.ai-emissions-tooltip-wrap:focus-within .ai-emissions-tooltip {
+.ai-emissions-method-region {
   display: grid;
-}
-
-.ai-emissions-tooltip > strong {
-  color: #172334;
-  font-size: 12px;
-}
-
-.ai-emissions-tooltip-region {
-  display: grid;
-  gap: 1px;
-  padding: 7px 9px;
+  gap: 3px;
+  padding: 12px 14px;
   border-radius: 6px;
   background: #f5f8fb;
 }
 
-.ai-emissions-tooltip small {
+.ai-emissions-method-details p {
+  margin: 0;
   color: var(--overview-muted);
-  font-size: 10px;
 }
 
 .ai-emissions-copy h3 {

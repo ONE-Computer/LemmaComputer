@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
 import { LeafThree20Regular } from "@fluentui/react-icons/svg/leaf-three";
 import { Info20Regular } from "@fluentui/react-icons/svg/info";
+import { ModalDialog } from "./ui.jsx";
 import { adminApi } from "./workspace-api.js";
 import { AI_EMISSIONS_METHOD, estimateAiTokenEmissions } from "./ai-emissions.js";
 import { formatOverviewMoney } from "./format-money.js";
@@ -177,6 +178,7 @@ export function AiControlPlaneOverview({
   const [loadedData, setLoadedData] = useState(null);
   const [loading, setLoading] = useState(!suppliedData);
   const [error, setError] = useState("");
+  const [emissionsDetailsOpen, setEmissionsDetailsOpen] = useState(false);
 
   useEffect(() => {
     if (suppliedData) {
@@ -325,22 +327,9 @@ export function AiControlPlaneOverview({
         <section className="ai-overview-section ai-emissions" aria-label="Estimated AI-related emissions">
           <span className="ai-emissions-icon"><LeafThree20Regular aria-hidden="true" /></span>
           <div className="ai-emissions-copy">
-            <div className="ai-emissions-tooltip-wrap">
-              <div className="ai-emissions-label">
-                <p>Estimated AI-related emissions</p>
-                <button type="button" aria-label="How estimated AI emissions are calculated" aria-describedby="ai-emissions-tooltip"><Info20Regular aria-hidden="true" /></button>
-              </div>
-              <span className="ai-emissions-tooltip" id="ai-emissions-tooltip" role="tooltip">
-                <strong>How this estimate is calculated</strong>
-                <span>Covered text tokens ÷ 1,000,000 × {AI_EMISSIONS_METHOD.energyKwhPerMillionTextTokens} kWh × the selected grid factor. Regional results are added together.</span>
-                {emissions?.regionSources?.length ? emissions.regionSources.map((source) => (
-                  <span className="ai-emissions-tooltip-region" key={source.region}>
-                    <b>{emissionsRegionName(source.label)}</b>
-                    {number(source.tokens).toLocaleString("en")} tokens × {AI_EMISSIONS_METHOD.regions[source.region].kgCo2ePerKwh} kg CO₂e/kWh
-                  </span>
-                )) : <span className="ai-emissions-tooltip-region">Choose an estimated serving grid on a configured provider to apply a regional factor.</span>}
-                <small>Includes input, output, cache-read, cache-write, and reasoning text tokens. This is an operational estimate, not an assured provider location.</small>
-              </span>
+            <div className="ai-emissions-label">
+              <p>Estimated AI-related emissions</p>
+              <button className="ai-emissions-info-button" type="button" aria-label="Open AI emissions calculation details" aria-haspopup="dialog" aria-expanded={emissionsDetailsOpen} onClick={() => setEmissionsDetailsOpen(true)}><Info20Regular aria-hidden="true" /></button>
             </div>
             <h3 id="ai-emissions-heading">{formatEmissions(emissions)}</h3>
             <span>{emissions ? `${emissions.coveragePercent ?? 0}% token coverage · ${emissionsComparison(emissions)}` : "Choose an estimated serving grid on at least one configured provider before reporting a number."}</span>
@@ -354,6 +343,25 @@ export function AiControlPlaneOverview({
       </div>
 
       <footer className="ai-overview-footer"><InlineLink onClick={onOpenPricing}>Manage pricing</InlineLink></footer>
+      {emissionsDetailsOpen && <ModalDialog
+        className="ai-emissions-method-modal"
+        title="How this estimate is calculated"
+        description={`Covered text tokens ÷ 1,000,000 × ${AI_EMISSIONS_METHOD.energyKwhPerMillionTextTokens} kWh × the selected grid factor. Regional results are added together.`}
+        eyebrow="Estimated AI-related emissions"
+        labelledBy="ai-emissions-method-title"
+        onClose={() => setEmissionsDetailsOpen(false)}
+      >
+        <div className="ai-emissions-method-details">
+          {emissions?.regionSources?.length ? emissions.regionSources.map((source) => (
+            <div className="ai-emissions-method-region" key={source.region}>
+              <strong>{emissionsRegionName(source.label)}</strong>
+              <span>{number(source.tokens).toLocaleString("en")} tokens × {AI_EMISSIONS_METHOD.regions[source.region].kgCo2ePerKwh} kg CO₂e/kWh</span>
+            </div>
+          )) : <div className="ai-emissions-method-region">Choose an estimated serving grid on a configured provider to apply a regional factor.</div>}
+          <p>Includes input, output, cache-read, cache-write, and reasoning text tokens. This is an operational estimate, not an assured provider location.</p>
+        </div>
+        <div className="modal-actions"><button className="primary-button" type="button" onClick={() => setEmissionsDetailsOpen(false)}>Close</button></div>
+      </ModalDialog>}
     </section>
   );
 }
