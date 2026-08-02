@@ -74,4 +74,19 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await expect(page.getByRole("combobox", { name: "Choose model mode" })).toBeDisabled();
   await expect(page.getByText(/approved destinations/)).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Choose model mode" })).toBeEnabled();
+  await expect(page.getByRole("combobox", { name: "Choose model mode" })).toHaveText("Pro · highest capability");
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: /Codex CLI · Product · Pro/ })).toBeVisible();
+  await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
+  await expect(page.getByRole("combobox", { name: "Choose model mode" })).toHaveText("Pro · highest capability");
+
+  await composer.fill("Continue with the same model mode.");
+  const sentAgain = page.waitForRequest((nextRequest) => (
+    nextRequest.method() === "POST"
+    && nextRequest.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/codex-cli/`)
+    && nextRequest.url().endsWith("/messages")
+  ));
+  await page.getByRole("button", { name: "Send message" }).click();
+  expect((await sentAgain).postDataJSON().requestedServiceClass).toBe("pro");
 });

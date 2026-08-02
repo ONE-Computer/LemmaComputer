@@ -103,6 +103,7 @@ const chatServiceClassOptions = [
   { value: "pro", label: "Pro · highest capability" },
 ];
 const chatServiceClassLabel = Object.fromEntries(chatServiceClassOptions.map((item) => [item.value, item.label.split(" · ")[0]]));
+const chatServiceClassValues = new Set(chatServiceClassOptions.map((item) => item.value));
 const chatAttachmentTypes = new Set([
   "image/png",
   "image/jpeg",
@@ -1274,6 +1275,9 @@ const workspaceName = (workspace) => workspace?.grantId === "personal"
 
 const workspacePreferenceKey = "onecomputer.active-workspace-id";
 const chatAgentPreferenceKey = (workspaceId) => `onecomputer.active-chat-agent:${workspaceId}`;
+const chatServiceClassPreferenceKey = (workspaceId, agentId, sessionId) => (
+  `onecomputer.chat-service-class:${workspaceId}:${agentId}:${sessionId}`
+);
 
 const readPreference = (key) => {
   try {
@@ -1290,6 +1294,12 @@ const writePreference = (key, value) => {
   } catch {
     // A blocked storage area must not prevent the workspace from being used.
   }
+};
+
+const readChatServiceClassPreference = (workspaceId, agentId, sessionId) => {
+  if (!workspaceId || !agentId || !sessionId) return "auto";
+  const value = readPreference(chatServiceClassPreferenceKey(workspaceId, agentId, sessionId));
+  return chatServiceClassValues.has(value) ? value : "auto";
 };
 
 const workspaceConfigurationStatus = (state) => ({
@@ -2232,6 +2242,7 @@ function ChatConversation({
   activeSessionId,
   onSessionsChange,
   onSessionChange,
+  onSessionCreated,
   onRefreshSessions,
   companionComposer = false,
   composerContext,
@@ -2460,6 +2471,7 @@ function ChatConversation({
           { ...created, title: created.title ?? title },
           ...current.filter((item) => item.id !== created.id),
         ]);
+        onSessionCreated?.(sessionId);
         onSessionChange(sessionId);
       } catch (requestError) {
         setHistoryError(requestError.message);
@@ -2803,6 +2815,14 @@ export function ChatScreen({
   const [contextBusy, setContextBusy] = useState(false);
   const handledHistoryLoadRequest = useRef(historyLoadRequest);
 
+  useEffect(() => {
+    setRequestedServiceClass(readChatServiceClassPreference(
+      workspace?.id,
+      activeAgentId,
+      activeSessionId,
+    ));
+  }, [workspace?.id, activeAgentId, activeSessionId]);
+
   const publishHistoryMetadata = (nextCursor = sessionNextCursor, loading = sessionLoadingMore) => {
     onHistoryMetadataChange?.({ hasMore: Boolean(nextCursor), loading });
   };
@@ -2925,6 +2945,22 @@ export function ChatScreen({
     setActiveAgentId(catalogId);
     onAgentChange?.(workspace?.id, catalogId);
   };
+  const selectRequestedServiceClass = (serviceClass) => {
+    setRequestedServiceClass(serviceClass);
+    if (workspace?.id && activeAgentId && activeSessionId) {
+      writePreference(
+        chatServiceClassPreferenceKey(workspace.id, activeAgentId, activeSessionId),
+        serviceClass,
+      );
+    }
+  };
+  const persistSessionServiceClass = (sessionId) => {
+    if (!workspace?.id || !activeAgentId || !sessionId) return;
+    writePreference(
+      chatServiceClassPreferenceKey(workspace.id, activeAgentId, sessionId),
+      requestedServiceClass,
+    );
+  };
   const workspaceOptions = workspaces?.length ? workspaces : workspace ? [workspace] : [];
   const hasContextControls = workspaceOptions.length > 0 || agents.length > 0;
   const contextControls = hasContextControls ? (
@@ -2953,7 +2989,7 @@ export function ChatScreen({
         <span className="chat-agent-selector-label">Model</span>
         <SelectMenu
           value={requestedServiceClass}
-          onValueChange={setRequestedServiceClass}
+          onValueChange={selectRequestedServiceClass}
           disabled={contextBusy}
           ariaLabel="Choose model mode"
           options={chatServiceClassOptions}
@@ -3023,6 +3059,7 @@ export function ChatScreen({
         activeSessionId={activeSessionId}
         onSessionsChange={onSessionsChange}
         onSessionChange={onSessionChange}
+        onSessionCreated={persistSessionServiceClass}
         onRefreshSessions={() => loadSessionPage()}
         companionComposer={companionComposer}
         composerContext={companionComposer && contextControls ? <div className="companion-chat-composer-context-fields">{contextControls}</div> : null}
