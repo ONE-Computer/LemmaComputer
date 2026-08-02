@@ -13,7 +13,7 @@ const localEnvironment = () => {
   try {
     const contents = readFileSync(".env", "utf8");
     const value = (key) => contents.match(new RegExp(`^${key}=(.+)$`, "m"))?.[1]?.trim();
-    return { projectName: value("ONECOMPUTER_COMPOSE_PROJECT_NAME"), networkPrefix: value("KASM_LOCAL_NETWORK_PREFIX") };
+    return { projectName: value("ONECOMPUTER_COMPOSE_PROJECT_NAME"), networkPrefix: value("ONECOMPUTER_KASM_LOCAL_NETWORK_PREFIX") };
   } catch {
     return {};
   }

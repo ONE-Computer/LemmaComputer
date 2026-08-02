@@ -1,7 +1,7 @@
-name: ${ONECOMPUTER_COMPOSE_PROJECT_NAME:-onecomputer}
+name: ${ONECOMPUTER_COMPOSE_PROJECT_NAME:?set ONECOMPUTER_COMPOSE_PROJECT_NAME in .env}
 
 x-control-runtime: &control-runtime
-  image: onecomputer/control-runtime:${ONECOMPUTER_IMAGE_TAG:-dev}
+  image: onecomputer/control-runtime:${ONECOMPUTER_IMAGE_TAG:?set ONECOMPUTER_IMAGE_TAG in .env}
   build:
     context: .
     dockerfile: docker/Dockerfile.node
@@ -20,10 +20,9 @@ x-hardened: &hardened
 services:
   postgres:
     image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
-    environment:
-      POSTGRES_DB: onecomputer
-      POSTGRES_USER: onecomputer
-      POSTGRES_PASSWORD: ${ONECOMPUTER_POSTGRES_PASSWORD:?set ONECOMPUTER_POSTGRES_PASSWORD}
+    env_file:
+      - path: .runtime-env/postgres.env
+        format: raw
     networks:
       - control-private
     volumes:
@@ -39,10 +38,9 @@ services:
 
   litellm-postgres:
     image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
-    environment:
-      POSTGRES_DB: litellm
-      POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: ${ONECOMPUTER_LITELLM_POSTGRES_PASSWORD:?set ONECOMPUTER_LITELLM_POSTGRES_PASSWORD}
+    env_file:
+      - path: .runtime-env/litellm-postgres.env
+        format: raw
     networks:
       - gateway-private
     volumes:
@@ -57,7 +55,7 @@ services:
     restart: unless-stopped
 
   ms365-mcp:
-    image: onecomputer/ms365-mcp:${ONECOMPUTER_MS365_IMAGE_TAG:-0.131.2}
+    image: onecomputer/ms365-mcp:${ONECOMPUTER_MS365_IMAGE_TAG:?set ONECOMPUTER_MS365_IMAGE_TAG in .env}
     build:
       context: .
       dockerfile: docker/Dockerfile.ms365-mcp
@@ -71,24 +69,14 @@ services:
       - User.Read offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite Chat.Read ChatMessage.Read ChatMessage.Send Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send
       - --no-dynamic-registration
       - --allow-unauthenticated-discovery
-    environment:
-      MS365_MCP_CLIENT_ID: ${ONECOMPUTER_MS365_CLIENT_ID:-${ONECOMPUTER_ENTRA_CLIENT_ID:?set ONECOMPUTER_ENTRA_CLIENT_ID}}
-      MS365_MCP_TENANT_ID: ${ONECOMPUTER_MS365_TENANT_ID:-${ONECOMPUTER_ENTRA_TENANT_ID:?set ONECOMPUTER_ENTRA_TENANT_ID}}
-      MS365_MCP_CLIENT_SECRET: ${ONECOMPUTER_MS365_CLIENT_SECRET:-${ONECOMPUTER_ENTRA_CLIENT_SECRET:?set ONECOMPUTER_ENTRA_CLIENT_SECRET}}
-      MS365_MCP_PUBLIC_URL: ${ONECOMPUTER_M365_AUTHORIZATION_ORIGIN:-http://localhost:4311}
-      MS365_MCP_ALLOWED_REDIRECT_URIS: ${ONECOMPUTER_LITELLM_PUBLIC_URL:-http://localhost:4000}/callback
-      MS365_MCP_MAX_TOP: "25"
-      MS365_MCP_MAX_PAGES: "4"
-      MS365_MCP_MAX_ITEMS: "100"
-      MS365_MCP_REDACT_PII: "true"
-      MS365_MCP_REQUIRE_CONFIRM: "true"
-      MS365_MCP_TRUST_PROXY_HOPS: "0"
-      LOG_LEVEL: info
+    env_file:
+      - path: .runtime-env/ms365-mcp.env
+        format: raw
     networks:
       - gateway-private
       - microsoft-egress
     ports:
-      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:-127.0.0.1}:${ONECOMPUTER_M365_PORT:-4311}:3000"
+      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:?set ONECOMPUTER_HTTP_BIND_ADDRESS in .env}:${ONECOMPUTER_M365_PORT:?set ONECOMPUTER_M365_PORT in .env}:3000"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
@@ -110,7 +98,7 @@ services:
     restart: unless-stopped
 
   litellm:
-    container_name: ${ONECOMPUTER_LITELLM_CONTAINER:-onecomputer-litellm}
+    container_name: ${ONECOMPUTER_LITELLM_CONTAINER:?set ONECOMPUTER_LITELLM_CONTAINER in .env}
     image: ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e
     command:
       - --config
@@ -121,25 +109,14 @@ services:
       - "2"
       - --log_config
       - /app/logging.yaml
-    environment:
-      LITELLM_MASTER_KEY: ${ONECOMPUTER_LITELLM_MASTER_KEY:?set ONECOMPUTER_LITELLM_MASTER_KEY}
-      LITELLM_SALT_KEY: ${ONECOMPUTER_LITELLM_SALT_KEY:?set ONECOMPUTER_LITELLM_SALT_KEY}
-      DATABASE_URL: postgres://litellm:${ONECOMPUTER_LITELLM_POSTGRES_PASSWORD}@litellm-postgres:5432/litellm
-      DISABLE_ADMIN_UI: "true"
-      PROXY_BASE_URL: ${ONECOMPUTER_LITELLM_PUBLIC_URL:-http://localhost:4000}
-      MCP_TRUSTED_REDIRECT_ORIGINS: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
-      ONECOMPUTER_M365_AUTHORIZATION_URL: ${ONECOMPUTER_M365_AUTHORIZATION_ORIGIN:-http://localhost:4311}/authorize
-      GITHUB_MCP_CLIENT_ID: ${ONECOMPUTER_GITHUB_MCP_CLIENT_ID:-}
-      GITHUB_MCP_CLIENT_SECRET: ${ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET:-}
-      ONECOMPUTER_MCP_POLICY_URL: http://control-api:4100/internal/v1/mcp/authorize
-      ONECOMPUTER_MCP_POLICY_TOKEN: ${ONECOMPUTER_CONTROLLER_TOKEN:?set ONECOMPUTER_CONTROLLER_TOKEN}
-      ONECOMPUTER_AI_USAGE_URL: http://control-api:4100/internal/v1/ai-usage
-      ONECOMPUTER_AI_USAGE_TOKEN: ${ONECOMPUTER_AI_USAGE_TOKEN:?set ONECOMPUTER_AI_USAGE_TOKEN}
+    env_file:
+      - path: .runtime-env/litellm.env
+        format: raw
     networks:
       - gateway-private
       - model-egress
     ports:
-      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:-127.0.0.1}:${ONECOMPUTER_LITELLM_PORT:-4000}:4000"
+      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:?set ONECOMPUTER_HTTP_BIND_ADDRESS in .env}:${ONECOMPUTER_LITELLM_PORT:?set ONECOMPUTER_LITELLM_PORT in .env}:4000"
     volumes:
       - ./config/litellm/config.yaml:/app/config.yaml:ro
       - ./config/litellm/logging.yaml:/app/logging.yaml:ro
@@ -166,23 +143,17 @@ services:
     restart: unless-stopped
 
   # Control uses this dedicated listener for every LiteLLM administration call.
-  # In the hosted overlay it terminates mTLS and only accepts the Control
+  # In the hosted profile it terminates mTLS and only accepts the Control
   # workload certificate; it never receives workspace traffic directly.
   litellm-admin-proxy:
     <<: [*control-runtime, *hardened]
     user: node
     command: ["node", "apps/litellm-admin-proxy/server.mjs"]
-    environment:
-      ONECOMPUTER_INSTALLATION_KIND: ${ONECOMPUTER_INSTALLATION_KIND:-customer-managed}
-      # This alias exists only on litellm-admin-private, so the listener is
-      # not bound to the gateway-private interface used by workspaces.
-      LITELLM_ADMIN_PROXY_HOST: litellm-admin-listener
-      LITELLM_ADMIN_PROXY_PORT: "8443"
-      LITELLM_ADMIN_PROXY_UPSTREAM_URL: http://litellm:4000
-      LITELLM_ADMIN_PROXY_TLS_CA_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64:-}
-      LITELLM_ADMIN_PROXY_TLS_SERVER_CERT_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64:-}
-      LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64:-}
-      LITELLM_ADMIN_PROXY_CLIENT_COMMON_NAME: ${ONECOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME:-onecomputer-control}
+    # This alias exists only on litellm-admin-private, so the listener is
+    # not bound to the gateway-private interface used by workspaces.
+    env_file:
+      - path: .runtime-env/litellm-admin-proxy.env
+        format: raw
     networks:
       gateway-private: {}
       litellm-admin-private:
@@ -206,12 +177,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.openvtc-consent
-    image: onecomputer/openvtc-consent:${ONECOMPUTER_IMAGE_TAG:-dev}
-    environment:
-      OPENVTC_CONSENT_LISTEN: 0.0.0.0:8788
-      OPENVTC_CONSENT_TOKEN: ${ONECOMPUTER_OPENVTC_CONSENT_TOKEN:?set ONECOMPUTER_OPENVTC_CONSENT_TOKEN}
-      OPENVTC_EXECUTOR_SEED_B64: ${ONECOMPUTER_OPENVTC_EXECUTOR_SEED_B64:?set ONECOMPUTER_OPENVTC_EXECUTOR_SEED_B64}
-      RUST_LOG: onecomputer_openvtc_consent=info
+    image: onecomputer/openvtc-consent:${ONECOMPUTER_IMAGE_TAG:?set ONECOMPUTER_IMAGE_TAG in .env}
+    env_file:
+      - path: .runtime-env/openvtc-consent.env
+        format: raw
     networks:
       - consent-private
     read_only: true
@@ -231,32 +200,9 @@ services:
   workspace-controller:
     <<: [*control-runtime, *hardened]
     command: ["npm", "run", "start", "--workspace", "@onecomputer/workspace-controller"]
-    environment:
-      CONTROLLER_HOST: 0.0.0.0
-      CONTROLLER_PORT: "4101"
-      CONTROLLER_INTERNAL_TOKEN: ${ONECOMPUTER_CONTROLLER_TOKEN:?set ONECOMPUTER_CONTROLLER_TOKEN}
-      SANDBOX_DRIVER: ${SANDBOX_DRIVER:-kasm-local}
-      ONECOMPUTER_INSTALLATION_KIND: ${ONECOMPUTER_INSTALLATION_KIND:-customer-managed}
-      DOCKER_SOCKET_PATH: /var/run/docker.sock
-      KASM_LOCAL_NETWORK_PREFIX: ${KASM_LOCAL_NETWORK_PREFIX:-onecomputer-workspace}
-      KASM_LOCAL_CONTROL_NETWORK: ${ONECOMPUTER_CONTROL_NETWORK:-onecomputer-control}
-      KASM_LOCAL_GATEWAY_CONTAINER: ${ONECOMPUTER_LITELLM_CONTAINER:-onecomputer-litellm}
-      KASM_LOCAL_CONTROL_CONTAINER: ${ONECOMPUTER_CONTROL_CONTAINER:-onecomputer-control-api}
-      KASM_LOCAL_IMAGE: ${ONECOMPUTER_WORKSPACE_IMAGE:-onecomputer/workspace:dev}
-      KASM_LOCAL_RELAY_IMAGE: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
-      KASM_LOCAL_EGRESS_PROXY_IMAGE: onecomputer/control-runtime:${ONECOMPUTER_IMAGE_TAG:-dev}
-      KASM_LOCAL_EGRESS_NETWORK: ${KASM_LOCAL_EGRESS_NETWORK:-onecomputer-egress}
-      KASM_PUBLIC_HOST: ${KASM_PUBLIC_HOST:-127.0.0.1}
-      KASM_LOCAL_KVM_ENABLED: ${KASM_LOCAL_KVM_ENABLED:-false}
-      KASM_LOCAL_STARTUP_TIMEOUT_MS: ${KASM_LOCAL_STARTUP_TIMEOUT_MS:-60000}
-      KASM_LOCAL_TIME_ZONE: ${ONECOMPUTER_TIME_ZONE:-}
-      CHAT_ATTACHMENT_RETENTION_DAYS: ${ONECOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS:-90}
-      KASM_BASE_URL: ${KASM_BASE_URL:-}
-      KASM_API_KEY: ${KASM_API_KEY:-}
-      KASM_API_SECRET: ${KASM_API_SECRET:-}
-      KASM_USER_ID: ${KASM_USER_ID:-}
-      KASM_IMAGE_ID: ${KASM_IMAGE_ID:-}
-      POLICY_VERIFICATION_KEYS_B64: ${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?set ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64}
+    env_file:
+      - path: .runtime-env/workspace-controller.env
+        format: raw
     networks:
       - control-private
     volumes:
@@ -276,10 +222,9 @@ services:
     user: node
     command: ["npm", "run", "db:migrate"]
     restart: "no"
-    environment:
-      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
-      ONECOMPUTER_APP_VERSION: ${ONECOMPUTER_IMAGE_TAG:-dev}
-      ONECOMPUTER_INSTALLATION_KIND: ${ONECOMPUTER_INSTALLATION_KIND:-customer-managed}
+    env_file:
+      - path: .runtime-env/db-migrate.env
+        format: raw
     networks:
       - control-private
     depends_on:
@@ -288,67 +233,12 @@ services:
 
   control-api:
     <<: [*control-runtime, *hardened]
-    container_name: ${ONECOMPUTER_CONTROL_CONTAINER:-onecomputer-control-api}
+    container_name: ${ONECOMPUTER_CONTROL_CONTAINER:?set ONECOMPUTER_CONTROL_CONTAINER in .env}
     user: node
     command: ["npm", "run", "start", "--workspace", "@onecomputer/control-api"]
-    environment:
-      CONTROL_HOST: 0.0.0.0
-      CONTROL_PORT: "4100"
-      WEB_PROXY_TOKEN: ${ONECOMPUTER_WEB_PROXY_TOKEN:?set ONECOMPUTER_WEB_PROXY_TOKEN}
-      CONTROLLER_URL: http://workspace-controller:4101
-      CONTROLLER_INTERNAL_TOKEN: ${ONECOMPUTER_CONTROLLER_TOKEN:?set ONECOMPUTER_CONTROLLER_TOKEN}
-      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
-      LITELLM_ADMIN_URL: ${ONECOMPUTER_LITELLM_ADMIN_URL:-http://litellm-admin-listener:8443}
-      LITELLM_ADMIN_TLS_CA_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64:-}
-      LITELLM_ADMIN_TLS_CLIENT_CERT_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64:-}
-      LITELLM_ADMIN_TLS_CLIENT_KEY_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64:-}
-      LITELLM_ADMIN_TLS_SERVER_NAME: ${ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME:-litellm-admin-listener}
-      LITELLM_WORKSPACE_URL: http://litellm:4000
-      LITELLM_PUBLIC_URL: ${ONECOMPUTER_LITELLM_PUBLIC_URL:-http://localhost:4000}
-      LITELLM_MASTER_KEY: ${ONECOMPUTER_LITELLM_MASTER_KEY:?set ONECOMPUTER_LITELLM_MASTER_KEY}
-      LITELLM_CREDENTIAL_SECRET: ${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_LITELLM_CREDENTIAL_SECRET}
-      PUBLIC_WEB_URL: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
-      M365_AUTHORIZATION_ORIGIN: ${ONECOMPUTER_M365_AUTHORIZATION_ORIGIN:-http://localhost:4311}
-      AGENT_BRIDGE_URL: http://onecomputer-control:4100
-      AGENT_BRIDGE_SECRET: ${ONECOMPUTER_AGENT_BRIDGE_SECRET:?set ONECOMPUTER_AGENT_BRIDGE_SECRET}
-      AGENT_BRIDGE_GRANT_TTL_SECONDS: ${ONECOMPUTER_AGENT_BRIDGE_GRANT_TTL_SECONDS:-900}
-      FIXTURE_APPROVAL_SECRET: ${ONECOMPUTER_FIXTURE_APPROVAL_SECRET:?set ONECOMPUTER_FIXTURE_APPROVAL_SECRET}
-      OPENVTC_CONSENT_URL: http://openvtc-consent:8788
-      OPENVTC_CONSENT_TOKEN: ${ONECOMPUTER_OPENVTC_CONSENT_TOKEN:?set ONECOMPUTER_OPENVTC_CONSENT_TOKEN}
-      WEB_PUSH_VAPID_SUBJECT: ${ONECOMPUTER_WEB_PUSH_VAPID_SUBJECT:-}
-      WEB_PUSH_VAPID_PUBLIC_KEY: ${ONECOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY:-}
-      WEB_PUSH_VAPID_PRIVATE_KEY: ${ONECOMPUTER_WEB_PUSH_VAPID_PRIVATE_KEY:-}
-      WEB_PUSH_SUBSCRIPTION_SECRET: ${ONECOMPUTER_WEB_PUSH_SUBSCRIPTION_SECRET:-}
-      ENTRA_TENANT_ID: ${ONECOMPUTER_ENTRA_TENANT_ID:-${ONECOMPUTER_MS365_TENANT_ID:?set ONECOMPUTER_ENTRA_TENANT_ID}}
-      ENTRA_CLIENT_ID: ${ONECOMPUTER_ENTRA_CLIENT_ID:-${ONECOMPUTER_MS365_CLIENT_ID:?set ONECOMPUTER_ENTRA_CLIENT_ID}}
-      ENTRA_CLIENT_SECRET: ${ONECOMPUTER_ENTRA_CLIENT_SECRET:-${ONECOMPUTER_MS365_CLIENT_SECRET:?set ONECOMPUTER_ENTRA_CLIENT_SECRET}}
-      SESSION_SECRET: ${ONECOMPUTER_SESSION_SECRET:?set ONECOMPUTER_SESSION_SECRET}
-      WORKSPACE_INGRESS_PUBLIC_URL: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
-      WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}
-      WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS:-300}
-      WORKSPACE_INGRESS_SESSION_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS:-28800}
-      EGRESS_GRANT_SECRET: ${ONECOMPUTER_EGRESS_GRANT_SECRET:?set ONECOMPUTER_EGRESS_GRANT_SECRET}
-      AGENT_CHAT_SECRET: ${ONECOMPUTER_HERMES_API_SECRET:?set ONECOMPUTER_HERMES_API_SECRET}
-      AI_USAGE_INTERNAL_TOKEN: ${ONECOMPUTER_AI_USAGE_TOKEN:?set ONECOMPUTER_AI_USAGE_TOKEN}
-      AI_USAGE_TASK_BINDING_SECRET: ${ONECOMPUTER_AI_USAGE_TASK_BINDING_SECRET:?set ONECOMPUTER_AI_USAGE_TASK_BINDING_SECRET}
-      CHANNEL_BROKER_URL: http://channel-broker:4102
-      CHANNEL_BROKER_INTERNAL_TOKEN: ${ONECOMPUTER_CHANNEL_BROKER_TOKEN:?set ONECOMPUTER_CHANNEL_BROKER_TOKEN}
-      ONECOMPUTER_INSTALLATION_KIND: ${ONECOMPUTER_INSTALLATION_KIND:-customer-managed}
-      TELEGRAM_RAW_TOKEN_INPUT_MODE: ${ONECOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE:-}
-      TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64: ${ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64:?set ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64}
-      TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64: ${ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64:?set ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64}
-      TELEGRAM_INTAKE_URL: /api/channel-intake/v1/telegram
-      TELEGRAM_INTAKE_GRANT_TTL_SECONDS: ${ONECOMPUTER_TELEGRAM_INTAKE_GRANT_TTL_SECONDS:-300}
-      SCHEDULER_INTERNAL_TOKEN: ${ONECOMPUTER_SCHEDULER_TOKEN:?set ONECOMPUTER_SCHEDULER_TOKEN}
-      SCHEDULE_PROMPT_SECRET: ${ONECOMPUTER_SCHEDULE_PROMPT_SECRET:?set ONECOMPUTER_SCHEDULE_PROMPT_SECRET}
-      POLICY_SIGNING_KEY_ID: ${ONECOMPUTER_POLICY_SIGNING_KEY_ID:?set ONECOMPUTER_POLICY_SIGNING_KEY_ID}
-      POLICY_SIGNING_PRIVATE_KEY_B64: ${ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64:?set ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64}
-      POLICY_VERIFICATION_KEYS_B64: ${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?set ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64}
-      POLICY_BUNDLE_TTL_SECONDS: ${ONECOMPUTER_POLICY_BUNDLE_TTL_SECONDS:-86400}
-      BOOTSTRAP_TENANT_ID: ${ONECOMPUTER_BOOTSTRAP_TENANT_ID:-example}
-      BOOTSTRAP_USER_ID: ${ONECOMPUTER_BOOTSTRAP_USER_ID:-bootstrap-admin}
-      TENANT_DISPLAY_NAME: ${ONECOMPUTER_TENANT_DISPLAY_NAME:-Example Organization}
-      ADMINISTRATOR_EMAILS: ${ONECOMPUTER_ADMINISTRATOR_EMAILS:-admin@example.com}
+    env_file:
+      - path: .runtime-env/control-api.env
+        format: raw
     networks:
       - web-edge
       - control-private
@@ -382,19 +272,9 @@ services:
     <<: [*control-runtime, *hardened]
     user: node
     command: ["npm", "run", "start", "--workspace", "@onecomputer/channel-broker"]
-    environment:
-      CHANNEL_BROKER_HOST: 0.0.0.0
-      CHANNEL_BROKER_PORT: "4102"
-      CHANNEL_BROKER_INTERNAL_TOKEN: ${ONECOMPUTER_CHANNEL_BROKER_TOKEN:?set ONECOMPUTER_CHANNEL_BROKER_TOKEN}
-      CHANNEL_CREDENTIAL_SECRET: ${ONECOMPUTER_CHANNEL_CREDENTIAL_SECRET:?set ONECOMPUTER_CHANNEL_CREDENTIAL_SECRET}
-      CONTROL_URL: http://control-api:4100
-      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
-      ONECOMPUTER_INSTALLATION_KIND: ${ONECOMPUTER_INSTALLATION_KIND:-customer-managed}
-      TELEGRAM_RAW_TOKEN_INPUT_MODE: ${ONECOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE:-}
-      TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64: ${ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64:?set ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64}
-      TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64: ${ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64:?set ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64}
-      POLL_INTERVAL_MS: ${ONECOMPUTER_CHANNEL_POLL_INTERVAL_MS:-1000}
-      COMPOSITION_WINDOW_MS: ${ONECOMPUTER_TELEGRAM_COMPOSITION_WINDOW_MS:-1500}
+    env_file:
+      - path: .runtime-env/channel-broker.env
+        format: raw
     networks:
       - control-private
       - web-edge
@@ -418,15 +298,9 @@ services:
     <<: [*control-runtime, *hardened]
     user: node
     command: ["npm", "run", "start", "--workspace", "@onecomputer/scheduler-worker"]
-    environment:
-      SCHEDULER_HOST: 0.0.0.0
-      SCHEDULER_PORT: "4103"
-      SCHEDULER_INTERNAL_TOKEN: ${ONECOMPUTER_SCHEDULER_TOKEN:?set ONECOMPUTER_SCHEDULER_TOKEN}
-      CONTROL_URL: http://control-api:4100
-      DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
-      POLL_INTERVAL_MS: ${ONECOMPUTER_SCHEDULER_POLL_INTERVAL_MS:-5000}
-      CLAIM_LIMIT: ${ONECOMPUTER_SCHEDULER_CLAIM_LIMIT:-10}
-      CLAIM_LEASE_MS: ${ONECOMPUTER_SCHEDULER_CLAIM_LEASE_MS:-120000}
+    env_file:
+      - path: .runtime-env/scheduler-worker.env
+        format: raw
     networks:
       - control-private
     depends_on:
@@ -448,12 +322,9 @@ services:
     <<: [*control-runtime, *hardened]
     user: node
     command: ["node", "apps/web/server.mjs"]
-    environment:
-      WEB_HOST: 0.0.0.0
-      WEB_PORT: "4173"
-      ONECOMPUTER_CONTROL_URL: http://control-api:4100
-      ONECOMPUTER_CHANNEL_BROKER_INTAKE_URL: http://channel-broker:4102
-      ONECOMPUTER_WEB_PROXY_TOKEN: ${ONECOMPUTER_WEB_PROXY_TOKEN:?set ONECOMPUTER_WEB_PROXY_TOKEN}
+    env_file:
+      - path: .runtime-env/web.env
+        format: raw
     networks:
       - web-edge
     depends_on:
@@ -473,24 +344,16 @@ services:
     <<: [*control-runtime, *hardened]
     user: node
     command: ["npm", "run", "start", "--workspace", "@onecomputer/workspace-ingress-server"]
-    environment:
-      WORKSPACE_INGRESS_HOST: 0.0.0.0
-      WORKSPACE_INGRESS_PORT: "4174"
-      WORKSPACE_INGRESS_PUBLIC_URL: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
-      WORKSPACE_INGRESS_WEB_UPSTREAM: http://web:4173
-      WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM: http://ms365-mcp:3000
-      WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM: http://litellm:4000
-      WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}
-      WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS:-300}
-      WORKSPACE_INGRESS_SESSION_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS:-28800}
-      WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "false"
+    env_file:
+      - path: .runtime-env/workspace-ingress.env
+        format: raw
     networks:
       - public-edge
       - web-edge
       - control-private
       - gateway-private
     ports:
-      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:-127.0.0.1}:${ONECOMPUTER_WEB_PORT:-4174}:4174"
+      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:?set ONECOMPUTER_HTTP_BIND_ADDRESS in .env}:${ONECOMPUTER_WEB_PORT:?set ONECOMPUTER_WEB_PORT in .env}:4174"
     depends_on:
       web:
         condition: service_healthy
@@ -513,7 +376,7 @@ services:
   workspace-image:
     profiles:
       - build
-    image: ${ONECOMPUTER_WORKSPACE_IMAGE:-onecomputer/workspace:dev}
+    image: ${ONECOMPUTER_WORKSPACE_IMAGE:?set ONECOMPUTER_WORKSPACE_IMAGE in .env}
     build:
       context: .
       dockerfile: docker/Dockerfile.workspace
@@ -524,7 +387,7 @@ networks:
   web-edge:
     internal: true
   control-private:
-    name: ${ONECOMPUTER_CONTROL_NETWORK:-onecomputer-control}
+    name: ${ONECOMPUTER_CONTROL_NETWORK:?set ONECOMPUTER_CONTROL_NETWORK in .env}
     internal: true
   consent-private:
     internal: true

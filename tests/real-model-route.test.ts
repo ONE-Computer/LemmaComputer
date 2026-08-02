@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { mvpPolicyDocument, upgradeHistoricMvpPolicyDocument } from "@onecomputer/workspace-store";
+import { projectServiceEnvironment } from "../scripts/deployment-config.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const source = (relativePath: string) => readFile(path.join(root, relativePath), "utf8");
@@ -68,8 +69,10 @@ test("provider setup uses Control and LiteLLM credentials, never provider enviro
   ]);
   const litellm = compose.split("  litellm:")[1]?.split("\n  openvtc-consent:")[0] ?? "";
   const everythingElse = compose.replace(litellm, "");
+  const litellmEnvironment = projectServiceEnvironment().litellm;
   assert.doesNotMatch(litellm, /(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|ZAI_API_KEY|UI_USERNAME|UI_PASSWORD)/);
-  assert.match(litellm, /DISABLE_ADMIN_UI: "true"/);
+  assert.match(litellm, /env_file:\s+- path: \.runtime-env\/litellm\.env\s+format: raw/);
+  assert.equal(litellmEnvironment.DISABLE_ADMIN_UI, "true");
   assert.doesNotMatch(everythingElse, /ONECOMPUTER_(?:OPENAI|CLAUDE|GLM)_API_KEY/);
   assert.doesNotMatch(example, /ONECOMPUTER_(?:OPENAI|CLAUDE|GLM)_API_KEY/);
   assert.match(web, /Provider settings/);
@@ -85,11 +88,13 @@ test("the local workspace receives an explicit host-seeded IANA timezone", async
     source("scripts/initialize-env.mjs"),
     source("docker/workspace/onecomputer-workspace-entrypoint.sh"),
   ]);
+  const controllerEnvironment = projectServiceEnvironment()["workspace-controller"];
   assert.match(example, /^ONECOMPUTER_TIME_ZONE=Etc\/UTC$/m);
   assert.match(initializer, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
-  assert.match(compose, /KASM_LOCAL_TIME_ZONE: \$\{ONECOMPUTER_TIME_ZONE:-\}/);
-  assert.match(compose, /KASM_LOCAL_KVM_ENABLED: \$\{KASM_LOCAL_KVM_ENABLED:-false\}/);
-  assert.match(compose, /ONECOMPUTER_INSTALLATION_KIND: \$\{ONECOMPUTER_INSTALLATION_KIND:-customer-managed\}/);
+  assert.match(compose, /env_file:\s+- path: \.runtime-env\/workspace-controller\.env\s+format: raw/);
+  assert.equal(controllerEnvironment.KASM_LOCAL_TIME_ZONE, "Etc/UTC");
+  assert.equal(controllerEnvironment.KASM_LOCAL_KVM_ENABLED, "false");
+  assert.equal(controllerEnvironment.ONECOMPUTER_INSTALLATION_KIND, "customer-managed");
   assert.match(entrypoint, /ONECOMPUTER_TIME_ZONE="\$ONECOMPUTER_TIME_ZONE"/);
 });
 

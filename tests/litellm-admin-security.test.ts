@@ -9,6 +9,7 @@ import {
   mergeEnvironment,
   parseEnvironment,
 } from "../scripts/environment-template.mjs";
+import { projectServiceEnvironment } from "../scripts/deployment-config.mjs";
 
 const credentialSecret = "credential-secret-that-is-long-enough-0000001";
 const sessionSecret = "session-secret-that-is-long-enough-0000000001";
@@ -76,19 +77,25 @@ test("environment initialization and upgrades never derive session or ingress se
   assert.equal(merged.mapped, 0);
 });
 
-test("hosted Compose routes LiteLLM administration through the dedicated mutual-TLS listener", async () => {
+test("the shared projection routes LiteLLM administration through the dedicated mutual-TLS listener", async () => {
   const [compose, hostedCompose] = await Promise.all([
     readFile(new URL("../compose.yaml", import.meta.url), "utf8"),
     readFile(new URL("../compose.hosted.yaml", import.meta.url), "utf8"),
   ]);
   const control = compose.split("  control-api:")[1]?.split("\n  channel-broker:")[0] ?? "";
   const proxy = compose.split("  litellm-admin-proxy:")[1]?.split("\n  openvtc-consent:")[0] ?? "";
-  assert.match(control, /LITELLM_ADMIN_URL: \$\{ONECOMPUTER_LITELLM_ADMIN_URL:-http:\/\/litellm-admin-listener:8443\}/);
-  assert.match(control, /SESSION_SECRET: \$\{ONECOMPUTER_SESSION_SECRET:\?set ONECOMPUTER_SESSION_SECRET\}/);
-  assert.match(control, /WORKSPACE_INGRESS_SECRET: \$\{ONECOMPUTER_WORKSPACE_INGRESS_SECRET:\?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET\}/);
-  assert.match(proxy, /LITELLM_ADMIN_PROXY_TLS_SERVER_CERT_B64/);
-  assert.match(proxy, /LITELLM_ADMIN_PROXY_TLS_CA_B64/);
-  assert.match(proxy, /litellm-admin-listener/);
-  assert.match(hostedCompose, /LITELLM_ADMIN_URL: https:\/\/litellm-admin-listener:8443/);
-  assert.match(hostedCompose, /ONECOMPUTER_INSTALLATION_KIND: hosted/);
+  const projected = projectServiceEnvironment();
+  const controlEnvironment = projected["control-api"];
+  const proxyEnvironment = projected["litellm-admin-proxy"];
+
+  assert.match(control, /env_file:\s+- path: \.runtime-env\/control-api\.env\s+format: raw/);
+  assert.match(proxy, /env_file:\s+- path: \.runtime-env\/litellm-admin-proxy\.env\s+format: raw/);
+  assert.equal(controlEnvironment.LITELLM_ADMIN_URL, "http://litellm-admin-listener:8443");
+  assert.ok("SESSION_SECRET" in controlEnvironment);
+  assert.ok("WORKSPACE_INGRESS_SECRET" in controlEnvironment);
+  assert.ok("LITELLM_ADMIN_PROXY_TLS_SERVER_CERT_B64" in proxyEnvironment);
+  assert.ok("LITELLM_ADMIN_PROXY_TLS_CA_B64" in proxyEnvironment);
+  assert.equal(proxyEnvironment.LITELLM_ADMIN_PROXY_HOST, "litellm-admin-listener");
+  assert.ok(!("LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64" in controlEnvironment));
+  assert.doesNotMatch(hostedCompose, /^\s+environment:/m);
 });

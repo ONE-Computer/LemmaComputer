@@ -1,55 +1,13 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import webPush from "web-push";
+import {
+  coupledEnvironmentGroups,
+  environmentAliases,
+  environmentContract,
+  generatedSecretNames,
+} from "./deployment-config.mjs";
 
-const generatedSecretNames = [
-  "ONECOMPUTER_WEB_PROXY_TOKEN",
-  "ONECOMPUTER_CONTROLLER_TOKEN",
-  "ONECOMPUTER_POSTGRES_PASSWORD",
-  "ONECOMPUTER_LITELLM_SALT_KEY",
-  "ONECOMPUTER_LITELLM_CREDENTIAL_SECRET",
-  "ONECOMPUTER_LITELLM_POSTGRES_PASSWORD",
-  "ONECOMPUTER_FIXTURE_APPROVAL_SECRET",
-  "ONECOMPUTER_OPENVTC_CONSENT_TOKEN",
-  "ONECOMPUTER_WEB_PUSH_SUBSCRIPTION_SECRET",
-  "ONECOMPUTER_SESSION_SECRET",
-  "ONECOMPUTER_WORKSPACE_INGRESS_SECRET",
-  "ONECOMPUTER_EGRESS_GRANT_SECRET",
-  "ONECOMPUTER_AGENT_BRIDGE_SECRET",
-  "ONECOMPUTER_HERMES_API_SECRET",
-  "ONECOMPUTER_CHANNEL_CREDENTIAL_SECRET",
-  "ONECOMPUTER_CHANNEL_BROKER_TOKEN",
-  "ONECOMPUTER_SCHEDULE_PROMPT_SECRET",
-  "ONECOMPUTER_SCHEDULER_TOKEN",
-  "ONECOMPUTER_AI_USAGE_TOKEN",
-  "ONECOMPUTER_AI_USAGE_TASK_BINDING_SECRET",
-];
-
-export const environmentAliases = new Map([
-  ["ONECOMPUTER_ENTRA_TENANT_ID", "ONECOMPUTER_MS365_TENANT_ID"],
-  ["ONECOMPUTER_ENTRA_CLIENT_ID", "ONECOMPUTER_MS365_CLIENT_ID"],
-  ["ONECOMPUTER_ENTRA_CLIENT_SECRET", "ONECOMPUTER_MS365_CLIENT_SECRET"],
-  ["KASM_LOCAL_NETWORK_PREFIX", "KASM_LOCAL_NETWORK"],
-]);
-
-export const coupledEnvironmentGroups = [
-  [
-    "ONECOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY",
-    "ONECOMPUTER_WEB_PUSH_VAPID_PRIVATE_KEY",
-  ],
-  [
-    "ONECOMPUTER_POLICY_SIGNING_KEY_ID",
-    "ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64",
-    "ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64",
-  ],
-  [
-    "ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64",
-    "ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64",
-  ],
-  [
-    "ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64",
-    "ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64",
-  ],
-];
+export { coupledEnvironmentGroups, environmentAliases };
 
 export function parseEnvironment(contents) {
   const entries = [];
@@ -81,16 +39,20 @@ export function initializeEnvironment(template, timeZone) {
     contents = contents.replace(expression, `${name}=${value}`);
   };
 
+  const nameFor = (generator) => {
+    const name = environmentContract.find((item) => item.generator === generator)?.key;
+    if (!name) throw new Error(`No deployment environment variable is registered for ${generator}`);
+    return name;
+  };
   for (const name of generatedSecretNames) replace(name, randomSecret());
 
-  replace("ONECOMPUTER_LITELLM_MASTER_KEY", `sk-${randomSecret()}`);
-  replace("ONECOMPUTER_OPENVTC_EXECUTOR_SEED_B64", randomBytes(32).toString("base64"));
-  replace("ONECOMPUTER_WORKSPACE_IMAGE", "onecomputer/workspace:dev");
-  replace("ONECOMPUTER_TIME_ZONE", timeZone);
+  replace(nameFor("master-key"), `sk-${randomSecret()}`);
+  replace(nameFor("seed"), randomBytes(32).toString("base64"));
+  replace(environmentContract.find((item) => item.initialize === "time-zone")?.key ?? "ONECOMPUTER_TIME_ZONE", timeZone);
 
   const vapid = webPush.generateVAPIDKeys();
-  replace("ONECOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY", vapid.publicKey);
-  replace("ONECOMPUTER_WEB_PUSH_VAPID_PRIVATE_KEY", vapid.privateKey);
+  replace(nameFor("vapid-public"), vapid.publicKey);
+  replace(nameFor("vapid-private"), vapid.privateKey);
 
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const keyId = `psk_policy_${new Date().toISOString().slice(0, 10).replaceAll("-", "_")}`;
@@ -105,32 +67,32 @@ export function initializeEnvironment(template, timeZone) {
       expiresAt: null,
     }],
   };
-  replace("ONECOMPUTER_POLICY_SIGNING_KEY_ID", keyId);
+  replace(nameFor("policy-key-id"), keyId);
   replace(
-    "ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64",
+    nameFor("policy-private"),
     privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
   );
   replace(
-    "ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64",
+    nameFor("policy-public-set"),
     Buffer.from(JSON.stringify(keySet), "utf8").toString("base64"),
   );
 
   const telegramGrant = generateKeyPairSync("ed25519");
   replace(
-    "ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64",
+    nameFor("telegram-grant-private"),
     telegramGrant.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
   );
   replace(
-    "ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64",
+    nameFor("telegram-grant-public"),
     telegramGrant.publicKey.export({ format: "der", type: "spki" }).toString("base64"),
   );
   const telegramEnvelope = generateKeyPairSync("rsa", { modulusLength: 3072 });
   replace(
-    "ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64",
+    nameFor("telegram-envelope-private"),
     telegramEnvelope.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
   );
   replace(
-    "ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64",
+    nameFor("telegram-envelope-public"),
     telegramEnvelope.publicKey.export({ format: "der", type: "spki" }).toString("base64"),
   );
   return contents;
@@ -175,9 +137,11 @@ export function mergeEnvironment(template, current, initialized) {
     const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
     if (!match) return line;
     const key = match[1];
-    if (currentEnvironment.values.has(key)) {
+    const currentValue = currentEnvironment.values.get(key);
+    const templateValue = templateEnvironment.values.get(key);
+    if (currentEnvironment.values.has(key) && !(currentValue === "" && templateValue !== "")) {
       preserved += 1;
-      return `${key}=${currentEnvironment.values.get(key)}`;
+      return `${key}=${currentValue}`;
     }
     const alias = environmentAliases.get(key);
     if (alias && currentEnvironment.values.has(alias)) {

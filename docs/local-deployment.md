@@ -27,7 +27,7 @@ A setup is complete when:
 
 - Linux on `amd64`/`x86_64`. The current managed workspace image is not built
   for ARM hosts.
-- Docker Engine with the Docker Compose v2 plugin. The current user must be
+- Docker Engine with Docker Compose v2.30.0 or later. The current user must be
   able to access the Docker socket; the local workspace controller mounts it.
 - Node.js 22 or later and npm.
 - A Microsoft Entra tenant in which an app registration can be created.
@@ -171,7 +171,7 @@ rotation from product sign-in:
   the `ONECOMPUTER_MS365_*` variables.
 
 Both apps should be single-tenant. If one app is used for both roles, leave all
-three `ONECOMPUTER_MS365_*` values empty so Compose reuses
+three `ONECOMPUTER_MS365_*` values empty so the canonical service projection reuses
 `ONECOMPUTER_ENTRA_*`. If a separate connector app is used, set all three
 Microsoft 365 values; do not partially configure the group.
 
@@ -184,7 +184,7 @@ npm ci
 npm run env:init
 ```
 
-The initializer copies `.env.example`, generates fresh service credentials,
+The initializer renders the canonical deployment contract, generates fresh service credentials,
 encryption keys, policy-signing material, an OpenVTC executor identity, and Web
 Push keys, then writes `.env` with mode `0600`. It refuses to overwrite an
 existing `.env`.
@@ -212,6 +212,11 @@ implicit values, generates only missing local secrets, and keeps unrecognized
 variables in a clearly marked review section. It refuses duplicate variables
 or a partially configured policy-signing or Web Push key pair. Review any
 preserved extra variable names after the update; their values are never printed.
+
+`npm run compose:*` and `npm run image:workspace` render per-service
+`.runtime-env` files automatically. Run `npm run env:render` before a direct
+`docker compose` command or before handing the service-specific environment
+projection to a non-Compose deployment adapter.
 
 ### Values the operator must set
 
@@ -247,8 +252,8 @@ their values, so remove them manually after the managed-provider cutover.
 | `ONECOMPUTER_GITHUB_MCP_CLIENT_ID`, `ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET` | The built-in GitHub connector is enabled |
 | `ONECOMPUTER_BOOTSTRAP_TENANT_ID`, `ONECOMPUTER_BOOTSTRAP_USER_ID`, `ONECOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
 | Public URL and port variables | The deployment is intentionally using origins other than the localhost defaults |
-| `KASM_LOCAL_KVM_ENABLED=true` | Claude Cowork is enabled on a customer-managed host that exposes `/dev/kvm` and `/dev/vhost-vsock` and has memory/disk headroom |
-| `KASM_*` variables | `SANDBOX_DRIVER=kasm` uses an external Kasm installation |
+| `ONECOMPUTER_KASM_LOCAL_KVM_ENABLED=true` | Claude Cowork is enabled on a customer-managed host that exposes `/dev/kvm` and `/dev/vhost-vsock` and has memory/disk headroom |
+| `ONECOMPUTER_KASM_*` variables | `ONECOMPUTER_SANDBOX_DRIVER=kasm` uses an external Kasm installation |
 
 Leave generated secrets unchanged and stable while their dependent state
 exists. See [Configuration and operations](operations.md) for the complete

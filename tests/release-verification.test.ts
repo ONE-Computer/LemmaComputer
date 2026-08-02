@@ -16,6 +16,10 @@ test("release attestation requires an isolated built Hermes workspace readiness 
     "hermes-workspace-readiness-smoke",
   ]);
   assert.match(verifyRelease, /Release verification requires an isolated worktree/);
+  const renderServiceEnvironment = verifyRelease.indexOf('run(process.execPath, ["scripts/render-service-env.mjs"])');
+  const firstComposeInvocation = verifyRelease.indexOf('run("docker", ["compose"');
+  assert.ok(renderServiceEnvironment >= 0, "release verification must render its ignored service environment files");
+  assert.ok(renderServiceEnvironment < firstComposeInvocation, "release verification must render service environments before Compose");
   assert.match(verifyRelease, /"--profile", "build", "build", "workspace-image"/);
   assert.match(verifyRelease, /"compose", "run", "--rm", "--no-deps"/);
   assert.match(verifyRelease, /qualify-workspace-startup\.mts:ro/);
