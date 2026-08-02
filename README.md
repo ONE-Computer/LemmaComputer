@@ -107,7 +107,7 @@ interface, state owner, health contract, and extension seam.
 
 ## Run locally
 
-The reference deployment requires Linux on `amd64`, Docker Engine with Compose,
+The reference deployment requires Linux on `amd64`, Docker Engine with Docker Compose v2.30.0 or later,
 Node.js 22 or later, a Microsoft Entra tenant, and a model-provider API key. It
 binds browser-facing ports to loopback and is intended for development or
 evaluation.
@@ -116,6 +116,7 @@ evaluation.
 npm ci
 npm run env:init
 # Edit the generated .env with the Entra and administrator values.
+npm run env:check
 npm run image:workspace
 npm run compose:config
 npm run compose:up

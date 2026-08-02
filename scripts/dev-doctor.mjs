@@ -1,5 +1,6 @@
 import { access, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { worktreeIsolationEnvironmentVariableNames } from "./deployment-config.mjs";
 
 const run = (command, args) => spawnSync(command, args, { encoding: "utf8" });
 const failures = [];
@@ -12,7 +13,7 @@ let env = "";
 try { env = await readFile(".env", "utf8"); } catch { failures.push(".env is missing; run npm run worktree:init"); }
 const value = (key) => env.match(new RegExp(`^${key}=(.+)$`, "m"))?.[1]?.trim();
 if (!integrationCheckout) {
-  for (const key of ["ONECOMPUTER_COMPOSE_PROJECT_NAME", "ONECOMPUTER_CONTROL_NETWORK", "ONECOMPUTER_CONTROL_CONTAINER", "ONECOMPUTER_LITELLM_CONTAINER"]) {
+  for (const key of worktreeIsolationEnvironmentVariableNames) {
     if (!value(key)?.startsWith("oc-")) failures.push(`${key} is not worktree-isolated`);
   }
 }

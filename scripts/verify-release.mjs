@@ -23,7 +23,7 @@ const env = await readFile(".env", "utf8");
 const envValue = (name) => env.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
 const composeProject = envValue("ONECOMPUTER_COMPOSE_PROJECT_NAME");
 const workspaceImage = envValue("ONECOMPUTER_WORKSPACE_IMAGE");
-const workspaceNetworkPrefix = envValue("KASM_LOCAL_NETWORK_PREFIX");
+const workspaceNetworkPrefix = envValue("ONECOMPUTER_KASM_LOCAL_NETWORK_PREFIX");
 if (
   !composeProject
   || composeProject === "onecomputer"
@@ -34,6 +34,9 @@ if (
 ) {
   throw new Error("Release verification requires an isolated worktree initialized with npm run worktree:init");
 }
+// compose.yaml consumes ignored per-service files. Render and validate them
+// immediately before any release command can invoke Docker Compose.
+run(process.execPath, ["scripts/render-service-env.mjs"]);
 run("npm", ["run", "qualify:providers"]);
 run("npm", ["run", "qualify:oauth"]);
 run(process.execPath, ["scripts/verify-quick.mjs"]);

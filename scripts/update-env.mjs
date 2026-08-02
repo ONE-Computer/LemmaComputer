@@ -3,14 +3,24 @@ import {
   environmentParity,
   initializeEnvironment,
   mergeEnvironment,
+  parseEnvironment,
 } from "./environment-template.mjs";
+import {
+  renderEnvironmentTemplate,
+  validateDeploymentEnvironment,
+} from "./deployment-config.mjs";
 
 const destination = process.argv.find((argument) => argument.startsWith("--file="))?.slice("--file=".length) ?? ".env";
 const check = process.argv.includes("--check");
 const write = process.argv.includes("--write");
+const profile = process.argv.find((argument) => argument.startsWith("--profile="))?.slice("--profile=".length);
 if (check === write) throw new Error("Choose exactly one of --check or --write");
 
-const template = await readFile(".env.example", "utf8");
+const template = renderEnvironmentTemplate();
+const checkedInTemplate = await readFile(".env.example", "utf8");
+if (checkedInTemplate !== template) {
+  throw new Error(".env.example is not generated from scripts/deployment-config.mjs; run npm run env:example -- --write");
+}
 const current = await readFile(destination, "utf8");
 const parity = environmentParity(template, current);
 const retiredSensitiveVariableNames = new Set(["ONECOMPUTER_OPENAI_API_KEY", "ONECOMPUTER_CLAUDE_API_KEY", "ONECOMPUTER_GLM_API_KEY", "ONECOMPUTER_LITELLM_UI_PASSWORD"]);
@@ -22,7 +32,14 @@ if (check) {
   if (retiredSensitive.length) process.stdout.write(`Retired sensitive variables are still present and no longer used: ${retiredSensitive.join(", ")}. Remove them manually after provider-settings cutover.\n`);
   if (parity.duplicates.length) process.stdout.write(`Duplicate variables: ${parity.duplicates.join(", ")}\n`);
   if (!parity.missing.length && !parity.duplicates.length) {
-    process.stdout.write(`Environment schema is current (${parity.extra.length} preserved extra variable${parity.extra.length === 1 ? "" : "s"}).\n`);
+    try {
+      const values = Object.fromEntries(parseEnvironment(current).values);
+      const validated = validateDeploymentEnvironment(values, { profile, strict: true });
+      process.stdout.write(`Deployment environment contract is valid for ${validated.ONECOMPUTER_INSTALLATION_KIND} (${parity.extra.length} preserved extra variable${parity.extra.length === 1 ? "" : "s"}).\n`);
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    }
   } else {
     process.exitCode = 1;
   }
@@ -30,6 +47,8 @@ if (check) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
   const initialized = initializeEnvironment(template, timeZone);
   const merged = mergeEnvironment(template, current, initialized);
+  const values = Object.fromEntries(parseEnvironment(merged.contents).values);
+  validateDeploymentEnvironment(values, { profile, strict: true });
   const temporary = `${destination}.update-${process.pid}`;
   try {
     await writeFile(temporary, merged.contents, { mode: 0o600 });

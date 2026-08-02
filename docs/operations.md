@@ -1,7 +1,11 @@
 # Configuration and operations
 
 The root `compose.yaml` is the reference deployment for a single-host
-development or evaluation environment. It replaces layered infrastructure
+development or evaluation environment. The checked-in deployment environment
+contract in `scripts/deployment-config.mjs` is the source of truth for every
+operator setting; it generates `.env.example`, validates profile-specific
+requirements, and renders least-privilege service environment files for Compose
+or another deployment target. Compose owns only container topology. It replaces layered infrastructure
 snapshots with one validated topology, two managed database volumes, explicit
 network boundaries, health-gated dependencies, and a separate build target for
 the workspace image.
@@ -19,7 +23,7 @@ npm ci
 npm run env:init
 ```
 
-The initializer reads `.env.example`, generates local cryptographic material,
+The initializer renders the canonical contract, generates local cryptographic material,
 writes the result with mode `0600`, and refuses to replace an existing file.
 Use `--force` only when intentionally invalidating all current local sessions,
 policy signatures, approvals, encrypted credentials, and service trust:
@@ -32,6 +36,7 @@ For an alternate path:
 
 ```bash
 npm run env:init -- --file=/absolute/path/to/onecomputer.env
+npm run env:render -- --file=/absolute/path/to/onecomputer.env
 docker compose --env-file /absolute/path/to/onecomputer.env config --quiet
 ```
 
@@ -57,6 +62,23 @@ only missing local secrets, and preserves unknown variables in a review section.
 It refuses duplicate variables and incomplete coupled signing or Web Push key
 groups. Review preserved extra variable names manually; the commands never
 print their values.
+
+`npm run env:render` writes `.runtime-env/<service>.env` with mode `0600`.
+Each service receives only its declared inputs, so do not substitute a global
+`.env` file as a service `env_file`. A non-Compose deployment adapter can
+consume the same projection; it must provide the equivalent internal service
+names or adapt those reference topology values for its platform.
+
+The `npm run compose:*` and `npm run image:workspace` commands render those
+files automatically. Before a direct `docker compose` command, run
+`npm run env:render` for the same environment first. The reference Compose
+stack requires Docker Compose v2.30.0 or later so its `env_file` entries can
+use literal `raw` format for secret-manager values.
+
+Qualification stacks use a separate generated
+`.env.qualification.example` reference and create their secrets and ports at
+run time. They are test-only inputs and are intentionally rejected from a
+production deployment environment.
 
 ## Environment variable groups
 
@@ -275,12 +297,17 @@ Hosted deployments must use the dedicated mutual-TLS administration listener,
 not the gateway's workspace-facing endpoint:
 
 ```bash
-docker compose -f compose.yaml -f compose.hosted.yaml config --quiet
-docker compose -f compose.yaml -f compose.hosted.yaml up -d --wait
+npm run env:check -- --profile=hosted
+npm run env:render -- --profile=hosted
+docker compose config --quiet
+docker compose up -d --wait
 ```
 
-The hosted overlay makes Control use
-`https://litellm-admin-listener:8443`. That listener is bound only to the
+Set `ONECOMPUTER_INSTALLATION_KIND=hosted` and
+`ONECOMPUTER_LITELLM_ADMIN_URL=https://litellm-admin-listener:8443` in the
+deployment environment. `compose.hosted.yaml` remains a compatibility marker
+only; it deliberately does not select a profile or override a security value.
+The listener is bound only to the
 internal `litellm-admin-private` network alias, and its proxy can reach the
 LiteLLM upstream without exposing the listener to workspace traffic. It accepts
 only a client certificate issued to the `onecomputer-control` workload identity.
@@ -305,7 +332,7 @@ the TLS handshake and rejects a certificate for a different workload identity.
 For an upgrade from an older installation, run `npm run env:update`, put three
 independent values in `ONECOMPUTER_LITELLM_CREDENTIAL_SECRET`,
 `ONECOMPUTER_SESSION_SECRET`, and
-`ONECOMPUTER_WORKSPACE_INGRESS_SECRET`, then deploy the hosted overlay. Do not
+`ONECOMPUTER_WORKSPACE_INGRESS_SECRET`, then run the hosted profile preflight. Do not
 rotate the credential-derivation secret merely to rotate sessions or ingress;
 those values are intentionally separate now.
 
@@ -328,7 +355,7 @@ Back these values up through an approved secret manager.
 
 ### Sandbox driver
 
-`SANDBOX_DRIVER=kasm-local` uses the host Docker Engine. Build the workspace
+`ONECOMPUTER_SANDBOX_DRIVER=kasm-local` uses the host Docker Engine. Build the workspace
 image first:
 
 ```bash
@@ -346,7 +373,7 @@ allow additional host memory for Docker and the ONEComputer services. Opt in
 with:
 
 ```text
-KASM_LOCAL_KVM_ENABLED=true
+ONECOMPUTER_KASM_LOCAL_KVM_ENABLED=true
 ```
 
 The local driver accepts this setting for customer-managed installations and
@@ -396,18 +423,18 @@ scheduler; do not place this override on a shared multi-tenant agent.
 For an external Kasm installation, set:
 
 ```text
-SANDBOX_DRIVER=kasm
-KASM_BASE_URL=https://kasm.example.com
-KASM_API_KEY=...
-KASM_API_SECRET=...
-KASM_USER_ID=...
-KASM_IMAGE_ID=...
+ONECOMPUTER_SANDBOX_DRIVER=kasm
+ONECOMPUTER_KASM_BASE_URL=https://kasm.example.com
+ONECOMPUTER_KASM_API_KEY=...
+ONECOMPUTER_KASM_API_SECRET=...
+ONECOMPUTER_KASM_USER_ID=...
+ONECOMPUTER_KASM_IMAGE_ID=...
 ```
 
 Remove the Docker socket mount from the controller when using the remote
 adapter.
 
-`KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for
+`ONECOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for
 the managed runtime readiness marker. The default is 60 seconds and the
 accepted range is 5–300 seconds. Increase it only when measured image/host
 startup needs more time; do not use it to hide an entrypoint, resource, policy,
@@ -492,7 +519,7 @@ Common failures:
 - **Workspace startup times out:** inspect the sandbox container and its
   readiness marker, image architecture, host capacity, signed policy, selected
   agent initialization, and any Cowork device/seccomp preflight before changing
-  `KASM_LOCAL_STARTUP_TIMEOUT_MS`.
+  `ONECOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS`.
 - **LiteLLM stays unhealthy:** inspect its database, master/salt keys, mounted
   YAML, and custom callback import.
 - **Workspace creation fails with image not found:** run

@@ -11,6 +11,8 @@ test-results/
 .env
 .env.*
 !.env.example
+!.env.qualification.example
+.runtime-env/
 
 .artifacts/
 *.log

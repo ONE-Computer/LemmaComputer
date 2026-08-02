@@ -1,25 +1,9 @@
-# Hosted production overlay. Use with:
-# docker compose -f compose.yaml -f compose.hosted.yaml up -d --wait
-# TLS material is injected by the deployment secret manager; it is never
-# generated into or read from a repository file.
-services:
-  db-migrate:
-    environment:
-      ONECOMPUTER_INSTALLATION_KIND: hosted
-
-  workspace-controller:
-    environment:
-      ONECOMPUTER_INSTALLATION_KIND: hosted
-
-  control-api:
-    environment:
-      ONECOMPUTER_INSTALLATION_KIND: hosted
-      LITELLM_ADMIN_URL: https://litellm-admin-listener:8443
-
-  channel-broker:
-    environment:
-      ONECOMPUTER_INSTALLATION_KIND: hosted
-
-  litellm-admin-proxy:
-    environment:
-      ONECOMPUTER_INSTALLATION_KIND: hosted
+# Hosted deployment marker.
+#
+# Deployment policy is selected only by ONECOMPUTER_INSTALLATION_KIND in the
+# canonical environment contract. Before using this file, run:
+#   npm run env:check -- --profile=hosted
+#
+# The base Compose file consumes generated per-service environment projections;
+# this overlay deliberately has no environment values to override.
+services: {}
