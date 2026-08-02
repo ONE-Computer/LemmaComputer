@@ -219,6 +219,11 @@ Built-in connectors cannot be deleted through the administration API.
 
 ### Managed model providers
 
+For the boundary between Control's provider lifecycle, LiteLLM's encrypted
+credential and dynamic route records, workspace virtual keys, governed Auto,
+and MCP grants, see [LiteLLM gateway
+architecture](litellm-gateway-architecture.md).
+
 OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock are configured by an organization administrator in
 **AI control plane → Models & providers**, not in `.env`. Control passes the
 submitted write-only key directly to LiteLLM's private credential API. LiteLLM

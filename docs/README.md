@@ -3,6 +3,10 @@
 - [Architecture and trust model](architecture.md) explains the system
   boundaries, policy projection, credential custody, workspace network,
   governed routing and accounting, and the protected-operation protocol.
+- [LiteLLM gateway architecture](litellm-gateway-architecture.md) traces the
+  private administrator API, workspace data path, provider lifecycle,
+  synthetic Auto routing, MCP/OAuth grants, protected execution, budgets, and
+  failure behavior while separating gateway duties from Control authority.
 - [AI control plane](ai-control-plane.md) maps the administrator product
   surface to provider, routing, pricing, Team, budget, usage-health, spend, and
   emissions authorities.

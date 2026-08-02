@@ -300,6 +300,13 @@ metadata to Control; route mappings consume that inventory rather than
 guessing capabilities from display names. The static YAML contains gateway and
 MCP policy but no managed provider models.
 
+The gateway's administrator, workspace data, browser OAuth, and callback
+interfaces use different credentials and trust boundaries. Control is the
+routing, policy, approval, budget, and accounting authority; LiteLLM is the
+credential custodian and execution point. See [LiteLLM gateway
+architecture](litellm-gateway-architecture.md) for the complete topology,
+state-ownership table, grant lifecycles, sequences, and failure behavior.
+
 **Extension seam:** adding a managed provider requires the contract model
 catalog, Provider settings lifecycle, tenant-safe LiteLLM route projection,
 Control display catalog, bootstrap policy, and possibly a managed-client

@@ -39,12 +39,13 @@ flowchart LR
   Control --> Controller["Workspace controller"]
   Controller --> Sandbox["Kasm sandbox"]
   Control --> Consent["OpenVTC consent service"]
-  Control --> Gateway["LiteLLM gateway"]
-  Gateway -->|"signed route decision + usage admission"| Control
+  Control -->|"private administrator API"| Gateway["LiteLLM gateway"]
+  Gateway -->|"routing, usage, and MCP policy callback"| Control
   Control --> Broker["Channel broker"]
   Scheduler["Scheduler worker"] --> Control
 
-  Sandbox --> Gateway
+  Sandbox --> Loopback["Root-owned AI/MCP broker"]
+  Loopback -->|"scoped virtual key"| Gateway
   Sandbox --> Control
   Sandbox --> Egress["Per-workspace egress proxy"]
   Gateway --> Models["Model providers"]
@@ -76,7 +77,10 @@ credentials rather than provider, gateway-administrator, Microsoft, Control, or
 Docker credentials.
 
 See [Architecture](docs/architecture.md) for trust boundaries, runtime flows,
-network isolation, policy integrity, and the approval protocol.
+network isolation, policy integrity, and the approval protocol. The dedicated
+[LiteLLM gateway architecture](docs/litellm-gateway-architecture.md) separates
+the provider, governed Auto, MCP/OAuth, scoped-grant, budget, and telemetry
+paths and identifies which decisions remain authoritative in Control.
 
 ## Services
 
@@ -150,6 +154,7 @@ configuration lives in `config/` and `integrations/`.
 ## Documentation
 
 - [Architecture and trust model](docs/architecture.md)
+- [LiteLLM gateway architecture](docs/litellm-gateway-architecture.md)
 - [AI control plane](docs/ai-control-plane.md)
 - [Service reference](docs/services.md)
 - [Governed model routing](docs/model-routing.md)

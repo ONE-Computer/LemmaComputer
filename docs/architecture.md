@@ -141,6 +141,28 @@ security surfaces:
 They require authenticated reverse proxies, TLS, and an intentional routing
 design in any networked deployment.
 
+### LiteLLM is an execution boundary, not the governance authority
+
+LiteLLM has four distinct interfaces in this system:
+
+| Interface | Caller | Purpose |
+| --- | --- | --- |
+| Private administrator API | Control | Create or revoke encrypted provider credentials, dynamic tenant model routes, scoped virtual keys, MCP server records, and non-authoritative Team budget projections |
+| Workspace data API | Root-owned loopback broker | Submit governed model requests and discover or call only the MCP tools allowed by the current workspace-and-agent key |
+| Browser OAuth surface | Employee browser through a Control-created connection flow | Complete per-user connector authorization while keeping access and refresh tokens inside LiteLLM |
+| ONEComputer callback | LiteLLM internal request hooks | Ask Control to decide and verify model routes, admit usage, authorize MCP calls, claim protected-operation leases, and record completion evidence |
+
+Control remains authoritative for identity and tool policy, service-class
+routing, approval state, Team budgets, and usage accounting. LiteLLM owns
+provider and OAuth credential custody and performs the authorized upstream
+operation. Its static model list is empty: managed provider deployments are
+tenant-scoped database records created through the private API, and governed
+workspace keys expose only the synthetic `onecomputer-auto` alias.
+
+See [LiteLLM gateway architecture](litellm-gateway-architecture.md) for the
+full provider lifecycle, grant projections, Auto-switching sequence, MCP/OAuth
+flows, state custody, budget defense in depth, and failure matrix.
+
 ## Core flows
 
 ### Authentication and policy assignment
