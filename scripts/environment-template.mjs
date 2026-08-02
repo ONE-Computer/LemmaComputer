@@ -41,6 +41,14 @@ export const coupledEnvironmentGroups = [
     "ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64",
     "ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64",
   ],
+  [
+    "ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64",
+    "ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64",
+  ],
+  [
+    "ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64",
+    "ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64",
+  ],
 ];
 
 export function parseEnvironment(contents) {
@@ -105,6 +113,25 @@ export function initializeEnvironment(template, timeZone) {
   replace(
     "ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64",
     Buffer.from(JSON.stringify(keySet), "utf8").toString("base64"),
+  );
+
+  const telegramGrant = generateKeyPairSync("ed25519");
+  replace(
+    "ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64",
+    telegramGrant.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+  );
+  replace(
+    "ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64",
+    telegramGrant.publicKey.export({ format: "der", type: "spki" }).toString("base64"),
+  );
+  const telegramEnvelope = generateKeyPairSync("rsa", { modulusLength: 3072 });
+  replace(
+    "ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64",
+    telegramEnvelope.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+  );
+  replace(
+    "ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64",
+    telegramEnvelope.publicKey.export({ format: "der", type: "spki" }).toString("base64"),
   );
   return contents;
 }

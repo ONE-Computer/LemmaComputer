@@ -10,6 +10,8 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import {
   OneComputerError,
+  TelegramTokenIntakeEnvelope,
+  TelegramTokenIntakeGrantVerifier,
   channelArtifactDownloadRequestSchema,
   channelRouteSchema,
   channelTurnRequestSchema,
@@ -23,6 +25,7 @@ import {
   chatFilePartSchema,
   saveTelegramChannelConnectionSchema,
   saveTelegramCredentialSchema,
+  telegramTokenIntakeSubmissionSchema,
   telegramChannelConnectionStatusSchema,
   telegramCredentialListSchema,
   telegramCredentialStatusSchema,
@@ -93,6 +96,12 @@ export interface ChannelControlClient {
   ): Promise<ChannelTurnResponse>;
   downloadArtifact(route: ChannelRoute, artifact: ChatArtifact): Promise<Buffer>;
 }
+
+export type TelegramTokenIntakeDependencies = {
+  grantVerifier: TelegramTokenIntakeGrantVerifier;
+  envelope: TelegramTokenIntakeEnvelope;
+  now?: () => Date;
+};
 
 export class HttpChannelControlClient implements ChannelControlClient {
   constructor(
@@ -825,6 +834,7 @@ export class ChannelBrokerService {
     private readonly control: ChannelControlClient,
     private readonly typingRefreshMs = 4_000,
     private readonly compositionWindowMs = 0,
+    private readonly tokenIntake?: TelegramTokenIntakeDependencies,
   ) {}
 
   private async withTypingIndicator<T>(token: string, chatId: string, turn: () => Promise<T>) {
@@ -852,15 +862,23 @@ export class ChannelBrokerService {
     });
   }
 
-  async saveCredential(identity: IdentityContext, raw: unknown, credentialId?: string) {
+  async saveCredential(
+    identity: IdentityContext,
+    raw: unknown,
+    credentialId?: string,
+    options: { allowCreateWithCredentialId?: boolean } = {},
+  ) {
     const input = saveTelegramCredentialSchema.parse(raw);
     const prior = credentialId
       ? await this.store.getOwnedChannelCredential(identity, credentialId)
       : null;
-    if (credentialId && !prior) {
+    if (credentialId && prior && options.allowCreateWithCredentialId) {
+      throw new OneComputerError("TELEGRAM_INTAKE_CREDENTIAL_EXISTS", "The Telegram credential request is no longer valid", 409);
+    }
+    if (credentialId && !prior && !options.allowCreateWithCredentialId) {
       throw new OneComputerError("CHANNEL_CREDENTIAL_NOT_FOUND", "The channel credential was not found", 404);
     }
-    const id = prior?.id ?? randomUUID();
+    const id = prior?.id ?? credentialId ?? randomUUID();
     const bot = await this.telegram.validate(input.botToken);
     const saved = await this.store.saveChannelCredential(identity, {
       id,
@@ -898,6 +916,39 @@ export class ChannelBrokerService {
       workspaceId: linked?.workspaceId ?? null,
       connectionId: linked?.connectionId ?? null,
     });
+  }
+
+  async redeemTelegramTokenIntake(raw: unknown) {
+    if (!this.tokenIntake) {
+      throw new OneComputerError("TELEGRAM_INTAKE_NOT_CONFIGURED", "Telegram credential intake is unavailable", 503, true);
+    }
+    const submission = telegramTokenIntakeSubmissionSchema.parse(raw);
+    const now = this.tokenIntake.now?.() ?? new Date();
+    const grant = this.tokenIntake.grantVerifier.verify(submission.grant, now);
+    const consumed = await this.store.consumeTelegramTokenIntakeGrant({
+      grantId: grant.grantId,
+      tenantId: grant.tenantId,
+      subjectId: grant.subjectId,
+      action: grant.action,
+      credentialId: grant.credentialId,
+      idempotencyKey: grant.idempotencyKey,
+      expiresAt: new Date(grant.expiresAt * 1_000),
+    });
+    if (!consumed) {
+      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_REPLAYED", "The Telegram credential request is no longer valid", 409);
+    }
+    const botToken = this.tokenIntake.envelope.open(submission.envelope, grant.grantId);
+    const identity: IdentityContext = {
+      tenantId: grant.tenantId,
+      subjectId: grant.subjectId,
+      audience: "onecomputer-control",
+    };
+    return this.saveCredential(
+      identity,
+      { botToken },
+      grant.credentialId,
+      { allowCreateWithCredentialId: grant.action === "create" },
+    );
   }
 
   async deleteCredential(identity: IdentityContext, credentialId: string) {

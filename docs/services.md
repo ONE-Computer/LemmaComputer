@@ -389,6 +389,23 @@ agent turn.
 The broker has a dedicated egress network; workspaces never receive the bot
 token or direct Telegram reachability.
 
+Telegram credential setup is broker-only. Control authenticates the user and
+issues a signed, single-use grant bound to the tenant, user, create-or-rotate
+action, credential ID, idempotency key, and a 30–600 second expiry. The browser
+encrypts the token to the broker's public key and sends the resulting envelope
+through the Web edge directly to the broker. Control, the Web service, and the
+workspace ingress do not receive a usable bot token; Control receives only the
+safe credential status returned after broker validation.
+
+The grant-signing private key is injected only into Control; the envelope
+decryption private key is injected only into the broker. Existing encrypted
+credentials remain usable. Before upgrading an existing deployment, run
+`npm run env:update`, run the one-shot database migration, and deploy the
+services together. Hosted deployments reject the deprecated raw-token routes
+by default. Customer-managed deployments retain `legacy` raw input only as a
+measured migration bridge; set `ONECOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE=reject`
+after affected API clients have moved to the grant flow.
+
 **Extension seam:** implement a provider client and credential envelope inside
 the broker, add owned connection schemas and migrations, require Control route
 validation for every inbound identity, and persist provider delivery IDs for

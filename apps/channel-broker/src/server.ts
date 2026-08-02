@@ -2,6 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
 import {
   OneComputerError,
+  TelegramTokenIntakeEnvelope,
+  TelegramTokenIntakeGrantVerifier,
   channelBrokerCredentialOwnerSchema,
   channelBrokerOwnerSchema,
   channelBrokerSaveConnectionSchema,
@@ -24,6 +26,13 @@ const envSchema = z.object({
   CHANNEL_CREDENTIAL_SECRET: z.string().min(32),
   CONTROL_URL: z.string().url().default("http://127.0.0.1:4100"),
   DATABASE_URL: z.string().min(1),
+  ONECOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
+  TELEGRAM_RAW_TOKEN_INPUT_MODE: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.enum(["legacy", "reject"]).optional(),
+  ),
+  TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64: z.string().min(32).optional(),
+  TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64: z.string().min(64).optional(),
   POLL_INTERVAL_MS: z.coerce.number().int().min(250).max(60_000).default(1_000),
   COMPOSITION_WINDOW_MS: z.coerce.number().int().min(0).max(5_000).default(1_500),
 });
@@ -36,7 +45,12 @@ const sameSecret = (received: string | string[] | undefined, expected: string) =
   return left.length === right.length && timingSafeEqual(left, right);
 };
 
-export function createChannelBrokerServer(service: ChannelBrokerService, internalToken: string) {
+export function createChannelBrokerServer(
+  service: ChannelBrokerService,
+  internalToken: string,
+  options: { rawTokenInputMode?: "legacy" | "reject" } = {},
+) {
+  const rawTokenInputMode = options.rawTokenInputMode ?? "legacy";
   const app = Fastify({
     logger: {
       redact: [
@@ -49,7 +63,9 @@ export function createChannelBrokerServer(service: ChannelBrokerService, interna
   });
 
   app.addHook("onRequest", async (request, reply) => {
-    if (request.url === "/healthz") return;
+    const publicTelegramIntake = request.url === "/public/v1/telegram/intake"
+      || request.url.startsWith("/public/v1/telegram/intake?");
+    if (request.url === "/healthz" || publicTelegramIntake) return;
     if (!sameSecret(request.headers["x-onecomputer-channel-token"], internalToken)) {
       return reply.code(401).send({
         error: {
@@ -63,15 +79,24 @@ export function createChannelBrokerServer(service: ChannelBrokerService, interna
   });
 
   app.get("/healthz", async () => ({ status: "ok" }));
+  app.post("/public/v1/telegram/intake", async (request, reply) => (
+    reply.code(201).send(await service.redeemTelegramTokenIntake(request.body ?? {}))
+  ));
   app.post("/internal/v1/credentials", async (request) => {
     const { identity } = channelBrokerOwnerSchema.parse(request.body ?? {});
     return service.listCredentials(identityContextSchema.parse(identity));
   });
   app.post("/internal/v1/credentials/telegram", async (request) => {
+    if (rawTokenInputMode === "reject") {
+      throw new OneComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
+    }
     const { identity, botToken } = channelBrokerSaveCredentialSchema.parse(request.body ?? {});
     return service.saveCredential(identityContextSchema.parse(identity), { botToken });
   });
   app.put("/internal/v1/credentials/telegram", async (request) => {
+    if (rawTokenInputMode === "reject") {
+      throw new OneComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
+    }
     const { identity, credentialId, botToken } = channelBrokerSaveCredentialSchema.parse(request.body ?? {});
     if (!credentialId) throw new OneComputerError("CHANNEL_CREDENTIAL_ID_REQUIRED", "Credential ID is required", 400);
     return service.saveCredential(identityContextSchema.parse(identity), { botToken }, credentialId);
@@ -120,6 +145,14 @@ export function createChannelBrokerServer(service: ChannelBrokerService, interna
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   const env = envSchema.parse(process.env);
+  const tokenIntakeValues = [env.TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64, env.TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64];
+  if (tokenIntakeValues.some(Boolean) && !tokenIntakeValues.every(Boolean)) {
+    throw new Error("Telegram intake grant verification and encryption keys must be configured together");
+  }
+  if (env.ONECOMPUTER_INSTALLATION_KIND === "hosted" && !tokenIntakeValues.every(Boolean)) {
+    throw new Error("Hosted deployments require broker-only Telegram credential intake keys");
+  }
+  const rawTokenInputMode = env.TELEGRAM_RAW_TOKEN_INPUT_MODE ?? (env.ONECOMPUTER_INSTALLATION_KIND === "hosted" ? "reject" : "legacy");
   const store = PostgresChannelStore.fromConnectionString(env.DATABASE_URL);
   const service = new ChannelBrokerService(
     store,
@@ -128,8 +161,14 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     new HttpChannelControlClient(env.CONTROL_URL, env.CHANNEL_BROKER_INTERNAL_TOKEN),
     4_000,
     env.COMPOSITION_WINDOW_MS,
+    env.TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64 && env.TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64
+      ? {
+          grantVerifier: new TelegramTokenIntakeGrantVerifier(env.TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64),
+          envelope: new TelegramTokenIntakeEnvelope(env.TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64),
+        }
+      : undefined,
   );
-  const app = createChannelBrokerServer(service, env.CHANNEL_BROKER_INTERNAL_TOKEN);
+  const app = createChannelBrokerServer(service, env.CHANNEL_BROKER_INTERNAL_TOKEN, { rawTokenInputMode });
   let polling = false;
   const poll = async () => {
     if (polling) return;

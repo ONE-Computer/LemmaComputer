@@ -1,4 +1,14 @@
-import { createHash } from "node:crypto";
+import {
+  constants,
+  createDecipheriv,
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  privateDecrypt,
+  randomUUID,
+  sign as signBytes,
+  verify as verifyBytes,
+} from "node:crypto";
 import { z } from "zod";
 
 export const workspaceStates = [
@@ -1109,8 +1119,12 @@ export const sendChatTurnSchema = z.object({
 
 export const telegramConnectionStateSchema = z.enum(["connected", "not_configured"]);
 export const telegramCredentialKindSchema = z.literal("telegram_bot_token");
+export const telegramBotTokenSchema = z.string().trim().regex(
+  /^\d{1,20}:[A-Za-z0-9_-]{20,236}$/,
+  "A Telegram bot token is required",
+);
 export const saveTelegramCredentialSchema = z.object({
-  botToken: z.string().trim().min(20).max(256),
+  botToken: telegramBotTokenSchema,
 }).strict();
 export const telegramCredentialStatusSchema = z.object({
   id: z.uuid(),
@@ -1165,6 +1179,218 @@ export const channelBrokerSaveCredentialSchema = saveTelegramCredentialSchema.ex
   identity: channelBrokerIdentitySchema,
   credentialId: z.uuid().optional(),
 }).strict();
+
+export const telegramTokenIntakeActionSchema = z.enum(["create", "rotate"]);
+export type TelegramTokenIntakeAction = z.infer<typeof telegramTokenIntakeActionSchema>;
+export const telegramTokenIntakePath = "/api/channel-intake/v1/telegram";
+
+const telegramTokenIntakeIdempotencyKeySchema = z.string()
+  .trim()
+  .min(16)
+  .max(256)
+  .regex(/^[A-Za-z0-9._~-]+$/, "A valid idempotency key is required");
+
+export const telegramTokenIntakeGrantPayloadSchema = z.object({
+  version: z.literal(1),
+  purpose: z.literal("onecomputer.telegram-token-intake"),
+  grantId: z.uuid(),
+  tenantId: z.string().trim().min(1).max(200),
+  subjectId: z.string().trim().min(1).max(200),
+  action: telegramTokenIntakeActionSchema,
+  credentialId: z.uuid(),
+  idempotencyKey: telegramTokenIntakeIdempotencyKeySchema,
+  issuedAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().positive(),
+}).strict().refine((value) => value.expiresAt > value.issuedAt, "The Telegram intake grant must expire after issuance");
+export type TelegramTokenIntakeGrantPayload = z.infer<typeof telegramTokenIntakeGrantPayloadSchema>;
+
+export const telegramTokenIntakeGrantSchema = z.object({
+  grant: z.string().regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/),
+  grantId: z.uuid(),
+  credentialId: z.uuid(),
+  action: telegramTokenIntakeActionSchema,
+  expiresAt: z.iso.datetime(),
+  intakeUrl: z.literal(telegramTokenIntakePath),
+  encryption: z.object({
+    algorithm: z.literal("RSA-OAEP-256+A256GCM"),
+    keyId: z.literal("telegram-intake-rsa-oaep-256-v1"),
+    publicKeySpkiBase64: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).min(256).max(4_096),
+  }).strict(),
+}).strict();
+export type TelegramTokenIntakeGrant = z.infer<typeof telegramTokenIntakeGrantSchema>;
+
+export const telegramTokenIntakeEnvelopeSchema = z.object({
+  version: z.literal(1),
+  algorithm: z.literal("RSA-OAEP-256+A256GCM"),
+  keyId: z.literal("telegram-intake-rsa-oaep-256-v1"),
+  encryptedKey: z.string().regex(/^[A-Za-z0-9_-]+$/).min(300).max(1_024),
+  iv: z.string().regex(/^[A-Za-z0-9_-]+$/).min(16).max(32),
+  ciphertext: z.string().regex(/^[A-Za-z0-9_-]+$/).min(24).max(1_024),
+}).strict();
+export type TelegramTokenIntakeEnvelopeValue = z.infer<typeof telegramTokenIntakeEnvelopeSchema>;
+
+export const telegramTokenIntakeSubmissionSchema = z.object({
+  grant: z.string().regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/),
+  envelope: telegramTokenIntakeEnvelopeSchema,
+}).strict();
+
+const base64urlJson = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+
+const parseBase64urlJson = (value: string, code: string) => {
+  try {
+    return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
+  } catch {
+    throw new OneComputerError(code, "The Telegram intake grant is invalid", 401);
+  }
+};
+
+const telegramTokenIntakeSigningInput = (header: string, payload: string) => Buffer.from(`${header}.${payload}`, "utf8");
+
+export class TelegramTokenIntakeGrantIssuer {
+  private readonly privateKey: ReturnType<typeof createPrivateKey>;
+
+  constructor(privateKeyPkcs8Base64: string) {
+    try {
+      this.privateKey = createPrivateKey({
+        key: Buffer.from(privateKeyPkcs8Base64, "base64"),
+        format: "der",
+        type: "pkcs8",
+      });
+    } catch {
+      throw new Error("Telegram intake signing private key is invalid");
+    }
+    if (this.privateKey.asymmetricKeyType !== "ed25519") {
+      throw new Error("Telegram intake signing private key must use Ed25519");
+    }
+  }
+
+  issue(input: {
+    identity: IdentityContext;
+    action: TelegramTokenIntakeAction;
+    credentialId: string;
+    idempotencyKey: string;
+    issuedAt?: Date;
+    ttlSeconds?: number;
+  }) {
+    const issuedAt = input.issuedAt ?? new Date();
+    const ttlSeconds = input.ttlSeconds ?? 300;
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 30 || ttlSeconds > 600) {
+      throw new Error("Telegram intake grants must live for between 30 and 600 seconds");
+    }
+    const payload = telegramTokenIntakeGrantPayloadSchema.parse({
+      version: 1,
+      purpose: "onecomputer.telegram-token-intake",
+      grantId: randomUUID(),
+      tenantId: input.identity.tenantId,
+      subjectId: input.identity.subjectId,
+      action: input.action,
+      credentialId: input.credentialId,
+      idempotencyKey: input.idempotencyKey,
+      issuedAt: Math.floor(issuedAt.getTime() / 1_000),
+      expiresAt: Math.floor(issuedAt.getTime() / 1_000) + ttlSeconds,
+    });
+    const header = base64urlJson({ alg: "EdDSA", typ: "oc-telegram-intake-grant", version: 1 });
+    const body = base64urlJson(payload);
+    const signature = signBytes(null, telegramTokenIntakeSigningInput(header, body), this.privateKey).toString("base64url");
+    return {
+      grantId: payload.grantId,
+      token: `${header}.${body}.${signature}`,
+      expiresAt: new Date(payload.expiresAt * 1_000),
+    };
+  }
+}
+
+export class TelegramTokenIntakeGrantVerifier {
+  private readonly publicKey: ReturnType<typeof createPublicKey>;
+
+  constructor(publicKeySpkiBase64: string) {
+    try {
+      this.publicKey = createPublicKey({
+        key: Buffer.from(publicKeySpkiBase64, "base64"),
+        format: "der",
+        type: "spki",
+      });
+    } catch {
+      throw new Error("Telegram intake signing public key is invalid");
+    }
+    if (this.publicKey.asymmetricKeyType !== "ed25519") {
+      throw new Error("Telegram intake signing public key must use Ed25519");
+    }
+  }
+
+  verify(token: string, now = new Date()) {
+    const [header, body, signature, extra] = token.split(".");
+    if (!header || !body || !signature || extra) {
+      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+    }
+    const parsedHeader = parseBase64urlJson(header, "TELEGRAM_INTAKE_GRANT_INVALID");
+    if (
+      !parsedHeader || typeof parsedHeader !== "object"
+      || (parsedHeader as Record<string, unknown>).alg !== "EdDSA"
+      || (parsedHeader as Record<string, unknown>).typ !== "oc-telegram-intake-grant"
+      || (parsedHeader as Record<string, unknown>).version !== 1
+    ) {
+      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+    }
+    const received = Buffer.from(signature, "base64url");
+    const expectedLength = 64;
+    if (received.length !== expectedLength || !verifyBytes(null, telegramTokenIntakeSigningInput(header, body), this.publicKey, received)) {
+      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+    }
+    const payload = telegramTokenIntakeGrantPayloadSchema.safeParse(parseBase64urlJson(body, "TELEGRAM_INTAKE_GRANT_INVALID"));
+    if (!payload.success) {
+      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+    }
+    if (payload.data.expiresAt * 1_000 <= now.getTime()) {
+      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_EXPIRED", "The Telegram intake grant has expired", 401);
+    }
+    if (payload.data.issuedAt * 1_000 > now.getTime() + 30_000) {
+      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+    }
+    return payload.data;
+  }
+}
+
+export class TelegramTokenIntakeEnvelope {
+  private readonly privateKey: ReturnType<typeof createPrivateKey>;
+
+  constructor(privateKeyPkcs8Base64: string) {
+    try {
+      this.privateKey = createPrivateKey({
+        key: Buffer.from(privateKeyPkcs8Base64, "base64"),
+        format: "der",
+        type: "pkcs8",
+      });
+    } catch {
+      throw new Error("Telegram intake encryption private key is invalid");
+    }
+    if (this.privateKey.asymmetricKeyType !== "rsa") {
+      throw new Error("Telegram intake encryption private key must use RSA");
+    }
+  }
+
+  open(raw: unknown, grantId: string) {
+    const envelope = telegramTokenIntakeEnvelopeSchema.parse(raw);
+    try {
+      const contentKey = privateDecrypt({
+        key: this.privateKey,
+        padding: constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: "sha256",
+      }, Buffer.from(envelope.encryptedKey, "base64url"));
+      if (contentKey.length !== 32) throw new Error("invalid content key length");
+      const combined = Buffer.from(envelope.ciphertext, "base64url");
+      if (combined.length <= 16) throw new Error("missing authentication tag");
+      const decipher = createDecipheriv("aes-256-gcm", contentKey, Buffer.from(envelope.iv, "base64url"));
+      decipher.setAAD(Buffer.from(`onecomputer.telegram-token-intake.v1:${grantId}`, "utf8"));
+      decipher.setAuthTag(combined.subarray(-16));
+      const token = Buffer.concat([decipher.update(combined.subarray(0, -16)), decipher.final()]).toString("utf8");
+      return telegramBotTokenSchema.parse(token);
+    } catch (error) {
+      if (error instanceof OneComputerError) throw error;
+      throw new OneComputerError("TELEGRAM_INTAKE_ENVELOPE_INVALID", "The Telegram token envelope is invalid", 400);
+    }
+  }
+}
 export const channelBrokerOwnerSchema = z.object({
   identity: channelBrokerIdentitySchema,
   workspaceId: z.uuid().optional(),

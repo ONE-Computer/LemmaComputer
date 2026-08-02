@@ -9,6 +9,9 @@ import { controlRequestTimeout } from "./proxy-timeout.mjs";
 const host = process.env.WEB_HOST ?? "127.0.0.1";
 const port = Number(process.env.WEB_PORT ?? 4173);
 const controlUrl = new URL(process.env.ONECOMPUTER_CONTROL_URL ?? "http://127.0.0.1:4100");
+const channelBrokerIntakeUrl = process.env.ONECOMPUTER_CHANNEL_BROKER_INTAKE_URL
+  ? new URL(process.env.ONECOMPUTER_CHANNEL_BROKER_INTAKE_URL)
+  : null;
 const proxyToken = process.env.ONECOMPUTER_WEB_PROXY_TOKEN;
 const distribution = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "dist");
 
@@ -125,6 +128,56 @@ const proxy = (request, response, requestUrl) => {
   request.pipe(upstream);
 };
 
+const proxyTelegramIntake = (request, response, requestUrl) => {
+  if (!channelBrokerIntakeUrl) {
+    response.writeHead(503, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify({
+      error: {
+        code: "TELEGRAM_INTAKE_UNAVAILABLE",
+        message: "Telegram credential intake is unavailable",
+        retryable: true,
+      },
+    }));
+    return;
+  }
+  const upstreamUrl = new URL(`${requestUrl.pathname.slice("/api/channel-intake".length)}${requestUrl.search}`, channelBrokerIntakeUrl);
+  const transport = upstreamUrl.protocol === "https:" ? https : http;
+  // This endpoint carries an envelope that is self-authorized by the signed
+  // grant. Do not relay browser cookies, bearer tokens, or Control's proxy
+  // credential to the broker.
+  const headers = {
+    host: upstreamUrl.host,
+    ...(typeof request.headers["content-type"] === "string"
+      ? { "content-type": request.headers["content-type"] }
+      : {}),
+    ...(typeof request.headers["content-length"] === "string"
+      ? { "content-length": request.headers["content-length"] }
+      : {}),
+  };
+  const upstream = transport.request(upstreamUrl, { method: request.method, headers }, (upstreamResponse) => {
+    response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+    upstreamResponse.pipe(response);
+  });
+  upstream.setTimeout(controlRequestTimeout(request.method, "/v1/credentials/telegram/intake"), () => {
+    upstream.destroy(new Error("Telegram broker intake timeout"));
+  });
+  upstream.on("error", () => {
+    if (response.headersSent) {
+      response.destroy();
+      return;
+    }
+    response.writeHead(502, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify({
+      error: {
+        code: "TELEGRAM_INTAKE_UNAVAILABLE",
+        message: "Telegram credential intake is unavailable",
+        retryable: true,
+      },
+    }));
+  });
+  request.pipe(upstream);
+};
+
 const server = http.createServer(async (request, response) => {
   const requestUrl = new URL(request.url ?? "/", "http://onecomputer.invalid");
   if (requestUrl.pathname === "/healthz") {
@@ -133,6 +186,20 @@ const server = http.createServer(async (request, response) => {
       "cache-control": "no-store",
     });
     response.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+  if (requestUrl.pathname === "/api/channel-intake/v1/telegram") {
+    if (request.method !== "POST") {
+      response.writeHead(405, { allow: "POST" });
+      response.end();
+      return;
+    }
+    proxyTelegramIntake(request, response, requestUrl);
+    return;
+  }
+  if (requestUrl.pathname.startsWith("/api/channel-intake/")) {
+    response.writeHead(404, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify({ error: { code: "NOT_FOUND", message: "Not found", retryable: false } }));
     return;
   }
   if (requestUrl.pathname === "/api" || requestUrl.pathname.startsWith("/api/")) {

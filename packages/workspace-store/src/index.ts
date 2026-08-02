@@ -77,6 +77,16 @@ export type ChannelCredentialRecord = {
   updatedAt: Date;
 };
 
+export type TelegramTokenIntakeGrantUse = {
+  grantId: string;
+  tenantId: string;
+  subjectId: string;
+  action: "create" | "rotate";
+  credentialId: string;
+  idempotencyKey: string;
+  expiresAt: Date;
+};
+
 export type ChannelPendingResponse = {
   connectionId: string;
   updateId: string;
@@ -96,6 +106,7 @@ export interface ChannelStore {
   getOwnedChannelCredential(identity: IdentityContext, credentialId: string): Promise<ChannelCredentialRecord | null>;
   saveChannelCredential(identity: IdentityContext, input: Omit<ChannelCredentialRecord, "tenantId" | "subjectId" | "createdAt" | "updatedAt">): Promise<ChannelCredentialRecord>;
   deleteChannelCredential(identity: IdentityContext, credentialId: string): Promise<boolean>;
+  consumeTelegramTokenIntakeGrant(input: TelegramTokenIntakeGrantUse): Promise<boolean>;
   getOwnedChannelConnection(identity: IdentityContext, adapter: "telegram", workspaceId: string): Promise<ChannelConnectionRecord | null>;
   saveChannelConnection(identity: IdentityContext, input: {
     id: string;
@@ -942,6 +953,28 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     const result = await this.pool.query(
       "DELETE FROM channel_credentials WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
       [credentialId, identity.tenantId, identity.subjectId],
+    );
+    return Boolean(result.rowCount);
+  }
+
+  async consumeTelegramTokenIntakeGrant(input: TelegramTokenIntakeGrantUse) {
+    const result = await this.pool.query(
+      `INSERT INTO telegram_token_intake_grants (
+         grant_id,tenant_id,subject_id,action,credential_id,idempotency_key,expires_at,consumed_at
+       )
+       SELECT $1,$2,$3,$4,$5,$6,$7,now()
+       WHERE $7::timestamptz > now()
+       ON CONFLICT (grant_id) DO NOTHING
+       RETURNING grant_id`,
+      [
+        input.grantId,
+        input.tenantId,
+        input.subjectId,
+        input.action,
+        input.credentialId,
+        input.idempotencyKey,
+        input.expiresAt,
+      ],
     );
     return Boolean(result.rowCount);
   }
@@ -1868,6 +1901,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   private records = new Map<string, WorkspaceRecord>();
   private channelConnections = new Map<string, ChannelConnectionRecord>();
   private channelCredentials = new Map<string, ChannelCredentialRecord>();
+  private telegramTokenIntakeGrants = new Map<string, TelegramTokenIntakeGrantUse>();
   private channelUpdates = new Map<string, {
     senderId: string;
     state: "reserved" | "dispatched" | "delivered" | "rejected" | "failed";
@@ -2070,6 +2104,12 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
         for (const session of this.channelSessions.keys()) if (session.startsWith(`${connection.id}:`)) this.channelSessions.delete(session);
       }
     }
+    return true;
+  }
+
+  async consumeTelegramTokenIntakeGrant(input: TelegramTokenIntakeGrantUse) {
+    if (input.expiresAt.getTime() <= Date.now() || this.telegramTokenIntakeGrants.has(input.grantId)) return false;
+    this.telegramTokenIntakeGrants.set(input.grantId, { ...input });
     return true;
   }
 

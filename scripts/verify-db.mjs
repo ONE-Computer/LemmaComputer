@@ -68,6 +68,7 @@ try {
     "tests/provider-settings-postgres.test.ts",
     "tests/spend-cost-coverage-postgres.test.ts",
     "tests/workspace-settings-postgres.test.ts",
+    "tests/telegram-token-intake-postgres.test.ts",
     "tests/migration-ledger-baseline-postgres.test.ts",
   ], {
     env: {
@@ -82,6 +83,7 @@ try {
       PROVIDER_SETTINGS_TEST_DATABASE_URL: postgresUrl,
       SPEND_COVERAGE_TEST_DATABASE_URL: postgresUrl,
       WORKSPACE_SETTINGS_TEST_DATABASE_URL: postgresUrl,
+      TELEGRAM_INTAKE_TEST_DATABASE_URL: postgresUrl,
       MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL: migrationLedgerLegacyUrl,
       MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL: migrationLedgerFreshUrl,
     },
@@ -120,7 +122,7 @@ try {
 
   sql("postgres", "UPDATE onecomputer_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='028'");
   if (!migrate("postgres", false).includes("historical migrations are immutable")) throw new Error("checksum drift did not fail closed");
-  process.stdout.write("Database gate passed: fresh, no-op, concurrent, legacy baseline, mismatch, checksum, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, and Companion push cases.\n");
+  process.stdout.write("Database gate passed: fresh, no-op, concurrent, legacy baseline, mismatch, checksum, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
 } finally {
   exec("docker", ["rm", "-f", container]);
 }
