@@ -22,6 +22,13 @@ coverage_percent = tokens_with_configured_grid / all_text_tokens × 100
 
 Text tokens are the ledger's non-diagnostic `input_uncached_token`, `cache_read_token`, `cache_write_token`, `output_token`, and `reasoning_token` quantities. Image, audio, request, character, and duration units are excluded from this version.
 
+Administrators choose the estimated serving grid under **AI control plane →
+Models & providers**. Overview shows the result only when at least one
+configured provider has a supported grid selection; its details dialog exposes
+the method version, energy factor, regional factors, coverage, and source
+links. Changing the selection changes the accounting assumption only. It does
+not route traffic or assert a provider's physical serving location.
+
 ## Factors
 
 | Estimated serving grid | Grid factor | Result per million text tokens |

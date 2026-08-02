@@ -13,6 +13,19 @@ Users choose one of four aliases:
 
 Auto, Lite, Balanced, and Pro are product contracts, not provider model names. Administrators can replace the deployment behind a class without changing user workflows.
 
+The workspace **Default model mode** is the starting choice for new
+conversations. Chat can override it per conversation without changing the
+workspace configuration. The Web client persists that override in
+browser-local storage keyed by workspace, agent, and conversation, restores it
+when returning to the same conversation, and falls back to Auto if the saved
+value is unsupported. Clearing site data or using another browser starts with
+the workspace default again.
+
+The default and override affect `requestedServiceClass`; they never expose or
+select a provider model directly. An explicit Lite, Balanced, or Pro request
+skips Auto classification but remains subject to the full eligibility checks
+below.
+
 ## Decision flow
 
 1. LiteLLM accepts only the synthetic `onecomputer-auto` transport alias.
@@ -71,13 +84,30 @@ The kill switch appends a disabled rollout that returns execution to the configu
 
 ## Operator provisioning and qualification
 
-Before creating a Team policy, provision:
+Use **AI control plane** in this order:
+
+1. In **Models & providers**, configure and test provider credentials and
+   choose approved models. Control uses the provider configuration's reviewed
+   capability inventory when composing routes.
+2. In **Pricing**, create complete immutable rate cards for every deployment
+   expected to carry traffic.
+3. In **Model routes**, publish an immutable mapping that assigns eligible
+   deployments to Lite, Balanced, and Pro.
+4. In **Teams & budgets**, assign default spending Teams and configure budgets.
+5. Return to **Model routes** to create each Team policy and start its rollout
+   in shadow mode.
+
+Before creating a Team policy, the resulting state must include:
 
 - an immutable mapping version;
 - approved, evaluated deployments with capability and residency metadata; and
 - effective tenant rate cards for every deployment expected to carry traffic.
 
 Both deployment profiles use the same callback, Control APIs, schema, and tenant-scoped records. Deployment-specific endpoints and secrets remain configuration.
+
+Saving a provider credential does not automatically publish a mapping, create
+a price, or enable production routing. Those remain separate versioned
+administrator decisions.
 
 Qualify the pinned LiteLLM image and real callback hook with:
 

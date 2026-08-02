@@ -16,6 +16,16 @@ centrally-built chat interface:
   signed approval for individual capabilities. Critical Microsoft 365 actions
   are bound to their exact arguments, approved out of band, and executed once
   with a short-lived lease.
+- **Governed model choice and spend.** Employees choose stable Auto, Lite,
+  Balanced, or Pro service classes instead of provider model names. The
+  administrator AI control plane manages provider deployments, immutable
+  pricing, Team allocation and budgets, routing rollout evidence, usage-data
+  health, and ledger-backed spend reporting without storing prompts or hidden
+  reasoning.
+
+The same tenant-scoped codebase supports `customer-managed` single-tenant and
+ONEComputer-operated `hosted` deployments. Deployment profiles change
+configuration and infrastructure, not the product schema or security model.
 
 ## Architecture
 
@@ -30,6 +40,7 @@ flowchart LR
   Controller --> Sandbox["Kasm sandbox"]
   Control --> Consent["OpenVTC consent service"]
   Control --> Gateway["LiteLLM gateway"]
+  Gateway -->|"signed route decision + usage admission"| Control
   Control --> Broker["Channel broker"]
   Scheduler["Scheduler worker"] --> Control
 
@@ -49,9 +60,12 @@ The system separates four concerns:
 1. **Experience plane:** the Web application, companion approval experience,
    and managed sandbox applications.
 2. **Control plane:** identity, policy, workspace lifecycle, scoped grant
-   issuance, operation state, audit receipts, and channel routing.
-3. **Data plane:** LiteLLM routes model and MCP traffic using revocable
-   workspace-and-agent credentials; egress proxies enforce signed domain rules.
+   issuance, model-routing decisions, Team budgets, immutable usage accounting,
+   operation state, audit receipts, and channel routing.
+3. **Data plane:** LiteLLM accepts the governed `onecomputer-auto` transport
+   alias, executes only the concrete deployment authorized by Control, and
+   routes MCP traffic using revocable workspace-and-agent credentials; egress
+   proxies enforce signed domain rules.
 4. **Consent plane:** the isolated OpenVTC service signs requests and verifies
    enrollment and decision proofs. Control owns the operation state machine and
    one-time execution lease.
@@ -71,13 +85,14 @@ network isolation, policy integrity, and the approval protocol.
 | `workspace-ingress` | Serves the product origin and exchanges short-lived workspace launch links for scoped sessions | `127.0.0.1:4174` |
 | `web` | Static React application and authenticated reverse proxy to Control | Private |
 | `control-api` | Identity, policy, lifecycle orchestration, grants, governance, audit, and connection APIs | Private |
+| `db-migrate` | One-shot, checksummed Control-database migration job that must complete before Control starts | Private/job |
 | `workspace-controller` | Provisions Kasm workspaces through local Docker or the Kasm Developer API | Private |
 | `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, and MCP dispatch | `127.0.0.1:4000` |
 | `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | OAuth bridge on `127.0.0.1:4311` |
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |
 | `scheduler-worker` | Claims due schedules and dispatches them through Control without decrypting prompts | Private |
-| `postgres` | ONEComputer identity, policy, workspace, operation, and audit state | Private |
+| `postgres` | ONEComputer identity, policy, workspace, routing, usage-ledger, budget, operation, and audit state | Private |
 | `litellm-postgres` | Gateway configuration, virtual keys, and encrypted OAuth state | Private |
 | workspace sidecars | Credential brokers, Kasm relay, and default-deny egress enforcement created per workspace | Dynamic/private |
 
@@ -100,9 +115,11 @@ npm run compose:config
 npm run compose:up
 ```
 
-After the stack is healthy, sign in as an administrator and use **Settings →
-Provider settings** to add and test each write-only model-provider key. Do not
-put OpenAI or Anthropic keys in `.env`.
+After the stack is healthy, sign in as an administrator and open **AI control
+plane → Models & providers** to add and test each write-only model-provider
+key. Then configure Pricing, publish a Model routes mapping, and set up a Team
+rollout before expecting governed Auto, Lite, Balanced, or Pro requests to run.
+Do not put provider keys in `.env`.
 
 Before editing `.env`, configure the two exact Web redirect URIs and delegated
 Graph permissions in Entra. The
@@ -133,6 +150,7 @@ configuration lives in `config/` and `integrations/`.
 ## Documentation
 
 - [Architecture and trust model](docs/architecture.md)
+- [AI control plane](docs/ai-control-plane.md)
 - [Service reference](docs/services.md)
 - [Governed model routing](docs/model-routing.md)
 - [Local deployment and Entra setup](docs/local-deployment.md)

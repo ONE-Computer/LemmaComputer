@@ -12,6 +12,7 @@ as host bindings.
 | Web | `apps/web` | `4173` | Stateless |
 | Control API | `apps/control-api` | `4100` | Control PostgreSQL |
 | Workspace controller | `apps/workspace-controller` | `4101` | Sandbox provider plus Control records |
+| Database migration job | `apps/control-api/src/migrate.ts` | None; one-shot | Control PostgreSQL migration ledger |
 | Channel broker | `apps/channel-broker` | `4102` | Control PostgreSQL |
 | Scheduler worker | `apps/scheduler-worker` | `4103` | Control PostgreSQL leases; no prompt access |
 | Egress proxy | `apps/egress-proxy` | `3128` | Stateless; signed launch projection |
@@ -90,6 +91,13 @@ are:
 - signed effective-policy bundle issuance;
 - workspace lifecycle and readiness;
 - scoped LiteLLM grant creation and revocation;
+- managed provider model inventory and capability projection;
+- Team membership, default spend allocation, budgets, reservations, overrides,
+  and projection reconciliation;
+- immutable rate cards, governed routing mappings and policies, shadow reviews,
+  rollout modes, decisions, observations, and deployment-health evidence;
+- AI usage admission, normalized completion accounting, corrections,
+  reconciliation, spend reporting, exports, and data-health baselines;
 - Microsoft 365 OAuth connection orchestration;
 - MCP per-call authorization;
 - governed-operation creation, consent, execution leases, and receipts;
@@ -111,21 +119,31 @@ The notable unauthenticated or separately authenticated endpoints are:
 Internal callers use:
 
 - `POST /internal/v1/mcp/authorize` from the LiteLLM callback;
+- `/internal/v1/ai-usage/routing/*` for governed route decision, binding
+  verification, and observations;
+- `/internal/v1/ai-usage/attempts/admit` and
+  `/internal/v1/ai-usage/events` for fail-closed admission and completion;
 - `POST /internal/v1/channels/routes/validate` from the channel broker;
 - `POST /internal/v1/channels/turns` from the channel broker.
 
-The internal MCP route requires `x-onecomputer-mcp-policy-token`. Channel routes
-require `x-onecomputer-channel-token`. Product requests require both the Web
-proxy boundary and an authenticated employee session, except for the explicit
-flows above.
+The internal MCP route requires `x-onecomputer-mcp-policy-token`. Routing and
+usage routes require `x-onecomputer-ai-usage-token`. Channel routes require
+`x-onecomputer-channel-token`. Product requests require both the Web proxy
+boundary and an authenticated employee session, except for the explicit flows
+above.
 
-### Startup contract
+### Migration and startup contract
 
-Control validates all environment variables, asserts that the explicit migration job has brought the database to the exact compatible schema, registers
-policy verification keys, connects to OpenVTC, constructs the signing
-authority, and starts listening only after its required dependencies are
-usable. Partial configuration of LiteLLM, OpenVTC, Web Push, ingress, or the
-channel broker is rejected.
+The one-shot `db-migrate` process holds the migration advisory lock, validates
+the dependency/checksum ledger, and applies each pending migration in its own
+transaction. Compose starts Control only after that job exits successfully.
+
+Control itself never migrates. It validates all environment variables, asserts
+that the database is at the exact compatible schema, registers policy
+verification keys, connects to OpenVTC, constructs the signing and governance
+authorities, and starts listening only after its required dependencies are
+usable. Partial configuration of LiteLLM, OpenVTC, Web Push, ingress, AI usage,
+routing, budgets, or the channel broker is rejected.
 
 ### Logging
 
@@ -246,13 +264,25 @@ LiteLLM is the model and MCP data plane. Control uses its administrator API to
 create deterministic virtual credentials with:
 
 - tenant/user/workspace/agent metadata;
-- exactly one model alias;
-- exactly one MCP server and explicit tool allowlist;
+- exactly one governed transport alias for current service-class workspaces
+  (`onecomputer-auto`), or one explicit compatibility route for a legacy
+  direct-alias policy;
+- one or more explicitly projected MCP servers with per-server tool allowlists;
 - expiry;
 - RPM and parallel-request limits, with token usage metered but not capped;
 - effective policy identifier and hash.
 
-The custom callback checks image support on model calls. Before every resolved
+For governed model calls, the custom callback accepts only
+`onecomputer-auto`, derives bounded privacy-safe task signals, asks Control for
+a concrete deployment, verifies the returned signed binding immediately before
+execution, and admits the attempt to the ledger and Team budget. It strips
+ONEComputer authentication and governance metadata before provider dispatch,
+normalizes provider usage after completion, and reports routing observations.
+An admission or binding failure denies provider execution; completion
+telemetry failure does not replace an already successful provider response and
+instead leaves a visible reconciliation gap.
+
+The same callback checks image support on model calls. Before every resolved
 Microsoft 365 tool dispatch, it requires the exact expected MCP server binding
 and asks Control for an allow, deny, or approval-required decision. If Control
 is unavailable or returns malformed data, the callback fails closed.
@@ -265,7 +295,10 @@ write-only through Control; LiteLLM encrypts it in its credential store and
 holds tenant-scoped model records that reference only the credential name.
 Control stores no raw key, checks a candidate route before activation, and
 issues workspace keys only for that tenant's stable aliases and access groups.
-The static YAML contains only gateway policy and explicit legacy routes.
+Provider configuration exposes a reviewed model list and explicit capability
+metadata to Control; route mappings consume that inventory rather than
+guessing capabilities from display names. The static YAML contains gateway and
+MCP policy but no managed provider models.
 
 **Extension seam:** adding a managed provider requires the contract model
 catalog, Provider settings lifecycle, tenant-safe LiteLLM route projection,
@@ -399,6 +432,7 @@ historical records without an explicit compatibility design.
 | `@onecomputer/workspace-store` | Store interfaces, PostgreSQL implementations, migrations, and policy derivation |
 | `@onecomputer/policy-integrity` | Canonical policy signing and verification |
 | `@onecomputer/litellm-adapter` | Gateway grants, OAuth orchestration, readiness, and governed execution |
+| `@onecomputer/model-router` | Deterministic service-class selection, candidate filtering, session affinity, and signed decision bindings |
 | `@onecomputer/kasm-adapter` | Local Docker and Kasm Developer API sandbox adapters |
 | `@onecomputer/egress-policy` | Host normalization, grant signing, policy compilation, and decisions |
 | `@onecomputer/workspace-ingress-auth` | Launch/session claim issuance and verification |

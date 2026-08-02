@@ -1,6 +1,16 @@
 # AI spend observability
 
-The AI spend view in Settings is an administrator-only, tenant-scoped read model over the append-only usage ledger. It is available in both `customer-managed` and `hosted` deployments. It is separate from employee Activity and never reads raw provider traces.
+**AI control plane → Overview** and its **Spend Details** drill-down are
+administrator-only, tenant-scoped read models over the append-only usage
+ledger. They are available in both `customer-managed` and `hosted`
+deployments. They are separate from personal Settings and employee Activity and
+never read raw provider traces.
+
+Overview summarizes the current month: provider cost, aggregate matching Team
+budgets, forecast, a 30-day trend, top spending Teams, and the separately
+disclosed AI token-emissions proxy. Spend Details provides date filters,
+CSV/JSON export, spend dimensions, Team → user → task navigation, and governed
+attempt evidence.
 
 ## Reading totals
 
@@ -53,11 +63,28 @@ This keeps historical totals stable if an administrator later maps an alias to a
 
 A monetary total can legitimately be zero, but unknown, incomplete, and delayed states are always shown separately from zero.
 
+The separate **Data health** tab keeps diagnostic coverage out of financial
+totals. It reports:
+
+- unpriced or partially priced usage events still requiring review;
+- admitted attempts still awaiting a final provider usage record; and
+- failed attempts for which no billable usage was reported.
+
+An administrator can record an append-only historical review baseline for
+unpriced usage received before the report's `asOf`. That acknowledgement does
+not delete usage, fill a missing price, or change any spend total. New pricing
+gaps after the baseline remain active.
+
 ## Explanations and privacy
 
 Task explanations use only allow-listed counters and categories: conversation history, attachments, retrieved context, system/policy context, tool-result context, output/reasoning quantity, retries/fallbacks, routing overhead, and cache behavior. They do not contain prompts, responses, hidden reasoning, screenshots, page content, raw tool arguments, connector secrets, provider account identifiers, or signed URLs.
 
 Task identity is composite: user, workspace, agent, session, task, and turn. The opaque task key preserves that identity during drill-down and avoids merging unrelated calls that reuse the same task ID.
+
+There is no general-purpose Explainability score on Overview. Task drill-down
+shows a sanitized explanation only when allow-listed cost-driver counts were
+recorded for that task. It does not infer causation from spend changes, token
+ratios, or unrelated operational counters.
 
 ## API and exports
 
@@ -66,6 +93,10 @@ Administrators can read:
 - `GET /v1/admin/spend` for a paginated report;
 - `GET /v1/admin/spend/tasks/:taskKey` for the governed calls behind one task;
 - `GET /v1/admin/spend/export?format=csv|json` for the same frozen authorized view.
+
+Administrators record a Data health historical pricing review with
+`POST /v1/admin/spend/cost-coverage/acknowledgements`. The endpoint accepts the
+review cutoff only; it does not mutate ledger facts or prices.
 
 Queries accept ISO-8601 `from`, `to`, and `asOf` values plus Team, user, workspace, agent, session, task, and turn filters. Ranges are limited to 366 days and task pages to 200 rows. An opaque cursor carries the original filters, range, and `asOf`; callers must not modify it.
 

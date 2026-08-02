@@ -22,6 +22,12 @@ npm run release:tag -- --push
 
 The first command performs the local release checks and records `.artifacts/release-verification/<sha>.json`. The preview command validates the candidate and prints the tag without changing GitHub. The final command pushes only the new immutable tag; it never advances a branch.
 
+The release gate qualifies managed-provider configuration and OAuth renewal,
+runs quick and database verification, builds the workspace image, starts an
+isolated Compose stack, checks the product origin, and creates, observes, and
+destroys a real Hermes workspace. A healthy control stack without a durable
+workspace readiness marker is not a releasable candidate.
+
 Deploy the exact tag and image digest. Creating a newer tag is the only way to release a newer commit. Never move or reuse an existing demo tag.
 
 ## Database promotion
@@ -48,15 +54,18 @@ Anthropic, GLM, and Bedrock routes with Provider settings:
    intentionally not reused across the route replacement.
 3. Run the normal one-shot Control migration, deploy the promoted image and
    static configuration, and restart LiteLLM and Control. Do not preserve the
-   retired OpenAI/Anthropic static YAML routes.
+   retired OpenAI, Anthropic, or GLM static YAML routes.
 4. Remove the retired provider-key values from the demo environment only after
    the new stack is healthy. `npm run env:check` reports their names without
    printing values; `env:update` intentionally preserves them.
-5. Sign in as a demo administrator, open **Settings → Provider settings**, add
-   a key for every provider referenced by the demo policy, and run the
-   in-product route test. A `PROVIDER_STATIC_CUTOVER_REQUIRED` response means
-   an old static route is still present; remove it and restart LiteLLM.
-6. Create or restart a workspace and run one harmless prompt through every
+5. Sign in as a demo administrator, open **AI control plane → Models &
+   providers**, add a key for every provider referenced by the demo policy,
+   choose its approved models, and run the in-product route test. A
+   `PROVIDER_STATIC_CUTOVER_REQUIRED` response means an old static route is
+   still present; remove it and restart LiteLLM.
+6. Configure complete Pricing, publish the immutable Model routes mapping, and
+   verify the demo Team policy and rollout before creating a workspace.
+7. Create or restart a workspace and run one harmless prompt through every
    demo-critical model alias. Disabling or deleting a provider must revoke
    affected workspace grants and require a restart.
 

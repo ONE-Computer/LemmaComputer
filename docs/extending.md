@@ -28,7 +28,8 @@ This order keeps provider payloads from becoming implicit policy.
 
 A model route has two identities:
 
-- the stable policy alias, such as `onecomputer-claude`;
+- the product contract or compatibility alias; governed service-class traffic
+  uses `onecomputer-auto` plus requested Auto/Lite/Balanced/Pro context;
 - the provider deployment configured in LiteLLM.
 
 Do not place provider model IDs directly in employee policy. This allows an
@@ -37,30 +38,39 @@ policy versions.
 
 ### Implementation checklist
 
-1. Add the stable alias to `sandboxModelAliases` in
-   `packages/contracts/src/index.ts`.
-2. Add its employee-facing name and provider to the model catalog in
-   `apps/control-api/src/server.ts`.
+1. Add the provider and approved model definition to
+   `packages/litellm-adapter/src/provider-settings.ts`, including accurate
+   vision, tool, and streaming capability flags. Define reviewed context,
+   output, residency, evaluation, and price metadata in the governed route
+   mapping and rate card. Add a stable compatibility alias only when a managed
+   client or existing signed policy requires one.
+2. Add or extend the strict Provider settings schemas and administrator display
+   metadata in `apps/control-api/src/provider-settings.ts` and the Web provider
+   inventory. Do not expose the provider model as an employee service class.
 3. If an existing persisted setting has a model-alias check constraint, generate
    a forward-only migration that expands it. Do not edit an applied migration.
-4. Choose one deployment path:
-   - a static route in `config/litellm/config.yaml` with a LiteLLM-only
-     environment credential; or
-   - a reviewed dynamic API-key route. The Control service sends the key once
-     to LiteLLM's private `/credentials` API, then creates or updates a
-     database-managed model that refers only to the credential name.
-5. Do not add a dynamic-route provider key to `compose.yaml` or
-   `.env.example`. LiteLLM's encrypted credential table is the demo secret
-   store; the LiteLLM encryption root remains a deployment secret.
-6. Add the alias to the initial policy document in
-   `packages/workspace-store/src/identity-policy.ts` if it should be assignable
-   by default.
-7. If a managed client validates model names locally, add an explicit transport
+4. Implement a reviewed dynamic Provider settings path. Control sends the
+   write-only key once to LiteLLM's private `/credentials` API, then creates or
+   updates tenant-scoped database-managed models that refer only to the
+   credential name. `config/litellm/config.yaml` intentionally has an empty
+   managed `model_list`; do not add a static provider route.
+5. Do not add a managed-provider key to `compose.yaml` or `.env.example`.
+   LiteLLM's encrypted credential table is the credential store; the LiteLLM
+   encryption root remains a deployment secret.
+6. Project the deployment descriptor into the administrator Pricing and Model
+   routes inventory. Current employee workspace policy remains on
+   `onecomputer-auto`; do not add a provider model ID or concrete deployment to
+   employee policy.
+7. If a managed client validates model names locally and a compatibility route
+   is required, add an explicit transport
    mapping in `packages/litellm-adapter/src/index.ts` and a matching LiteLLM
    transport alias. Preserve the policy alias in key metadata.
-8. Set accurate capability, context-limit, retry, and pricing metadata. The
-   gateway callback rejects image input when the selected deployment lacks it.
-9. Extend route, capability, signed-policy, secret-boundary, and negative tests.
+8. Ensure the provider deployment descriptor can be priced by an immutable
+   rate card and selected in a governed Lite/Balanced/Pro mapping. Provider
+   configuration, pricing, mapping publication, Team policy, and rollout remain
+   separate administrator decisions.
+9. Extend route, capability, signed-decision, usage-admission, pricing,
+   secret-boundary, and negative tests.
 
 Do not configure cross-provider fallback for a governed alias unless policy and
 audit semantics explicitly represent every possible destination.
@@ -77,7 +87,10 @@ The raw Bedrock API key is write-only. Control sends it only to LiteLLM's
 private credential API, whose pinned implementation encrypts credential values
 in its database. The LiteLLM model record stores only
 `litellm_credential_name`, region, and reviewed capability/pricing metadata.
-Workspace virtual keys receive only the stable public alias.
+Legacy direct-route workspace keys receive only the stable compatibility alias.
+Governed service-class workspace keys receive `onecomputer-auto`; Control's
+signed decision selects the Bedrock deployment only when its region, profile,
+rate card, Team policy, health, and budget are eligible.
 
 ## Add an MCP connector
 

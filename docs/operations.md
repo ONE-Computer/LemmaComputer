@@ -66,7 +66,7 @@ print their values.
 | --- | --- | --- |
 | `ONECOMPUTER_HTTP_BIND_ADDRESS` | `127.0.0.1` | Host bind address for all published ports |
 | `ONECOMPUTER_WEB_PORT` | `4174` | Product and workspace-ingress port |
-| `ONECOMPUTER_LITELLM_PORT` | `4000` | LiteLLM UI and OAuth callback port |
+| `ONECOMPUTER_LITELLM_PORT` | `4000` | Gateway OAuth callback surface; the administrator UI is disabled |
 | `ONECOMPUTER_M365_PORT` | `4311` | Microsoft connector authorization bridge |
 | `ONECOMPUTER_PUBLIC_WEB_URL` | `http://localhost:4174` | Canonical product origin and Entra callback base |
 | `ONECOMPUTER_LITELLM_PUBLIC_URL` | `http://localhost:4000` | Canonical gateway callback base |
@@ -220,19 +220,31 @@ Built-in connectors cannot be deleted through the administration API.
 ### Managed model providers
 
 OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock are configured by an organization administrator in
-**Settings → Provider settings**, not in `.env`. Control passes the submitted
-write-only key directly to LiteLLM's private credential API. LiteLLM encrypts
-the credential in its own database; ONEComputer stores only tenant-scoped route
-IDs, lifecycle state, timestamps, and a safe HMAC fingerprint.
+**AI control plane → Models & providers**, not in `.env`. Control passes the
+submitted write-only key directly to LiteLLM's private credential API. LiteLLM
+encrypts the credential in its own database; ONEComputer stores only
+tenant-scoped route IDs, selected model IDs, lifecycle state, timestamps, and a
+safe HMAC fingerprint.
 
-The dynamic routes retain the stable public aliases required by signed policy
-and managed clients. Each tenant's route is bound to a tenant-specific LiteLLM
-access group, so a virtual workspace key cannot select another organization’s
-deployment. Only explicitly granted model aliases are issued to a workspace.
+OpenAI, Anthropic, and Z.ai allow the administrator to choose one or more models
+from a reviewed product inventory. Bedrock uses a reviewed region and inference
+profile pair. Each inventory item declares vision, tool, and streaming support;
+the Model routes editor inherits those provider-sourced flags and combines them
+with reviewed route context/output limits and residency metadata instead of
+guessing capabilities from display names.
 
-| Credential source | Route |
-| --- | --- |
-| Administrator Provider settings | OpenAI: `onecomputer-assistant`, `onecomputer-openai`, `claude-opus-4-6`; Anthropic: `onecomputer-claude`, `claude-sonnet-4-6`; GLM: `onecomputer-glm`, `claude-sonnet-4-5`; Bedrock: `onecomputer-bedrock` |
+The dynamic routes retain compatibility aliases required by signed policy and
+managed clients, while governed service-class workspaces receive only the
+synthetic `onecomputer-auto` transport alias. Every concrete model deployment
+is bound to a tenant-specific LiteLLM access group, so a virtual workspace key
+cannot select another organization's deployment. The current reviewed model
+and alias inventory in
+`packages/litellm-adapter/src/provider-settings.ts` is the source of truth; do
+not duplicate it in operator configuration.
+
+Provider health is necessary but not sufficient for governed routing. Pricing,
+an immutable Lite/Balanced/Pro mapping, a Team policy, and a rollout mode are
+separate Control records managed in the adjacent AI control-plane tabs.
 
 The static OpenAI, Anthropic, and GLM YAML routes and provider environment variables are
 retired. During the cutover, keep the LiteLLM salt and credential secret stable,
@@ -350,6 +362,13 @@ KASM_IMAGE_ID=...
 Remove the Docker socket mount from the controller when using the remote
 adapter.
 
+`KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for
+the managed runtime readiness marker. The default is 60 seconds and the
+accepted range is 5–300 seconds. Increase it only when measured image/host
+startup needs more time; do not use it to hide an entrypoint, resource, policy,
+or device preflight failure. Release verification performs a real Hermes
+workspace create/readiness/destroy smoke against the built image.
+
 ## Start and stop
 
 Validate interpolation and schema before any mutation:
@@ -364,6 +383,10 @@ Start and wait for health:
 ```bash
 npm run compose:up
 ```
+
+Compose runs the one-shot `db-migrate` job after PostgreSQL becomes healthy and
+starts `control-api` only after the job succeeds. Control performs a read-only
+schema compatibility check and never migrates during application startup.
 
 The workspace build is intentionally not part of normal `up`; it is a build
 profile and not a service. Rebuild it explicitly after changing its Dockerfile
@@ -395,6 +418,7 @@ Review upstream version and digest changes before updating pins.
 
 ```bash
 docker compose ps
+docker compose logs --since=10m db-migrate
 docker compose logs --since=10m control-api
 docker compose logs --since=10m workspace-controller
 docker compose logs --since=10m litellm
@@ -420,6 +444,10 @@ Common failures:
 
 - **Control stays unhealthy:** inspect required environment validation,
   database schema compatibility or migration-job failure, policy key parsing, and OpenVTC profile connection.
+- **Workspace startup times out:** inspect the sandbox container and its
+  readiness marker, image architecture, host capacity, signed policy, selected
+  agent initialization, and any Cowork device/seccomp preflight before changing
+  `KASM_LOCAL_STARTUP_TIMEOUT_MS`.
 - **LiteLLM stays unhealthy:** inspect its database, master/salt keys, mounted
   YAML, and custom callback import.
 - **Workspace creation fails with image not found:** run

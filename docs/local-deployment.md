@@ -35,8 +35,8 @@ A setup is complete when:
   permissions.
 - Provider keys for every dynamically managed model alias assigned by the demo
   policy. Keep them out of `.env`: after the first administrator sign-in,
-  configure and test both Anthropic and OpenAI in **Settings → Provider
-  settings** before creating a workspace.
+  configure and test every required provider in **AI control plane → Models &
+  providers** before creating a workspace.
 - At least 4 GiB of memory for one running workspace, plus capacity for the
   control stack. Allow substantial disk space and time for the desktop image
   build.
@@ -231,11 +231,13 @@ small. Every user in the configured Entra tenant may authenticate, but only the
 listed addresses bootstrap as administrators.
 
 OpenAI, Anthropic, GLM (Z.ai), and Bedrock keys are configured only after the stack is healthy:
-sign in as a listed administrator, open **Settings → Provider settings**, save the
-write-only key, and run the route test before creating a workspace. When
-updating an older environment, `npm run env:check` reports retired provider
-variable *names* only; it preserves their values, so remove them manually after
-the managed-provider cutover.
+sign in as a listed administrator, open **AI control plane → Models &
+providers**, save the write-only key, choose the approved models, and run the
+route test before creating a workspace. Configure Pricing, a Model routes
+mapping, and the Team rollout separately; a healthy provider route alone does
+not enable governed service classes. When updating an older environment, `npm
+run env:check` reports retired provider variable *names* only; it preserves
+their values, so remove them manually after the managed-provider cutover.
 
 ### Optional values
 
@@ -313,10 +315,14 @@ Equivalent direct command:
 docker compose up -d --build --wait --wait-timeout 300
 ```
 
-Control runs database migrations during startup. Inspect readiness:
+Compose first runs the one-shot `db-migrate` job. `control-api` starts only
+after that job succeeds and then performs a read-only exact-schema
+compatibility check; application startup never applies migrations. Inspect the
+migration job and service readiness:
 
 ```bash
 docker compose ps
+docker compose logs --since=10m db-migrate
 docker compose logs --since=10m control-api
 docker compose logs --since=10m workspace-controller
 docker compose logs --since=10m litellm
@@ -341,13 +347,18 @@ Then:
 2. Sign in with an address listed in
    `ONECOMPUTER_ADMINISTRATOR_EMAILS`.
 3. Verify the account has administrator navigation.
-4. Open **Settings → Provider settings**, save the key for every provider
-   referenced by the policy, and confirm its route test passes. The key must not
-   appear again in the UI, browser storage, or logs.
-5. Open **Connections**, connect Microsoft 365, and complete the delegated
+4. Open **AI control plane → Models & providers**, save the key for every
+   provider referenced by the policy, choose its approved models, and confirm
+   its route test passes. The key must not appear again in the UI, browser
+   storage, or logs.
+5. In **AI control plane**, add complete Pricing, publish a Lite/Balanced/Pro
+   Model routes mapping, assign the administrator a default spending Team, and
+   set up that Team's rollout. Keep Auto in shadow mode until its evidence is
+   reviewed.
+6. Open **Connections**, connect Microsoft 365, and complete the delegated
    consent flow.
-6. Create a workspace and open it.
-7. Send a harmless model prompt and exercise a read-only Microsoft 365 tool
+7. Create a workspace and open it.
+8. Send a harmless model prompt and exercise a read-only Microsoft 365 tool
    that is allowed by the assigned policy.
 
 A healthy process does not prove provider access, Microsoft consent, policy
@@ -426,10 +437,12 @@ and role assignment rather than changing bootstrap identifiers blindly.
 
 ### The stack is healthy but model calls fail
 
-Open **Settings → Provider settings** as an administrator and confirm that the
-assigned provider is Active and its in-product route test passes. The default
-demo policy uses dynamic Anthropic and OpenAI routes; it does not read provider
-keys from `.env`.
+Open **AI control plane → Models & providers** as an administrator and confirm
+that the assigned provider is Active and its in-product route test passes.
+Then confirm Pricing coverage, the published Model routes mapping, the user's
+default spending Team, and that Team's rollout state. The default demo policy
+uses dynamic managed-provider routes; it does not read provider keys from
+`.env`.
 
 ### Workspace creation reports image not found
 

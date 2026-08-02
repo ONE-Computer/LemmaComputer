@@ -29,7 +29,9 @@ Use normal Compose commands inside the worktree. Its generated `.env` keeps volu
 - `npm run dev:doctor`: environment, dependency, and Docker-context safety.
 - `npm run verify:quick`: doctor, environment parity, Compose parsing, TypeScript builds, and the full non-database test suite.
 - `npm run verify:db`: disposable PostgreSQL migration qualification.
-- `npm run verify:release`: quick and DB gates plus an isolated built-Compose health smoke; writes a SHA-bound local attestation.
+- `npm run verify:release`: provider and OAuth qualification, quick and DB
+  gates, workspace-image build, isolated Compose health, and a real Hermes
+  workspace readiness smoke; writes a SHA-bound local attestation.
 
 Run `verify:quick` before handoff or integration. Run `verify:db` whenever persistence, migration, startup ordering, backup compatibility, or tenant scoping changes. Update the task branch from current `main` when needed, resolve conflicts there, and rerun the applicable gates before merging.
 

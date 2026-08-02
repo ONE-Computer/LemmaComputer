@@ -25,7 +25,7 @@ Removing a membership does not delete its interval. A default membership must be
 
 ## Administration
 
-Administrators manage Teams from **Settings → Administration → Teams**:
+Administrators manage Teams from **AI control plane → Teams & budgets**:
 
 1. Create a Team with a name, owner/budget manager, optional description, and optional cost-center code.
 2. Assign active organization users as members.

@@ -14,10 +14,12 @@ Microsoft OAuth tokens, Control service credentials, policy-signing keys, the
 Docker socket, or external-channel credentials.
 
 Control creates a short-lived LiteLLM virtual key for a specific tenant, user,
-workspace, agent, model route, MCP server, tool set, policy version, and
-rate limit. A root-owned loopback broker inside the managed image holds that
-scoped key. User applications authenticate to the local broker with a
-non-authoritative local credential.
+workspace, agent, model route, MCP server, tool set, policy version, and rate
+limit. Governed workspaces receive the single synthetic `onecomputer-auto`
+transport alias; the signed runtime policy and gateway metadata retain the
+policy route and service-class context. A root-owned loopback broker inside the
+managed image holds that scoped key. User applications authenticate to the
+local broker with a non-authoritative local credential.
 
 OAuth tokens for Microsoft 365 are held in the gateway boundary and persisted
 by LiteLLM using its stable salt key. OpenAI, Anthropic, GLM, and Bedrock keys are write-only
@@ -92,6 +94,7 @@ flowchart TB
 
   subgraph ControlPlane["Private control plane"]
     Control["Control API"]
+    Governance["Routing + usage governance"]
     Controller["Workspace controller"]
     Channel["Channel broker"]
     ControlDB[("Control database")]
@@ -112,6 +115,8 @@ flowchart TB
   Browser --> GatewayOAuth --> LiteLLM
   Browser --> M365Bridge --> M365
   Control --> ControlDB
+  Control --> Governance --> ControlDB
+  LiteLLM --> Governance
   Control --> Controller
   Control --> OpenVTC
   Control --> LiteLLM
@@ -158,8 +163,9 @@ process; the session cookie establishes the employee principal.
 
 ### Workspace provisioning
 
-1. The employee saves a configuration constrained to applications, agents, and
-   model aliases assigned by policy.
+1. The employee saves a configuration constrained to applications, agents,
+   the governed model route, and available default service classes assigned by
+   policy.
 2. Control derives the runtime policy, signs it, and creates scoped gateway and
    agent grants.
 3. Control sends the signed bundle and grants to the controller over an
@@ -177,16 +183,36 @@ need host Docker authority.
 
 ### Model request
 
-1. The managed AI client calls its local loopback broker.
-2. The broker restricts paths and forwards the request with its
-   workspace-and-agent LiteLLM key.
-3. LiteLLM validates key expiry, model allowlist, identity metadata,
-   concurrency, and RPM limits. Token usage is metered without a
-   ONEComputer-imposed per-minute allowance.
-4. LiteLLM selects the single configured provider deployment. Cross-provider
-   fallback is deliberately disabled.
-5. Raw prompts and responses are not written by the configured gateway
-   logging path.
+1. Chat or the managed AI client selects a requested service class. The
+   workspace configuration supplies the default; Chat may apply a
+   per-conversation override. Auto, Lite, Balanced, and Pro are product
+   contracts rather than provider model names.
+2. The root-owned loopback broker restricts paths, removes requester-supplied
+   ONEComputer and LiteLLM routing metadata, and forwards
+   `onecomputer-auto` with its workspace-and-agent key and signed task binding.
+3. LiteLLM validates key expiry, the synthetic model allowlist, trusted
+   identity metadata, concurrency, and RPM limits. Token usage is metered
+   without a ONEComputer-imposed per-minute allowance.
+4. The ONEComputer callback asks Control for a routing decision. Control
+   resolves the subject's default spending Team, immutable Team and identity
+   policies, rollout mode, mapping, provider capability and health evidence,
+   effective rate card, currency, residency, and budget eligibility.
+5. Control records the decision and candidate evidence, then returns a
+   short-lived signed binding for one concrete deployment. LiteLLM verifies the
+   binding against the selected deployment immediately before dispatch and
+   admits the exact provider attempt to the usage ledger and Team budget.
+6. The callback removes governance and authentication internals from the
+   provider request. LiteLLM never falls back outside the signed concrete
+   deployment. Explicit Lite, Balanced, or Pro requests skip Auto
+   classification but remain subject to every policy, capability, price,
+   health, residency, and budget check.
+7. After completion, the callback records normalized usage, cost and routing
+   observation evidence. Provider availability failures temporarily mark that
+   deployment unavailable; a later success clears the signal. A missing final
+   usage event leaves the admission visible for reconciliation.
+
+Raw prompts and responses are not written by the configured gateway logging
+path or the governance ledger.
 
 Claude Desktop accepts only model identifiers from its built-in model catalog.
 The LiteLLM adapter therefore projects policy aliases onto a small set of
@@ -264,7 +290,12 @@ credential, prompt key, or direct workspace-network access.
 
 LiteLLM PostgreSQL owns gateway keys, encrypted provider credentials, model
 configuration stored by LiteLLM, and user OAuth state. Control PostgreSQL owns
-the tenant-scoped provider route metadata needed to govern those records.
+the tenant-scoped provider route metadata needed to govern those records. It is
+also authoritative for Teams and default spending assignments, rate cards,
+budgets and reservations, usage admissions/events/corrections, cost-coverage
+review baselines, routing mappings and policies, rollout reviews and modes,
+decisions and observations, and deployment-health evidence. These records are
+append-only or versioned where they form accounting or governance evidence.
 Per-workspace home directories are Docker volumes for the local sandbox driver.
 These state classes must be backed up and restored consistently for disaster recovery.
 
@@ -281,6 +312,10 @@ Changes must preserve these invariants:
 - every workspace grant is tenant/user/workspace/agent/policy scoped and
   revocable;
 - every runtime policy is signed and independently verified;
+- every governed model dispatch matches a fresh signed concrete-deployment
+  decision and a durable usage admission;
+- service-class choice never bypasses Team/identity policy, price integrity,
+  budget, capability, health, currency, or residency controls;
 - MCP policy failure is a denial, never an implicit allow;
 - a protected operation executes only after verified, exact, unexpired consent;
 - an execution lease is complete, short-lived, and one-time;
