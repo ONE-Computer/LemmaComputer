@@ -49,6 +49,7 @@ const envSchema = z.object({
   KASM_LOCAL_EGRESS_NETWORK: z.string().default("onecomputer-egress"),
   KASM_PUBLIC_HOST: z.string().default("127.0.0.1"),
   KASM_LOCAL_KVM_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  KASM_LOCAL_STARTUP_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(300_000).default(60_000),
   KASM_LOCAL_TIME_ZONE: z.preprocess(
     (value) => value === "" ? undefined : value,
     timeZoneSchema.optional(),
@@ -301,6 +302,7 @@ export function adapterFromEnv(env: z.infer<typeof envSchema>): SandboxAdapter {
       timeZone: env.KASM_LOCAL_TIME_ZONE,
       chatAttachmentRetentionDays: env.CHAT_ATTACHMENT_RETENTION_DAYS,
       kvmEnabled: env.KASM_LOCAL_KVM_ENABLED,
+      startupTimeoutMs: env.KASM_LOCAL_STARTUP_TIMEOUT_MS,
       installationKind: env.ONECOMPUTER_INSTALLATION_KIND,
     });
   }

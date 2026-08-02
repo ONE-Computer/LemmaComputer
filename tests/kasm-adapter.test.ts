@@ -4,7 +4,12 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { buildKasmClipboardLaunch, KasmLocalAdapter, mapKasmState } from "@onecomputer/kasm-adapter";
+import {
+  buildKasmClipboardLaunch,
+  DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS,
+  KasmLocalAdapter,
+  mapKasmState,
+} from "@onecomputer/kasm-adapter";
 import { policyFixture } from "./policy-fixture.js";
 
 test("Kasm launch forces the native clipboard contract instead of browser-local defaults", () => {
@@ -51,6 +56,54 @@ test("Kasm operational states map to the canonical sandbox contract", () => {
   assert.equal(mapKasmState("starting"), "provisioning");
   assert.equal(mapKasmState("stopped"), "stopped");
   assert.equal(mapKasmState("error"), "failed");
+});
+
+test("local Kasm gives workspace initialization a production-safe startup window", () => {
+  assert.equal(DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS, 60_000);
+});
+
+test("local Kasm observes readiness at the timeout boundary", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  let inspections = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    const path = request.url?.replace(/^\/v1\.47/, "") ?? "";
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path === "/containers/sandbox-id/json") {
+      inspections += 1;
+      response.end(JSON.stringify({
+        State: {
+          Running: true,
+          Status: "running",
+          Health: { Status: inspections === 1 ? "starting" : "healthy" },
+        },
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+      startupPollMs: 50,
+      startupTimeoutMs: 5,
+    });
+    await (adapter as unknown as { waitForStartup: (id: string) => Promise<void> }).waitForStartup("sandbox-id");
+    assert.equal(inspections, 2);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("local Kasm reconciliation restores governed endpoints after Compose replaces them", async () => {

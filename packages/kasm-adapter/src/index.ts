@@ -288,6 +288,8 @@ type KasmLocalConfig = {
   startupPollMs?: number;
 };
 
+export const DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS = 60_000;
+
 export class KasmLocalAdapter implements SandboxAdapter {
   private readonly socketPath: string;
   constructor(private readonly config: KasmLocalConfig) {
@@ -955,23 +957,21 @@ export class KasmLocalAdapter implements SandboxAdapter {
   }
 
   private async waitForStartup(providerId: string) {
-    const timeoutMs = this.config.startupTimeoutMs ?? 15_000;
+    const timeoutMs = this.config.startupTimeoutMs ?? DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS;
     const pollMs = this.config.startupPollMs ?? 250;
     const deadline = Date.now() + timeoutMs;
-    do {
-      const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
-      const state = asObject(inspected.State);
-      const health = textValue(asObject(state.Health), "Status");
-      const running = state.Running === true && state.Restarting !== true && state.Paused !== true;
-      if (running && (!health || health === "healthy")) return;
+    while (true) {
+      if (await this.isStartupReady(providerId)) return;
 
-      const terminal = state.OOMKilled === true
-        || state.Restarting === true
-        || health === "unhealthy"
-        || ["dead", "exited"].includes(String(state.Status ?? ""));
-      if (terminal) throw await this.startupFailure(providerId, state, health);
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
-    } while (Date.now() < deadline);
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, remainingMs)));
+    }
+
+    // Always perform one final observation after the deadline. The old
+    // do/while checked the deadline after sleeping and could miss a container
+    // that became healthy on Docker's next scheduled health check.
+    if (await this.isStartupReady(providerId)) return;
 
     throw new OneComputerError(
       "WORKSPACE_STARTUP_TIMEOUT",
@@ -979,6 +979,21 @@ export class KasmLocalAdapter implements SandboxAdapter {
       504,
       true,
     );
+  }
+
+  private async isStartupReady(providerId: string) {
+    const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+    const state = asObject(inspected.State);
+    const health = textValue(asObject(state.Health), "Status");
+    const running = state.Running === true && state.Restarting !== true && state.Paused !== true;
+    if (running && (!health || health === "healthy")) return true;
+
+    const terminal = state.OOMKilled === true
+      || state.Restarting === true
+      || health === "unhealthy"
+      || ["dead", "exited"].includes(String(state.Status ?? ""));
+    if (terminal) throw await this.startupFailure(providerId, state, health);
+    return false;
   }
 
   private async startupFailure(providerId: string, state: JsonObject, health?: string) {
