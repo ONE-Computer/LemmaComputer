@@ -182,9 +182,9 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configured.json().provider.modelId, "gpt-5.6-terra");
     assert.equal(configured.json().provider.emissionsRegion, "sg");
     assert.deepEqual(configured.json().provider.modelOptions, [
-      { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol" },
-      { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra" },
-      { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna" },
+      { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", modelCapabilities: { vision: true, tools: true, streaming: true } },
+      { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", modelCapabilities: { vision: true, tools: true, streaming: true } },
+      { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", modelCapabilities: { vision: true, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configured.json()).includes(rawOpenAiKey), false);
     assert.equal(providerAdministration.configured[0]!.apiKey, rawOpenAiKey);
@@ -524,6 +524,7 @@ test("provider settings accept model sets and expose concrete deployment descrip
     assert.equal(provider.deployments[0].primary, true);
     assert.ok(provider.deployments[0].aliases.includes("onecomputer-openai"));
     assert.match(provider.deployments[0].providerDeployment, /^ocp-/);
+    assert.deepEqual(provider.deployments[1].modelCapabilities, { vision: true, tools: true, streaming: true });
     assert.notEqual(provider.deployments[0].id, provider.deployments[1].id);
 
     const invalidPayloads = [

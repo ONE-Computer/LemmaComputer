@@ -47,6 +47,7 @@ import {
 } from "./openvtc-browser-agent.js";
 import { ConfirmDialog, ModalDialog, SelectMenu, TextPromptDialog, useDismissOnOutside } from "./ui.jsx";
 import { ActivityPanel, ActivityToggle } from "./ActivityPanel.jsx";
+import { providerModelCapabilityLabels } from "./provider-inventory.js";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
 const providerTitle = (provider) => ({
@@ -1033,7 +1034,8 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
                     const modelId = deployment.modelId ?? deployment.id;
                     const displayName = deployment.displayName ?? deployment.upstreamModelDisplayName ?? provider.modelOptions?.find((option) => option.id === modelId)?.displayName ?? modelId;
                     const aliases = deployment.aliases ?? (deployment.alias ? [deployment.alias] : []);
-                    return <li key={deployment.id ?? modelId}><strong>{displayName}</strong><small>{aliases.length ? aliases.join(" · ") : modelId}</small></li>;
+                    const capabilities = providerModelCapabilityLabels(deployment.modelCapabilities);
+                    return <li key={deployment.id ?? modelId}><strong>{displayName}</strong><small>{aliases.length ? aliases.join(" · ") : modelId}</small>{capabilities.length > 0 && <small className="provider-model-capabilities">{capabilities.join(" · ")}</small>}</li>;
                   })}
                 </ul> : <small>{provider.primaryAlias} · {provider.upstreamModelDisplayName}</small>}
                 <span>{stateLabel}{provider.fingerprint ? <> · {provider.fingerprint}</> : null}</span>
@@ -1058,7 +1060,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
           <span>Select one or more provider models. Model routes decide which tier uses each deployment.</span>
           {editor.modelOptions.map((option) => <label key={option.id}>
             <input type="checkbox" checked={editor.selectedModelIds.includes(option.id)} disabled={busy} onChange={(event) => toggleModel(option.id, event.target.checked)} />
-            <span><strong>{option.displayName}</strong><small>{option.id}</small></span>
+            <span><strong>{option.displayName}</strong><small>{option.id}</small>{providerModelCapabilityLabels(option.modelCapabilities).length > 0 && <small className="provider-model-capabilities">{providerModelCapabilityLabels(option.modelCapabilities).join(" · ")}</small>}</span>
           </label>)}
         </fieldset>}
         {editor.provider === "bedrock" && <>

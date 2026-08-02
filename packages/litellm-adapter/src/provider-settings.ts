@@ -32,6 +32,11 @@ export type ManagedProviderConfiguration =
   | (ManagedProviderOperation & { provider: "anthropic"; apiKey: string } & DirectProviderSelection<AnthropicProviderModelId>)
   | (ManagedProviderOperation & { provider: "glm"; apiKey: string } & DirectProviderSelection<GlmProviderModelId>)
   | (ManagedProviderOperation & { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId });
+export type ManagedProviderModelCapabilities = {
+  vision: boolean;
+  tools: boolean;
+  streaming: boolean;
+};
 export type ManagedProviderDeploymentDescriptor = {
   id: string;
   provider: ManagedProviderName;
@@ -47,6 +52,7 @@ export type ManagedProviderDeploymentDescriptor = {
   primary: boolean;
   legacyAlias: boolean;
   vision: boolean;
+  modelCapabilities?: ManagedProviderModelCapabilities;
 };
 export type ManagedProviderRoute = {
   modelIds: string[];
@@ -64,6 +70,7 @@ export type ManagedProviderModel = {
   alias: string;
   model: string;
   vision: boolean;
+  modelCapabilities?: ManagedProviderModelCapabilities;
   bedrock?: { region: BedrockApiKeyRegion; profile: BedrockApiKeyModelProfile };
 };
 
@@ -72,13 +79,25 @@ export type ManagedProviderDisplayMetadata = {
   upstreamModelDisplayName: string;
 };
 
-type ProviderModelProfile = { id: ProviderModelId; displayName: string; model: string; vision: boolean };
+type ProviderModelProfile = {
+  id: ProviderModelId;
+  displayName: string;
+  model: string;
+  vision: boolean;
+  modelCapabilities?: ManagedProviderModelCapabilities;
+};
+
+const openAiGpt56Capabilities: ManagedProviderModelCapabilities = Object.freeze({
+  vision: true,
+  tools: true,
+  streaming: true,
+});
 
 export const managedProviderModelProfiles = Object.freeze({
   openai: Object.freeze([
-    { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", model: "openai/gpt-5.6-sol", vision: true },
-    { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", model: "openai/gpt-5.6-terra", vision: true },
-    { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", model: "openai/gpt-5.6-luna", vision: true },
+    { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", model: "openai/gpt-5.6-sol", vision: true, modelCapabilities: openAiGpt56Capabilities },
+    { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", model: "openai/gpt-5.6-terra", vision: true, modelCapabilities: openAiGpt56Capabilities },
+    { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", model: "openai/gpt-5.6-luna", vision: true, modelCapabilities: openAiGpt56Capabilities },
   ]),
   anthropic: Object.freeze([
     { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6", model: "anthropic/claude-sonnet-4-6", vision: true },
@@ -88,7 +107,7 @@ export const managedProviderModelProfiles = Object.freeze({
     { id: "glm-5", displayName: "Z.ai GLM-5", model: "zai/glm-5", vision: false },
     { id: "glm-5.2", displayName: "Z.ai GLM-5.2", model: "zai/glm-5.2", vision: false },
   ]),
-} satisfies Record<SelectableProviderName, ReadonlyArray<ProviderModelProfile>>);
+} satisfies Record<SelectableProviderName, ReadonlyArray<ProviderModelProfile>>) as Readonly<Record<SelectableProviderName, ReadonlyArray<ProviderModelProfile>>>;
 
 export const defaultManagedProviderModelIds = Object.freeze({
   openai: "gpt-5.6-luna",
@@ -97,7 +116,11 @@ export const defaultManagedProviderModelIds = Object.freeze({
 } satisfies Record<SelectableProviderName, ProviderModelId>);
 
 export const managedProviderModelOptions = (provider: SelectableProviderName) =>
-  managedProviderModelProfiles[provider].map(({ id, displayName }) => ({ id, displayName }));
+  managedProviderModelProfiles[provider].map(({ id, displayName, modelCapabilities }) => ({
+    id,
+    displayName,
+    ...(modelCapabilities ? { modelCapabilities } : {}),
+  }));
 
 export const managedProviderModel = (provider: SelectableProviderName, modelId: unknown) =>
   managedProviderModelProfiles[provider].find((candidate) => candidate.id === modelId) ?? null;
@@ -215,6 +238,11 @@ const templatesFor = (
         alias: bedrockApiKeyRouteAlias,
         model: profile.litellmModel,
         vision: profile.capabilities.vision,
+        modelCapabilities: {
+          vision: profile.capabilities.vision,
+          tools: profile.capabilities.toolCalls,
+          streaming: profile.capabilities.streaming,
+        },
         bedrock: { region: configuration.region, profile },
       },
       upstreamModelId: null,
@@ -228,7 +256,7 @@ const templatesFor = (
   const primary = profiles[0]!;
   const legacy = managedProviderModels[provider].map((model) => ({
     alias: model.alias,
-    model: { ...model, model: primary.model, vision: primary.vision },
+    model: { ...model, model: primary.model, vision: primary.vision, modelCapabilities: primary.modelCapabilities },
     upstreamModelId: primary.id,
     displayName: primary.displayName,
     primary: true,
@@ -241,7 +269,7 @@ const templatesFor = (
       const alias = managedProviderModelAlias(provider, profile.id);
       return {
         alias,
-        model: { alias, model: profile.model, vision: profile.vision },
+        model: { alias, model: profile.model, vision: profile.vision, modelCapabilities: profile.modelCapabilities },
         upstreamModelId: profile.id,
         displayName: profile.displayName,
         primary: profile.id === primary.id,
@@ -282,6 +310,7 @@ export const managedProviderDeploymentDescriptors = (
       primary: template.primary,
       legacyAlias: template.legacyAlias,
       vision: template.model.vision,
+      ...(template.model.modelCapabilities ? { modelCapabilities: template.model.modelCapabilities } : {}),
     };
   });
 };
@@ -604,6 +633,10 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         onecomputer_primary_deployment: deployment.primary,
         onecomputer_legacy_alias: deployment.legacyAlias,
         supports_vision: deployment.model.vision,
+        ...(deployment.model.modelCapabilities ? {
+          supports_function_calling: deployment.model.modelCapabilities.tools,
+          supports_streaming: deployment.model.modelCapabilities.streaming,
+        } : {}),
         ...(bedrock ? {
           supports_function_calling: bedrock.profile.capabilities.toolCalls,
           supports_response_schema: bedrock.profile.capabilities.structuredOutput,

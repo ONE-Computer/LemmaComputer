@@ -294,6 +294,11 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.equal(modelSet.deployments[0]!.primary, true);
     assert.ok(modelSet.deployments[0]!.aliases.includes("onecomputer-assistant"));
     assert.match(modelSet.deployments[0]!.providerDeployment, /^ocp-/);
+    assert.deepEqual(modelSet.deployments[1]!.modelCapabilities, {
+      vision: true,
+      tools: true,
+      streaming: true,
+    });
     assert.equal(
       managedProviderAliasForAccessGroup("tenant-alpha", modelSet.deployments[0]!.providerDeployment),
       "onecomputer-openai-gpt-5-6-sol",
@@ -311,6 +316,9 @@ test("managed provider configuration isolates tenants, validates candidates, and
         .map((document) => document.model_info.onecomputer_upstream_model_id),
       ["gpt-5.6-sol", "gpt-5.6-luna"],
     );
+    assert.ok(modelSetUpdates
+      .filter((document) => document.model_info.onecomputer_legacy_alias === false)
+      .every((document) => document.model_info.supports_function_calling === true));
 
     const retireStart = requests.length;
     const retired = await gateway.configureManagedProvider({

@@ -10,6 +10,22 @@ export const providerTitle = (value) => ({
 
 const valueOf = (...values) => values.find((value) => typeof value === "string" && value.trim())?.trim() ?? "";
 
+const modelCapabilities = (value) => {
+  if (!value || typeof value !== "object") return null;
+  const { vision, tools, streaming } = value;
+  if (typeof vision !== "boolean" || typeof tools !== "boolean" || typeof streaming !== "boolean") return null;
+  return { vision, tools, streaming };
+};
+
+export const providerModelCapabilityLabels = (capabilities) => {
+  if (!capabilities) return [];
+  return [
+    capabilities.tools ? "Function tools" : null,
+    capabilities.vision ? "Vision" : null,
+    capabilities.streaming ? "Streaming" : null,
+  ].filter(Boolean);
+};
+
 export const providerDeploymentKey = (deployment) => [
   deployment.provider,
   deployment.providerAccountId,
@@ -31,6 +47,7 @@ export const configuredProviderDeployments = (providers = []) => providers
       const region = valueOf(deployment.region, provider.region) || null;
       const providerServiceTier = valueOf(deployment.providerServiceTier) || null;
       const displayName = valueOf(deployment.displayName, provider.upstreamModelDisplayName, providerModel);
+      const declaredCapabilities = modelCapabilities(deployment.modelCapabilities);
       const normalized = {
         id: valueOf(deployment.id) || providerDeploymentKey({ provider: providerName, providerAccountId, providerModel, providerDeployment, region, providerServiceTier }),
         provider: providerName,
@@ -40,6 +57,7 @@ export const configuredProviderDeployments = (providers = []) => providers
         region,
         providerServiceTier,
         displayName,
+        ...(declaredCapabilities ? { modelCapabilities: declaredCapabilities } : {}),
       };
       return normalized.provider && normalized.providerAccountId && normalized.providerModel && normalized.providerDeployment ? normalized : null;
     });

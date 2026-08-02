@@ -79,6 +79,17 @@ test("provider setup shows configured deployments and selects more than one rout
   await expect(opus).not.toBeChecked();
 });
 
+test("provider model selection discloses reviewed OpenAI model capabilities", async ({ page }) => {
+  await page.goto("/?view=ai-control-plane&section=models-providers");
+  const openai = page.locator(".provider-settings-inventory article").filter({ hasText: "OpenAI" });
+  await openai.getByRole("button", { name: "Connect" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Connect OpenAI" });
+  await expect(dialog.getByText("Function tools")).toHaveCount(3);
+  await expect(dialog.getByText("Vision")).toHaveCount(3);
+  await expect(dialog.getByText("Streaming")).toHaveCount(3);
+});
+
 test("Teams and budgets is the sole Team-management surface", async ({ page }) => {
   await page.goto("/?view=ai-control-plane&section=teams-budgets");
   await expect(page.getByRole("heading", { name: "Teams" })).toBeVisible();

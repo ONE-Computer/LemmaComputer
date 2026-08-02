@@ -132,6 +132,50 @@ test("administrator can configure the first alias mapping from provider inventor
   await expect(page.getByText("Local mapping draft saved")).toBeVisible();
 });
 
+test("route drafts inherit Luna tool capability from the provider deployment", async ({ page }) => {
+  const mappingId = "22222222-2222-4222-8222-222222222222";
+  const deployments = ["lite", "balanced", "pro"].map((serviceClass, index) => ({
+    id: `44444444-4444-4444-8444-44444444444${index + 1}`,
+    serviceClass,
+    provider: "openai",
+    providerAccountId: "openai-primary",
+    providerModel: serviceClass === "lite" ? "openai/gpt-5.6-luna" : "openai/gpt-5.6-terra",
+    providerDeployment: serviceClass === "lite" ? "openai/luna" : `openai/${serviceClass}`,
+    rateCardId: null,
+    capabilities: { vision: false, tools: false, streaming: true, contextTokens: 32000, outputTokens: 32768, residency: [] },
+    approved: true,
+    evaluationPassed: true,
+  }));
+  await page.route("**/v1/admin/routing/mappings/latest", async (route) => {
+    await route.fulfill({ json: { mapping: { id: mappingId, tenantId: "acme", revisionNote: "Incorrect legacy capability flags", createdBy: "admin", createdAt: "2026-08-02T00:00:00.000Z", deployments } } });
+  });
+  await page.route("**/v1/admin/provider-settings", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    const openai = payload.providers.find((provider) => provider.provider === "openai");
+    openai.state = "active";
+    openai.selectedModelIds = ["gpt-5.6-luna"];
+    openai.deployments = [{
+      id: "openai-luna",
+      provider: "openai",
+      providerAccountId: "openai-primary",
+      providerModel: "openai/gpt-5.6-luna",
+      providerDeployment: "openai/luna",
+      displayName: "OpenAI GPT-5.6 Luna",
+      modelCapabilities: { vision: true, tools: true, streaming: true },
+    }];
+    await route.fulfill({ response, json: payload });
+  });
+
+  await page.goto("/?view=ai-control-plane&section=model-routes");
+  await page.getByRole("button", { name: "Create draft" }).click();
+  const editor = page.getByRole("dialog", { name: "Create a mapping draft" });
+  await expect(editor.getByText("Inherited model capabilities: Function tools · Vision · Streaming")).toBeVisible();
+  await editor.getByLabel("Mapping revision note").fill("Correct inherited Luna capability metadata.");
+  await editor.getByRole("button", { name: "Save local draft" }).click();
+  await expect(page.getByRole("table").getByText("Function tools · Vision · Streaming")).toBeVisible();
+});
+
 test("administrator can set up a published mapping for a Team and start first shadow rollout", async ({ page }) => {
   const mappingId = "22222222-2222-4222-8222-222222222222";
   const policyId = "33333333-3333-4333-8333-333333333333";

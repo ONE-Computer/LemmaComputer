@@ -274,6 +274,10 @@
   min-width: 205px;
 }
 
+.route-table td:nth-child(3) {
+  min-width: 150px;
+}
+
 .route-table td:last-child {
   min-width: 110px;
   text-align: right;
@@ -283,6 +287,12 @@
 .route-table td > small,
 .route-card-version {
   display: block;
+}
+
+.route-capability-copy,
+.route-model-capabilities {
+  color: #496a89 !important;
+  font-weight: 620;
 }
 
 .route-table td > strong {
