@@ -48,7 +48,7 @@ export interface ProviderSettingsStore {
   deleteProviderSetting(tenantId: string, provider: ManagedProviderName): Promise<boolean>;
   withProviderLifecycleLock<T>(tenantId: string, provider: ManagedProviderName, operation: () => Promise<T>): Promise<T>;
   ensureProviderLifecycle(input: { tenantId: string; provider: ManagedProviderName; updatedBy: string }): Promise<ProviderLifecycleRecord>;
-  beginProviderLifecycle(input: { tenantId: string; provider: ManagedProviderName; updatedBy: string }): Promise<ProviderLifecycleRecord>;
+  beginProviderLifecycle(input: { tenantId: string; provider: ManagedProviderName; updatedBy: string }): Promise<ProviderLifecycleRecord | null>;
   getProviderLifecycle(tenantId: string, provider: ManagedProviderName): Promise<ProviderLifecycleRecord | null>;
   fenceProviderDisabled(input: { tenantId: string; provider: ManagedProviderName; updatedBy: string }): Promise<ProviderLifecycleFenceResult>;
   fenceProviderDeleted(input: { tenantId: string; provider: ManagedProviderName; updatedBy: string }): Promise<ProviderLifecycleFenceResult>;
@@ -213,6 +213,11 @@ export class PostgresProviderSettingsStore implements ProviderSettingsStore {
   async beginProviderLifecycle(input: { tenantId: string; provider: ManagedProviderName; updatedBy: string }) {
     return this.transaction(async (client) => {
       const current = await this.lifecycleForUpdate(client, input);
+      // A pending fence is an incomplete incident-response epoch. Do not let
+      // a configuration started during that epoch make the provider active;
+      // the administrator may explicitly configure again after cleanup (or
+      // reconciliation) has completed.
+      if (current.reconciliationStatus === "pending") return null;
       const result = await client.query(
         `UPDATE provider_lifecycle_fences
          SET generation=$3,
@@ -274,7 +279,10 @@ export class PostgresProviderSettingsStore implements ProviderSettingsStore {
           lifecycle.generation + 1,
           desiredState,
           JSON.stringify(pendingCleanupModelIds),
-          pendingCleanupModelIds.length ? "pending" : "not_required",
+          // "pending" covers the whole disable epoch, not only model deletion.
+          // That closes the gap between the durable fence and acquiring the
+          // long-lived lifecycle lock for upstream cleanup.
+          "pending",
           input.updatedBy,
         ],
       );
@@ -613,6 +621,7 @@ export class MemoryProviderSettingsStore implements ProviderSettingsStore {
 
   async beginProviderLifecycle(input: { tenantId: string; provider: ManagedProviderName; updatedBy: string }) {
     const current = this.ensureLifecycle(input);
+    if (current.reconciliationStatus === "pending") return null;
     const next: ProviderLifecycleRecord = {
       ...current,
       generation: current.generation + 1,
@@ -651,7 +660,7 @@ export class MemoryProviderSettingsStore implements ProviderSettingsStore {
       generation: lifecycle.generation + 1,
       desiredState,
       pendingCleanupModelIds,
-      reconciliationStatus: pendingCleanupModelIds.length ? "pending" : "not_required",
+      reconciliationStatus: "pending",
       reconciliationErrorCode: null,
       updatedBy: input.updatedBy,
       updatedAt: new Date(),

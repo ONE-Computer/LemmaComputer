@@ -204,6 +204,14 @@ export class ProviderSettingsService {
         provider,
         updatedBy: actor.userId,
       });
+      if (!lifecycle) {
+        throw new OneComputerError(
+          "PROVIDER_LIFECYCLE_FENCED",
+          "The provider is still being disabled; reconcile it before configuring again",
+          409,
+          true,
+        );
+      }
       const current = await this.store.getProviderSetting(actor.tenantId, provider);
       if (input.provider === "bedrock" && current?.state === "active") {
         const existing = this.requireBedrockSelection(current);

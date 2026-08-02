@@ -19,6 +19,7 @@ import {
   type SessionPrincipal,
 } from "@onecomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
+import { ProviderSettingsService } from "../apps/control-api/src/provider-settings.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "provider-settings-proxy-token-at-least-24-characters";
@@ -430,6 +431,58 @@ test("a disable fences an in-flight provider rotation and revokes workspace gran
   } finally {
     await app.close();
   }
+});
+
+test("a configure that arrives during a disable epoch cannot reactivate the provider", async () => {
+  const settingsStore = new MemoryProviderSettingsStore();
+  const providerAdministration = new FakeProviderAdministration();
+  const revocationStarted = deferred();
+  const releaseRevocation = deferred();
+  const service = new ProviderSettingsService(settingsStore, providerAdministration, {
+    revokeWorkspaceGrants: async () => {
+      revocationStarted.resolve();
+      await releaseRevocation.promise;
+      return { revoked: 0, failed: 0 };
+    },
+  });
+  await service.configure(administrator, {
+    provider: "openai",
+    apiKey: rawOpenAiKey,
+    modelId: "gpt-5.6-terra",
+  });
+
+  const disabling = service.disable(administrator, "openai");
+  await revocationStarted.promise;
+  const fenced = await settingsStore.getProviderSetting(identity.tenantId, "openai");
+  assert.equal(fenced?.state, "disabled");
+
+  const reconfigure = service.configure(administrator, {
+    provider: "openai",
+    apiKey: rawOpenAiKey,
+    modelId: "gpt-5.6-sol",
+  });
+  try {
+    await assert.rejects(
+      reconfigure,
+      (error: unknown) => error instanceof OneComputerError && error.code === "PROVIDER_LIFECYCLE_FENCED",
+    );
+  } finally {
+    releaseRevocation.resolve();
+    await disabling;
+  }
+
+  const final = await settingsStore.getProviderSetting(identity.tenantId, "openai");
+  assert.equal(final?.state, "disabled");
+  assert.deepEqual(final?.modelIds, []);
+  assert.equal(providerAdministration.configured.length, 1, "the post-fence configure must not reach LiteLLM");
+
+  const explicitReenable = await service.configure(administrator, {
+    provider: "openai",
+    apiKey: rawOpenAiKey,
+    modelId: "gpt-5.6-sol",
+  });
+  assert.equal(explicitReenable.state, "active");
+  assert.equal(providerAdministration.configured.length, 2);
 });
 
 test("reconciliation retries gateway cleanup without re-enabling a disabled provider", async () => {

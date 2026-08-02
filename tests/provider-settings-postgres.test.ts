@@ -192,3 +192,80 @@ test("PostgreSQL lifecycle fencing survives concurrent Control instances and kee
     await Promise.all([firstStore.close(), secondStore.close(), pool.end()]);
   }
 });
+
+test("PostgreSQL disable epoch blocks a configure from another Control instance until it completes", {
+  skip: !connectionString,
+}, async () => {
+  const tenantId = `provider-disable-epoch-test-${randomUUID()}`;
+  const identity: IdentityContext = {
+    tenantId,
+    subjectId: "provider-disable-epoch-admin",
+    audience: "onecomputer-control",
+  };
+  const actor: SessionPrincipal = {
+    userId: identity.subjectId,
+    tenantId,
+    email: "provider-disable-epoch-admin@example.test",
+    displayName: "Provider disable epoch administrator",
+    tenantDisplayName: "Provider disable epoch test",
+    roles: ["administrator"],
+    identity,
+  };
+  const firstStore = PostgresProviderSettingsStore.fromConnectionString(connectionString!);
+  const secondStore = PostgresProviderSettingsStore.fromConnectionString(connectionString!);
+  const pool = new pg.Pool({ connectionString });
+  const gateway = new DelayedProviderAdministration();
+  const first = new ProviderSettingsService(firstStore, gateway);
+  const revocationStarted = deferred();
+  const releaseRevocation = deferred();
+  const second = new ProviderSettingsService(secondStore, gateway, {
+    revokeWorkspaceGrants: async () => {
+      revocationStarted.resolve();
+      await releaseRevocation.promise;
+      return { revoked: 0, failed: 0 };
+    },
+  });
+  try {
+    await pool.query(
+      "INSERT INTO tenants(id,external_tenant_id,display_name) VALUES($1,$2,'Provider disable epoch test')",
+      [tenantId, `external-${tenantId}`],
+    );
+    await first.configure(actor, {
+      provider: "openai",
+      apiKey: "sk-provider-disable-epoch-initial-never-log-0001",
+      modelId: "gpt-5.6-terra",
+    });
+
+    const disabling = second.disable(actor, "openai");
+    await revocationStarted.promise;
+    const reconfigure = first.configure(actor, {
+      provider: "openai",
+      apiKey: "sk-provider-disable-epoch-race-never-log-0002",
+      modelId: "gpt-5.6-sol",
+    });
+    try {
+      await assert.rejects(
+        reconfigure,
+        (error: unknown) => error instanceof OneComputerError && error.code === "PROVIDER_LIFECYCLE_FENCED",
+      );
+    } finally {
+      releaseRevocation.resolve();
+      await disabling;
+    }
+
+    const disabled = await secondStore.getProviderSetting(tenantId, "openai");
+    assert.equal(disabled?.state, "disabled");
+    assert.deepEqual(disabled?.modelIds, []);
+    const reenabled = await first.configure(actor, {
+      provider: "openai",
+      apiKey: "sk-provider-disable-epoch-explicit-never-log-0003",
+      modelId: "gpt-5.6-sol",
+    });
+    assert.equal(reenabled.state, "active");
+  } finally {
+    await pool.query("DELETE FROM provider_lifecycle_fences WHERE tenant_id=$1", [tenantId]);
+    await pool.query("DELETE FROM provider_settings WHERE tenant_id=$1", [tenantId]);
+    await pool.query("DELETE FROM tenants WHERE id=$1", [tenantId]);
+    await Promise.all([firstStore.close(), secondStore.close(), pool.end()]);
+  }
+});
