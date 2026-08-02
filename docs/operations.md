@@ -269,6 +269,46 @@ LiteLLM encryption secrets as one set. Rolling back only an image can leave
 dynamic model records or encrypted credentials incompatible with the old static
 configuration.
 
+### Hosted LiteLLM administration transport
+
+Hosted deployments must use the dedicated mutual-TLS administration listener,
+not the gateway's workspace-facing endpoint:
+
+```bash
+docker compose -f compose.yaml -f compose.hosted.yaml config --quiet
+docker compose -f compose.yaml -f compose.hosted.yaml up -d --wait
+```
+
+The hosted overlay makes Control use
+`https://litellm-admin-listener:8443`. That listener is bound only to the
+internal `litellm-admin-private` network alias, and its proxy can reach the
+LiteLLM upstream without exposing the listener to workspace traffic. It accepts
+only a client certificate issued to the `onecomputer-control` workload identity.
+
+Inject the following as base64-encoded PEM from the deployment secret manager:
+
+- `ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64`
+- `ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64` and
+  `ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64`
+- `ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64` and
+  `ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64`
+
+The server certificate must verify for
+`ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME` (normally
+`litellm-admin-listener`), and the client certificate subject CN must match
+`ONECOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME` (normally
+`onecomputer-control`). Hosted startup refuses HTTP, missing or malformed mTLS
+material, and any reuse of `ONECOMPUTER_LITELLM_CREDENTIAL_SECRET` as a session
+or workspace-ingress secret. The proxy rejects missing client certificates at
+the TLS handshake and rejects a certificate for a different workload identity.
+
+For an upgrade from an older installation, run `npm run env:update`, put three
+independent values in `ONECOMPUTER_LITELLM_CREDENTIAL_SECRET`,
+`ONECOMPUTER_SESSION_SECRET`, and
+`ONECOMPUTER_WORKSPACE_INGRESS_SECRET`, then deploy the hosted overlay. Do not
+rotate the credential-derivation secret merely to rotate sessions or ingress;
+those values are intentionally separate now.
+
 ### Stable cryptographic material
 
 These values must remain stable while their dependent state exists:

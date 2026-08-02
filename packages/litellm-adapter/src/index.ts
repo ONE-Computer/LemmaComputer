@@ -11,8 +11,10 @@ import {
   type RuntimePolicy,
 } from "@onecomputer/contracts";
 import { managedProviderForAlias, managedProviderModels, tenantManagedModelAccessGroup } from "./provider-settings.js";
+import type { FetchLike } from "./mtls-fetch.js";
 export * from "./provider-settings.js";
 export * from "./budget-projection.js";
+export * from "./mtls-fetch.js";
 
 export type GatewayGrant = {
   baseUrl: string;
@@ -179,6 +181,7 @@ type LiteLLMConfig = {
   workspaceGrantTtlMs?: number;
   workspaceGrantRenewalMs?: number;
   connectionGrantTtlMs?: number;
+  adminFetch?: FetchLike;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -243,6 +246,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   private readonly workspaceGrantTtlMs: number;
   private readonly workspaceGrantRenewalMs: number;
   private readonly connectionGrantTtlMs: number;
+  private readonly adminFetch: FetchLike;
   private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string; modelAlias: string; transportModelAlias: string }>();
   private readonly modelCapabilityStates = new Map<string, { expiresAt: number; capabilities: GatewayModelCapabilities }>();
   private readonly oauthClientRegistrationStates = new Map<string, Promise<string | null>>();
@@ -257,6 +261,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     this.workspaceGrantTtlMs = config.workspaceGrantTtlMs ?? 8 * 60 * 60 * 1000;
     this.workspaceGrantRenewalMs = config.workspaceGrantRenewalMs ?? 60 * 60 * 1000;
     this.connectionGrantTtlMs = config.connectionGrantTtlMs ?? 15 * 60 * 1000;
+    this.adminFetch = config.adminFetch ?? fetch;
   }
 
   userIdFor(identity: IdentityContext) {
@@ -309,7 +314,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       });
       const authorize = async () => {
         try {
-          return await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(grant.serverId)}/authorize?${query}`, {
+          return await this.adminFetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(grant.serverId)}/authorize?${query}`, {
             method: "GET",
             headers: { authorization: `Bearer ${grant.credential}` },
             redirect: "manual",
@@ -414,7 +419,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       });
       let response: Response;
       try {
-        response = await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(grant.serverId)}/token`, {
+        response = await this.adminFetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(grant.serverId)}/token`, {
           method: "POST",
           headers: {
             authorization: `Bearer ${grant.credential}`,
@@ -513,7 +518,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     if (dynamicClientId) query.set("client_id", dynamicClientId);
     let response: Response;
     try {
-      response = await fetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(temporaryId)}/authorize?${query}`, {
+      response = await this.adminFetch(`${this.adminUrl}/v1/mcp/server/oauth/${encodeURIComponent(temporaryId)}/authorize?${query}`, {
         method: "GET",
         headers: { authorization: `Bearer ${this.config.masterKey}` },
         redirect: "manual",
@@ -1309,7 +1314,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
 
   private async call(url: string, token: string, init: { method: string; body?: JsonObject }) {
     try {
-      const response = await fetch(url, {
+      const response = await this.adminFetch(url, {
         method: init.method,
         headers: {
           authorization: `Bearer ${token}`,

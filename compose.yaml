@@ -165,6 +165,43 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Control uses this dedicated listener for every LiteLLM administration call.
+  # In the hosted overlay it terminates mTLS and only accepts the Control
+  # workload certificate; it never receives workspace traffic directly.
+  litellm-admin-proxy:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["node", "apps/litellm-admin-proxy/server.mjs"]
+    environment:
+      ONECOMPUTER_INSTALLATION_KIND: ${ONECOMPUTER_INSTALLATION_KIND:-customer-managed}
+      # This alias exists only on litellm-admin-private, so the listener is
+      # not bound to the gateway-private interface used by workspaces.
+      LITELLM_ADMIN_PROXY_HOST: litellm-admin-listener
+      LITELLM_ADMIN_PROXY_PORT: "8443"
+      LITELLM_ADMIN_PROXY_UPSTREAM_URL: http://litellm:4000
+      LITELLM_ADMIN_PROXY_TLS_CA_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64:-}
+      LITELLM_ADMIN_PROXY_TLS_SERVER_CERT_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64:-}
+      LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64:-}
+      LITELLM_ADMIN_PROXY_CLIENT_COMMON_NAME: ${ONECOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME:-onecomputer-control}
+    networks:
+      gateway-private: {}
+      litellm-admin-private:
+        aliases:
+          - litellm-admin-listener
+    depends_on:
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('node:net').connect(Number(process.env.LITELLM_ADMIN_PROXY_PORT),'litellm-admin-listener').once('connect',()=>process.exit(0)).once('error',()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   openvtc-consent:
     build:
       context: .
@@ -261,7 +298,11 @@ services:
       CONTROLLER_URL: http://workspace-controller:4101
       CONTROLLER_INTERNAL_TOKEN: ${ONECOMPUTER_CONTROLLER_TOKEN:?set ONECOMPUTER_CONTROLLER_TOKEN}
       DATABASE_URL: postgres://onecomputer:${ONECOMPUTER_POSTGRES_PASSWORD}@postgres:5432/onecomputer
-      LITELLM_ADMIN_URL: http://litellm:4000
+      LITELLM_ADMIN_URL: ${ONECOMPUTER_LITELLM_ADMIN_URL:-http://litellm-admin-listener:8443}
+      LITELLM_ADMIN_TLS_CA_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64:-}
+      LITELLM_ADMIN_TLS_CLIENT_CERT_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64:-}
+      LITELLM_ADMIN_TLS_CLIENT_KEY_B64: ${ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64:-}
+      LITELLM_ADMIN_TLS_SERVER_NAME: ${ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME:-litellm-admin-listener}
       LITELLM_WORKSPACE_URL: http://litellm:4000
       LITELLM_PUBLIC_URL: ${ONECOMPUTER_LITELLM_PUBLIC_URL:-http://localhost:4000}
       LITELLM_MASTER_KEY: ${ONECOMPUTER_LITELLM_MASTER_KEY:?set ONECOMPUTER_LITELLM_MASTER_KEY}
@@ -279,9 +320,9 @@ services:
       ENTRA_TENANT_ID: ${ONECOMPUTER_ENTRA_TENANT_ID:-${ONECOMPUTER_MS365_TENANT_ID:?set ONECOMPUTER_ENTRA_TENANT_ID}}
       ENTRA_CLIENT_ID: ${ONECOMPUTER_ENTRA_CLIENT_ID:-${ONECOMPUTER_MS365_CLIENT_ID:?set ONECOMPUTER_ENTRA_CLIENT_ID}}
       ENTRA_CLIENT_SECRET: ${ONECOMPUTER_ENTRA_CLIENT_SECRET:-${ONECOMPUTER_MS365_CLIENT_SECRET:?set ONECOMPUTER_ENTRA_CLIENT_SECRET}}
-      SESSION_SECRET: ${ONECOMPUTER_SESSION_SECRET:-${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_SESSION_SECRET}}
+      SESSION_SECRET: ${ONECOMPUTER_SESSION_SECRET:?set ONECOMPUTER_SESSION_SECRET}
       WORKSPACE_INGRESS_PUBLIC_URL: ${ONECOMPUTER_PUBLIC_WEB_URL:-http://localhost:4174}
-      WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:-${ONECOMPUTER_SESSION_SECRET:-${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}}}
+      WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}
       WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS:-300}
       WORKSPACE_INGRESS_SESSION_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS:-28800}
       EGRESS_GRANT_SECRET: ${ONECOMPUTER_EGRESS_GRANT_SECRET:?set ONECOMPUTER_EGRESS_GRANT_SECRET}
@@ -305,11 +346,14 @@ services:
       - control-private
       - consent-private
       - gateway-private
+      - litellm-admin-private
       - identity-egress
     depends_on:
       db-migrate:
         condition: service_completed_successfully
       litellm:
+        condition: service_healthy
+      litellm-admin-proxy:
         condition: service_healthy
       openvtc-consent:
         condition: service_healthy
@@ -422,7 +466,7 @@ services:
       WORKSPACE_INGRESS_WEB_UPSTREAM: http://web:4173
       WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM: http://ms365-mcp:3000
       WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM: http://litellm:4000
-      WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:-${ONECOMPUTER_SESSION_SECRET:-${ONECOMPUTER_LITELLM_CREDENTIAL_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}}}
+      WORKSPACE_INGRESS_SECRET: ${ONECOMPUTER_WORKSPACE_INGRESS_SECRET:?set ONECOMPUTER_WORKSPACE_INGRESS_SECRET}
       WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS:-300}
       WORKSPACE_INGRESS_SESSION_TTL_SECONDS: ${ONECOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS:-28800}
       WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "false"
@@ -471,6 +515,10 @@ networks:
   consent-private:
     internal: true
   gateway-private:
+    internal: true
+  # The only intended consumer of the hosted admin listener is Control. The
+  # proxy additionally verifies Control's dedicated client certificate.
+  litellm-admin-private:
     internal: true
   identity-egress: {}
   model-egress: {}

@@ -14,6 +14,7 @@ import {
   type ProviderModelId,
   type ProviderSettingMetadata,
 } from "@onecomputer/contracts";
+import type { FetchLike } from "./mtls-fetch.js";
 
 export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock"] as const;
 export type ManagedProviderName = typeof managedProviderNames[number];
@@ -201,7 +202,7 @@ export const managedProviderAliasForAccessGroup = (tenantId: string, accessGroup
 const tenantCredentialName = (tenantId: string, provider: ManagedProviderName) => `onecomputer-provider-${tenantRouteHash(tenantId)}-${provider}`;
 const tenantModelId = (tenantId: string, provider: ManagedProviderName, alias: string) => `onecomputer-provider-${tenantRouteHash(tenantId)}-${provider}-${alias}`;
 
-export type LiteLLMProviderAdministrationConfig = { adminUrl: string; masterKey: string; credentialSecret: string; requestTimeoutMs?: number; bedrockRuntimeEndpoint?: string };
+export type LiteLLMProviderAdministrationConfig = { adminUrl: string; masterKey: string; credentialSecret: string; requestTimeoutMs?: number; bedrockRuntimeEndpoint?: string; adminFetch?: FetchLike };
 type JsonObject = Record<string, unknown>;
 
 type ProviderModelTemplate = {
@@ -340,6 +341,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   private readonly credentialSecret: string;
   private readonly timeoutMs: number;
   private readonly bedrockRuntimeEndpoint: string | undefined;
+  private readonly adminFetch: FetchLike;
 
   constructor(config: LiteLLMProviderAdministrationConfig) {
     this.adminUrl = config.adminUrl.replace(/\/$/, "");
@@ -347,6 +349,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     this.credentialSecret = config.credentialSecret;
     this.timeoutMs = config.requestTimeoutMs ?? 15_000;
     this.bedrockRuntimeEndpoint = config.bedrockRuntimeEndpoint?.replace(/[/]$/, "");
+    this.adminFetch = config.adminFetch ?? fetch;
   }
 
   async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
@@ -675,7 +678,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
 
   private async call(path: string, input: { method: "GET" | "POST" | "PATCH" | "DELETE"; body?: JsonObject; credential?: string }): Promise<GatewayResult> {
     try {
-      const response = await fetch(`${this.adminUrl}${path}`, {
+      const response = await this.adminFetch(`${this.adminUrl}${path}`, {
         method: input.method,
         headers: {
           authorization: `Bearer ${input.credential ?? this.masterKey}`,
