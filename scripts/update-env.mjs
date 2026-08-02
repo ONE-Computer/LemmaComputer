@@ -6,6 +6,7 @@ import {
   parseEnvironment,
 } from "./environment-template.mjs";
 import {
+  environmentVariableNameSet,
   renderEnvironmentTemplate,
   validateDeploymentEnvironment,
 } from "./deployment-config.mjs";
@@ -25,6 +26,9 @@ const current = await readFile(destination, "utf8");
 const parity = environmentParity(template, current);
 const retiredSensitiveVariableNames = new Set(["ONECOMPUTER_OPENAI_API_KEY", "ONECOMPUTER_CLAUDE_API_KEY", "ONECOMPUTER_GLM_API_KEY", "ONECOMPUTER_LITELLM_UI_PASSWORD"]);
 const retiredSensitive = parity.extra.filter((name) => retiredSensitiveVariableNames.has(name));
+const registeredDeploymentValues = (values) => Object.fromEntries(
+  [...values].filter(([key]) => !key.startsWith("ONECOMPUTER_") || environmentVariableNameSet.has(key)),
+);
 
 if (check) {
   if (parity.missing.length) process.stdout.write(`Missing variables: ${parity.missing.join(", ")}\n`);
@@ -33,7 +37,7 @@ if (check) {
   if (parity.duplicates.length) process.stdout.write(`Duplicate variables: ${parity.duplicates.join(", ")}\n`);
   if (!parity.missing.length && !parity.duplicates.length) {
     try {
-      const values = Object.fromEntries(parseEnvironment(current).values);
+      const values = registeredDeploymentValues(parseEnvironment(current).values);
       const validated = validateDeploymentEnvironment(values, { profile, strict: true });
       process.stdout.write(`Deployment environment contract is valid for ${validated.ONECOMPUTER_INSTALLATION_KIND} (${parity.extra.length} preserved extra variable${parity.extra.length === 1 ? "" : "s"}).\n`);
     } catch (error) {
@@ -47,7 +51,7 @@ if (check) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
   const initialized = initializeEnvironment(template, timeZone);
   const merged = mergeEnvironment(template, current, initialized);
-  const values = Object.fromEntries(parseEnvironment(merged.contents).values);
+  const values = registeredDeploymentValues(parseEnvironment(merged.contents).values);
   validateDeploymentEnvironment(values, { profile, strict: true });
   const temporary = `${destination}.update-${process.pid}`;
   try {

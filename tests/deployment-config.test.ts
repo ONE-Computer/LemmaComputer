@@ -134,6 +134,33 @@ test("env:update normalizes a historical blank LiteLLM admin URL to the catalog 
   assert.equal(services["control-api"].LITELLM_ADMIN_URL, "http://litellm-admin-listener:8443");
 });
 
+test("environment migration preserves retired variables without projecting them into services", async () => {
+  const root = await mkdtemp(join(tmpdir(), "onecomputer-env-migration-"));
+  const source = join(root, "deployment.env");
+  const destination = join(root, "service-env");
+  const retiredValue = "legacy-provider-key-that-must-not-reach-services";
+  try {
+    await writeFile(source, `${initializeEnvironment(renderEnvironmentTemplate(), "Etc/UTC")}ONECOMPUTER_OPENAI_API_KEY=${retiredValue}\n`, { mode: 0o600 });
+    const update = spawnSync(process.execPath, [
+      new URL("../scripts/update-env.mjs", import.meta.url).pathname,
+      `--file=${source}`,
+      "--write",
+    ], { cwd: new URL("..", import.meta.url).pathname, encoding: "utf8" });
+    assert.equal(update.status, 0, update.stderr);
+    assert.match(await readFile(source, "utf8"), new RegExp(`ONECOMPUTER_OPENAI_API_KEY=${retiredValue}`));
+
+    const render = spawnSync(process.execPath, [
+      new URL("../scripts/render-service-env.mjs", import.meta.url).pathname,
+      `--file=${source}`,
+      `--directory=${destination}`,
+    ], { cwd: new URL("..", import.meta.url).pathname, encoding: "utf8" });
+    assert.equal(render.status, 0, render.stderr);
+    assert.doesNotMatch(await readFile(join(destination, "litellm.env"), "utf8"), new RegExp(retiredValue));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("hosted validation fails closed for missing or non-HTTPS LiteLLM mutual TLS", () => {
   const missingMaterial = validHostedEnvironment();
   missingMaterial.ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64 = "";

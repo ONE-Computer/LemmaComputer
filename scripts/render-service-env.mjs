@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseEnvironment } from "./environment-template.mjs";
 import {
+  environmentVariableNameSet,
   projectServiceEnvironment,
   serializeEnvironment,
   validateDeploymentEnvironment,
@@ -12,7 +13,9 @@ const destination = process.argv.find((argument) => argument.startsWith("--direc
 const profile = process.argv.find((argument) => argument.startsWith("--profile="))?.slice("--profile=".length);
 const check = process.argv.includes("--check");
 const current = await readFile(source, "utf8");
-const values = Object.fromEntries(parseEnvironment(current).values);
+const values = Object.fromEntries(
+  [...parseEnvironment(current).values].filter(([key]) => !key.startsWith("ONECOMPUTER_") || environmentVariableNameSet.has(key)),
+);
 const validated = validateDeploymentEnvironment(values, { profile, strict: true });
 const services = projectServiceEnvironment(validated);
 
