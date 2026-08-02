@@ -22,6 +22,7 @@ test("administrator enters the AI control plane from the account menu and naviga
   await expect(explainability.getByText("Routing impact")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "0.92 gCO₂e" })).toBeVisible();
   await expect(page.getByText(/19% token coverage/)).toBeVisible();
+  await expect(page.getByText(/evidence coverage/)).toHaveCount(0);
   await expect(page.getByRole("link", { name: "US grid factor" })).toHaveAttribute("href", "https://www.epa.gov/egrid/summary-data");
   const emissionsInfo = page.getByRole("button", { name: "How estimated AI emissions are calculated" });
   await emissionsInfo.hover();

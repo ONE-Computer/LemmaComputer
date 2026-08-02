@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
-import { Globe20Regular } from "@fluentui/react-icons/svg/globe";
+import { LeafThree20Regular } from "@fluentui/react-icons/svg/leaf-three";
 import { Info20Regular } from "@fluentui/react-icons/svg/info";
 import { adminApi } from "./workspace-api.js";
 import { AI_EMISSIONS_METHOD, estimateAiTokenEmissions } from "./ai-emissions.js";
@@ -350,7 +350,7 @@ export function AiControlPlaneOverview({
       </div>
 
       <section className="ai-emissions" aria-labelledby="ai-emissions-heading">
-        <span className="ai-emissions-icon"><Globe20Regular aria-hidden="true" /></span>
+        <span className="ai-emissions-icon"><LeafThree20Regular aria-hidden="true" /></span>
         <div className="ai-emissions-copy">
           <div className="ai-emissions-label">
             <p>Estimated AI-related emissions</p>
@@ -372,7 +372,6 @@ export function AiControlPlaneOverview({
           <h3 id="ai-emissions-heading">{formatEmissions(emissions)}</h3>
           <span>{emissions ? `${emissions.coveragePercent ?? 0}% token coverage · ${emissionsComparison(emissions)}` : "Choose an estimated serving grid on at least one configured provider before reporting a number."}</span>
         </div>
-        <span className="ai-emissions-coverage">{emissions ? `${emissions.coveragePercent ?? 0}% evidence coverage` : "No assured emissions source"}</span>
         <div className="ai-emissions-evidence">
           <strong>Operational estimate · Scope 3 Category 1 candidate</strong>
           <span>{emissions?.methodologyVersion ? `${emissions.energyKwhPerMillionTextTokens} kWh / 1M text tokens · ${emissions.methodologyVersion}` : "Purchased cloud/AI services; confirm the reporting boundary with your sustainability policy."}</span>
