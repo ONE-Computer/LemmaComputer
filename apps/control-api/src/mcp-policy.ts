@@ -304,6 +304,11 @@ export class McpPolicyService {
     ]);
     if (!principal || principal.tenantId !== request.tenantId) return denied("MCP_IDENTITY_MISMATCH", capability);
     if (!effectivePolicy || !workspace) return denied("MCP_POLICY_NOT_ASSIGNED", capability);
+    // The policy callback is a privileged boundary in its own right. A token
+    // projected into a sandbox must not be able to authorize MCP work while
+    // that exact workspace is stopped, restarting, or has otherwise ceased to
+    // be an active instance.
+    if (!["ready", "open"].includes(workspace.state)) return denied("MCP_WORKSPACE_NOT_READY", capability);
 
     const runtime = runtimePolicyFor(effectivePolicy);
     const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id));
@@ -455,6 +460,7 @@ export class McpPolicyService {
     ]);
     if (!principal || principal.tenantId !== request.tenantId) return genericDecision("deny", "MCP_IDENTITY_MISMATCH");
     if (!effectivePolicy || !workspace) return genericDecision("deny", "MCP_POLICY_NOT_ASSIGNED");
+    if (!["ready", "open"].includes(workspace.state)) return genericDecision("deny", "MCP_WORKSPACE_NOT_READY");
     const runtime = runtimePolicyFor(effectivePolicy);
     const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id));
     const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);

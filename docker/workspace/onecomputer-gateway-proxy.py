@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -30,18 +31,59 @@ ALLOWED_PATHS = INFERENCE_PATHS | {"/v1/models", "/mcp-rest/tools/list", "/mcp-r
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
 MODEL_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
+AGENT_BRIDGE_TOKEN_PATTERN = re.compile(r"^ocab2_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$")
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
 LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
 UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
 UPLOAD_JOBS: dict[str, dict] = {}
 UPLOAD_KEYS: dict[tuple, str] = {}
 UPLOAD_LOCK = threading.Lock()
+AGENT_BRIDGE_LOCK = threading.Lock()
 
 if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CREDENTIAL) < 24
-        or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or len(AGENT_BRIDGE_TOKEN) < 24
+        or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or not AGENT_BRIDGE_TOKEN_PATTERN.fullmatch(AGENT_BRIDGE_TOKEN)
         or not MODEL_ALIAS_PATTERN.fullmatch(MODEL_ALIAS) or DEFAULT_SERVICE_CLASS not in {"auto", "lite", "balanced", "pro"}
         or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}):
     raise SystemExit("invalid gateway broker configuration")
+
+
+def bridge_token_expiry(token: str) -> int | None:
+    match = AGENT_BRIDGE_TOKEN_PATTERN.fullmatch(token)
+    if not match:
+        return None
+    try:
+        encoded = match.group(1)
+        padding = "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded + padding))
+        expires_at = payload.get("exp")
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
+        return None
+    return expires_at if isinstance(expires_at, int) and expires_at > 0 else None
+
+
+def agent_bridge_token() -> str:
+    """Renew shortly before expiry without ever widening the injected grant's scopes."""
+    global AGENT_BRIDGE_TOKEN
+    with AGENT_BRIDGE_LOCK:
+        expires_at = bridge_token_expiry(AGENT_BRIDGE_TOKEN)
+        if expires_at is not None and expires_at > int(time.time()) + 60:
+            return AGENT_BRIDGE_TOKEN
+        target = CONTROL._replace(
+            path=f"{CONTROL.path.rstrip('/')}/internal/v1/agent/grants/renew",
+            query="",
+            fragment="",
+        ).geturl()
+        request = urllib.request.Request(target, data=b"{}", method="POST", headers={
+            "authorization": f"Bearer {AGENT_BRIDGE_TOKEN}",
+            "content-type": "application/json",
+        })
+        with urllib.request.urlopen(request, timeout=10) as response:
+            document = json.loads(response.read())
+        renewed = document.get("token") if isinstance(document, dict) else None
+        if not isinstance(renewed, str) or not AGENT_BRIDGE_TOKEN_PATTERN.fullmatch(renewed):
+            raise ValueError("invalid renewed agent bridge grant")
+        AGENT_BRIDGE_TOKEN = renewed
+        return AGENT_BRIDGE_TOKEN
 
 
 def task_service_class(task_binding: str) -> str:
@@ -63,7 +105,7 @@ def issue_task_binding() -> str:
     path = f"{control_path}/internal/v1/agent/usage-bindings"
     target = CONTROL._replace(path=path, query="", fragment="").geturl()
     request = urllib.request.Request(target, data=payload, method="POST", headers={
-        "authorization": f"Bearer {AGENT_BRIDGE_TOKEN}",
+        "authorization": f"Bearer {agent_bridge_token()}",
         "content-type": "application/json",
     })
     with urllib.request.urlopen(request, timeout=10) as response:
@@ -161,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def control_json(self, path: str, body: dict | None = None) -> dict:
-        headers = {"authorization": f"Bearer {AGENT_BRIDGE_TOKEN}"}
+        headers = {"authorization": f"Bearer {agent_bridge_token()}"}
         encoded = None
         if body is not None:
             encoded = json.dumps(body, separators=(",", ":")).encode()
@@ -370,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
             }
         }
         target = CONTROL if is_operation else UPSTREAM
-        headers["authorization"] = f"Bearer {AGENT_BRIDGE_TOKEN if is_operation else CREDENTIAL}"
+        headers["authorization"] = f"Bearer {agent_bridge_token() if is_operation else CREDENTIAL}"
         if body is not None:
             headers["content-length"] = str(len(body))
         connection_class = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection
@@ -406,7 +448,7 @@ def control_job_update(operation_id: str, action: str, lease_id: str) -> None:
         data=json.dumps({"leaseId": lease_id}, separators=(",", ":")).encode(),
         method="POST",
         headers={
-            "authorization": f"Bearer {AGENT_BRIDGE_TOKEN}",
+            "authorization": f"Bearer {agent_bridge_token()}",
             "content-type": "application/json",
         },
     )

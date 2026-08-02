@@ -6,18 +6,20 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 
 const program = String.raw`
+import base64
 import importlib.util
 import json
 import os
 import sys
 
 sys.dont_write_bytecode = True
+bridge_payload = base64.urlsafe_b64encode(json.dumps({"exp": 4102444800}).encode()).decode().rstrip("=")
 os.environ.update({
     "ONECOMPUTER_GATEWAY_UPSTREAM": "http://127.0.0.1:4000",
     "ONECOMPUTER_GATEWAY_CREDENTIAL": "scoped-credential-at-least-24-characters",
     "ONECOMPUTER_MODEL_ALIAS": sys.argv[2],
     "ONECOMPUTER_CONTROL_UPSTREAM": "http://127.0.0.1:4173",
-    "ONECOMPUTER_AGENT_BRIDGE_TOKEN": "bridge-token-at-least-24-characters",
+    "ONECOMPUTER_AGENT_BRIDGE_TOKEN": f"ocab2_{bridge_payload}.{'s' * 43}",
     "ONECOMPUTER_GATEWAY_LISTEN_PORT": "4312",
 })
 spec = importlib.util.spec_from_file_location("onecomputer_gateway_proxy", sys.argv[1])
@@ -44,6 +46,8 @@ const taskBinding = (requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "au
   schemaVersion: 1,
   requestedServiceClass,
 })).toString("base64url")}.${"s".repeat(43)}`;
+
+const bridgeGrant = (expiresAt: number) => `ocab2_${Buffer.from(JSON.stringify({ exp: expiresAt })).toString("base64url")}.${"s".repeat(43)}`;
 
 test("the workspace broker binds Claude background model names to the assigned provider route", () => {
   const normalized = normalize("claude-sonnet-4-6", {
@@ -125,6 +129,9 @@ const availableBrokerPort = async () => {
 
 test("the loopback broker forwards only the assigned model, scoped credential, and broker-owned task binding", async () => {
   let bindingRequests = 0;
+  let renewalRequests = 0;
+  const initialBridgeGrant = bridgeGrant(Math.floor(Date.now() / 1_000) + 1);
+  const renewedBridgeGrant = bridgeGrant(Math.floor(Date.now() / 1_000) + 900);
   let received: {
     url?: string;
     authorization?: string;
@@ -136,8 +143,16 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    if (request.url === "/internal/v1/agent/grants/renew") {
+      renewalRequests += 1;
+      assert.equal(request.headers.authorization, `Bearer ${initialBridgeGrant}`);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ token: renewedBridgeGrant }));
+      return;
+    }
     if (request.url === "/internal/v1/agent/usage-bindings") {
       bindingRequests += 1;
+      assert.equal(request.headers.authorization, `Bearer ${renewedBridgeGrant}`);
       const bindingRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       assert.equal(bindingRequest.requestedServiceClass, "lite");
       assert.match(bindingRequest.taskId, /^workspace-native:/);
@@ -168,7 +183,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       ONECOMPUTER_TRANSPORT_MODEL_ALIAS: "onecomputer-auto",
       ONECOMPUTER_REQUESTED_SERVICE_CLASS: "lite",
       ONECOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
-      ONECOMPUTER_AGENT_BRIDGE_TOKEN: "bridge-token-at-least-24-characters",
+      ONECOMPUTER_AGENT_BRIDGE_TOKEN: initialBridgeGrant,
       ONECOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
     },
     stdio: ["ignore", "ignore", "pipe"],
@@ -205,6 +220,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       }),
     });
     assert.equal(response.status, 200, await response.text());
+    assert.equal(renewalRequests, 1, "a near-expiry bridge grant is renewed before a Control request");
     assert.equal(bindingRequests, 1);
     assert.equal(received.url, "/v1/messages");
     assert.equal(received.authorization, "Bearer scoped-credential-at-least-24-characters");

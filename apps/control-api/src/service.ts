@@ -214,7 +214,7 @@ export class WorkspaceService {
     private readonly store: WorkspaceStore,
     private readonly controller: ControllerClient,
     private readonly gateway?: GatewayClient,
-    private readonly agentBridge?: { baseUrl: string; issue: (identity: IdentityContext, workspaceId: string, policy: RuntimePolicy) => string },
+    private readonly agentBridge?: { baseUrl: string; issue: (identity: IdentityContext, workspace: WorkspaceRecord, policy: RuntimePolicy) => string },
     private readonly egressProxyAuthority?: EgressProxyGrantAuthority,
     private readonly policyBundleAuthority?: PolicyBundleAuthority,
     private readonly agentChatAuthority?: AgentChatAuthority,
@@ -258,8 +258,8 @@ export class WorkspaceService {
     };
   }
 
-  private bridgeGrant(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy) {
-    return this.agentBridge ? { baseUrl: this.agentBridge.baseUrl, token: this.agentBridge.issue(identity, workspaceId, policy) } : undefined;
+  private bridgeGrant(identity: IdentityContext, workspace: WorkspaceRecord, policy: RuntimePolicy) {
+    return this.agentBridge ? { baseUrl: this.agentBridge.baseUrl, token: this.agentBridge.issue(identity, workspace, policy) } : undefined;
   }
 
   private agentPolicies(policy: RuntimePolicy): RuntimePolicy[] {
@@ -276,7 +276,8 @@ export class WorkspaceService {
     }));
   }
 
-  private async ensureAgentGrants(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy) {
+  private async ensureAgentGrants(identity: IdentityContext, workspace: WorkspaceRecord, policy: RuntimePolicy) {
+    const workspaceId = workspace.id;
     const policies = this.agentPolicies(policy);
     const resolved = await Promise.all(policies.map(async (agentPolicy) => ({
       policy: agentPolicy,
@@ -286,7 +287,7 @@ export class WorkspaceService {
         agentId: agentPolicy.agentId,
         policy: agentPolicy,
       }),
-      agentBridge: this.bridgeGrant(identity, workspaceId, agentPolicy),
+      agentBridge: this.bridgeGrant(identity, workspace, agentPolicy),
     })));
     const primary = resolved[0]!;
     const agentGrants = policy.agents?.length && this.gateway && this.agentBridge
@@ -363,7 +364,7 @@ export class WorkspaceService {
     const authorized = this.authorizePolicy(identity, record.id, policy);
     if (this.gateway && ["ready", "open"].includes(record.state)) {
       if (!this.policyBundleAuthority || authorized) {
-        await this.ensureAgentGrants(identity, record.id, authorized?.payload.policy ?? policy).catch(() => undefined);
+        await this.ensureAgentGrants(identity, record, authorized?.payload.policy ?? policy).catch(() => undefined);
       }
     }
     return this.view(record, policy, authorized, projectedIntegrity);
@@ -379,7 +380,7 @@ export class WorkspaceService {
     const record = await this.store.getCurrent(identity, grantId);
     if (!record || !this.gateway || !["ready", "open"].includes(record.state)) return false;
     const authorized = this.authorizePolicy(identity, record.id, policy);
-    await this.ensureAgentGrants(identity, record.id, authorized?.payload.policy ?? policy);
+    await this.ensureAgentGrants(identity, record, authorized?.payload.policy ?? policy);
     return true;
   }
 
@@ -401,6 +402,7 @@ export class WorkspaceService {
   }
 
   async revokePolicyGrant(workspaceId: string, policy: RuntimePolicy) {
+    await this.store.revokeBridgeGrants(workspaceId);
     await this.revokeAgentGrants(workspaceId, policy);
   }
 
@@ -412,7 +414,7 @@ export class WorkspaceService {
     try {
       const authorized = this.authorizePolicy(identity, claimed.id, policy);
       const verifiedPolicy = authorized?.payload.policy ?? policy;
-      const grants = await this.ensureAgentGrants(identity, claimed.id, verifiedPolicy);
+      const grants = await this.ensureAgentGrants(identity, claimed, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
       const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
@@ -429,7 +431,7 @@ export class WorkspaceService {
       record = await this.store.finish(claimed.id, claimed.operationToken!, { state: sandbox.state === "ready" ? "ready" : "provisioning", providerId: sandbox.providerId, failureCode: sandbox.failureCode });
       return this.view(record, policy, authorized, sandbox.policyIntegrity);
     } catch (error) {
-      await this.revokeAgentGrants(claimed.id, policy).catch(() => undefined);
+      await this.revokePolicyGrant(claimed.id, policy).catch(() => undefined);
       await this.store.finish(claimed.id, claimed.operationToken!, { state: "failed", failureCode: error instanceof OneComputerError ? error.code : "PROVISION_FAILED" });
       throw error;
     }
@@ -439,7 +441,7 @@ export class WorkspaceService {
     const record = await this.owned(identity, workspaceId);
     if (!record.providerId || !["ready", "open"].includes(record.state)) throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not ready to open", 409, true);
     const authorized = this.authorizePolicy(identity, record.id, policy);
-    await this.ensureAgentGrants(identity, record.id, authorized?.payload.policy ?? policy);
+    await this.ensureAgentGrants(identity, record, authorized?.payload.policy ?? policy);
     const controllerLaunch = await this.controller.open(record.providerId);
     const launch = this.publicLaunch(identity, record.id, controllerLaunch);
     const updated = await this.store.update(record.id, { state: "open", failureCode: null });
@@ -473,10 +475,11 @@ export class WorkspaceService {
     const claimed = await this.store.claim(record.id, ["ready", "open", "stopped", "failed"], "restarting");
     if (!claimed) throw new OneComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
     try {
+      const bridgeGeneration = await this.store.revokeBridgeGrants(claimed.id);
       if (claimed.providerId) await this.controller.destroy(claimed.providerId);
       const authorized = this.authorizePolicy(identity, claimed.id, policy);
       const verifiedPolicy = authorized?.payload.policy ?? policy;
-      const grants = await this.ensureAgentGrants(identity, claimed.id, verifiedPolicy);
+      const grants = await this.ensureAgentGrants(identity, bridgeGeneration, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
       const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
@@ -497,7 +500,7 @@ export class WorkspaceService {
         sandbox.policyIntegrity,
       );
     } catch (error) {
-      await this.revokeAgentGrants(claimed.id, policy).catch(() => undefined);
+      await this.revokePolicyGrant(claimed.id, policy).catch(() => undefined);
       await this.store.finish(claimed.id, claimed.operationToken!, { state: "failed", providerId: null, failureCode: error instanceof OneComputerError ? error.code : "RESTART_FAILED" });
       throw error;
     }
@@ -512,6 +515,7 @@ export class WorkspaceService {
       : ["ready" as const, "open" as const, "provisioning" as const, "restarting" as const, "failed" as const];
     const claimed = await this.store.claim(record.id, allowed, "stopping");
     if (!claimed) throw new OneComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
+    await this.store.revokeBridgeGrants(claimed.id);
     try {
       if (claimed.providerId) await this.controller.destroy(claimed.providerId);
     } catch (error) {
@@ -545,6 +549,7 @@ export class WorkspaceService {
 
   async delete(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
+    await this.store.revokeBridgeGrants(record.id);
     if (record.providerId) await this.controller.destroy(record.providerId);
     await this.controller.purgeWorkspace(record.id);
     await this.revokeAgentGrants(record.id, policy);
@@ -557,7 +562,7 @@ export class WorkspaceService {
     if (!this.gateway) throw new OneComputerError("GATEWAY_NOT_CONFIGURED", "The model gateway is not configured", 503, true);
     const authorized = this.authorizePolicy(identity, record.id, policy);
     const verifiedPolicy = authorized?.payload.policy ?? policy;
-    await this.ensureAgentGrants(identity, record.id, verifiedPolicy);
+    await this.ensureAgentGrants(identity, record, verifiedPolicy);
     return this.gateway.test(record.id, verifiedPolicy.agentId, verifiedPolicy);
   }
 

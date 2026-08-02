@@ -22,7 +22,7 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(releaseTag, /requiredReleaseGates\.some/);
   assert.match(qualifier, /agentProfile: "hermes-claw-managed-v1"/);
   assert.match(qualifier, /chatRuntimes: \[\{/);
-  assert.match(qualifier, /onecomputer:agent-bridge:/);
+  assert.match(qualifier, /AgentBridgeAuthority\(agentBridgeSecret\)/);
   assert.match(qualifier, /status\?\.state !== "ready"/);
   assert.match(qualifier, /method: "DELETE"/);
   assert.match(qualifier, /\/internal\/v1\/workspaces\/\$\{workspaceId\}\/storage/);

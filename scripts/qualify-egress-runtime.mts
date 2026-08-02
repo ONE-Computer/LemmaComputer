@@ -17,6 +17,10 @@ const expectedGrant = {
 };
 const verificationSecret = deriveEgressProxySecret("qualification-root-secret-at-least-thirty-two-characters", workspaceId);
 const token = issueEgressProxyGrant(verificationSecret, expectedGrant, new Date(), 3600);
+// The egress qualification does not contact Control through the workspace
+// broker, but the broker still validates that injected bridge credentials have
+// the current v2 shape before it starts.
+const qualificationAgentBridgeToken = `ocab2_${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1_000) + 3_600 })).toString("base64url")}.${"q".repeat(43)}`;
 const policy = {
   schemaVersion: 1,
   policyVersionId: "qualification-policy-v1",
@@ -86,7 +90,7 @@ try {
       },
       agentBridge: {
         baseUrl: "http://onecomputer-control:4100",
-        token: "qualification-agent-bridge-token-at-least-24-characters",
+        token: qualificationAgentBridgeToken,
       },
       egressProxy: {
         token,

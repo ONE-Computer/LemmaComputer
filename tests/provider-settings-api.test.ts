@@ -469,6 +469,7 @@ test("provider settings do not expose an administrator endpoint to an employee s
     {},
     {
       authentication: authentication(employee),
+      agentBridgeSecret: "provider-settings-agent-bridge-secret-at-least-32-characters",
       providerSettingsStore: new MemoryProviderSettingsStore(),
       providerAdministration: new FakeProviderAdministration(),
     },

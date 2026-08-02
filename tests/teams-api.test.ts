@@ -189,7 +189,12 @@ const appFor = (actor: SessionPrincipal, teamStore: TeamStore) => createControlS
   undefined,
   undefined,
   {},
-  { authentication: authentication(actor), identityPolicyStore: identityPolicies, teamStore },
+  {
+    authentication: authentication(actor),
+    identityPolicyStore: identityPolicies,
+    teamStore,
+    agentBridgeSecret: "teams-api-agent-bridge-secret-at-least-32-characters",
+  },
 );
 
 const headers = {
