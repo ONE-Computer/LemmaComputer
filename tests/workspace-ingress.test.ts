@@ -23,6 +23,27 @@ const close = async (server: Server) => new Promise<void>((resolve, reject) => {
   server.close((error) => error ? reject(error) : resolve());
 });
 
+const requestWithAuthority = async (method: string, url: string, authority: string, cookie?: string) => (
+  new Promise<{ status: number; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+    const request = http.request(url, {
+      method,
+      headers: {
+        host: authority,
+        ...(cookie ? { cookie } : {}),
+      },
+    }, (response) => {
+      response.resume();
+      response.once("end", () => resolve({ status: response.statusCode ?? 0, headers: response.headers }));
+    });
+    request.once("error", reject);
+    request.end();
+  })
+);
+
+const getWithAuthority = async (url: string, authority: string, cookie?: string) => (
+  requestWithAuthority("GET", url, authority, cookie)
+);
+
 test("workspace ingress forwards the web app and exchanges a launch for an isolated workspace session", async () => {
   let workspaceRequest: { url?: string; authorization?: string; cookie?: string } | undefined;
   let workspaceUpgradeRawHeaders: string[] | undefined;
@@ -154,7 +175,8 @@ test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth rout
   ]);
   const ingress = createWorkspaceIngress({
     authority: new WorkspaceIngressAuthority(secret),
-    publicUrl: "https://onecomputer.example",
+    publicUrl: "http://onecomputer.example",
+    litellmPublicUrl: "http://onecomputer.example/oauth/mcp",
     webUpstream: `http://127.0.0.1:${webPort}`,
     microsoft365AuthorizationUpstream: `http://127.0.0.1:${microsoft365Port}`,
     litellmOAuthUpstream: `http://127.0.0.1:${litellmPort}`,
@@ -167,16 +189,30 @@ test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth rout
     assert.equal(authorize.status, 302);
     assert.equal(authorize.headers.get("location"), "https://login.microsoftonline.com/example/oauth2/v2.0/authorize");
 
-    const callback = await fetch(`http://127.0.0.1:${ingressPort}/callback?state=relay&code=sentinel`, {
-      headers: { cookie: "mcp_oauth_state_relay=opaque" },
-      redirect: "manual",
-    });
+    const callback = await getWithAuthority(
+      `http://127.0.0.1:${ingressPort}/oauth/mcp/callback?state=relay&code=sentinel`,
+      "onecomputer.example",
+      "mcp_oauth_state_relay=opaque",
+    );
     assert.equal(callback.status, 303);
-    assert.equal(callback.headers.get("location"), "/api/v1/connections/microsoft-365/callback?state=relay&code=sentinel");
+    assert.equal(callback.headers.location, "/api/v1/connections/microsoft-365/callback?state=relay&code=sentinel");
 
-    const rejectedMethod = await fetch(`http://127.0.0.1:${ingressPort}/callback`, { method: "POST" });
+    const rejectedOAuthSurface = await getWithAuthority(
+      `http://127.0.0.1:${ingressPort}/oauth/mcp/not-a-callback`,
+      "onecomputer.example",
+    );
+    assert.equal(rejectedOAuthSurface.status, 404);
+
+    const rejectedCallbackAuthority = await fetch(`http://127.0.0.1:${ingressPort}/oauth/mcp/callback?state=relay&code=sentinel`);
+    assert.equal(rejectedCallbackAuthority.status, 404);
+
+    const rejectedMethod = await requestWithAuthority(
+      "POST",
+      `http://127.0.0.1:${ingressPort}/oauth/mcp/callback`,
+      "onecomputer.example",
+    );
     assert.equal(rejectedMethod.status, 405);
-    assert.equal(rejectedMethod.headers.get("allow"), "GET");
+    assert.equal(rejectedMethod.headers.allow, "GET");
 
     const privateConnectorRoute = await fetch(`http://127.0.0.1:${ingressPort}/m365/token`);
     assert.equal(privateConnectorRoute.status, 200);

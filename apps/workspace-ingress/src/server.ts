@@ -14,6 +14,7 @@ type Protocol = "http" | "https";
 export type WorkspaceIngressConfig = {
   authority: WorkspaceIngressAuthority;
   publicUrl: string;
+  litellmPublicUrl?: string;
   webUpstream: string;
   microsoft365AuthorizationUpstream?: string;
   litellmOAuthUpstream?: string;
@@ -203,6 +204,8 @@ const publicOAuthRoute = (
   request: IncomingMessage,
   microsoft365AuthorizationUpstream: URL | null,
   litellmOAuthUpstream: URL | null,
+  litellmPublicAuthority: string | null,
+  litellmCallbackPath: string,
 ) => {
   const url = new URL(request.url ?? "/", "http://workspace-ingress.invalid");
   if (url.pathname === "/m365/authorize" && microsoft365AuthorizationUpstream) {
@@ -211,7 +214,11 @@ const publicOAuthRoute = (
       upstreamPath: `/authorize${url.search}`,
     };
   }
-  if (url.pathname === "/callback" && litellmOAuthUpstream) {
+  if (
+    url.pathname === litellmCallbackPath
+    && litellmOAuthUpstream
+    && (!litellmPublicAuthority || request.headers.host?.toLowerCase() === litellmPublicAuthority)
+  ) {
     return {
       upstream: litellmOAuthUpstream,
       upstreamPath: `/callback${url.search}`,
@@ -231,6 +238,10 @@ const sessionCookie = (token: string, workspaceId: string, maxAge: number, secur
 
 export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
   const publicUrl = new URL(config.publicUrl);
+  const litellmPublicUrl = config.litellmPublicUrl ? new URL(config.litellmPublicUrl) : null;
+  const litellmPublicAuthority = litellmPublicUrl?.host.toLowerCase() ?? null;
+  const litellmPublicPath = litellmPublicUrl?.pathname.replace(/\/$/, "") || "";
+  const litellmCallbackPath = `${litellmPublicPath}/callback`;
   const webUpstream = new URL(config.webUpstream);
   const microsoft365AuthorizationUpstream = config.microsoft365AuthorizationUpstream
     ? new URL(config.microsoft365AuthorizationUpstream)
@@ -249,7 +260,13 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
       response.end(JSON.stringify({ status: "ok" }));
       return;
     }
-    const oauthRoute = publicOAuthRoute(request, microsoft365AuthorizationUpstream, litellmOAuthUpstream);
+    const oauthRoute = publicOAuthRoute(
+      request,
+      microsoft365AuthorizationUpstream,
+      litellmOAuthUpstream,
+      litellmPublicAuthority,
+      litellmCallbackPath,
+    );
     if (oauthRoute) {
       if (request.method !== "GET") {
         response.writeHead(405, { allow: "GET", "cache-control": "no-store" });
@@ -267,6 +284,15 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
         audit,
         { code: "OAUTH_UPSTREAM_UNAVAILABLE", message: "The Microsoft 365 connection service is unavailable" },
       );
+      return;
+    }
+    const requestPath = new URL(request.url ?? "/", "http://workspace-ingress.invalid").pathname;
+    const inLiteLlmPublicPath = litellmPublicPath
+      ? requestPath === litellmPublicPath || requestPath.startsWith(`${litellmPublicPath}/`)
+      : requestPath === "/callback";
+    if (litellmPublicAuthority && inLiteLlmPublicPath) {
+      response.writeHead(404, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify({ error: { code: "OAUTH_ROUTE_NOT_FOUND", message: "The OAuth callback route was not found" } }));
       return;
     }
     const route = workspaceRoute(request);
@@ -335,6 +361,7 @@ const envSchema = z.object({
   WORKSPACE_INGRESS_HOST: z.string().default("127.0.0.1"),
   WORKSPACE_INGRESS_PORT: z.coerce.number().int().positive().default(4174),
   WORKSPACE_INGRESS_PUBLIC_URL: z.string().url().default("http://localhost:4174"),
+  WORKSPACE_INGRESS_LITELLM_PUBLIC_URL: z.string().url().optional(),
   WORKSPACE_INGRESS_WEB_UPSTREAM: z.string().url().default("http://127.0.0.1:4173"),
   WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM: z.string().url().optional(),
   WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM: z.string().url().optional(),
@@ -353,6 +380,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       env.WORKSPACE_INGRESS_SESSION_TTL_SECONDS,
     ),
     publicUrl: env.WORKSPACE_INGRESS_PUBLIC_URL,
+    litellmPublicUrl: env.WORKSPACE_INGRESS_LITELLM_PUBLIC_URL,
     webUpstream: env.WORKSPACE_INGRESS_WEB_UPSTREAM,
     microsoft365AuthorizationUpstream: env.WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM,
     litellmOAuthUpstream: env.WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM,

@@ -48,7 +48,8 @@ flowchart LR
   end
 
   Browser --> Web --> Control
-  Browser -->|"OAuth redirect/callback :4000"| DataAPI
+  Browser -->|"OAuth callback via ingress /oauth/mcp/callback"| Web
+  Web -->|"exact callback route; private network"| DataAPI
   Agent --> Broker -->|"scoped virtual key"| DataAPI
   Control -->|"master-key authenticated; private network"| AdminAPI
   AdminAPI --> LiteLLMDB

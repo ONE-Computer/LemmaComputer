@@ -123,6 +123,24 @@ test("a complete hosted configuration passes the shared profile validation", () 
   }));
 });
 
+test("the public ingress owns the browser-facing LiteLLM OAuth callback", () => {
+  const values = validHostedEnvironment();
+  const services = projectServiceEnvironment(values);
+  const publicOrigin = new URL(values.ONECOMPUTER_PUBLIC_WEB_URL).origin;
+  const litellmPublicUrl = `${publicOrigin}/oauth/mcp`;
+
+  assert.equal(
+    services["workspace-ingress"].WORKSPACE_INGRESS_LITELLM_PUBLIC_URL,
+    litellmPublicUrl,
+  );
+  assert.equal(services["workspace-ingress"].WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM, "http://litellm:4000");
+  assert.equal(services.litellm.PROXY_BASE_URL, litellmPublicUrl);
+  assert.equal(services["control-api"].LITELLM_PUBLIC_URL, litellmPublicUrl);
+  assert.equal(services["ms365-mcp"].MS365_MCP_PUBLIC_URL, `${publicOrigin}/m365`);
+  assert.equal(services["ms365-mcp"].MS365_MCP_ALLOWED_REDIRECT_URIS, `${litellmPublicUrl}/callback`);
+  assert.equal(services.litellm.ONECOMPUTER_M365_AUTHORIZATION_URL, `${publicOrigin}/m365/authorize`);
+});
+
 test("env:update normalizes a historical blank LiteLLM admin URL to the catalog default", () => {
   const template = renderEnvironmentTemplate();
   const initialized = initializeEnvironment(template, "Etc/UTC");

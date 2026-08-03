@@ -32,11 +32,7 @@ const sections = [
   ]),
   section("Public endpoints", "Use externally reachable HTTPS URLs in production. The reference stack binds loopback ports by default.", [
     variable("ONECOMPUTER_WEB_PORT", "4174", "Published ONEComputer Web and workspace-ingress port.", { kind: "integer" }),
-    variable("ONECOMPUTER_LITELLM_PORT", "4000", "Published LiteLLM port.", { kind: "integer" }),
-    variable("ONECOMPUTER_M365_PORT", "4311", "Published Microsoft 365 MCP authorization port.", { kind: "integer" }),
     variable("ONECOMPUTER_PUBLIC_WEB_URL", "http://localhost:4174", "Public Web and workspace ingress base URL.", { kind: "url" }),
-    variable("ONECOMPUTER_LITELLM_PUBLIC_URL", "http://localhost:4000", "Public LiteLLM OAuth callback base URL.", { kind: "url" }),
-    variable("ONECOMPUTER_M365_AUTHORIZATION_ORIGIN", "http://localhost:4311", "Public Microsoft 365 MCP authorization origin.", { kind: "url" }),
   ]),
   section("LiteLLM administration mutual TLS", "Hosted deployments must set an HTTPS admin URL and inject every certificate value from the deployment secret manager.", [
     variable("ONECOMPUTER_LITELLM_ADMIN_URL", "http://litellm-admin-listener:8443", "Control-to-LiteLLM administration listener URL.", { kind: "url" }),
@@ -374,11 +370,7 @@ export function worktreeEnvironmentOverrides({ slug, id, portOffset }) {
     ["ONECOMPUTER_KASM_LOCAL_NETWORK_PREFIX", `${slug}-workspace`],
     ["ONECOMPUTER_KASM_LOCAL_EGRESS_NETWORK", `${slug}-egress`],
     ["ONECOMPUTER_WEB_PORT", String(4174 + portOffset)],
-    ["ONECOMPUTER_LITELLM_PORT", String(4000 + portOffset)],
-    ["ONECOMPUTER_M365_PORT", String(4311 + portOffset)],
     ["ONECOMPUTER_PUBLIC_WEB_URL", `http://localhost:${4174 + portOffset}`],
-    ["ONECOMPUTER_LITELLM_PUBLIC_URL", `http://localhost:${4000 + portOffset}`],
-    ["ONECOMPUTER_M365_AUTHORIZATION_ORIGIN", `http://localhost:${4311 + portOffset}`],
     ["ONECOMPUTER_INSTALLATION_KIND", "worktree"],
   ]);
 }
@@ -425,6 +417,9 @@ export function projectServiceEnvironment(input = {}) {
   const litellmUrl = `http://${runtimeDefaults.litellmHost}:4000`;
   const ms365Url = `http://${runtimeDefaults.ms365Host}:3000`;
   const consentUrl = `http://${runtimeDefaults.consentHost}:8788`;
+  const publicWebOrigin = new URL(v("ONECOMPUTER_PUBLIC_WEB_URL")).origin;
+  const litellmPublicUrl = `${publicWebOrigin}/oauth/mcp`;
+  const m365AuthorizationOrigin = `${publicWebOrigin}/m365`;
   const gatewayEgressProxyUrl = `http://litellm-gateway:${encodeURIComponent(v("ONECOMPUTER_GATEWAY_EGRESS_PROXY_TOKEN"))}@gateway-egress-proxy:3128`;
   const remoteMcpEgressProxyUrl = `http://litellm-gateway:${encodeURIComponent(v("ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_TOKEN"))}@remote-mcp-egress-proxy:3128`;
 
@@ -443,8 +438,8 @@ export function projectServiceEnvironment(input = {}) {
       MS365_MCP_CLIENT_ID: ms365Client,
       MS365_MCP_TENANT_ID: ms365Tenant,
       MS365_MCP_CLIENT_SECRET: ms365Secret,
-      MS365_MCP_PUBLIC_URL: v("ONECOMPUTER_M365_AUTHORIZATION_ORIGIN"),
-      MS365_MCP_ALLOWED_REDIRECT_URIS: `${v("ONECOMPUTER_LITELLM_PUBLIC_URL")}/callback`,
+      MS365_MCP_PUBLIC_URL: m365AuthorizationOrigin,
+      MS365_MCP_ALLOWED_REDIRECT_URIS: `${litellmPublicUrl}/callback`,
       MS365_MCP_MAX_TOP: v("ONECOMPUTER_MS365_MAX_TOP"),
       MS365_MCP_MAX_PAGES: v("ONECOMPUTER_MS365_MAX_PAGES"),
       MS365_MCP_MAX_ITEMS: v("ONECOMPUTER_MS365_MAX_ITEMS"),
@@ -458,9 +453,9 @@ export function projectServiceEnvironment(input = {}) {
       LITELLM_SALT_KEY: v("ONECOMPUTER_LITELLM_SALT_KEY"),
       DATABASE_URL: litellmDatabaseUrl(v),
       DISABLE_ADMIN_UI: "true",
-      PROXY_BASE_URL: v("ONECOMPUTER_LITELLM_PUBLIC_URL"),
+      PROXY_BASE_URL: litellmPublicUrl,
       MCP_TRUSTED_REDIRECT_ORIGINS: v("ONECOMPUTER_PUBLIC_WEB_URL"),
-      ONECOMPUTER_M365_AUTHORIZATION_URL: `${v("ONECOMPUTER_M365_AUTHORIZATION_ORIGIN")}/authorize`,
+      ONECOMPUTER_M365_AUTHORIZATION_URL: `${m365AuthorizationOrigin}/authorize`,
       GITHUB_MCP_CLIENT_ID: v("ONECOMPUTER_GITHUB_MCP_CLIENT_ID"),
       GITHUB_MCP_CLIENT_SECRET: v("ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET"),
       ONECOMPUTER_MCP_POLICY_URL: `${controlUrl}/internal/v1/mcp/authorize`,
@@ -556,11 +551,11 @@ export function projectServiceEnvironment(input = {}) {
       LITELLM_ADMIN_TLS_CLIENT_KEY_B64: v("ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64"),
       LITELLM_ADMIN_TLS_SERVER_NAME: v("ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME"),
       LITELLM_WORKSPACE_URL: litellmUrl,
-      LITELLM_PUBLIC_URL: v("ONECOMPUTER_LITELLM_PUBLIC_URL"),
+      LITELLM_PUBLIC_URL: litellmPublicUrl,
       LITELLM_MASTER_KEY: v("ONECOMPUTER_LITELLM_MASTER_KEY"),
       LITELLM_CREDENTIAL_SECRET: v("ONECOMPUTER_LITELLM_CREDENTIAL_SECRET"),
       PUBLIC_WEB_URL: v("ONECOMPUTER_PUBLIC_WEB_URL"),
-      M365_AUTHORIZATION_ORIGIN: v("ONECOMPUTER_M365_AUTHORIZATION_ORIGIN"),
+      M365_AUTHORIZATION_ORIGIN: m365AuthorizationOrigin,
       AGENT_BRIDGE_URL: controlUrl,
       AGENT_BRIDGE_SECRET: v("ONECOMPUTER_AGENT_BRIDGE_SECRET"),
       AGENT_BRIDGE_GRANT_TTL_SECONDS: v("ONECOMPUTER_AGENT_BRIDGE_GRANT_TTL_SECONDS"),
@@ -638,6 +633,7 @@ export function projectServiceEnvironment(input = {}) {
       WORKSPACE_INGRESS_HOST: runtimeDefaults.ingressHost,
       WORKSPACE_INGRESS_PORT: runtimeDefaults.ingressPort,
       WORKSPACE_INGRESS_PUBLIC_URL: v("ONECOMPUTER_PUBLIC_WEB_URL"),
+      WORKSPACE_INGRESS_LITELLM_PUBLIC_URL: litellmPublicUrl,
       WORKSPACE_INGRESS_WEB_UPSTREAM: `http://web:${runtimeDefaults.webPort}`,
       WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM: ms365Url,
       WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM: litellmUrl,

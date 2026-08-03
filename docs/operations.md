@@ -88,17 +88,14 @@ production deployment environment.
 | --- | --- | --- |
 | `ONECOMPUTER_HTTP_BIND_ADDRESS` | `127.0.0.1` | Host bind address for all published ports |
 | `ONECOMPUTER_WEB_PORT` | `4174` | Product and workspace-ingress port |
-| `ONECOMPUTER_LITELLM_PORT` | `4000` | Gateway OAuth callback surface; the administrator UI is disabled |
-| `ONECOMPUTER_M365_PORT` | `4311` | Microsoft connector authorization bridge |
 | `ONECOMPUTER_PUBLIC_WEB_URL` | `http://localhost:4174` | Canonical product origin and Entra callback base |
-| `ONECOMPUTER_LITELLM_PUBLIC_URL` | `http://localhost:4000` | Canonical gateway callback base |
-| `ONECOMPUTER_M365_AUTHORIZATION_ORIGIN` | `http://localhost:4311` | Browser-facing connector origin |
 
-The three URLs and port mappings must describe the same externally observed
-origins. Changing `ONECOMPUTER_PUBLIC_WEB_URL` or
-`ONECOMPUTER_LITELLM_PUBLIC_URL` requires updating the corresponding Entra
-redirect URI. The Microsoft authorization origin must remain reachable by the
-browser but is not itself an Entra redirect URI.
+Workspace ingress derives the browser-facing connector routes from the one
+canonical origin. It forwards only `GET /oauth/mcp/callback` to private
+LiteLLM and `GET /m365/authorize` to the private Microsoft 365 bridge. LiteLLM
+and the bridge do not publish host ports. Changing
+`ONECOMPUTER_PUBLIC_WEB_URL` requires updating the corresponding Entra and
+GitHub OAuth-app redirect URI.
 
 ### Identity and bootstrap
 
@@ -151,7 +148,7 @@ dynamic OAuth client registration. GitHub requires an OAuth app because its
 authorization server does not expose dynamic client registration. Configure
 `ONECOMPUTER_GITHUB_MCP_CLIENT_ID` and
 `ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET`, with the LiteLLM callback
-`${ONECOMPUTER_LITELLM_PUBLIC_URL}/callback` registered in GitHub. Other
+`${ONECOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback` registered in GitHub. Other
 providers can impose their own OAuth-app approval or allow-list requirements;
 an unsuccessful registration or authorization leaves the catalog card
 disconnected and contributes no tools.

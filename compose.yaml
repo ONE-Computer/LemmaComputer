@@ -75,8 +75,6 @@ services:
     networks:
       - gateway-private
       - microsoft-egress
-    ports:
-      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:?set ONECOMPUTER_HTTP_BIND_ADDRESS in .env}:${ONECOMPUTER_M365_PORT:?set ONECOMPUTER_M365_PORT in .env}:3000"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
@@ -118,8 +116,6 @@ services:
     networks:
       - gateway-private
       - mcp-client-private
-    ports:
-      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:?set ONECOMPUTER_HTTP_BIND_ADDRESS in .env}:${ONECOMPUTER_LITELLM_PORT:?set ONECOMPUTER_LITELLM_PORT in .env}:4000"
     volumes:
       - ./config/litellm/config.yaml:/app/config.yaml:ro
       - ./config/litellm/logging.yaml:/app/logging.yaml:ro

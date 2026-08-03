@@ -86,7 +86,7 @@ Open **Authentication → Add a platform → Web** and add these exact URIs:
 
 ```text
 http://localhost:4174/api/v1/auth/callback
-http://localhost:4000/callback
+http://localhost:4174/oauth/mcp/callback
 ```
 
 The first is the ONEComputer sign-in callback. The second is used by the
@@ -167,7 +167,7 @@ rotation from product sign-in:
   `ONECOMPUTER_ENTRA_*` variables. It needs only the OpenID sign-in scopes used
   by ONEComputer.
 - The Microsoft 365 connector app uses
-  `http://localhost:4000/callback`, the delegated Graph permissions above, and
+  `http://localhost:4174/oauth/mcp/callback`, the delegated Graph permissions above, and
   the `ONECOMPUTER_MS365_*` variables.
 
 Both apps should be single-tenant. If one app is used for both roles, leave all
@@ -413,7 +413,7 @@ a trailing slash:
 
 ```text
 http://localhost:4174/api/v1/auth/callback
-http://localhost:4000/callback
+http://localhost:4174/oauth/mcp/callback
 ```
 
 Remove stale tunnel callbacks once they are no longer used.
@@ -431,12 +431,12 @@ and role assignment rather than changing bootstrap identifiers blindly.
 
 ### Microsoft 365 connection fails
 
-- Confirm the `http://localhost:4000/callback` Web redirect.
+- Confirm the `http://localhost:4174/oauth/mcp/callback` Web redirect.
 - Confirm all 13 delegated Graph permissions are configured and granted.
 - Confirm the client and tenant values belong to the app that holds those
   permissions.
-- Confirm ports `4000` and `4311` are reachable from the same browser used for
-  ONEComputer.
+- Confirm port `4174` is reachable from the same browser used for ONEComputer;
+  LiteLLM and the Microsoft 365 bridge remain private.
 - Inspect `ms365-mcp`, `litellm`, and `control-api` logs without recording
   callback query strings or tokens.
 

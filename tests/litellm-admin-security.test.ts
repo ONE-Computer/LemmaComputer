@@ -102,9 +102,11 @@ test("the shared projection routes LiteLLM administration through the dedicated 
 
 test("Compose separates model egress from strict remote-MCP egress", async () => {
   const compose = await readFile(new URL("../compose.yaml", import.meta.url), "utf8");
+  const ms365 = compose.split("  ms365-mcp:")[1]?.split("\n  litellm:")[0] ?? "";
   const litellm = compose.split("  litellm:")[1]?.split("\n  # The model-only internet-routed hop")[0] ?? "";
   const modelProxy = compose.split("\n  gateway-egress-proxy:\n")[1]?.split("\n  # The only external path for custom/public MCP operations.")[0] ?? "";
   const remoteProxy = compose.split("\n  remote-mcp-egress-proxy:\n")[1]?.split("\n  # Control uses this dedicated listener")[0] ?? "";
+  const workspaceIngress = compose.split("\n  workspace-ingress:\n")[1]?.split("\n  # This is a build target")[0] ?? "";
   const dockerfile = await readFile(new URL("../docker/Dockerfile.litellm", import.meta.url), "utf8");
   const patch = await readFile(new URL("../integrations/litellm/onecomputer_remote_mcp_egress.py", import.meta.url), "utf8");
   const projected = projectServiceEnvironment();
@@ -124,6 +126,9 @@ test("Compose separates model egress from strict remote-MCP egress", async () =>
   assert.match(litellm, /networks:\n\s+- gateway-private/);
   assert.match(litellm, /\n\s+- mcp-client-private/);
   assert.doesNotMatch(litellm, /\n\s+- model-egress/);
+  assert.doesNotMatch(litellm, /\n\s+ports:/);
+  assert.doesNotMatch(ms365, /\n\s+ports:/);
+  assert.match(workspaceIngress, /\$\{ONECOMPUTER_WEB_PORT:\?set ONECOMPUTER_WEB_PORT in \.env\}:4174/);
   assert.match(litellm, /socket\.create_connection\(\('remote-mcp-egress-proxy',3128\),2\)/);
   assert.match(modelProxy, /env_file:\s+- path: \.runtime-env\/gateway-egress-proxy\.env\s+format: raw/);
   assert.match(modelProxy, /model-egress: \{\}/);

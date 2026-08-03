@@ -131,15 +131,13 @@ flowchart TB
   LiteLLM --> M365
 ```
 
-The three loopback-published ports in the reference deployment are different
-security surfaces:
-
-- `4174` is the product origin and authenticated workspace ingress.
-- `4000` is the gateway OAuth callback surface; LiteLLM's administrator UI is disabled.
-- `4311` is a local browser bridge for the Microsoft connector.
-
-They require authenticated reverse proxies, TLS, and an intentional routing
-design in any networked deployment.
+The reference deployment publishes one browser-facing product origin on port
+`4174`. Workspace ingress owns that origin and exposes only the exact MCP OAuth
+routes needed by browsers: `GET /oauth/mcp/callback` for private LiteLLM and
+`GET /m365/authorize` for the private Microsoft connector bridge. LiteLLM and
+the bridge do not publish host ports. A networked deployment terminates TLS at
+the public load balancer or reverse proxy and forwards this origin to workspace
+ingress; it must not expose the private upstream services directly.
 
 ### LiteLLM is an execution boundary, not the governance authority
 
