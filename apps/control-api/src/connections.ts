@@ -806,7 +806,11 @@ export class McpConnectionService {
   }
 
   private isOnDemandConnector(connector: Pick<ConnectorDefinition, "id" | "source">) {
-    return connector.source === "built-in" && connector.id !== "microsoft-365";
+    // Microsoft 365 is a static internal server. Every remote connector,
+    // including an administrator-added custom connector, must reconcile its
+    // durable LiteLLM row when a user connects so a failed startup discovery
+    // cannot leave the connector permanently unusable.
+    return connector.id !== "microsoft-365";
   }
 
   private publicConnector(connector: ConnectorDefinition) {

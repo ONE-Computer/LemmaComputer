@@ -492,7 +492,61 @@ test("managed remote registrations repair the strict egress profile on legacy Li
     }]);
     const repair = requests.find((request) => request.method === "PUT" && request.url === "/v1/mcp/server");
     assert.ok(repair);
-    assert.deepEqual(repair.body.mcp_info, { onecomputer_egress_profile: "strict_remote" });
+    assert.deepEqual(repair.body, {
+      server_id: "legacy-remote-id",
+      mcp_info: { onecomputer_egress_profile: "strict_remote" },
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("managed remote registrations rediscover missing OAuth metadata without replacing credentials", async () => {
+  const requests: Array<{ method: string; url: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({
+      method: request.method ?? "",
+      url: request.url ?? "",
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {},
+    });
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{
+        server_id: "linear-server-id",
+        server_name: "onecomputer_linear",
+        url: "https://mcp.linear.app/mcp",
+        authorization_url: null,
+        token_url: null,
+        mcp_info: { onecomputer_egress_profile: "strict_remote" },
+      }]));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await liveAdapter.ensureOAuthMcpServers([{
+      serverId: "linear-server-id",
+      serverName: "onecomputer_linear",
+      name: "Linear",
+      description: "Linear connector.",
+      url: "https://mcp.linear.app/mcp",
+      scopes: [],
+      egressProfile: "strict_remote",
+    }]);
+    const repair = requests.find((request) => request.method === "PUT" && request.url === "/v1/mcp/server");
+    assert.ok(repair);
+    assert.deepEqual(repair.body, { server_id: "linear-server-id" });
+    assert.equal("credentials" in repair.body, false);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

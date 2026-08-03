@@ -679,14 +679,25 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           throw new OneComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector registration does not match the approved catalog`, 409);
         }
         // Apply the Control-owned egress classification to records created by
-        // an earlier release. The LiteLLM extension also treats HTTPS MCP
-        // servers as strict by default, so a failed reconciliation cannot
-        // reopen a legacy connector's direct path.
+        // an earlier release. Also rebuild records whose OAuth metadata was
+        // unavailable during gateway startup. LiteLLM starts before Control's
+        // dynamic egress authorizer, so startup-only discovery is not a safe
+        // readiness boundary. A server-id-only update preserves credentials
+        // while forcing the pinned gateway to rediscover and reload the row.
         const existingProfile = asObject(exact.mcp_info).onecomputer_egress_profile;
-        if (input.egressProfile && existingProfile !== input.egressProfile) {
+        const missingOAuthMetadata = typeof exact.authorization_url !== "string"
+          || !exact.authorization_url
+          || typeof exact.token_url !== "string"
+          || !exact.token_url;
+        const needsProfileRepair = Boolean(input.egressProfile && existingProfile !== input.egressProfile);
+        if (needsProfileRepair || missingOAuthMetadata) {
+          const repair: JsonObject = { server_id: input.serverId };
+          if (needsProfileRepair) {
+            repair.mcp_info = { onecomputer_egress_profile: input.egressProfile! };
+          }
           const updated = await this.adminCall("/v1/mcp/server", {
             method: "PUT",
-            body: this.mcpRegistrationPayload(input),
+            body: repair,
           }, true);
           if (!updated.ok) throw this.upstreamError("MCP_REGISTRATION_FAILED", updated.status, updated.payload);
         }

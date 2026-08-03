@@ -606,6 +606,7 @@ test("administrators can add a connector without code, then explicitly approve t
   gateway.statusByServer.set(serverName, connected);
   gateway.toolsByServer.set(serverName, ["create_task", "list_tasks"]);
   await completeFixtureConnection(service, gateway, alpha, created.id);
+  assert.equal(gateway.ensured.at(-1)?.[0]?.serverId, gateway.registered[0]?.serverId, "custom connectors reconcile their durable gateway row before authorization");
   const basePolicy: RuntimePolicy = {
     schemaVersion: 1,
     policyVersionId: "policy-v1",
