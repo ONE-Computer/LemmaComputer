@@ -117,6 +117,7 @@ services:
         format: raw
     networks:
       - gateway-private
+      - mcp-client-private
     ports:
       - "${ONECOMPUTER_HTTP_BIND_ADDRESS:?set ONECOMPUTER_HTTP_BIND_ADDRESS in .env}:${ONECOMPUTER_LITELLM_PORT:?set ONECOMPUTER_LITELLM_PORT in .env}:4000"
     volumes:
@@ -137,7 +138,7 @@ services:
         - CMD
         - python
         - -c
-        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=2)
+        - import socket,urllib.request; socket.create_connection(('gateway-egress-proxy',3128),2).close(); socket.create_connection(('remote-mcp-egress-proxy',3128),2).close(); urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=2)
       interval: 5s
       timeout: 3s
       retries: 40
@@ -184,6 +185,9 @@ services:
       - path: .runtime-env/remote-mcp-egress-proxy.env
         format: raw
     networks:
+      mcp-client-private:
+        aliases:
+          - remote-mcp-egress-proxy
       mcp-egress-private: {}
       model-egress: {}
     healthcheck:
@@ -448,6 +452,10 @@ networks:
   consent-private:
     internal: true
   gateway-private:
+    internal: true
+  # LiteLLM can reach the strict remote-MCP proxy on this private hop without
+  # gaining a direct route to the public model-egress network.
+  mcp-client-private:
     internal: true
   # Only the remote-MCP proxy and Control meet on this network. It prevents
   # that proxy from dialing other gateway-private services directly.

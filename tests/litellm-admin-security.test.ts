@@ -122,13 +122,16 @@ test("Compose separates model egress from strict remote-MCP egress", async () =>
   assert.equal(litellmEnvironment.AIOHTTP_TRUST_ENV, "true");
   assert.match(litellmEnvironment.NO_PROXY, /ms365-mcp.*control-api/);
   assert.match(litellm, /networks:\n\s+- gateway-private/);
+  assert.match(litellm, /\n\s+- mcp-client-private/);
   assert.doesNotMatch(litellm, /\n\s+- model-egress/);
+  assert.match(litellm, /socket\.create_connection\(\('remote-mcp-egress-proxy',3128\),2\)/);
   assert.match(modelProxy, /env_file:\s+- path: \.runtime-env\/gateway-egress-proxy\.env\s+format: raw/);
   assert.match(modelProxy, /model-egress: \{\}/);
   assert.equal(modelProxyEnvironment.EGRESS_PROXY_PORT, "3128");
   assert.ok("EGRESS_PROXY_SERVICE_PASSWORD" in modelProxyEnvironment);
   assert.ok(!("EGRESS_DYNAMIC_AUTHORIZATION_URL" in modelProxyEnvironment));
   assert.match(remoteProxy, /env_file:\s+- path: \.runtime-env\/remote-mcp-egress-proxy\.env\s+format: raw/);
+  assert.match(remoteProxy, /mcp-client-private:\n\s+aliases:\n\s+- remote-mcp-egress-proxy/);
   assert.match(remoteProxy, /mcp-egress-private: \{\}/);
   assert.doesNotMatch(remoteProxy, /gateway-private/);
   assert.match(remoteProxy, /model-egress: \{\}/);
