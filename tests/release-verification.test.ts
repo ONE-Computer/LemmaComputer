@@ -34,3 +34,9 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(qualifier, /method: "DELETE"/);
   assert.match(qualifier, /\/internal\/v1\/workspaces\/\$\{workspaceId\}\/storage/);
 });
+
+test("OAuth release qualification explicitly reviews discovered connector tools", async () => {
+  const qualifier = await readFile("scripts/qualify-oauth-renewal.mts", "utf8");
+  assert.match(qualifier, /connectorToolPolicy\(alpha, "oauth-qualification"\)/);
+  assert.match(qualifier, /saveConnectorToolPolicy\([\s\S]+fixtureReview\.documentHash/);
+});

@@ -240,6 +240,20 @@ const main = async () => {
     counters = await readCounters(fixtureUrl);
     assert.equal(counters.oauthTokenRefresh - alphaBeforeRenewal.oauthTokenRefresh, 1, "the post-renewal safe tool call must not trigger another refresh request");
 
+    // Discovery is not authorization. The production connector boundary
+    // deliberately withholds newly discovered or changed tools until an
+    // administrator reviews their current definitions. Qualify that boundary
+    // explicitly before later assertions expect this fixture to be projected.
+    const fixtureReview = await connectionService.connectorToolPolicy(alpha, "oauth-qualification");
+    assert.deepEqual(fixtureReview.changes.added, ["credential_identity", "credential_secondary"]);
+    assert.ok(fixtureReview.tools.every((tool) => tool.reviewRequired && tool.decision === "deny"));
+    await connectionService.saveConnectorToolPolicy(
+      alpha,
+      "oauth-qualification",
+      Object.fromEntries(fixtureReview.tools.map((tool) => [tool.name, "allow" as const])),
+      fixtureReview.documentHash,
+    );
+
     await connectExpired(beta, betaCode);
     const betaBeforeRenewal = await readCounters(fixtureUrl);
     const betaStatus = await serviceStatus(beta);
