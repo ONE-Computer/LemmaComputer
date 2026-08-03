@@ -81,8 +81,7 @@ flowchart TB
   subgraph Public["Browser-facing boundary"]
     Browser["Employee browser"]
     Ingress["Workspace ingress :4174"]
-    GatewayOAuth["LiteLLM OAuth callback :4000"]
-    M365Bridge["M365 authorization bridge :4311"]
+    OAuthRoutes["Exact /oauth/mcp/callback and /m365/authorize routes"]
   end
 
   subgraph Experience["Private experience plane"]
@@ -112,8 +111,9 @@ flowchart TB
   end
 
   Browser --> Ingress --> Web --> Control
-  Browser --> GatewayOAuth --> LiteLLM
-  Browser --> M365Bridge --> M365
+  Ingress --> OAuthRoutes
+  OAuthRoutes -->|"private callback"| LiteLLM
+  OAuthRoutes -->|"private authorization relay"| M365
   Control --> ControlDB
   Control --> Governance --> ControlDB
   LiteLLM --> Governance
@@ -138,6 +138,10 @@ routes needed by browsers: `GET /oauth/mcp/callback` for private LiteLLM and
 the bridge do not publish host ports. A networked deployment terminates TLS at
 the public load balancer or reverse proxy and forwards this origin to workspace
 ingress; it must not expose the private upstream services directly.
+
+See [MCP networking, egress, and OAuth callbacks](mcp-networking.md) for the
+complete inbound browser flow, outbound proxy decisions, redirect handling,
+and provider callback-registration contract.
 
 ### LiteLLM is an execution boundary, not the governance authority
 

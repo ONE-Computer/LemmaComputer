@@ -339,9 +339,10 @@ it in organization mode with:
 - connector confirmation required for writes;
 - a read-only filesystem and capability drop.
 
-The connector is reachable by LiteLLM on `gateway-private`. Its browser
-authorization endpoint is published on loopback for the reference deployment;
-token exchange remains private.
+The connector is reachable by LiteLLM on `gateway-private`. Browser
+authorization enters through the canonical ONEComputer origin at
+`/m365/authorize`; the ingress relay forwards it over the private network and
+the connector port is not published directly. Token exchange remains private.
 
 **Extension seam:** pin and review connector upgrades, update the Compose tool
 allowlist, LiteLLM `allowed_tools`, `m365ToolCatalog`, canonical tool schemas,

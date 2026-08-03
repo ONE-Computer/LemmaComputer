@@ -7,6 +7,13 @@
   private administrator API, workspace data path, provider lifecycle,
   synthetic Auto routing, MCP/OAuth grants, protected execution, budgets, and
   failure behavior while separating gateway duties from Control authority.
+- [MCP networking, egress, and OAuth callbacks](mcp-networking.md) separates
+  outbound model/MCP traffic from the browser callback path and defines the
+  proxy, SSRF, redirect, provider-registration, and production acceptance
+  boundaries.
+- [Cloud deployment guides](deployment/README.md) map those logical trust
+  boundaries to provider-specific infrastructure, beginning with the
+  [AWS deployment architecture](deployment/aws-deployment.md).
 - [AI control plane](ai-control-plane.md) maps the administrator product
   surface to provider, routing, pricing, Team, budget, usage-health, spend, and
   emissions authorities.

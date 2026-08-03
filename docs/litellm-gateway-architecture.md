@@ -65,11 +65,13 @@ flowchart LR
 The diagram shows logical interfaces inside the LiteLLM process, not separate
 containers. Control can use the master-key administrator interface from the
 private gateway network. A workspace cannot: it reaches only the data API
-through a root-owned loopback broker and a narrow virtual key. Port `4000` is
-published on loopback only for browser OAuth callbacks; the LiteLLM
-administrator UI is disabled. The built-in Microsoft 365 connector also uses
-the separate local authorization bridge on port `4311` before LiteLLM stores
-the resulting user-scoped credential.
+through a root-owned loopback broker and a narrow virtual key. LiteLLM port
+`4000` is private. Browser OAuth completion enters through the canonical
+product origin at `GET /oauth/mcp/callback`, and workspace ingress rewrites
+that exact route to LiteLLM's internal `/callback`. The built-in Microsoft 365
+connector similarly uses `GET /m365/authorize` on the product origin before
+ingress relays it to the private bridge on port `3000`. Neither upstream is
+published directly.
 
 ## State and credential custody
 
@@ -200,8 +202,8 @@ server or tool.
 1. Control creates a short-lived connection key with no model access and only
    the selected connector's OAuth, status, and safe-discovery routes.
 2. The browser completes the connector authorization flow through LiteLLM's
-   callback surface. LiteLLM stores the per-user token; Control and the browser
-   do not receive the access or refresh token.
+   ingress-owned `/oauth/mcp/callback` surface. LiteLLM stores the per-user
+   token; Control and the browser do not receive the access or refresh token.
 3. Control asks LiteLLM for connection status and performs scoped safe tool
    discovery. A Microsoft 365 connection key may additionally call only the
    non-secret `get-current-user` label lookup.

@@ -178,9 +178,12 @@ Custom endpoints are admitted only after public-HTTPS parsing and resolution
 of every A and AAAA answer. IP literals, private/link-local/ULA answers,
 mixed public-and-private DNS answers, credentials, and fragments are rejected.
 That admission check is defense in depth: LiteLLM has no direct internet route.
-Its model and MCP requests go through the gateway egress proxy, which resolves
-and validates every `CONNECT` hop again, pins the approved IP, and rejects an
-unapproved redirect destination.
+Model requests use the static-provider `gateway-egress-proxy`; public MCP and
+OAuth requests use the separate `remote-mcp-egress-proxy`. The strict MCP
+client cannot inherit `NO_PROXY`, and the remote proxy resolves and validates
+every connection again, pins the approved IP, checks TLS SNI, and independently
+authorizes redirected destinations. See [MCP networking, egress, and OAuth
+callbacks](mcp-networking.md) for the complete path.
 
 For a hosted deployment, the platform/network owner must put every exact HTTPS
 origin used by the MCP and OAuth flow—endpoint, protected-resource and
@@ -554,8 +557,10 @@ Common failures:
   `onecomputer-control` membership, and the ingress logs.
 - **MCP calls return policy unavailable:** verify Control health and the shared
   controller/policy callback token.
-- **Microsoft connection callback fails:** verify all three public origins,
-  Entra redirect URIs, client type, tenant, and clock.
+- **Microsoft connection callback fails:** verify the canonical public origin,
+  exact `/oauth/mcp/callback` Entra redirect URI, `/m365/authorize` ingress
+  route, Web client type, tenant, and clock. Do not expose LiteLLM or the M365
+  bridge as a workaround.
 
 Do not enable verbose gateway request/response logging to diagnose production
 traffic. Correlate safe error codes and operation IDs instead.
@@ -664,3 +669,6 @@ Before network exposure:
 The published ports default to `127.0.0.1` specifically to prevent accidental
 LAN exposure. Do not change `ONECOMPUTER_HTTP_BIND_ADDRESS` to `0.0.0.0`
 without the controls above.
+
+For a concrete AWS mapping of these requirements, see [AWS deployment
+architecture](deployment/aws-deployment.md).

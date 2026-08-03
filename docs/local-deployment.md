@@ -99,9 +99,9 @@ For this flow:
   disabled;
 - leave public client flows disabled;
 - do not add a trailing slash;
-- do not add `http://localhost:4311` as a redirect URI; port `4311` is the
-  browser-facing Microsoft connector authorization bridge, not an Entra
-  callback; and
+- do not add a direct LiteLLM or Microsoft 365 bridge port as a redirect URI;
+  both services are private and browser traffic uses the ONEComputer origin;
+  and
 - remove obsolete tunnel or callback URIs when they are no longer in use.
 
 Entra matches redirect URIs closely. If any public hostname, scheme, port, or
