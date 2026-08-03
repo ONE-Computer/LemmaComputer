@@ -169,6 +169,11 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(entrypoint, /Cowork cannot create an AF_VSOCK socket/);
   assert.match(entrypoint, /groupadd --system --gid "\$device_gid" "\$device_group"/);
   assert.match(entrypoint, /setpriv --reuid=1000 --regid=1000 --init-groups[\s\S]*\[\[ -r "\$1" && -w "\$1" \]\]/);
+  const profileInitialization = entrypoint.indexOf("/dockerstartup/kasm_default_profile.sh /bin/true");
+  const hermesGatewayStartup = entrypoint.indexOf("/opt/onecomputer/hermes-venv/bin/hermes gateway run");
+  assert.ok(profileInitialization >= 0, "Kasm must initialize the persistent home explicitly");
+  assert.ok(profileInitialization < hermesGatewayStartup, "Kasm must initialize the home before agent processes start");
+  assert.doesNotMatch(entrypoint, /exec setpriv[\s\S]*kasm_default_profile\.sh/);
   assert.match(entrypoint, /"isLocalDevMcpEnabled": False/);
   assert.match(entrypoint, /"isDesktopExtensionEnabled": False/);
   assert.match(entrypoint, /claude-sonnet-4-5/);

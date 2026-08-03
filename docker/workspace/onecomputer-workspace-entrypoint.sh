@@ -189,6 +189,17 @@ if agent_enabled codex-cli; then
   }
 fi
 
+# The Kasm base profile is the authoritative initializer for the persistent
+# home. Run it to completion before ONEComputer writes configuration or starts
+# any agent process. Starting agents first lets them race Kasm's `cp -rp` over
+# ~/.local and can restart the whole desktop nondeterministically.
+if ! chown -R 1000:1000 /home/kasm-user \
+  || ! setpriv --reuid=1000 --regid=1000 --init-groups \
+    /dockerstartup/kasm_default_profile.sh /bin/true; then
+  echo "Kasm profile initialization failed" >&2
+  exit 75
+fi
+
 for clipboard_boolean in \
   "$ONECOMPUTER_CLIPBOARD_ENABLED" \
   "$ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE" \
@@ -799,6 +810,5 @@ fi
 touch /run/onecomputer/workspace-ready
 
 exec setpriv --reuid=1000 --regid=1000 --init-groups \
-  /dockerstartup/kasm_default_profile.sh \
   /dockerstartup/vnc_startup.sh \
   /dockerstartup/kasm_startup.sh "$@"

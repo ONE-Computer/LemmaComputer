@@ -53,8 +53,8 @@ try {
   const qualifier = `${process.cwd()}/scripts/qualify-workspace-startup.mts`;
   run("docker", [
     "compose", "run", "--rm", "--no-deps",
-    "-v", `${qualifier}:/app/qualify-workspace-startup.mts:ro`,
-    "control-api", "./node_modules/.bin/tsx", "/app/qualify-workspace-startup.mts",
+    "-v", `${qualifier}:/app/scripts/qualify-workspace-startup.mts:ro`,
+    "control-api", "./node_modules/.bin/tsx", "/app/scripts/qualify-workspace-startup.mts",
   ]);
 } finally {
   if (composeAttempted) run(process.execPath, ["scripts/compose-down.mjs", "--volumes"]);

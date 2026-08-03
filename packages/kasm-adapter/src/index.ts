@@ -597,7 +597,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         ...(typeof labels["com.onecomputer.workspace-id"] === "string"
           ? { workspaceId: String(labels["com.onecomputer.workspace-id"]) }
           : {}),
-        state: running ? health === "starting" ? "provisioning" : "ready" : failed ? "failed" : "stopped",
+        state: failed ? "failed" : running ? health === "starting" ? "provisioning" : "ready" : "stopped",
         failureCode: failed ? health === "unhealthy" ? "WORKSPACE_HEALTHCHECK_FAILED" : "WORKSPACE_STARTUP_FAILED" : null,
         ...(egressPolicyProjection ? { egressPolicyProjection } : {}),
         policyProjectionPresent: Boolean(projectedPolicyEntry),
@@ -973,12 +973,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     // that became healthy on Docker's next scheduled health check.
     if (await this.isStartupReady(providerId)) return;
 
-    throw new OneComputerError(
-      "WORKSPACE_STARTUP_TIMEOUT",
-      "The workspace did not become healthy in time. ONEComputer will retry safely.",
-      504,
-      true,
-    );
+    throw await this.startupTimeoutFailure(providerId);
   }
 
   private async isStartupReady(providerId: string) {
@@ -990,7 +985,6 @@ export class KasmLocalAdapter implements SandboxAdapter {
 
     const terminal = state.OOMKilled === true
       || state.Restarting === true
-      || health === "unhealthy"
       || ["dead", "exited"].includes(String(state.Status ?? ""));
     if (terminal) throw await this.startupFailure(providerId, state, health);
     return false;
@@ -1024,6 +1018,25 @@ export class KasmLocalAdapter implements SandboxAdapter {
     );
   }
 
+  private async startupTimeoutFailure(providerId: string) {
+    const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+    const state = asObject(inspected.State);
+    const health = textValue(asObject(state.Health), "Status");
+    const running = state.Running === true && state.Restarting !== true && state.Paused !== true;
+    if (!running || state.OOMKilled === true || state.Restarting === true) {
+      return this.startupFailure(providerId, state, health);
+    }
+    const logs = await this.containerLogs(providerId).catch(() => "");
+    const diagnostic = this.safeStartupDiagnostic(logs);
+    const detail = diagnostic ? ` ${diagnostic}` : "";
+    return new OneComputerError(
+      health === "unhealthy" ? "WORKSPACE_HEALTHCHECK_FAILED" : "WORKSPACE_STARTUP_TIMEOUT",
+      `The workspace did not become ready before the startup deadline.${detail}`,
+      504,
+      true,
+    );
+  }
+
   private safeStartupDiagnostic(logs: string) {
     const patterns = [
       /Cowork cannot access \/dev\/(?:kvm|vhost-vsock) as kasm-user/,
@@ -1033,6 +1046,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       /(?:Claude Desktop|Claude CLI|Codex CLI|Hermes Agent CLI|Hermes Agent Desktop) (?:GATEWAY_UPSTREAM|GATEWAY_CREDENTIAL|MODEL_ALIAS|CONTROL_UPSTREAM|AGENT_BRIDGE_TOKEN|ALLOWED_TOOLS) is required/,
       /(?:Hermes sandbox API|Claude Chat API|Codex Chat API) configuration is required/,
       /invalid clipboard (?:policy boolean|size policy)/,
+      /Kasm profile initialization failed/,
     ];
     for (const pattern of patterns) {
       const match = logs.match(pattern);

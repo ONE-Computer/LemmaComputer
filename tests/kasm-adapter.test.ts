@@ -106,6 +106,51 @@ test("local Kasm observes readiness at the timeout boundary", async () => {
   }
 });
 
+test("local Kasm allows a running workspace to recover from transient unhealthy readiness", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  let inspections = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    const path = request.url?.replace(/^\/v1\.47/, "") ?? "";
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path === "/containers/sandbox-id/json") {
+      inspections += 1;
+      response.end(JSON.stringify({
+        State: {
+          Running: true,
+          Status: "running",
+          ExitCode: 0,
+          Health: { Status: inspections === 1 ? "unhealthy" : "healthy" },
+        },
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "onecomputer-workspace",
+      controlNetwork: "onecomputer-control",
+      gatewayContainer: "onecomputer-litellm",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed",
+      startupPollMs: 1,
+      startupTimeoutMs: 100,
+    });
+    await (adapter as unknown as { waitForStartup: (id: string) => Promise<void> }).waitForStartup("sandbox-id");
+    assert.equal(inspections, 2);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("local Kasm reconciliation restores governed endpoints after Compose replaces them", async () => {
   const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");

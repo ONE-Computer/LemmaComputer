@@ -4,10 +4,11 @@ import test from "node:test";
 import { releaseAttestationSchemaVersion, requiredReleaseGates } from "../scripts/release-gates.mjs";
 
 test("release attestation requires an isolated built Hermes workspace readiness smoke", async () => {
-  const [verifyRelease, releaseTag, qualifier] = await Promise.all([
+  const [verifyRelease, releaseTag, qualifier, workspaceDockerfile] = await Promise.all([
     readFile("scripts/verify-release.mjs", "utf8"),
     readFile("scripts/release-tag.mjs", "utf8"),
     readFile("scripts/qualify-workspace-startup.mts", "utf8"),
+    readFile("docker/Dockerfile.workspace", "utf8"),
   ]);
 
   assert.equal(releaseAttestationSchemaVersion, 3);
@@ -22,7 +23,9 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.ok(renderServiceEnvironment < firstComposeInvocation, "release verification must render service environments before Compose");
   assert.match(verifyRelease, /"--profile", "build", "build", "workspace-image"/);
   assert.match(verifyRelease, /"compose", "run", "--rm", "--no-deps"/);
-  assert.match(verifyRelease, /qualify-workspace-startup\.mts:ro/);
+  assert.match(verifyRelease, /:\/app\/scripts\/qualify-workspace-startup\.mts:ro/);
+  assert.match(verifyRelease, /"\/app\/scripts\/qualify-workspace-startup\.mts"/);
+  assert.match(workspaceDockerfile, /workspace-ready[\s\S]+\/dev\/tcp\/127\.0\.0\.1\/6901/);
   assert.match(releaseTag, /requiredReleaseGates\.some/);
   assert.match(qualifier, /agentProfile: "hermes-claw-managed-v1"/);
   assert.match(qualifier, /chatRuntimes: \[\{/);

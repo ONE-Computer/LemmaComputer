@@ -273,7 +273,9 @@ RUN chmod 0755 \
     && chown -R 1000:1000 /home/kasm-default-profile/Desktop /home/kasm-default-profile/.config
 
 HEALTHCHECK --interval=5s --timeout=2s --start-period=15s --retries=12 \
-  CMD test -f /run/onecomputer/workspace-ready || exit 1
+  CMD test -f /run/onecomputer/workspace-ready \
+    && timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6901' \
+    || exit 1
 
 USER root
 ENTRYPOINT ["/usr/local/sbin/onecomputer-workspace-entrypoint"]
