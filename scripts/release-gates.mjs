@@ -2,6 +2,7 @@ export const releaseAttestationSchemaVersion = 3;
 
 export const requiredReleaseGates = Object.freeze([
   "pinned-litellm-provider-settings-qualification",
+  "pinned-litellm-remote-mcp-egress-qualification",
   "pinned-litellm-oauth-renewal-qualification",
   "verify:quick",
   "verify:db",

@@ -15,15 +15,17 @@ import asyncio
 import importlib
 import importlib.metadata
 import inspect
+import ipaddress
 import os
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
 
 EXPECTED_LITELLM_VERSION = "1.93.0"
 REMOTE_PROXY_ENV = "LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL"
+MAX_OAUTH_METADATA_REDIRECTS = 5
 _installed = False
 _routing_clients: dict[int, "_McpRoutingClient"] = {}
 
@@ -52,6 +54,28 @@ def _https_url(url: str) -> bool:
     except ValueError:
         return False
     return parsed.scheme.lower() == "https" and bool(parsed.hostname)
+
+
+def _public_https_url(url: str) -> bool:
+    """Validate URL structure before the egress proxy applies network policy."""
+    try:
+        parsed = urlsplit(url)
+        parsed.port
+    except ValueError:
+        return False
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or "#" in url
+    ):
+        return False
+    try:
+        ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        return True
+    return False
 
 
 def _internal_http_url(url: str) -> bool:
@@ -256,6 +280,7 @@ def _patch_runtime_mcp_client() -> None:
 
     if not getattr(manager_type, "_lemmacomputer_mcp_egress_patched", False):
         original_create_client = manager_type._create_mcp_client
+        original_fetch_oauth_discovery_url = manager_type._fetch_oauth_discovery_url
 
         async def create_client_with_profile(self: Any, server: Any, *args: Any, **kwargs: Any) -> Any:
             client = await original_create_client(self, server, *args, **kwargs)
@@ -265,6 +290,41 @@ def _patch_runtime_mcp_client() -> None:
             return client
 
         manager_type._create_mcp_client = create_client_with_profile
+        manager_type._lemmacomputer_original_fetch_oauth_discovery_url = original_fetch_oauth_discovery_url
+
+        async def fetch_oauth_discovery_url_through_proxy(
+            self: Any,
+            url: str,
+            server_url: str,
+        ) -> Any:
+            if _internal_http_url(server_url):
+                original = type(self)._lemmacomputer_original_fetch_oauth_discovery_url
+                return await original(self, url, server_url)
+            if not _public_https_url(server_url):
+                raise RuntimeError("Remote MCP server URLs must use public HTTPS hostnames")
+
+            client = manager_module.get_async_httpx_client(
+                llm_provider=manager_module.httpxSpecialProvider.MCP,
+                params={"timeout": manager_module.MCP_METADATA_TIMEOUT},
+            )
+            current_url = url
+            for _ in range(MAX_OAUTH_METADATA_REDIRECTS + 1):
+                if not _public_https_url(current_url):
+                    raise RuntimeError("MCP OAuth metadata URLs must use public HTTPS hostnames")
+                response = await client.get(
+                    current_url,
+                    follow_redirects=False,
+                    timeout=manager_module.MCP_METADATA_TIMEOUT,
+                )
+                if not response.is_redirect:
+                    return response
+                location = response.headers.get("location")
+                if not location:
+                    return response
+                current_url = urljoin(current_url, location)
+            raise RuntimeError("MCP OAuth metadata exceeded the redirect limit")
+
+        manager_type._fetch_oauth_discovery_url = fetch_oauth_discovery_url_through_proxy
         manager_type._lemmacomputer_mcp_egress_patched = True
 
 
@@ -279,6 +339,12 @@ def verify() -> None:
         raise RuntimeError("Pinned LiteLLM MCP client implementation changed; refusing to start without an egress review")
     if "server" not in inspect.signature(manager_module.MCPServerManager._create_mcp_client).parameters:
         raise RuntimeError("Pinned LiteLLM MCP manager signature changed; refusing to start without an egress review")
+    if list(inspect.signature(manager_module.MCPServerManager._fetch_oauth_discovery_url).parameters) != [
+        "self",
+        "url",
+        "server_url",
+    ]:
+        raise RuntimeError("Pinned LiteLLM OAuth discovery signature changed; refusing to start without an egress review")
 
 
 def install() -> None:

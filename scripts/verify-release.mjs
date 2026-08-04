@@ -38,6 +38,7 @@ if (
 // immediately before any release command can invoke Docker Compose.
 run(process.execPath, ["scripts/render-service-env.mjs"]);
 run("npm", ["run", "qualify:providers"]);
+run("npm", ["run", "qualify:mcp-egress"]);
 run("npm", ["run", "qualify:oauth"]);
 run(process.execPath, ["scripts/verify-quick.mjs"]);
 run(process.execPath, ["scripts/verify-db.mjs"]);

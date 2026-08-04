@@ -40,3 +40,16 @@ test("OAuth release qualification explicitly reviews discovered connector tools"
   assert.match(qualifier, /connectorToolPolicy\(alpha, "oauth-qualification"\)/);
   assert.match(qualifier, /saveConnectorToolPolicy\([\s\S]+fixtureReview\.documentHash/);
 });
+
+test("release verification executes the pinned remote MCP egress qualification", async () => {
+  const [verifyRelease, packageDocument, qualifier] = await Promise.all([
+    readFile("scripts/verify-release.mjs", "utf8"),
+    readFile("package.json", "utf8"),
+    readFile("scripts/qualify-mcp-egress.mjs", "utf8"),
+  ]);
+  assert.ok(requiredReleaseGates.includes("pinned-litellm-remote-mcp-egress-qualification"));
+  assert.match(verifyRelease, /run\("npm", \["run", "qualify:mcp-egress"\]\)/);
+  assert.match(packageDocument, /"qualify:mcp-egress": "node scripts\/qualify-mcp-egress\.mjs"/);
+  assert.match(qualifier, /"--network", "none"/);
+  assert.match(qualifier, /tests\/litellm-remote-mcp-egress\.py/);
+});

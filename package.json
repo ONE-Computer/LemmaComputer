@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "test:activity:e2e": "playwright test tests/e2e/activity-panel.spec.ts",
     "test:activity:e2e:update": "playwright test tests/e2e/activity-panel.spec.ts --update-snapshots",
+    "qualify:mcp-egress": "node scripts/qualify-mcp-egress.mjs",
     "qualify:oauth": "tsx scripts/qualify-oauth-renewal.mts",
     "qualify:providers": "tsx scripts/qualify-provider-settings.mts",
     "qualify:workspace-startup": "tsx scripts/qualify-workspace-startup.mts",
