@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Claude Desktop
-Comment=ONEComputer managed AI workspace
+Comment=LemmaComputer managed AI workspace
 Exec=/usr/local/bin/onecomputer-claude-desktop
 Icon=claude
 Terminal=false

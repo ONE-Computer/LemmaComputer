@@ -1,6 +1,6 @@
-# ONEComputer
+# LemmaComputer
 
-ONEComputer is an enterprise control plane for governed AI workspaces. It gives
+LemmaComputer is an enterprise control plane for governed AI workspaces. It gives
 employees access to frontier AI applications inside persistent sandboxes while
 keeping provider credentials, enterprise OAuth tokens, policy decisions, and
 high-risk actions outside the user-controlled environment.
@@ -24,7 +24,7 @@ centrally-built chat interface:
   reasoning.
 
 The same tenant-scoped codebase supports `customer-managed` single-tenant and
-ONEComputer-operated `hosted` deployments. Deployment profiles change
+LemmaComputer-operated `hosted` deployments. Deployment profiles change
 configuration and infrastructure, not the product schema or security model.
 
 ## Architecture
@@ -98,7 +98,7 @@ paths and identifies which decisions remain authoritative in Control.
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |
 | `scheduler-worker` | Claims due schedules and dispatches them through Control without decrypting prompts | Private |
-| `postgres` | ONEComputer identity, policy, workspace, routing, usage-ledger, budget, operation, and audit state | Private |
+| `postgres` | LemmaComputer identity, policy, workspace, routing, usage-ledger, budget, operation, and audit state | Private |
 | `litellm-postgres` | Gateway configuration, virtual keys, and encrypted OAuth state | Private |
 | workspace sidecars | Credential brokers, Kasm relay, and default-deny egress enforcement created per workspace | Dynamic/private |
 
@@ -162,12 +162,12 @@ configuration lives in `config/` and `integrations/`.
 - [Service reference](docs/services.md)
 - [Governed model routing](docs/model-routing.md)
 - [Local deployment and Entra setup](docs/local-deployment.md)
-- [Extending ONEComputer](docs/extending.md)
+- [Extending LemmaComputer](docs/extending.md)
 - [Configuration and operations](docs/operations.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](docs/SECURITY.md)
 
-ONEComputer is security-sensitive infrastructure. Changes to identity,
+LemmaComputer is security-sensitive infrastructure. Changes to identity,
 credentials, signed policy, approval binding, egress, or execution leases
 should include negative tests that demonstrate the relevant boundary fails
 closed.

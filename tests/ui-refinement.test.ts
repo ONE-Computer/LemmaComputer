@@ -5,6 +5,24 @@ import test from "node:test";
 
 const source = async (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
+test("LemmaComputer branding appears in the primary, mobile, sign-in, and companion shells", async () => {
+  const [app, companion, index, manifest] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/CompanionApp.jsx"),
+    source("apps/web/index.html"),
+    source("apps/web/public/companion.webmanifest"),
+  ]);
+  assert.match(app, /aria-label="LemmaComputer"><strong>Lemma<\/strong><span>Computer<\/span>/);
+  assert.match(app, /className="mobile-brand"><strong>Lemma<\/strong><span>Computer<\/span>/);
+  assert.match(app, /"onecomputer-glm": "GLM"/);
+  assert.match(app, /workspaceModelName\(workspace\.modelRoute\?\.alias/);
+  assert.match(companion, /aria-label="LemmaComputer"><strong>Lemma<\/strong><span>Computer<\/span><em>Companion<\/em>/);
+  assert.match(index, /<title>LemmaComputer<\/title>/);
+  assert.match(manifest, /"name": "LemmaComputer Companion"/);
+  assert.match(manifest, /"short_name": "Lemma"/);
+  assert.doesNotMatch(`${app}\n${companion}\n${index}\n${manifest}`, /ONEComputer/);
+});
+
 test("Workspace is the single multi-workspace overview without redundant reassurance or activity", async () => {
   const [app, ui] = await Promise.all([
     source("apps/web/src/App.jsx"),
@@ -42,7 +60,7 @@ test("workspace creation collects configuration before provisioning", async () =
   const createNameStep = app.slice(app.indexOf("const createAdditionalWorkspace"), app.indexOf("const configureMicrosoft365"));
   const saveStep = app.slice(app.indexOf("const saveWorkspaceSettings"), app.indexOf("const selectNav"));
   assert.match(app, /confirmLabel="Continue to configuration"/);
-  assert.match(app, /Choose the profile, applications, agents, and model before ONEComputer starts this workspace/);
+  assert.match(app, /Choose the profile, applications, agents, and model before LemmaComputer starts this workspace/);
   assert.match(createNameStep, /selectWorkspaceConfiguration\(grantId\)/);
   assert.doesNotMatch(createNameStep, /workspaceApi\.create/);
   assert.ok(saveStep.indexOf("sandboxApi.save(sandboxConfiguration)") < saveStep.indexOf("workspaceApi.create(configuration.grantId)"));
@@ -162,7 +180,7 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
   assert.match(styles, /\.companion-chat-composer-row\s*\{[\s\S]*grid-template-columns:\s*36px minmax\(0, 1fr\) minmax\(0, auto\) 36px;[\s\S]*align-items:\s*end/);
   assert.match(companionStyles, /\.companion-mode-switch\s*\{/);
   assert.doesNotMatch(companionStyles, /\.companion-destinations/);
-  assert.match(manifest, /Chat with workspace agents and review protected ONEComputer actions/);
+  assert.match(manifest, /Chat with workspace agents and review protected LemmaComputer actions/);
 });
 
 test("workspace options are editable, opt-in, and return to the overview with restart guidance after save", async () => {

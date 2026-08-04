@@ -208,7 +208,7 @@ export function ActivityTimeline({ events = [], feedState = "empty", onRetry }) 
       {feedState === "disconnected" && (
         <div className="activity-connection-notice" role="status">
           <Info20Regular aria-hidden="true" />
-          <span><strong>Reconnecting</strong><small>Saved updates remain visible while ONEComputer catches up.</small></span>
+          <span><strong>Reconnecting</strong><small>Saved updates remain visible while LemmaComputer catches up.</small></span>
         </div>
       )}
       {emptyState ? (
@@ -397,7 +397,7 @@ export function ActivityPanel({ open, workspaceId, agentId, sessionId, turnId, o
             <Dismiss20Regular aria-hidden="true" />
           </button>
         </header>
-        <p className="activity-panel-intro">The approach, actions, and sources ONEComputer recorded for this turn.</p>
+        <p className="activity-panel-intro">The approach, actions, and sources LemmaComputer recorded for this turn.</p>
         <span className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</span>
         <ActivityTimeline events={events} feedState={feedState} onRetry={retry} />
         <div className="activity-viewer-slot" data-activity-extension-slot="computer-viewer" aria-label="Computer view extension slot">

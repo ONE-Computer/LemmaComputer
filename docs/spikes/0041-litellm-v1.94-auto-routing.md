@@ -2,9 +2,9 @@
 
 **Issue:** #41
 **Decision date:** 2026-07-31
-**Decision:** **NO-GO for LiteLLM as ONEComputer's governed routing decision
+**Decision:** **NO-GO for LiteLLM as LemmaComputer's governed routing decision
 authority.** Keep LiteLLM as the provider-neutral inference data plane and let
-ONEComputer own the narrow `ModelRouter` decision boundary described below.
+LemmaComputer own the narrow `ModelRouter` decision boundary described below.
 
 This is a spike record, not production enablement. It adds no schema, UI,
 workspace grant, or production LiteLLM image change.
@@ -77,19 +77,19 @@ benchmark.
 | Local heuristic | Four tiers, deterministic keyword overrides, low-cost local scoring, configurable thresholds | Acceptable component |
 | Semantic Auto Router | Uses an embedding call and an utterance index | Not selected; extra runtime call, cost, privacy surface |
 | Optional small-LLM classifier | v1.94 supports a classifier model and falls back to heuristic on error | Mechanically available; quality, latency, and real spend untested without credentials |
-| Low confidence/default | Default/fallback model is configurable | ONEComputer will make the default explicit as `Balanced` |
+| Low confidence/default | Default/fallback model is configurable | LemmaComputer will make the default explicit as `Balanced` |
 | Session affinity | Built in and scoped by API-key hash plus session id | Useful reference, but affinity is disabled when routing plugins are used and must not bypass Team policy |
 | Provider neutrality | Tier targets are LiteLLM model groups and can point at managed providers | Acceptable data-plane capability |
-| Failure fallback | LiteLLM can fall back among model groups | ONEComputer must reserve/check budget before every dispatch and record attempts separately |
-| Capability floors | LiteLLM exposes model metadata and pre-call checks | ONEComputer policy remains authoritative for vision, tools, streaming, and context floors |
+| Failure fallback | LiteLLM can fall back among model groups | LemmaComputer must reserve/check budget before every dispatch and record attempts separately |
+| Capability floors | LiteLLM exposes model metadata and pre-call checks | LemmaComputer policy remains authoritative for vision, tools, streaming, and context floors |
 | Spend attribution | v1.94 forwards sanitized caller metadata to LLM-classifier and embedding sub-calls | Promising; the owned ledger still has to create separate originating tenant/user/Team attempts |
-| One-alias grant | Existing ONEComputer access-group grants expose one stable client alias | Preserve; never grant underlying provider model names |
+| One-alias grant | Existing LemmaComputer access-group grants expose one stable client alias | Preserve; never grant underlying provider model names |
 | Structured decision telemetry | Adaptive routing writes some structured metadata, but normal complexity routing emits cause, tier, score, signals, and selected model only in formatted info logs | **Blocking NO-GO** |
 | Privacy | Existing config disables raw request/response and message logging | Preserve; only bounded signal codes may be persisted |
 | Licensing | Complexity and Auto Router source is outside `enterprise/` and covered by the repository MIT license | Acceptable for the evaluated source; re-check each pinned upgrade |
-| Admin-free runtime | Static heuristic configuration needs no admin call per request | Acceptable, but mapping/rate-card versions remain ONEComputer configuration |
+| Admin-free runtime | Static heuristic configuration needs no admin call per request | Acceptable, but mapping/rate-card versions remain LemmaComputer configuration |
 
-The blocker is not routing quality. It is evidence integrity: ONEComputer cannot
+The blocker is not routing quality. It is evidence integrity: LemmaComputer cannot
 base budgets, explanations, or audit history on parsing a human log line such as
 `routing decision cause=..., tier=..., score=..., signals=...`. A supported
 callback must return a typed decision before production use. Until then,

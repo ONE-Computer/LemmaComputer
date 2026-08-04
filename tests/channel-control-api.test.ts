@@ -531,7 +531,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
       [
         {
           type: "notice",
-          notice: "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+          notice: "Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action.",
         },
         {
           type: "text-delta",
@@ -543,7 +543,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
             sessionId: "telegram-session-hermes",
             text: "Hello from Hermes",
             notices: [
-              "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+              "Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action.",
             ],
             artifacts: [generatedArtifact],
             state: "completed",

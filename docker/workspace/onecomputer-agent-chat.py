@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private native-agent adapter exposing ONEComputer's canonical Chat event stream."""
+"""Private native-agent adapter exposing LemmaComputer's canonical Chat event stream."""
 
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ TELEGRAM_ARTIFACT_INSTRUCTION = (
 )
 NEEDS_INPUT_MARKER = "[ONECOMPUTER_NEEDS_INPUT]"
 BASE_SYSTEM_PROMPT = (
-    f"You are the selected agent in a ONEComputer {EXECUTION_MODE} workspace. "
+    f"You are the selected agent in a LemmaComputer {EXECUTION_MODE} workspace. "
     "Complete the employee's requested work with the assigned tools instead of "
     "shifting executable steps back to the employee. Tool descriptions are the "
     "canonical source for tool-specific prerequisites. When the employee gives a "
@@ -121,7 +121,7 @@ BASE_SYSTEM_PROMPT = (
     "an MCP call in terminal, execute_code, Python, or a tool_call helper. "
     "When upload-file-content is given a workspace-local file, pass its absolute "
     "path as localFilePath; do not read or base64-encode the file into model text. "
-    "ONEComputer Control is the authority for tool policy and signed approvals. "
+    "LemmaComputer Control is the authority for tool policy and signed approvals. "
     "If a protected operation is pending, use wait-for-governed-operation and "
     "report the final result accurately. Never claim an operation completed until "
     "the tool confirms it. Before using any tool, briefly tell the employee what "
@@ -131,7 +131,7 @@ BASE_SYSTEM_PROMPT = (
     "names, commands, hidden reasoning, or every individual call. If you cannot proceed without a "
     "missing detail or employee choice, do not call tools. Ask one concise question "
     f"and begin that response with the exact marker {NEEDS_INPUT_MARKER}; "
-    "ONEComputer removes the marker and keeps the conversation ready for their reply. "
+    "LemmaComputer removes the marker and keeps the conversation ready for their reply. "
     "Never use that marker when you can proceed safely. "
     "Treat greetings, acknowledgements, small talk, and "
     "underspecified messages with no concrete task as ordinary conversation. "
@@ -1418,7 +1418,7 @@ async def sessions(request: Request) -> Response:
             response = await http.post(
                 f"{HERMES_URL}/api/sessions",
                 headers={"authorization": f"Bearer {HERMES_KEY}"},
-                # Hermes requires titles to be globally unique. ONEComputer owns
+                # Hermes requires titles to be globally unique. LemmaComputer owns
                 # presentation titles, so passing them upstream would make a new
                 # "hi" or Telegram session fail when an older one has that title.
                 json={},

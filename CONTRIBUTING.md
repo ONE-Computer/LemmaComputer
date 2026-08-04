@@ -1,6 +1,6 @@
-# Contributing to ONEComputer
+# Contributing to LemmaComputer
 
-Thank you for helping improve ONEComputer. This repository contains
+Thank you for helping improve LemmaComputer. This repository contains
 security-sensitive control-plane, credential, sandbox, and consent code, so
 changes should be small enough to review and explicit about the trust boundary
 they affect.
@@ -55,7 +55,7 @@ and workspace home data out of commits.
 - Update technical documentation when a service contract or extension path
   changes.
 
-See [Extending ONEComputer](docs/extending.md) for component-specific
+See [Extending LemmaComputer](docs/extending.md) for component-specific
 checklists.
 
 ## Tests

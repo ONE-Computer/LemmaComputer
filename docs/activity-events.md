@@ -1,6 +1,6 @@
 # Activity event protocol
 
-ONEComputer projects agent activity into a versioned, user-visible event stream. `ActivityEventV1` is a sanitized product contract, not a chain-of-thought or administrator-observability feed.
+LemmaComputer projects agent activity into a versioned, user-visible event stream. `ActivityEventV1` is a sanitized product contract, not a chain-of-thought or administrator-observability feed.
 
 ## Event contract
 

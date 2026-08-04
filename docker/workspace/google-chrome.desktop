@@ -2,7 +2,7 @@
 Version=1.0
 Type=Application
 Name=Google Chrome
-Comment=Browse approved web destinations through the ONEComputer firewall
+Comment=Browse approved web destinations through the LemmaComputer firewall
 Exec=/usr/bin/google-chrome-stable --no-sandbox %U
 Icon=google-chrome
 Terminal=false

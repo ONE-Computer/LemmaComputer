@@ -1,6 +1,6 @@
 # Third-party notices
 
-ONEComputer includes the following third-party software. This inventory records
+LemmaComputer includes the following third-party software. This inventory records
 the direct packages added for the structured Chat surface; transitive package
 licenses remain available in their installed package metadata and distribution
 files.
@@ -14,7 +14,7 @@ files.
 - Source: <https://github.com/vercel/ai>
 - License text: <https://github.com/vercel/ai/blob/main/LICENSE>
 
-These packages run locally in the ONEComputer web and Control applications.
+These packages run locally in the LemmaComputer web and Control applications.
 Their inclusion does not require Vercel hosting, AI Gateway, or another
 Vercel-hosted runtime service.
 

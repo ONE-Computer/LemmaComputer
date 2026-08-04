@@ -349,7 +349,7 @@ export const connectorCatalog = (tenantId: string, microsoftAuthorizationOrigin:
     serverName: "onecomputer_ms365",
     name: "Microsoft 365",
     shortDescription: "Mail, calendar, files, and Teams",
-    description: "Use approved Microsoft 365 tools through the ONEComputer AI gateway. Protected actions require approval.",
+    description: "Use approved Microsoft 365 tools through the LemmaComputer AI gateway. Protected actions require approval.",
     category: "Productivity",
     services: ["Outlook Mail", "Calendar", "OneDrive", "Teams"],
     endpointUrl: "http://ms365-mcp:3000/mcp",

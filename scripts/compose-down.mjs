@@ -75,7 +75,7 @@ export function runComposeDown({
     stderr.write([
       `Refusing to stop Compose while ${runtimeContainers.size} managed workspace runtime container${runtimeContainers.size === 1 ? "" : "s"} still ${runtimeContainers.size === 1 ? "exists" : "exist"}:`,
       ...[...runtimeContainers].sort().map((name) => `  - ${name}`),
-      "Stop every active workspace through ONEComputer, then rerun npm run compose:down.",
+      "Stop every active workspace through LemmaComputer, then rerun npm run compose:down.",
       "This guard preserves Control state, runtime grants, and workspace storage consistency.",
       "",
     ].join("\n"));
@@ -89,8 +89,8 @@ export function runComposeDown({
   }
   if (result.status === 0) {
     stdout.write(args.includes("--volumes")
-      ? "ONEComputer Compose services stopped; Compose-managed volumes were removed.\n"
-      : "ONEComputer Compose services stopped; persistent volumes were retained.\n");
+      ? "LemmaComputer Compose services stopped; Compose-managed volumes were removed.\n"
+      : "LemmaComputer Compose services stopped; persistent volumes were retained.\n");
   }
   return result.status ?? 1;
 }

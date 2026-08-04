@@ -1,6 +1,6 @@
 # Teams and cost allocation
 
-ONEComputer uses **Team** as the human-facing boundary for allocating AI usage. A Team is an internal organization group such as Finance, Engineering, or Customer Success. The optional `cost_center_code` is only an external accounting reference attached to that Team; it is not the Team's identity and it does not need to be present.
+LemmaComputer uses **Team** as the human-facing boundary for allocating AI usage. A Team is an internal organization group such as Finance, Engineering, or Customer Success. The optional `cost_center_code` is only an external accounting reference attached to that Team; it is not the Team's identity and it does not need to be present.
 
 ## Access-control boundary
 
@@ -19,7 +19,7 @@ A user may belong to several active Teams, but has exactly one active default sp
 
 The P0 administration surface applies membership and default changes immediately. Future-dated effective times are rejected rather than being shown as active before their start time. Scheduled allocation changes require a later, explicit interval-scheduling design.
 
-During rollout, asking ONEComputer to resolve a default for an active user with no valid assignment creates or uses the tenant-owned **Unallocated** fallback. Administrators should move users out of Unallocated as ownership becomes known. Spend must never be silently discarded because membership data is incomplete.
+During rollout, asking LemmaComputer to resolve a default for an active user with no valid assignment creates or uses the tenant-owned **Unallocated** fallback. Administrators should move users out of Unallocated as ownership becomes known. Spend must never be silently discarded because membership data is incomplete.
 
 Removing a membership does not delete its interval. A default membership must be transferred before it can be removed. Archiving a Team preserves all Team, membership, default-assignment, and audit history; active defaults on the archived Team move to Unallocated.
 

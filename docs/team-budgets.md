@@ -4,7 +4,7 @@ Team budgets are an AI spend-governance control, not a subscription, invoice, or
 payment balance. The same implementation runs in `customer-managed` and `hosted`
 profiles. All configuration, reservations, alerts, overrides, and reconciliation
 records retain a tenant key in both profiles. A customer-managed installation has
-no ONEComputer-hosted billing or telemetry dependency.
+no LemmaComputer-hosted billing or telemetry dependency.
 
 ## Accounting basis
 
@@ -66,13 +66,13 @@ or previously effective limit applies automatically.
 
 ## LiteLLM projection and reconciliation
 
-ONEComputer projects an opaque tenant/Team key and the minimum limit metadata to
+LemmaComputer projects an opaque tenant/Team key and the minimum limit metadata to
 LiteLLM through supported Team APIs. It never reads or writes the LiteLLM database.
 A hard budget may project `max_budget`; a soft budget projects observability
 metadata without a blocking gateway limit. The projection contains no Team name,
 cost-center code, user identity, prompt, completion, provider payload, or key.
 
-Projection state is a defense-in-depth mirror. ONEComputer's exact ledger and
+Projection state is a defense-in-depth mirror. LemmaComputer's exact ledger and
 atomic reservation are authoritative. Reconciliation fingerprints the expected
 projection, compares it with the supported API response, records matched, drifted,
 unavailable, or repaired state, and can repair drift through the same API.

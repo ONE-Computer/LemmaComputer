@@ -352,7 +352,7 @@ export class McpPolicyService {
     let canonicalArguments: Record<string, OwnedJson>;
     try {
       // Softeria requires `confirm: true` before it will execute a write. That
-      // connector guard is not a ONEComputer policy decision and must never
+      // connector guard is not a LemmaComputer policy decision and must never
       // become part of the bound operation fingerprint. The managed bridge
       // supplies it for every write; Control removes it before validating the
       // user-controlled arguments and independently applies Allow / Approval /

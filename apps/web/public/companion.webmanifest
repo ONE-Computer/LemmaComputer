@@ -1,8 +1,8 @@
 {
   "id": "/companion",
-  "name": "ONEComputer Companion",
-  "short_name": "ONE Companion",
-  "description": "Chat with workspace agents and review protected ONEComputer actions.",
+  "name": "LemmaComputer Companion",
+  "short_name": "Lemma",
+  "description": "Chat with workspace agents and review protected LemmaComputer actions.",
   "start_url": "/companion",
   "scope": "/",
   "display": "standalone",

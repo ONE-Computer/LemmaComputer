@@ -301,7 +301,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(chatAdapter, /raise RuntimeError\("Hermes could not complete the request"\)/);
   assert.match(hermesDesktopLauncher, /HERMES_DESKTOP_HERMES_ROOT=\/opt\/onecomputer\/hermes-agent/);
   assert.match(hermesDesktopLauncher, /Hermes --no-sandbox/);
-  assert.match(entrypoint, /ONEComputer-Agent\.desktop/);
+  assert.match(entrypoint, /LemmaComputer-Agent\.desktop/);
   assert.match(entrypoint, /Hermes-Claw\.desktop/);
   assert.match(entrypoint, /onecomputer-hermes-agent-cli\.desktop.*Hermes-Agent-CLI\.desktop/);
   assert.doesNotMatch(entrypoint, /onecomputer-hermes-claw\.desktop/);

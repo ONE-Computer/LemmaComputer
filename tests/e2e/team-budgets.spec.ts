@@ -12,7 +12,7 @@ test("administrator creates, monitors, reconciles, and temporarily overrides a T
   const row=page.locator(".admin-team-list article").filter({hasText:"AI Platform"});
   await row.getByRole("button",{name:"Budget"}).click();
   const dialog=page.getByRole("dialog",{name:"AI Platform budget"});
-  await expect(dialog.getByText("ONEComputer is the authoritative spend ledger.")).toBeVisible();
+  await expect(dialog.getByText("LemmaComputer is the authoritative spend ledger.")).toBeVisible();
   await dialog.getByLabel("Budget limit").fill("1000");
   await dialog.getByLabel("Currency").fill("USD");
   await expect(dialog.getByRole("combobox",{name:"Period"})).toContainText("Calendar month");

@@ -145,7 +145,7 @@ test("the channel control client owns a long response timeout instead of inherit
     response.writeHead(200, { "content-type": "application/x-ndjson; charset=utf-8" });
     response.write(`${JSON.stringify({
       type: "notice",
-      notice: "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+      notice: "Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action.",
     })}\n`);
     response.write(`${JSON.stringify({
       type: "text-delta",
@@ -157,7 +157,7 @@ test("the channel control client owns a long response timeout instead of inherit
         response: {
           sessionId: "932b72c3-220a-465d-96d0-d1ac11270f25",
           text: "Working on it. Completed.",
-          notices: ["Approval needed: Send Teams chat message. Open ONEComputer to review this protected action."],
+          notices: ["Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action."],
           state: "completed",
         },
       })}\n`);
@@ -192,7 +192,7 @@ test("the channel control client owns a long response timeout instead of inherit
       .finally(() => { completed = true; });
     await waitUntil(() => notices.length === 1 && deltas.length === 1);
     assert.deepEqual(notices, [
-      "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
+      "Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action.",
     ]);
     assert.deepEqual(deltas, ["Working on it. "]);
     assert.equal(completed, false);
@@ -261,7 +261,7 @@ test("Telegram parses document captions and largest photos, then downloads throu
               document: {
                 file_id: "deck-file-id",
                 file_unique_id: "deck-unique-id",
-                file_name: "ONEComputer-Architecture.pptx",
+                file_name: "LemmaComputer-Architecture.pptx",
                 mime_type: "application/octet-stream",
                 file_size: deck.length,
               },
@@ -310,7 +310,7 @@ test("Telegram parses document captions and largest photos, then downloads throu
     attachment: {
       fileId: "deck-file-id",
       fileUniqueId: "deck-unique-id",
-      filename: "ONEComputer-Architecture.pptx",
+      filename: "LemmaComputer-Architecture.pptx",
       mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       fileSize: deck.length,
     },
@@ -900,7 +900,7 @@ test("the broker forwards approval notices during a turn and keeps a later failu
   const store = new MemoryChannelStore();
   const telegram = new FakeTelegram();
   const control = new FakeControl();
-  control.notice = "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.";
+  control.notice = "Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action.";
   control.failAfterNotice = true;
   const service = new ChannelBrokerService(
     store,
@@ -925,8 +925,8 @@ test("the broker forwards approval notices during a turn and keeps a later failu
 
   assert.deepEqual(telegram.sent.map((message) => message.text), [
     "Message received.",
-    "Approval needed: Send Teams chat message. Open ONEComputer to review this protected action.",
-    "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.",
+    "Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action.",
+    "I couldn’t finish the task while the protected action was awaiting review. Open LemmaComputer to check the approval, then retry if needed.",
   ]);
 });
 

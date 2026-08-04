@@ -1,13 +1,13 @@
-# ONEComputer agent instructions
+# LemmaComputer agent instructions
 
 These instructions apply to the entire repository. A more specific `AGENTS.md` may add subsystem rules but cannot weaken these safety rules.
 
 ## Product and deployment invariant
 
-ONEComputer has one product codebase with two supported deployment profiles:
+LemmaComputer has one product codebase with two supported deployment profiles:
 
 - `customer-managed`: a customer runs a single-tenant installation in its own environment.
-- `hosted`: ONEComputer operates the service and isolates multiple customer organizations.
+- `hosted`: LemmaComputer operates the service and isolates multiple customer organizations.
 
 Do not fork a separate self-hosted codebase. Keep deployment-specific behavior behind explicit configuration and interfaces. Every persisted or cached customer-owned record must be tenant-scoped in both profiles. A separate repository requires an ADR proving that shared releases, migrations, and security fixes cannot remain safe.
 

@@ -278,7 +278,7 @@ architecture](litellm-gateway-architecture.md).
 OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock are configured by an organization administrator in
 **AI control plane → Models & providers**, not in `.env`. Control passes the
 submitted write-only key directly to LiteLLM's private credential API. LiteLLM
-encrypts the credential in its own database; ONEComputer stores only
+encrypts the credential in its own database; LemmaComputer stores only
 tenant-scoped route IDs, selected model IDs, lifecycle state, timestamps, and a
 safe HMAC fingerprint.
 
@@ -398,7 +398,7 @@ Claude Cowork local execution requires hardware virtualization. On every Docker
 or Kasm Agent host, verify that `/dev/kvm` and `/dev/vhost-vsock` are character
 devices and that the host has at least 8 GB of RAM and approximately 25 GB of
 free disk space. The local driver gives Cowork workspaces an 8 GiB memory limit;
-allow additional host memory for Docker and the ONEComputer services. Opt in
+allow additional host memory for Docker and the LemmaComputer services. Opt in
 with:
 
 ```text
@@ -422,7 +422,7 @@ AF_VSOCK socket creation before launching the desktop, so host and image group
 IDs do not need to match. Changing this setting recreates the workspace
 container on its next launch while preserving its workspace volume.
 
-For an external Kasm installation, configure the ONEComputer Workspace image's
+For an external Kasm installation, configure the LemmaComputer Workspace image's
 Docker Run Config Override in Kasm:
 
 ```json
@@ -493,7 +493,7 @@ The workspace build is intentionally not part of normal `up`; it is a build
 profile and not a service. Rebuild it explicitly after changing its Dockerfile
 or assets.
 
-Stop every active workspace through ONEComputer before stopping the control
+Stop every active workspace through LemmaComputer before stopping the control
 stack. Then stop Compose containers while retaining state:
 
 ```bash

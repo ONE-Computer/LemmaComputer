@@ -53,7 +53,7 @@ const sandboxProfiles = [
     executionMode: "managed",
     egressMode: "restricted",
     dataGuidance: "Use for organization work. Local tools and public destinations remain policy restricted.",
-    client: "ONEComputer managed workspace",
+    client: "LemmaComputer managed workspace",
     clientVersion: "managed-v1",
     persistence: "persistent-home",
     network: "gateway-only",
@@ -67,7 +67,7 @@ const sandboxProfiles = [
     executionMode: "managed",
     egressMode: "restricted",
     dataGuidance: "Use only for existing qualification workspaces.",
-    client: "ONEComputer qualification CLI",
+    client: "LemmaComputer qualification CLI",
     clientVersion: "issue-006",
     persistence: "persistent-home",
     network: "gateway-only",
@@ -81,7 +81,7 @@ const sandboxProfiles = [
     executionMode: "disposable-open",
     egressMode: "full-web",
     dataGuidance: "Non-sensitive work only. Downloads and installed tools are untrusted; Delete permanently removes the workspace.",
-    client: "ONEComputer open workspace",
+    client: "LemmaComputer open workspace",
     clientVersion: "disposable-open-v1",
     persistence: "persistent-home",
     network: "gateway-only",
@@ -90,7 +90,7 @@ const sandboxProfiles = [
 ] as const;
 
 const sandboxModels = [
-  { alias: "onecomputer-auto", displayName: "Governed routing", provider: "ONEComputer" },
+  { alias: "onecomputer-auto", displayName: "Governed routing", provider: "LemmaComputer" },
   { alias: "onecomputer-claude", displayName: "Claude", provider: "Anthropic" },
   { alias: "onecomputer-openai", displayName: "OpenAI", provider: "OpenAI" },
   { alias: "onecomputer-glm", displayName: "GLM", provider: "Z.ai" },
@@ -99,7 +99,7 @@ const sandboxModels = [
 ] as const;
 
 const workspaceServiceClasses = [
-  { value: "auto", displayName: "Auto", description: "ONEComputer chooses the best eligible tier for each task." },
+  { value: "auto", displayName: "Auto", description: "LemmaComputer chooses the best eligible tier for each task." },
   { value: "lite", displayName: "Lite", description: "Fast, economical work." },
   { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
   { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },
@@ -1019,7 +1019,7 @@ export function createControlServer(
             } catch (error) {
               if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
             }
-            const notice = `${summary.replace(/[.!?]+$/, "")}. Open ONEComputer to review this protected action.`;
+            const notice = `${summary.replace(/[.!?]+$/, "")}. Open LemmaComputer to review this protected action.`;
             if (!notices.includes(notice)) {
               notices.push(notice);
               yield frame({ type: "notice", notice });

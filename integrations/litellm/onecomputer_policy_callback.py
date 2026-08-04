@@ -1,4 +1,4 @@
-"""Fail-closed LiteLLM MCP pre-call policy callback owned by ONEComputer."""
+"""Fail-closed LiteLLM MCP pre-call policy callback owned by LemmaComputer."""
 
 import asyncio
 import base64
@@ -1393,7 +1393,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
 
         if decision["decision"] == "allow":
             # Audit context and onecomputerFile are bound into the signed
-            # operation but are ONEComputer metadata, not Softeria arguments.
+            # operation but are LemmaComputer metadata, not Softeria arguments.
             if isinstance(data.get("arguments"), dict):
                 data["arguments"] = {
                     key: value

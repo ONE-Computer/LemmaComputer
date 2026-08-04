@@ -73,7 +73,7 @@ describe("published OpenVTC browser SDK", () => {
     assert.deepEqual(await unwrapSecret(wrapped, wrapper), secret);
   });
 
-  it("keeps only WebAuthn PRF and IndexedDB platform glue in ONEComputer", async () => {
+  it("keeps only WebAuthn PRF and IndexedDB platform glue in LemmaComputer", async () => {
     const source = await readFile(
       new URL("../apps/web/src/openvtc-browser-agent.js", import.meta.url),
       "utf8",

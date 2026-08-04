@@ -48,7 +48,7 @@
       return;
     }
     if (!policyEnabled) {
-      show("Clipboard sharing is disabled by your ONEComputer workspace policy.");
+      show("Clipboard sharing is disabled by your LemmaComputer workspace policy.");
       return;
     }
     if (!chromium || !nativeApi) {

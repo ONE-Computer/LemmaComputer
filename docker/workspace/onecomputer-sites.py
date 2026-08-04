@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a bounded static site through the workspace-local ONEComputer broker."""
+"""Publish a bounded static site through the workspace-local LemmaComputer broker."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def broker_url() -> str:
         "http://127.0.0.1:4316",
         "http://127.0.0.1:4317",
     }:
-        raise SystemExit("ONEComputer Sites is unavailable for this agent")
+        raise SystemExit("LemmaComputer Sites is unavailable for this agent")
     return value
 
 
@@ -71,7 +71,7 @@ def publish(arguments: argparse.Namespace) -> int:
         "name": site["name"],
         "slug": site["slug"],
         "revision": site["currentRevision"],
-        "open": "Open ONEComputer and choose Sites",
+        "open": "Open LemmaComputer and choose Sites",
     }, separators=(",", ":")))
     return 0
 

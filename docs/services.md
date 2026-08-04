@@ -1,6 +1,6 @@
 # Service reference
 
-This document describes the processes that make up ONEComputer and the
+This document describes the processes that make up LemmaComputer and the
 contracts between them. Ports are container ports unless explicitly described
 as host bindings.
 
@@ -268,7 +268,7 @@ direct internet-routed network attachment.
 
 **Configuration:** `config/litellm/config.yaml`
 
-**ONEComputer callback:** `integrations/litellm/onecomputer_policy_callback.py`
+**LemmaComputer callback:** `integrations/litellm/onecomputer_policy_callback.py`
 
 LiteLLM is the model and MCP data plane. Control uses its administrator API to
 create deterministic virtual credentials with:
@@ -286,7 +286,7 @@ For governed model calls, the custom callback accepts only
 `onecomputer-auto`, derives bounded privacy-safe task signals, asks Control for
 a concrete deployment, verifies the returned signed binding immediately before
 execution, and admits the attempt to the ledger and Team budget. It strips
-ONEComputer authentication and governance metadata before provider dispatch,
+LemmaComputer authentication and governance metadata before provider dispatch,
 normalizes provider usage after completion, and reports routing observations.
 An admission or binding failure denies provider execution; completion
 telemetry failure does not replace an already successful provider response and
@@ -340,7 +340,7 @@ it in organization mode with:
 - a read-only filesystem and capability drop.
 
 The connector is reachable by LiteLLM on `gateway-private`. Browser
-authorization enters through the canonical ONEComputer origin at
+authorization enters through the canonical LemmaComputer origin at
 `/m365/authorize`; the ingress relay forwards it over the private network and
 the connector port is not published directly. Token exchange remains private.
 

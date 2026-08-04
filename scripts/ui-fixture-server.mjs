@@ -42,7 +42,7 @@ const workspace = {
   policyAssignment: { version: 7, hash: digest },
   profile: {
     id: "claude-desktop-standard-v1",
-    client: "ONEComputer managed workspace",
+    client: "LemmaComputer managed workspace",
     clientVersion: "managed-v1",
     modelAlias: "onecomputer-glm",
     executionMode: "managed",
@@ -66,7 +66,7 @@ const sandboxWorkspace = {
   policyAssignment: { version: 4, hash: digest },
   profile: {
     id: "disposable-open-v1",
-    client: "ONEComputer open workspace",
+    client: "LemmaComputer open workspace",
     clientVersion: "disposable-open-v1",
     modelAlias: "onecomputer-openai",
     executionMode: "disposable-open",
@@ -101,7 +101,7 @@ const profile = {
   executionMode: "managed",
   egressMode: "restricted",
   dataGuidance: "Use for organization work. Local tools and public destinations remain policy restricted.",
-  client: "ONEComputer managed workspace",
+  client: "LemmaComputer managed workspace",
   clientVersion: "managed-v1",
   persistence: "persistent-home",
   network: "gateway-only",
@@ -116,7 +116,7 @@ const disposableProfile = {
   executionMode: "disposable-open",
   egressMode: "full-web",
   dataGuidance: "Non-sensitive work only. Delete permanently removes the workspace.",
-  client: "ONEComputer open workspace",
+  client: "LemmaComputer open workspace",
   clientVersion: "disposable-open-v1",
   persistence: "persistent-home",
   network: "gateway-only",
@@ -145,7 +145,7 @@ const availableAgents = [
     id: "claude-desktop",
     displayName: "Claude Desktop",
     clientVersion: "1.22209.3",
-    description: "Managed desktop client routed through ONEComputer.",
+    description: "Managed desktop client routed through LemmaComputer.",
     license: "Anthropic commercial distribution",
     source: "https://downloads.claude.ai/claude-desktop/apt/stable/",
     artifactSha256: "d427f46ac9233dbc4d8a441a602f09f750b8a5f05d1fc7a00285d7a6ce07655c",
@@ -155,7 +155,7 @@ const availableAgents = [
     id: "claude-cli",
     displayName: "Claude CLI",
     clientVersion: "2.1.215",
-    description: "Pinned Claude CLI routed through its own governed ONEComputer identity.",
+    description: "Pinned Claude CLI routed through its own governed LemmaComputer identity.",
     license: "Anthropic commercial distribution",
     source: "https://downloads.claude.ai/claude-code-releases/2.1.215/linux-x64/claude.zst",
     artifactSha256: "7ff9594e53cd89d1af9ceb3c18d3d70be1a5c6d27475e31ee2bed65d748f18c0",
@@ -175,7 +175,7 @@ const availableAgents = [
     id: "hermes-claw",
     displayName: "Hermes Agent CLI",
     clientVersion: "0.19.0",
-    description: "Pinned Hermes Agent CLI configured as a governed ONEComputer client.",
+    description: "Pinned Hermes Agent CLI configured as a governed LemmaComputer client.",
     license: "MIT",
     source: "https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20",
     artifactSha256: "285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990",
@@ -193,9 +193,9 @@ let sandboxSettings = {
   profile,
   availableProfiles: [profile, disposableProfile],
   availableApplications,
-  availableModels: [{ alias: "onecomputer-auto", displayName: "Governed routing", provider: "ONEComputer" }],
+  availableModels: [{ alias: "onecomputer-auto", displayName: "Governed routing", provider: "LemmaComputer" }],
   availableServiceClasses: [
-    { value: "auto", displayName: "Auto", description: "ONEComputer chooses the best eligible tier for each task." },
+    { value: "auto", displayName: "Auto", description: "LemmaComputer chooses the best eligible tier for each task." },
     { value: "lite", displayName: "Lite", description: "Fast, economical work." },
     { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
     { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },
@@ -275,7 +275,7 @@ const initialChatMessages = [
       { type: "data-progress", id: "fixture-progress-1", data: { activityId: "fixture-progress-1", label: "Work complete", state: "completed" } },
       { type: "data-tool", id: "fixture-tool-1", data: { toolCallId: "fixture-tool-1", name: "get-drive-item", state: "completed", summary: "File metadata checked" } },
       { type: "data-approval", id: "fixture-approval-1", data: { approvalId: "fixture-approval-1", toolCallId: "fixture-tool-2", operationId: "00000000-0000-4000-8000-000000000001", state: "approval_required", summary: "Approval needed: Delete planning-draft.docx from OneDrive" } },
-      { type: "text", text: "**The protected deletion is waiting for your signed approval.**\n\n- The file has not been deleted.\n- ONEComputer will run it only after approval.", state: "done" },
+      { type: "text", text: "**The protected deletion is waiting for your signed approval.**\n\n- The file has not been deleted.\n- LemmaComputer will run it only after approval.", state: "done" },
       { type: "data-terminal", id: "terminal-fixture-turn-1", data: { turnId: "fixture-turn-1", state: "completed" } },
     ],
   },
@@ -518,7 +518,7 @@ let fixtureMcpConnections = [
     serverName: "onecomputer_ms365",
     name: "Microsoft 365",
     shortDescription: "Mail, calendar, files, and Teams",
-    description: "Use approved Microsoft 365 tools through the ONEComputer AI gateway.",
+    description: "Use approved Microsoft 365 tools through the LemmaComputer AI gateway.",
     category: "Productivity",
     services: ["Outlook Mail", "Calendar", "OneDrive", "Teams"],
     policySupport: "governed",
@@ -1251,7 +1251,7 @@ const server = http.createServer((request, response) => {
         ? "I’ll build the smallest Vite site and publish it with the reviewed skill.\n\n"
         : "I’ll check the workspace context first, then summarize what I can do.\n\n";
       const closingText = siteRequest
-        ? "Published **Hello world**. Open ONEComputer → Sites to view it."
+        ? "Published **Hello world**. Open LemmaComputer → Sites to view it."
         : "I’m working inside your workspace and can use only:\n\n- approved tools\n- approved destinations";
       const openingChunks = [
         { type: "start", messageId, messageMetadata: { agentCatalogId, turnId, state: "streaming", createdAt } },
@@ -1619,5 +1619,5 @@ const server = http.createServer((request, response) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  process.stdout.write(`ONEComputer UI fixture listening on http://127.0.0.1:${port}\n`);
+  process.stdout.write(`LemmaComputer UI fixture listening on http://127.0.0.1:${port}\n`);
 });

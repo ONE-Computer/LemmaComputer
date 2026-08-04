@@ -23,7 +23,7 @@ self.addEventListener("push", (event) => {
   }
   if (!validHint) return;
   event.waitUntil(self.registration.showNotification("Approval requested", {
-    body: "Open ONEComputer Companion to review a protected action.",
+    body: "Open LemmaComputer Companion to review a protected action.",
     tag: "onecomputer-approval-pending",
     renotify: true,
     requireInteraction: true,

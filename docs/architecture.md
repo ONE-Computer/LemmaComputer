@@ -1,6 +1,6 @@
 # Architecture and trust model
 
-ONEComputer is a policy and credential boundary around user-facing AI
+LemmaComputer is a policy and credential boundary around user-facing AI
 applications. Its design goal is to preserve the product experience of
 frontier AI tools while moving enterprise authority out of the employee's
 sandbox.
@@ -152,7 +152,7 @@ LiteLLM has four distinct interfaces in this system:
 | Private administrator API | Control | Create or revoke encrypted provider credentials, dynamic tenant model routes, scoped virtual keys, MCP server records, and non-authoritative Team budget projections |
 | Workspace data API | Root-owned loopback broker | Submit governed model requests and discover or call only the MCP tools allowed by the current workspace-and-agent key |
 | Browser OAuth surface | Employee browser through a Control-created connection flow | Complete per-user connector authorization while keeping access and refresh tokens inside LiteLLM |
-| ONEComputer callback | LiteLLM internal request hooks | Ask Control to decide and verify model routes, admit usage, authorize MCP calls, claim protected-operation leases, and record completion evidence |
+| LemmaComputer callback | LiteLLM internal request hooks | Ask Control to decide and verify model routes, admit usage, authorize MCP calls, claim protected-operation leases, and record completion evidence |
 
 Control remains authoritative for identity and tool policy, service-class
 routing, approval state, Team budgets, and usage accounting. LiteLLM owns
@@ -212,12 +212,12 @@ need host Docker authority.
    per-conversation override. Auto, Lite, Balanced, and Pro are product
    contracts rather than provider model names.
 2. The root-owned loopback broker restricts paths, removes requester-supplied
-   ONEComputer and LiteLLM routing metadata, and forwards
+   LemmaComputer and LiteLLM routing metadata, and forwards
    `onecomputer-auto` with its workspace-and-agent key and signed task binding.
 3. LiteLLM validates key expiry, the synthetic model allowlist, trusted
    identity metadata, concurrency, and RPM limits. Token usage is metered
-   without a ONEComputer-imposed per-minute allowance.
-4. The ONEComputer callback asks Control for a routing decision. Control
+   without a LemmaComputer-imposed per-minute allowance.
+4. The LemmaComputer callback asks Control for a routing decision. Control
    resolves the subject's default spending Team, immutable Team and identity
    policies, rollout mode, mapping, provider capability and health evidence,
    effective rate card, currency, residency, and budget eligibility.

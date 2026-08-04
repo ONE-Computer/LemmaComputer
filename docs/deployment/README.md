@@ -1,6 +1,6 @@
 # Cloud deployment guides
 
-These guides map ONEComputer's logical trust boundaries onto cloud services.
+These guides map LemmaComputer's logical trust boundaries onto cloud services.
 They are reference architectures, not deployable infrastructure-as-code or a
 production security sign-off.
 

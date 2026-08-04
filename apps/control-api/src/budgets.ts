@@ -54,7 +54,7 @@ export class TeamBudgetAdministrationService{
       try{await this.projector.project(projection);result=await this.projector.reconcile(projection);}
       catch{result={status:"unavailable",projectionKey:this.projector.projectionKey(projection),expectedFingerprint:usageFingerprint(projection),observedFingerprint:null,detail:"LiteLLM Team projection is unavailable; hard admission remains fail closed"};}
     }else{
-      result={status:"unavailable",projectionKey:`oc-budget-${createHash("sha256").update(`${actor.tenantId}\0${teamId}`).digest("hex").slice(0,24)}`,expectedFingerprint:usageFingerprint(projection),observedFingerprint:null,detail:"LiteLLM Team projection is not configured; ONEComputer admission remains authoritative"};
+      result={status:"unavailable",projectionKey:`oc-budget-${createHash("sha256").update(`${actor.tenantId}\0${teamId}`).digest("hex").slice(0,24)}`,expectedFingerprint:usageFingerprint(projection),observedFingerprint:null,detail:"LiteLLM Team projection is not configured; LemmaComputer admission remains authoritative"};
     }
     await this.store.recordGatewayReconciliation({tenantId:actor.tenantId,teamId,budgetVersionId:status.budget.id,projectionKey:result.projectionKey,limitAmount:status.effectiveLimitAmount,mode:status.budget.mode,expectedFingerprint:result.expectedFingerprint,observedFingerprint:result.observedFingerprint,status:result.status,detail:result.detail,startedBy:actor.userId,checkedAt:now});
     return result;

@@ -29,7 +29,7 @@ providers**, rather than in personal Settings.
 sequenceDiagram
   participant Client as Chat or managed workspace agent
   participant Broker as Root-owned loopback broker
-  participant Gateway as LiteLLM + ONEComputer callback
+  participant Gateway as LiteLLM + LemmaComputer callback
   participant Control as Control routing and usage authority
   participant Store as Control PostgreSQL
   participant Provider as Selected model provider

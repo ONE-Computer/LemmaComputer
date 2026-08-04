@@ -1,6 +1,6 @@
 ---
 name: make-a-site
-description: Build and publish a simple owner-only static Vite site into ONEComputer Sites. Use when an employee asks to make, vibe-code, publish, deploy, update, or republish a small website or web app from a disposable ONEComputer workspace.
+description: Build and publish a simple owner-only static Vite site into LemmaComputer Sites. Use when an employee asks to make, vibe-code, publish, deploy, update, or republish a small website or web app from a disposable LemmaComputer workspace.
 ---
 
 # Make a Site
@@ -21,4 +21,4 @@ onecomputer-sites publish --name "Site name" --slug "site-name" --dist "/absolut
 
 Use a lowercase hyphenated slug. Publishing the same slug creates a new immutable revision of the employee's existing site.
 
-Report success only when `onecomputer-sites` returns JSON with `published:true`. Tell the employee the site is available under ONEComputer → Sites. If the command fails, report the error plainly and do not claim the site is live.
+Report success only when `onecomputer-sites` returns JSON with `published:true`. Tell the employee the site is available under LemmaComputer → Sites. If the command fails, report the error plainly and do not claim the site is live.

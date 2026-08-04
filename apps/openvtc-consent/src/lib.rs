@@ -725,7 +725,7 @@ mod tests {
             effects: json!([{"kind": "delete", "summary": "Delete the selected resource."}]),
             consequences: json!(["The selected resource is removed."]),
             subject: Some("urn:onecomputer:operation:test".into()),
-            origin: Some("ONEComputer Control".into()),
+            origin: Some("LemmaComputer Control".into()),
             state_pin: Some(json!({"resource": "resource-1", "version": "etag-1"})),
         }
     }

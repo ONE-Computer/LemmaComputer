@@ -1,6 +1,6 @@
 # LiteLLM gateway architecture
 
-LiteLLM is ONEComputer's model and MCP execution gateway. It is deliberately
+LiteLLM is LemmaComputer's model and MCP execution gateway. It is deliberately
 not the source of truth for identity policy, service-class routing, approvals,
 budgets, or usage accounting. Control decides what may happen; LiteLLM holds
 the credentials and performs only the model or connector operation allowed by
@@ -28,7 +28,7 @@ flowchart LR
     Broker["Root-owned loopback broker"]
   end
 
-  subgraph ControlBoundary["ONEComputer control plane"]
+  subgraph ControlBoundary["LemmaComputer control plane"]
     Web["Web application"]
     Control["Control API"]
     Routing["Routing, policy, budget, and usage authorities"]
@@ -38,7 +38,7 @@ flowchart LR
   subgraph GatewayBoundary["LiteLLM gateway boundary"]
     AdminAPI["Private administrator API"]
     DataAPI["Model, MCP, and OAuth data APIs"]
-    Callback["ONEComputer policy callback"]
+    Callback["LemmaComputer policy callback"]
     LiteLLMDB[("LiteLLM PostgreSQL")]
   end
 
@@ -98,7 +98,7 @@ OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock deployments are managed at
 runtime from **AI control plane → Models & providers**:
 
 1. An administrator submits a write-only provider credential and selects from
-   ONEComputer's reviewed model or Bedrock profile inventory.
+   LemmaComputer's reviewed model or Bedrock profile inventory.
 2. Control sends the raw credential directly to LiteLLM's private credential
    API. LiteLLM encrypts it in its database; Control retains only safe
    tenant-scoped metadata and a fingerprint.
@@ -152,7 +152,7 @@ sequenceDiagram
   participant Client as Workspace client
   participant Broker as Loopback broker
   participant Gateway as LiteLLM
-  participant Callback as ONEComputer callback
+  participant Callback as LemmaComputer callback
   participant Control as Control routing and usage authority
   participant Provider as Concrete provider deployment
 
@@ -186,7 +186,7 @@ names. `onecomputer-auto` is a synthetic transport alias:
 - LiteLLM cannot silently choose another provider deployment. No eligible,
   correctly priced, healthy route means the request fails closed.
 
-The callback removes ONEComputer authentication, policy, routing, and
+The callback removes LemmaComputer authentication, policy, routing, and
 accounting metadata before provider dispatch. Raw prompts and responses are not
 part of routing evidence and are not enabled in gateway logging.
 

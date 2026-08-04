@@ -3,10 +3,10 @@
 This document is the canonical network-flow description for MCP connectors.
 It separates two directions that must not be collapsed into one component:
 
-- **outbound connector traffic** originates inside ONEComputer and leaves
+- **outbound connector traffic** originates inside LemmaComputer and leaves
   through a controlled forward proxy;
 - **inbound browser callbacks** return through the normal product ingress on
-  the canonical ONEComputer origin.
+  the canonical LemmaComputer origin.
 
 The remote-MCP egress proxy is not a reverse proxy and is never a public OAuth
 listener. Workspace ingress is not a general egress proxy. Each has one narrow
@@ -43,7 +43,7 @@ flowchart LR
 
 The provider does not open a server-to-server connection to the callback. It
 redirects the employee's browser. A VPN-only deployment therefore works when
-the browser can still resolve and reach the canonical ONEComputer origin over
+the browser can still resolve and reach the canonical LemmaComputer origin over
 the VPN after visiting the provider.
 
 ## Outbound paths are deliberately separate

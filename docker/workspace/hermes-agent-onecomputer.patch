@@ -12,7 +12,7 @@ index 65d5b32..0faa6bd 100644
 +    def _parse_ai_usage_task_binding_header(
 +        self, request: "web.Request"
 +    ) -> tuple[Optional[str], Optional["web.Response"]]:
-+        """Return ONEComputer's bounded signed per-turn usage binding."""
++        """Return LemmaComputer's bounded signed per-turn usage binding."""
 +        raw = request.headers.get(self._AI_USAGE_TASK_BINDING_HEADER, "").strip()
 +        if not raw:
 +            return None, None

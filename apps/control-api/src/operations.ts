@@ -75,7 +75,7 @@ const companionActionFor = (record: GovernedOperationRecord) => ({
 }[record.toolName] ?? actionFor(record));
 
 const activityRequester = (record: GovernedOperationRecord) => {
-  if (!record.agentId) return "ONEComputer";
+  if (!record.agentId) return "LemmaComputer";
   const agent = ownedAgentCatalog.find((candidate) => (
     record.agentId === candidate.id || record.agentId?.endsWith(`:${candidate.id}`)
   ));

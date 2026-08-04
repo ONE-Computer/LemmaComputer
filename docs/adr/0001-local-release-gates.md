@@ -5,7 +5,7 @@
 
 ## Context
 
-`main` must remain available for unscheduled demos. The repository intentionally does not rely on GitHub Actions, paid branch protection, or a GitHub Team upgrade. Development must support several agents in parallel worktrees, including concurrent schema work. The product must support ONEComputer-hosted multi-organization SaaS and customer-managed single-tenant installations without security fixes or migrations drifting between editions.
+`main` must remain available for unscheduled demos. The repository intentionally does not rely on GitHub Actions, paid branch protection, or a GitHub Team upgrade. Development must support several agents in parallel worktrees, including concurrent schema work. The product must support LemmaComputer-hosted multi-organization SaaS and customer-managed single-tenant installations without security fixes or migrations drifting between editions.
 
 ## Decision
 

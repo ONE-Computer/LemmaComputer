@@ -1,6 +1,6 @@
 # Governed model routing
 
-ONEComputer exposes stable service classes while keeping provider deployments and prices under administrator control.
+LemmaComputer exposes stable service classes while keeping provider deployments and prices under administrator control.
 
 LiteLLM carries the synthetic transport alias and executes the signed concrete
 route, but it does not own the Auto classifier or service-class policy. See

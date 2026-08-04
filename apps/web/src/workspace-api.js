@@ -7,7 +7,7 @@ async function request(path, options = {}) {
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload?.error?.message ?? "ONEComputer could not complete the request.");
+    const error = new Error(payload?.error?.message ?? "LemmaComputer could not complete the request.");
     error.code = payload?.error?.code ?? "REQUEST_FAILED";
     error.retryable = payload?.error?.retryable ?? false;
     error.status = response.status;

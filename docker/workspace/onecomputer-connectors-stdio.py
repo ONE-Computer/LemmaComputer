@@ -23,7 +23,7 @@ if BROKER not in {
     "http://127.0.0.1:4316",
     "http://127.0.0.1:4317",
 }:
-    raise SystemExit("invalid ONEComputer connectors broker")
+    raise SystemExit("invalid LemmaComputer connectors broker")
 PROTOCOL_VERSION = "2024-11-05"
 TOOLS: dict[str, dict] = {}
 LOCAL_UPLOADS: dict[str, dict] = {}
@@ -55,12 +55,12 @@ AUDIT_CONTEXT_SCHEMA = {
     "required": ["target", "targetType"],
     "additionalProperties": False,
 }
-DELETE_ONEDRIVE_DESCRIPTION = """Delete one Microsoft OneDrive or SharePoint drive item through ONEComputer governance.
+DELETE_ONEDRIVE_DESCRIPTION = """Delete one Microsoft OneDrive or SharePoint drive item through LemmaComputer governance.
 
 This is a remote Microsoft 365 action, not a local filesystem action. A user-facing filename, link, folder path, or filename visible in an attached screenshot is enough to begin discovery: call list-drives to resolve driveId, then search-onedrive-files or list-folder-files to resolve the exact driveItemId. Do not ask the user for internal drive or item IDs before attempting those assigned discovery tools. If multiple items match, ask the user to disambiguate before deleting anything.
 
-Before calling this tool, get the exact item's current top-level name and eTag with get-drive-item (includeHeaders=true and select=id,name,eTag,parentReference). Pass that exact name as resourceName and exact eTag as If-Match. The resourceName is shown to the user in the signed approval and Trail; never substitute an opaque item ID. Call this tool directly; do not request Cowork or local-file deletion permission. ONEComputer Control will obtain any required signed approval and this call will wait for the final result."""
-DELETE_ONEDRIVE_MISSING_METADATA = """The remote OneDrive deletion was not submitted because resourceName or If-Match is missing. Call get-drive-item for this driveId and driveItemId with includeHeaders=true and select=id,name,eTag,parentReference, then call delete-onedrive-file again with the exact top-level name as resourceName and eTag as If-Match. Do not use Cowork or local-filesystem deletion permission; ONEComputer handles approval when this remote tool is called."""
+Before calling this tool, get the exact item's current top-level name and eTag with get-drive-item (includeHeaders=true and select=id,name,eTag,parentReference). Pass that exact name as resourceName and exact eTag as If-Match. The resourceName is shown to the user in the signed approval and Trail; never substitute an opaque item ID. Call this tool directly; do not request Cowork or local-file deletion permission. LemmaComputer Control will obtain any required signed approval and this call will wait for the final result."""
+DELETE_ONEDRIVE_MISSING_METADATA = """The remote OneDrive deletion was not submitted because resourceName or If-Match is missing. Call get-drive-item for this driveId and driveItemId with includeHeaders=true and select=id,name,eTag,parentReference, then call delete-onedrive-file again with the exact top-level name as resourceName and eTag as If-Match. Do not use Cowork or local-filesystem deletion permission; LemmaComputer handles approval when this remote tool is called."""
 CALENDAR_VIEW_DESCRIPTION = """Get chronological event occurrences from the signed-in user's default Outlook calendar within an explicit time window.
 
 Use this tool for requests such as next, upcoming, today, this week, or events between two dates. For upcoming events, set startDateTime to the current time and endDateTime to a bounded future time in ISO 8601 format. Do not use list-calendar-events for upcoming events because that tool returns event series without an implicit from-now window."""
@@ -70,17 +70,17 @@ Use this first when a OneDrive request supplies a human-facing filename, link, o
 SEARCH_ONEDRIVE_DESCRIPTION = """Search one OneDrive or SharePoint drive for items matching a human-facing filename.
 
 If driveId is unknown, call list-drives first. Search using the filename or other value the user supplied, including a filename visible in an attached screenshot. Use top no greater than 10 and the exact select value id,name,eTag,parentReference. Do not request all pages. OneDrive search is eventually consistent, so use list-folder-files on the known parent immediately after creating an item. Treat multiple matches as ambiguous and ask the user to choose before a mutation."""
-UPLOAD_ONEDRIVE_DESCRIPTION = """Create or replace one file in Microsoft OneDrive or SharePoint through ONEComputer governance.
+UPLOAD_ONEDRIVE_DESCRIPTION = """Create or replace one file in Microsoft OneDrive or SharePoint through LemmaComputer governance.
 
-Pass driveId from list-drives. Pass only the value that belongs between `/items/` and `/content` as driveItemId: use an opaque item ID to replace an existing file, `root:/file.txt:` for a new file in the drive root, or `root:/folder/file.txt:` for a new file below the root. Never include `/items/`, `/content`, `/drives/`, or a complete Microsoft Graph URL in driveItemId. For a file already in this workspace, pass its absolute path as localFilePath; ONEComputer uses an approval-bound resumable upload and streams bounded chunks without putting file bytes into model text or imposing a product file-size limit. Otherwise pass a small base64-encoded body supported by the connector's inline endpoint. Supply exactly one of localFilePath or body. To verify a just-created file, call list-folder-files on its parent because OneDrive search indexing can lag. Call this tool directly; ONEComputer obtains any required signed approval."""
+Pass driveId from list-drives. Pass only the value that belongs between `/items/` and `/content` as driveItemId: use an opaque item ID to replace an existing file, `root:/file.txt:` for a new file in the drive root, or `root:/folder/file.txt:` for a new file below the root. Never include `/items/`, `/content`, `/drives/`, or a complete Microsoft Graph URL in driveItemId. For a file already in this workspace, pass its absolute path as localFilePath; LemmaComputer uses an approval-bound resumable upload and streams bounded chunks without putting file bytes into model text or imposing a product file-size limit. Otherwise pass a small base64-encoded body supported by the connector's inline endpoint. Supply exactly one of localFilePath or body. To verify a just-created file, call list-folder-files on its parent because OneDrive search indexing can lag. Call this tool directly; LemmaComputer obtains any required signed approval."""
 LIST_JOINED_TEAMS_DESCRIPTION = """List every Microsoft Teams team joined by the signed-in user.
 
 This Graph endpoint does not accept generic OData paging or filtering options. Call it with no arguments, then match the returned displayName and id locally. Use the selected id with list-team-channels."""
 TEAMS_TOOL_DESCRIPTIONS = {
-    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation selected during discovery with targetType chat. ONEComputer obtains signed approval before sending.",
-    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation with targetType chat. ONEComputer obtains signed approval before sending.",
-    "send-channel-message": "Post one HTML message to a Teams channel. Get teamId from list-joined-teams and channelId from list-team-channels. Put the post in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact team and channel display names selected during discovery. ONEComputer obtains signed approval before posting.",
-    "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Set onecomputerAudit to the exact team and channel display names. Put the reply in body.body.content and set body.body.contentType to html. ONEComputer obtains signed approval before posting.",
+    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation selected during discovery with targetType chat. LemmaComputer obtains signed approval before sending.",
+    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation with targetType chat. LemmaComputer obtains signed approval before sending.",
+    "send-channel-message": "Post one HTML message to a Teams channel. Get teamId from list-joined-teams and channelId from list-team-channels. Put the post in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact team and channel display names selected during discovery. LemmaComputer obtains signed approval before posting.",
+    "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Set onecomputerAudit to the exact team and channel display names. Put the reply in body.body.content and set body.body.contentType to html. LemmaComputer obtains signed approval before posting.",
 }
 
 BOUNDED_LIST_INPUT_PROPERTIES = {
@@ -190,7 +190,7 @@ DELETE_ONEDRIVE_INPUT_SCHEMA = {
             "type": "string",
             "minLength": 1,
             "maxLength": 255,
-            "description": "Exact top-level name returned by get-drive-item. ONEComputer shows this human-facing target in the signed approval and Trail.",
+            "description": "Exact top-level name returned by get-drive-item. LemmaComputer shows this human-facing target in the signed approval and Trail.",
         },
         "If-Match": {
             "type": "string",
@@ -506,21 +506,21 @@ CURATED_WRITE_INPUT_SCHEMAS = {
     **TEAMS_INPUT_SCHEMAS,
 }
 CURATED_WRITE_DESCRIPTIONS = {
-    "create-draft-email": "Create an Outlook email draft without sending it. Body is a message object with subject, body, and optional recipients. ONEComputer obtains signed approval before creating the draft.",
-    "update-mail-message": "Update editable fields on an existing Outlook message or draft. Get messageId from list-mail-messages. Supply only the fields to change. ONEComputer obtains signed approval.",
-    "delete-mail-message": "Delete one Outlook message. Get messageId from list-mail-messages or get-mail-message. ONEComputer obtains signed approval before deleting.",
-    "move-mail-message": "Move one Outlook message to another mail folder. Get messageId from list-mail-messages and DestinationId from list-mail-folders. ONEComputer obtains signed approval.",
-    "send-mail": "Send a new Outlook email. Body must contain Message with subject, body, and verified toRecipients; optionally set SaveToSentItems. Never guess a recipient address. ONEComputer obtains signed approval before sending.",
-    "send-draft-message": "Send an existing Outlook draft. Get messageId from list-mail-messages and verify the draft and recipients first. ONEComputer obtains signed approval before sending.",
-    "reply-mail-message": "Reply only to the sender of an Outlook message. Get messageId from get-mail-message and put the reply text in body.Comment. ONEComputer obtains signed approval before sending.",
-    "reply-all-mail-message": "Reply to the sender and all recipients of an Outlook message. Verify the recipient set, then put the reply text in body.Comment. ONEComputer obtains signed approval before sending.",
-    "forward-mail-message": "Forward an Outlook message to explicitly verified recipients. Put them in body.ToRecipients and optional text in body.Comment. Never guess an address. ONEComputer obtains signed approval before sending.",
-    "create-calendar-event": "Create an Outlook calendar event. Supply subject plus start and end objects containing local dateTime and an explicit timeZone supported by the employee's mailbox. Use the trusted employee timezone supplied in the agent instructions when the request omits a timezone; if none is supplied, ask before calling this tool. Never guess from examples or substitute Pacific time. Add attendees only when the user requested them. ONEComputer applies the configured write policy.",
-    "update-calendar-event": "Update an existing Outlook calendar event. Get eventId from get-calendar-view or list-calendar-events and supply only the fields to change. ONEComputer obtains signed approval.",
-    "delete-calendar-event": "Delete one Outlook calendar event. Resolve the exact eventId and confirm ambiguous matches before calling. ONEComputer obtains signed approval.",
-    "create-onedrive-folder": "Create a folder below a OneDrive item. Use list-drives and list-folder-files to resolve driveId and parent driveItemId. Body requires name and folder: {}. ONEComputer obtains signed approval.",
-    "move-rename-onedrive-item": "Rename and/or move one OneDrive item. Resolve driveId and driveItemId first; body may contain name and/or parentReference.id. ONEComputer obtains signed approval.",
-    "copy-drive-item": "Copy one OneDrive item. Resolve the source driveId and driveItemId; body requires parentReference.id and may include a new name. ONEComputer obtains signed approval.",
+    "create-draft-email": "Create an Outlook email draft without sending it. Body is a message object with subject, body, and optional recipients. LemmaComputer obtains signed approval before creating the draft.",
+    "update-mail-message": "Update editable fields on an existing Outlook message or draft. Get messageId from list-mail-messages. Supply only the fields to change. LemmaComputer obtains signed approval.",
+    "delete-mail-message": "Delete one Outlook message. Get messageId from list-mail-messages or get-mail-message. LemmaComputer obtains signed approval before deleting.",
+    "move-mail-message": "Move one Outlook message to another mail folder. Get messageId from list-mail-messages and DestinationId from list-mail-folders. LemmaComputer obtains signed approval.",
+    "send-mail": "Send a new Outlook email. Body must contain Message with subject, body, and verified toRecipients; optionally set SaveToSentItems. Never guess a recipient address. LemmaComputer obtains signed approval before sending.",
+    "send-draft-message": "Send an existing Outlook draft. Get messageId from list-mail-messages and verify the draft and recipients first. LemmaComputer obtains signed approval before sending.",
+    "reply-mail-message": "Reply only to the sender of an Outlook message. Get messageId from get-mail-message and put the reply text in body.Comment. LemmaComputer obtains signed approval before sending.",
+    "reply-all-mail-message": "Reply to the sender and all recipients of an Outlook message. Verify the recipient set, then put the reply text in body.Comment. LemmaComputer obtains signed approval before sending.",
+    "forward-mail-message": "Forward an Outlook message to explicitly verified recipients. Put them in body.ToRecipients and optional text in body.Comment. Never guess an address. LemmaComputer obtains signed approval before sending.",
+    "create-calendar-event": "Create an Outlook calendar event. Supply subject plus start and end objects containing local dateTime and an explicit timeZone supported by the employee's mailbox. Use the trusted employee timezone supplied in the agent instructions when the request omits a timezone; if none is supplied, ask before calling this tool. Never guess from examples or substitute Pacific time. Add attendees only when the user requested them. LemmaComputer applies the configured write policy.",
+    "update-calendar-event": "Update an existing Outlook calendar event. Get eventId from get-calendar-view or list-calendar-events and supply only the fields to change. LemmaComputer obtains signed approval.",
+    "delete-calendar-event": "Delete one Outlook calendar event. Resolve the exact eventId and confirm ambiguous matches before calling. LemmaComputer obtains signed approval.",
+    "create-onedrive-folder": "Create a folder below a OneDrive item. Use list-drives and list-folder-files to resolve driveId and parent driveItemId. Body requires name and folder: {}. LemmaComputer obtains signed approval.",
+    "move-rename-onedrive-item": "Rename and/or move one OneDrive item. Resolve driveId and driveItemId first; body may contain name and/or parentReference.id. LemmaComputer obtains signed approval.",
+    "copy-drive-item": "Copy one OneDrive item. Resolve the source driveId and driveItemId; body requires parentReference.id and may include a new name. LemmaComputer obtains signed approval.",
     **TEAMS_TOOL_DESCRIPTIONS,
 }
 
@@ -719,20 +719,20 @@ def discover_tools() -> list[dict]:
                 else UPLOAD_ONEDRIVE_DESCRIPTION if upstream_name == "upload-file-content"
                 else LIST_JOINED_TEAMS_DESCRIPTION if upstream_name == "list-joined-teams"
                 else CURATED_WRITE_DESCRIPTIONS[upstream_name] if upstream_name in CURATED_WRITE_DESCRIPTIONS
-                else raw.get("description", f"{server_label} tool governed by ONEComputer policy.")
+                else raw.get("description", f"{server_label} tool governed by LemmaComputer policy.")
             ),
             "inputSchema": input_schema,
         })
     TOOLS[WAIT_TOOL_NAME] = {"name": WAIT_TOOL_NAME, "onecomputer_local": True}
     result.append({
         "name": WAIT_TOOL_NAME,
-        "description": "Wait for a protected ONEComputer operation after another Microsoft 365 tool reports that signed approval is pending. Waits for up to 75 seconds. If the operation is still pending, call this tool again with the same operationId. Do not retry the original destructive tool.",
+        "description": "Wait for a protected LemmaComputer operation after another Microsoft 365 tool reports that signed approval is pending. Waits for up to 75 seconds. If the operation is still pending, call this tool again with the same operationId. Do not retry the original destructive tool.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "operationId": {
                     "type": "string",
-                    "description": "The ONEComputer governed operation ID returned by the protected tool.",
+                    "description": "The LemmaComputer governed operation ID returned by the protected tool.",
                 },
             },
             "required": ["operationId"],
@@ -825,7 +825,7 @@ def call_tool(name: str, arguments: dict) -> dict:
                 operation = response.get("operation") if isinstance(response.get("operation"), dict) else {}
                 identifier = operation.get("id")
                 if not isinstance(identifier, str):
-                    return error_result("ONEComputer did not create a governed resumable upload.")
+                    return error_result("LemmaComputer did not create a governed resumable upload.")
                 LOCAL_UPLOADS[identifier] = {
                     "driveId": arguments["driveId"],
                     "driveItemId": arguments["driveItemId"],
@@ -857,7 +857,7 @@ def call_tool(name: str, arguments: dict) -> dict:
             operation = response.get("operation") if isinstance(response.get("operation"), dict) else {}
             identifier = operation.get("id")
             if not isinstance(identifier, str):
-                return error_result("ONEComputer did not create a governed OneDrive deletion.")
+                return error_result("LemmaComputer did not create a governed OneDrive deletion.")
             if operation.get("state") == "succeeded":
                 return operation_result(operation, identifier)
             return {
@@ -883,7 +883,7 @@ def call_tool(name: str, arguments: dict) -> dict:
             payload = {}
         identifier = operation_id(payload)
         if error.code != 409 or not identifier:
-            message = nested_error(payload) or f"ONEComputer rejected the tool call (HTTP {error.code})."
+            message = nested_error(payload) or f"LemmaComputer rejected the tool call (HTTP {error.code})."
             return error_result(message)
 
     return {
@@ -941,7 +941,7 @@ def handle(message: dict) -> None:
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": "onecomputer-connectors", "version": "0.1.0"},
-                "instructions": "Tools are prefixed with their connected service name and operate on remote service resources. Use the corresponding MCP tool directly. Read calls normally run immediately. Writes may return a governed operation; call wait-for-governed-operation with that operationId until signed approval or denial is final. Never substitute Cowork or local-filesystem permission tools for remote-service actions. ONEComputer Control enforces policy and obtains signed approval inside protected tool calls.",
+                "instructions": "Tools are prefixed with their connected service name and operate on remote service resources. Use the corresponding MCP tool directly. Read calls normally run immediately. Writes may return a governed operation; call wait-for-governed-operation with that operationId until signed approval or denial is final. Never substitute Cowork or local-filesystem permission tools for remote-service actions. LemmaComputer Control enforces policy and obtains signed approval inside protected tool calls.",
             })
         elif method == "ping":
             respond(identifier, {})

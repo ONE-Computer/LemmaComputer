@@ -1,7 +1,7 @@
 # Local deployment and Microsoft Entra setup
 
 This runbook is ordered for an operator or coding agent starting from a fresh
-clone. It produces a loopback-only ONEComputer deployment with the local Docker
+clone. It produces a loopback-only LemmaComputer deployment with the local Docker
 sandbox driver, Microsoft Entra sign-in, the Microsoft 365 connector, and at
 least one model route.
 
@@ -57,7 +57,7 @@ access errors before continuing.
 
 ## Configure Microsoft Entra
 
-ONEComputer is a confidential, single-tenant Web application. The shortest
+LemmaComputer is a confidential, single-tenant Web application. The shortest
 local setup uses one Entra app registration for both product sign-in and
 delegated Microsoft 365 access. A separate connector app is also supported and
 is described below.
@@ -68,9 +68,9 @@ is described below.
    [Microsoft Entra admin center](https://entra.microsoft.com/), open
    **Entra ID → App registrations → New registration**.
 2. Give the application a recognizable name, such as
-   `ONEComputer local`.
+   `LemmaComputer local`.
 3. Select **Accounts in this organizational directory only (Single tenant)**.
-   ONEComputer sends authorization requests to one configured tenant and
+   LemmaComputer sends authorization requests to one configured tenant and
    rejects an ID token from another tenant.
 4. Register the application.
 5. From **Overview**, record:
@@ -89,7 +89,7 @@ http://localhost:4174/api/v1/auth/callback
 http://localhost:4174/oauth/mcp/callback
 ```
 
-The first is the ONEComputer sign-in callback. The second is used by the
+The first is the LemmaComputer sign-in callback. The second is used by the
 LiteLLM/Microsoft 365 OAuth bridge. Both are server-side Web callbacks; do not
 register them as SPA, mobile, or public-client callbacks.
 
@@ -100,7 +100,7 @@ For this flow:
 - leave public client flows disabled;
 - do not add a trailing slash;
 - do not add a direct LiteLLM or Microsoft 365 bridge port as a redirect URI;
-  both services are private and browser traffic uses the ONEComputer origin;
+  both services are private and browser traffic uses the LemmaComputer origin;
   and
 - remove obsolete tunnel or callback URIs when they are no longer in use.
 
@@ -140,7 +140,7 @@ ChannelMessage.Read.All
 ChannelMessage.Send
 ```
 
-Use delegated permissions only. ONEComputer accesses Microsoft 365 on behalf
+Use delegated permissions only. LemmaComputer accesses Microsoft 365 on behalf
 of the signed-in user; it does not use application permissions for the
 connector.
 
@@ -165,7 +165,7 @@ rotation from product sign-in:
 - The Web sign-in app uses
   `http://localhost:4174/api/v1/auth/callback` and the
   `ONECOMPUTER_ENTRA_*` variables. It needs only the OpenID sign-in scopes used
-  by ONEComputer.
+  by LemmaComputer.
 - The Microsoft 365 connector app uses
   `http://localhost:4174/oauth/mcp/callback`, the delegated Graph permissions above, and
   the `ONECOMPUTER_MS365_*` variables.
@@ -372,7 +372,7 @@ assignment, or workspace-image availability; complete the browser checks.
 ## Stop, restart, and reset
 
 Before stopping the control stack, stop every active workspace through the
-ONEComputer UI. The product stop action removes its sandbox, relay, and egress
+LemmaComputer UI. The product stop action removes its sandbox, relay, and egress
 containers, revokes runtime grants, and updates Control state while retaining
 the workspace home volume.
 
@@ -400,7 +400,7 @@ npm run compose:down -- --volumes
 ```
 
 The last command is destructive. It does not delete the separately managed
-per-workspace home volumes. Purge workspaces through ONEComputer so Control and
+per-workspace home volumes. Purge workspaces through LemmaComputer so Control and
 runtime state remain consistent. See [Persistence](operations.md#persistence)
 for ownership and backup details.
 
@@ -435,7 +435,7 @@ and role assignment rather than changing bootstrap identifiers blindly.
 - Confirm all 13 delegated Graph permissions are configured and granted.
 - Confirm the client and tenant values belong to the app that holds those
   permissions.
-- Confirm port `4174` is reachable from the same browser used for ONEComputer;
+- Confirm port `4174` is reachable from the same browser used for LemmaComputer;
   LiteLLM and the Microsoft 365 bridge remain private.
 - Inspect `ms365-mcp`, `litellm`, and `control-api` logs without recording
   callback query strings or tokens.

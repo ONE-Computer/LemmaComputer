@@ -75,7 +75,7 @@ export const sandboxApplicationSchema = z.object({
 }).strict();
 export type SandboxApplication = z.infer<typeof sandboxApplicationSchema>;
 
-// A policy always refers to a stable ONEComputer alias. Provider Settings can
+// A policy always refers to a stable LemmaComputer alias. Provider Settings can
 // replace the private deployment behind this alias without rewriting signed
 // workspace policy documents.
 export const bedrockApiKeyRouteAlias = "onecomputer-bedrock" as const;
@@ -228,6 +228,10 @@ export const sandboxProfileSchema = z.object({
   egressMode: egressModeSchema.default("restricted"),
   dataGuidance: z.string().min(1),
   client: z.enum([
+    "LemmaComputer managed workspace",
+    "LemmaComputer open workspace",
+    "LemmaComputer qualification CLI",
+    // Preserve existing signed policies and persisted manifests across the display-brand change.
     "ONEComputer managed workspace",
     "ONEComputer open workspace",
     "ONEComputer qualification CLI",
@@ -339,7 +343,7 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
     id: "claude-desktop",
     displayName: "Claude Desktop",
     clientVersion: "1.22209.3",
-    description: "Managed desktop client routed through ONEComputer.",
+    description: "Managed desktop client routed through LemmaComputer.",
     license: "Anthropic commercial distribution",
     source: "https://downloads.claude.ai/claude-desktop/apt/stable/",
     artifactSha256: "d427f46ac9233dbc4d8a441a602f09f750b8a5f05d1fc7a00285d7a6ce07655c",
@@ -349,7 +353,7 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
     id: "claude-cli",
     displayName: "Claude CLI",
     clientVersion: "2.1.215",
-    description: "Pinned Claude CLI routed through its own governed ONEComputer identity.",
+    description: "Pinned Claude CLI routed through its own governed LemmaComputer identity.",
     license: "Anthropic commercial distribution",
     source: "https://downloads.claude.ai/claude-code-releases/2.1.215/linux-x64/claude.zst",
     artifactSha256: "7ff9594e53cd89d1af9ceb3c18d3d70be1a5c6d27475e31ee2bed65d748f18c0",
@@ -359,7 +363,7 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
     id: "codex-cli",
     displayName: "Codex CLI",
     clientVersion: "0.144.4",
-    description: "Pinned Codex SDK and CLI runtime routed through its own governed ONEComputer identity.",
+    description: "Pinned Codex SDK and CLI runtime routed through its own governed LemmaComputer identity.",
     license: "Apache-2.0",
     source: "https://pypi.org/project/openai-codex/0.144.4/",
     artifactSha256: "de1513a6e94b9a8d7728a3b74298bc1469428ade10ba0ef2d5db47dd1cb606f5",
@@ -379,7 +383,7 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
     id: "hermes-claw",
     displayName: "Hermes Agent CLI",
     clientVersion: "0.19.0",
-    description: "Pinned Hermes Agent CLI configured as a governed ONEComputer client.",
+    description: "Pinned Hermes Agent CLI configured as a governed LemmaComputer client.",
     license: "MIT",
     source: "https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20",
     artifactSha256: "285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990",

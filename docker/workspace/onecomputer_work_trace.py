@@ -1,4 +1,4 @@
-"""Sanitized, provider-neutral helpers for ONEComputer's user-visible work trace."""
+"""Sanitized, provider-neutral helpers for LemmaComputer's user-visible work trace."""
 
 from __future__ import annotations
 

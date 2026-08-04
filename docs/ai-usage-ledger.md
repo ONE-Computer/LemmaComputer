@@ -1,6 +1,6 @@
 # AI usage and cost ledger
 
-ONEComputer records every governed provider invocation as a tenant-scoped,
+LemmaComputer records every governed provider invocation as a tenant-scoped,
 append-only attempt and usage event. The ledger is the accounting source for
 provider cost. It is not a provider invoice, a raw trace store, or a
 service-class chargeback system.
@@ -24,7 +24,7 @@ additional retries and fallbacks.
 
 The workspace passes a signed task binding in
 `x-onecomputer-ai-task-binding`. The loopback gateway removes any requester
-supplied ONEComputer or LiteLLM identity/route metadata, installs the
+supplied LemmaComputer or LiteLLM identity/route metadata, installs the
 header-derived binding, and removes the header before forwarding. The callback
 accepts identity only from LiteLLM's authenticated key projection. It carries
 lineage between v1.93 retry/fallback hooks in callback-signed metadata; client
@@ -130,7 +130,7 @@ audited design rather than a mutable-row cleanup.
 In the `customer-managed` profile, records, rate cards, exports, and
 reconciliation remain in the customer's local deployment. The pinned rate
 catalogue is shipped with the release, and negotiated rates are entered
-locally. Runtime catalogue lookup and ONEComputer-hosted telemetry egress are
+locally. Runtime catalogue lookup and LemmaComputer-hosted telemetry egress are
 not required. The `hosted` profile uses the same tenant-scoped interfaces and
 schema.
 

@@ -69,7 +69,7 @@ const denyResponse = (response: http.ServerResponse, statusCode: number, reasonC
   response.writeHead(statusCode, {
     "content-type": "application/json",
     "cache-control": "no-store",
-    ...(statusCode === 407 ? { "proxy-authenticate": 'Basic realm="ONEComputer egress"' } : {}),
+    ...(statusCode === 407 ? { "proxy-authenticate": 'Basic realm="LemmaComputer egress"' } : {}),
   });
   response.end(JSON.stringify({ error: { code: reasonCode, message: "The egress firewall denied this connection" } }));
 };

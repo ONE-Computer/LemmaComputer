@@ -31,7 +31,7 @@ test("keeps a retryable workspace start in Preparing instead of Needs attention"
         policyAssignment: { version: 4, hash: "a".repeat(64) },
         profile: {
           id: "disposable-open-v1",
-          client: "ONEComputer open workspace",
+          client: "LemmaComputer open workspace",
           clientVersion: "disposable-open-v1",
           modelAlias: "onecomputer-openai",
           executionMode: "disposable-open",

@@ -107,7 +107,7 @@ test("compose shutdown refuses to bypass managed workspace lifecycle", () => {
   assert.equal(status, 1);
   assert.equal(calls.length, runtimeContainerFilters.length);
   assert.doesNotMatch(calls.map(({ args }) => args.join(" ")).join("\n"), /compose down/);
-  assert.match(errors, /Stop every active workspace through ONEComputer/);
+  assert.match(errors, /Stop every active workspace through LemmaComputer/);
 });
 
 test("compose shutdown delegates to Docker only when runtime containers are absent", () => {

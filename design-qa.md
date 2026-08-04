@@ -10,7 +10,7 @@
 
 **Full-view comparison evidence**
 
-The Overview and Model routes references were placed beside their matched application captures in the same browser input. The implementation preserves the selected information hierarchy, restrained ONEComputer palette, compact tab navigation, card rhythm, and enterprise data density.
+The Overview and Model routes references were placed beside their matched application captures in the same browser input. The implementation preserves the selected information hierarchy, restrained LemmaComputer palette, compact tab navigation, card rhythm, and enterprise data density.
 
 **Focused region comparison evidence**
 
@@ -28,7 +28,7 @@ The profile-menu reference and implementation were compared together. The implem
 
 **Required fidelity surfaces**
 
-- Fonts and typography: passed; Inter and the existing ONEComputer heading hierarchy are preserved.
+- Fonts and typography: passed; Inter and the existing LemmaComputer heading hierarchy are preserved.
 - Spacing and layout rhythm: passed after the header, nested-padding, and table-density fixes.
 - Colors and visual tokens: passed; existing navy, warm-white, line, and semantic status tokens are reused.
 - Image quality and asset fidelity: passed; the existing brand wordmark and Fluent UI icons are used, with no fabricated image assets.

@@ -120,7 +120,7 @@ const proxy = (request, response, requestUrl) => {
     response.end(JSON.stringify({
       error: {
         code: "CONTROL_UNAVAILABLE",
-        message: "ONEComputer Control is unavailable",
+        message: "LemmaComputer Control is unavailable",
         retryable: true,
       },
     }));

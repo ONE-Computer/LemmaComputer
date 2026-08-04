@@ -75,7 +75,7 @@ if (!push) {
   process.exit(0);
 }
 
-capture("git", ["tag", "-a", tag, sha, "-m", `ONEComputer demo release ${tag}`]);
+capture("git", ["tag", "-a", tag, sha, "-m", `LemmaComputer demo release ${tag}`]);
 try {
   capture("git", ["push", "origin", `refs/tags/${tag}`]);
 } catch (error) {

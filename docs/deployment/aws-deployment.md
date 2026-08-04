@@ -5,11 +5,11 @@ claim that a deployed account, firewall, secret manager, database, or identity
 configuration has been assessed. Convert the chosen design into reviewed IaC,
 threat-model it, and validate it in the target AWS organization before use.
 
-This design supports both ONEComputer deployment profiles:
+This design supports both LemmaComputer deployment profiles:
 
 - `customer-managed`: one customer operates a single-tenant installation in
   its AWS environment;
-- `hosted`: ONEComputer operates shared services with organization isolation
+- `hosted`: LemmaComputer operates shared services with organization isolation
   enforced in every persisted record, cache, policy, credential, and grant.
 
 ## Recommended starting point
@@ -32,7 +32,7 @@ AWS WAF, a network firewall, and security groups solve different problems:
   other workload and port. They are not a domain-name allowlist.
 - **AWS Network Firewall** or an approved third-party NGFW such as FortiGate
   inspects routed north-south/east-west traffic. It complements, but does not
-  replace, ONEComputer's application-aware MCP and workspace forward proxies.
+  replace, LemmaComputer's application-aware MCP and workspace forward proxies.
 
 ## Reference topology
 
@@ -44,7 +44,7 @@ flowchart TB
   WAF["AWS WAF"]
   ALB["Public or internal ALB :443"]
 
-  subgraph VPC["ONEComputer VPC across at least two AZs"]
+  subgraph VPC["LemmaComputer VPC across at least two AZs"]
     subgraph IngressSubnets["Ingress subnets"]
       ALB
     end
@@ -120,7 +120,7 @@ ENIs, route tables, security groups, instance profiles, or metadata paths.
 
 For customer-managed installations, use the customer's existing inspection,
 identity, DNS, and log-archive standards where they provide equivalent
-controls. Do not fork the ONEComputer application code to fit the topology;
+controls. Do not fork the LemmaComputer application code to fit the topology;
 select the deployment profile and implement infrastructure-specific adapters.
 
 ## Browser ingress options
@@ -146,18 +146,18 @@ retention, and sanitize the request target before broader SIEM export.
 
 Use an internal ALB reachable through AWS Client VPN, Site-to-Site VPN, Direct
 Connect, or an existing Transit Gateway. With Client VPN split tunneling, push
-only the ONEComputer/private DNS CIDRs and create matching authorization rules.
+only the LemmaComputer/private DNS CIDRs and create matching authorization rules.
 Client Route Enforcement is recommended where supported by the managed client.
 
 MCP OAuth still works in this mode. The external identity/provider page
 redirects the browser—not the provider's backend—to the callback. The browser
-must keep its VPN route and private DNS resolution for the ONEComputer origin
+must keep its VPN route and private DNS resolution for the LemmaComputer origin
 while completing the provider flow.
 
 An internal NLB is a valid smaller option only when the deployment needs a
 single TCP/TLS entry point and supplies HTTP routing/security elsewhere. Use an
 ALB when AWS WAF, HTTP-aware health checks, headers, or path controls are part
-of the design. ONEComputer itself still performs exact callback-path routing.
+of the design. LemmaComputer itself still performs exact callback-path routing.
 
 ## Public routes
 
@@ -359,7 +359,7 @@ Enable and retain, with tenant/data-residency requirements applied:
 - ECS/CloudWatch service logs with explicit blocking delivery where audit loss
   is unacceptable;
 - Aurora events, audit/connection logs, backup and restore evidence;
-- ONEComputer normalized egress and policy audit events in an append-protected
+- LemmaComputer normalized egress and policy audit events in an append-protected
   destination.
 
 Alert on direct internet-route drift, public ENIs, public DB changes, security

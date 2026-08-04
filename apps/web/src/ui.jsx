@@ -275,7 +275,7 @@ export function ConfirmDialog({ title, description, confirmLabel, danger = false
     <ModalDialog title={title} description={description} onClose={busy ? () => undefined : onCancel} labelledBy="confirm-dialog-title">
       <div className="modal-notice">
         <Info24Regular aria-hidden="true" />
-        <span>This change only applies after ONEComputer confirms it.</span>
+        <span>This change only applies after LemmaComputer confirms it.</span>
       </div>
       <div className="modal-actions">
         <button className="secondary-button" type="button" disabled={busy} onClick={onCancel}>Cancel</button>
@@ -323,7 +323,7 @@ const policyStates = {
     label: "Policy verified",
     tone: "success",
     title: "Workspace policy matches external enforcement",
-    detail: "The policy projected into this workspace matches the version independently enforced by ONEComputer.",
+    detail: "The policy projected into this workspace matches the version independently enforced by LemmaComputer.",
   },
   drift: {
     label: "Policy mismatch",
@@ -392,7 +392,7 @@ export class AppErrorBoundary extends React.Component {
       <main className="fatal-error" role="alert">
         <div className="fatal-error-card">
           <Info24Regular aria-hidden="true" />
-          <p>ONEComputer</p>
+          <p>LemmaComputer</p>
           <h1>This page could not be displayed</h1>
           <span>No action was applied. Reload the page, or contact support if the problem continues.</span>
           <button className="primary-button" type="button" onClick={() => window.location.reload()}>Reload page</button>

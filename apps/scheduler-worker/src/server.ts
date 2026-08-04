@@ -38,12 +38,12 @@ export class HttpScheduleControlClient implements ScheduleControlClient {
         signal: AbortSignal.timeout(15 * 60_000),
       });
     } catch {
-      throw new OneComputerError("SCHEDULE_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
+      throw new OneComputerError("SCHEDULE_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     }
     if (!response.ok) {
       throw new OneComputerError(
         "SCHEDULE_EXECUTION_REJECTED",
-        "ONEComputer rejected the scheduled run",
+        "LemmaComputer rejected the scheduled run",
         response.status,
         response.status >= 500,
       );

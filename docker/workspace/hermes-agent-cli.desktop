@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Hermes Agent CLI
-Comment=Governed Hermes Agent CLI through ONEComputer
+Comment=Governed Hermes Agent CLI through LemmaComputer
 Exec=xfce4-terminal --title="Hermes Agent CLI" --command=/usr/local/bin/onecomputer-hermes
 Icon=utilities-terminal
 Terminal=false

@@ -47,7 +47,7 @@ const signedRequest = await request("/v1/task-consent/requests", {
   effects: [{ kind: "delete", summary: "Delete the qualification item." }],
   consequences: ["The qualification item is removed."],
   subject: "urn:onecomputer:operation:qualification",
-  origin: "ONEComputer Control",
+  origin: "LemmaComputer Control",
   statePin: { resource: "qualification-item", version: "etag-1" },
 });
 assert.equal(signedRequest.document.issuer, profile.executorDid);

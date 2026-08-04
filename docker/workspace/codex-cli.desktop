@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Codex CLI
-Comment=Governed Codex CLI through ONEComputer
+Comment=Governed Codex CLI through LemmaComputer
 Exec=xfce4-terminal --title="Codex CLI" --command=/usr/local/bin/onecomputer-codex
 Icon=utilities-terminal
 Terminal=false

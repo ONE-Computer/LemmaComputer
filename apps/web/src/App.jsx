@@ -104,6 +104,15 @@ const chatServiceClassOptions = [
 ];
 const chatServiceClassLabel = Object.fromEntries(chatServiceClassOptions.map((item) => [item.value, item.label.split(" · ")[0]]));
 const chatServiceClassValues = new Set(chatServiceClassOptions.map((item) => item.value));
+const workspaceModelNames = {
+  "onecomputer-auto": "Governed routing",
+  "onecomputer-claude": "Claude",
+  "onecomputer-openai": "OpenAI",
+  "onecomputer-glm": "GLM",
+  "onecomputer-bedrock": "Amazon Bedrock",
+  "onecomputer-assistant": "Standard route",
+};
+const workspaceModelName = (alias) => workspaceModelNames[alias] ?? alias;
 const chatAttachmentTypes = new Set([
   "image/png",
   "image/jpeg",
@@ -160,7 +169,7 @@ const signInErrorByReason = {
   OIDC_NONCE_MISMATCH: "Microsoft returned an identity token for a different sign-in attempt.",
   OIDC_IDENTITY_INVALID: "This Microsoft identity is not allowed for the configured tenant.",
   OIDC_STATE_INVALID: "The saved sign-in state could not be decrypted.",
-  OIDC_FAILED: "ONEComputer could not finish the sign-in bootstrap.",
+  OIDC_FAILED: "LemmaComputer could not finish the sign-in bootstrap.",
 };
 const attachmentMediaType = (file) => {
   if (chatAttachmentTypes.has(file.type)) return file.type;
@@ -333,7 +342,7 @@ function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorksp
             const primaryLabel = ["not_created", "stopped", "failed"].includes(workspace.state)
               ? "Start workspace"
               : workspace.state === "open" ? "Return to workspace" : busy ? "Preparing workspace" : "Open workspace";
-            const model = workspace.modelRoute?.alias ?? workspace.profile?.modelAlias ?? "Not assigned";
+            const model = workspaceModelName(workspace.modelRoute?.alias ?? workspace.profile?.modelAlias ?? "Not assigned");
             const apps = workspace.applications?.map((application) => applicationNames[application] ?? application) ?? [];
             const agents = workspace.agents ?? [];
             const titleId = `workspace-${workspace.id}`;
@@ -448,7 +457,7 @@ function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
   return (
     <ModalDialog
       title={draft.id ? "Edit schedule" : "Create schedule"}
-      description="ONEComputer will re-check the workspace, agent, and current policy before every run."
+      description="LemmaComputer will re-check the workspace, agent, and current policy before every run."
       eyebrow="Scheduled agent prompt"
       onClose={onClose}
     >
@@ -584,13 +593,13 @@ function SignInScreen({ error }) {
   return (
     <main className="signin-screen">
       <section className="signin-card">
-        <div className="brand signin-brand" aria-label="ONEComputer"><strong>ONE</strong><span>Computer</span></div>
+        <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
         <p>Your managed work computer</p>
         <h1>Sign in to continue</h1>
         <span>Use your ME TECH Microsoft account. Your organization’s workspace and agent policy will be applied after sign-in.</span>
         {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sign-in was not completed</strong>{error}</span></div>}
         <a className="primary-button signin-button" href={authApi.loginUrl}><Person24Regular aria-hidden="true" />Sign in with Microsoft</a>
-        <small><ShieldCheckmark24Regular aria-hidden="true" />ONEComputer uses a secure server session. Microsoft tokens are not stored in your browser.</small>
+        <small><ShieldCheckmark24Regular aria-hidden="true" />LemmaComputer uses a secure server session. Microsoft tokens are not stored in your browser.</small>
       </section>
     </main>
   );
@@ -778,7 +787,7 @@ function TeamBudgetDialog({ team, onClose }) {
     if (result) hydrate(result.status);
   };
   const money = (value) => value === null || value === undefined ? "—" : `${status?.budget?.currency ?? draft.currency} ${Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
-  return <ModalDialog className="team-budget-modal" title={`${team.displayName} budget`} description="ONEComputer is the authoritative spend ledger. The LiteLLM Team limit is a defense-in-depth projection." eyebrow="Organization spend" labelledBy="team-budget-title" onClose={busy ? () => undefined : onClose}>
+  return <ModalDialog className="team-budget-modal" title={`${team.displayName} budget`} description="LemmaComputer is the authoritative spend ledger. The LiteLLM Team limit is a defense-in-depth projection." eyebrow="Organization spend" labelledBy="team-budget-title" onClose={busy ? () => undefined : onClose}>
     {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Budget operation failed</strong>{error}</span></div>}
     {status?.budget && <section className="team-budget-status" aria-label="Current budget period">
       <div><span>Settled spend</span><strong>{money(status.settledProviderCost)}</strong></div>
@@ -1379,7 +1388,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
         <div>
           <p>{ownerName ? `${ownerName} · Workspace configuration` : creatingWorkspace ? "Create workspace" : "Workspace configuration"}</p>
           <h1>{workspaceName(selectedWorkspace ?? { grantId: selectedGrantId })}</h1>
-          <span>{ownerName ? "Manage this member’s policy-bounded workspace configuration. Profile, application, agent, and model changes apply after the workspace restarts." : creatingWorkspace ? "Choose the profile, applications, agents, and model before ONEComputer starts this workspace." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
+          <span>{ownerName ? "Manage this member’s policy-bounded workspace configuration. Profile, application, agent, and model changes apply after the workspace restarts." : creatingWorkspace ? "Choose the profile, applications, agents, and model before LemmaComputer starts this workspace." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
         </div>
         <span className={`sandbox-state ${creatingWorkspace ? "not_created" : selectedWorkspace?.state}`}>{creatingWorkspace ? "Not created" : workspaceConfigurationStatus(selectedWorkspace?.state)}</span>
       </header>
@@ -1916,7 +1925,7 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
         <span className="sandbox-section-icon"><PlugConnected24Regular aria-hidden="true" /></span>
         <span className="workspace-channels-summary-copy">
           <span><h2 id="workspace-channels-heading">Channels</h2><em>Optional</em></span>
-          <p>Add a messaging channel only if you want to reach this workspace outside ONEComputer.</p>
+          <p>Add a messaging channel only if you want to reach this workspace outside LemmaComputer.</p>
         </span>
         <span className={`workspace-channels-status${configured ? " connected" : ""}`}>{loading ? "Checking" : configured ? "Telegram connected" : "None connected"}</span>
         <ChevronDown16Regular className="workspace-channels-chevron" aria-hidden="true" />
@@ -2622,8 +2631,8 @@ function ChatConversation({
           </article>
         ))}
         {awaitingAssistant && (
-          <article className="chat-message system chat-acknowledgement" aria-label="ONEComputer received your message">
-            <span>ONEComputer</span>
+          <article className="chat-message system chat-acknowledgement" aria-label="LemmaComputer received your message">
+            <span>LemmaComputer</span>
             <div className="chat-activity progress running" role="status">
               <span aria-hidden="true" />
               <p>Message received.</p>
@@ -3817,7 +3826,7 @@ export function App() {
   const disconnectMcpConnector = async (connector) => {
     if (!await requestConfirmation({
       title: `Disconnect ${connector.name}?`,
-      description: `ONEComputer will revoke this connection. Your ${connector.name} account and provider data will not be deleted.`,
+      description: `LemmaComputer will revoke this connection. Your ${connector.name} account and provider data will not be deleted.`,
       confirmLabel: "Disconnect",
       danger: true,
     })) return;
@@ -3974,7 +3983,7 @@ export function App() {
       title: "Delete Telegram credential?",
       description: credential.workspaceId
         ? "This also disconnects Telegram from its workspace and deletes its channel sessions. The bot itself remains in Telegram."
-        : "The encrypted credential will be permanently removed from ONEComputer.",
+        : "The encrypted credential will be permanently removed from LemmaComputer.",
       confirmLabel: "Delete credential",
       danger: true,
     })) return;
@@ -4554,8 +4563,8 @@ export function App() {
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside ref={sidebarRef} id="primary-navigation" className={`sidebar${mobileNavOpen ? " mobile-open" : ""}`} aria-label="Application navigation" inert={modalActive ? true : undefined}>
-        <div className="brand" aria-label="ONEComputer">
-          <strong>ONE</strong><span>Computer</span>
+        <div className="brand" aria-label="LemmaComputer">
+          <strong>Lemma</strong><span>Computer</span>
         </div>
         <nav aria-label="Primary navigation">
           <NavButton active={activeNav === "Workspace"} icon={activeNav === "Workspace" ? Home24Filled : Home24Regular} label="Workspace" onClick={() => selectNav("Workspace")} />
@@ -4610,7 +4619,7 @@ export function App() {
           <button className="mobile-menu" type="button" aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"} aria-expanded={mobileNavOpen} aria-controls="primary-navigation" onClick={() => setMobileNavOpen((value) => !value)}>
             <Navigation24Regular aria-hidden="true" />
           </button>
-          <div className="mobile-brand"><strong>ONE</strong><span>Computer</span></div>
+          <div className="mobile-brand"><strong>Lemma</strong><span>Computer</span></div>
         </header>
 
         {activeNav === "Workspace" && !selectedSandboxGrantId && (
@@ -4818,7 +4827,7 @@ export function App() {
       {sandboxCreateOpen && (
         <TextPromptDialog
           title="Create workspace"
-          description="Choose a clear name first. You’ll review the profile, applications, agents, and model before ONEComputer starts anything."
+          description="Choose a clear name first. You’ll review the profile, applications, agents, and model before LemmaComputer starts anything."
           label="Workspace name"
           defaultValue="Project workspace"
           confirmLabel="Continue to configuration"
@@ -4873,7 +4882,7 @@ export function App() {
                 ? "The bound operation was approved, executed once, and recorded with a receipt."
                 : operation.state === "denied"
                   ? "The request was denied and the tool was not called."
-                  : "ONEComputer is preserving the authoritative operation state."
+                  : "LemmaComputer is preserving the authoritative operation state."
           }</p></div>
           {operation.state === "approval_required" && operation.requiredApprovalChannel === "local-fixture" ? (
             <div className="approval-actions">
@@ -4890,7 +4899,7 @@ export function App() {
               </div>
               <h3>{approvalRequest.payload.effects?.[0]?.summary ?? operation.safeSummary}</h3>
               <dl>
-                <div><dt>Signed by</dt><dd>ONEComputer Control</dd></div>
+                <div><dt>Signed by</dt><dd>LemmaComputer Control</dd></div>
                 <div><dt>Approval binding</dt><dd>{approvalRequest.payload.payloadDigest.slice(0, 16)}…</dd></div>
               </dl>
               <p className="approval-warning">One device confirmation signs your decision for only this exact operation.</p>

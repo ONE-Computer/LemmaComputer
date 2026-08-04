@@ -1,6 +1,6 @@
-# Extending ONEComputer
+# Extending LemmaComputer
 
-ONEComputer is intentionally explicit. A connector, model, application, or
+LemmaComputer is intentionally explicit. A connector, model, application, or
 agent is not enabled by discovery alone; it becomes available only after its
 schema, policy identity, credential path, runtime projection, and tests agree.
 
@@ -96,7 +96,7 @@ rate card, Team policy, health, and budget are eligible.
 
 An MCP connector crosses identity, OAuth, tool-schema, and side-effect
 boundaries. Merely adding `mcp_servers` configuration would bypass
-ONEComputer's governance model.
+LemmaComputer's governance model.
 
 ### Connector checklist
 
@@ -257,7 +257,7 @@ the workspace.
 8. Give the provider its own explicit egress route if its destination set
    differs.
 
-External sender identifiers are not ONEComputer identities. They become
+External sender identifiers are not LemmaComputer identities. They become
 authorized only through an owned connection persisted by Control.
 
 ## Change OpenVTC behavior

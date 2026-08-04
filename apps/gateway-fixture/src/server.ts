@@ -82,7 +82,7 @@ export function createGatewayFixture() {
         object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1_000),
         model: String(body.model ?? "onecomputer-fixture"),
-        choices: [{ index: 0, delta: { role: "assistant", content: "ONEComputer’s scoped model route is ready through LiteLLM." }, finish_reason: null }],
+        choices: [{ index: 0, delta: { role: "assistant", content: "LemmaComputer’s scoped model route is ready through LiteLLM." }, finish_reason: null }],
       })}\n\n`);
       reply.raw.write(`data: ${JSON.stringify({
         id,
@@ -101,7 +101,7 @@ export function createGatewayFixture() {
       model: String(body.model ?? "onecomputer-fixture"),
       choices: [{
         index: 0,
-        message: { role: "assistant", content: "ONEComputer’s scoped model route is ready through LiteLLM." },
+        message: { role: "assistant", content: "LemmaComputer’s scoped model route is ready through LiteLLM." },
         finish_reason: "stop",
       }],
       usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
@@ -143,7 +143,7 @@ export function createGatewayFixture() {
     const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
     const responseId = `resp-${randomUUID()}`;
     const messageId = `msg-${randomUUID()}`;
-    const text = "ONEComputer’s scoped model route is ready through LiteLLM.";
+    const text = "LemmaComputer’s scoped model route is ready through LiteLLM.";
     const completed = {
       id: responseId,
       object: "response",

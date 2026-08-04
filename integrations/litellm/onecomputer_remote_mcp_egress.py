@@ -271,7 +271,7 @@ def _patch_runtime_mcp_client() -> None:
 def verify() -> None:
     actual = importlib.metadata.version("litellm")
     if actual != EXPECTED_LITELLM_VERSION:
-        raise RuntimeError(f"ONEComputer remote MCP egress patch requires LiteLLM {EXPECTED_LITELLM_VERSION}, found {actual}")
+        raise RuntimeError(f"LemmaComputer remote MCP egress patch requires LiteLLM {EXPECTED_LITELLM_VERSION}, found {actual}")
     _validated_proxy_url()
     client_module = importlib.import_module("litellm.experimental_mcp_client.client")
     manager_module = importlib.import_module("litellm.proxy._experimental.mcp_server.mcp_server_manager")

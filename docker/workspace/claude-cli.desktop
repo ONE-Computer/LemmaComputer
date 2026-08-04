@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Claude CLI
-Comment=Governed Claude CLI through ONEComputer
+Comment=Governed Claude CLI through LemmaComputer
 Exec=xfce4-terminal --title="Claude CLI" --command=/usr/local/bin/onecomputer-claude
 Icon=utilities-terminal
 Terminal=false

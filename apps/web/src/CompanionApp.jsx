@@ -78,7 +78,7 @@ const activityState = {
 };
 
 function Brand() {
-  return <div className="companion-brand" aria-label="ONEComputer"><strong>ONE</strong><span>Computer</span><em>Companion</em></div>;
+  return <div className="companion-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span><em>Companion</em></div>;
 }
 
 function CompanionSignIn({ error }) {
@@ -335,7 +335,7 @@ export function CompanionApp() {
   const support = useMemo(() => companionPushSupport(), [config]);
 
   useEffect(() => {
-    document.title = "ONEComputer Companion";
+    document.title = "LemmaComputer Companion";
     const manifest = document.createElement("link");
     manifest.rel = "manifest";
     manifest.href = "/companion.webmanifest";
@@ -543,7 +543,7 @@ export function CompanionApp() {
   };
 
   const subscribeCurrentBrowser = async (approver = localApprover) => {
-    if (!config?.enabled || !config.vapidPublicKey) throw new Error("Web Push is not configured by your ONEComputer administrator.");
+    if (!config?.enabled || !config.vapidPublicKey) throw new Error("Web Push is not configured by your LemmaComputer administrator.");
     if (!approver) throw new Error("Enroll this browser’s approval key first.");
     const push = await enableCompanionPush(config.vapidPublicKey);
     return approvalApi.subscribeCompanion({
@@ -558,7 +558,7 @@ export function CompanionApp() {
     setBusy("setup");
     setMessage("");
     try {
-      if (!config?.enabled) throw new Error("Web Push is not configured by your ONEComputer administrator.");
+      if (!config?.enabled) throw new Error("Web Push is not configured by your LemmaComputer administrator.");
       const push = await enableCompanionPush(config.vapidPublicKey);
       const challenge = await approvalApi.challenge();
       await enrollBrowserApprover(
@@ -610,8 +610,8 @@ export function CompanionApp() {
         decision,
         state: response.operation.state,
         summary: decision === "approve"
-          ? "Approved. ONEComputer released one exact execution path."
-          : "Denied. ONEComputer will not release this operation.",
+          ? "Approved. LemmaComputer released one exact execution path."
+          : "Denied. LemmaComputer will not release this operation.",
       });
       setActivityLoaded(false);
     } catch (error) {

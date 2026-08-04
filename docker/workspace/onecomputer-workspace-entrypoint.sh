@@ -11,7 +11,7 @@ set -euo pipefail
 : "${ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL:=true}"
 : "${ONECOMPUTER_CLIPBOARD_MAX_BYTES:=65536}"
 : "${ONECOMPUTER_COWORK_ENABLED:=false}"
-: "${ONECOMPUTER_SIGNED_POLICY_B64:?Signed ONEComputer policy projection is required}"
+: "${ONECOMPUTER_SIGNED_POLICY_B64:?Signed LemmaComputer policy projection is required}"
 : "${ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64:?Policy verification keys are required}"
 
 [[ "$ONECOMPUTER_EXECUTION_MODE" == "managed" || "$ONECOMPUTER_EXECUTION_MODE" == "disposable-open" ]] || {
@@ -190,7 +190,7 @@ if agent_enabled codex-cli; then
 fi
 
 # The Kasm base profile is the authoritative initializer for the persistent
-# home. Run it to completion before ONEComputer writes configuration or starts
+# home. Run it to completion before LemmaComputer writes configuration or starts
 # any agent process. Starting agents first lets them race Kasm's `cp -rp` over
 # ~/.local and can restart the whole desktop nondeterministically.
 if ! chown -R 1000:1000 /home/kasm-user \
@@ -265,7 +265,7 @@ files = {
     "/etc/onecomputer/policy/signed-policy.json": bundle_text,
     "/etc/onecomputer/policy/verification-keys.json": keys_text,
     "/etc/onecomputer/policy/README.txt": (
-        "This is the transparent ONEComputer policy projection. The workspace copy is not an "
+        "This is the transparent LemmaComputer policy projection. The workspace copy is not an "
         "enforcement authority. Control and the workspace controller independently verify and "
         "enforce the signed policy outside this sandbox.\n"
     ),
@@ -349,7 +349,7 @@ document = {
     "autoModeEnabled": False,
     "toolSearchEnabled": False,
     "managedMcpServers": [{
-        "name": "ONEComputer connectors",
+        "name": "LemmaComputer connectors",
         "transport": "stdio",
         "command": "/usr/local/libexec/onecomputer-connectors-stdio",
         "args": [],
@@ -423,7 +423,7 @@ sandbox_mode = {json.dumps(sandbox_mode)}
 web_search = {json.dumps(web_search)}
 
 [model_providers.onecomputer]
-name = "ONEComputer governed OpenAI"
+name = "LemmaComputer governed OpenAI"
 base_url = "http://127.0.0.1:4317/v1"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
@@ -511,7 +511,7 @@ rm -f /home/kasm-user/.config/autostart/claude-desktop.desktop \
   /home/kasm-user/Desktop/Claude-Desktop.desktop \
   /home/kasm-user/Desktop/Claude-CLI.desktop \
   /home/kasm-user/Desktop/Codex-CLI.desktop \
-  /home/kasm-user/Desktop/ONEComputer-Agent.desktop \
+  /home/kasm-user/Desktop/LemmaComputer-Agent.desktop \
   /home/kasm-user/Desktop/Hermes-Claw.desktop \
   /home/kasm-user/Desktop/Hermes-CLI.desktop \
   /home/kasm-user/Desktop/Hermes-Agent-CLI.desktop \

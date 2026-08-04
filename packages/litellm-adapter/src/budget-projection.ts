@@ -28,7 +28,7 @@ const fingerprint=(value:unknown)=>createHash("sha256").update(canonical(value))
 
 /**
  * Projects a non-authoritative enforcement mirror through LiteLLM's supported
- * Team API. ONEComputer's exact ledger and reservation transaction remain the
+ * Team API. LemmaComputer's exact ledger and reservation transaction remain the
  * source of truth; this adapter never reads a LiteLLM database.
  */
 export class LiteLlmTeamBudgetProjector{
@@ -54,7 +54,7 @@ export class LiteLlmTeamBudgetProjector{
       team_id:this.projectionKey(input),
       team_alias:this.projectionKey(input),
       // LiteLLM receives a blocking limit only in hard mode. Soft enforcement
-      // remains an observable ONEComputer warning.
+      // remains an observable LemmaComputer warning.
       max_budget:input.mode==="hard"?numericLimit:null,
       metadata:{
         onecomputer_tenant_key:createHash("sha256").update(input.tenantId).digest("hex").slice(0,24),
@@ -114,11 +114,11 @@ export class LiteLlmTeamBudgetProjector{
       const observedFingerprint=fingerprint(observed);
       const left=Buffer.from(expectedFingerprint,"hex");const right=Buffer.from(observedFingerprint,"hex");
       if(left.length===right.length&&timingSafeEqual(left,right))return{status:"matched",projectionKey:expected.team_id,expectedFingerprint,observedFingerprint,detail:null};
-      if(!repair)return{status:"drifted",projectionKey:expected.team_id,expectedFingerprint,observedFingerprint,detail:"LiteLLM Team limit or ONEComputer projection metadata differs"};
+      if(!repair)return{status:"drifted",projectionKey:expected.team_id,expectedFingerprint,observedFingerprint,detail:"LiteLLM Team limit or LemmaComputer projection metadata differs"};
       await this.project(input);
       return{status:"repaired",projectionKey:expected.team_id,expectedFingerprint,observedFingerprint,detail:"Drift was repaired through the LiteLLM Team API"};
     }catch{
-      return{status:"unavailable",projectionKey:expected.team_id,expectedFingerprint,observedFingerprint:null,detail:"LiteLLM Team state is unavailable; ONEComputer hard admission remains fail closed"};
+      return{status:"unavailable",projectionKey:expected.team_id,expectedFingerprint,observedFingerprint:null,detail:"LiteLLM Team state is unavailable; LemmaComputer hard admission remains fail closed"};
     }
   }
 }

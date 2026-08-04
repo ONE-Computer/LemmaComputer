@@ -605,7 +605,7 @@ test("connector discovery performs dynamic client registration when credentials 
     const registration = requests.find((request) => request.url.includes("/register"))!;
     assert.equal(registration.authorization, "Bearer sk-master-test-not-used-00001");
     assert.deepEqual(registration.body, {
-      client_name: "ONEComputer",
+      client_name: "LemmaComputer",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",

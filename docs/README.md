@@ -1,4 +1,4 @@
-# ONEComputer documentation
+# LemmaComputer documentation
 
 - [Architecture and trust model](architecture.md) explains the system
   boundaries, policy projection, credential custody, workspace network,
@@ -39,7 +39,7 @@
 - [Local deployment and Entra setup](local-deployment.md) is the agent-oriented
   runbook for preparing `.env`, configuring Microsoft Entra, building the
   workspace image, starting Compose, and verifying the stack.
-- [Extending ONEComputer](extending.md) is the implementation guide for adding
+- [Extending LemmaComputer](extending.md) is the implementation guide for adding
   model routes, MCP connectors, tools, agents, applications, sandbox drivers,
   channels, and schema migrations.
 - [Configuration and operations](operations.md) covers the reference Compose

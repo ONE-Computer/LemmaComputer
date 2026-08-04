@@ -113,7 +113,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
   private async post(path: string, input: unknown) {
     const target = new URL(path, this.baseUrl);
     if (!["http:", "https:"].includes(target.protocol)) {
-      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
+      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     }
     const payload = Buffer.from(JSON.stringify(input));
     let response: { statusCode: number; body: string };
@@ -148,16 +148,16 @@ export class HttpChannelControlClient implements ChannelControlClient {
         request.end(payload);
       });
     } catch {
-      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
+      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw new OneComputerError("CHANNEL_ROUTE_REJECTED", "ONEComputer rejected the channel route", response.statusCode, response.statusCode >= 500);
+      throw new OneComputerError("CHANNEL_ROUTE_REJECTED", "LemmaComputer rejected the channel route", response.statusCode, response.statusCode >= 500);
     }
     if (response.statusCode === 204) return null;
     try {
       return JSON.parse(response.body) as unknown;
     } catch {
-      throw new OneComputerError("CHANNEL_CONTROL_INVALID_RESPONSE", "ONEComputer Control returned an invalid response", 502, true);
+      throw new OneComputerError("CHANNEL_CONTROL_INVALID_RESPONSE", "LemmaComputer Control returned an invalid response", 502, true);
     }
   }
 
@@ -169,7 +169,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
   ): Promise<ChannelTurnResponse> {
     const target = new URL(path, this.baseUrl);
     if (!["http:", "https:"].includes(target.protocol)) {
-      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
+      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     }
     const payload = Buffer.from(JSON.stringify(input));
     return new Promise((resolve, reject) => {
@@ -189,7 +189,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
               }
               throw new OneComputerError(
                 "CHANNEL_ROUTE_REJECTED",
-                "ONEComputer rejected the channel route",
+                "LemmaComputer rejected the channel route",
                 upstream.statusCode ?? 502,
                 (upstream.statusCode ?? 502) >= 500,
               );
@@ -200,7 +200,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
             if (!contentType?.startsWith("application/x-ndjson")) {
               throw new OneComputerError(
                 "CHANNEL_CONTROL_INVALID_RESPONSE",
-                "ONEComputer Control returned an invalid response",
+                "LemmaComputer Control returned an invalid response",
                 502,
                 true,
               );
@@ -216,7 +216,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
               if (totalSize > 512 * 1024) {
                 throw new OneComputerError(
                   "CHANNEL_CONTROL_INVALID_RESPONSE",
-                  "ONEComputer Control response exceeded its limit",
+                  "LemmaComputer Control response exceeded its limit",
                   502,
                   true,
                 );
@@ -261,7 +261,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
                 if (result) {
                   throw new OneComputerError(
                     "CHANNEL_CONTROL_INVALID_RESPONSE",
-                    "ONEComputer Control returned multiple results",
+                    "LemmaComputer Control returned multiple results",
                     502,
                     true,
                   );
@@ -275,7 +275,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
             if (buffer.length || !result) {
               throw new OneComputerError(
                 "CHANNEL_CONTROL_INVALID_RESPONSE",
-                "ONEComputer Control ended without a complete result",
+                "LemmaComputer Control ended without a complete result",
                 502,
                 true,
               );
@@ -286,7 +286,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
               ? error
               : new OneComputerError(
                 "CHANNEL_CONTROL_INVALID_RESPONSE",
-                "ONEComputer Control returned an invalid response",
+                "LemmaComputer Control returned an invalid response",
                 502,
                 true,
               ));
@@ -295,7 +295,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
       });
       request.setTimeout(this.timeoutMs, () => request.destroy(new Error("Control request timed out")));
       request.on("error", () => reject(
-        new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true),
+        new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true),
       ));
       request.end(payload);
     });
@@ -307,11 +307,11 @@ export class HttpChannelControlClient implements ChannelControlClient {
 
   async downloadArtifact(route: ChannelRoute, artifact: ChatArtifact) {
     const target = new URL("/internal/v1/channels/artifacts", this.baseUrl);
-    if (!["http:", "https:"].includes(target.protocol)) throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true);
+    if (!["http:", "https:"].includes(target.protocol)) throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     const input = channelArtifactDownloadRequestSchema.parse({ ...route, artifact });
     let response: Response;
     try { response = await fetch(target, { method: "POST", headers: { "content-type": "application/json", "x-onecomputer-channel-token": this.internalToken }, body: JSON.stringify(input), signal: AbortSignal.timeout(60_000) }); }
-    catch { throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "ONEComputer Control is unavailable", 503, true); }
+    catch { throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true); }
     if (!response.ok || !response.body) throw new OneComputerError("CHANNEL_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", response.status || 502, true);
     const reader = response.body.getReader(); const chunks: Buffer[] = []; let size = 0;
     try { while (true) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength;
@@ -718,7 +718,7 @@ const unsupportedAttachmentMessage = "I can receive images, PDF, text, Word, Exc
 const oversizedAttachmentMessage = "Telegram attachments must be 20 MB or smaller. Please send a smaller file.";
 const unavailableAttachmentMessage = "I could not download that Telegram attachment. Please send it again.";
 const safeFailureMessage = "I started the task, but the agent could not complete it. Try again, or use /agent to select another available agent.";
-const approvalFailureMessage = "I couldn’t finish the task while the protected action was awaiting review. Open ONEComputer to check the approval, then retry if needed.";
+const approvalFailureMessage = "I couldn’t finish the task while the protected action was awaiting review. Open LemmaComputer to check the approval, then retry if needed.";
 const telegramAgentCallbackPrefix = "onecomputer:agent:";
 const switchableAgentIds = ["hermes-claw", "claude-cli", "codex-cli"] as const;
 const telegramMessageLimit = 4_000;

@@ -16,9 +16,9 @@ attempt evidence.
 
 The selected date range uses the usage event's occurrence time. The `asOf` value freezes which received ledger facts belong to the view, so pagination and CSV/JSON exports continue to reconcile even if a delayed event or correction arrives later.
 
-Provider cost leads the view. Each currency is totaled separately; ONEComputer does not silently convert or combine currencies. Corrections are signed, append-only deltas and are applied exactly once. A corrected task remains marked as corrected.
+Provider cost leads the view. Each currency is totaled separately; LemmaComputer does not silently convert or combine currencies. Corrections are signed, append-only deltas and are applied exactly once. A corrected task remains marked as corrected.
 
-Provider-confirmed cost is reported separately from cost derived from ONEComputer's rate snapshot. It is not silently substituted for, or added to, the primary provider-cost total. The dashboard also exposes:
+Provider-confirmed cost is reported separately from cost derived from LemmaComputer's rate snapshot. It is not silently substituted for, or added to, the primary provider-cost total. The dashboard also exposes:
 
 - governed attempt and event volume;
 - retries, fallbacks, and failures without recounting correction events as attempts;

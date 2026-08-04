@@ -158,10 +158,10 @@ export class HttpControllerClient implements ControllerClient {
 }
 
 const profileClient = (profileId: RuntimePolicy["workspaceProfile"]) => profileId === "claude-desktop-standard-v1"
-  ? { client: "ONEComputer managed workspace", clientVersion: "managed-v1" }
+  ? { client: "LemmaComputer managed workspace", clientVersion: "managed-v1" }
   : profileId === "disposable-open-v1"
-    ? { client: "ONEComputer open workspace", clientVersion: "disposable-open-v1" }
-    : { client: "ONEComputer qualification CLI", clientVersion: "issue-006" };
+    ? { client: "LemmaComputer open workspace", clientVersion: "disposable-open-v1" }
+    : { client: "LemmaComputer qualification CLI", clientVersion: "issue-006" };
 
 export const toView = (
   record: WorkspaceRecord,
@@ -538,7 +538,7 @@ export class WorkspaceService {
       throw new OneComputerError(
         "WORKSPACE_ACCESS_CLEANUP_FAILED",
         retryable
-          ? "The workspace stopped, but access cleanup could not be confirmed. ONEComputer will retry safely."
+          ? "The workspace stopped, but access cleanup could not be confirmed. LemmaComputer will retry safely."
           : "The workspace stopped, but its access cleanup was rejected and needs administrator attention.",
         503,
         retryable,

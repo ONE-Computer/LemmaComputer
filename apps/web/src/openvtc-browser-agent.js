@@ -76,11 +76,11 @@ const createPrfCredential = async () => {
   const salt = crypto.getRandomValues(new Uint8Array(32));
   const credential = await navigator.credentials.create({
     publicKey: {
-      rp: { id: location.hostname, name: "ONEComputer" },
+      rp: { id: location.hostname, name: "LemmaComputer" },
       user: {
         id: crypto.getRandomValues(new Uint8Array(16)),
         name: "onecomputer-approver",
-        displayName: "ONEComputer approval device",
+        displayName: "LemmaComputer approval device",
       },
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       pubKeyCredParams: [{ type: "public-key", alg: -8 }, { type: "public-key", alg: -7 }],
@@ -235,7 +235,7 @@ export const validateRequest = (request, record, executorDid) => {
   const proof = request?.proof;
   if (!request || request.type !== REQUEST_TYPE || request.issuer !== executorDid
     || request.recipient !== record.did || !payload || typeof payload !== "object") {
-    throw new Error("The approval request is not addressed by the enrolled ONEComputer executor to this browser.");
+    throw new Error("The approval request is not addressed by the enrolled LemmaComputer executor to this browser.");
   }
   if (request.expiresAt !== payload.expiresAt || Date.parse(payload.expiresAt) <= Date.now()) {
     throw new Error("This approval request has expired.");

@@ -200,7 +200,7 @@ export class OpenVtcApprovalCoordinator {
         ? "This operation removes the selected Microsoft 365 resource."
         : "This operation changes Microsoft 365 data or communicates as the signed-in user."],
       subject: `urn:onecomputer:operation:${operation.id}`,
-      origin: "ONEComputer Control",
+      origin: "LemmaComputer Control",
       statePin: { resource: operation.resourceName, version: operation.operationDigest },
     });
     const task = await this.store.createOpenVtcConsentTask({
@@ -460,7 +460,7 @@ export class OpenVtcApprovalCoordinator {
         ? "This operation removes the selected Microsoft 365 resource."
         : "This operation changes Microsoft 365 data or communicates as the signed-in user."],
       subject: `urn:onecomputer:operation:${operation.id}`,
-      origin: "ONEComputer Control",
+      origin: "LemmaComputer Control",
       statePin: { resource: operation.resourceName, version: operation.operationDigest },
     });
     if (expected.payloadDigest !== task.payloadDigest

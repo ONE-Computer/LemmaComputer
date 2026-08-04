@@ -39,7 +39,7 @@ const identity: IdentityContext = {
   audience: "onecomputer-control",
 };
 
-test("Hermes session titles stay in the ONEComputer adapter so duplicate user titles cannot block a new chat", async () => {
+test("Hermes session titles stay in the LemmaComputer adapter so duplicate user titles cannot block a new chat", async () => {
   const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
   const creation = adapter.slice(adapter.indexOf('if AGENT == "hermes-claw":'), adapter.indexOf("async with state_lock:", adapter.indexOf('if AGENT == "hermes-claw":')));
   assert.match(creation, /json=\{\}/);

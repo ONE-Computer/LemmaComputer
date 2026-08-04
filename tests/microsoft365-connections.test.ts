@@ -102,7 +102,7 @@ const saveCurrentConnectorToolPolicy = async (
 
 const publicConnectorResolver = async () => [{ address: "93.184.216.34", family: 4 as const }];
 
-test("owned Microsoft 365 flow binds state and PKCE to the initiating ONEComputer identity", async () => {
+test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaComputer identity", async () => {
   const gateway = new FakeConnectionGateway();
   const service = new Microsoft365ConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
