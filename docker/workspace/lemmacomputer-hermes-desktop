@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export LEMMACOMPUTER_SITES_BROKER=http://127.0.0.1:4316
+
+export HERMES_HOME=/home/kasm-user/.hermes-desktop
+export HERMES_BUNDLED_SKILLS=/opt/lemmacomputer/hermes-agent/skills
+export HERMES_DESKTOP_HERMES_ROOT=/opt/lemmacomputer/hermes-agent
+export HERMES_DESKTOP_PYTHON=/opt/lemmacomputer/hermes-venv/bin/python
+export PATH=/opt/lemmacomputer/hermes-office-venv/bin:/opt/lemmacomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin
+export NODE_PATH=/opt/lemmacomputer/hermes-office-node/node_modules
+
+exec /opt/lemmacomputer/hermes-desktop/Hermes --no-sandbox "$@"

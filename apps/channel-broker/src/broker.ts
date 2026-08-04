@@ -9,7 +9,7 @@ import {
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import {
-  OneComputerError,
+  LemmaComputerError,
   TelegramTokenIntakeEnvelope,
   TelegramTokenIntakeGrantVerifier,
   channelArtifactDownloadRequestSchema,
@@ -38,7 +38,7 @@ import {
   type IdentityContext,
   type TelegramChannelConnectionStatus,
   type TelegramCredentialStatus,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import type {
   ChannelConnectionRecord,
   ChannelCredentialRecord,
@@ -113,7 +113,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
   private async post(path: string, input: unknown) {
     const target = new URL(path, this.baseUrl);
     if (!["http:", "https:"].includes(target.protocol)) {
-      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
+      throw new LemmaComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     }
     const payload = Buffer.from(JSON.stringify(input));
     let response: { statusCode: number; body: string };
@@ -124,7 +124,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
           headers: {
             "content-type": "application/json",
             "content-length": String(payload.length),
-            "x-onecomputer-channel-token": this.internalToken,
+            "x-lemmacomputer-channel-token": this.internalToken,
           },
         }, (upstream) => {
           const chunks: Buffer[] = [];
@@ -148,16 +148,16 @@ export class HttpChannelControlClient implements ChannelControlClient {
         request.end(payload);
       });
     } catch {
-      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
+      throw new LemmaComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw new OneComputerError("CHANNEL_ROUTE_REJECTED", "LemmaComputer rejected the channel route", response.statusCode, response.statusCode >= 500);
+      throw new LemmaComputerError("CHANNEL_ROUTE_REJECTED", "LemmaComputer rejected the channel route", response.statusCode, response.statusCode >= 500);
     }
     if (response.statusCode === 204) return null;
     try {
       return JSON.parse(response.body) as unknown;
     } catch {
-      throw new OneComputerError("CHANNEL_CONTROL_INVALID_RESPONSE", "LemmaComputer Control returned an invalid response", 502, true);
+      throw new LemmaComputerError("CHANNEL_CONTROL_INVALID_RESPONSE", "LemmaComputer Control returned an invalid response", 502, true);
     }
   }
 
@@ -169,7 +169,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
   ): Promise<ChannelTurnResponse> {
     const target = new URL(path, this.baseUrl);
     if (!["http:", "https:"].includes(target.protocol)) {
-      throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
+      throw new LemmaComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     }
     const payload = Buffer.from(JSON.stringify(input));
     return new Promise((resolve, reject) => {
@@ -178,7 +178,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
         headers: {
           "content-type": "application/json",
           "content-length": String(payload.length),
-          "x-onecomputer-channel-token": this.internalToken,
+          "x-lemmacomputer-channel-token": this.internalToken,
         },
       }, (upstream) => {
         void (async () => {
@@ -187,7 +187,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
               for await (const _chunk of upstream) {
                 // Drain the bounded internal error response before rejecting.
               }
-              throw new OneComputerError(
+              throw new LemmaComputerError(
                 "CHANNEL_ROUTE_REJECTED",
                 "LemmaComputer rejected the channel route",
                 upstream.statusCode ?? 502,
@@ -198,7 +198,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
               ? upstream.headers["content-type"][0]
               : upstream.headers["content-type"];
             if (!contentType?.startsWith("application/x-ndjson")) {
-              throw new OneComputerError(
+              throw new LemmaComputerError(
                 "CHANNEL_CONTROL_INVALID_RESPONSE",
                 "LemmaComputer Control returned an invalid response",
                 502,
@@ -214,7 +214,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
               const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
               totalSize += Buffer.byteLength(text);
               if (totalSize > 512 * 1024) {
-                throw new OneComputerError(
+                throw new LemmaComputerError(
                   "CHANNEL_CONTROL_INVALID_RESPONSE",
                   "LemmaComputer Control response exceeded its limit",
                   502,
@@ -251,7 +251,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
                   continue;
                 }
                 if (event.type === "error") {
-                  throw new OneComputerError(
+                  throw new LemmaComputerError(
                     event.code,
                     event.message,
                     event.code === "CHAT_RUNTIME_UNAVAILABLE" ? 503 : 502,
@@ -259,7 +259,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
                   );
                 }
                 if (result) {
-                  throw new OneComputerError(
+                  throw new LemmaComputerError(
                     "CHANNEL_CONTROL_INVALID_RESPONSE",
                     "LemmaComputer Control returned multiple results",
                     502,
@@ -273,7 +273,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
               }
             }
             if (buffer.length || !result) {
-              throw new OneComputerError(
+              throw new LemmaComputerError(
                 "CHANNEL_CONTROL_INVALID_RESPONSE",
                 "LemmaComputer Control ended without a complete result",
                 502,
@@ -282,9 +282,9 @@ export class HttpChannelControlClient implements ChannelControlClient {
             }
             resolve(result);
           } catch (error) {
-            reject(error instanceof OneComputerError
+            reject(error instanceof LemmaComputerError
               ? error
-              : new OneComputerError(
+              : new LemmaComputerError(
                 "CHANNEL_CONTROL_INVALID_RESPONSE",
                 "LemmaComputer Control returned an invalid response",
                 502,
@@ -295,7 +295,7 @@ export class HttpChannelControlClient implements ChannelControlClient {
       });
       request.setTimeout(this.timeoutMs, () => request.destroy(new Error("Control request timed out")));
       request.on("error", () => reject(
-        new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true),
+        new LemmaComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true),
       ));
       request.end(payload);
     });
@@ -307,18 +307,18 @@ export class HttpChannelControlClient implements ChannelControlClient {
 
   async downloadArtifact(route: ChannelRoute, artifact: ChatArtifact) {
     const target = new URL("/internal/v1/channels/artifacts", this.baseUrl);
-    if (!["http:", "https:"].includes(target.protocol)) throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
+    if (!["http:", "https:"].includes(target.protocol)) throw new LemmaComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     const input = channelArtifactDownloadRequestSchema.parse({ ...route, artifact });
     let response: Response;
-    try { response = await fetch(target, { method: "POST", headers: { "content-type": "application/json", "x-onecomputer-channel-token": this.internalToken }, body: JSON.stringify(input), signal: AbortSignal.timeout(60_000) }); }
-    catch { throw new OneComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true); }
-    if (!response.ok || !response.body) throw new OneComputerError("CHANNEL_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", response.status || 502, true);
+    try { response = await fetch(target, { method: "POST", headers: { "content-type": "application/json", "x-lemmacomputer-channel-token": this.internalToken }, body: JSON.stringify(input), signal: AbortSignal.timeout(60_000) }); }
+    catch { throw new LemmaComputerError("CHANNEL_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true); }
+    if (!response.ok || !response.body) throw new LemmaComputerError("CHANNEL_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", response.status || 502, true);
     const reader = response.body.getReader(); const chunks: Buffer[] = []; let size = 0;
     try { while (true) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength;
-      if (size > artifact.byteLength || size > channelArtifactMaxBytes) { await reader.cancel().catch(() => undefined); throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409); }
+      if (size > artifact.byteLength || size > channelArtifactMaxBytes) { await reader.cancel().catch(() => undefined); throw new LemmaComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409); }
       chunks.push(Buffer.from(value)); } } finally { reader.releaseLock(); }
     const data = Buffer.concat(chunks, size);
-    if (data.length !== artifact.byteLength || createHash("sha256").update(data).digest("hex") !== artifact.sha256) throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
+    if (data.length !== artifact.byteLength || createHash("sha256").update(data).digest("hex") !== artifact.sha256) throw new LemmaComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
     return data;
   }
 
@@ -337,12 +337,12 @@ export class HttpChannelControlClient implements ChannelControlClient {
 }
 
 const key = (secret: string) => createHash("sha256")
-  .update("onecomputer/channel-credential/k1\0")
+  .update("lemmacomputer/channel-credential/k1\0")
   .update(secret)
   .digest();
 
 const additionalData = (identity: IdentityContext, credentialId: string) => Buffer.from(
-  `onecomputer/channel-credential/k1:${identity.tenantId}:${identity.subjectId}:${credentialId}:telegram_bot_token`,
+  `lemmacomputer/channel-credential/k1:${identity.tenantId}:${identity.subjectId}:${credentialId}:telegram_bot_token`,
   "utf8",
 );
 
@@ -374,7 +374,7 @@ export class ChannelCredentialVault {
         decipher.final(),
       ]).toString("utf8");
     } catch {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "CHANNEL_CREDENTIAL_UNAVAILABLE",
         "The channel credential could not be unlocked",
         503,
@@ -385,7 +385,7 @@ export class ChannelCredentialVault {
 
   fingerprint(plaintext: string) {
     return createHmac("sha256", this.encryptionKey)
-      .update("onecomputer/channel-credential-fingerprint/k1\0")
+      .update("lemmacomputer/channel-credential-fingerprint/k1\0")
       .update(plaintext)
       .digest("base64url");
   }
@@ -456,16 +456,16 @@ export class TelegramBotApiClient implements TelegramBotClient {
         signal: AbortSignal.timeout(35_000),
       });
     } catch {
-      throw new OneComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram could not be reached", 503, true);
+      throw new LemmaComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram could not be reached", 503, true);
     }
     let payload: Record<string, unknown>;
     try {
       payload = botResponseSchema.object(await response.json());
     } catch {
-      throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid response", 502, true);
+      throw new LemmaComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid response", 502, true);
     }
     if (!response.ok || payload.ok !== true) {
-      throw new OneComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram rejected the bot request", 503, true);
+      throw new LemmaComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram rejected the bot request", 503, true);
     }
     return payload.result;
   }
@@ -484,7 +484,7 @@ export class TelegramBotApiClient implements TelegramBotClient {
       timeout: Math.max(0, Math.min(30, Math.trunc(timeoutSeconds))),
       allowed_updates: ["message", "callback_query"],
     });
-    if (!Array.isArray(result)) throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned invalid updates", 502, true);
+    if (!Array.isArray(result)) throw new LemmaComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned invalid updates", 502, true);
     return result.flatMap((raw): TelegramUpdate[] => {
       const update = botResponseSchema.object(raw);
       const callback = update.callback_query && typeof update.callback_query === "object"
@@ -570,11 +570,11 @@ export class TelegramBotApiClient implements TelegramBotClient {
       || filePath.startsWith("/")
       || pathSegments.some((segment) => !segment || segment === "." || segment === ".." || segment.includes("\\"))
     ) {
-      throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid file path", 502, true);
+      throw new LemmaComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid file path", 502, true);
     }
     const reportedSize = optionalTelegramFileSize(result.file_size);
     if (reportedSize !== undefined && reportedSize > maxBytes) {
-      throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
+      throw new LemmaComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
     }
     const encodedPath = pathSegments.map((segment) => encodeURIComponent(segment)).join("/");
     let response: Response;
@@ -585,16 +585,16 @@ export class TelegramBotApiClient implements TelegramBotClient {
         signal: AbortSignal.timeout(35_000),
       });
     } catch {
-      throw new OneComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
+      throw new LemmaComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
     }
     if (!response.ok || !response.body) {
-      throw new OneComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
+      throw new LemmaComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
     }
     const contentLengthHeader = response.headers.get("content-length");
     const contentLength = contentLengthHeader === null ? undefined : Number(contentLengthHeader);
     if (contentLength !== undefined && Number.isFinite(contentLength) && contentLength > maxBytes) {
       await response.body.cancel().catch(() => undefined);
-      throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
+      throw new LemmaComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
     }
     const reader = response.body.getReader();
     const chunks: Buffer[] = [];
@@ -606,17 +606,17 @@ export class TelegramBotApiClient implements TelegramBotClient {
         size += value.byteLength;
         if (size > maxBytes) {
           await reader.cancel().catch(() => undefined);
-          throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
+          throw new LemmaComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
         }
         chunks.push(Buffer.from(value));
       }
     } catch (error) {
-      if (error instanceof OneComputerError) throw error;
-      throw new OneComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
+      if (error instanceof LemmaComputerError) throw error;
+      throw new LemmaComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram could not download the attachment", 503, true);
     } finally {
       reader.releaseLock();
     }
-    if (!size) throw new OneComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram returned an empty attachment", 502, true);
+    if (!size) throw new LemmaComputerError("TELEGRAM_FILE_UNAVAILABLE", "Telegram returned an empty attachment", 502, true);
     return Buffer.concat(chunks, size);
   }
 
@@ -636,7 +636,7 @@ export class TelegramBotApiClient implements TelegramBotClient {
       } : {}),
     }));
     if (!Number.isSafeInteger(result.message_id)) {
-      throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid message", 502, true);
+      throw new LemmaComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid message", 502, true);
     }
     return String(result.message_id);
   }
@@ -645,12 +645,12 @@ export class TelegramBotApiClient implements TelegramBotClient {
     const form = new FormData(); form.set("chat_id", chatId); form.set("document", new Blob([Uint8Array.from(data)], { type: artifact.mediaType }), artifact.filename);
     let response: Response;
     try { response = await this.fetcher(`${this.apiOrigin}/bot${token}/sendDocument`, { method: "POST", body: form, signal: AbortSignal.timeout(60_000) }); }
-    catch { throw new OneComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram could not be reached", 503, true); }
+    catch { throw new LemmaComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram could not be reached", 503, true); }
     let payload: Record<string, unknown>;
-    try { payload = botResponseSchema.object(await response.json()); } catch { throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid response", 502, true); }
-    if (!response.ok || payload.ok !== true) throw new OneComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram rejected the generated file", 503, true);
+    try { payload = botResponseSchema.object(await response.json()); } catch { throw new LemmaComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid response", 502, true); }
+    if (!response.ok || payload.ok !== true) throw new LemmaComputerError("TELEGRAM_API_UNAVAILABLE", "Telegram rejected the generated file", 503, true);
     const result = botResponseSchema.object(payload.result);
-    if (!Number.isSafeInteger(result.message_id)) throw new OneComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid message", 502, true);
+    if (!Number.isSafeInteger(result.message_id)) throw new LemmaComputerError("TELEGRAM_INVALID_RESPONSE", "Telegram returned an invalid message", 502, true);
     return String(result.message_id);
   }
 
@@ -719,7 +719,7 @@ const oversizedAttachmentMessage = "Telegram attachments must be 20 MB or smalle
 const unavailableAttachmentMessage = "I could not download that Telegram attachment. Please send it again.";
 const safeFailureMessage = "I started the task, but the agent could not complete it. Try again, or use /agent to select another available agent.";
 const approvalFailureMessage = "I couldn’t finish the task while the protected action was awaiting review. Open LemmaComputer to check the approval, then retry if needed.";
-const telegramAgentCallbackPrefix = "onecomputer:agent:";
+const telegramAgentCallbackPrefix = "lemmacomputer:agent:";
 const switchableAgentIds = ["hermes-claw", "claude-cli", "codex-cli"] as const;
 const telegramMessageLimit = 4_000;
 const telegramStreamStartCharacters = 24;
@@ -873,10 +873,10 @@ export class ChannelBrokerService {
       ? await this.store.getOwnedChannelCredential(identity, credentialId)
       : null;
     if (credentialId && prior && options.allowCreateWithCredentialId) {
-      throw new OneComputerError("TELEGRAM_INTAKE_CREDENTIAL_EXISTS", "The Telegram credential request is no longer valid", 409);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_CREDENTIAL_EXISTS", "The Telegram credential request is no longer valid", 409);
     }
     if (credentialId && !prior && !options.allowCreateWithCredentialId) {
-      throw new OneComputerError("CHANNEL_CREDENTIAL_NOT_FOUND", "The channel credential was not found", 404);
+      throw new LemmaComputerError("CHANNEL_CREDENTIAL_NOT_FOUND", "The channel credential was not found", 404);
     }
     const id = prior?.id ?? credentialId ?? randomUUID();
     const bot = await this.telegram.validate(input.botToken);
@@ -920,7 +920,7 @@ export class ChannelBrokerService {
 
   async redeemTelegramTokenIntake(raw: unknown) {
     if (!this.tokenIntake) {
-      throw new OneComputerError("TELEGRAM_INTAKE_NOT_CONFIGURED", "Telegram credential intake is unavailable", 503, true);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_NOT_CONFIGURED", "Telegram credential intake is unavailable", 503, true);
     }
     const submission = telegramTokenIntakeSubmissionSchema.parse(raw);
     const now = this.tokenIntake.now?.() ?? new Date();
@@ -935,13 +935,13 @@ export class ChannelBrokerService {
       expiresAt: new Date(grant.expiresAt * 1_000),
     });
     if (!consumed) {
-      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_REPLAYED", "The Telegram credential request is no longer valid", 409);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_GRANT_REPLAYED", "The Telegram credential request is no longer valid", 409);
     }
     const botToken = this.tokenIntake.envelope.open(submission.envelope, grant.grantId);
     const identity: IdentityContext = {
       tenantId: grant.tenantId,
       subjectId: grant.subjectId,
-      audience: "onecomputer-control",
+      audience: "lemmacomputer-control",
     };
     return this.saveCredential(
       identity,
@@ -953,7 +953,7 @@ export class ChannelBrokerService {
 
   async deleteCredential(identity: IdentityContext, credentialId: string) {
     if (!await this.store.deleteChannelCredential(identity, credentialId)) {
-      throw new OneComputerError("CHANNEL_CREDENTIAL_NOT_FOUND", "The channel credential was not found", 404);
+      throw new LemmaComputerError("CHANNEL_CREDENTIAL_NOT_FOUND", "The channel credential was not found", 404);
     }
   }
 
@@ -966,11 +966,11 @@ export class ChannelBrokerService {
     const input = saveTelegramChannelConnectionSchema.parse(raw);
     const prior = await this.store.getOwnedChannelConnection(identity, "telegram", input.workspaceId);
     const credential = await this.store.getOwnedChannelCredential(identity, input.credentialId);
-    if (!credential) throw new OneComputerError("CHANNEL_CREDENTIAL_NOT_FOUND", "The Telegram credential was not found", 404);
+    if (!credential) throw new LemmaComputerError("CHANNEL_CREDENTIAL_NOT_FOUND", "The Telegram credential was not found", 404);
     const inventory = await this.store.listOwnedChannelCredentials(identity);
     const attached = inventory.find((item) => item.id === credential.id);
     if (attached?.workspaceId && attached.workspaceId !== input.workspaceId) {
-      throw new OneComputerError("CHANNEL_CREDENTIAL_IN_USE", "That Telegram credential is attached to another workspace", 409);
+      throw new LemmaComputerError("CHANNEL_CREDENTIAL_IN_USE", "That Telegram credential is attached to another workspace", 409);
     }
     const id = prior?.id ?? randomUUID();
     const token = this.vault.unprotect(identity, credential.id, credential.credentialCiphertext);
@@ -1000,11 +1000,11 @@ export class ChannelBrokerService {
     const connections = await this.store.listActiveChannelConnections("telegram");
     const results = await Promise.allSettled(connections.map((connection) => this.pollConnection(connection)));
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (failures.length === 1 && failures[0]!.reason instanceof OneComputerError) {
+    if (failures.length === 1 && failures[0]!.reason instanceof LemmaComputerError) {
       throw failures[0]!.reason;
     }
     if (failures.length) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "CHANNEL_POLL_FAILED",
         `${failures.length} Telegram connection${failures.length === 1 ? "" : "s"} could not be polled`,
         503,
@@ -1017,7 +1017,7 @@ export class ChannelBrokerService {
     const identity: IdentityContext = {
       tenantId: connection.tenantId,
       subjectId: connection.subjectId,
-      audience: "onecomputer-control",
+      audience: "lemmacomputer-control",
     };
     const token = this.vault.unprotect(identity, connection.credentialId, connection.credentialCiphertext);
     await this.deliverPendingResponses(connection, token);
@@ -1052,10 +1052,10 @@ export class ChannelBrokerService {
       await this.telegram.sendMessage(token, response.chatId, characters.slice(start, end).join(""));
       await this.store.advanceChannelResponseDelivery(response.connectionId, response.updateId, end);
     }
-    if (response.artifacts.length && !response.agentCatalogId) throw new OneComputerError("CHANNEL_ARTIFACT_ROUTE_MISSING", "The generated file route is unavailable", 500, true);
+    if (response.artifacts.length && !response.agentCatalogId) throw new LemmaComputerError("CHANNEL_ARTIFACT_ROUTE_MISSING", "The generated file route is unavailable", 500, true);
     for (let index = response.artifactOffset; index < response.artifacts.length; index += 1) {
       const artifact = response.artifacts[index]!;
-      const identity = { tenantId: connection.tenantId, subjectId: connection.subjectId, audience: "onecomputer-control" as const };
+      const identity = { tenantId: connection.tenantId, subjectId: connection.subjectId, audience: "lemmacomputer-control" as const };
       const data = await this.control.downloadArtifact(this.route(connection, identity, response.senderId, response.agentCatalogId!), artifact);
       await this.telegram.sendDocument(token, response.chatId, artifact, data);
       await this.store.advanceChannelArtifactDelivery(response.connectionId, response.updateId, index + 1);
@@ -1132,10 +1132,10 @@ export class ChannelBrokerService {
 
   private async attachmentPart(token: string, attachment: TelegramAttachment): Promise<{ part: ChatFilePart; byteLength: number }> {
     if (!attachment.mediaType || !telegramAttachmentTypes.has(attachment.mediaType)) {
-      throw new OneComputerError("CHANNEL_ATTACHMENT_UNSUPPORTED", "The Telegram attachment type is not supported", 400);
+      throw new LemmaComputerError("CHANNEL_ATTACHMENT_UNSUPPORTED", "The Telegram attachment type is not supported", 400);
     }
     if (attachment.fileSize !== undefined && attachment.fileSize > channelAttachmentMaxBytes) {
-      throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
+      throw new LemmaComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachment exceeds its size limit", 400);
     }
     const data = await this.telegram.downloadFile(token, attachment.fileId, channelAttachmentMaxBytes);
     return {
@@ -1237,12 +1237,12 @@ export class ChannelBrokerService {
           const downloaded = await this.attachmentPart(token, attachment);
           totalBytes += downloaded.byteLength;
           if (totalBytes > channelAttachmentMaxTotalBytes) {
-            throw new OneComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachments exceed their total size limit", 400);
+            throw new LemmaComputerError("CHANNEL_ATTACHMENT_TOO_LARGE", "The Telegram attachments exceed their total size limit", 400);
           }
           attachments.push(downloaded.part);
         }
       } catch (error) {
-        const code = error instanceof OneComputerError ? error.code : "TELEGRAM_FILE_UNAVAILABLE";
+        const code = error instanceof LemmaComputerError ? error.code : "TELEGRAM_FILE_UNAVAILABLE";
         const message = code === "CHANNEL_ATTACHMENT_UNSUPPORTED"
           ? unsupportedAttachmentMessage
           : code === "CHANNEL_ATTACHMENT_TOO_LARGE" ? oversizedAttachmentMessage : unavailableAttachmentMessage;
@@ -1308,7 +1308,7 @@ export class ChannelBrokerService {
       }
     } catch (error) {
       if (responseStaged) return;
-      const failureCode = error instanceof OneComputerError ? error.code : "CHANNEL_TURN_FAILED";
+      const failureCode = error instanceof LemmaComputerError ? error.code : "CHANNEL_TURN_FAILED";
       await this.store.stageChannelResponse(
         connection.id,
         update.updateId,

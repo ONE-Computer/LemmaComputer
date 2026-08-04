@@ -7,7 +7,7 @@ import {
   spendReportCsv,
   type SpendEventRow,
   type SpendRange,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 
 const range: SpendRange = {
   from: new Date("2026-07-01T00:00:00.000Z"),

@@ -11,7 +11,7 @@ import {
   type RoutingAffinityStore,
   type RoutingDeployment,
   type SessionAffinity,
-} from "@onecomputer/model-router";
+} from "@lemmacomputer/model-router";
 
 class MemoryAffinity implements RoutingAffinityStore {
   values = new Map<string, SessionAffinity>();
@@ -156,11 +156,11 @@ test("governed transport exposes one alias and cannot directly name provider mod
   });
   assert.equal(
     validateGovernedTransportRequest({
-      model: "onecomputer-auto",
+      model: "lemmacomputer-auto",
       metadata: { requestedServiceClass: "auto", routingBinding },
       messages: [],
     }).model,
-    "onecomputer-auto",
+    "lemmacomputer-auto",
   );
   assert.throws(
     () =>

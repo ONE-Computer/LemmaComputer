@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { governedOperationDigest, type GovernedOperationEnvelope, type IdentityContext } from "@onecomputer/contracts";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import { governedOperationDigest, type GovernedOperationEnvelope, type IdentityContext } from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 
-const alex: IdentityContext = { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" };
-const outsider: IdentityContext = { tenantId: "other", subjectId: "alex-morgan", audience: "onecomputer-control" };
+const alex: IdentityContext = { tenantId: "acme", subjectId: "alex-morgan", audience: "lemmacomputer-control" };
+const outsider: IdentityContext = { tenantId: "other", subjectId: "alex-morgan", audience: "lemmacomputer-control" };
 
 const setup = async () => {
   const store = new MemoryWorkspaceStore();
@@ -16,9 +16,9 @@ const setup = async () => {
     ...alex,
     workspaceId: workspace.id,
     capabilityId: "files.delete",
-    serverName: "onecomputer_fixture",
+    serverName: "lemmacomputer_fixture",
     toolName: "delete_file",
-    schemaId: "onecomputer.fixture.delete_file.v1",
+    schemaId: "lemmacomputer.fixture.delete_file.v1",
     arguments: { path: "/Finance/2026/Q3-draft.docx" },
     nonce: randomUUID(),
     expiresAt: new Date(now.getTime() + 60_000).toISOString(),

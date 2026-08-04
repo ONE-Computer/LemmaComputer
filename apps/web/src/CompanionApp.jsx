@@ -24,9 +24,9 @@ import {
 import { ConfirmDialog } from "./ui.jsx";
 import "./companion.css";
 
-const PROTOCOL_VERSION = "onecomputer-companion-push-0.1";
-const workspacePreferenceKey = "onecomputer.active-workspace-id";
-const chatAgentPreferenceKey = (workspaceId) => `onecomputer.active-chat-agent:${workspaceId}`;
+const PROTOCOL_VERSION = "lemmacomputer-companion-push-0.1";
+const workspacePreferenceKey = "lemmacomputer.active-workspace-id";
+const chatAgentPreferenceKey = (workspaceId) => `lemmacomputer.active-chat-agent:${workspaceId}`;
 
 const readPreference = (key) => {
   try {
@@ -462,7 +462,7 @@ export function CompanionApp() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return undefined;
     const openApproval = (event) => {
-      if (event.data?.type !== "onecomputer-open-approvals") return;
+      if (event.data?.type !== "lemmacomputer-open-approvals") return;
       setActiveView("companion");
       setActiveTab("approvals");
       setTerminal(null);

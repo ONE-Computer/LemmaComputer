@@ -33,20 +33,20 @@ const signedRequest = await request("/v1/task-consent/requests", {
   issuedAt: issuedAt.toISOString(),
   expiresAt: expiresAt.toISOString(),
   challenge,
-  taskType: "https://onecomputer.dev/spec/microsoft365/tool-call/0.1",
+  taskType: "https://lemmacomputer.dev/spec/microsoft365/tool-call/0.1",
   taskPayload: {
     operationDigest: "a".repeat(64),
     arguments: { itemId: "qualification-item", private: "must-not-cross-consent-boundary" },
   },
-  requesterDid: "did:onecomputer:agent:qualification",
-  approverSet: "onecomputer-workspace-owners",
+  requesterDid: "did:lemmacomputer:agent:qualification",
+  approverSet: "lemmacomputer-workspace-owners",
   minApprovals: 1,
   excludeRequester: true,
   sideEffects: "destructive",
   exposure: { discloses: "none", actsAsSubject: true },
   effects: [{ kind: "delete", summary: "Delete the qualification item." }],
   consequences: ["The qualification item is removed."],
-  subject: "urn:onecomputer:operation:qualification",
+  subject: "urn:lemmacomputer:operation:qualification",
   origin: "LemmaComputer Control",
   statePin: { resource: "qualification-item", version: "etag-1" },
 });
@@ -63,7 +63,7 @@ const enrollmentChallenge = crypto.randomUUID();
 const enrollment = await signTrustTask({
   envelope: {
     id: `urn:uuid:${crypto.randomUUID()}`,
-    type: "https://onecomputer.dev/spec/openvtc/approver-enrollment/0.1",
+    type: "https://lemmacomputer.dev/spec/openvtc/approver-enrollment/0.1",
     issuer: identity.did,
     recipient: profile.executorDid,
     issuedAt: issuedAt.toISOString(),

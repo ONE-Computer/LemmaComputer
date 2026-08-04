@@ -3,8 +3,8 @@ import test from "node:test";
 import {
   PostgresScheduleStore,
   PostgresWorkspaceStore,
-} from "@onecomputer/workspace-store";
-import type { IdentityContext } from "@onecomputer/contracts";
+} from "@lemmacomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
 
 const connectionString = process.env.SCHEDULE_TEST_DATABASE_URL;
 
@@ -17,7 +17,7 @@ test("PostgreSQL schedule claims are exclusive and workspace deletion cascades",
   const identity: IdentityContext = {
     tenantId: `schedule-test-${crypto.randomUUID()}`,
     subjectId: "owner",
-    audience: "onecomputer-control",
+    audience: "lemmacomputer-control",
   };
   try {
     await workspaceStore.migrate();

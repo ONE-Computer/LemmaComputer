@@ -132,7 +132,7 @@ workspace-and-agent projection. The record binds:
 - expiry, request-per-minute, and parallel-request limits.
 
 Current governed workspaces are allowed only the synthetic
-`onecomputer-auto` transport model. The key never grants every concrete model.
+`lemmacomputer-auto` transport model. The key never grants every concrete model.
 Trusted key metadata carries the requested policy alias, client-compatible
 alias, and tenant access context so the callback can validate the later
 Control decision. Legacy direct aliases remain a compatibility path and are
@@ -157,7 +157,7 @@ sequenceDiagram
   participant Provider as Concrete provider deployment
 
   Client->>Broker: Prompt and requested Auto/Lite/Balanced/Pro class
-  Broker->>Gateway: onecomputer-auto, scoped key, signed task binding
+  Broker->>Gateway: lemmacomputer-auto, scoped key, signed task binding
   Gateway->>Gateway: Check key, alias, expiry, RPM, concurrency
   Gateway->>Callback: Pre-routing hook
   Callback->>Control: Decide using trusted identity and bounded task signals
@@ -173,7 +173,7 @@ sequenceDiagram
 ```
 
 Auto, Lite, Balanced, and Pro are Control service contracts, not LiteLLM model
-names. `onecomputer-auto` is a synthetic transport alias:
+names. `lemmacomputer-auto` is a synthetic transport alias:
 
 - **Auto** lets Control classify privacy-safe task signals and select an
   eligible service class.
@@ -264,7 +264,7 @@ reconciliation.
 | Optional MCP connector unavailable | Connector tools may be absent, but a healthy model route remains ready |
 | Completion telemetry fails after provider success | Response is returned; the admitted attempt is flagged for reconciliation |
 
-Readiness code must treat `onecomputer-auto` as a synthetic governed alias, not
+Readiness code must treat `lemmacomputer-auto` as a synthetic governed alias, not
 as a provider model that needs a static `model_info` record. It must also keep
 model-route health separate from optional connector discovery health.
 
@@ -275,7 +275,7 @@ Changes around LiteLLM should preserve all of these boundaries:
 - no master key, provider key, OAuth token, or raw Control credential enters a
   workspace user process;
 - every dynamic deployment and virtual key remains tenant-scoped;
-- governed workspace keys expose only `onecomputer-auto`, never the concrete
+- governed workspace keys expose only `lemmacomputer-auto`, never the concrete
   provider inventory;
 - MCP grants name every allowed server and every allowed tool per server;
 - protected operations use an exact one-time lease and execution grant;

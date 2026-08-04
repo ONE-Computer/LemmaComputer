@@ -65,7 +65,7 @@ container runs `apps/web/server.mjs`, a small static server that:
 
 - serves the compiled single-page application;
 - proxies `/api/*` to Control after removing the `/api` prefix;
-- adds the internal `x-onecomputer-proxy-token`;
+- adds the internal `x-lemmacomputer-proxy-token`;
 - streams Control responses without buffering;
 - does not expose the proxy token to browser JavaScript.
 
@@ -126,9 +126,9 @@ Internal callers use:
 - `POST /internal/v1/channels/routes/validate` from the channel broker;
 - `POST /internal/v1/channels/turns` from the channel broker.
 
-The internal MCP route requires `x-onecomputer-mcp-policy-token`. Routing and
-usage routes require `x-onecomputer-ai-usage-token`. Channel routes require
-`x-onecomputer-channel-token`. Product requests require both the Web proxy
+The internal MCP route requires `x-lemmacomputer-mcp-policy-token`. Routing and
+usage routes require `x-lemmacomputer-ai-usage-token`. Channel routes require
+`x-lemmacomputer-channel-token`. Product requests require both the Web proxy
 boundary and an authenticated employee session, except for the explicit flows
 above.
 
@@ -200,7 +200,7 @@ version- and checksum-pinned.
 The Hermes payload also contains checksum-pinned copies of the official DOCX,
 PDF, PowerPoint, XLSX, and OCR/document skills and their native, Python, Node,
 and font dependencies. Telegram-originated deliverables written to the dedicated
-`ONEComputer/Outbox` are snapshotted into immutable, hash-verified runtime
+`LemmaComputer/Outbox` are snapshotted into immutable, hash-verified runtime
 artifacts; arbitrary workspace paths are never exported. When either Hermes client
 is selected, the entrypoint
 uses Hermes' bundled-skill manifest sync to seed its persistent profile.
@@ -268,14 +268,14 @@ direct internet-routed network attachment.
 
 **Configuration:** `config/litellm/config.yaml`
 
-**LemmaComputer callback:** `integrations/litellm/onecomputer_policy_callback.py`
+**LemmaComputer callback:** `integrations/litellm/lemmacomputer_policy_callback.py`
 
 LiteLLM is the model and MCP data plane. Control uses its administrator API to
 create deterministic virtual credentials with:
 
 - tenant/user/workspace/agent metadata;
 - exactly one governed transport alias for current service-class workspaces
-  (`onecomputer-auto`), or one explicit compatibility route for a legacy
+  (`lemmacomputer-auto`), or one explicit compatibility route for a legacy
   direct-alias policy;
 - one or more explicitly projected MCP servers with per-server tool allowlists;
 - expiry;
@@ -283,7 +283,7 @@ create deterministic virtual credentials with:
 - effective policy identifier and hash.
 
 For governed model calls, the custom callback accepts only
-`onecomputer-auto`, derives bounded privacy-safe task signals, asks Control for
+`lemmacomputer-auto`, derives bounded privacy-safe task signals, asks Control for
 a concrete deployment, verifies the returned signed binding immediately before
 execution, and admits the attempt to the ledger and Team budget. It strips
 LemmaComputer authentication and governance metadata before provider dispatch,
@@ -414,7 +414,7 @@ credentials remain usable. Before upgrading an existing deployment, run
 `npm run env:update`, run the one-shot database migration, and deploy the
 services together. Hosted deployments reject the deprecated raw-token routes
 by default. Customer-managed deployments retain `legacy` raw input only as a
-measured migration bridge; set `ONECOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE=reject`
+measured migration bridge; set `LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE=reject`
 after affected API clients have moved to the grant flow.
 
 **Extension seam:** implement a provider client and credential envelope inside
@@ -447,7 +447,7 @@ The control and gateway databases are deliberately separate.
 
 `postgres` stores owned product and governance state. Migrations in
 `packages/workspace-store/migrations` are dependency-ordered, checksummed, and
-recorded in `onecomputer_schema_migrations` by the explicit one-shot migration job.
+recorded in `lemmacomputer_schema_migrations` by the explicit one-shot migration job.
 Control startup is read-only with respect to schema and fails closed when the ledger
 is missing, behind, unknown, or changed.
 
@@ -463,14 +463,14 @@ historical records without an explicit compatibility design.
 
 | Package | Role |
 | --- | --- |
-| `@onecomputer/contracts` | Zod wire schemas, catalogs, error types, and shared domain types |
-| `@onecomputer/workspace-store` | Store interfaces, PostgreSQL implementations, migrations, and policy derivation |
-| `@onecomputer/policy-integrity` | Canonical policy signing and verification |
-| `@onecomputer/litellm-adapter` | Gateway grants, OAuth orchestration, readiness, and governed execution |
-| `@onecomputer/model-router` | Deterministic service-class selection, candidate filtering, session affinity, and signed decision bindings |
-| `@onecomputer/kasm-adapter` | Local Docker and Kasm Developer API sandbox adapters |
-| `@onecomputer/egress-policy` | Host normalization, grant signing, policy compilation, and decisions |
-| `@onecomputer/workspace-ingress-auth` | Launch/session claim issuance and verification |
+| `@lemmacomputer/contracts` | Zod wire schemas, catalogs, error types, and shared domain types |
+| `@lemmacomputer/workspace-store` | Store interfaces, PostgreSQL implementations, migrations, and policy derivation |
+| `@lemmacomputer/policy-integrity` | Canonical policy signing and verification |
+| `@lemmacomputer/litellm-adapter` | Gateway grants, OAuth orchestration, readiness, and governed execution |
+| `@lemmacomputer/model-router` | Deterministic service-class selection, candidate filtering, session affinity, and signed decision bindings |
+| `@lemmacomputer/kasm-adapter` | Local Docker and Kasm Developer API sandbox adapters |
+| `@lemmacomputer/egress-policy` | Host normalization, grant signing, policy compilation, and decisions |
+| `@lemmacomputer/workspace-ingress-auth` | Launch/session claim issuance and verification |
 
 Contracts should remain dependency-light and transport-oriented. Service
 packages may depend on contracts; contracts must not depend on a runtime

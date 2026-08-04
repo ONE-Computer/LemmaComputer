@@ -6,7 +6,7 @@ import {
   WorkspaceIngressAuthority,
   workspaceIngressAccessParameter,
   workspaceIngressSessionCookie,
-} from "@onecomputer/workspace-ingress-auth";
+} from "@lemmacomputer/workspace-ingress-auth";
 import { createWorkspaceIngress } from "../apps/workspace-ingress/src/server.js";
 
 const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
@@ -77,7 +77,7 @@ test("workspace ingress forwards the web app and exchanges a launch for an isola
     assert.equal(await webResponse.text(), "web");
 
     const launch = authority.issueLaunch({
-      identity: { tenantId: "acme", subjectId: "alex", audience: "onecomputer-control" },
+      identity: { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" },
       workspaceId,
       target: { protocol: "http", host: "127.0.0.1", port: workspacePort },
     });
@@ -175,8 +175,8 @@ test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth rout
   ]);
   const ingress = createWorkspaceIngress({
     authority: new WorkspaceIngressAuthority(secret),
-    publicUrl: "http://onecomputer.example",
-    litellmPublicUrl: "http://onecomputer.example/oauth/mcp",
+    publicUrl: "http://lemmacomputer.example",
+    litellmPublicUrl: "http://lemmacomputer.example/oauth/mcp",
     webUpstream: `http://127.0.0.1:${webPort}`,
     microsoft365AuthorizationUpstream: `http://127.0.0.1:${microsoft365Port}`,
     litellmOAuthUpstream: `http://127.0.0.1:${litellmPort}`,
@@ -191,7 +191,7 @@ test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth rout
 
     const callback = await getWithAuthority(
       `http://127.0.0.1:${ingressPort}/oauth/mcp/callback?state=relay&code=sentinel`,
-      "onecomputer.example",
+      "lemmacomputer.example",
       "mcp_oauth_state_relay=opaque",
     );
     assert.equal(callback.status, 303);
@@ -199,7 +199,7 @@ test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth rout
 
     const rejectedOAuthSurface = await getWithAuthority(
       `http://127.0.0.1:${ingressPort}/oauth/mcp/not-a-callback`,
-      "onecomputer.example",
+      "lemmacomputer.example",
     );
     assert.equal(rejectedOAuthSurface.status, 404);
 
@@ -209,7 +209,7 @@ test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth rout
     const rejectedMethod = await requestWithAuthority(
       "POST",
       `http://127.0.0.1:${ingressPort}/oauth/mcp/callback`,
-      "onecomputer.example",
+      "lemmacomputer.example",
     );
     assert.equal(rejectedMethod.status, 405);
     assert.equal(rejectedMethod.headers.allow, "GET");

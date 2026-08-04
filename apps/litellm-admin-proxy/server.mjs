@@ -52,7 +52,7 @@ export const createLiteLlmAdminProxy = ({
   certificate,
   privateKey,
   clientCa,
-  expectedClientCommonName = "onecomputer-control",
+  expectedClientCommonName = "lemmacomputer-control",
   requireMutualTls = true,
 }) => {
   const handler = (request, response) => {
@@ -80,7 +80,7 @@ export const createLiteLlmAdminProxy = ({
 };
 
 const main = () => {
-  const installationKind = process.env.ONECOMPUTER_INSTALLATION_KIND ?? "customer-managed";
+  const installationKind = process.env.LEMMACOMPUTER_INSTALLATION_KIND ?? "customer-managed";
   const requireMutualTls = installationKind === "hosted";
   const proxy = createLiteLlmAdminProxy({
     upstreamUrl: process.env.LITELLM_ADMIN_PROXY_UPSTREAM_URL ?? "http://litellm:4000",
@@ -88,7 +88,7 @@ const main = () => {
     certificate: requireMutualTls ? decodePem(process.env.LITELLM_ADMIN_PROXY_TLS_SERVER_CERT_B64, "LITELLM_ADMIN_PROXY_TLS_SERVER_CERT_B64") : undefined,
     privateKey: requireMutualTls ? decodePem(process.env.LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64, "LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64") : undefined,
     clientCa: requireMutualTls ? decodePem(process.env.LITELLM_ADMIN_PROXY_TLS_CA_B64, "LITELLM_ADMIN_PROXY_TLS_CA_B64") : undefined,
-    expectedClientCommonName: process.env.LITELLM_ADMIN_PROXY_CLIENT_COMMON_NAME ?? "onecomputer-control",
+    expectedClientCommonName: process.env.LITELLM_ADMIN_PROXY_CLIENT_COMMON_NAME ?? "lemmacomputer-control",
   });
   const host = process.env.LITELLM_ADMIN_PROXY_HOST ?? "0.0.0.0";
   const port = Number(process.env.LITELLM_ADMIN_PROXY_PORT ?? "8443");

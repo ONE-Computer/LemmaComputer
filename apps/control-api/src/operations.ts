@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
-  OneComputerError,
+  LemmaComputerError,
   canonicalJson,
   governedOperationDigest,
   ownedAgentCatalog,
@@ -8,18 +8,18 @@ import {
   type IdentityContext,
   type OperationView,
   type OwnedJson,
-} from "@onecomputer/contracts";
-import type { GovernedToolExecutor } from "@onecomputer/litellm-adapter";
-import type { GovernanceStore, GovernedOperationRecord, WorkspaceStore } from "@onecomputer/workspace-store";
+} from "@lemmacomputer/contracts";
+import type { GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
+import type { GovernanceStore, GovernedOperationRecord, WorkspaceStore } from "@lemmacomputer/workspace-store";
 import type { OpenVtcApprovalCoordinator } from "./openvtc.js";
 
 export type FixtureApprovalEnvelope = {
   version: "1";
-  issuer: "onecomputer-local-fixture";
+  issuer: "lemmacomputer-local-fixture";
   keyId: "fixture-hmac-v1";
   tenantId: string;
   subjectId: string;
-  audience: "onecomputer-control";
+  audience: "lemmacomputer-control";
   operationId: string;
   operationDigest: string;
   nonce: string;
@@ -128,12 +128,12 @@ const messageContent = (value: OwnedJson | undefined) => {
 };
 
 const auditTarget = (record: GovernedOperationRecord) => {
-  const context = ownedRecord(ownedRecord(record.arguments)?.onecomputerAudit);
+  const context = ownedRecord(ownedRecord(record.arguments)?.lemmacomputerAudit);
   return typeof context?.target === "string" ? context.target : "";
 };
 
 const auditTargetLabel = (record: GovernedOperationRecord) => {
-  const context = ownedRecord(ownedRecord(record.arguments)?.onecomputerAudit);
+  const context = ownedRecord(ownedRecord(record.arguments)?.lemmacomputerAudit);
   return ({
     recipient: "To",
     chat: "Chat",
@@ -252,9 +252,9 @@ const toView = (record: GovernedOperationRecord): OperationView => ({
   requestedAt: record.createdAt.toISOString(),
   updatedAt: record.updatedAt.toISOString(),
   expiresAt: record.expiresAt.toISOString(),
-  requiredApprovalChannel: record.serverName === "onecomputer_fixture"
+  requiredApprovalChannel: record.serverName === "lemmacomputer_fixture"
     && record.toolName === "delete_file"
-    && record.schemaId === "onecomputer.fixture.delete_file.v1"
+    && record.schemaId === "lemmacomputer.fixture.delete_file.v1"
     ? "local-fixture"
     : "openvtc-task-consent",
   approval: record.approval ? {
@@ -323,7 +323,7 @@ const decodeCompanionActivityCursor = (value: string | undefined) => {
     }
     return { createdAt, id: cursor.id };
   } catch {
-    throw new OneComputerError("INVALID_ACTIVITY_CURSOR", "The activity page cursor is invalid", 400);
+    throw new LemmaComputerError("INVALID_ACTIVITY_CURSOR", "The activity page cursor is invalid", 400);
   }
 };
 
@@ -361,7 +361,7 @@ const microsoft365Resource = (toolName: string, argumentsValue: Record<string, O
     : toolName.includes("calendar") ? "Outlook Calendar"
       : toolName.includes("chat") || toolName.includes("channel") ? "Microsoft Teams"
         : "OneDrive";
-  const context = ownedRecord(argumentsValue.onecomputerAudit);
+  const context = ownedRecord(argumentsValue.lemmacomputerAudit);
   const declaredTarget = typeof context?.target === "string" ? context.target.trim() : "";
   const target = microsoft365ArgumentTarget(toolName, argumentsValue) || declaredTarget;
   if (target) {
@@ -414,12 +414,12 @@ export class GovernedOperationService {
 
   async createDeleteFile(identity: IdentityContext, workspaceId: string, rawPath: string, idempotencyKey: string, correlationId: string) {
     const workspace = await this.store.getOwned(identity, workspaceId);
-    if (!workspace) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
-    if (!["ready", "open"].includes(workspace.state)) throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not ready for governed actions", 409, true);
+    if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    if (!["ready", "open"].includes(workspace.state)) throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not ready for governed actions", 409, true);
 
     const segments = rawPath.replaceAll("\\", "/").split("/").filter(Boolean);
     if (!segments.length || segments.some((segment) => segment === "." || segment === "..")) {
-      throw new OneComputerError("INVALID_RESOURCE_PATH", "The file path is invalid", 400);
+      throw new LemmaComputerError("INVALID_RESOURCE_PATH", "The file path is invalid", 400);
     }
     const path = `/${segments.join("/")}`;
     const now = new Date();
@@ -433,9 +433,9 @@ export class GovernedOperationService {
       workspaceId,
       audience: identity.audience,
       capabilityId: "files.delete",
-      serverName: "onecomputer_fixture",
+      serverName: "lemmacomputer_fixture",
       toolName: "delete_file",
-      schemaId: "onecomputer.fixture.delete_file.v1",
+      schemaId: "lemmacomputer.fixture.delete_file.v1",
       arguments: { path },
       nonce,
       expiresAt: expiresAt.toISOString(),
@@ -462,7 +462,7 @@ export class GovernedOperationService {
       createdAt: now,
       expiresAt,
     });
-    if (!record) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    if (!record) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
     if (record.operationDigest !== operationDigest) {
       const sameRequest = record.workspaceId === workspaceId
         && record.agentId === null
@@ -474,7 +474,7 @@ export class GovernedOperationService {
         && record.schemaId === operationEnvelope.schemaId
         && canonicalJson(record.arguments) === canonicalJson(operationEnvelope.arguments);
       if (!sameRequest) {
-        throw new OneComputerError("IDEMPOTENCY_MISMATCH", "The idempotency key was already used for a different operation", 409);
+        throw new LemmaComputerError("IDEMPOTENCY_MISMATCH", "The idempotency key was already used for a different operation", 409);
       }
     }
     return toView(record);
@@ -491,9 +491,9 @@ export class GovernedOperationService {
   ) {
     return this.createMicrosoft365Operation(identity, workspaceId, {
       capabilityId: "onedrive-delete-protected",
-      serverName: "onecomputer_ms365",
+      serverName: "lemmacomputer_ms365",
       toolName: "delete-onedrive-file",
-      schemaId: "onecomputer.m365.delete-onedrive-file.v1",
+      schemaId: "lemmacomputer.m365.delete-onedrive-file.v1",
       arguments: {
         "If-Match": input["If-Match"],
         confirm: true,
@@ -526,8 +526,8 @@ export class GovernedOperationService {
     retryTerminal = false,
   ) {
     const workspace = await this.store.getOwned(identity, workspaceId);
-    if (!workspace) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
-    if (!["ready", "open"].includes(workspace.state)) throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not ready for governed actions", 409, true);
+    if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    if (!["ready", "open"].includes(workspace.state)) throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not ready for governed actions", 409, true);
 
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.operationTtlMs);
@@ -580,7 +580,7 @@ export class GovernedOperationService {
       createdAt: now,
       expiresAt,
     });
-    if (!record) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    if (!record) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
     if (record.operationDigest !== operationDigest) {
       const sameRequest = record.workspaceId === workspaceId
         && record.agentId === agentId
@@ -592,7 +592,7 @@ export class GovernedOperationService {
         && record.schemaId === input.schemaId
         && canonicalJson(record.arguments) === canonicalJson(input.arguments);
       if (!sameRequest) {
-        throw new OneComputerError("IDEMPOTENCY_MISMATCH", "The idempotency key was already used for a different operation", 409);
+        throw new LemmaComputerError("IDEMPOTENCY_MISMATCH", "The idempotency key was already used for a different operation", 409);
       }
     }
     await this.openVtc?.ensureTask(identity, record);
@@ -601,14 +601,14 @@ export class GovernedOperationService {
 
   async get(identity: IdentityContext, operationId: string) {
     const record = await this.store.recoverOperation(identity, operationId, new Date(), "operation-read");
-    if (!record) throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+    if (!record) throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     return toView(record);
   }
 
   async getForAgent(identity: IdentityContext, operationId: string, binding: { workspaceId: string; agentId: string }) {
     const record = await this.store.recoverOperation(identity, operationId, new Date(), "agent-operation-read");
     if (!record || record.workspaceId !== binding.workspaceId || record.agentId !== binding.agentId) {
-      throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+      throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     }
     return toView(record);
   }
@@ -703,11 +703,11 @@ export class GovernedOperationService {
     const proofExpiresAt = new Date(Math.min(operation.expiresAt.getTime(), now.getTime() + 2 * 60 * 1000));
     const envelope: FixtureApprovalEnvelope = {
       version: "1",
-      issuer: "onecomputer-local-fixture",
+      issuer: "lemmacomputer-local-fixture",
       keyId: "fixture-hmac-v1",
       tenantId: identity.tenantId,
       subjectId: identity.subjectId,
-      audience: "onecomputer-control",
+      audience: "lemmacomputer-control",
       operationId,
       operationDigest: operation.operationDigest,
       nonce: operation.nonce,
@@ -725,7 +725,7 @@ export class GovernedOperationService {
     const issuedAt = new Date(envelope.issuedAt);
     const proofExpiresAt = new Date(envelope.expiresAt);
     const bindingMatches = envelope.version === "1"
-      && envelope.issuer === "onecomputer-local-fixture"
+      && envelope.issuer === "lemmacomputer-local-fixture"
       && envelope.keyId === "fixture-hmac-v1"
       && envelope.tenantId === identity.tenantId
       && envelope.subjectId === identity.subjectId
@@ -734,13 +734,13 @@ export class GovernedOperationService {
       && envelope.operationDigest === operation.operationDigest
       && envelope.nonce === operation.nonce;
     if (!bindingMatches || !this.approvals.verify(envelope, signature)) {
-      throw new OneComputerError("APPROVAL_PROOF_INVALID", "The approval proof is invalid for this operation", 403);
+      throw new LemmaComputerError("APPROVAL_PROOF_INVALID", "The approval proof is invalid for this operation", 403);
     }
     if (!Number.isFinite(issuedAt.getTime()) || !Number.isFinite(proofExpiresAt.getTime()) || issuedAt.getTime() > now.getTime() + 5_000 || proofExpiresAt <= now || operation.expiresAt <= now) {
-      throw new OneComputerError("APPROVAL_EXPIRED", "The approval proof or operation has expired", 409);
+      throw new LemmaComputerError("APPROVAL_EXPIRED", "The approval proof or operation has expired", 409);
     }
     if (operation.approval && operation.approval.decision !== envelope.decision) {
-      throw new OneComputerError("APPROVAL_CONFLICT", "This operation already has a different decision", 409);
+      throw new LemmaComputerError("APPROVAL_CONFLICT", "This operation already has a different decision", 409);
     }
     if (["denied", "failed", "expired"].includes(operation.state)) return toView(operation);
     if (operation.state === "succeeded") return toView(operation);
@@ -762,18 +762,18 @@ export class GovernedOperationService {
       decidedAt,
       correlationId,
     });
-    if (!recorded) throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+    if (!recorded) throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     if (!recorded.approval || recorded.approval.decision !== envelope.decision) {
-      throw new OneComputerError("APPROVAL_STATE_INVALID", "A verified approval record is required before execution", 409);
+      throw new LemmaComputerError("APPROVAL_STATE_INVALID", "A verified approval record is required before execution", 409);
     }
     if (envelope.decision === "deny") return toView(recorded);
     return this.execute(identity, recorded.id, correlationId);
   }
 
   async applyOpenVtcDecision(transportToken: string, document: unknown, correlationId: string) {
-    if (!this.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!this.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     const { identity, operation } = await this.openVtc.submitDecision(transportToken, document, correlationId);
-    if (!operation.approval) throw new OneComputerError("APPROVAL_STATE_INVALID", "A verified approval record is required before execution", 409);
+    if (!operation.approval) throw new LemmaComputerError("APPROVAL_STATE_INVALID", "A verified approval record is required before execution", 409);
     if (operation.approval.decision === "deny" || ["denied", "failed", "expired", "succeeded"].includes(operation.state)) return toView(operation);
     if (operation.toolName === "create-upload-session") return toView(operation);
     return this.execute(identity, operation.id, correlationId);
@@ -790,11 +790,11 @@ export class GovernedOperationService {
       operation.workspaceId !== binding.workspaceId
       || operation.agentId !== binding.agentId
       || operation.toolName !== "create-upload-session"
-      || operation.serverName !== "onecomputer_ms365"
+      || operation.serverName !== "lemmacomputer_ms365"
       || operation.approval?.decision !== "approve"
       || operation.state !== "approved"
     ) {
-      throw new OneComputerError("UPLOAD_NOT_APPROVED", "The resumable upload is not approved for this workspace agent", 409);
+      throw new LemmaComputerError("UPLOAD_NOT_APPROVED", "The resumable upload is not approved for this workspace agent", 409);
     }
     const leaseId = randomUUID();
     const claimed = await this.store.claimExecution(
@@ -805,7 +805,7 @@ export class GovernedOperationService {
       correlationId,
     );
     if (!claimed || claimed.leaseId !== leaseId) {
-      throw new OneComputerError("UPLOAD_ALREADY_STARTED", "The resumable upload has already started", 409);
+      throw new LemmaComputerError("UPLOAD_ALREADY_STARTED", "The resumable upload has already started", 409);
     }
     try {
       const result = await this.executor.executeGovernedTool({
@@ -821,13 +821,13 @@ export class GovernedOperationService {
         arguments: claimed.arguments,
       });
       const uploadUrlValue = uploadUrlFrom(result.result);
-      if (!uploadUrlValue) throw new OneComputerError("UPLOAD_SESSION_INVALID", "Microsoft did not return a resumable upload session", 502, true);
+      if (!uploadUrlValue) throw new LemmaComputerError("UPLOAD_SESSION_INVALID", "Microsoft did not return a resumable upload session", 502, true);
       const uploadUrl = new URL(uploadUrlValue);
       if (
         uploadUrl.protocol !== "https:"
         || !(uploadUrl.hostname.endsWith(".up.1drv.com") || uploadUrl.hostname.endsWith(".sharepoint.com"))
       ) {
-        throw new OneComputerError("UPLOAD_SESSION_INVALID", "Microsoft returned an invalid resumable upload destination", 502);
+        throw new LemmaComputerError("UPLOAD_SESSION_INVALID", "Microsoft returned an invalid resumable upload destination", 502);
       }
       return { leaseId, uploadUrl: uploadUrl.toString() };
     } catch (error) {
@@ -835,9 +835,9 @@ export class GovernedOperationService {
         identity,
         operation.id,
         leaseId,
-        error instanceof OneComputerError ? error.code : "UPLOAD_SESSION_FAILED",
+        error instanceof LemmaComputerError ? error.code : "UPLOAD_SESSION_FAILED",
         correlationId,
-        error instanceof OneComputerError ? error.message : "The resumable upload session could not be created",
+        error instanceof LemmaComputerError ? error.message : "The resumable upload session could not be created",
       );
       throw error;
     }
@@ -852,9 +852,9 @@ export class GovernedOperationService {
   ) {
     const operation = await this.requireOwned(identity, operationId);
     if (operation.workspaceId !== binding.workspaceId || operation.agentId !== binding.agentId || operation.toolName !== "create-upload-session") {
-      throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+      throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     }
-    const file = (operation.arguments as Record<string, OwnedJson>).onecomputerFile as Record<string, OwnedJson> | undefined;
+    const file = (operation.arguments as Record<string, OwnedJson>).lemmacomputerFile as Record<string, OwnedJson> | undefined;
     const name = typeof file?.name === "string" ? file.name : "file";
     const completed = await this.store.completeExecution(identity, operation.id, leaseId, {
       id: randomUUID(),
@@ -863,7 +863,7 @@ export class GovernedOperationService {
       resultHash: createHash("sha256").update(canonicalJson(file ?? null)).digest("hex"),
       executedAt: new Date(),
     }, correlationId);
-    if (!completed) throw new OneComputerError("UPLOAD_LEASE_INVALID", "The resumable upload lease is no longer valid", 409);
+    if (!completed) throw new LemmaComputerError("UPLOAD_LEASE_INVALID", "The resumable upload lease is no longer valid", 409);
     return toView(completed);
   }
 
@@ -876,16 +876,16 @@ export class GovernedOperationService {
   ) {
     const operation = await this.requireOwned(identity, operationId);
     if (operation.workspaceId !== binding.workspaceId || operation.agentId !== binding.agentId || operation.toolName !== "create-upload-session") {
-      throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+      throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     }
     await this.store.failExecution(identity, operation.id, leaseId, "UPLOAD_TRANSFER_FAILED", correlationId, "The approved OneDrive upload did not complete");
     return this.get(identity, operation.id);
   }
 
   private requireFixtureOperation(operation: GovernedOperationRecord) {
-    if (operation.serverName !== "onecomputer_fixture" || operation.toolName !== "delete_file"
-      || operation.schemaId !== "onecomputer.fixture.delete_file.v1") {
-      throw new OneComputerError(
+    if (operation.serverName !== "lemmacomputer_fixture" || operation.toolName !== "delete_file"
+      || operation.schemaId !== "lemmacomputer.fixture.delete_file.v1") {
+      throw new LemmaComputerError(
         "FIXTURE_APPROVAL_NOT_ALLOWED",
         "The local fixture cannot decide this governed operation",
         403,
@@ -897,7 +897,7 @@ export class GovernedOperationService {
     const leaseId = randomUUID();
     const leaseExpiresAt = new Date(Date.now() + 30_000);
     const claimed = await this.store.claimExecution(identity, operationId, leaseId, leaseExpiresAt, correlationId);
-    if (!claimed) throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+    if (!claimed) throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     if (claimed.leaseId !== leaseId) return this.waitForConcurrentExecution(identity, operationId);
     try {
       const result = await this.executor.executeGovernedTool({
@@ -919,16 +919,16 @@ export class GovernedOperationService {
         resultHash: createHash("sha256").update(canonicalJson(result.result)).digest("hex"),
         executedAt: new Date(),
       }, correlationId);
-      if (!completed) throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+      if (!completed) throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
       return toView(completed);
     } catch (error) {
       await this.store.failExecution(
         identity,
         claimed.id,
         leaseId,
-        error instanceof OneComputerError ? error.code : "TOOL_EXECUTION_FAILED",
+        error instanceof LemmaComputerError ? error.code : "TOOL_EXECUTION_FAILED",
         correlationId,
-        error instanceof OneComputerError ? error.message : "The governed tool execution failed",
+        error instanceof LemmaComputerError ? error.message : "The governed tool execution failed",
       );
       throw error;
     }
@@ -940,12 +940,12 @@ export class GovernedOperationService {
       if (current.state !== "executing") return toView(current);
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    throw new OneComputerError("OPERATION_IN_PROGRESS", "The governed operation is still executing", 409, true);
+    throw new LemmaComputerError("OPERATION_IN_PROGRESS", "The governed operation is still executing", 409, true);
   }
 
   private async requireOwned(identity: IdentityContext, operationId: string) {
     const operation = await this.store.recoverOperation(identity, operationId, new Date(), "operation-command");
-    if (!operation) throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+    if (!operation) throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     return operation;
   }
 }

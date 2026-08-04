@@ -119,7 +119,7 @@ const hashPricingRecord = async (record) => {
 };
 const routeDraftServiceClasses = ["lite", "balanced", "pro"];
 const routeDraftStorageKey = (scope) => scope?.tenantId && scope?.userId
-  ? `onecomputer.routing-mapping-draft:v1:${encodeURIComponent(scope.tenantId)}:${encodeURIComponent(scope.userId)}`
+  ? `lemmacomputer.routing-mapping-draft:v1:${encodeURIComponent(scope.tenantId)}:${encodeURIComponent(scope.userId)}`
   : "";
 const storedRouteDeployment = (value) => {
   if (!value || typeof value !== "object"

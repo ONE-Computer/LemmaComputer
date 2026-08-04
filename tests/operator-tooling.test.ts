@@ -16,7 +16,7 @@ import {
 test("environment updates preserve values, map renamed keys, initialize missing keys, and retain extras", () => {
   const template = [
     "KEEP=template-default",
-    "KASM_LOCAL_NETWORK_PREFIX=onecomputer-workspace",
+    "KASM_LOCAL_NETWORK_PREFIX=lemmacomputer-workspace",
     "NEW_VALUE=template-default",
     "",
   ].join("\n");
@@ -52,11 +52,11 @@ test("environment updates preserve values, map renamed keys, initialize missing 
 
 test("environment updates refuse partially configured coupled signing keys", () => {
   const template = [
-    "ONECOMPUTER_POLICY_SIGNING_KEY_ID=generated",
-    "ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64=generated",
-    "ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64=generated",
+    "LEMMACOMPUTER_POLICY_SIGNING_KEY_ID=generated",
+    "LEMMACOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64=generated",
+    "LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64=generated",
   ].join("\n");
-  const current = "ONECOMPUTER_POLICY_SIGNING_KEY_ID=existing";
+  const current = "LEMMACOMPUTER_POLICY_SIGNING_KEY_ID=existing";
 
   assert.throws(
     () => mergeEnvironment(template, current, template),
@@ -78,24 +78,24 @@ test("environment initialization creates separate Telegram grant and envelope ke
     type: "spki",
   });
 
-  assert.equal(privateKey("ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64").asymmetricKeyType, "ed25519");
-  assert.equal(publicKey("ONECOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64").asymmetricKeyType, "ed25519");
-  assert.equal(privateKey("ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64").asymmetricKeyType, "rsa");
-  assert.equal(publicKey("ONECOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64").asymmetricKeyType, "rsa");
+  assert.equal(privateKey("LEMMACOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64").asymmetricKeyType, "ed25519");
+  assert.equal(publicKey("LEMMACOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64").asymmetricKeyType, "ed25519");
+  assert.equal(privateKey("LEMMACOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64").asymmetricKeyType, "rsa");
+  assert.equal(publicKey("LEMMACOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64").asymmetricKeyType, "rsa");
 });
 
 test("compose shutdown refuses to bypass managed workspace lifecycle", () => {
   const calls: Array<{ command: string; args: string[] }> = [];
   let errors = "";
   const status = runComposeDown({
-    projectName: "onecomputer",
+    projectName: "lemmacomputer",
     run: (command: string, args: string[]) => {
       calls.push({ command, args });
       const filter = args[args.indexOf("--filter") + 1];
       return {
         status: 0,
         stdout: filter === runtimeContainerFilters[0]
-          ? "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508\n"
+          ? "lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508\n"
           : "",
         stderr: "",
       };

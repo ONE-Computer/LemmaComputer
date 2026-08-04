@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { createLiteLlmAdminProxy } from "../apps/litellm-admin-proxy/server.mjs";
-import { createMutualTlsFetch } from "@onecomputer/litellm-adapter";
+import { createMutualTlsFetch } from "@lemmacomputer/litellm-adapter";
 
 type CertificateMaterial = {
   directory: string;
@@ -23,12 +23,12 @@ const listen = (server: ReturnType<typeof createHttpServer>) => new Promise<void
 const close = (server: { close(callback: (error?: Error) => void): unknown }) => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 
 const generateCertificates = async (): Promise<CertificateMaterial> => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-litellm-admin-tls-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-litellm-admin-tls-"));
   const openssl = (args: string[]) => execFileSync("openssl", args, { cwd: directory, stdio: "pipe" });
-  openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-subj", "/CN=onecomputer-test-ca", "-days", "1"]);
+  openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-subj", "/CN=lemmacomputer-test-ca", "-days", "1"]);
   openssl(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr", "-subj", "/CN=litellm-admin"]);
   openssl(["x509", "-req", "-in", "server.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "server.crt", "-days", "1"]);
-  openssl(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "control.key", "-out", "control.csr", "-subj", "/CN=onecomputer-control"]);
+  openssl(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "control.key", "-out", "control.csr", "-subj", "/CN=lemmacomputer-control"]);
   openssl(["x509", "-req", "-in", "control.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "control.crt", "-days", "1"]);
   return {
     directory,
@@ -82,7 +82,7 @@ test("the LiteLLM administration proxy requires a Control client certificate and
     certificate: certificates.serverCertificate,
     privateKey: certificates.serverKey,
     clientCa: certificates.ca,
-    expectedClientCommonName: "onecomputer-control",
+    expectedClientCommonName: "lemmacomputer-control",
   });
   await listen(proxy);
   const proxyPort = (proxy.address() as AddressInfo).port;

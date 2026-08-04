@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately through
-[GitHub Security Advisories](https://github.com/ONE-Computer/onecomputer/security/advisories/new).
+[GitHub Security Advisories](https://github.com/ONE-Computer/lemmacomputer/security/advisories/new).
 Do not include provider keys, OAuth tokens, employee data, approval documents,
 database dumps, or other live secrets in the report. Use synthetic evidence and
 offer to share sensitive details through an agreed secure channel.

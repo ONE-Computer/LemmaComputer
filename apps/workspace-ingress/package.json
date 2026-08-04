@@ -1,5 +1,5 @@
 {
-  "name": "@onecomputer/workspace-ingress-server",
+  "name": "@lemmacomputer/workspace-ingress-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@onecomputer/workspace-ingress-auth": "*",
+    "@lemmacomputer/workspace-ingress-auth": "*",
     "zod": "4.4.3"
   }
 }

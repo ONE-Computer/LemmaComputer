@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BudgetUsageAttemptAdmission, budgetPeriodFor, quoteBudgetAttempt, type AttemptAdmissionInput, type TeamBudgetStore } from "@onecomputer/workspace-store";
+import { BudgetUsageAttemptAdmission, budgetPeriodFor, quoteBudgetAttempt, type AttemptAdmissionInput, type TeamBudgetStore } from "@lemmacomputer/workspace-store";
 
 test("calendar budget boundaries use local midnight through DST", () => {
   const march = budgetPeriodFor(new Date("2026-03-15T12:00:00Z"), "calendar_month", "America/New_York");

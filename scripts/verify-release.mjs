@@ -21,16 +21,16 @@ if (branch !== "main" && !branch.startsWith("release/")) {
 }
 const env = await readFile(".env", "utf8");
 const envValue = (name) => env.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
-const composeProject = envValue("ONECOMPUTER_COMPOSE_PROJECT_NAME");
-const workspaceImage = envValue("ONECOMPUTER_WORKSPACE_IMAGE");
-const workspaceNetworkPrefix = envValue("ONECOMPUTER_KASM_LOCAL_NETWORK_PREFIX");
+const composeProject = envValue("LEMMACOMPUTER_COMPOSE_PROJECT_NAME");
+const workspaceImage = envValue("LEMMACOMPUTER_WORKSPACE_IMAGE");
+const workspaceNetworkPrefix = envValue("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX");
 if (
   !composeProject
-  || composeProject === "onecomputer"
+  || composeProject === "lemmacomputer"
   || !workspaceImage
-  || workspaceImage === "onecomputer/workspace:dev"
+  || workspaceImage === "lemmacomputer/workspace:dev"
   || !workspaceNetworkPrefix
-  || workspaceNetworkPrefix === "onecomputer-workspace"
+  || workspaceNetworkPrefix === "lemmacomputer-workspace"
 ) {
   throw new Error("Release verification requires an isolated worktree initialized with npm run worktree:init");
 }
@@ -47,9 +47,9 @@ try {
   run("docker", ["image", "inspect", workspaceImage]);
   composeAttempted = true;
   run("docker", ["compose", "up", "-d", "--build", "--wait", "--wait-timeout", "300"]);
-  const webUrl = env.match(/^ONECOMPUTER_PUBLIC_WEB_URL=(.+)$/m)?.[1]?.trim();
-  if (!webUrl) throw new Error("ONECOMPUTER_PUBLIC_WEB_URL is missing");
-  run("curl", ["--fail", "--silent", "--show-error", `${webUrl}/__onecomputer/healthz`]);
+  const webUrl = env.match(/^LEMMACOMPUTER_PUBLIC_WEB_URL=(.+)$/m)?.[1]?.trim();
+  if (!webUrl) throw new Error("LEMMACOMPUTER_PUBLIC_WEB_URL is missing");
+  run("curl", ["--fail", "--silent", "--show-error", `${webUrl}/__lemmacomputer/healthz`]);
   const qualifier = `${process.cwd()}/scripts/qualify-workspace-startup.mts`;
   run("docker", [
     "compose", "run", "--rm", "--no-deps",

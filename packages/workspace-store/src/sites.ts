@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { IdentityContext } from "@onecomputer/contracts";
+import type { IdentityContext } from "@lemmacomputer/contracts";
 import pg from "pg";
 
 export type SiteRecord = {

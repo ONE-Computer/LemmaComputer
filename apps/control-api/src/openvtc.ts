@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { OneComputerError, type IdentityContext, type OwnedJson } from "@onecomputer/contracts";
+import { LemmaComputerError, type IdentityContext, type OwnedJson } from "@lemmacomputer/contracts";
 import type {
   GovernanceStore,
   GovernedOperationRecord,
@@ -8,7 +8,7 @@ import type {
   OpenVtcCompanionSubscriptionRecord,
   OpenVtcConsentTaskRecord,
   WorkspaceStore,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import {
   COMPANION_PUSH_PROTOCOL,
   type CompanionPushProvider,
@@ -16,8 +16,8 @@ import {
 } from "./web-push.js";
 import type { OpenVtcConsentClient } from "./openvtc-consent-client.js";
 
-const MICROSOFT365_TASK_TYPE = "https://onecomputer.dev/spec/microsoft365/tool-call/0.1";
-const ONECOMPUTER_APPROVER_ENROLLMENT_TYPE = "https://onecomputer.dev/spec/openvtc/approver-enrollment/0.1";
+const MICROSOFT365_TASK_TYPE = "https://lemmacomputer.dev/spec/microsoft365/tool-call/0.1";
+const LEMMACOMPUTER_APPROVER_ENROLLMENT_TYPE = "https://lemmacomputer.dev/spec/openvtc/approver-enrollment/0.1";
 const ENROLLMENT_TTL_MS = 5 * 60 * 1000;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -75,7 +75,7 @@ const taskPayloadFor = (record: GovernedOperationRecord): OwnedJson => ({
 const transportIdentity = (approver: OpenVtcApproverRecord): IdentityContext => ({
   tenantId: approver.tenantId,
   subjectId: approver.subjectId,
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 });
 
 const effectKind = (toolName: string) => toolName.startsWith("delete-") ? "delete"
@@ -102,7 +102,7 @@ export class OpenVtcApprovalCoordinator {
     });
     return {
       id: record.id,
-      type: ONECOMPUTER_APPROVER_ENROLLMENT_TYPE,
+      type: LEMMACOMPUTER_APPROVER_ENROLLMENT_TYPE,
       recipientDid: record.executorDid,
       challenge: record.challenge,
       tenantId: record.tenantId,
@@ -116,7 +116,7 @@ export class OpenVtcApprovalCoordinator {
     const challenge = await this.store.getOpenVtcEnrollmentChallenge(identity, challengeId);
     const now = new Date();
     if (!challenge || challenge.consumedAt || challenge.expiresAt <= now) {
-      throw new OneComputerError("OPENVTC_ENROLLMENT_CHALLENGE_INVALID", "The enrollment challenge is missing, expired, or already used", 409);
+      throw new LemmaComputerError("OPENVTC_ENROLLMENT_CHALLENGE_INVALID", "The enrollment challenge is missing, expired, or already used", 409);
     }
     const proof = await this.consent.verifyEnrollment({
       document,
@@ -129,7 +129,7 @@ export class OpenVtcApprovalCoordinator {
       now: now.toISOString(),
     });
     if (!await this.store.consumeOpenVtcEnrollmentChallenge(identity, challenge.id, challenge.challenge, now)) {
-      throw new OneComputerError("OPENVTC_ENROLLMENT_CHALLENGE_INVALID", "The enrollment challenge is missing, expired, or already used", 409);
+      throw new LemmaComputerError("OPENVTC_ENROLLMENT_CHALLENGE_INVALID", "The enrollment challenge is missing, expired, or already used", 409);
     }
     const payload = isObject(document) && isObject(document.payload) ? document.payload : {};
     const transportToken = `ocvta_${randomBytes(32).toString("base64url")}`;
@@ -189,8 +189,8 @@ export class OpenVtcApprovalCoordinator {
       challenge,
       taskType: MICROSOFT365_TASK_TYPE,
       taskPayload,
-      requesterDid: `did:onecomputer:agent:${operation.agentId ?? "workspace-agent"}`,
-      approverSet: "onecomputer-workspace-owners",
+      requesterDid: `did:lemmacomputer:agent:${operation.agentId ?? "workspace-agent"}`,
+      approverSet: "lemmacomputer-workspace-owners",
       minApprovals: 1,
       excludeRequester: true,
       sideEffects: operation.toolName.startsWith("delete-") ? "destructive" : "mutating",
@@ -199,7 +199,7 @@ export class OpenVtcApprovalCoordinator {
       consequences: [operation.toolName.startsWith("delete-")
         ? "This operation removes the selected Microsoft 365 resource."
         : "This operation changes Microsoft 365 data or communicates as the signed-in user."],
-      subject: `urn:onecomputer:operation:${operation.id}`,
+      subject: `urn:lemmacomputer:operation:${operation.id}`,
       origin: "LemmaComputer Control",
       statePin: { resource: operation.resourceName, version: operation.operationDigest },
     });
@@ -244,7 +244,7 @@ export class OpenVtcApprovalCoordinator {
     return {
       enabled: Boolean(this.pushProvider),
       protocolVersion: COMPANION_PUSH_PROTOCOL,
-      serviceWorkerVersion: "onecomputer-companion-sw-0.2",
+      serviceWorkerVersion: "lemmacomputer-companion-sw-0.2",
       vapidPublicKey: this.pushProvider?.publicKey ?? null,
       notificationPayload: { version: "1", event: "approval-pending" },
       support: [
@@ -272,9 +272,9 @@ export class OpenVtcApprovalCoordinator {
     platform: OpenVtcCompanionSubscriptionRecord["platform"];
     subscription: CompanionPushSubscription;
   }) {
-    if (!this.pushProvider) throw new OneComputerError("WEB_PUSH_NOT_CONFIGURED", "Companion push notifications are not configured", 503, true);
+    if (!this.pushProvider) throw new LemmaComputerError("WEB_PUSH_NOT_CONFIGURED", "Companion push notifications are not configured", 503, true);
     const approver = await this.store.getActiveOpenVtcApproverByDid(identity, input.approverDid);
-    if (!approver) throw new OneComputerError("OPENVTC_APPROVER_NOT_FOUND", "This browser approval key is not enrolled for the signed-in user", 404);
+    if (!approver) throw new LemmaComputerError("OPENVTC_APPROVER_NOT_FOUND", "This browser approval key is not enrolled for the signed-in user", 404);
     const protectedSubscription = this.pushProvider.protect(input.subscription);
     const saved = await this.store.upsertOpenVtcCompanionSubscription({
       id: randomUUID(),
@@ -303,13 +303,13 @@ export class OpenVtcApprovalCoordinator {
   }
 
   async testCompanion(identity: IdentityContext, companionId: string) {
-    if (!this.pushProvider) throw new OneComputerError("WEB_PUSH_NOT_CONFIGURED", "Companion push notifications are not configured", 503, true);
+    if (!this.pushProvider) throw new LemmaComputerError("WEB_PUSH_NOT_CONFIGURED", "Companion push notifications are not configured", 503, true);
     const subscriptions = await this.store.listOpenVtcCompanionSubscriptions(identity);
     const subscription = subscriptions.find((item) => item.id === companionId && item.status === "active");
-    if (!subscription) throw new OneComputerError("OPENVTC_COMPANION_NOT_FOUND", "Active companion browser not found", 404);
+    if (!subscription) throw new LemmaComputerError("OPENVTC_COMPANION_NOT_FOUND", "Active companion browser not found", 404);
     const result = await this.pushProvider.sendHint(subscription.subscriptionCiphertext);
     if (!result.delivered) {
-      throw new OneComputerError(result.failureCode ?? "WEB_PUSH_PROVIDER_UNAVAILABLE",
+      throw new LemmaComputerError(result.failureCode ?? "WEB_PUSH_PROVIDER_UNAVAILABLE",
         result.terminal ? "This notification subscription is no longer valid; re-enable notifications on this browser." : "The push provider is temporarily unavailable.",
         result.terminal ? 409 : 503,
         !result.terminal);
@@ -339,13 +339,13 @@ export class OpenVtcApprovalCoordinator {
     const payload = isObject(document) && isObject(document.payload) ? document.payload : null;
     const payloadDigest = payload?.payloadDigest;
     if (typeof payloadDigest !== "string" || !/^[0-9a-f]{64}$/.test(payloadDigest)) {
-      throw new OneComputerError("OPENVTC_DECISION_INVALID", "The decision payload digest is invalid", 400);
+      throw new LemmaComputerError("OPENVTC_DECISION_INVALID", "The decision payload digest is invalid", 400);
     }
     const task = await this.store.getOpenVtcConsentTaskByPayloadDigest(approver.id, payloadDigest);
-    if (!task) throw new OneComputerError("OPENVTC_TASK_NOT_FOUND", "No live consent task matches this decision", 404);
+    if (!task) throw new LemmaComputerError("OPENVTC_TASK_NOT_FOUND", "No live consent task matches this decision", 404);
     const identity = transportIdentity(approver);
     const operation = await this.store.getOwnedOperation(identity, task.operationId);
-    if (!operation) throw new OneComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
+    if (!operation) throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     await this.assertStoredRequest(task, approver, operation);
     const request = task.requestDocument as Record<string, unknown>;
     const requestPayload = request.payload as Record<string, unknown>;
@@ -368,11 +368,11 @@ export class OpenVtcApprovalCoordinator {
     });
     if (verified.signerDid !== approver.approverDid
       || verified.verificationMethod !== approver.verificationMethod) {
-      throw new OneComputerError("OPENVTC_DECISION_APPROVER_INVALID", "The decision key is not the enrolled approver key", 403);
+      throw new LemmaComputerError("OPENVTC_DECISION_APPROVER_INVALID", "The decision key is not the enrolled approver key", 403);
     }
     if (["approved", "denied"].includes(task.state)) {
       if (task.decisionHash === verified.documentHash) return { identity, operation };
-      throw new OneComputerError("APPROVAL_CONFLICT", "This task already has a different signed decision", 409);
+      throw new LemmaComputerError("APPROVAL_CONFLICT", "This task already has a different signed decision", 409);
     }
     const recorded = await this.store.recordOpenVtcDecision({
       identity,
@@ -395,17 +395,17 @@ export class OpenVtcApprovalCoordinator {
       const decidedTask = await this.store.getOpenVtcConsentTask(identity, task.operationId);
       const decidedOperation = await this.store.getOwnedOperation(identity, task.operationId);
       if (decidedTask?.decisionHash === verified.documentHash && decidedOperation) return { identity, operation: decidedOperation };
-      throw new OneComputerError("APPROVAL_STATE_INVALID", "The consent task is no longer live", 409);
+      throw new LemmaComputerError("APPROVAL_STATE_INVALID", "The consent task is no longer live", 409);
     }
     return { identity, operation: recorded };
   }
 
   private async requireTransportApprover(transportToken: string) {
     if (!/^ocvta_[A-Za-z0-9_-]{43}$/.test(transportToken)) {
-      throw new OneComputerError("UNAUTHENTICATED", "Browser agent authentication is required", 401);
+      throw new LemmaComputerError("UNAUTHENTICATED", "Browser agent authentication is required", 401);
     }
     const approver = await this.store.getOpenVtcApproverByTransportTokenHash(sha256(transportToken));
-    if (!approver) throw new OneComputerError("UNAUTHENTICATED", "Browser agent authentication is required", 401);
+    if (!approver) throw new LemmaComputerError("UNAUTHENTICATED", "Browser agent authentication is required", 401);
     return approver;
   }
 
@@ -439,7 +439,7 @@ export class OpenVtcApprovalCoordinator {
     const request = task.requestDocument;
     if (!isObject(request) || request.issuer !== this.consent.executorDid || request.recipient !== approver.approverDid
       || task.taskType !== MICROSOFT365_TASK_TYPE) {
-      throw new OneComputerError("OPENVTC_TASK_BINDING_INVALID", "The persisted consent request no longer matches its governed operation", 409);
+      throw new LemmaComputerError("OPENVTC_TASK_BINDING_INVALID", "The persisted consent request no longer matches its governed operation", 409);
     }
     const expected = await this.consent.signRequest({
       id: String(request.id),
@@ -450,7 +450,7 @@ export class OpenVtcApprovalCoordinator {
       taskType: task.taskType,
       taskPayload: taskPayloadFor(operation),
       requesterDid: String((request.payload as Record<string, unknown>).requester),
-      approverSet: "onecomputer-workspace-owners",
+      approverSet: "lemmacomputer-workspace-owners",
       minApprovals: 1,
       excludeRequester: true,
       sideEffects: operation.toolName.startsWith("delete-") ? "destructive" : "mutating",
@@ -459,14 +459,14 @@ export class OpenVtcApprovalCoordinator {
       consequences: [operation.toolName.startsWith("delete-")
         ? "This operation removes the selected Microsoft 365 resource."
         : "This operation changes Microsoft 365 data or communicates as the signed-in user."],
-      subject: `urn:onecomputer:operation:${operation.id}`,
+      subject: `urn:lemmacomputer:operation:${operation.id}`,
       origin: "LemmaComputer Control",
       statePin: { resource: operation.resourceName, version: operation.operationDigest },
     });
     if (expected.payloadDigest !== task.payloadDigest
       || expected.documentHash !== task.requestHash
       || expected.proofHash !== task.requestProofHash) {
-      throw new OneComputerError("OPENVTC_TASK_BINDING_INVALID", "The persisted consent request no longer matches its governed operation", 409);
+      throw new LemmaComputerError("OPENVTC_TASK_BINDING_INVALID", "The persisted consent request no longer matches its governed operation", 409);
     }
   }
 }

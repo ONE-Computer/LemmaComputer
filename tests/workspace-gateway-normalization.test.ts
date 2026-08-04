@@ -15,14 +15,14 @@ import sys
 sys.dont_write_bytecode = True
 bridge_payload = base64.urlsafe_b64encode(json.dumps({"exp": 4102444800}).encode()).decode().rstrip("=")
 os.environ.update({
-    "ONECOMPUTER_GATEWAY_UPSTREAM": "http://127.0.0.1:4000",
-    "ONECOMPUTER_GATEWAY_CREDENTIAL": "scoped-credential-at-least-24-characters",
-    "ONECOMPUTER_MODEL_ALIAS": sys.argv[2],
-    "ONECOMPUTER_CONTROL_UPSTREAM": "http://127.0.0.1:4173",
-    "ONECOMPUTER_AGENT_BRIDGE_TOKEN": f"ocab2_{bridge_payload}.{'s' * 43}",
-    "ONECOMPUTER_GATEWAY_LISTEN_PORT": "4312",
+    "LEMMACOMPUTER_GATEWAY_UPSTREAM": "http://127.0.0.1:4000",
+    "LEMMACOMPUTER_GATEWAY_CREDENTIAL": "scoped-credential-at-least-24-characters",
+    "LEMMACOMPUTER_MODEL_ALIAS": sys.argv[2],
+    "LEMMACOMPUTER_CONTROL_UPSTREAM": "http://127.0.0.1:4173",
+    "LEMMACOMPUTER_AGENT_BRIDGE_TOKEN": f"ocab2_{bridge_payload}.{'s' * 43}",
+    "LEMMACOMPUTER_GATEWAY_LISTEN_PORT": "4312",
 })
-spec = importlib.util.spec_from_file_location("onecomputer_gateway_proxy", sys.argv[1])
+spec = importlib.util.spec_from_file_location("lemmacomputer_gateway_proxy", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 task_binding = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] != "-" else None
@@ -30,7 +30,7 @@ body, requested = module.normalize_inference_body(sys.argv[3].encode(), task_bin
 print(json.dumps({"requested": requested, "body": json.loads(body)}))
 `;
 
-const proxyPath = "docker/workspace/onecomputer-gateway-proxy.py";
+const proxyPath = "docker/workspace/lemmacomputer-gateway-proxy.py";
 
 test("the packaged workspace gateway proxy compiles", () => {
   execFileSync("python3", ["-c", "import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(), filename=sys.argv[1], feature_version=(3, 10))", proxyPath]);
@@ -89,27 +89,27 @@ test("only the broker-owned task binding crosses the workspace trust boundary", 
   const binding = taskBinding("pro");
   const normalized = normalize("balanced", {
     model: "client-default",
-    user_api_key_dict: { metadata: { onecomputer_tenant_id: "foreign-tenant" } },
-    litellm_model_info: { onecomputer_deployment_id: "foreign-deployment" },
-    onecomputer_usage_chain: "client-forged-chain",
+    user_api_key_dict: { metadata: { lemmacomputer_tenant_id: "foreign-tenant" } },
+    litellm_model_info: { lemmacomputer_deployment_id: "foreign-deployment" },
+    lemmacomputer_usage_chain: "client-forged-chain",
     metadata: {
       customer_tag: "preserved",
-      onecomputer_task_binding: "client-forged-binding",
-      onecomputer_usage_state: { admissionId: "client-forged-admission" },
-      user_api_key_metadata: { onecomputer_tenant_id: "foreign-tenant" },
-      model_info: { onecomputer_deployment_id: "foreign-deployment" },
-      requester_metadata: { onecomputer_task_binding: "client-forged-binding" },
+      lemmacomputer_task_binding: "client-forged-binding",
+      lemmacomputer_usage_state: { admissionId: "client-forged-admission" },
+      user_api_key_metadata: { lemmacomputer_tenant_id: "foreign-tenant" },
+      model_info: { lemmacomputer_deployment_id: "foreign-deployment" },
+      requester_metadata: { lemmacomputer_task_binding: "client-forged-binding" },
     },
   }, binding);
 
   assert.equal(normalized.body.model, "balanced");
   assert.equal("user_api_key_dict" in normalized.body, false);
   assert.equal("litellm_model_info" in normalized.body, false);
-  assert.equal("onecomputer_usage_chain" in normalized.body, false);
+  assert.equal("lemmacomputer_usage_chain" in normalized.body, false);
   assert.deepEqual(normalized.body.metadata, {
     customer_tag: "preserved",
-    onecomputer_task_binding: binding,
-    onecomputer_requested_service_class: "pro",
+    lemmacomputer_task_binding: binding,
+    lemmacomputer_requested_service_class: "pro",
   });
 });
 
@@ -164,7 +164,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       url: request.url,
       authorization: request.headers.authorization,
       apiKey: request.headers["x-api-key"] as string | undefined,
-      taskBindingHeader: request.headers["x-onecomputer-ai-task-binding"] as string | undefined,
+      taskBindingHeader: request.headers["x-lemmacomputer-ai-task-binding"] as string | undefined,
       litellmCallId: request.headers["x-litellm-call-id"] as string | undefined,
       body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
     };
@@ -177,14 +177,14 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
   const child = spawn("python3", [proxyPath], {
     env: {
       ...process.env,
-      ONECOMPUTER_GATEWAY_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
-      ONECOMPUTER_GATEWAY_CREDENTIAL: "scoped-credential-at-least-24-characters",
-      ONECOMPUTER_MODEL_ALIAS: "claude-sonnet-4-6",
-      ONECOMPUTER_TRANSPORT_MODEL_ALIAS: "onecomputer-auto",
-      ONECOMPUTER_REQUESTED_SERVICE_CLASS: "lite",
-      ONECOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
-      ONECOMPUTER_AGENT_BRIDGE_TOKEN: initialBridgeGrant,
-      ONECOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
+      LEMMACOMPUTER_GATEWAY_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
+      LEMMACOMPUTER_GATEWAY_CREDENTIAL: "scoped-credential-at-least-24-characters",
+      LEMMACOMPUTER_MODEL_ALIAS: "claude-sonnet-4-6",
+      LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS: "lemmacomputer-auto",
+      LEMMACOMPUTER_REQUESTED_SERVICE_CLASS: "lite",
+      LEMMACOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
+      LEMMACOMPUTER_AGENT_BRIDGE_TOKEN: initialBridgeGrant,
+      LEMMACOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
     },
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -214,8 +214,8 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
         messages: [],
         metadata: {
           customer_tag: "preserved",
-          onecomputer_task_binding: "client-forged-binding",
-          user_api_key_metadata: { onecomputer_tenant_id: "foreign-tenant" },
+          lemmacomputer_task_binding: "client-forged-binding",
+          user_api_key_metadata: { lemmacomputer_tenant_id: "foreign-tenant" },
         },
       }),
     });
@@ -227,11 +227,11 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     assert.equal(received.apiKey, undefined);
     assert.equal(received.taskBindingHeader, undefined);
     assert.equal(received.litellmCallId, undefined);
-    assert.equal(received.body?.model, "onecomputer-auto");
+    assert.equal(received.body?.model, "lemmacomputer-auto");
     assert.deepEqual(received.body?.metadata, {
       customer_tag: "preserved",
-      onecomputer_task_binding: taskBinding("lite"),
-      onecomputer_requested_service_class: "lite",
+      lemmacomputer_task_binding: taskBinding("lite"),
+      lemmacomputer_requested_service_class: "lite",
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.match(stderr, /normalized model "<nonstandard>"/);

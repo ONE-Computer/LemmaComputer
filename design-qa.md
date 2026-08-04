@@ -3,7 +3,7 @@
 - Overview reference: `/home/mike/.codex/generated_images/019fb309-3e6d-7f11-9a4c-0eed1cf2bee2/call_fL6iISHzpJwS5PvwCoKRWCpE.png`
 - Model routes reference: `/home/mike/.codex/generated_images/019fb309-3e6d-7f11-9a4c-0eed1cf2bee2/call_ucX0rLbhBtKQUFE7izTW9Kne.png`
 - Profile-menu reference: `/home/mike/.codex/attachments/95e804f1-e2d0-43ea-be7d-65478ca48b40/codex-clipboard-a82475e2-6638-4678-bfc9-ed44c76c52b2.png`
-- Implementation captures: `/tmp/onecomputer-ai-control-overview-final.png`, `/tmp/onecomputer-model-routes-matched.png`, and `/tmp/onecomputer-profile-control-plane.png`.
+- Implementation captures: `/tmp/lemmacomputer-ai-control-overview-final.png`, `/tmp/lemmacomputer-model-routes-matched.png`, and `/tmp/lemmacomputer-profile-control-plane.png`.
 - Comparison surface: all three source/implementation pairs were loaded together in one local browser board.
 - Comparison viewport: 1900 × 1200; application captures: 1440 × 1000, light theme, administrator fixture state.
 - Data-state note: illustrative reference numbers were not copied into live views; unavailable evidence stays explicitly qualified.

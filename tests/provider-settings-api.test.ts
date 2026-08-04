@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OneComputerError, type IdentityContext } from "@onecomputer/contracts";
+import { LemmaComputerError, type IdentityContext } from "@lemmacomputer/contracts";
 import {
   managedProviderModels,
   managedProviderDeploymentDescriptors,
@@ -10,14 +10,14 @@ import {
   type ManagedProviderOperation,
   type ManagedProviderRoute,
   type ProviderAdministrationGateway,
-} from "@onecomputer/litellm-adapter";
+} from "@lemmacomputer/litellm-adapter";
 import {
   MemoryProviderSettingsStore,
   MemoryWorkspaceStore,
   type EffectivePolicy,
   type IdentityPolicyStore,
   type SessionPrincipal,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import { ProviderSettingsService } from "../apps/control-api/src/provider-settings.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
@@ -31,7 +31,7 @@ const rawRejectedKey = "sk-control-rejected-never-returned-000002";
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "alpha",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const administrator: SessionPrincipal = {
   userId: identity.subjectId,
@@ -47,9 +47,9 @@ const employee: SessionPrincipal = {
   roles: ["employee"],
 };
 const testHeaders = {
-  "x-onecomputer-proxy-token": proxyToken,
-  "x-onecomputer-test-tenant-id": identity.tenantId,
-  "x-onecomputer-test-user-id": identity.subjectId,
+  "x-lemmacomputer-proxy-token": proxyToken,
+  "x-lemmacomputer-test-tenant-id": identity.tenantId,
+  "x-lemmacomputer-test-user-id": identity.subjectId,
 };
 
 const effectivePolicy: EffectivePolicy = {
@@ -67,11 +67,11 @@ const effectivePolicy: EffectivePolicy = {
     workspaceProfile: "claude-desktop-standard-v1",
     workspaceProfiles: ["claude-desktop-standard-v1"],
     agentProfile: "claude-desktop-managed-v1",
-    modelAliases: ["onecomputer-assistant"],
+    modelAliases: ["lemmacomputer-assistant"],
     networkProfile: "controlled-egress-v1",
     mcp: {
       servers: {
-        onecomputer_ms365: {
+        lemmacomputer_ms365: {
           tools: ["list-mail-folders"],
           toolPolicies: { "list-mail-folders": "allow" },
         },
@@ -97,7 +97,7 @@ const authentication = (principal: SessionPrincipal) => ({
   begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
   complete: async () => { throw new Error("not used"); },
   authenticate: async () => principal,
-  logout: async () => "onecomputer_session=; Max-Age=0",
+  logout: async () => "lemmacomputer_session=; Max-Age=0",
 });
 
 class FakeProviderAdministration implements ProviderAdministrationGateway {
@@ -242,14 +242,14 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
         upstreamModelDisplayName: provider.upstreamModelDisplayName,
       })),
       [
-        { provider: "openai", primaryAlias: "onecomputer-openai", upstreamModelDisplayName: "OpenAI GPT-5.6 Terra" },
-        { provider: "anthropic", primaryAlias: "onecomputer-claude", upstreamModelDisplayName: "Anthropic Claude Sonnet 4.6" },
-        { provider: "glm", primaryAlias: "onecomputer-glm", upstreamModelDisplayName: "Z.ai GLM-5" },
-        { provider: "bedrock", primaryAlias: "onecomputer-bedrock", upstreamModelDisplayName: "Amazon Bedrock Claude Sonnet 4.5" },
+        { provider: "openai", primaryAlias: "lemmacomputer-openai", upstreamModelDisplayName: "OpenAI GPT-5.6 Terra" },
+        { provider: "anthropic", primaryAlias: "lemmacomputer-claude", upstreamModelDisplayName: "Anthropic Claude Sonnet 4.6" },
+        { provider: "glm", primaryAlias: "lemmacomputer-glm", upstreamModelDisplayName: "Z.ai GLM-5" },
+        { provider: "bedrock", primaryAlias: "lemmacomputer-bedrock", upstreamModelDisplayName: "Amazon Bedrock Claude Sonnet 4.5" },
       ],
     );
     const listedGlm = listed.json().providers.find((provider: { provider: string }) => provider.provider === "glm");
-    assert.deepEqual(listedGlm.aliases, ["onecomputer-glm", "claude-sonnet-4-5"]);
+    assert.deepEqual(listedGlm.aliases, ["lemmacomputer-glm", "claude-sonnet-4-5"]);
 
     const configuredGlm = await app.inject({
       method: "PUT",
@@ -260,7 +260,7 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configuredGlm.statusCode, 200);
     assert.equal(configuredGlm.json().provider.provider, "glm");
     assert.equal(configuredGlm.json().provider.state, "active");
-    assert.equal(configuredGlm.json().provider.primaryAlias, "onecomputer-glm");
+    assert.equal(configuredGlm.json().provider.primaryAlias, "lemmacomputer-glm");
     assert.equal(configuredGlm.json().provider.upstreamModelDisplayName, "Z.ai GLM-5.2");
     assert.equal(configuredGlm.json().provider.modelId, "glm-5.2");
     assert.deepEqual(configuredGlm.json().provider.modelOptions, [
@@ -335,7 +335,7 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(blockedAgain.statusCode, 409);
     assert.equal(blockedAgain.json().error.code, "PROVIDER_NOT_CONFIGURED");
 
-    providerAdministration.failure = new OneComputerError(
+    providerAdministration.failure = new LemmaComputerError(
       "PROVIDER_CREDENTIAL_REJECTED",
       "upstream reflected " + rawRejectedKey,
       422,
@@ -464,7 +464,7 @@ test("a configure that arrives during a disable epoch cannot reactivate the prov
   try {
     await assert.rejects(
       reconfigure,
-      (error: unknown) => error instanceof OneComputerError && error.code === "PROVIDER_LIFECYCLE_FENCED",
+      (error: unknown) => error instanceof LemmaComputerError && error.code === "PROVIDER_LIFECYCLE_FENCED",
     );
   } finally {
     releaseRevocation.resolve();
@@ -512,7 +512,7 @@ test("reconciliation retries gateway cleanup without re-enabling a disabled prov
     });
     assert.equal(configured.statusCode, 200);
 
-    providerAdministration.failure = new OneComputerError("PROVIDER_GATEWAY_UNAVAILABLE", "gateway unavailable", 503, true);
+    providerAdministration.failure = new LemmaComputerError("PROVIDER_GATEWAY_UNAVAILABLE", "gateway unavailable", 503, true);
     const disabled = await app.inject({
       method: "POST",
       url: "/v1/admin/provider-settings/openai/disable",
@@ -633,7 +633,7 @@ test("Bedrock provider settings persist only approved selection metadata and fai
 
     const beforeRejectedRotation = await settingsStore.getProviderSetting(identity.tenantId, "bedrock");
     assert.ok(beforeRejectedRotation);
-    providerAdministration.failure = new OneComputerError(
+    providerAdministration.failure = new LemmaComputerError(
       "BEDROCK_API_KEY_INVALID",
       "upstream reflected " + rawRejectedBedrockKey,
       422,
@@ -737,7 +737,7 @@ test("provider settings do not expose an administrator endpoint to an employee s
     const response = await app.inject({
       method: "GET",
       url: "/v1/admin/provider-settings",
-      headers: { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=employee" },
+      headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=employee" },
     });
     assert.equal(response.statusCode, 403);
 
@@ -782,7 +782,7 @@ test("provider settings accept model sets and expose concrete deployment descrip
       "gpt-5.6-luna",
     ]);
     assert.equal(provider.deployments[0].primary, true);
-    assert.ok(provider.deployments[0].aliases.includes("onecomputer-openai"));
+    assert.ok(provider.deployments[0].aliases.includes("lemmacomputer-openai"));
     assert.match(provider.deployments[0].providerDeployment, /^ocp-/);
     assert.deepEqual(provider.deployments[1].modelCapabilities, { vision: true, tools: true, streaming: true });
     assert.notEqual(provider.deployments[0].id, provider.deployments[1].id);

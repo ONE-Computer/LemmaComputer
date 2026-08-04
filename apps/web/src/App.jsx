@@ -105,12 +105,12 @@ const chatServiceClassOptions = [
 const chatServiceClassLabel = Object.fromEntries(chatServiceClassOptions.map((item) => [item.value, item.label.split(" · ")[0]]));
 const chatServiceClassValues = new Set(chatServiceClassOptions.map((item) => item.value));
 const workspaceModelNames = {
-  "onecomputer-auto": "Governed routing",
-  "onecomputer-claude": "Claude",
-  "onecomputer-openai": "OpenAI",
-  "onecomputer-glm": "GLM",
-  "onecomputer-bedrock": "Amazon Bedrock",
-  "onecomputer-assistant": "Standard route",
+  "lemmacomputer-auto": "Governed routing",
+  "lemmacomputer-claude": "Claude",
+  "lemmacomputer-openai": "OpenAI",
+  "lemmacomputer-glm": "GLM",
+  "lemmacomputer-bedrock": "Amazon Bedrock",
+  "lemmacomputer-assistant": "Standard route",
 };
 const workspaceModelName = (alias) => workspaceModelNames[alias] ?? alias;
 const chatAttachmentTypes = new Set([
@@ -1301,10 +1301,10 @@ const workspaceName = (workspace) => workspace?.grantId === "personal"
   ? "Acme Workspace"
   : workspace?.grantId?.replace(/^(sandbox|workspace)-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Managed workspace";
 
-const workspacePreferenceKey = "onecomputer.active-workspace-id";
-const chatAgentPreferenceKey = (workspaceId) => `onecomputer.active-chat-agent:${workspaceId}`;
+const workspacePreferenceKey = "lemmacomputer.active-workspace-id";
+const chatAgentPreferenceKey = (workspaceId) => `lemmacomputer.active-chat-agent:${workspaceId}`;
 const chatServiceClassPreferenceKey = (workspaceId, agentId, sessionId) => (
-  `onecomputer.chat-service-class:${workspaceId}:${agentId}:${sessionId}`
+  `lemmacomputer.chat-service-class:${workspaceId}:${agentId}:${sessionId}`
 );
 
 const readPreference = (key) => {
@@ -3700,7 +3700,7 @@ export function App() {
     if (!targetWorkspace || ["not_created", "stopped", "failed"].includes(targetWorkspace.state)) {
       return createWorkspace(targetWorkspace?.grantId ?? "personal");
     }
-    const sessionWindow = window.open("about:blank", "onecomputer-workspace");
+    const sessionWindow = window.open("about:blank", "lemmacomputer-workspace");
     setWorkspaceActionId(targetWorkspace.id);
     try {
       const result = await workspaceApi.open(targetWorkspace.id);

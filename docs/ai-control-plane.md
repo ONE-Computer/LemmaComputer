@@ -35,7 +35,7 @@ sequenceDiagram
   participant Provider as Selected model provider
 
   Client->>Broker: Prompt + requested service class
-  Broker->>Gateway: onecomputer-auto + signed task binding + scoped key
+  Broker->>Gateway: lemmacomputer-auto + signed task binding + scoped key
   Gateway->>Control: Decide route from bounded signals and trusted identity
   Control->>Store: Resolve Team, policy, rollout, mapping, price, budget, health
   Store-->>Control: Immutable decision context
@@ -69,7 +69,7 @@ There are two user selection scopes:
 
 Clearing site data or opening another browser loses the local conversation
 override. Unsupported saved values fall back to Auto. Regardless of the UI
-choice, governed traffic uses the single synthetic `onecomputer-auto` transport
+choice, governed traffic uses the single synthetic `lemmacomputer-auto` transport
 alias; the requested class is trusted only after Control evaluates the signed
 task and workspace context.
 

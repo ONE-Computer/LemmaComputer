@@ -3,13 +3,13 @@ import {
   approvedBedrockApiKeyModelProfiles,
   bedrockApiKeyRouteAlias,
   bedrockApiKeyRouteConfigurationSchema,
-  OneComputerError,
+  LemmaComputerError,
   type BedrockApiKeyRouteConfiguration,
   type BedrockApiKeyModelProfile,
   type IdentityContext,
   type OwnedJson,
   type RuntimePolicy,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import { managedProviderForAlias, managedProviderModels, tenantManagedModelAccessGroup } from "./provider-settings.js";
 import type { FetchLike } from "./mtls-fetch.js";
 export * from "./provider-settings.js";
@@ -212,7 +212,7 @@ const stringArray = (value: unknown) => Array.isArray(value)
 const canonicalToolDefinition = (value: unknown): string => {
   if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new OneComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
+    if (!Number.isFinite(value)) throw new LemmaComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) return `[${value.map(canonicalToolDefinition).join(",")}]`;
@@ -220,11 +220,11 @@ const canonicalToolDefinition = (value: unknown): string => {
     const record = value as JsonObject;
     return `{${Object.keys(record).sort().map((key) => {
       const item = record[key];
-      if (item === undefined) throw new OneComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
+      if (item === undefined) throw new LemmaComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
       return `${JSON.stringify(key)}:${canonicalToolDefinition(item)}`;
     }).join(",")}}`;
   }
-  throw new OneComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
+  throw new LemmaComputerError("MCP_TOOL_DISCOVERY_INVALID", "The connector returned an invalid tool definition", 502, true);
 };
 
 const maxToolDefinitionPreviewLength = 6_144;
@@ -300,31 +300,31 @@ const WORKSPACE_MAX_PARALLEL_REQUESTS = 30;
 
 // LiteLLM stores this model in its database so Provider Settings can change the
 // approved API-key route without changing config.yaml or restarting Compose.
-const BEDROCK_MODEL_ID = "onecomputer-bedrock-api-key-v1";
-const BEDROCK_CREDENTIAL_NAME = /^onecomputer-bedrock-[a-z0-9][a-z0-9-]{0,63}$/;
+const BEDROCK_MODEL_ID = "lemmacomputer-bedrock-api-key-v1";
+const BEDROCK_CREDENTIAL_NAME = /^lemmacomputer-bedrock-[a-z0-9][a-z0-9-]{0,63}$/;
 const BEDROCK_ROUTE_TIMEOUT_SECONDS = 60;
 const BEDROCK_ROUTE_MAX_RETRIES = 2;
 
 const desktopTransportAliases: Record<string, string> = {
-  "onecomputer-auto": "claude-sonnet-4-6",
-  "onecomputer-claude": "claude-sonnet-4-6",
-  "onecomputer-openai": "claude-opus-4-6",
-  "onecomputer-glm": "claude-sonnet-4-5",
+  "lemmacomputer-auto": "claude-sonnet-4-6",
+  "lemmacomputer-claude": "claude-sonnet-4-6",
+  "lemmacomputer-openai": "claude-opus-4-6",
+  "lemmacomputer-glm": "claude-sonnet-4-5",
   [bedrockApiKeyRouteAlias]: bedrockApiKeyRouteAlias,
 };
 
 const desktopModelAlias = (modelAlias: string, policy?: RuntimePolicy) => {
   if (!["claude-desktop-managed-v1", "claude-cli-managed-v1"].includes(policy?.agentProfile ?? "")) return modelAlias;
   const transportAlias = desktopTransportAliases[modelAlias];
-  if (!transportAlias) throw new OneComputerError("DESKTOP_MODEL_ROUTE_INVALID", "The selected model has no Claude Desktop transport route", 500);
+  if (!transportAlias) throw new LemmaComputerError("DESKTOP_MODEL_ROUTE_INVALID", "The selected model has no Claude Desktop transport route", 500);
   return transportAlias;
 };
 
 export const workspaceModelGrantProjection = (tenantId: string, modelAlias: string, policy?: RuntimePolicy) => {
   const clientModelAlias = desktopModelAlias(modelAlias, policy);
-  const transportModelAlias = modelAlias === "onecomputer-auto" ? "onecomputer-auto" : clientModelAlias;
-  if (transportModelAlias === "onecomputer-auto") {
-    return { clientModelAlias, transportModelAlias, providerAccessGroup: null, grantModels: ["onecomputer-auto"] };
+  const transportModelAlias = modelAlias === "lemmacomputer-auto" ? "lemmacomputer-auto" : clientModelAlias;
+  if (transportModelAlias === "lemmacomputer-auto") {
+    return { clientModelAlias, transportModelAlias, providerAccessGroup: null, grantModels: ["lemmacomputer-auto"] };
   }
   const managedProvider = managedProviderForAlias(clientModelAlias);
   const providerAccessGroup = managedProvider ? tenantManagedModelAccessGroup(tenantId, clientModelAlias) : null;
@@ -349,8 +349,8 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   constructor(private readonly config: LiteLLMConfig) {
     this.adminUrl = config.adminUrl.replace(/\/$/, "");
     this.workspaceUrl = config.workspaceUrl.replace(/\/$/, "");
-    this.modelAlias = config.modelAlias ?? "onecomputer-assistant";
-    this.mcpServer = config.mcpServer ?? "onecomputer_fixture";
+    this.modelAlias = config.modelAlias ?? "lemmacomputer-assistant";
+    this.mcpServer = config.mcpServer ?? "lemmacomputer_fixture";
     this.allowedTools = config.allowedTools ?? ["search_files"];
     this.timeoutMs = config.requestTimeoutMs ?? 15_000;
     this.workspaceGrantTtlMs = config.workspaceGrantTtlMs ?? 8 * 60 * 60 * 1000;
@@ -361,14 +361,14 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
 
   userIdFor(identity: IdentityContext) {
     const digest = createHash("sha256")
-      .update(`onecomputer:litellm:user:${identity.tenantId}:${identity.subjectId}`)
+      .update(`lemmacomputer:litellm:user:${identity.tenantId}:${identity.subjectId}`)
       .digest("base64url");
     return `oc-user-${digest}`;
   }
 
   agentIdFor(workspaceId: string, agentId?: string) {
     const digest = createHash("sha256")
-      .update(`onecomputer:litellm:agent:${workspaceId}:${agentId ?? "default"}`)
+      .update(`lemmacomputer:litellm:agent:${workspaceId}:${agentId ?? "default"}`)
       .digest("base64url");
     return `oc-agent-${digest}`;
   }
@@ -376,15 +376,15 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   credentialFor(workspaceId: string, agentId?: string) {
     const digest = createHmac("sha256", this.config.credentialSecret)
       .update(agentId
-        ? `onecomputer:litellm:workspace:${workspaceId}:agent:${agentId}`
-        : `onecomputer:litellm:workspace:${workspaceId}`)
+        ? `lemmacomputer:litellm:workspace:${workspaceId}:agent:${agentId}`
+        : `lemmacomputer:litellm:workspace:${workspaceId}`)
       .digest("base64url");
     return `sk-ocw-${digest}`;
   }
 
   connectionCredentialFor(identity: IdentityContext, serverName: string, grantNonce: string) {
     const digest = createHmac("sha256", this.config.credentialSecret)
-      .update(`onecomputer:litellm:connection:${identity.tenantId}:${identity.subjectId}:${serverName}:${grantNonce}`)
+      .update(`lemmacomputer:litellm:connection:${identity.tenantId}:${identity.subjectId}:${serverName}:${grantNonce}`)
       .digest("base64url");
     return `sk-occ-${digest}`;
   }
@@ -416,7 +416,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
             signal: AbortSignal.timeout(this.timeoutMs),
           });
         } catch {
-          throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
+          throw new LemmaComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
         }
       };
       // LiteLLM persists dynamic OAuth registrations. Reconcile it before every
@@ -428,7 +428,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       if (await this.missingOAuthClient(response)) {
         await response.body?.cancel().catch(() => undefined);
         if (!reconciledClientId) {
-          throw new OneComputerError(
+          throw new LemmaComputerError(
             "MCP_OAUTH_CLIENT_REQUIRED",
             "This connector requires provider app credentials",
             400,
@@ -438,10 +438,10 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       }
       if (response.status < 300 || response.status >= 400) {
         await response.body?.cancel().catch(() => undefined);
-        throw new OneComputerError("MCP_AUTHORIZATION_REJECTED", "Connector authorization could not be started", 502, true);
+        throw new LemmaComputerError("MCP_AUTHORIZATION_REJECTED", "Connector authorization could not be started", 502, true);
       }
       const location = response.headers.get("location");
-      if (!location) throw new OneComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
+      if (!location) throw new LemmaComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
       let authorizationUrl: URL;
       let expectedOrigins: string[];
       try {
@@ -450,10 +450,10 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           ?? (input.authorizationOrigin ? [input.authorizationOrigin] : []);
         expectedOrigins = configuredOrigins.map((origin) => new URL(origin).origin);
       } catch {
-        throw new OneComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
+        throw new LemmaComputerError("MCP_AUTHORIZATION_INVALID", "The connector authorization response was invalid", 502, true);
       }
       if (!expectedOrigins.includes(authorizationUrl.origin)) {
-        throw new OneComputerError("MCP_AUTHORIZATION_ORIGIN_MISMATCH", "The connector authorization origin was not approved", 502);
+        throw new LemmaComputerError("MCP_AUTHORIZATION_ORIGIN_MISMATCH", "The connector authorization origin was not approved", 502);
       }
       const cookieHeaders = response.headers as Headers & { getSetCookie?: () => string[] };
       const cookies = cookieHeaders.getSetCookie?.() ?? (response.headers.get("set-cookie") ? [response.headers.get("set-cookie")!] : []);
@@ -524,11 +524,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           signal: AbortSignal.timeout(this.timeoutMs),
         });
       } catch {
-        throw new OneComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
+        throw new LemmaComputerError("GATEWAY_UNAVAILABLE", "The MCP connection service is unavailable", 503, true);
       }
       await response.body?.cancel().catch(() => undefined);
       if (!response.ok) {
-        throw new OneComputerError("MCP_TOKEN_EXCHANGE_FAILED", "The connector did not complete the connection", 502, true);
+        throw new LemmaComputerError("MCP_TOKEN_EXCHANGE_FAILED", "The connector did not complete the connection", 502, true);
       }
       return await this.readConnectionStatus(grant.credential, grant.serverId, input.serverName, { includeAccount: true });
     } finally {
@@ -537,7 +537,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   }
 
   async userOAuthConnectionStatus(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus> {
-    const includeAccount = serverName === "onecomputer_ms365";
+    const includeAccount = serverName === "lemmacomputer_ms365";
     const grant = await this.ensureConnectionGrant(identity, serverName, { accountLookup: includeAccount });
     try {
       return await this.readConnectionStatus(grant.credential, grant.serverId, serverName, { includeAccount });
@@ -581,7 +581,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         // A tool without an exact server identity is not attributable to this
         // connector and must never become reviewable or projectable.
         if (typeof info.server_id !== "string") {
-          throw new OneComputerError(
+          throw new LemmaComputerError(
             "MCP_TOOL_DISCOVERY_INVALID",
             "The connector returned a tool without its server identity. Reconnect and try again.",
             502,
@@ -593,7 +593,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         if (!descriptor) continue;
         const existing = descriptors.get(descriptor.name);
         if (existing && existing.definitionHash !== descriptor.definitionHash) {
-          throw new OneComputerError(
+          throw new LemmaComputerError(
             "MCP_TOOL_DISCOVERY_CONFLICT",
             "The connector returned conflicting definitions for a tool. Reconnect and try again.",
             502,
@@ -609,7 +609,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   }
 
   async discoverOAuthMcpServer(input: Omit<McpConnectorRegistrationInput, "serverId" | "serverName"> & { callbackUrl: string }) {
-    const temporaryId = `onecomputer_discovery_${createHash("sha256").update(`${input.url}:${Date.now()}`).digest("hex").slice(0, 20)}`;
+    const temporaryId = `lemmacomputer_discovery_${createHash("sha256").update(`${input.url}:${Date.now()}`).digest("hex").slice(0, 20)}`;
     const payload = this.mcpRegistrationPayload({
       ...input,
       serverId: temporaryId,
@@ -619,7 +619,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     if (!created.ok) throw this.upstreamError("MCP_DISCOVERY_FAILED", created.status, created.payload);
     const dynamicClientId = input.clientId ? undefined : await this.registerDynamicOAuthClient(temporaryId);
     if (!input.clientId && !dynamicClientId) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "MCP_OAUTH_CLIENT_REQUIRED",
         "This connector requires provider app credentials",
         400,
@@ -627,7 +627,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     }
     const query = new URLSearchParams({
       redirect_uri: input.callbackUrl,
-      state: "onecomputer-discovery",
+      state: "lemmacomputer-discovery",
       code_challenge: createHash("sha256").update(temporaryId).digest("base64url"),
       code_challenge_method: "S256",
       response_type: "code",
@@ -642,18 +642,18 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {
-      throw new OneComputerError("MCP_DISCOVERY_FAILED", "The connector could not be reached", 502, true);
+      throw new LemmaComputerError("MCP_DISCOVERY_FAILED", "The connector could not be reached", 502, true);
     }
     const location = response.headers.get("location");
     await response.body?.cancel().catch(() => undefined);
     if (response.status < 300 || response.status >= 400 || !location) {
-      throw new OneComputerError("MCP_DISCOVERY_FAILED", "The connector did not expose a compatible OAuth flow", 400);
+      throw new LemmaComputerError("MCP_DISCOVERY_FAILED", "The connector did not expose a compatible OAuth flow", 400);
     }
     let authorizationUrl: URL;
     try {
       authorizationUrl = new URL(location);
     } catch {
-      throw new OneComputerError("MCP_DISCOVERY_FAILED", "The connector returned an invalid authorization address", 400);
+      throw new LemmaComputerError("MCP_DISCOVERY_FAILED", "The connector returned an invalid authorization address", 400);
     }
     return {
       authorizationOrigin: authorizationUrl.origin,
@@ -676,7 +676,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       const exact = servers.find((server) => server.server_id === input.serverId);
       if (exact) {
         if (exact.server_name !== input.serverName || exact.url !== input.url) {
-          throw new OneComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector registration does not match the approved catalog`, 409);
+          throw new LemmaComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector registration does not match the approved catalog`, 409);
         }
         // Apply the Control-owned egress classification to records created by
         // an earlier release. Also rebuild records whose OAuth metadata was
@@ -684,7 +684,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         // dynamic egress authorizer, so startup-only discovery is not a safe
         // readiness boundary. A server-id-only update preserves credentials
         // while forcing the pinned gateway to rediscover and reload the row.
-        const existingProfile = asObject(exact.mcp_info).onecomputer_egress_profile;
+        const existingProfile = asObject(exact.mcp_info).lemmacomputer_egress_profile;
         const missingOAuthMetadata = typeof exact.authorization_url !== "string"
           || !exact.authorization_url
           || typeof exact.token_url !== "string"
@@ -693,7 +693,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         if (needsProfileRepair || missingOAuthMetadata) {
           const repair: JsonObject = { server_id: input.serverId };
           if (needsProfileRepair) {
-            repair.mcp_info = { onecomputer_egress_profile: input.egressProfile! };
+            repair.mcp_info = { lemmacomputer_egress_profile: input.egressProfile! };
           }
           const updated = await this.adminCall("/v1/mcp/server", {
             method: "PUT",
@@ -705,7 +705,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       }
       const nameConflict = servers.find((server) => server.server_name === input.serverName);
       if (nameConflict) {
-        throw new OneComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector name is already registered`, 409);
+        throw new LemmaComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector name is already registered`, 409);
       }
       await this.registerOAuthMcpServer(input);
       servers.push({
@@ -737,7 +737,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         scopes: input.scopes,
       },
       ...(input.egressProfile ? {
-        mcp_info: { onecomputer_egress_profile: input.egressProfile },
+        mcp_info: { lemmacomputer_egress_profile: input.egressProfile },
       } : {}),
       allow_all_keys: false,
       available_on_public_internet: true,
@@ -751,7 +751,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const server = servers.map(asObject).find((item) => item.server_name === serverName);
     const serverId = server?.server_id;
     if (typeof serverId !== "string" || !serverId) {
-      throw new OneComputerError("MCP_CONNECTION_NOT_REGISTERED", "The connector is not registered in LiteLLM", 503, true);
+      throw new LemmaComputerError("MCP_CONNECTION_NOT_REGISTERED", "The connector is not registered in LiteLLM", 503, true);
     }
     return serverId;
   }
@@ -762,9 +762,9 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const credential = this.connectionCredentialFor(identity, serverName, grantNonce);
     const userId = this.userIdFor(identity);
     const serverDigest = createHash("sha256").update(serverName).digest("base64url").slice(0, 12);
-    const keyAlias = `onecomputer-connection-${userId}-${serverDigest}-${grantNonce}`;
+    const keyAlias = `lemmacomputer-connection-${userId}-${serverDigest}-${grantNonce}`;
     const credentialRoute = `/v1/mcp/server/${serverId}/oauth-user-credential`;
-    const accountLookup = options.accountLookup === true && serverName === "onecomputer_ms365";
+    const accountLookup = options.accountLookup === true && serverName === "lemmacomputer_ms365";
     const allowedRoutes = [
       `/v1/mcp/server/oauth/${serverId}/authorize`,
       `/v1/mcp/server/oauth/${serverId}/token`,
@@ -784,12 +784,12 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       rpm_limit: 12,
       allowed_routes: allowedRoutes,
       metadata: {
-        onecomputer_tenant_id: identity.tenantId,
-        onecomputer_subject_id: identity.subjectId,
-        onecomputer_gateway_user_id: userId,
-        onecomputer_connection_credential: true,
-        onecomputer_connection_server: serverName,
-        onecomputer_connection_account_lookup: accountLookup,
+        lemmacomputer_tenant_id: identity.tenantId,
+        lemmacomputer_subject_id: identity.subjectId,
+        lemmacomputer_gateway_user_id: userId,
+        lemmacomputer_connection_credential: true,
+        lemmacomputer_connection_server: serverName,
+        lemmacomputer_connection_account_lookup: accountLookup,
       },
       object_permission: {
         mcp_servers: [serverName],
@@ -808,7 +808,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const hasCredential = payload.has_credential === true;
     const isExpired = payload.is_expired === true;
     const state = !hasCredential ? "disconnected" : isExpired ? "expired" : "connected";
-    const account = options.includeAccount === true && state === "connected" && serverName === "onecomputer_ms365"
+    const account = options.includeAccount === true && state === "connected" && serverName === "lemmacomputer_ms365"
       ? await this.readConnectionAccount(credential, serverId).catch(() => null)
       : null;
     return {
@@ -830,15 +830,15 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     });
     if (!called.ok) throw this.upstreamError("MCP_ACCOUNT_LOOKUP_FAILED", called.status, called.payload);
     const payload = asObject(called.payload);
-    if (payload.isError === true) throw new OneComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
+    if (payload.isError === true) throw new LemmaComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
     const content = Array.isArray(payload.content) ? payload.content : [];
     const text = content.map(asObject).find((item) => item.type === "text" && typeof item.text === "string")?.text;
-    if (typeof text !== "string") throw new OneComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
+    if (typeof text !== "string") throw new LemmaComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
     let profile: JsonObject;
     try {
       profile = asObject(JSON.parse(text));
     } catch {
-      throw new OneComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
+      throw new LemmaComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
     }
     const safeString = (value: unknown) => typeof value === "string" && value.trim()
       ? value.trim().slice(0, 320)
@@ -849,7 +849,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       userPrincipalName: safeString(profile.userPrincipalName),
     };
     if (!account.displayName && !account.email && !account.userPrincipalName) {
-      throw new OneComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
+      throw new LemmaComputerError("MCP_ACCOUNT_LOOKUP_FAILED", "Connector account details are unavailable", 502, true);
     }
     return account;
   }
@@ -864,7 +864,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
 
   private executionCredential(operationId: string, leaseId: string) {
     const digest = createHmac("sha256", this.config.credentialSecret)
-      .update(`onecomputer:litellm:execution:${operationId}:${leaseId}`)
+      .update(`lemmacomputer:litellm:execution:${operationId}:${leaseId}`)
       .digest("base64url");
     return `sk-oce-${digest}`;
   }
@@ -906,7 +906,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const durationSeconds = Math.max(60, Math.ceil(this.workspaceGrantTtlMs / 1_000));
     const grant = {
       key: credential,
-      key_alias: `onecomputer-agent-${gatewayAgentId}`,
+      key_alias: `lemmacomputer-agent-${gatewayAgentId}`,
       key_type: "llm_api",
       user_id: gatewayUserId,
       agent_id: gatewayAgentId,
@@ -915,22 +915,22 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       rpm_limit: WORKSPACE_RPM_LIMIT,
       max_parallel_requests: WORKSPACE_MAX_PARALLEL_REQUESTS,
       metadata: {
-        onecomputer_workspace_id: input.workspaceId,
-        onecomputer_tenant_id: input.identity.tenantId,
-        onecomputer_subject_id: input.identity.subjectId,
-        onecomputer_agent_id: agentId ?? `workspace-default:${input.workspaceId}`,
-        onecomputer_policy_model_alias: modelAlias,
-        onecomputer_client_model_alias: clientModelAlias,
-        onecomputer_provider_access_group: providerAccessGroup,
-        onecomputer_governed_routing: transportModelAlias === "onecomputer-auto",
+        lemmacomputer_workspace_id: input.workspaceId,
+        lemmacomputer_tenant_id: input.identity.tenantId,
+        lemmacomputer_subject_id: input.identity.subjectId,
+        lemmacomputer_agent_id: agentId ?? `workspace-default:${input.workspaceId}`,
+        lemmacomputer_policy_model_alias: modelAlias,
+        lemmacomputer_client_model_alias: clientModelAlias,
+        lemmacomputer_provider_access_group: providerAccessGroup,
+        lemmacomputer_governed_routing: transportModelAlias === "lemmacomputer-auto",
         ...(input.policy ? {
-          onecomputer_policy_version_id: input.policy.policyVersionId,
-          onecomputer_policy_version: input.policy.policyVersion,
-          onecomputer_policy_hash: input.policy.policyHash,
+          lemmacomputer_policy_version_id: input.policy.policyVersionId,
+          lemmacomputer_policy_version: input.policy.policyVersion,
+          lemmacomputer_policy_hash: input.policy.policyHash,
         } : {}),
-        onecomputer_gateway_user_id: gatewayUserId,
-        onecomputer_gateway_agent_id: gatewayAgentId,
-        onecomputer_mcp_servers: mcpServers,
+        lemmacomputer_gateway_user_id: gatewayUserId,
+        lemmacomputer_gateway_agent_id: gatewayAgentId,
+        lemmacomputer_mcp_servers: mcpServers,
       },
       object_permission: {
         mcp_servers: mcpServers,
@@ -950,19 +950,19 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         && key?.max_budget == null
         && key?.budget_duration == null
         && key?.tpm_limit == null
-        && metadata.onecomputer_tenant_id === input.identity.tenantId
-        && metadata.onecomputer_subject_id === input.identity.subjectId
-        && metadata.onecomputer_workspace_id === input.workspaceId
-        && metadata.onecomputer_agent_id === (agentId ?? `workspace-default:${input.workspaceId}`)
-        && (!input.policy || (metadata.onecomputer_policy_version_id === input.policy.policyVersionId
-          && metadata.onecomputer_policy_hash === input.policy.policyHash));
+        && metadata.lemmacomputer_tenant_id === input.identity.tenantId
+        && metadata.lemmacomputer_subject_id === input.identity.subjectId
+        && metadata.lemmacomputer_workspace_id === input.workspaceId
+        && metadata.lemmacomputer_agent_id === (agentId ?? `workspace-default:${input.workspaceId}`)
+        && (!input.policy || (metadata.lemmacomputer_policy_version_id === input.policy.policyVersionId
+          && metadata.lemmacomputer_policy_hash === input.policy.policyHash));
     };
     const modelProjectionMatches = (key: JsonObject | undefined) => {
       const metadata = asObject(key?.metadata);
       return sameStrings(stringArray(key?.models), grantModels)
-        && metadata.onecomputer_policy_model_alias === modelAlias
-        && metadata.onecomputer_client_model_alias === clientModelAlias
-        && (metadata.onecomputer_provider_access_group ?? null) === providerAccessGroup;
+        && metadata.lemmacomputer_policy_model_alias === modelAlias
+        && metadata.lemmacomputer_client_model_alias === clientModelAlias
+        && (metadata.lemmacomputer_provider_access_group ?? null) === providerAccessGroup;
     };
     const currentIdentityMatches = identityMatches(current);
     const currentModelProjectionMatches = modelProjectionMatches(current);
@@ -1009,7 +1009,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           body: { key_aliases: [grant.key_alias] },
         }, true).catch(() => undefined);
         this.workspaceGrantStates.delete(credential);
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "GATEWAY_GRANT_FAILED",
           "The model gateway did not apply the workspace model grant",
           502,
@@ -1026,7 +1026,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const modelAlias = policy?.modelAlias ?? this.modelAlias;
     const allowedTools = policy?.allowedTools ?? this.allowedTools;
     const credential = this.credentialFor(workspaceId, effectiveAgentId);
-    const gatewayModelAlias = this.workspaceGrantStates.get(credential)?.transportModelAlias ?? (modelAlias === "onecomputer-auto" ? "onecomputer-auto" : desktopModelAlias(modelAlias, policy));
+    const gatewayModelAlias = this.workspaceGrantStates.get(credential)?.transportModelAlias ?? (modelAlias === "lemmacomputer-auto" ? "lemmacomputer-auto" : desktopModelAlias(modelAlias, policy));
     const [models, tools, modelRoute] = await Promise.all([
       this.dataCall("/v1/models", credential),
       this.dataCall("/mcp-rest/tools/list", credential),
@@ -1052,7 +1052,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async modelCapabilities(modelAlias: string): Promise<GatewayModelCapabilities> {
     const cached = this.modelCapabilityStates.get(modelAlias);
     if (cached && cached.expiresAt > Date.now()) return cached.capabilities;
-    if (modelAlias === "onecomputer-auto") {
+    if (modelAlias === "lemmacomputer-auto") {
       // Auto is a synthetic governed route rather than a LiteLLM provider
       // model. The router includes image requirements in task classification
       // and selects only an eligible vision-capable deployment for them.
@@ -1074,7 +1074,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const selected = models.map(asObject).find((item) => item.model_name === modelAlias);
     const supportsVision = asObject(selected?.model_info).supports_vision;
     if (typeof supportsVision !== "boolean") {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "MODEL_CAPABILITY_UNAVAILABLE",
         "The selected model route does not declare whether it supports image input",
         503,
@@ -1096,7 +1096,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       modelProfileId: input.modelProfileId,
     });
     if (!BEDROCK_CREDENTIAL_NAME.test(input.credentialName)) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "BEDROCK_CREDENTIAL_NAME_INVALID",
         "The Bedrock credential reference is not an approved internal name",
         400,
@@ -1159,7 +1159,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async testBedrockApiKeyRoute(input: BedrockApiKeyRouteSelection): Promise<BedrockApiKeyRouteTestResult> {
     const profile = this.bedrockProfile(input);
     const credential = `sk-ocb-${randomBytes(24).toString("base64url")}`;
-    const keyAlias = `onecomputer-bedrock-probe-${randomBytes(12).toString("hex")}`;
+    const keyAlias = `lemmacomputer-bedrock-probe-${randomBytes(12).toString("hex")}`;
     const grant = await this.adminCall("/key/generate", {
       method: "POST",
       body: {
@@ -1172,9 +1172,9 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         tpm_limit: 4_096,
         max_parallel_requests: 1,
         metadata: {
-          onecomputer_purpose: "bedrock-route-test",
-          onecomputer_non_billable_exemption: "provider-route-test-v1",
-          onecomputer_model_alias: bedrockApiKeyRouteAlias,
+          lemmacomputer_purpose: "bedrock-route-test",
+          lemmacomputer_non_billable_exemption: "provider-route-test-v1",
+          lemmacomputer_model_alias: bedrockApiKeyRouteAlias,
         },
       },
     }, true);
@@ -1203,7 +1203,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   private bedrockProfile(input: BedrockApiKeyRouteSelection): BedrockApiKeyModelProfile {
     const profile = approvedBedrockApiKeyModelProfiles.find((candidate) => candidate.id === input.modelProfileId);
     if (!profile || !profile.regions.includes(input.region)) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "BEDROCK_ROUTE_UNAPPROVED",
         "The selected Bedrock region or inference profile is not approved",
         400,
@@ -1224,12 +1224,12 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       },
       model_info: {
         id: BEDROCK_MODEL_ID,
-        onecomputer_provider: "bedrock",
-        onecomputer_provider_account_id: credentialName,
-        onecomputer_base_model: profile.litellmModel,
-        onecomputer_deployment_id: BEDROCK_MODEL_ID,
-        onecomputer_region: region,
-        onecomputer_provider_service_tier: "standard",
+        lemmacomputer_provider: "bedrock",
+        lemmacomputer_provider_account_id: credentialName,
+        lemmacomputer_base_model: profile.litellmModel,
+        lemmacomputer_deployment_id: BEDROCK_MODEL_ID,
+        lemmacomputer_region: region,
+        lemmacomputer_provider_service_tier: "standard",
         supports_vision: profile.capabilities.vision,
         supports_function_calling: profile.capabilities.toolCalls,
         supports_response_schema: profile.capabilities.structuredOutput,
@@ -1262,7 +1262,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       typeof value === "number" && Number.isInteger(value) && value >= 0
     );
     if (!isTokenCount(promptTokens) || !isTokenCount(completionTokens) || !isTokenCount(totalTokens)) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "BEDROCK_USAGE_UNAVAILABLE",
         "The Bedrock route did not return verifiable usage metadata",
         502,
@@ -1272,7 +1272,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return { promptTokens, completionTokens, totalTokens };
   }
 
-  private bedrockUpstreamError(status: number, payload: unknown): OneComputerError {
+  private bedrockUpstreamError(status: number, payload: unknown): LemmaComputerError {
     const body = asObject(payload);
     const detail = asObject(body.detail);
     const error = asObject(body.error);
@@ -1287,35 +1287,35 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     ].filter((value): value is string => typeof value === "string").join(" ").toLowerCase();
 
     if (status === 429 || /throttl|rate.?limit/.test(diagnostic)) {
-      return new OneComputerError("BEDROCK_THROTTLED", "Bedrock is throttling this route; retry shortly", 429, true);
+      return new LemmaComputerError("BEDROCK_THROTTLED", "Bedrock is throttling this route; retry shortly", 429, true);
     }
     if (status === 408 || status === 504 || /timeout|timed out/.test(diagnostic)) {
-      return new OneComputerError("BEDROCK_TIMEOUT", "Bedrock did not respond before the route timeout", 504, true);
+      return new LemmaComputerError("BEDROCK_TIMEOUT", "Bedrock did not respond before the route timeout", 504, true);
     }
     if (/invalid.*(?:api|bearer).*key|(?:api|bearer).*key.*invalid|authentication/.test(diagnostic) || status === 401) {
-      return new OneComputerError("BEDROCK_API_KEY_INVALID", "Bedrock rejected the API key", 401);
+      return new LemmaComputerError("BEDROCK_API_KEY_INVALID", "Bedrock rejected the API key", 401);
     }
     if (/marketplace|eula|subscription|model access|access to (?:the )?model|enable.*model/.test(diagnostic)) {
-      return new OneComputerError(
+      return new LemmaComputerError(
         "BEDROCK_MODEL_ACCESS_REQUIRED",
         "Enable the approved model and accept its applicable Bedrock terms before retrying",
         403,
       );
     }
     if (/unsupported.*region|region.*(?:unsupported|not supported|invalid)/.test(diagnostic)) {
-      return new OneComputerError("BEDROCK_REGION_UNSUPPORTED", "The approved Bedrock inference profile is not available in that region", 422);
+      return new LemmaComputerError("BEDROCK_REGION_UNSUPPORTED", "The approved Bedrock inference profile is not available in that region", 422);
     }
     if (/accessdenied|access denied|not authorized|permission/.test(diagnostic)) {
-      return new OneComputerError("BEDROCK_ACCESS_DENIED", "Bedrock denied access to the approved route", 403);
+      return new LemmaComputerError("BEDROCK_ACCESS_DENIED", "Bedrock denied access to the approved route", 403);
     }
     if (status >= 500) {
-      return new OneComputerError("BEDROCK_ROUTE_UNAVAILABLE", "The Bedrock route is temporarily unavailable", 503, true);
+      return new LemmaComputerError("BEDROCK_ROUTE_UNAVAILABLE", "The Bedrock route is temporarily unavailable", 503, true);
     }
-    return new OneComputerError("BEDROCK_ROUTE_REJECTED", "Bedrock rejected the route configuration or test request", status || 502);
+    return new LemmaComputerError("BEDROCK_ROUTE_REJECTED", "Bedrock rejected the route configuration or test request", status || 502);
   }
 
   private async modelRoute(credential: string, workspaceId: string, agentId: string | undefined, modelAlias: string): Promise<GatewayModelRoute> {
-    const keyAlias = `onecomputer-agent-${this.agentIdFor(workspaceId, agentId)}`;
+    const keyAlias = `lemmacomputer-agent-${this.agentIdFor(workspaceId, agentId)}`;
     const [result, capabilities] = await Promise.all([
       this.adminCall(`/key/list?return_full_object=true&key_alias=${encodeURIComponent(keyAlias)}`, { method: "GET" }),
       this.modelCapabilities(modelAlias),
@@ -1323,7 +1323,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const keys = Array.isArray(asObject(result.payload).keys) ? asObject(result.payload).keys as unknown[] : [];
     const tokenHash = createHash("sha256").update(credential).digest("hex");
     const key = keys.map(asObject).find((item) => item.token === tokenHash);
-    if (!key) throw new OneComputerError("GATEWAY_USAGE_UNAVAILABLE", "The model route usage state is unavailable", 502, true);
+    if (!key) throw new LemmaComputerError("GATEWAY_USAGE_UNAVAILABLE", "The model route usage state is unavailable", 502, true);
     const numberOr = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
     const positiveNumberOrNull = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
     return {
@@ -1347,7 +1347,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       this.readiness(workspaceId, effectiveAgentId, policy),
       this.dataCall("/mcp-rest/tools/list", credential),
     ]);
-    if (readiness.models !== "ready" || !readiness.modelRoute) throw new OneComputerError("MODEL_ROUTE_FAILED", "The assigned model route is unavailable", 502, true);
+    if (readiness.models !== "ready" || !readiness.modelRoute) throw new LemmaComputerError("MODEL_ROUTE_FAILED", "The assigned model route is unavailable", 502, true);
     // Model routing and optional MCP connectors have independent health. A stale
     // or disconnected connector must not make a working model gateway look down.
     const tools = toolList.ok && Array.isArray(asObject(toolList.payload).tools)
@@ -1368,13 +1368,13 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
 
   async executeGovernedTool(input: GovernedToolExecutionInput): Promise<GovernedToolExecutionResult> {
     const credential = this.executionCredential(input.operationId, input.leaseId);
-    const gatewayUserId = this.userIdFor({ tenantId: input.tenantId, subjectId: input.subjectId, audience: "onecomputer-control" });
+    const gatewayUserId = this.userIdFor({ tenantId: input.tenantId, subjectId: input.subjectId, audience: "lemmacomputer-control" });
     const gatewayAgentId = this.agentIdFor(input.workspaceId, input.agentId);
     const grant = await this.adminCall("/key/generate", {
       method: "POST",
       body: {
         key: credential,
-        key_alias: `onecomputer-execution-${input.operationId}`,
+        key_alias: `lemmacomputer-execution-${input.operationId}`,
         key_type: "llm_api",
         user_id: gatewayUserId,
         agent_id: gatewayAgentId,
@@ -1382,16 +1382,16 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         models: [],
         rpm_limit: 4,
         metadata: {
-          onecomputer_tenant_id: input.tenantId,
-          onecomputer_subject_id: input.subjectId,
-          onecomputer_workspace_id: input.workspaceId,
-          onecomputer_agent_id: input.agentId ?? `workspace-default:${input.workspaceId}`,
-          onecomputer_gateway_user_id: gatewayUserId,
-          onecomputer_gateway_agent_id: gatewayAgentId,
-          onecomputer_operation_id: input.operationId,
-          onecomputer_operation_digest: input.operationDigest,
-          onecomputer_lease_id: input.leaseId,
-          onecomputer_mcp_servers: [input.serverName],
+          lemmacomputer_tenant_id: input.tenantId,
+          lemmacomputer_subject_id: input.subjectId,
+          lemmacomputer_workspace_id: input.workspaceId,
+          lemmacomputer_agent_id: input.agentId ?? `workspace-default:${input.workspaceId}`,
+          lemmacomputer_gateway_user_id: gatewayUserId,
+          lemmacomputer_gateway_agent_id: gatewayAgentId,
+          lemmacomputer_operation_id: input.operationId,
+          lemmacomputer_operation_digest: input.operationDigest,
+          lemmacomputer_lease_id: input.leaseId,
+          lemmacomputer_mcp_servers: [input.serverName],
         },
         object_permission: {
           mcp_servers: [input.serverName],
@@ -1407,7 +1407,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       const selectedTool = tools.map(asObject).find((tool) => tool.name === input.toolName);
       const selectedServerId = asObject(selectedTool?.mcp_info).server_id;
       if (typeof selectedServerId !== "string" || !selectedServerId) {
-        throw new OneComputerError("GATEWAY_EXECUTION_TOOL_NOT_ASSIGNED", "The exact governed tool is not assigned to this execution", 403);
+        throw new LemmaComputerError("GATEWAY_EXECUTION_TOOL_NOT_ASSIGNED", "The exact governed tool is not assigned to this execution", 403);
       }
       const called = await this.dataCall("/mcp-rest/tools/call", credential, {
         method: "POST",
@@ -1421,7 +1421,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         const failureSummary = typeof firstText === "string" && firstText.trim()
           ? firstText.trim().slice(0, 240)
           : "The governed Microsoft 365 tool reported a failure";
-        throw new OneComputerError("UPSTREAM_TOOL_FAILED", failureSummary, 502, true);
+        throw new LemmaComputerError("UPSTREAM_TOOL_FAILED", failureSummary, 502, true);
       }
       const resultSummary = typeof firstText === "string" ? firstText.slice(0, 240) : "The governed tool completed successfully.";
       return {
@@ -1436,7 +1436,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
 
   async revoke(workspaceId: string, agentId?: string) {
     const credential = this.credentialFor(workspaceId, agentId);
-    const keyAlias = `onecomputer-agent-${this.agentIdFor(workspaceId, agentId)}`;
+    const keyAlias = `lemmacomputer-agent-${this.agentIdFor(workspaceId, agentId)}`;
     const result = await this.adminCall("/key/delete", {
       method: "POST",
       body: { key_aliases: [keyAlias] },
@@ -1468,7 +1468,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       });
       return { ok: response.ok, status: response.status, payload: await response.json().catch(() => ({})) };
     } catch {
-      throw new OneComputerError("GATEWAY_UNAVAILABLE", "The model gateway is unavailable", 503, true);
+      throw new LemmaComputerError("GATEWAY_UNAVAILABLE", "The model gateway is unavailable", 503, true);
     }
   }
 
@@ -1480,6 +1480,6 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       : typeof detail.error === "string"
         ? detail.error
         : "The model gateway rejected the request");
-    return new OneComputerError(code, message, status >= 500 ? 502 : status, status >= 500);
+    return new LemmaComputerError(code, message, status >= 500 ? 502 : status, status >= 500);
   }
 }

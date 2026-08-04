@@ -15,7 +15,7 @@ Docker socket, or external-channel credentials.
 
 Control creates a short-lived LiteLLM virtual key for a specific tenant, user,
 workspace, agent, model route, MCP server, tool set, policy version, and rate
-limit. Governed workspaces receive the single synthetic `onecomputer-auto`
+limit. Governed workspaces receive the single synthetic `lemmacomputer-auto`
 transport alias; the signed runtime policy and gateway metadata retain the
 policy route and service-class context. A root-owned loopback broker inside the
 managed image holds that scoped key. User applications authenticate to the
@@ -159,7 +159,7 @@ routing, approval state, Team budgets, and usage accounting. LiteLLM owns
 provider and OAuth credential custody and performs the authorized upstream
 operation. Its static model list is empty: managed provider deployments are
 tenant-scoped database records created through the private API, and governed
-workspace keys expose only the synthetic `onecomputer-auto` alias.
+workspace keys expose only the synthetic `lemmacomputer-auto` alias.
 
 See [LiteLLM gateway architecture](litellm-gateway-architecture.md) for the
 full provider lifecycle, grant projections, Auto-switching sequence, MCP/OAuth
@@ -213,7 +213,7 @@ need host Docker authority.
    contracts rather than provider model names.
 2. The root-owned loopback broker restricts paths, removes requester-supplied
    LemmaComputer and LiteLLM routing metadata, and forwards
-   `onecomputer-auto` with its workspace-and-agent key and signed task binding.
+   `lemmacomputer-auto` with its workspace-and-agent key and signed task binding.
 3. LiteLLM validates key expiry, the synthetic model allowlist, trusted
    identity metadata, concurrency, and RPM limits. Token usage is metered
    without a LemmaComputer-imposed per-minute allowance.
@@ -286,7 +286,7 @@ are excluded from the user-controlled operation fingerprint.
 | --- | --- | --- |
 | `public-edge` | ingress | Yes, for the host-published product origin |
 | `web-edge` | ingress, Web, Control | No |
-| `onecomputer-control` | Control, controller, channel broker, scheduler worker, ingress, dynamic relays | No |
+| `lemmacomputer-control` | Control, controller, channel broker, scheduler worker, ingress, dynamic relays | No |
 | `consent-private` | Control, OpenVTC | No |
 | `gateway-private` | Control, LiteLLM, gateway database, M365 MCP, model egress proxy | No |
 | `identity-egress` | Control | Yes, for Entra discovery and token exchange |
@@ -314,7 +314,7 @@ The remote-MCP proxy has its own LiteLLM service credential, a default-deny
 empty static policy, and an authenticated Control callback that receives only
 normalized protocol/host/port values. Errors and timeouts deny the connection.
 In hosted multi-tenant mode, custom MCP origins come from the deployment-owned
-`ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` allowlist rather than tenant connector
+`LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` allowlist rather than tenant connector
 records, so a tenant administrator cannot create a gateway-wide destination.
 
 ## State and recovery

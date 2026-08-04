@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sendChatTurnSchema } from "@onecomputer/contracts";
-import { RoutingDecisionBindingAuthority } from "@onecomputer/model-router";
-import type { RoutingStore, TeamStore } from "@onecomputer/workspace-store";
+import { sendChatTurnSchema } from "@lemmacomputer/contracts";
+import { RoutingDecisionBindingAuthority } from "@lemmacomputer/model-router";
+import type { RoutingStore, TeamStore } from "@lemmacomputer/workspace-store";
 import { RoutingExecutionService } from "../apps/control-api/src/routing.js";
 import { UsageTaskBindingAuthority } from "../apps/control-api/src/usage-ledger.js";
 

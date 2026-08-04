@@ -78,9 +78,9 @@ export type SandboxApplication = z.infer<typeof sandboxApplicationSchema>;
 // A policy always refers to a stable LemmaComputer alias. Provider Settings can
 // replace the private deployment behind this alias without rewriting signed
 // workspace policy documents.
-export const bedrockApiKeyRouteAlias = "onecomputer-bedrock" as const;
+export const bedrockApiKeyRouteAlias = "lemmacomputer-bedrock" as const;
 
-export const sandboxModelAliases = ["onecomputer-auto", "onecomputer-claude", "onecomputer-openai", "onecomputer-glm", "onecomputer-assistant", bedrockApiKeyRouteAlias] as const;
+export const sandboxModelAliases = ["lemmacomputer-auto", "lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-glm", "lemmacomputer-assistant", bedrockApiKeyRouteAlias] as const;
 export const sandboxModelAliasSchema = z.enum(sandboxModelAliases);
 export type SandboxModelAlias = z.infer<typeof sandboxModelAliasSchema>;
 
@@ -232,9 +232,9 @@ export const sandboxProfileSchema = z.object({
     "LemmaComputer open workspace",
     "LemmaComputer qualification CLI",
     // Preserve existing signed policies and persisted manifests across the display-brand change.
-    "ONEComputer managed workspace",
-    "ONEComputer open workspace",
-    "ONEComputer qualification CLI",
+    "LemmaComputer managed workspace",
+    "LemmaComputer open workspace",
+    "LemmaComputer qualification CLI",
   ]),
   clientVersion: z.string().min(1),
   persistence: z.literal("persistent-home"),
@@ -317,7 +317,7 @@ export const executeScheduleRunSchema = z.object({
 }).strict();
 
 export const agentProfileSchema = z.enum([
-  "onecomputer-default-agent",
+  "lemmacomputer-default-agent",
   "claude-desktop-managed-v1",
   "claude-cli-managed-v1",
   "codex-cli-managed-v1",
@@ -688,7 +688,7 @@ export const createWorkspaceSchema = z.object({
 export const identityContextSchema = z.object({
   tenantId: z.string().min(1).max(128),
   subjectId: z.string().min(1).max(128),
-  audience: z.literal("onecomputer-control"),
+  audience: z.literal("lemmacomputer-control"),
 });
 export type IdentityContext = z.infer<typeof identityContextSchema>;
 
@@ -827,15 +827,15 @@ export const policyVerificationKeySchema = z.strictObject({
 export type PolicyVerificationKey = z.infer<typeof policyVerificationKeySchema>;
 
 export const policyVerificationKeySetSchema = z.strictObject({
-  profile: z.literal("onecomputer-policy-key-set/v1"),
+  profile: z.literal("lemmacomputer-policy-key-set/v1"),
   keys: z.array(policyVerificationKeySchema).min(1).max(8),
 });
 export type PolicyVerificationKeySet = z.infer<typeof policyVerificationKeySetSchema>;
 
 export const policyBundlePayloadSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  issuer: z.literal("onecomputer-control"),
-  audience: z.literal("onecomputer-policy-enforcement"),
+  issuer: z.literal("lemmacomputer-control"),
+  audience: z.literal("lemmacomputer-policy-enforcement"),
   tenantId: z.string().min(1).max(128),
   subjectId: z.string().min(1).max(128),
   workspaceId: z.uuid(),
@@ -856,7 +856,7 @@ export const policyBundlePayloadSchema = z.strictObject({
 export type PolicyBundlePayload = z.infer<typeof policyBundlePayloadSchema>;
 
 export const signedPolicyBundleSchema = z.strictObject({
-  profile: z.literal("onecomputer-effective-policy/v1"),
+  profile: z.literal("lemmacomputer-effective-policy/v1"),
   canonicalization: z.literal("RFC8785-JCS"),
   algorithm: z.literal("Ed25519"),
   keyId: policyVerificationKeySchema.shape.keyId,
@@ -1170,7 +1170,7 @@ export const channelBrokerIdentitySchema = identityContextSchema.pick({
   tenantId: true,
   subjectId: true,
 }).extend({
-  audience: z.literal("onecomputer-control").default("onecomputer-control"),
+  audience: z.literal("lemmacomputer-control").default("lemmacomputer-control"),
 });
 export const channelBrokerSaveConnectionSchema = saveTelegramChannelConnectionSchema.extend({
   identity: channelBrokerIdentitySchema,
@@ -1196,7 +1196,7 @@ const telegramTokenIntakeIdempotencyKeySchema = z.string()
 
 export const telegramTokenIntakeGrantPayloadSchema = z.object({
   version: z.literal(1),
-  purpose: z.literal("onecomputer.telegram-token-intake"),
+  purpose: z.literal("lemmacomputer.telegram-token-intake"),
   grantId: z.uuid(),
   tenantId: z.string().trim().min(1).max(200),
   subjectId: z.string().trim().min(1).max(200),
@@ -1244,7 +1244,7 @@ const parseBase64urlJson = (value: string, code: string) => {
   try {
     return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
   } catch {
-    throw new OneComputerError(code, "The Telegram intake grant is invalid", 401);
+    throw new LemmaComputerError(code, "The Telegram intake grant is invalid", 401);
   }
 };
 
@@ -1283,7 +1283,7 @@ export class TelegramTokenIntakeGrantIssuer {
     }
     const payload = telegramTokenIntakeGrantPayloadSchema.parse({
       version: 1,
-      purpose: "onecomputer.telegram-token-intake",
+      purpose: "lemmacomputer.telegram-token-intake",
       grantId: randomUUID(),
       tenantId: input.identity.tenantId,
       subjectId: input.identity.subjectId,
@@ -1325,7 +1325,7 @@ export class TelegramTokenIntakeGrantVerifier {
   verify(token: string, now = new Date()) {
     const [header, body, signature, extra] = token.split(".");
     if (!header || !body || !signature || extra) {
-      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
     }
     const parsedHeader = parseBase64urlJson(header, "TELEGRAM_INTAKE_GRANT_INVALID");
     if (
@@ -1334,22 +1334,22 @@ export class TelegramTokenIntakeGrantVerifier {
       || (parsedHeader as Record<string, unknown>).typ !== "oc-telegram-intake-grant"
       || (parsedHeader as Record<string, unknown>).version !== 1
     ) {
-      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
     }
     const received = Buffer.from(signature, "base64url");
     const expectedLength = 64;
     if (received.length !== expectedLength || !verifyBytes(null, telegramTokenIntakeSigningInput(header, body), this.publicKey, received)) {
-      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
     }
     const payload = telegramTokenIntakeGrantPayloadSchema.safeParse(parseBase64urlJson(body, "TELEGRAM_INTAKE_GRANT_INVALID"));
     if (!payload.success) {
-      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
     }
     if (payload.data.expiresAt * 1_000 <= now.getTime()) {
-      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_EXPIRED", "The Telegram intake grant has expired", 401);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_GRANT_EXPIRED", "The Telegram intake grant has expired", 401);
     }
     if (payload.data.issuedAt * 1_000 > now.getTime() + 30_000) {
-      throw new OneComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_GRANT_INVALID", "The Telegram intake grant is invalid", 401);
     }
     return payload.data;
   }
@@ -1385,13 +1385,13 @@ export class TelegramTokenIntakeEnvelope {
       const combined = Buffer.from(envelope.ciphertext, "base64url");
       if (combined.length <= 16) throw new Error("missing authentication tag");
       const decipher = createDecipheriv("aes-256-gcm", contentKey, Buffer.from(envelope.iv, "base64url"));
-      decipher.setAAD(Buffer.from(`onecomputer.telegram-token-intake.v1:${grantId}`, "utf8"));
+      decipher.setAAD(Buffer.from(`lemmacomputer.telegram-token-intake.v1:${grantId}`, "utf8"));
       decipher.setAuthTag(combined.subarray(-16));
       const token = Buffer.concat([decipher.update(combined.subarray(0, -16)), decipher.final()]).toString("utf8");
       return telegramBotTokenSchema.parse(token);
     } catch (error) {
-      if (error instanceof OneComputerError) throw error;
-      throw new OneComputerError("TELEGRAM_INTAKE_ENVELOPE_INVALID", "The Telegram token envelope is invalid", 400);
+      if (error instanceof LemmaComputerError) throw error;
+      throw new LemmaComputerError("TELEGRAM_INTAKE_ENVELOPE_INVALID", "The Telegram token envelope is invalid", 400);
     }
   }
 }
@@ -1749,7 +1749,7 @@ export const apiErrorSchema = z.object({
   }),
 });
 
-export class OneComputerError extends Error {
+export class LemmaComputerError extends Error {
   constructor(
     public readonly code: string,
     message: string,
@@ -1757,7 +1757,7 @@ export class OneComputerError extends Error {
     public readonly retryable = false,
   ) {
     super(message);
-    this.name = "OneComputerError";
+    this.name = "LemmaComputerError";
   }
 }
 
@@ -1784,17 +1784,17 @@ export type GovernedOperationEnvelope = {
 const normalizeOwnedJson = (value: unknown): OwnedJson => {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new OneComputerError("INVALID_CANONICAL_JSON", "Canonical JSON numbers must be finite", 400);
+    if (!Number.isFinite(value)) throw new LemmaComputerError("INVALID_CANONICAL_JSON", "Canonical JSON numbers must be finite", 400);
     return value;
   }
   if (Array.isArray(value)) return value.map(normalizeOwnedJson);
   if (typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) {
-    throw new OneComputerError("INVALID_CANONICAL_JSON", "Canonical JSON accepts only plain JSON values", 400);
+    throw new LemmaComputerError("INVALID_CANONICAL_JSON", "Canonical JSON accepts only plain JSON values", 400);
   }
   const normalized: Record<string, OwnedJson> = {};
   for (const key of Object.keys(value as Record<string, unknown>).sort()) {
     const item = (value as Record<string, unknown>)[key];
-    if (item === undefined) throw new OneComputerError("INVALID_CANONICAL_JSON", "Canonical JSON does not accept undefined values", 400);
+    if (item === undefined) throw new LemmaComputerError("INVALID_CANONICAL_JSON", "Canonical JSON does not accept undefined values", 400);
     normalized[key] = normalizeOwnedJson(item);
   }
   return normalized;
@@ -1949,7 +1949,7 @@ export const m365ToolCatalog = {
 export type M365ToolName = keyof typeof m365ToolCatalog;
 
 export const mcpToolPolicySchema = z.object({
-  serverName: z.literal("onecomputer_ms365"),
+  serverName: z.literal("lemmacomputer_ms365"),
   version: z.number().int().positive(),
   documentHash: z.string().regex(/^[a-f0-9]{64}$/),
   tools: z.array(z.object({

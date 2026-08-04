@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MemoryWorkspaceStore, type BudgetStatus, type CreateBudgetOverrideInput, type CreateBudgetVersionInput, type IdentityPolicyStore, type RecordBudgetReconciliationInput, type SessionPrincipal, type TeamBudgetStore } from "@onecomputer/workspace-store";
+import { MemoryWorkspaceStore, type BudgetStatus, type CreateBudgetOverrideInput, type CreateBudgetVersionInput, type IdentityPolicyStore, type RecordBudgetReconciliationInput, type SessionPrincipal, type TeamBudgetStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken="budget-api-proxy-token-at-least-24-characters";
 const teamId="1b5f0aa2-e2e2-4ca4-86ca-8f1ea74a5b61";
-const administrator:SessionPrincipal={userId:"budget-admin",tenantId:"acme",email:"admin@example.test",displayName:"Budget Administrator",tenantDisplayName:"Acme",roles:["employee","administrator"],identity:{tenantId:"acme",subjectId:"budget-admin",audience:"onecomputer-control"}};
-const employee:SessionPrincipal={...administrator,userId:"budget-user",roles:["employee"],identity:{tenantId:"acme",subjectId:"budget-user",audience:"onecomputer-control"}};
+const administrator:SessionPrincipal={userId:"budget-admin",tenantId:"acme",email:"admin@example.test",displayName:"Budget Administrator",tenantDisplayName:"Acme",roles:["employee","administrator"],identity:{tenantId:"acme",subjectId:"budget-admin",audience:"lemmacomputer-control"}};
+const employee:SessionPrincipal={...administrator,userId:"budget-user",roles:["employee"],identity:{tenantId:"acme",subjectId:"budget-user",audience:"lemmacomputer-control"}};
 const period={start:new Date("2026-07-01T00:00:00Z"),end:new Date("2026-08-01T00:00:00Z")};
 
 class FakeBudgetStore implements TeamBudgetStore{
@@ -31,7 +31,7 @@ class FakeBudgetStore implements TeamBudgetStore{
 const authentication=(actor:SessionPrincipal)=>({begin:async()=>({location:"https://login.example.test",cookie:"state=opaque"}),complete:async()=>{throw new Error("unused");},authenticate:async()=>actor,logout:async()=>""});
 const identityPolicies={getEffectivePolicy:async()=>null,listUsers:async()=>[]} as unknown as IdentityPolicyStore;
 const appFor=(actor:SessionPrincipal,budgetStore:TeamBudgetStore)=>createControlServer(new MemoryWorkspaceStore(),{} as ControllerClient,proxyToken,undefined,undefined,{}, {authentication:authentication(actor),identityPolicyStore:identityPolicies,budgetStore,agentBridgeSecret:"team-budgets-agent-bridge-secret-at-least-32-characters"});
-const headers={"x-onecomputer-proxy-token":proxyToken,cookie:"onecomputer_session=valid"};
+const headers={"x-lemmacomputer-proxy-token":proxyToken,cookie:"lemmacomputer_session=valid"};
 
 test("Team budget API is administrator-only, tenant-derived, validated, and returns current period state",async()=>{
   const store=new FakeBudgetStore();const admin=appFor(administrator,store);const user=appFor(employee,store);

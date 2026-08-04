@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext, RuntimePolicy } from "@onecomputer/contracts";
+import type { IdentityContext, RuntimePolicy } from "@lemmacomputer/contracts";
 import {
   AgentBridgeAuthority,
   agentBridgeAudience,
@@ -10,7 +10,7 @@ import {
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "mike",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 
 const runtimePolicy: RuntimePolicy = {
@@ -18,11 +18,11 @@ const runtimePolicy: RuntimePolicy = {
   policyVersionId: randomUUID(),
   policyHash: "a".repeat(64),
   workspaceProfile: "claude-desktop-v1",
-  agentProfile: "onecomputer-default-agent",
+  agentProfile: "lemmacomputer-default-agent",
   agentId: randomUUID(),
-  modelAliases: ["onecomputer-assistant"],
+  modelAliases: ["lemmacomputer-assistant"],
   networkProfile: "controlled-egress-v1",
-  mcpServer: "onecomputer_ms365",
+  mcpServer: "lemmacomputer_ms365",
   allowedTools: ["list-drives"],
   toolPolicies: { "list-drives": "allow" },
   capabilities: ["m365-read"],

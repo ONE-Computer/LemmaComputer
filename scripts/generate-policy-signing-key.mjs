@@ -7,7 +7,7 @@ const publicKeySpkiBase64 = publicKey.export({ format: "der", type: "spki" }).to
 const date = new Date().toISOString().slice(0, 10).replaceAll("-", "_");
 const keyId = `psk_policy_${date}`;
 const keySet = {
-  profile: "onecomputer-policy-key-set/v1",
+  profile: "lemmacomputer-policy-key-set/v1",
   keys: [{
     keyId,
     algorithm: "Ed25519",
@@ -19,10 +19,10 @@ const keySet = {
 };
 
 const entries = [
-  `ONECOMPUTER_POLICY_SIGNING_KEY_ID=${keyId}`,
-  `ONECOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64=${privateKeyPkcs8Base64}`,
-  `ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(JSON.stringify(keySet), "utf8").toString("base64")}`,
-  "ONECOMPUTER_POLICY_BUNDLE_TTL_SECONDS=86400",
+  `LEMMACOMPUTER_POLICY_SIGNING_KEY_ID=${keyId}`,
+  `LEMMACOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64=${privateKeyPkcs8Base64}`,
+  `LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(JSON.stringify(keySet), "utf8").toString("base64")}`,
+  "LEMMACOMPUTER_POLICY_BUNDLE_TTL_SECONDS=86400",
 ];
 
 const output = `${entries.join("\n")}\n`;

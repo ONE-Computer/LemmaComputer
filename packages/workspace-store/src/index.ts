@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { activityEventSchema } from "@onecomputer/contracts";
-import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceRequestedServiceClass, WorkspaceState } from "@onecomputer/contracts";
+import { activityEventSchema } from "@lemmacomputer/contracts";
+import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceRequestedServiceClass, WorkspaceState } from "@lemmacomputer/contracts";
 import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migrations.js";
 export * from "./identity-policy.js";
 export * from "./connector-registry.js";
@@ -258,7 +258,7 @@ export type OpenVtcCompanionSubscriptionRecord = {
   subjectId: string;
   approverId: string;
   installationId: string;
-  protocolVersion: "onecomputer-companion-push-0.1";
+  protocolVersion: "lemmacomputer-companion-push-0.1";
   browserFamily: "chrome" | "edge" | "firefox" | "safari" | "other";
   platform: "windows" | "macos" | "linux" | "android" | "ios" | "other";
   endpointHash: string;
@@ -609,7 +609,7 @@ const mapOpenVtcCompanionSubscriptionRow = (row: Record<string, unknown>): OpenV
   subjectId: String(row.subject_id),
   approverId: String(row.approver_id),
   installationId: String(row.installation_id),
-  protocolVersion: "onecomputer-companion-push-0.1",
+  protocolVersion: "lemmacomputer-companion-push-0.1",
   browserFamily: row.browser_family as OpenVtcCompanionSubscriptionRecord["browserFamily"],
   platform: row.platform as OpenVtcCompanionSubscriptionRecord["platform"],
   endpointHash: String(row.endpoint_hash),

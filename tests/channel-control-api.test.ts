@@ -8,14 +8,14 @@ import {
   type AgentChatEvent,
   type ChannelTurnRequest,
   type IdentityContext,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import {
   MemoryWorkspaceStore,
   type EffectivePolicy,
   type IdentityPolicyStore,
   type RoutingStore,
   type SessionPrincipal,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import type { AgentChatClient } from "../apps/control-api/src/agent-chat.js";
 import type { ChannelBrokerManagementClient } from "../apps/control-api/src/channel-broker.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
@@ -23,7 +23,7 @@ import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "channel-control-proxy-token-at-least-24-characters";
 const channelToken = "channel-control-internal-token-at-least-32-characters";
-const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
+const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
 const principal: SessionPrincipal = {
   userId: "alpha",
   tenantId: "acme",
@@ -43,9 +43,9 @@ const generatedArtifact = {
 };
 
 const headers = {
-  "x-onecomputer-proxy-token": proxyToken,
-  "x-onecomputer-test-tenant-id": alpha.tenantId,
-  "x-onecomputer-test-user-id": alpha.subjectId,
+  "x-lemmacomputer-proxy-token": proxyToken,
+  "x-lemmacomputer-test-tenant-id": alpha.tenantId,
+  "x-lemmacomputer-test-user-id": alpha.subjectId,
 };
 
 const effectivePolicy = (): EffectivePolicy => ({
@@ -67,11 +67,11 @@ const effectivePolicy = (): EffectivePolicy => ({
     defaultAgents: ["hermes-claw", "claude-cli", "codex-cli"],
     applications: ["firefox"],
     defaultApplications: ["firefox"],
-    modelAliases: ["onecomputer-assistant"],
+    modelAliases: ["lemmacomputer-assistant"],
     networkProfile: "controlled-egress-v1",
     mcp: {
       servers: {
-        onecomputer_ms365: {
+        lemmacomputer_ms365: {
           tools: ["list-mail-folders"],
           toolPolicies: { "list-mail-folders": m365ToolCatalog["list-mail-folders"].decision },
         },
@@ -101,8 +101,8 @@ class FakeBroker implements ChannelBrokerManagementClient {
     return {
       id: credentialId ?? "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
       kind: "telegram_bot_token" as const,
-      displayName: "@onecomputer_test_bot",
-      botUsername: "onecomputer_test_bot",
+      displayName: "@lemmacomputer_test_bot",
+      botUsername: "lemmacomputer_test_bot",
       version: credentialId ? 2 : 1,
       workspaceId: null,
       connectionId: null,
@@ -130,7 +130,7 @@ class FakeBroker implements ChannelBrokerManagementClient {
       allowedUserCount: input.allowedUserIds.length,
       defaultAgentId: input.defaultAgentId,
       allowAgentSwitch: true,
-      botUsername: "onecomputer_test_bot",
+      botUsername: "lemmacomputer_test_bot",
       tokenVersion: 1,
       updatedAt: new Date().toISOString(),
     };
@@ -405,7 +405,7 @@ test("workspace settings authorize governed Auto only when a complete mapping ex
   try {
     const response = await app.inject({ method: "GET", url: "/v1/sandbox-settings?grantId=personal", headers });
     assert.equal(response.statusCode, 200);
-    assert.equal(response.json().modelAlias, "onecomputer-auto");
+    assert.equal(response.json().modelAlias, "lemmacomputer-auto");
     assert.deepEqual(response.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["auto", "lite", "balanced", "pro"]);
   } finally {
     await app.close();
@@ -462,8 +462,8 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     credentialKeyVersion: 1,
     version: 1,
     fingerprint: "test-fingerprint",
-    displayName: "@onecomputer_test_bot",
-    botUsername: "onecomputer_test_bot",
+    displayName: "@lemmacomputer_test_bot",
+    botUsername: "lemmacomputer_test_bot",
   });
   await store.saveChannelConnection(alpha, {
     id: connectionId,
@@ -511,7 +511,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     const accepted = await app.inject({
       method: "POST",
       url: "/internal/v1/channels/turns",
-      headers: { "x-onecomputer-channel-token": channelToken, "content-type": "application/json" },
+      headers: { "x-lemmacomputer-channel-token": channelToken, "content-type": "application/json" },
       payload,
     });
     assert.equal(accepted.statusCode, 200);
@@ -557,7 +557,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     const unauthenticatedArtifact = await app.inject({ method: "POST", url: "/internal/v1/channels/artifacts", payload: artifactRequest });
     assert.equal(unauthenticatedArtifact.statusCode, 401);
     const deliveredArtifact = await app.inject({ method: "POST", url: "/internal/v1/channels/artifacts",
-      headers: { "x-onecomputer-channel-token": channelToken, "content-type": "application/json" }, payload: artifactRequest });
+      headers: { "x-lemmacomputer-channel-token": channelToken, "content-type": "application/json" }, payload: artifactRequest });
     assert.equal(deliveredArtifact.statusCode, 200);
     assert.equal(deliveredArtifact.headers["content-type"], generatedArtifact.mediaType);
     assert.deepEqual(deliveredArtifact.rawPayload, generatedDeck);
@@ -565,7 +565,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     const replayed = await app.inject({
       method: "POST",
       url: "/internal/v1/channels/turns",
-      headers: { "x-onecomputer-channel-token": channelToken, "content-type": "application/json" },
+      headers: { "x-lemmacomputer-channel-token": channelToken, "content-type": "application/json" },
       payload,
     });
     assert.equal(replayed.statusCode, 409);
@@ -573,7 +573,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     const foreignSender = await app.inject({
       method: "POST",
       url: "/internal/v1/channels/turns",
-      headers: { "x-onecomputer-channel-token": channelToken, "content-type": "application/json" },
+      headers: { "x-lemmacomputer-channel-token": channelToken, "content-type": "application/json" },
       payload: { ...payload, externalSenderId: "99999", updateId: "2" },
     });
     assert.equal(foreignSender.statusCode, 403);
@@ -581,7 +581,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     const wrongAgent = await app.inject({
       method: "POST",
       url: "/internal/v1/channels/turns",
-      headers: { "x-onecomputer-channel-token": channelToken, "content-type": "application/json" },
+      headers: { "x-lemmacomputer-channel-token": channelToken, "content-type": "application/json" },
       payload: { ...payload, agentCatalogId: "claude-cli", updateId: "3" },
     });
     assert.equal(wrongAgent.statusCode, 409);

@@ -1,4 +1,4 @@
-import type { ConnectorRegistryRecord, SaveConnectorRegistryRecord } from "@onecomputer/workspace-store";
+import type { ConnectorRegistryRecord, SaveConnectorRegistryRecord } from "@lemmacomputer/workspace-store";
 
 export type ConnectorDefinition = ConnectorRegistryRecord;
 
@@ -17,7 +17,7 @@ const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "
   ...connector,
   policySupport: "automatic",
   source: "built-in",
-  createdBy: "onecomputer",
+  createdBy: "lemmacomputer",
 });
 
 const readyActivation: ConnectorActivation = { readiness: "ready", action: "connect", message: "This approved service is ready to connect." };
@@ -36,8 +36,8 @@ export const connectorActivation = (_connector: Pick<ConnectorDefinition, "id" |
 const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "notion",
-    serverId: "onecomputer_notion",
-    serverName: "onecomputer_notion",
+    serverId: "lemmacomputer_notion",
+    serverName: "lemmacomputer_notion",
     name: "Notion",
     shortDescription: "Search and update workspace knowledge",
     description: "Search and update the pages, databases, and knowledge your Notion account can access.",
@@ -50,8 +50,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "linear",
-    serverId: "onecomputer_linear",
-    serverName: "onecomputer_linear",
+    serverId: "lemmacomputer_linear",
+    serverName: "lemmacomputer_linear",
     name: "Linear",
     shortDescription: "Plan projects, issues, and product work",
     description: "Plan and follow product work across the issues, projects, and comments your account can access.",
@@ -64,8 +64,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "atlassian",
-    serverId: "onecomputer_atlassian",
-    serverName: "onecomputer_atlassian",
+    serverId: "lemmacomputer_atlassian",
+    serverName: "lemmacomputer_atlassian",
     name: "Atlassian",
     shortDescription: "Work across Jira and Confluence",
     description: "Bring approved Jira work and Confluence knowledge into your workspace.",
@@ -89,8 +89,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "asana",
-    serverId: "onecomputer_asana",
-    serverName: "onecomputer_asana",
+    serverId: "lemmacomputer_asana",
+    serverName: "lemmacomputer_asana",
     name: "Asana",
     shortDescription: "Manage tasks, projects, and reports",
     description: "Work with the tasks and projects your Asana account is authorized to access.",
@@ -103,8 +103,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "figma",
-    serverId: "onecomputer_figma",
-    serverName: "onecomputer_figma",
+    serverId: "lemmacomputer_figma",
+    serverName: "lemmacomputer_figma",
     name: "Figma",
     shortDescription: "Use design context from Figma files",
     description: "Retrieve the design context, variables, and components your Figma account can access.",
@@ -117,8 +117,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "box",
-    serverId: "onecomputer_box",
-    serverName: "onecomputer_box",
+    serverId: "lemmacomputer_box",
+    serverName: "lemmacomputer_box",
     name: "Box",
     shortDescription: "Search, organize, and use Box content",
     description: "Use files, folders, and Box AI features allowed by your Box account.",
@@ -131,8 +131,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "github",
-    serverId: "onecomputer_github",
-    serverName: "onecomputer_github",
+    serverId: "lemmacomputer_github",
+    serverName: "lemmacomputer_github",
     name: "GitHub",
     shortDescription: "Repositories, issues, and pull requests",
     description: "Work with repositories, issues, and pull requests allowed by your GitHub organization.",
@@ -145,8 +145,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "vercel",
-    serverId: "onecomputer_vercel",
-    serverName: "onecomputer_vercel",
+    serverId: "lemmacomputer_vercel",
+    serverName: "lemmacomputer_vercel",
     name: "Vercel",
     shortDescription: "Manage projects, deployments, and logs",
     description: "Use the Vercel projects and deployments your account authorizes.",
@@ -159,8 +159,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "supabase",
-    serverId: "onecomputer_supabase",
-    serverName: "onecomputer_supabase",
+    serverId: "lemmacomputer_supabase",
+    serverName: "lemmacomputer_supabase",
     name: "Supabase",
     shortDescription: "Work with Supabase projects and data",
     description: "Use the Supabase projects, database, and development tools your account authorizes.",
@@ -173,8 +173,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "neon",
-    serverId: "onecomputer_neon",
-    serverName: "onecomputer_neon",
+    serverId: "lemmacomputer_neon",
+    serverName: "lemmacomputer_neon",
     name: "Neon",
     shortDescription: "Manage Neon projects, branches, and databases",
     description: "Use the Neon projects, branches, databases, and development tools your account authorizes.",
@@ -187,8 +187,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "cloudflare-api",
-    serverId: "onecomputer_cloudflare_api",
-    serverName: "onecomputer_cloudflare_api",
+    serverId: "lemmacomputer_cloudflare_api",
+    serverName: "lemmacomputer_cloudflare_api",
     name: "Cloudflare",
     shortDescription: "Manage Cloudflare services through approved tools",
     description: "Use the Cloudflare account permissions you grant through its official API MCP server.",
@@ -201,8 +201,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "cloudflare-workers-builds",
-    serverId: "onecomputer_cloudflare_workers_builds",
-    serverName: "onecomputer_cloudflare_workers_builds",
+    serverId: "lemmacomputer_cloudflare_workers_builds",
+    serverName: "lemmacomputer_cloudflare_workers_builds",
     name: "Cloudflare Workers Builds",
     shortDescription: "Inspect and manage Workers builds",
     description: "Use the Cloudflare Workers Builds information your account authorizes.",
@@ -215,8 +215,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "hubspot",
-    serverId: "onecomputer_hubspot",
-    serverName: "onecomputer_hubspot",
+    serverId: "lemmacomputer_hubspot",
+    serverName: "lemmacomputer_hubspot",
     name: "HubSpot",
     shortDescription: "Search CRM records and customer work",
     description: "Use the CRM records and permissions your HubSpot account authorizes.",
@@ -229,8 +229,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "intercom",
-    serverId: "onecomputer_intercom",
-    serverName: "onecomputer_intercom",
+    serverId: "lemmacomputer_intercom",
+    serverName: "lemmacomputer_intercom",
     name: "Intercom",
     shortDescription: "Use customer conversations and contacts",
     description: "Use Intercom conversations and data available to your authorized account.",
@@ -243,8 +243,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "slack",
-    serverId: "onecomputer_slack",
-    serverName: "onecomputer_slack",
+    serverId: "lemmacomputer_slack",
+    serverName: "lemmacomputer_slack",
     name: "Slack",
     shortDescription: "Search channels and work with approved Slack context",
     description: "Use messages, channels, and canvases from a Slack workspace after your organization registers and approves the required Slack MCP app.",
@@ -257,8 +257,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "cloudflare-observability",
-    serverId: "onecomputer_cloudflare_observability",
-    serverName: "onecomputer_cloudflare_observability",
+    serverId: "lemmacomputer_cloudflare_observability",
+    serverName: "lemmacomputer_cloudflare_observability",
     name: "Cloudflare Observability",
     shortDescription: "Inspect application logs and analytics",
     description: "Use Cloudflare observability data that your account authorizes.",
@@ -271,8 +271,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "cloudflare-radar",
-    serverId: "onecomputer_cloudflare_radar",
-    serverName: "onecomputer_cloudflare_radar",
+    serverId: "lemmacomputer_cloudflare_radar",
+    serverName: "lemmacomputer_cloudflare_radar",
     name: "Cloudflare Radar",
     shortDescription: "Explore Internet trends and URL scans",
     description: "Use Cloudflare Radar data and utilities through the official remote MCP server.",
@@ -285,8 +285,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "cloudflare-graphql",
-    serverId: "onecomputer_cloudflare_graphql",
-    serverName: "onecomputer_cloudflare_graphql",
+    serverId: "lemmacomputer_cloudflare_graphql",
+    serverName: "lemmacomputer_cloudflare_graphql",
     name: "Cloudflare GraphQL",
     shortDescription: "Query Cloudflare analytics data",
     description: "Use the Cloudflare GraphQL analytics data your account authorizes.",
@@ -299,8 +299,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "stripe",
-    serverId: "onecomputer_stripe",
-    serverName: "onecomputer_stripe",
+    serverId: "lemmacomputer_stripe",
+    serverName: "lemmacomputer_stripe",
     name: "Stripe",
     shortDescription: "Work with payments and billing data",
     description: "Use the Stripe account permissions you grant through Stripe's official MCP server.",
@@ -313,8 +313,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "cloudflare-audit-logs",
-    serverId: "onecomputer_cloudflare_audit_logs",
-    serverName: "onecomputer_cloudflare_audit_logs",
+    serverId: "lemmacomputer_cloudflare_audit_logs",
+    serverName: "lemmacomputer_cloudflare_audit_logs",
     name: "Cloudflare Audit Logs",
     shortDescription: "Review Cloudflare audit activity",
     description: "Query the Cloudflare audit logs that your account authorizes.",
@@ -327,8 +327,8 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "cloudflare-one-casb",
-    serverId: "onecomputer_cloudflare_one_casb",
-    serverName: "onecomputer_cloudflare_one_casb",
+    serverId: "lemmacomputer_cloudflare_one_casb",
+    serverName: "lemmacomputer_cloudflare_one_casb",
     name: "Cloudflare One CASB",
     shortDescription: "Review SaaS security configuration",
     description: "Use Cloudflare One CASB findings that your account authorizes.",
@@ -345,8 +345,8 @@ export const connectorCatalog = (tenantId: string, microsoftAuthorizationOrigin:
   {
     tenantId,
     id: "microsoft-365",
-    serverId: "onecomputer_ms365",
-    serverName: "onecomputer_ms365",
+    serverId: "lemmacomputer_ms365",
+    serverName: "lemmacomputer_ms365",
     name: "Microsoft 365",
     shortDescription: "Mail, calendar, files, and Teams",
     description: "Use approved Microsoft 365 tools through the LemmaComputer AI gateway. Protected actions require approval.",
@@ -358,7 +358,7 @@ export const connectorCatalog = (tenantId: string, microsoftAuthorizationOrigin:
     policySupport: "governed",
     brand: "microsoft",
     source: "built-in",
-    createdBy: "onecomputer",
+    createdBy: "lemmacomputer",
   },
   ...remoteCatalog.map((connector) => ({ tenantId, ...connector })),
 ];

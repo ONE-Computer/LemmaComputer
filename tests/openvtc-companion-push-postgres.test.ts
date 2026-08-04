@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import { PostgresWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
+import { PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { OpenVtcApprovalCoordinator } from "../apps/control-api/src/openvtc.js";
 import type { CompanionPushProvider, CompanionPushSubscription } from "../apps/control-api/src/web-push.js";
 import { TestOpenVtcConsentClient } from "./helpers/openvtc-consent.js";
@@ -16,7 +16,7 @@ test("PostgreSQL Companion push enqueue is immediate, claimable, and deduplicate
   const identity: IdentityContext = {
     tenantId: `companion-push-test-${randomUUID()}`,
     subjectId: "owner",
-    audience: "onecomputer-control",
+    audience: "lemmacomputer-control",
   };
   const sent: string[] = [];
   const provider: CompanionPushProvider = {
@@ -67,13 +67,13 @@ test("PostgreSQL Companion push enqueue is immediate, claimable, and deduplicate
       workspaceId,
       agentId: "agent-postgres-companion",
       capabilityId: "m365-write-protected",
-      serverName: "onecomputer_ms365",
+      serverName: "lemmacomputer_ms365",
       toolName: "send-chat-message",
-      schemaId: "onecomputer.m365.send-chat-message.v1",
+      schemaId: "lemmacomputer.m365.send-chat-message.v1",
       arguments: {
         chatId: "chat-1",
         body: { body: { contentType: "html", content: "Hello" } },
-        onecomputerAudit: { target: "Project chat", targetType: "chat" },
+        lemmacomputerAudit: { target: "Project chat", targetType: "chat" },
       },
       operationDigest: "c".repeat(64),
       nonce: randomUUID(),

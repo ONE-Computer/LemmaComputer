@@ -57,7 +57,7 @@ export type ModelRoutingRequest = {
 };
 
 export type ModelRoutingDecision = {
-  requestedAlias: "onecomputer-auto";
+  requestedAlias: "lemmacomputer-auto";
   requestedServiceClass: RequestedServiceClass;
   selectedServiceClass: ProductServiceClass;
   taskClass: InternalTaskClass;
@@ -287,7 +287,7 @@ export class DeterministicModelRouter implements ModelRouter {
     if (request.requestedServiceClass === "Auto") this.writeAffinity(affinityKey, selectedServiceClass);
 
     return {
-      requestedAlias: "onecomputer-auto",
+      requestedAlias: "lemmacomputer-auto",
       requestedServiceClass: request.requestedServiceClass,
       selectedServiceClass,
       taskClass: classification.taskClass,

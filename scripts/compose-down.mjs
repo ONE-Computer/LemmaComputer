@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 export const runtimeContainerFilters = [
-  "label=com.onecomputer.sandbox.provider=kasm-local",
-  "label=com.onecomputer.sandbox.relay=kasm-local",
-  "label=com.onecomputer.egress-proxy=v2",
+  "label=com.lemmacomputer.sandbox.provider=kasm-local",
+  "label=com.lemmacomputer.sandbox.relay=kasm-local",
+  "label=com.lemmacomputer.egress-proxy=v2",
 ];
 
 const text = (value) => Buffer.isBuffer(value) ? value.toString("utf8") : String(value ?? "");
@@ -13,7 +13,7 @@ const localEnvironment = () => {
   try {
     const contents = readFileSync(".env", "utf8");
     const value = (key) => contents.match(new RegExp(`^${key}=(.+)$`, "m"))?.[1]?.trim();
-    return { projectName: value("ONECOMPUTER_COMPOSE_PROJECT_NAME"), networkPrefix: value("ONECOMPUTER_KASM_LOCAL_NETWORK_PREFIX") };
+    return { projectName: value("LEMMACOMPUTER_COMPOSE_PROJECT_NAME"), networkPrefix: value("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX") };
   } catch {
     return {};
   }
@@ -24,13 +24,13 @@ export function runComposeDown({
   args = process.argv.slice(2),
   stdout = process.stdout,
   stderr = process.stderr,
-  projectName = localEnvironment().projectName ?? "onecomputer",
-  networkPrefix = localEnvironment().networkPrefix ?? "onecomputer-workspace",
+  projectName = localEnvironment().projectName ?? "lemmacomputer",
+  networkPrefix = localEnvironment().networkPrefix ?? "lemmacomputer-workspace",
 } = {}) {
   const runtimeContainers = new Set();
   const workspaceIds = new Set();
   const sandboxNames = new Set();
-  const scoped = projectName !== "onecomputer";
+  const scoped = projectName !== "lemmacomputer";
   for (const [filterIndex, filter] of runtimeContainerFilters.entries()) {
     const result = run("docker", ["ps", "-a", "--filter", filter, "--format", "{{.Names}}"], { encoding: "utf8" });
     if (result.error) {
@@ -57,15 +57,15 @@ export function runComposeDown({
         return 1;
       }
       const belongs = filterIndex === 0
-        ? String(labels["com.onecomputer.workspace-network"] ?? "").startsWith(`${networkPrefix}-`)
+        ? String(labels["com.lemmacomputer.workspace-network"] ?? "").startsWith(`${networkPrefix}-`)
         : filterIndex === 1
-          ? sandboxNames.has(String(labels["com.onecomputer.sandbox-id"] ?? ""))
-          : workspaceIds.has(String(labels["com.onecomputer.workspace-id"] ?? ""));
+          ? sandboxNames.has(String(labels["com.lemmacomputer.sandbox-id"] ?? ""))
+          : workspaceIds.has(String(labels["com.lemmacomputer.workspace-id"] ?? ""));
       if (belongs) {
         runtimeContainers.add(name);
         if (filterIndex === 0) {
           sandboxNames.add(name);
-          workspaceIds.add(String(labels["com.onecomputer.workspace-id"] ?? ""));
+          workspaceIds.add(String(labels["com.lemmacomputer.workspace-id"] ?? ""));
         }
       }
     }

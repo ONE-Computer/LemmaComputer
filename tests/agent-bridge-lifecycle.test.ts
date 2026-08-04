@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext, Launch, RuntimePolicy, Sandbox } from "@onecomputer/contracts";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext, Launch, RuntimePolicy, Sandbox } from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import {
   AgentBridgeAuthority,
   agentBridgeAudience,
@@ -16,7 +16,7 @@ const bridgeSecret = "agent-bridge-dedicated-secret-at-least-32-characters";
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "alex",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const policy: RuntimePolicy = {
   schemaVersion: 1,
@@ -24,11 +24,11 @@ const policy: RuntimePolicy = {
   policyVersion: 1,
   policyHash: "a".repeat(64),
   workspaceProfile: "kasm-persistent-standard",
-  agentProfile: "onecomputer-default-agent",
+  agentProfile: "lemmacomputer-default-agent",
   agentId: "agent-alex",
   networkProfile: "controlled-egress-v1",
-  modelAlias: "onecomputer-assistant",
-  mcpServer: "onecomputer_fixture",
+  modelAlias: "lemmacomputer-assistant",
+  mcpServer: "lemmacomputer_fixture",
   allowedTools: ["search_files"],
   toolPolicies: { search_files: "allow" },
 };

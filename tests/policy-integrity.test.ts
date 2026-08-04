@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext, RuntimePolicy } from "@onecomputer/contracts";
+import type { IdentityContext, RuntimePolicy } from "@lemmacomputer/contracts";
 import {
   PolicyBundleSigner,
   PolicyVerificationError,
   verifySignedPolicyBundle,
   type PolicyVerificationKeySet,
-} from "@onecomputer/policy-integrity";
+} from "@lemmacomputer/policy-integrity";
 
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "alex",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 
 const policy: RuntimePolicy = {
@@ -29,14 +29,14 @@ const policy: RuntimePolicy = {
     agentProfile: "hermes-claw-managed-v1",
     displayName: "Hermes Agent CLI",
     clientVersion: "0.19.0",
-    modelAlias: "onecomputer-glm",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-glm",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-calendars"],
     toolPolicies: { "list-calendars": "allow" },
   }],
   networkProfile: "controlled-egress-v1",
-  modelAlias: "onecomputer-glm",
-  mcpServer: "onecomputer_ms365",
+  modelAlias: "lemmacomputer-glm",
+  mcpServer: "lemmacomputer_ms365",
   allowedTools: ["list-calendars"],
   toolPolicies: { "list-calendars": "allow" },
 };
@@ -48,7 +48,7 @@ const fixture = () => {
     privateKeyPkcs8Base64: privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
   });
   const keys: PolicyVerificationKeySet = {
-    profile: "onecomputer-policy-key-set/v1",
+    profile: "lemmacomputer-policy-key-set/v1",
     keys: [{
       ...signer.verificationKey(),
       status: "active",
@@ -61,7 +61,7 @@ const fixture = () => {
     policy,
     routes: {
       modelGateway: "http://litellm:4000",
-      mcpControl: "http://onecomputer-control:4100",
+      mcpControl: "http://lemmacomputer-control:4100",
     },
     now,
     ttlSeconds: 900,

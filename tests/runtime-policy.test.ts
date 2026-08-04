@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runtimePolicyFor, withOpenWorkspaceProfile, type EffectivePolicy } from "@onecomputer/workspace-store";
+import { runtimePolicyFor, withOpenWorkspaceProfile, type EffectivePolicy } from "@lemmacomputer/workspace-store";
 
 test("legacy managed policy upgrades add open access without changing agent selection", () => {
   const legacy = {
@@ -34,10 +34,10 @@ test("a user policy projects into an approved workspace runtime", () => {
     document: {
       schemaVersion: 1,
       workspaceProfile: "kasm-persistent-standard",
-      agentProfile: "onecomputer-default-agent",
-      modelAliases: ["onecomputer-assistant"],
+      agentProfile: "lemmacomputer-default-agent",
+      modelAliases: ["lemmacomputer-assistant"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file"] } } },
     },
   };
   assert.deepEqual(runtimePolicyFor(effective), {
@@ -49,7 +49,7 @@ test("a user policy projects into an approved workspace runtime", () => {
     executionMode: "managed",
     egressMode: "restricted",
     agentId: "agent-1",
-    agentProfile: "onecomputer-default-agent",
+    agentProfile: "lemmacomputer-default-agent",
     applications: ["firefox"],
     networkProfile: "controlled-egress-v1",
     clipboard: {
@@ -58,8 +58,8 @@ test("a user policy projects into an approved workspace runtime", () => {
       workspaceToLocal: true,
       maxBytes: 65_536,
     },
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     requestedServiceClass: "auto",
     allowedTools: ["list-mail-folders", "list-calendars", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file"],
     toolPolicies: {
@@ -84,9 +84,9 @@ test("disposable-open projects explicit open execution and full-web egress witho
       workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
       agentProfile: "codex-cli-managed-v1",
       agents: ["codex-cli", "hermes-claw"],
-      modelAliases: ["onecomputer-openai"],
+      modelAliases: ["lemmacomputer-openai"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
     },
   };
 
@@ -112,9 +112,9 @@ test("disposable-open projects attached deny rules as full-web exceptions", () =
       schemaVersion: 1,
       workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
       agents: ["codex-cli"],
-      modelAliases: ["onecomputer-openai"],
+      modelAliases: ["lemmacomputer-openai"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
     },
     egressSecurityGroup: {
       schemaVersion: 1,
@@ -169,26 +169,26 @@ test("an assigned sandbox selection can narrow a multi-model policy but cannot b
       workspaceProfile: "claude-desktop-standard-v1",
       workspaceProfiles: ["claude-desktop-standard-v1"],
       agentProfile: "claude-desktop-managed-v1",
-      modelAliases: ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm"],
+      modelAliases: ["lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-glm"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
     },
   };
-  const selected = runtimePolicyFor(effective, "onecomputer-glm", "claude-desktop-standard-v1");
-  assert.equal(selected.modelAlias, "onecomputer-glm");
+  const selected = runtimePolicyFor(effective, "lemmacomputer-glm", "claude-desktop-standard-v1");
+  assert.equal(selected.modelAlias, "lemmacomputer-glm");
   assert.equal(selected.workspaceProfile, "claude-desktop-standard-v1");
   assert.throws(() => runtimePolicyFor(effective, "unassigned-model", "claude-desktop-standard-v1"), /not assigned/);
-  assert.throws(() => runtimePolicyFor(effective, "onecomputer-auto", "claude-desktop-standard-v1"), /not assigned/);
+  assert.throws(() => runtimePolicyFor(effective, "lemmacomputer-auto", "claude-desktop-standard-v1"), /not assigned/);
   const governed = runtimePolicyFor(
     effective,
-    "onecomputer-auto",
+    "lemmacomputer-auto",
     "claude-desktop-standard-v1",
     undefined,
     undefined,
     undefined,
-    ["onecomputer-auto"],
+    ["lemmacomputer-auto"],
   );
-  assert.equal(governed.modelAlias, "onecomputer-auto");
+  assert.equal(governed.modelAlias, "lemmacomputer-auto");
 });
 
 test("policy-selected Claude and Hermes clients receive distinct governed identities", () => {
@@ -202,9 +202,9 @@ test("policy-selected Claude and Hermes clients receive distinct governed identi
       workspaceProfiles: ["claude-desktop-standard-v1"],
       agentProfile: "claude-desktop-managed-v1",
       agents: ["claude-desktop", "hermes-claw"],
-      modelAliases: ["onecomputer-claude"],
+      modelAliases: ["lemmacomputer-claude"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
     },
   };
 
@@ -239,9 +239,9 @@ test("optional Chrome, Claude CLI, and Hermes Agent Desktop stay off until selec
       defaultAgents: ["claude-desktop", "hermes-claw"],
       applications: ["firefox", "google-chrome"],
       defaultApplications: ["firefox"],
-      modelAliases: ["onecomputer-claude"],
+      modelAliases: ["lemmacomputer-claude"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
     },
   };
 

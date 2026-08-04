@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { deriveEgressProxySecret, issueEgressProxyGrant } from "@onecomputer/egress-policy";
+import { deriveEgressProxySecret, issueEgressProxyGrant } from "@lemmacomputer/egress-policy";
 
 const controllerUrl = process.env.CONTROLLER_URL ?? "http://127.0.0.1:14101";
 const controllerToken = process.env.CONTROLLER_INTERNAL_TOKEN;
 if (!controllerToken) throw new Error("CONTROLLER_INTERNAL_TOKEN is required");
 
 const workspaceId = "22222222-2222-4222-8222-222222222222";
-const sandboxName = `onecomputer-sandbox-${workspaceId}`;
+const sandboxName = `lemmacomputer-sandbox-${workspaceId}`;
 const expectedGrant = {
   tenantId: "qualification",
   subjectId: "firewall-test",
@@ -49,8 +49,8 @@ const policy = {
     }],
   },
   clipboard: { enabled: true, localToWorkspace: true, workspaceToLocal: true, maxBytes: 65_536 },
-  modelAlias: "onecomputer-claude",
-  mcpServer: "onecomputer_ms365",
+  modelAlias: "lemmacomputer-claude",
+  mcpServer: "lemmacomputer_ms365",
   allowedTools: ["list-mail-folders"],
   toolPolicies: { "list-mail-folders": "allow" },
 };
@@ -85,11 +85,11 @@ try {
       gateway: {
         baseUrl: "http://litellm:4000",
         credential: "qualification-workspace-key-at-least-24-characters",
-        modelAlias: "onecomputer-claude",
+        modelAlias: "lemmacomputer-claude",
         expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       },
       agentBridge: {
-        baseUrl: "http://onecomputer-control:4100",
+        baseUrl: "http://lemmacomputer-control:4100",
         token: qualificationAgentBridgeToken,
       },
       egressProxy: {
@@ -167,6 +167,6 @@ try {
       docker("rm", "-f", sandboxName, `${sandboxName}-egress`, `${sandboxName}-relay`);
     }
     await controller(`/internal/v1/workspaces/${workspaceId}/storage`, { method: "DELETE" }).catch(() => undefined);
-    docker("network", "rm", `onecomputer-workspace-${workspaceId}`);
+    docker("network", "rm", `lemmacomputer-workspace-${workspaceId}`);
   }
 }

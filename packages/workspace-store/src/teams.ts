@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import {
-  OneComputerError,
+  LemmaComputerError,
   type CreateTeam,
   type MinimalSpendingTeam,
   type TeamDetail,
   type TeamMembership,
   type TeamSummary,
   type UpdateTeam,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 
 export type TeamAuditEvent = {
   id: string;
@@ -148,7 +148,7 @@ export class PostgresTeamStore implements TeamStore {
 
   async createTeam(input: CreateTeam & { tenantId: string; createdBy: string }) {
     if (input.displayName.trim().toLowerCase() === "unallocated") {
-      throw new OneComputerError("TEAM_NAME_RESERVED", "Unallocated is reserved for the rollout fallback Team", 409);
+      throw new LemmaComputerError("TEAM_NAME_RESERVED", "Unallocated is reserved for the rollout fallback Team", 409);
     }
     const client = await this.pool.connect();
     const teamId = randomUUID();
@@ -193,7 +193,7 @@ export class PostgresTeamStore implements TeamStore {
     } catch (error) {
       await client.query("ROLLBACK");
       if (isPgUniqueViolation(error)) {
-        throw new OneComputerError("TEAM_NAME_CONFLICT", "An active Team already uses that name", 409);
+        throw new LemmaComputerError("TEAM_NAME_CONFLICT", "An active Team already uses that name", 409);
       }
       throw error;
     } finally {
@@ -204,7 +204,7 @@ export class PostgresTeamStore implements TeamStore {
 
   async updateTeam(input: UpdateTeam & { tenantId: string; teamId: string; updatedBy: string }) {
     if (input.displayName?.trim().toLowerCase() === "unallocated") {
-      throw new OneComputerError("TEAM_NAME_RESERVED", "Unallocated is reserved for the rollout fallback Team", 409);
+      throw new LemmaComputerError("TEAM_NAME_RESERVED", "Unallocated is reserved for the rollout fallback Team", 409);
     }
     const client = await this.pool.connect();
     try {
@@ -215,12 +215,12 @@ export class PostgresTeamStore implements TeamStore {
          WHERE tenant_id=$1 AND id=$2 AND allocation_type='team' FOR UPDATE`,
         [input.tenantId, input.teamId],
       );
-      if (!current.rowCount) throw new OneComputerError("TEAM_NOT_FOUND", "Team not found", 404);
+      if (!current.rowCount) throw new LemmaComputerError("TEAM_NOT_FOUND", "Team not found", 404);
       if (current.rows[0].status !== "active") {
-        throw new OneComputerError("TEAM_ARCHIVED", "Archived Teams cannot be changed", 409);
+        throw new LemmaComputerError("TEAM_ARCHIVED", "Archived Teams cannot be changed", 409);
       }
       if (current.rows[0].is_rollout_fallback) {
-        throw new OneComputerError("TEAM_FALLBACK_IMMUTABLE", "The rollout fallback Team cannot be edited", 409);
+        throw new LemmaComputerError("TEAM_FALLBACK_IMMUTABLE", "The rollout fallback Team cannot be edited", 409);
       }
       if (input.ownerUserId !== undefined) {
         await this.assertTenantUser(client, input.tenantId, input.ownerUserId, "TEAM_OWNER_NOT_FOUND");
@@ -252,7 +252,7 @@ export class PostgresTeamStore implements TeamStore {
     } catch (error) {
       await client.query("ROLLBACK");
       if (isPgUniqueViolation(error)) {
-        throw new OneComputerError("TEAM_NAME_CONFLICT", "An active Team already uses that name", 409);
+        throw new LemmaComputerError("TEAM_NAME_CONFLICT", "An active Team already uses that name", 409);
       }
       throw error;
     } finally {
@@ -271,9 +271,9 @@ export class PostgresTeamStore implements TeamStore {
          WHERE tenant_id=$1 AND id=$2 AND allocation_type='team' FOR UPDATE`,
         [input.tenantId, input.teamId],
       );
-      if (!team.rowCount) throw new OneComputerError("TEAM_NOT_FOUND", "Team not found", 404);
+      if (!team.rowCount) throw new LemmaComputerError("TEAM_NOT_FOUND", "Team not found", 404);
       if (team.rows[0].is_rollout_fallback) {
-        throw new OneComputerError("TEAM_FALLBACK_ARCHIVE_FORBIDDEN", "The rollout fallback Team cannot be archived", 409);
+        throw new LemmaComputerError("TEAM_FALLBACK_ARCHIVE_FORBIDDEN", "The rollout fallback Team cannot be archived", 409);
       }
       if (team.rows[0].status === "archived") {
         await client.query("COMMIT");
@@ -414,7 +414,7 @@ export class PostgresTeamStore implements TeamStore {
         [input.tenantId, input.userId, input.teamId],
       );
       if (isDefault.rowCount) {
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "TEAM_DEFAULT_TRANSFER_REQUIRED",
           "Choose another default spending Team before removing this membership",
           409,
@@ -743,7 +743,7 @@ export class PostgresTeamStore implements TeamStore {
       "SELECT id FROM users WHERE tenant_id=$1 AND id=$2",
       [tenantId, userId],
     );
-    if (!user.rowCount) throw new OneComputerError(code, "User not found in this tenant", 404);
+    if (!user.rowCount) throw new LemmaComputerError(code, "User not found in this tenant", 404);
   }
 
   private async assertActiveTenantUser(client: pg.PoolClient, tenantId: string, userId: string) {
@@ -751,9 +751,9 @@ export class PostgresTeamStore implements TeamStore {
       "SELECT status FROM users WHERE tenant_id=$1 AND id=$2",
       [tenantId, userId],
     );
-    if (!user.rowCount) throw new OneComputerError("TEAM_MEMBER_NOT_FOUND", "User not found in this tenant", 404);
+    if (!user.rowCount) throw new LemmaComputerError("TEAM_MEMBER_NOT_FOUND", "User not found in this tenant", 404);
     if (user.rows[0].status !== "active") {
-      throw new OneComputerError("TEAM_MEMBER_DISABLED", "A suspended user cannot receive a new Team assignment", 409);
+      throw new LemmaComputerError("TEAM_MEMBER_DISABLED", "A suspended user cannot receive a new Team assignment", 409);
     }
   }
 
@@ -769,7 +769,7 @@ export class PostgresTeamStore implements TeamStore {
       [tenantId, teamId],
     );
     if (!team.rowCount || (requireActive && team.rows[0].status !== "active")) {
-      throw new OneComputerError("TEAM_NOT_FOUND", requireActive ? "Active Team not found" : "Team not found", 404);
+      throw new LemmaComputerError("TEAM_NOT_FOUND", requireActive ? "Active Team not found" : "Team not found", 404);
     }
   }
 
@@ -780,7 +780,7 @@ export class PostgresTeamStore implements TeamStore {
        WHERE tenant_id=$1 AND id=$2 AND allocation_type='team'`,
       [tenantId, teamId],
     );
-    if (!team.rowCount) throw new OneComputerError("TEAM_NOT_FOUND", "Team not found", 404);
+    if (!team.rowCount) throw new LemmaComputerError("TEAM_NOT_FOUND", "Team not found", 404);
     return team.rows[0];
   }
 
@@ -804,7 +804,7 @@ export class PostgresTeamStore implements TeamStore {
 
   private assertNotFuture(value: Date | undefined, code: string) {
     if (value && value.getTime() > Date.now()) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         code,
         "Future Team membership transitions are not supported in this release",
         400,

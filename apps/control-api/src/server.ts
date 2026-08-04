@@ -1,15 +1,15 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, OneComputerError, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@onecomputer/contracts";
-import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
-import {RoutingDecisionBindingAuthority} from "@onecomputer/model-router";
-import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@onecomputer/workspace-store";
-import { WorkspaceIngressAuthority } from "@onecomputer/workspace-ingress-auth";
-import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@onecomputer/workspace-store";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@lemmacomputer/contracts";
+import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
+import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
+import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
+import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
+import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
-import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@onecomputer/workspace-store";
+import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
 import { ProviderSettingsService } from "./provider-settings.js";
@@ -90,12 +90,12 @@ const sandboxProfiles = [
 ] as const;
 
 const sandboxModels = [
-  { alias: "onecomputer-auto", displayName: "Governed routing", provider: "LemmaComputer" },
-  { alias: "onecomputer-claude", displayName: "Claude", provider: "Anthropic" },
-  { alias: "onecomputer-openai", displayName: "OpenAI", provider: "OpenAI" },
-  { alias: "onecomputer-glm", displayName: "GLM", provider: "Z.ai" },
-  { alias: "onecomputer-bedrock", displayName: "Claude Sonnet 4.5", provider: "Amazon Bedrock" },
-  { alias: "onecomputer-assistant", displayName: "Standard route (legacy)", provider: "OpenAI" },
+  { alias: "lemmacomputer-auto", displayName: "Governed routing", provider: "LemmaComputer" },
+  { alias: "lemmacomputer-claude", displayName: "Claude", provider: "Anthropic" },
+  { alias: "lemmacomputer-openai", displayName: "OpenAI", provider: "OpenAI" },
+  { alias: "lemmacomputer-glm", displayName: "GLM", provider: "Z.ai" },
+  { alias: "lemmacomputer-bedrock", displayName: "Claude Sonnet 4.5", provider: "Amazon Bedrock" },
+  { alias: "lemmacomputer-assistant", displayName: "Standard route (legacy)", provider: "OpenAI" },
 ] as const;
 
 const workspaceServiceClasses = [
@@ -217,7 +217,7 @@ const envSchema = z.object({
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
   DATABASE_URL: z.string().min(1),
-  ONECOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
+  LEMMACOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
   LITELLM_ADMIN_URL: z.string().url().optional(),
   LITELLM_ADMIN_TLS_CA_B64: optionalEnvString(),
   LITELLM_ADMIN_TLS_CLIENT_CERT_B64: optionalEnvString(),
@@ -231,7 +231,7 @@ const envSchema = z.object({
   LITELLM_PUBLIC_URL: z.string().url().default("http://localhost:4000"),
   PUBLIC_WEB_URL: z.string().url().default("http://localhost:4174"),
   M365_AUTHORIZATION_ORIGIN: z.string().url().default("http://localhost:4311"),
-  AGENT_BRIDGE_URL: z.string().url().default("http://onecomputer-control:4100"),
+  AGENT_BRIDGE_URL: z.string().url().default("http://lemmacomputer-control:4100"),
   AGENT_BRIDGE_SECRET: z.string().min(32),
   AGENT_BRIDGE_GRANT_TTL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   FIXTURE_APPROVAL_SECRET: z.string().min(32).default("local-disabled-fixture-approval-secret-32-chars"),
@@ -368,17 +368,17 @@ export function createControlServer(
     executionMode: "managed",
     egressMode: "restricted",
     agentId: "test-default-agent",
-    agentProfile: "onecomputer-default-agent",
+    agentProfile: "lemmacomputer-default-agent",
     applications: ["firefox"],
     networkProfile: "controlled-egress-v1",
-    modelAlias: "onecomputer-assistant",
+    modelAlias: "lemmacomputer-assistant",
     requestedServiceClass: "auto",
-    mcpServer: "onecomputer_fixture",
+    mcpServer: "lemmacomputer_fixture",
     allowedTools: ["search_files"],
     toolPolicies: { search_files: "allow" },
   };
   const app = Fastify({
-    logger: { redact: ["req.headers.x-onecomputer-proxy-token", "req.headers.x-onecomputer-mcp-policy-token", "req.headers.x-onecomputer-ai-usage-token", "req.headers.authorization", "req.body", "*.arguments", "*.launchUrl"] },
+    logger: { redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
       disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url) || request.url.startsWith("/v1/auth/callback"),
     }),
@@ -412,12 +412,12 @@ export function createControlServer(
   const activityEvents = new ActivityEventService(store);
   const sites = security.siteStore ? new SitesService(security.siteStore) : undefined;
   const requireSites = () => {
-    if (!sites) throw new OneComputerError("SITES_NOT_CONFIGURED", "Sites are unavailable", 503, true);
+    if (!sites) throw new LemmaComputerError("SITES_NOT_CONFIGURED", "Sites are unavailable", 503, true);
     return sites;
   };
   const requireTeams = () => {
     if (!security.teamStore) {
-      throw new OneComputerError("TEAMS_NOT_CONFIGURED", "Team administration is unavailable", 503, true);
+      throw new LemmaComputerError("TEAMS_NOT_CONFIGURED", "Team administration is unavailable", 503, true);
     }
     return security.teamStore;
   };
@@ -434,7 +434,7 @@ export function createControlServer(
     : undefined;
   const requireUsageLedger = () => {
     if (!usageLedger || !security.usageLedgerStore) {
-      throw new OneComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
+      throw new LemmaComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
     }
     return { service: usageLedger, store: security.usageLedgerStore };
   };
@@ -453,19 +453,19 @@ export function createControlServer(
     requestedServiceClass,
   });
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
-  const requireBudgets=()=>{if(!budgets)throw new OneComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
+  const requireBudgets=()=>{if(!budgets)throw new LemmaComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
   const routingExecution=security.routingStore&&security.teamStore&&usageBindings?new RoutingExecutionService(security.routingStore,security.teamStore,new RoutingDecisionBindingAuthority(security.usageTaskBindingSecret!),usageBindings,security.budgetStore):undefined;
   const routing=security.routingStore?new RoutingAdministrationService(security.routingStore):undefined;
-  const requireRouting=()=>{if(!routing)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
+  const requireRouting=()=>{if(!routing)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
   const channelBroker = security.channelBrokerClient;
   const telegramRawTokenInputMode = security.telegramRawTokenInputMode ?? "legacy";
   const requireSpendObservability = (request: object) => {
     const actor = principal(request);
     if (!isAdministrator(actor)) {
-      throw new OneComputerError("SPEND_VIEW_NOT_FOUND", "Spend view not found", 404);
+      throw new LemmaComputerError("SPEND_VIEW_NOT_FOUND", "Spend view not found", 404);
     }
     if (!security.spendObservabilityStore) {
-      throw new OneComputerError("SPEND_OBSERVABILITY_NOT_CONFIGURED", "Spend observability is unavailable", 503, true);
+      throw new LemmaComputerError("SPEND_OBSERVABILITY_NOT_CONFIGURED", "Spend observability is unavailable", 503, true);
     }
     return { actor, store: security.spendObservabilityStore };
   };
@@ -474,21 +474,21 @@ export function createControlServer(
       return await security.spendObservabilityStore!.report(tenantId, range);
     } catch (error) {
       if (error instanceof SpendReadLimitError) {
-        throw new OneComputerError("SPEND_RANGE_TOO_LARGE", error.message, 422);
+        throw new LemmaComputerError("SPEND_RANGE_TOO_LARGE", error.message, 422);
       }
       throw error;
     }
   };
 
   const service = new WorkspaceService(store, controller, gateway, {
-    baseUrl: connectionOptions.agentBridgeUrl ?? "http://onecomputer-control:4100",
+    baseUrl: connectionOptions.agentBridgeUrl ?? "http://lemmacomputer-control:4100",
     issue: (identity, workspace, policy) => agentBridgeAuthority.issue(identity, workspace.id, policy, {
       workspaceGeneration: workspace.bridgeGrantGeneration,
     }),
   }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority, agentChatAuthority, security.workspaceIngress);
   const executor: GovernedToolExecutor = gateway?.executeGovernedTool
     ? { executeGovernedTool: (input) => gateway.executeGovernedTool!(input) }
-    : { executeGovernedTool: async () => { throw new OneComputerError("GATEWAY_NOT_CONFIGURED", "The governed tool gateway is not configured", 503, true); } };
+    : { executeGovernedTool: async () => { throw new LemmaComputerError("GATEWAY_NOT_CONFIGURED", "The governed tool gateway is not configured", 503, true); } };
   const operations = new GovernedOperationService(store, executor, new FixtureApprovalAuthority(fixtureApprovalSecret), undefined, security.openVtc);
   const oauthGateway = gateway
     && typeof (gateway as Partial<OAuthConnectionGateway>).beginUserOAuthConnection === "function"
@@ -520,11 +520,11 @@ export function createControlServer(
     connections ? (actor, serverName, toolName) => connections.hostedToolPolicy(actor, serverName, toolName) : undefined,
   ) : undefined;
   const requireConnections = () => {
-    if (!connections) throw new OneComputerError("MCP_CONNECTIONS_NOT_CONFIGURED", "MCP connections are not configured", 503, true);
+    if (!connections) throw new LemmaComputerError("MCP_CONNECTIONS_NOT_CONFIGURED", "MCP connections are not configured", 503, true);
     return connections;
   };
   const requireProviderSettings = () => {
-    if (!providerSettings) throw new OneComputerError("PROVIDER_SETTINGS_NOT_CONFIGURED", "Provider settings are not configured", 503, true);
+    if (!providerSettings) throw new LemmaComputerError("PROVIDER_SETTINGS_NOT_CONFIGURED", "Provider settings are not configured", 503, true);
     return providerSettings;
   };
   const assertProviderConfiguration = async (actor: SessionPrincipal, policy: RuntimePolicy) => {
@@ -534,12 +534,12 @@ export function createControlServer(
     }
   };
   const requireChannelBroker = () => {
-    if (!channelBroker) throw new OneComputerError("CHANNEL_BROKER_NOT_CONFIGURED", "Messaging connections are not configured", 503, true);
+    if (!channelBroker) throw new LemmaComputerError("CHANNEL_BROKER_NOT_CONFIGURED", "Messaging connections are not configured", 503, true);
     return channelBroker;
   };
   const requireTelegramTokenIntake = () => {
     if (!security.telegramTokenIntake) {
-      throw new OneComputerError("TELEGRAM_INTAKE_NOT_CONFIGURED", "Telegram credential intake is unavailable", 503, true);
+      throw new LemmaComputerError("TELEGRAM_INTAKE_NOT_CONFIGURED", "Telegram credential intake is unavailable", 503, true);
     }
     return security.telegramTokenIntake;
   };
@@ -586,7 +586,7 @@ export function createControlServer(
     if (requestPath === "/v1/openvtc/inbox" || requestPath === "/trust-tasks") return;
     if (requestPath.startsWith("/internal/v1/channels/")) {
       if (!security.channelBrokerInternalToken || !sameSecret(
-        request.headers["x-onecomputer-channel-token"] as string | undefined,
+        request.headers["x-lemmacomputer-channel-token"] as string | undefined,
         security.channelBrokerInternalToken,
       )) {
         return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Channel broker authentication is required", correlationId: request.id, retryable: false } });
@@ -595,7 +595,7 @@ export function createControlServer(
     }
     if (requestPath.startsWith("/internal/v1/schedules/")) {
       if (!security.schedulerInternalToken || !sameSecret(
-        request.headers["x-onecomputer-scheduler-token"] as string | undefined,
+        request.headers["x-lemmacomputer-scheduler-token"] as string | undefined,
         security.schedulerInternalToken,
       )) {
         return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Scheduler authentication is required", correlationId: request.id, retryable: false } });
@@ -604,7 +604,7 @@ export function createControlServer(
     }
     if (requestPath.startsWith("/internal/v1/ai-usage/")) {
       if (!security.usageInternalToken || !sameSecret(
-        request.headers["x-onecomputer-ai-usage-token"] as string | undefined,
+        request.headers["x-lemmacomputer-ai-usage-token"] as string | undefined,
         security.usageInternalToken,
       )) {
         return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "AI usage callback authentication is required", correlationId: request.id, retryable: false } });
@@ -633,24 +633,24 @@ export function createControlServer(
       const workspace = await store.getOwned({
         tenantId: actor.tenantId,
         subjectId: actor.subjectId,
-        audience: "onecomputer-control",
+        audience: "lemmacomputer-control",
       }, actor.workspaceId);
       if (!workspace || workspace.bridgeGrantGeneration !== actor.workspaceGeneration) {
-        throw new OneComputerError("AGENT_BRIDGE_GRANT_REVOKED", "Agent bridge authentication is no longer active", 403);
+        throw new LemmaComputerError("AGENT_BRIDGE_GRANT_REVOKED", "Agent bridge authentication is no longer active", 403);
       }
       if (!["ready", "open"].includes(workspace.state)) {
-        throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not active for agent bridge access", 403);
+        throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not active for agent bridge access", 403);
       }
       agentPrincipals.set(request, actor);
       return;
     }
     if (requestPath === "/internal/v1/mcp/authorize") {
-      if (!sameSecret(request.headers["x-onecomputer-mcp-policy-token"] as string | undefined, security.mcpPolicyToken ?? proxyToken)) {
+      if (!sameSecret(request.headers["x-lemmacomputer-mcp-policy-token"] as string | undefined, security.mcpPolicyToken ?? proxyToken)) {
         return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Internal policy authentication is required", correlationId: request.id, retryable: false } });
       }
       return;
     }
-    if (!sameSecret(request.headers["x-onecomputer-proxy-token"] as string | undefined, proxyToken)) {
+    if (!sameSecret(request.headers["x-lemmacomputer-proxy-token"] as string | undefined, proxyToken)) {
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Authentication is required", correlationId: request.id, retryable: false } });
     }
     if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")) return;
@@ -683,19 +683,19 @@ export function createControlServer(
 
   const principal = (request: object) => {
     const value = principals.get(request);
-    if (!value) throw new OneComputerError("UNAUTHENTICATED", "Sign in with your work account", 401);
+    if (!value) throw new LemmaComputerError("UNAUTHENTICATED", "Sign in with your work account", 401);
     return value;
   };
   const identity = (request: object) => identityContextSchema.parse(principal(request).identity);
   const requireAdministrator = (request: object) => {
     const value = principal(request);
-    if (!isAdministrator(value)) throw new OneComputerError("FORBIDDEN", "Administrator access is required", 403);
+    if (!isAdministrator(value)) throw new LemmaComputerError("FORBIDDEN", "Administrator access is required", 403);
     return value;
   };
   const assignedPolicy = async (request: object) => {
     const value = principal(request);
     const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;
-    if (security.identityPolicyStore && !effective) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+    if (security.identityPolicyStore && !effective) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
     return { principal: value, effective };
   };
   const workspaceEgressFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string) => (
@@ -727,7 +727,7 @@ export function createControlServer(
           saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
           saved?.applicationIds ?? defaultApplicationIds(document),
           workspaceEgress,
-          governedRoutingAvailable ? ["onecomputer-auto"] : [],
+          governedRoutingAvailable ? ["lemmacomputer-auto"] : [],
         ),
         requestedServiceClass: saved?.requestedServiceClass ?? "auto",
       };
@@ -810,22 +810,22 @@ export function createControlServer(
   const requireWorkspacePolicy = async (request: object, workspaceId: string) => {
     const { principal: value, effective } = await assignedPolicy(request);
     const workspace = await store.getOwned(value.identity, workspaceId);
-    if (!workspace) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
     return policyForGrant(value, effective, workspace.grantId);
   };
   const channelPolicy = async (channelIdentity: IdentityContext, workspaceId: string) => {
     const workspace = await store.getOwned(channelIdentity, workspaceId);
-    if (!workspace) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
     let actor: SessionPrincipal;
     let effective: EffectivePolicy | null;
     if (security.identityPolicyStore) {
       const resolved = await security.identityPolicyStore.getPrincipal(channelIdentity.subjectId);
       if (!resolved || resolved.tenantId !== channelIdentity.tenantId) {
-        throw new OneComputerError("CHANNEL_IDENTITY_NOT_FOUND", "The channel owner is unavailable", 403);
+        throw new LemmaComputerError("CHANNEL_IDENTITY_NOT_FOUND", "The channel owner is unavailable", 403);
       }
       actor = resolved;
       effective = await security.identityPolicyStore.getEffectivePolicy(resolved.userId);
-      if (!effective) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+      if (!effective) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
     } else if (security.testIdentityMode) {
       actor = {
         userId: channelIdentity.subjectId,
@@ -838,7 +838,7 @@ export function createControlServer(
       };
       effective = null;
     } else {
-      throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503, true);
+      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503, true);
     }
     return policyForGrant(actor, effective, workspace.grantId);
   };
@@ -850,7 +850,7 @@ export function createControlServer(
         async (owner, workspaceId, catalogId) => {
           const { policy } = await channelPolicy(owner, workspaceId);
           if (!assignedChatAgentIds(policy).includes(catalogId)) {
-            throw new OneComputerError("CHAT_AGENT_NOT_SELECTED", "That agent is not selected for this workspace", 409);
+            throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That agent is not selected for this workspace", 409);
           }
         },
         async (owner, workspaceId, catalogId) => {
@@ -863,12 +863,12 @@ export function createControlServer(
       )
     : undefined;
   const requireSchedules = () => {
-    if (!schedules) throw new OneComputerError("SCHEDULER_NOT_CONFIGURED", "Scheduling is unavailable", 503, true);
+    if (!schedules) throw new LemmaComputerError("SCHEDULER_NOT_CONFIGURED", "Scheduling is unavailable", 503, true);
     return schedules;
   };
   const verifiedChannelRoute = async (route: ChannelRoute, enforceSelectedRoute: boolean) => {
     if (!store.getOwnedChannelConnection) {
-      throw new OneComputerError("CHANNEL_STORE_NOT_CONFIGURED", "Channel storage is unavailable", 503, true);
+      throw new LemmaComputerError("CHANNEL_STORE_NOT_CONFIGURED", "Channel storage is unavailable", 503, true);
     }
     const connection = await store.getOwnedChannelConnection(route.identity, "telegram", route.workspaceId);
     if (
@@ -877,18 +877,18 @@ export function createControlServer(
       || connection.workspaceId !== route.workspaceId
       || !connection.allowedUserIds.includes(route.externalSenderId)
     ) {
-      throw new OneComputerError("CHANNEL_ROUTE_REJECTED", "The channel route is not authorized", 403);
+      throw new LemmaComputerError("CHANNEL_ROUTE_REJECTED", "The channel route is not authorized", 403);
     }
     if (enforceSelectedRoute) {
       const selected = await store.getChannelSenderAgent?.(connection.id, route.externalSenderId)
         ?? connection.defaultAgentId;
       if (selected !== route.agentCatalogId) {
-        throw new OneComputerError("CHANNEL_AGENT_MISMATCH", "The channel agent route changed", 409);
+        throw new LemmaComputerError("CHANNEL_AGENT_MISMATCH", "The channel agent route changed", 409);
       }
     }
     const { policy } = await channelPolicy(route.identity, route.workspaceId);
     if (!assignedChatAgentIds(policy).includes(route.agentCatalogId)) {
-      throw new OneComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
+      throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
     }
     return {
       policy,
@@ -897,31 +897,31 @@ export function createControlServer(
   };
   const idempotency = (headers: Record<string, unknown>) => {
     const key = headers["idempotency-key"];
-    if (typeof key !== "string" || key.length < 8 || key.length > 128) throw new OneComputerError("IDEMPOTENCY_KEY_REQUIRED", "A valid Idempotency-Key header is required", 400);
+    if (typeof key !== "string" || key.length < 8 || key.length > 128) throw new LemmaComputerError("IDEMPOTENCY_KEY_REQUIRED", "A valid Idempotency-Key header is required", 400);
     return key;
   };
   const telegramIntakeIdempotency = (headers: Record<string, unknown>) => {
     const key = idempotency(headers);
     if (!/^[A-Za-z0-9._~-]{16,128}$/.test(key)) {
-      throw new OneComputerError("IDEMPOTENCY_KEY_REQUIRED", "A valid Idempotency-Key header is required", 400);
+      throw new LemmaComputerError("IDEMPOTENCY_KEY_REQUIRED", "A valid Idempotency-Key header is required", 400);
     }
     return key;
   };
   const browserAgentToken = (authorization: string | string[] | undefined) => {
     const value = Array.isArray(authorization) ? authorization[0] : authorization;
     const match = typeof value === "string" ? /^Bearer (ocvta_[A-Za-z0-9_-]{43})$/.exec(value) : null;
-    if (!match) throw new OneComputerError("UNAUTHENTICATED", "Browser agent authentication is required", 401);
+    if (!match) throw new LemmaComputerError("UNAUTHENTICATED", "Browser agent authentication is required", 401);
     return match[1];
   };
 
   app.post("/internal/v1/ai-usage/routing/decide",async(request,reply)=>{
-    if(!routingExecution)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const result=await routingExecution.decide(internalRoutingDecisionSchema.parse(request.body??{}));return reply.code(result.status==="created"?201:200).send(result);
+    if(!routingExecution)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const result=await routingExecution.decide(internalRoutingDecisionSchema.parse(request.body??{}));return reply.code(result.status==="created"?201:200).send(result);
   });
   app.post("/internal/v1/ai-usage/routing/verify",async(request)=>{
-    if(!routingExecution)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const body=z.strictObject({binding:z.strictObject({schemaVersion:z.literal(1),tenantId:z.string(),requestId:z.string(),decisionId:z.string(),deploymentId:z.string(),mappingVersionId:z.string(),policyVersionId:z.string(),expiresAt:z.iso.datetime(),signature:z.string()}),actual:z.strictObject({tenantId:z.string(),requestId:z.string(),deploymentId:z.string()})}).parse(request.body??{});return routingExecution.verify(body.binding,body.actual);
+    if(!routingExecution)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const body=z.strictObject({binding:z.strictObject({schemaVersion:z.literal(1),tenantId:z.string(),requestId:z.string(),decisionId:z.string(),deploymentId:z.string(),mappingVersionId:z.string(),policyVersionId:z.string(),expiresAt:z.iso.datetime(),signature:z.string()}),actual:z.strictObject({tenantId:z.string(),requestId:z.string(),deploymentId:z.string()})}).parse(request.body??{});return routingExecution.verify(body.binding,body.actual);
   });
   app.post("/internal/v1/ai-usage/routing/observations",async(request,reply)=>{
-    if(!routingExecution)throw new OneComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const result=await routingExecution.observe(internalRoutingObservationSchema.parse(request.body??{}));return reply.code(result.status==="created"?201:200).send(result);
+    if(!routingExecution)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Governed model routing is unavailable",503,true);const result=await routingExecution.observe(internalRoutingObservationSchema.parse(request.body??{}));return reply.code(result.status==="created"?201:200).send(result);
   });
   app.get("/healthz", async () => ({ status: "ok" }));
   app.post("/internal/v1/ai-usage/attempts/admit", async (request, reply) => {
@@ -933,7 +933,7 @@ export function createControlServer(
     return reply.code(result.status === "created" ? 201 : 200).send(result);
   });
   app.post("/internal/v1/mcp/authorize", { bodyLimit: 6 * 1024 * 1024 }, async (request) => {
-    if (!mcpPolicy) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "MCP policy storage is unavailable", 503, true);
+    if (!mcpPolicy) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "MCP policy storage is unavailable", 503, true);
     return mcpPolicy.authorize(mcpPolicyRequestSchema.parse(request.body ?? {}), request.id);
   });
   app.post("/internal/v1/mcp-egress/authorize", async (request) => {
@@ -958,7 +958,7 @@ export function createControlServer(
       input.updateId,
       input.externalSenderId,
     )) {
-      throw new OneComputerError("CHANNEL_UPDATE_REPLAYED", "The channel update was already dispatched", 409);
+      throw new LemmaComputerError("CHANNEL_UPDATE_REPLAYED", "The channel update was already dispatched", 409);
     }
     const session = input.sessionId
       ? { id: input.sessionId }
@@ -999,7 +999,7 @@ export function createControlServer(
           if (event.type === "text-delta") {
             text += event.delta;
             if (text.length > 16_000) {
-              throw new OneComputerError("CHANNEL_RESPONSE_TOO_LARGE", "The channel response exceeded its limit", 502);
+              throw new LemmaComputerError("CHANNEL_RESPONSE_TOO_LARGE", "The channel response exceeded its limit", 502);
             }
             yield frame({ type: "text-delta", delta: event.delta });
           }
@@ -1017,7 +1017,7 @@ export function createControlServer(
               const operation = await operations.get(input.identity, event.operationId);
               summary = chatApprovalSummary(event.state, operation.safeSummary);
             } catch (error) {
-              if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
+              if (!(error instanceof LemmaComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
             }
             const notice = `${summary.replace(/[.!?]+$/, "")}. Open LemmaComputer to review this protected action.`;
             if (!notices.includes(notice)) {
@@ -1043,7 +1043,7 @@ export function createControlServer(
           response: channelTurnResponseSchema.parse({ sessionId: session.id, text, notices, ...(artifacts.length ? { artifacts } : {}), state }),
         });
       } catch (error) {
-        const owned = error instanceof OneComputerError ? error : undefined;
+        const owned = error instanceof LemmaComputerError ? error : undefined;
         yield frame({
           type: "error",
           code: owned?.code ?? "CHANNEL_TURN_FAILED",
@@ -1062,9 +1062,9 @@ export function createControlServer(
     const { access } = await verifiedChannelRoute(input, false);
     const data = await agentChat.downloadArtifact(access, input.artifact.artifactId);
     if (data.length !== input.artifact.byteLength || createHash("sha256").update(data).digest("hex") !== input.artifact.sha256) {
-      throw new OneComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
+      throw new LemmaComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
     }
-    if (data.length > channelArtifactMaxBytes) throw new OneComputerError("CHANNEL_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
+    if (data.length > channelArtifactMaxBytes) throw new LemmaComputerError("CHANNEL_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
     return reply.header("cache-control", "no-store").type(input.artifact.mediaType).send(data);
   });
   app.post("/internal/v1/schedules/runs/execute", async (request) => {
@@ -1073,7 +1073,7 @@ export function createControlServer(
   });
   app.post("/internal/v1/agent/grants/renew", async (request) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const token = agentBridgeAuthority.renew(actor);
     const renewed = agentBridgeAuthority.verify(token, {
       audience: agentBridgeAudience,
@@ -1086,30 +1086,30 @@ export function createControlServer(
   });
   app.post("/internal/v1/agent/usage-bindings", async (request) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const input = z.strictObject({
       requestedServiceClass: z.enum(["auto", "lite", "balanced", "pro"]),
       taskId: z.string().min(1).max(256),
     }).parse(request.body ?? {});
-    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" as const };
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
     if (actor.policyHash !== policy.policyHash || !allowedAgentIds.has(actor.agentId)) {
-      throw new OneComputerError("AI_USAGE_TASK_BINDING_MISMATCH", "The route preference is not assigned to this workspace agent", 403);
+      throw new LemmaComputerError("AI_USAGE_TASK_BINDING_MISMATCH", "The route preference is not assigned to this workspace agent", 403);
     }
     const binding = issueUsageTaskBinding(owner, actor.workspaceId, actor.agentId, "background", input.taskId, undefined, undefined, input.requestedServiceClass);
-    if (!binding) throw new OneComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
+    if (!binding) throw new LemmaComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
     return { binding };
   });
 
   app.post("/internal/v1/agent/sites", { bodyLimit: 800 * 1024 }, async (request, reply) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
-    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" as const };
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
     if (actor.policyHash !== policy.policyHash || !allowedAgentIds.has(actor.agentId)) {
-      throw new OneComputerError("SITE_POLICY_BINDING_MISMATCH", "Publishing is not assigned to this workspace agent", 403);
+      throw new LemmaComputerError("SITE_POLICY_BINDING_MISMATCH", "Publishing is not assigned to this workspace agent", 403);
     }
     const input = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
     const site = await requireSites().publish(owner, {
@@ -1122,16 +1122,16 @@ export function createControlServer(
 
   app.get<{ Params: { operationId: string } }>("/internal/v1/agent/operations/:operationId", async (request) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     return operations.getForAgent(
-      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" },
+      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" },
       request.params.operationId,
       { workspaceId: actor.workspaceId, agentId: actor.agentId },
     );
   });
   app.post("/internal/v1/agent/uploads", async (request, reply) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const input = z.strictObject({
       driveId: z.string().trim().min(1).max(512),
       driveItemId: z.string().trim().min(1).max(512),
@@ -1140,7 +1140,7 @@ export function createControlServer(
       sha256: z.string().regex(/^[a-f0-9]{64}$/),
       idempotencyKey: z.string().min(16).max(128),
     }).parse(request.body ?? {});
-    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" as const };
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
     if (
@@ -1149,7 +1149,7 @@ export function createControlServer(
       || !policy.allowedTools.includes("upload-file-content")
       || policy.toolPolicies["upload-file-content"] !== "approval_required"
     ) {
-      throw new OneComputerError("MCP_POLICY_BINDING_MISMATCH", "The upload is not assigned to this workspace agent", 403);
+      throw new LemmaComputerError("MCP_POLICY_BINDING_MISMATCH", "The upload is not assigned to this workspace agent", 403);
     }
     const operation = await operations.createMicrosoft365Operation(
       owner,
@@ -1157,13 +1157,13 @@ export function createControlServer(
       {
         capabilityId: resumableUploadCapability.capabilityId,
         schemaId: resumableUploadCapability.schemaId,
-        serverName: "onecomputer_ms365",
+        serverName: "lemmacomputer_ms365",
         toolName: "create-upload-session",
         arguments: {
           driveId: input.driveId,
           driveItemId: input.driveItemId,
           body: { item: { "@microsoft.graph.conflictBehavior": "replace" } },
-          onecomputerFile: { name: input.fileName, size: input.size, sha256: input.sha256 },
+          lemmacomputerFile: { name: input.fileName, size: input.size, sha256: input.sha256 },
           confirm: true,
         },
         displayName: "Upload large OneDrive file",
@@ -1180,7 +1180,7 @@ export function createControlServer(
   });
   app.post("/internal/v1/agent/deletions", async (request, reply) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const input = z.strictObject({
       driveId: z.string().trim().min(1).max(512),
       driveItemId: z.string().trim().min(1).max(512),
@@ -1188,7 +1188,7 @@ export function createControlServer(
       "If-Match": z.string().trim().min(1).max(512),
       idempotencyKey: z.string().min(16).max(128),
     }).parse(request.body ?? {});
-    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" as const };
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
     if (
@@ -1197,7 +1197,7 @@ export function createControlServer(
       || !policy.allowedTools.includes("delete-onedrive-file")
       || policy.toolPolicies["delete-onedrive-file"] !== "approval_required"
     ) {
-      throw new OneComputerError("MCP_POLICY_BINDING_MISMATCH", "OneDrive deletion is not assigned to this workspace agent", 403);
+      throw new LemmaComputerError("MCP_POLICY_BINDING_MISMATCH", "OneDrive deletion is not assigned to this workspace agent", 403);
     }
     const capability = m365CapabilityDefinitions["delete-onedrive-file"];
     const operation = await operations.createMicrosoft365Operation(
@@ -1206,7 +1206,7 @@ export function createControlServer(
       {
         capabilityId: capability.capabilityId,
         schemaId: capability.schemaId,
-        serverName: "onecomputer_ms365",
+        serverName: "lemmacomputer_ms365",
         toolName: "delete-onedrive-file",
         arguments: {
           driveId: input.driveId,
@@ -1229,9 +1229,9 @@ export function createControlServer(
   });
   app.post<{ Params: { operationId: string } }>("/internal/v1/agent/uploads/:operationId/begin", async (request) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     return operations.beginResumableUpload(
-      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" },
+      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" },
       request.params.operationId,
       { workspaceId: actor.workspaceId, agentId: actor.agentId },
       request.id,
@@ -1239,10 +1239,10 @@ export function createControlServer(
   });
   app.post<{ Params: { operationId: string } }>("/internal/v1/agent/uploads/:operationId/complete", async (request) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const input = z.strictObject({ leaseId: z.uuid() }).parse(request.body ?? {});
     return operations.completeResumableUpload(
-      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" },
+      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" },
       request.params.operationId,
       { workspaceId: actor.workspaceId, agentId: actor.agentId },
       input.leaseId,
@@ -1251,10 +1251,10 @@ export function createControlServer(
   });
   app.post<{ Params: { operationId: string } }>("/internal/v1/agent/uploads/:operationId/fail", async (request) => {
     const actor = agentPrincipals.get(request);
-    if (!actor) throw new OneComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const input = z.strictObject({ leaseId: z.uuid() }).parse(request.body ?? {});
     return operations.failResumableUpload(
-      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "onecomputer-control" },
+      { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" },
       request.params.operationId,
       { workspaceId: actor.workspaceId, agentId: actor.agentId },
       input.leaseId,
@@ -1262,18 +1262,18 @@ export function createControlServer(
     );
   });
   app.get<{ Querystring: { return?: string } }>("/v1/auth/login", async (request, reply) => {
-    if (!security.authentication) throw new OneComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
+    if (!security.authentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
     const started = await security.authentication.begin(request.query.return);
     return reply.code(302).header("set-cookie", started.cookie).header("location", started.location).send();
   });
   app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/auth/callback", async (request, reply) => {
-    if (!security.authentication) throw new OneComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
+    if (!security.authentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
     try {
       const completed = await security.authentication.complete({ ...request.query, cookie: request.headers.cookie });
       reply.header("set-cookie", [completed.cookie, completed.clearStateCookie]);
       return reply.code(303).header("location", completed.returnPath).send();
     } catch (error) {
-      const reason = error instanceof OneComputerError ? error.code : "OIDC_FAILED";
+      const reason = error instanceof LemmaComputerError ? error.code : "OIDC_FAILED";
       request.log.warn({
         err: {
           name: error instanceof Error ? error.name : "UnknownError",
@@ -1331,8 +1331,8 @@ export function createControlServer(
     const header = ["occurred_at","event_id","team","cost_center","subject","task","context","alias","provider","model","deployment","cost","currency","price_status"];
     const rows = result.events.map((event) => [event.occurredAt,event.id,event.teamDisplayName,event.costCenterCode,event.subjectId,event.taskId,event.contextKind,event.requestedAlias,event.resolvedProvider,event.resolvedModel,event.resolvedDeploymentId,event.providerCost,event.currency,event.priceStatus].map(csv).join(","));
     return reply.header("cache-control", "no-store")
-      .header("x-onecomputer-export-complete", result.nextCursor ? "false" : "true")
-      .header("x-onecomputer-export-next-cursor", encodeUsageCursor(result.nextCursor) ?? "")
+      .header("x-lemmacomputer-export-complete", result.nextCursor ? "false" : "true")
+      .header("x-lemmacomputer-export-next-cursor", encodeUsageCursor(result.nextCursor) ?? "")
       .header("content-type", "text/csv; charset=utf-8")
       .header("content-disposition", "attachment; filename=ai-usage.csv")
       .send(`${header.join(",")}\n${rows.join("\n")}\n`);
@@ -1396,7 +1396,7 @@ export function createControlServer(
     const { actor, store: spendStore } = requireSpendObservability(request);
     const query = parseSpendQuery(request.query);
     const task = await spendStore.task(actor.tenantId, request.params.taskKey, query.range);
-    if (!task) throw new OneComputerError("SPEND_VIEW_NOT_FOUND", "Spend view not found", 404);
+    if (!task) throw new LemmaComputerError("SPEND_VIEW_NOT_FOUND", "Spend view not found", 404);
     reply.header("cache-control", "no-store");
     return { task };
   });
@@ -1406,12 +1406,12 @@ export function createControlServer(
     const report = await readSpendReport(actor.tenantId, query.range);
     reply.header("cache-control", "no-store");
     if (query.format === "json") {
-      reply.header("content-disposition", "attachment; filename=\"onecomputer-ai-spend.json\"");
+      reply.header("content-disposition", "attachment; filename=\"lemmacomputer-ai-spend.json\"");
       return { tenantId: actor.tenantId, report };
     }
     return reply
       .type("text/csv; charset=utf-8")
-      .header("content-disposition", "attachment; filename=\"onecomputer-ai-spend.csv\"")
+      .header("content-disposition", "attachment; filename=\"lemmacomputer-ai-spend.csv\"")
       .send(spendReportCsv(report, actor.tenantId));
   });
   app.post("/v1/admin/teams", async (request, reply) => {
@@ -1428,7 +1428,7 @@ export function createControlServer(
   app.get<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId", async (request) => {
     const actor = requireAdministrator(request);
     const team = await requireTeams().getTeam(actor.tenantId, z.uuid().parse(request.params.teamId));
-    if (!team) throw new OneComputerError("TEAM_NOT_FOUND", "Team not found", 404);
+    if (!team) throw new LemmaComputerError("TEAM_NOT_FOUND", "Team not found", 404);
     return { team };
   });
   app.patch<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId", async (request) => {
@@ -1527,7 +1527,7 @@ export function createControlServer(
   app.get<{Params:{decisionId:string}}>("/v1/admin/routing/decisions/:decisionId",async(request,reply)=>{const actor=requireAdministrator(request);const decision=await requireRouting().decision(actor,z.uuid().parse(request.params.decisionId));if(!decision)return reply.code(404).send({error:{code:"ROUTING_DECISION_NOT_FOUND",message:"Routing decision not found",correlationId:request.id,retryable:false}});return decision;});
   app.get("/v1/admin/users", async (request) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     return {
@@ -1535,7 +1535,7 @@ export function createControlServer(
         const targetIdentity = identityContextSchema.parse({
           tenantId: actor.tenantId,
           subjectId: user.userId,
-          audience: "onecomputer-control",
+          audience: "lemmacomputer-control",
         });
         const workspaces = await store.listCurrent(targetIdentity);
         return {
@@ -1555,7 +1555,7 @@ export function createControlServer(
                   settings?.agentIds,
                   settings?.applicationIds,
                   workspaceEgress,
-                  governedRoutingAvailable ? ["onecomputer-auto"] : [],
+                  governedRoutingAvailable ? ["lemmacomputer-auto"] : [],
                 )
               : null;
             return {
@@ -1574,17 +1574,17 @@ export function createControlServer(
   });
   app.patch<{ Params: { userId: string } }>("/v1/admin/users/:userId/status", async (request) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const input = z.strictObject({ status: z.enum(["active", "disabled"]) }).parse(request.body ?? {});
     if (request.params.userId === actor.userId && input.status === "disabled") {
-      throw new OneComputerError("ADMIN_SELF_DISABLE_FORBIDDEN", "You cannot suspend your own administrator account", 409);
+      throw new LemmaComputerError("ADMIN_SELF_DISABLE_FORBIDDEN", "You cannot suspend your own administrator account", 409);
     }
     const target = (await security.identityPolicyStore.listUsers(actor.tenantId)).find((item) => item.userId === request.params.userId);
-    if (!target) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+    if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
     const targetIdentity = identityContextSchema.parse({
       tenantId: actor.tenantId,
       subjectId: target.userId,
-      audience: "onecomputer-control",
+      audience: "lemmacomputer-control",
     });
     const targetPrincipal: SessionPrincipal = {
       userId: target.userId,
@@ -1615,7 +1615,7 @@ export function createControlServer(
   });
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/sessions/revoke", async (request) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const revokedSessions = await security.identityPolicyStore.revokeUserSessions({
       tenantId: actor.tenantId,
       targetUserId: request.params.userId,
@@ -1625,23 +1625,23 @@ export function createControlServer(
   });
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const target = (await security.identityPolicyStore.listUsers(actor.tenantId)).find((item) => item.userId === request.params.userId);
-    if (!target) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+    if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
     return security.identityPolicyStore.assignMvpPolicy({ tenantId: actor.tenantId, targetUserId: request.params.userId, assignedBy: actor.userId });
   });
   app.delete<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request, reply) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const target = (await security.identityPolicyStore.listUsers(actor.tenantId)).find((item) => item.userId === request.params.userId);
-    if (!target) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+    if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
     const current = await security.identityPolicyStore.getEffectivePolicy(request.params.userId);
     const revoked = await security.identityPolicyStore.revokeMvpPolicy({ tenantId: actor.tenantId, targetUserId: request.params.userId, revokedBy: actor.userId });
     if (revoked && current) {
       const targetIdentity: IdentityContext = {
         tenantId: actor.tenantId,
         subjectId: request.params.userId,
-        audience: "onecomputer-control",
+        audience: "lemmacomputer-control",
       };
       const runtime = runtimePolicyFor(
         current,
@@ -1658,18 +1658,18 @@ export function createControlServer(
   });
   app.post<{ Body: { revisionNote?: string } }>("/v1/admin/policy/versions", async (request) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const note = z.object({ revisionNote: z.string().min(3).max(160) }).parse(request.body ?? {});
     return security.identityPolicyStore.createMvpPolicyVersion({ tenantId: actor.tenantId, createdBy: actor.userId, revisionNote: note.revisionNote });
   });
   app.get("/v1/admin/egress-security-groups", async (request) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     return { securityGroups: await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId) };
   });
   app.post("/v1/admin/egress-security-groups", async (request, reply) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const input = saveEgressSecurityGroupSchema.parse(request.body ?? {});
     const saved = await security.identityPolicyStore.saveEgressSecurityGroup({
       tenantId: actor.tenantId,
@@ -1699,7 +1699,7 @@ export function createControlServer(
   app.post<{ Params: { grantId: string } }>("/v1/admin/workspaces/:grantId/egress-security-group", async (request) => {
     const actor = requireAdministrator(request);
     if (!security.identityPolicyStore?.assignWorkspaceEgressSecurityGroup) {
-      throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
+      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
     }
     const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
     const grantId = z.string().min(1).max(128).parse(request.params.grantId);
@@ -1719,12 +1719,12 @@ export function createControlServer(
   });
   app.get("/v1/admin/mcp-policy", async (request) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
     const effective = users.map((user) => user.effectivePolicy).find(Boolean) ?? null;
     const runtime = effective ? runtimePolicyFor(effective) : null;
     return {
-      serverName: "onecomputer_ms365",
+      serverName: "lemmacomputer_ms365",
       version: effective?.version ?? 1,
       documentHash: effective?.documentHash ?? "0".repeat(64),
       tools: Object.entries(m365CapabilityDefinitions).map(([name, definition]) => ({
@@ -1739,10 +1739,10 @@ export function createControlServer(
   });
   app.put("/v1/admin/mcp-policy", async (request) => {
     const actor = requireAdministrator(request);
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const input = saveMcpToolPolicySchema.parse(request.body ?? {});
     const expected = Object.keys(m365CapabilityDefinitions).sort();
-    if (Object.keys(input.tools).sort().join("\0") !== expected.join("\0")) throw new OneComputerError("INVALID_TOOL_POLICY", "A decision is required for every assigned Microsoft 365 tool", 400);
+    if (Object.keys(input.tools).sort().join("\0") !== expected.join("\0")) throw new LemmaComputerError("INVALID_TOOL_POLICY", "A decision is required for every assigned Microsoft 365 tool", 400);
     const savedPolicy = await security.identityPolicyStore.updateMvpToolPolicy({ tenantId: actor.tenantId, updatedBy: actor.userId, tools: input.tools });
     const workspaceGrants = await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
     return {
@@ -1888,7 +1888,7 @@ export function createControlServer(
       await refreshOwnedWorkspaceConnectionGrants(actor);
       return reply.code(303).header("location", service.resultUrl(request.params.connectorId, "connected")).send();
     } catch (error) {
-      const reason = error instanceof OneComputerError ? error.code : "MCP_CONNECTION_FAILED";
+      const reason = error instanceof LemmaComputerError ? error.code : "MCP_CONNECTION_FAILED";
       return reply.code(303).header("location", service.resultUrl(request.params.connectorId, "error", reason)).send();
     }
   });
@@ -1931,7 +1931,7 @@ export function createControlServer(
   app.post("/v1/credentials/telegram", async (request, reply) => {
     await requirePolicy(request);
     if (telegramRawTokenInputMode === "reject") {
-      throw new OneComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
+      throw new LemmaComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
     }
     const input = saveTelegramCredentialSchema.parse(request.body ?? {});
     return reply.code(201).send(await requireChannelBroker().saveCredential(identity(request), input));
@@ -1965,7 +1965,7 @@ export function createControlServer(
   app.put<{ Params: { credentialId: string } }>("/v1/credentials/:credentialId/telegram", async (request) => {
     await requirePolicy(request);
     if (telegramRawTokenInputMode === "reject") {
-      throw new OneComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
+      throw new LemmaComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
     }
     const credentialId = z.uuid().parse(request.params.credentialId);
     const input = saveTelegramCredentialSchema.parse(request.body ?? {});
@@ -1998,7 +1998,7 @@ export function createControlServer(
     const input = saveTelegramChannelConnectionSchema.parse({ ...(request.body as object ?? {}), workspaceId });
     const { policy } = await requireWorkspacePolicy(request, workspaceId);
     if (!assignedChatAgentIds(policy).includes(input.defaultAgentId)) {
-      throw new OneComputerError("CHAT_AGENT_NOT_SELECTED", "The default messaging agent is not selected for this workspace", 409);
+      throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "The default messaging agent is not selected for this workspace", 409);
     }
     return requireChannelBroker().save(identity(request), input);
   });
@@ -2026,14 +2026,14 @@ export function createControlServer(
     const assignedApplications = assignedApplicationIds(document);
     const availableApplications = sandboxApplications.filter((application) => assignedApplications.includes(application.id));
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
-    const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "onecomputer-auto" : assignedModels.includes(model.alias));
+    const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "lemmacomputer-auto" : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
-    if (!availableProfiles.length || !availableModels.length || !availableAgents.length) throw new OneComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, or agent", 500);
-    if (!availableApplications.length) throw new OneComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
+    if (!availableProfiles.length || !availableModels.length || !availableAgents.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, or agent", 500);
+    if (!availableApplications.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const profileId = saved && availableProfiles.some((profile) => profile.id === saved.profileId) ? saved.profileId : availableProfiles[0]!.id;
     const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
-    const modelAlias = governedRoutingAvailable ? "onecomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
+    const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
     const requestedServiceClass = governedRoutingAvailable ? saved?.requestedServiceClass ?? "auto" : "auto";
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
@@ -2047,7 +2047,7 @@ export function createControlServer(
           selectedAgentIds,
           selectedApplicationIds,
           workspaceEgress,
-          governedRoutingAvailable ? ["onecomputer-auto"] : [],
+          governedRoutingAvailable ? ["lemmacomputer-auto"] : [],
         )
       : undefined;
     const egress = runtime?.egress;
@@ -2075,7 +2075,7 @@ export function createControlServer(
       applicationIds: selectedApplicationIds,
       modelAlias,
       requestedServiceClass,
-      routePreferenceMigrationRequired: governedRoutingAvailable && saved?.modelAlias !== "onecomputer-auto",
+      routePreferenceMigrationRequired: governedRoutingAvailable && saved?.modelAlias !== "lemmacomputer-auto",
       profile: availableProfiles.find((profile) => profile.id === profileId),
       availableProfiles,
       availableApplications,
@@ -2096,20 +2096,20 @@ export function createControlServer(
     input: z.infer<typeof saveSandboxSettingsSchema>,
     includeAdministratorOptions: boolean,
   ) => {
-    if (!store.saveSandboxSettings) throw new OneComputerError("SANDBOX_SETTINGS_NOT_CONFIGURED", "Sandbox settings storage is unavailable", 503, true);
+    if (!store.saveSandboxSettings) throw new LemmaComputerError("SANDBOX_SETTINGS_NOT_CONFIGURED", "Sandbox settings storage is unavailable", 503, true);
     const document = (effective?.document ?? {}) as Record<string, unknown>;
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
     const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
-    const modelAlias = governedRoutingAvailable ? "onecomputer-auto" : input.modelAlias;
+    const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : input.modelAlias;
     const agents = Array.isArray(document.agents) ? document.agents : ownedAgentCatalog.map((agent) => agent.id);
-    if (!profiles.includes(input.profileId)) throw new OneComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
-    if (input.applicationIds.some((id) => !applications.includes(id))) throw new OneComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
-    if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new OneComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
-    if (input.agentIds.some((id) => !agents.includes(id))) throw new OneComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
+    if (!profiles.includes(input.profileId)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
+    if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
+    if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
+    if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
     const current = await store.getCurrent(actor.identity, input.grantId);
-    if (current && !["not_created", "stopped", "failed"].includes(current.state)) throw new OneComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop the workspace before changing its profile or model route", 409, true);
+    if (current && !["not_created", "stopped", "failed"].includes(current.state)) throw new LemmaComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop the workspace before changing its profile or model route", 409, true);
     await store.saveSandboxSettings(actor.identity, {
       grantId: input.grantId,
       profileId: input.profileId as SandboxProfileId,
@@ -2121,13 +2121,13 @@ export function createControlServer(
     return sandboxSettingsFor(actor, effective, input.grantId, includeAdministratorOptions);
   };
   const administratorTarget = async (actor: SessionPrincipal, userId: string) => {
-    if (!security.identityPolicyStore) throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const target = (await security.identityPolicyStore.listUsers(actor.tenantId)).find((item) => item.userId === userId);
-    if (!target) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+    if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
     const identity = identityContextSchema.parse({
       tenantId: actor.tenantId,
       subjectId: target.userId,
-      audience: "onecomputer-control",
+      audience: "lemmacomputer-control",
     });
     const principal: SessionPrincipal = {
       userId: target.userId,
@@ -2145,7 +2145,7 @@ export function createControlServer(
     async (request) => {
       const actor = requireAdministrator(request);
       const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
-      if (!target.effectivePolicy) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+      if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
       const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
       return sandboxSettingsFor(targetPrincipal, target.effectivePolicy, grantId, true);
     },
@@ -2154,7 +2154,7 @@ export function createControlServer(
     const actor = requireAdministrator(request);
     const input = saveSandboxSettingsSchema.parse(request.body ?? {});
     const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
-    if (!target.effectivePolicy) throw new OneComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+    if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
     return saveSandboxSettingsFor(targetPrincipal, target.effectivePolicy, input, true);
   });
   app.post<{ Params: { userId: string; grantId: string } }>(
@@ -2162,7 +2162,7 @@ export function createControlServer(
     async (request) => {
       const actor = requireAdministrator(request);
       if (!security.identityPolicyStore?.assignWorkspaceEgressSecurityGroup) {
-        throw new OneComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
+        throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
       }
       const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
       const grantId = z.string().min(1).max(128).parse(request.params.grantId);
@@ -2192,30 +2192,30 @@ export function createControlServer(
     return saveSandboxSettingsFor(actor, effective, input, actor.roles.includes("administrator"));
   });
   app.post("/v1/openvtc/enrollment-challenges", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     return reply.code(201).header("cache-control", "no-store").send(await security.openVtc.createEnrollmentChallenge(identity(request)));
   });
   app.post("/v1/openvtc/approvers", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     const input = z.object({ challengeId: z.uuid(), document: z.unknown() }).strict().parse(request.body ?? {});
     return reply.code(201).header("cache-control", "no-store").send(await security.openVtc.enroll(identity(request), input.challengeId, input.document));
   });
   app.get<{ Querystring: { approverDid?: string } }>("/v1/openvtc/approvers/current", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     return reply.header("cache-control", "no-store").send(await security.openVtc.status(identity(request), request.query.approverDid));
   });
   app.delete<{ Querystring: { approverDid?: string } }>("/v1/openvtc/approvers/current", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     return await security.openVtc.revoke(identity(request), request.query.approverDid) ? reply.code(204).send() : reply.code(404).send({ error: { code: "OPENVTC_APPROVER_NOT_FOUND", message: "No active browser approver is enrolled", correlationId: request.id, retryable: false } });
   });
   app.get<{ Querystring: { approverDid?: string } }>("/v1/openvtc/approvals/pending", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     const document = await security.openVtc.inboxForIdentity(identity(request), request.query.approverDid);
     reply.header("cache-control", "no-store");
     return document ? reply.send(document) : reply.code(204).send();
   });
   app.get("/v1/openvtc/companion/config", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     return reply.header("cache-control", "no-store").send(security.openVtc.companionConfig());
   });
   app.get<{ Querystring: { cursor?: string; limit?: string } }>("/v1/openvtc/companion/activity", async (request, reply) => {
@@ -2230,11 +2230,11 @@ export function createControlServer(
     return reply.header("cache-control", "no-store").send(await operations.companionActivityDetail(identity(request), operationId));
   });
   app.get("/v1/openvtc/companions", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     return reply.header("cache-control", "no-store").send(await security.openVtc.companions(identity(request)));
   });
   app.put("/v1/openvtc/companions/subscription", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     const input = z.object({
       version: z.literal(COMPANION_PUSH_PROTOCOL),
       approverDid: z.string().startsWith("did:key:z").max(200),
@@ -2254,17 +2254,17 @@ export function createControlServer(
     return reply.code(201).header("cache-control", "no-store").send(await security.openVtc.subscribeCompanion(identity(request), input));
   });
   app.delete<{ Params: { companionId: string } }>("/v1/openvtc/companions/:companionId", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     return await security.openVtc.revokeCompanion(identity(request), request.params.companionId)
       ? reply.code(204).send()
       : reply.code(404).send({ error: { code: "OPENVTC_COMPANION_NOT_FOUND", message: "Companion browser not found", correlationId: request.id, retryable: false } });
   });
   app.post<{ Params: { companionId: string } }>("/v1/openvtc/companions/:companionId/test", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     return reply.header("cache-control", "no-store").send(await security.openVtc.testCompanion(identity(request), request.params.companionId));
   });
   app.get("/v1/openvtc/inbox", async (request, reply) => {
-    if (!security.openVtc) throw new OneComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
+    if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
     const document = await security.openVtc.inbox(browserAgentToken(request.headers.authorization));
     reply.header("cache-control", "no-store");
     return document ? reply.send(document) : reply.code(204).send();
@@ -2331,7 +2331,7 @@ export function createControlServer(
           reasonCode: "CHAT_AGENT_READY",
         };
       } catch (error) {
-        if (!(error instanceof OneComputerError) || error.code !== "CHAT_RUNTIME_UNAVAILABLE") throw error;
+        if (!(error instanceof LemmaComputerError) || error.code !== "CHAT_RUNTIME_UNAVAILABLE") throw error;
         return {
           catalogId: access.catalogId,
           displayName: access.displayName,
@@ -2356,7 +2356,7 @@ export function createControlServer(
         reasonCode: "CHAT_AGENT_READY",
       });
     } catch (error) {
-      if (!(error instanceof OneComputerError)) throw error;
+      if (!(error instanceof LemmaComputerError)) throw error;
       if (error.code === "CHAT_AGENT_NOT_SELECTED") {
         return reply.header("cache-control", "no-store").send({
           workspaceId: request.params.workspaceId,
@@ -2407,7 +2407,7 @@ export function createControlServer(
           const operation = await operations.get(owner, operationId);
           return { state: operation.state, safeSummary: operation.safeSummary };
         } catch (error) {
-          if (error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND") return undefined;
+          if (error instanceof LemmaComputerError && error.code === "OPERATION_NOT_FOUND") return undefined;
           throw error;
         }
       },
@@ -2493,7 +2493,7 @@ export function createControlServer(
     const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
     const input = sendChatTurnSchema.parse(request.body ?? {});
     if (input.message.metadata.agentCatalogId !== catalogId) {
-      throw new OneComputerError("CHAT_AGENT_MISMATCH", "The submitted message does not belong to the selected agent", 409);
+      throw new LemmaComputerError("CHAT_AGENT_MISMATCH", "The submitted message does not belong to the selected agent", 409);
     }
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const includesImage = input.message.parts.some(
@@ -2501,7 +2501,7 @@ export function createControlServer(
     );
     if (includesImage) {
       if (!gateway) {
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "MODEL_CAPABILITY_UNAVAILABLE",
           "The selected model route's image capability could not be verified",
           503,
@@ -2510,7 +2510,7 @@ export function createControlServer(
       }
       const capabilities = await gateway.modelCapabilities(policy.modelAlias);
       if (!capabilities.vision) {
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "MODEL_IMAGE_INPUT_UNSUPPORTED",
           "The selected workspace model does not support image input. Choose a vision-capable model or remove the image.",
           422,
@@ -2545,7 +2545,7 @@ export function createControlServer(
                 summary: chatApprovalSummary(event.state, operation.safeSummary),
               };
             } catch (error) {
-              if (!(error instanceof OneComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
+              if (!(error instanceof LemmaComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
             }
           }
           await activityEvents.recordAgentEvent({
@@ -2601,7 +2601,7 @@ export function createControlServer(
           await new Promise<void>((resolve) => waiters.add(resolve));
         }
       },
-      onError: (error) => error instanceof OneComputerError
+      onError: (error) => error instanceof LemmaComputerError
         ? error.message
         : "The selected workspace agent could not complete this turn.",
     });
@@ -2701,7 +2701,7 @@ export function createControlServer(
   app.setErrorHandler((error, request, reply) => {
     const errorName = error instanceof Error ? error.name : "UnknownError";
     const validation = errorName === "ZodError";
-    const known = error instanceof OneComputerError ? error : validation ? new OneComputerError("INVALID_REQUEST", "The request is invalid", 400) : new OneComputerError("INTERNAL_ERROR", "The request could not be completed", 500, true);
+    const known = error instanceof LemmaComputerError ? error : validation ? new LemmaComputerError("INVALID_REQUEST", "The request is invalid", 400) : new LemmaComputerError("INTERNAL_ERROR", "The request could not be completed", 500, true);
     request.log.error({ err: { name: errorName, code: known.code } }, "control request failed");
     reply.code(known.statusCode).send({ error: { code: known.code, message: known.message, correlationId: request.id, retryable: known.retryable } });
   });
@@ -2766,7 +2766,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const gatewayValues = [env.LITELLM_ADMIN_URL, env.LITELLM_WORKSPACE_URL, env.LITELLM_MASTER_KEY, env.LITELLM_CREDENTIAL_SECRET];
   if (gatewayValues.some(Boolean) && !gatewayValues.every(Boolean)) throw new Error("All LiteLLM gateway settings must be configured together");
   const liteLlmAdminTls = assertHostedLiteLlmAdminSecurity({
-    installationKind: env.ONECOMPUTER_INSTALLATION_KIND,
+    installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
     adminUrl: env.LITELLM_ADMIN_URL,
     credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
     sessionSecret: env.SESSION_SECRET,
@@ -2806,10 +2806,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   if (telegramTokenIntakeValues.some(Boolean) && !telegramTokenIntakeValues.every(Boolean)) {
     throw new Error("Telegram intake signing and encryption keys must be configured together");
   }
-  if (env.ONECOMPUTER_INSTALLATION_KIND === "hosted" && !telegramTokenIntakeValues.every(Boolean)) {
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !telegramTokenIntakeValues.every(Boolean)) {
     throw new Error("Hosted deployments require broker-only Telegram credential intake keys");
   }
-  const telegramRawTokenInputMode = env.TELEGRAM_RAW_TOKEN_INPUT_MODE ?? (env.ONECOMPUTER_INSTALLATION_KIND === "hosted" ? "reject" : "legacy");
+  const telegramRawTokenInputMode = env.TELEGRAM_RAW_TOKEN_INPUT_MODE ?? (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" ? "reject" : "legacy");
   const telegramTokenIntake = env.TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64 && env.TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64
     ? {
         grantIssuer: new TelegramTokenIntakeGrantIssuer(env.TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64),
@@ -2880,7 +2880,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       authorizationOrigin: env.M365_AUTHORIZATION_ORIGIN,
       liteLlmPublicUrl: env.LITELLM_PUBLIC_URL,
       agentBridgeUrl: env.AGENT_BRIDGE_URL,
-      installationKind: env.ONECOMPUTER_INSTALLATION_KIND,
+      installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
       hostedCustomConnectorEgressOrigins: env.HOSTED_MCP_EGRESS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
     },
     {

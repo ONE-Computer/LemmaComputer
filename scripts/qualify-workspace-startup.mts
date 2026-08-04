@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { RuntimePolicy } from "@onecomputer/contracts";
-import { PolicyBundleSigner } from "@onecomputer/policy-integrity";
+import type { RuntimePolicy } from "@lemmacomputer/contracts";
+import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
 import { AgentBridgeAuthority } from "../apps/control-api/src/agent-bridge.js";
 
 const required = (name: string) => {
@@ -20,7 +20,7 @@ const signer = new PolicyBundleSigner({
 const workspaceId = randomUUID();
 const agentId = `release-hermes-${workspaceId.slice(0, 8)}`;
 const modelGateway = "http://litellm:4000";
-const mcpControl = "http://onecomputer-control:4100";
+const mcpControl = "http://lemmacomputer-control:4100";
 const expiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
 const policy: RuntimePolicy = {
   schemaVersion: 1,
@@ -40,13 +40,13 @@ const policy: RuntimePolicy = {
     workspaceToLocal: true,
     maxBytes: 65_536,
   },
-  modelAlias: "onecomputer-auto",
-  mcpServer: "onecomputer_connectors",
+  modelAlias: "lemmacomputer-auto",
+  mcpServer: "lemmacomputer_connectors",
   requestedServiceClass: "auto",
   allowedTools: ["list-mail-folders"],
   toolPolicies: { "list-mail-folders": "allow" },
 };
-const identity = { tenantId: "release-qualification", subjectId: "workspace-smoke", audience: "onecomputer-control" } as const;
+const identity = { tenantId: "release-qualification", subjectId: "workspace-smoke", audience: "lemmacomputer-control" } as const;
 const policyBundle = signer.issue({
   identity,
   workspaceId,

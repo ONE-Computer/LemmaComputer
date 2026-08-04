@@ -2,7 +2,7 @@
 Type=Application
 Name=Claude Desktop
 Comment=LemmaComputer managed AI workspace
-Exec=/usr/local/bin/onecomputer-claude-desktop
+Exec=/usr/local/bin/lemmacomputer-claude-desktop
 Icon=claude
 Terminal=false
 Categories=Office;Utility;

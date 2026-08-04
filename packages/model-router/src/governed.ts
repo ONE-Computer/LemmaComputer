@@ -147,7 +147,7 @@ export class NoopRoutingAffinityStore implements RoutingAffinityStore {
 export type RoutingSelectionStatus = "selected" | "no_candidate" | "fixed";
 export type ModelRoutingDecision = {
   requestId: string;
-  requestedAlias: "onecomputer-auto";
+  requestedAlias: "lemmacomputer-auto";
   requestedServiceClass: RequestedServiceClass;
   selectedServiceClass: ProductServiceClass;
   selectionStatus: RoutingSelectionStatus;
@@ -203,7 +203,7 @@ export type SignedRoutingBinding = {
   signature: string;
 };
 export type GovernedTransportRequest = {
-  model: "onecomputer-auto";
+  model: "lemmacomputer-auto";
   metadata: {
     requestedServiceClass: RequestedServiceClass;
     routingBinding: SignedRoutingBinding;
@@ -214,7 +214,7 @@ export const validateGovernedTransportRequest = (
   input: Record<string, unknown>,
 ): GovernedTransportRequest => {
   if (
-    input.model !== "onecomputer-auto" ||
+    input.model !== "lemmacomputer-auto" ||
     typeof input.metadata !== "object" ||
     !input.metadata ||
     !requestedServiceClasses.includes(
@@ -497,7 +497,7 @@ export class DeterministicModelRouter {
     if (policy.mode === "disabled")
       return {
         requestId: request.requestId,
-        requestedAlias: "onecomputer-auto",
+        requestedAlias: "lemmacomputer-auto",
         requestedServiceClass: requested,
         selectedServiceClass: fixed.serviceClass,
         selectionStatus: "fixed",
@@ -692,7 +692,7 @@ export class DeterministicModelRouter {
         );
       return {
         requestId: request.requestId,
-        requestedAlias: "onecomputer-auto",
+        requestedAlias: "lemmacomputer-auto",
         requestedServiceClass: requested,
         selectedServiceClass: selectedClass,
         selectionStatus: "no_candidate",
@@ -741,7 +741,7 @@ export class DeterministicModelRouter {
       });
     return {
       requestId: request.requestId,
-      requestedAlias: "onecomputer-auto",
+      requestedAlias: "lemmacomputer-auto",
       requestedServiceClass: requested,
       selectedServiceClass: selectedClass,
       selectionStatus: "selected",

@@ -44,7 +44,7 @@ await writeFile(envPath, `${lines.join("\n")}\n`, { mode: 0o600 });
 for (const mountedFile of [
   "config/litellm/config.yaml",
   "config/litellm/logging.yaml",
-  "integrations/litellm/onecomputer_policy_callback.py",
+  "integrations/litellm/lemmacomputer_policy_callback.py",
 ]) await chmod(mountedFile, 0o644);
 await rm(".artifacts/release-verification", { recursive: true, force: true });
 process.stdout.write([

@@ -84,7 +84,7 @@ token, refresh, and MCP-tool connection:
    allowlist can proceed only when the internal Control authorizer returns the
    exact shape `{ "allowed": true }` within its timeout.
 5. In hosted mode, Control authorizes only origins from the deployment-owned
-   `ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` inventory. A tenant connector record
+   `LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` inventory. A tenant connector record
    cannot widen the shared network boundary.
 6. The proxy connects to a validated resolved address and checks that HTTPS
    SNI matches the requested host. Tunnel lifetime and idle time are bounded.
@@ -100,12 +100,12 @@ application regresses.
 
 ## OAuth browser flow
 
-`ONECOMPUTER_PUBLIC_WEB_URL` is the only browser-facing origin. The service
+`LEMMACOMPUTER_PUBLIC_WEB_URL` is the only browser-facing origin. The service
 projection derives these exact routes from it:
 
 ```text
-https://<onecomputer-origin>/oauth/mcp/callback
-https://<onecomputer-origin>/m365/authorize
+https://<lemmacomputer-origin>/oauth/mcp/callback
+https://<lemmacomputer-origin>/m365/authorize
 ```
 
 The sequence is:
@@ -143,16 +143,16 @@ Provider OAuth applications must register the derived callback exactly,
 including scheme, authority, and path:
 
 ```text
-https://<onecomputer-origin>/oauth/mcp/callback
+https://<lemmacomputer-origin>/oauth/mcp/callback
 ```
 
 The product sign-in callback is different and remains:
 
 ```text
-https://<onecomputer-origin>/api/v1/auth/callback
+https://<lemmacomputer-origin>/api/v1/auth/callback
 ```
 
-Changing `ONECOMPUTER_PUBLIC_WEB_URL` requires updating both registrations.
+Changing `LEMMACOMPUTER_PUBLIC_WEB_URL` requires updating both registrations.
 Old direct callbacks such as `http://localhost:4000/callback` and
 `https://<origin>/callback` should be removed after the new route is verified
 and any rollback window closes.

@@ -18,11 +18,11 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
         name: "delete-onedrive-file",
         description: "Delete a file",
         inputSchema: { type: "object" },
-        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+        mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
       }] }));
       return;
     }
-    if (request.method === "POST" && request.url === "/onecomputer/deletions") {
+    if (request.method === "POST" && request.url === "/lemmacomputer/deletions") {
       response.statusCode = 201;
       response.end(JSON.stringify({
         operation: {
@@ -33,7 +33,7 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
       }));
       return;
     }
-    if (request.method === "GET" && request.url === `/onecomputer/operations/${operationId}`) {
+    if (request.method === "GET" && request.url === `/lemmacomputer/operations/${operationId}`) {
       statusReads += 1;
       response.end(JSON.stringify(statusReads === 1
         ? { id: operationId, state: "approval_required" }
@@ -47,7 +47,7 @@ test("Claude Desktop MCP call returns a governed handle while the bridge remains
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -113,7 +113,7 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
           name: "list-drives",
           description: "List drives",
           inputSchema: { type: "object" },
-          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+          mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
         },
         {
           name: "search-onedrive-files",
@@ -127,7 +127,7 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
               fetchAllPages: { type: "boolean" },
             },
           },
-          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+          mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
         },
       ] }));
       return;
@@ -148,7 +148,7 @@ test("Claude Desktop MCP bridge removes nullable LiteLLM result fields", async (
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -202,11 +202,11 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
           },
           required: ["driveId", "driveItemId", "confirm"],
         },
-        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+        mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
       }] }));
       return;
     }
-    if (request.method === "POST" && request.url === "/onecomputer/deletions") {
+    if (request.method === "POST" && request.url === "/lemmacomputer/deletions") {
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       deletionRequest = body;
       response.statusCode = 201;
@@ -226,7 +226,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -247,7 +247,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
         driveItemId: "item",
         resourceName: "planning-draft.docx",
         "If-Match": "{E1CFF1EF-69D6-4F68-A75F-29D6C6DB2670},3",
-        onecomputerAudit: { target: "planning-draft.docx", targetType: "file" },
+        lemmacomputerAudit: { target: "planning-draft.docx", targetType: "file" },
         confirm: true,
         excludeResponse: false,
       },
@@ -261,7 +261,7 @@ test("Claude Desktop cannot choose connector flags and governed deletion carries
   assert.equal("excludeResponse" in tools[0]!.inputSchema.properties, false);
   assert.deepEqual(
     (tools[0]!.inputSchema as unknown as { required: string[] }).required,
-    ["driveId", "driveItemId", "resourceName", "If-Match", "onecomputerAudit"],
+    ["driveId", "driveItemId", "resourceName", "If-Match", "lemmacomputerAudit"],
   );
   assert.match(
     ((responses[0]?.result as { tools: Array<{ description: string }> }).tools[0]?.description ?? ""),
@@ -294,7 +294,7 @@ test("Claude Desktop bridge supplies Softeria confirmation for an allowed calend
           properties: { body: { type: "object" }, confirm: { type: "boolean" } },
           required: ["body"],
         },
-        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+        mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
       }] }));
       return;
     }
@@ -310,7 +310,7 @@ test("Claude Desktop bridge supplies Softeria confirmation for an allowed calend
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -355,7 +355,7 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
           },
           required: ["driveId", "driveItemId"],
         },
-        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+        mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
       }] }));
       return;
     }
@@ -367,7 +367,7 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -394,7 +394,7 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
 });
 
 test("workspace-local uploads use the approval-bound resumable broker without putting bytes in model text", async (context) => {
-  const uploadDirectory = await mkdtemp(join(homedir(), ".onecomputer-upload-test-"));
+  const uploadDirectory = await mkdtemp(join(homedir(), ".lemmacomputer-upload-test-"));
   const uploadPath = join(uploadDirectory, "happy.txt");
   await writeFile(uploadPath, "happy from a workspace file");
   context.after(() => rm(uploadDirectory, { recursive: true, force: true }));
@@ -417,11 +417,11 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
           },
           required: ["driveId", "driveItemId", "body", "confirm"],
         },
-        mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+        mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
       }] }));
       return;
     }
-    if (request.method === "POST" && request.url === "/onecomputer/uploads") {
+    if (request.method === "POST" && request.url === "/lemmacomputer/uploads") {
       localUploadArguments = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       response.statusCode = 201;
       response.end(JSON.stringify({
@@ -439,7 +439,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -459,7 +459,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
         driveId: "drive",
         driveItemId: "/items/root:/happy.txt:/content",
         localFilePath: uploadPath,
-        onecomputerAudit: { target: "happy.txt", targetType: "file" },
+        lemmacomputerAudit: { target: "happy.txt", targetType: "file" },
       },
     },
   })}\n`);
@@ -482,7 +482,7 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
   assert.match(advertised.inputSchema.properties.driveItemId?.description ?? "", /root:\/happy\.txt:/);
   assert.match(advertised.inputSchema.properties.driveItemId?.pattern ?? "", /items/);
   assert.match(advertised.inputSchema.properties.localFilePath?.description ?? "", /do not read or base64-encode/i);
-  assert.deepEqual(advertised.inputSchema.required, ["driveId", "driveItemId", "onecomputerAudit"]);
+  assert.deepEqual(advertised.inputSchema.required, ["driveId", "driveItemId", "lemmacomputerAudit"]);
   assert.deepEqual(advertised.inputSchema.oneOf, [
     { required: ["body"] },
     { required: ["localFilePath"] },
@@ -508,7 +508,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
             type: "object",
             properties: { top: { type: "number" }, filter: { type: "string" } },
           },
-          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+          mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
         },
         {
           name: "send-channel-message",
@@ -531,7 +531,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
             },
             required: ["teamId", "channelId", "body", "confirm"],
           },
-          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+          mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
         },
         {
           name: "create-draft-email",
@@ -553,7 +553,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
             },
             required: ["body", "confirm"],
           },
-          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+          mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
         },
         {
           name: "create-calendar-event",
@@ -575,7 +575,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
             },
             required: ["body", "confirm"],
           },
-          mcp_info: { server_id: "server-1", server_name: "onecomputer_ms365" },
+          mcp_info: { server_id: "server-1", server_name: "lemmacomputer_ms365" },
         },
       ] }));
       return;
@@ -587,7 +587,7 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -624,8 +624,8 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
   assert.match(joined.description, /does not accept generic OData/);
 
   const send = tools.find((tool) => tool.name === "microsoft365__send-channel-message")!;
-  assert.deepEqual(Object.keys(send.inputSchema.properties), ["teamId", "channelId", "body", "onecomputerAudit"]);
-  assert.deepEqual(send.inputSchema.required, ["teamId", "channelId", "body", "onecomputerAudit"]);
+  assert.deepEqual(Object.keys(send.inputSchema.properties), ["teamId", "channelId", "body", "lemmacomputerAudit"]);
+  assert.deepEqual(send.inputSchema.required, ["teamId", "channelId", "body", "lemmacomputerAudit"]);
   assert.deepEqual(Object.keys(send.inputSchema.properties.body?.properties ?? {}), ["body"]);
   assert.deepEqual(
     Object.keys(send.inputSchema.properties.body?.properties?.body?.properties ?? {}),
@@ -642,11 +642,11 @@ test("managed Microsoft schemas hide unsupported OData and read-only Graph field
     ["subject", "body", "toRecipients", "ccRecipients", "bccRecipients", "importance"],
   );
   assert.deepEqual(draft.inputSchema.properties.body?.required, ["subject", "body"]);
-  assert.ok(draft.inputSchema.required?.includes("onecomputerAudit"));
+  assert.ok(draft.inputSchema.required?.includes("lemmacomputerAudit"));
 
   const event = tools.find((tool) => tool.name === "microsoft365__create-calendar-event")!;
   assert.deepEqual(event.inputSchema.properties.body?.required, ["subject", "start", "end"]);
-  assert.ok(event.inputSchema.required?.includes("onecomputerAudit"));
+  assert.ok(event.inputSchema.required?.includes("lemmacomputerAudit"));
   assert.equal("id" in (event.inputSchema.properties.body?.properties ?? {}), false);
   assert.equal("changeKey" in (event.inputSchema.properties.body?.properties ?? {}), false);
 });
@@ -659,7 +659,7 @@ test("an approved execution failure cannot be reported as an approval rejection"
       response.end(JSON.stringify({ tools: [] }));
       return;
     }
-    if (request.method === "GET" && request.url === `/onecomputer/operations/${operationId}`) {
+    if (request.method === "GET" && request.url === `/lemmacomputer/operations/${operationId}`) {
       response.end(JSON.stringify({
         id: operationId,
         state: "failed",
@@ -676,7 +676,7 @@ test("an approved execution failure cannot be reported as an approval rejection"
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -719,13 +719,13 @@ test("tools with the same upstream name remain advertised and route to the selec
           name: "search",
           description: "Search Notion",
           inputSchema: { type: "object" },
-          mcp_info: { server_id: "notion-id", server_name: "onecomputer_notion" },
+          mcp_info: { server_id: "notion-id", server_name: "lemmacomputer_notion" },
         },
         {
           name: "search",
           description: "Search Linear",
           inputSchema: { type: "object" },
-          mcp_info: { server_id: "linear-id", server_name: "onecomputer_linear" },
+          mcp_info: { server_id: "linear-id", server_name: "lemmacomputer_linear" },
         },
       ] }));
       return;
@@ -742,7 +742,7 @@ test("tools with the same upstream name remain advertised and route to the selec
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -791,13 +791,13 @@ test("Microsoft 365 and Linear tools are always connector-prefixed and retain up
           name: "list-calendars",
           description: "List Microsoft 365 calendars",
           inputSchema: { type: "object" },
-          mcp_info: { server_id: "microsoft365-id", server_name: "onecomputer_ms365" },
+          mcp_info: { server_id: "microsoft365-id", server_name: "lemmacomputer_ms365" },
         },
         {
           name: "list_issues",
           description: "List Linear issues",
           inputSchema: { type: "object" },
-          mcp_info: { server_id: "linear-id", server_name: "onecomputer_linear" },
+          mcp_info: { server_id: "linear-id", server_name: "lemmacomputer_linear" },
         },
       ] }));
       return;
@@ -814,7 +814,7 @@ test("Microsoft 365 and Linear tools are always connector-prefixed and retain up
   await once(server, "listening");
   context.after(() => server.close());
 
-  const child = spawn("python3", ["docker/workspace/onecomputer-connectors-stdio.py"], {
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });

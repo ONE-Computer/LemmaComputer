@@ -59,8 +59,8 @@ test("administrator can inspect alias mappings, pricing coverage, and supported 
   await expect(aliasTable.getByText("Anthropic · claude-sonnet-4-6")).toBeVisible();
   await expect(page.getByRole("status")).toContainText("saved in this browser");
   await expect(aliasTable.getByText("No card")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("onecomputer.routing-mapping-draft:")))).toEqual([
-    "onecomputer.routing-mapping-draft:v1:acme:alex-morgan",
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("lemmacomputer.routing-mapping-draft:")))).toEqual([
+    "lemmacomputer.routing-mapping-draft:v1:acme:alex-morgan",
   ]);
 
   await page.reload();
@@ -70,7 +70,7 @@ test("administrator can inspect alias mappings, pricing coverage, and supported 
   await page.getByRole("button", { name: "Publish mapping version" }).click();
   await page.getByRole("dialog", { name: "Publish mapping version?" }).getByRole("button", { name: "Publish mapping version" }).click();
   await expect(page.getByRole("status")).toContainText("Published for policy/shadow evaluation; current Team rollouts are unchanged.");
-  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("onecomputer.routing-mapping-draft:")))).toEqual([]);
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("lemmacomputer.routing-mapping-draft:")))).toEqual([]);
 
   await page.getByLabel("Pro").uncheck();
   await page.getByRole("button", { name: "Save Team policy" }).click();

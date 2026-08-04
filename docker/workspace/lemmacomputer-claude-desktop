@@ -17,9 +17,9 @@ export no_proxy="$NO_PROXY"
 if [[ -r /etc/claude-desktop/code-model ]]; then
   code_model="$(</etc/claude-desktop/code-model)"
   [[ "$code_model" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$ ]] || exit 78
-  export ONECOMPUTER_SITES_BROKER=http://127.0.0.1:4315
+  export LEMMACOMPUTER_SITES_BROKER=http://127.0.0.1:4315
   export ANTHROPIC_BASE_URL=http://127.0.0.1:4315
-  export ANTHROPIC_AUTH_TOKEN=onecomputer-loopback-broker
+  export ANTHROPIC_AUTH_TOKEN=lemmacomputer-loopback-broker
   export ANTHROPIC_MODEL="$code_model"
   export ANTHROPIC_DEFAULT_OPUS_MODEL="$code_model"
   export ANTHROPIC_DEFAULT_SONNET_MODEL="$code_model"

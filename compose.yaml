@@ -1,7 +1,7 @@
-name: ${ONECOMPUTER_COMPOSE_PROJECT_NAME:?set ONECOMPUTER_COMPOSE_PROJECT_NAME in .env}
+name: ${LEMMACOMPUTER_COMPOSE_PROJECT_NAME:?set LEMMACOMPUTER_COMPOSE_PROJECT_NAME in .env}
 
 x-control-runtime: &control-runtime
-  image: onecomputer/control-runtime:${ONECOMPUTER_IMAGE_TAG:?set ONECOMPUTER_IMAGE_TAG in .env}
+  image: lemmacomputer/control-runtime:${LEMMACOMPUTER_IMAGE_TAG:?set LEMMACOMPUTER_IMAGE_TAG in .env}
   build:
     context: .
     dockerfile: docker/Dockerfile.node
@@ -28,7 +28,7 @@ services:
     volumes:
       - control-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U onecomputer -d onecomputer"]
+      test: ["CMD-SHELL", "pg_isready -U lemmacomputer -d lemmacomputer"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -55,7 +55,7 @@ services:
     restart: unless-stopped
 
   ms365-mcp:
-    image: onecomputer/ms365-mcp:${ONECOMPUTER_MS365_IMAGE_TAG:?set ONECOMPUTER_MS365_IMAGE_TAG in .env}
+    image: lemmacomputer/ms365-mcp:${LEMMACOMPUTER_MS365_IMAGE_TAG:?set LEMMACOMPUTER_MS365_IMAGE_TAG in .env}
     build:
       context: .
       dockerfile: docker/Dockerfile.ms365-mcp
@@ -96,8 +96,8 @@ services:
     restart: unless-stopped
 
   litellm:
-    container_name: ${ONECOMPUTER_LITELLM_CONTAINER:?set ONECOMPUTER_LITELLM_CONTAINER in .env}
-    image: onecomputer/litellm:v1.93.0-onecomputer-egress
+    container_name: ${LEMMACOMPUTER_LITELLM_CONTAINER:?set LEMMACOMPUTER_LITELLM_CONTAINER in .env}
+    image: lemmacomputer/litellm:v1.93.0-lemmacomputer-egress
     build:
       context: .
       dockerfile: docker/Dockerfile.litellm
@@ -119,7 +119,7 @@ services:
     volumes:
       - ./config/litellm/config.yaml:/app/config.yaml:ro
       - ./config/litellm/logging.yaml:/app/logging.yaml:ro
-      - ./integrations/litellm/onecomputer_policy_callback.py:/app/onecomputer_policy_callback.py:ro
+      - ./integrations/litellm/lemmacomputer_policy_callback.py:/app/lemmacomputer_policy_callback.py:ro
     depends_on:
       litellm-postgres:
         condition: service_healthy
@@ -150,7 +150,7 @@ services:
   gateway-egress-proxy:
     <<: [*control-runtime, *hardened]
     user: node
-    command: ["npm", "run", "start", "--workspace", "@onecomputer/egress-proxy"]
+    command: ["npm", "run", "start", "--workspace", "@lemmacomputer/egress-proxy"]
     env_file:
       - path: .runtime-env/gateway-egress-proxy.env
         format: raw
@@ -176,7 +176,7 @@ services:
   remote-mcp-egress-proxy:
     <<: [*control-runtime, *hardened]
     user: node
-    command: ["npm", "run", "start", "--workspace", "@onecomputer/egress-proxy"]
+    command: ["npm", "run", "start", "--workspace", "@lemmacomputer/egress-proxy"]
     env_file:
       - path: .runtime-env/remote-mcp-egress-proxy.env
         format: raw
@@ -232,7 +232,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.openvtc-consent
-    image: onecomputer/openvtc-consent:${ONECOMPUTER_IMAGE_TAG:?set ONECOMPUTER_IMAGE_TAG in .env}
+    image: lemmacomputer/openvtc-consent:${LEMMACOMPUTER_IMAGE_TAG:?set LEMMACOMPUTER_IMAGE_TAG in .env}
     env_file:
       - path: .runtime-env/openvtc-consent.env
         format: raw
@@ -254,7 +254,7 @@ services:
 
   workspace-controller:
     <<: [*control-runtime, *hardened]
-    command: ["npm", "run", "start", "--workspace", "@onecomputer/workspace-controller"]
+    command: ["npm", "run", "start", "--workspace", "@lemmacomputer/workspace-controller"]
     env_file:
       - path: .runtime-env/workspace-controller.env
         format: raw
@@ -288,9 +288,9 @@ services:
 
   control-api:
     <<: [*control-runtime, *hardened]
-    container_name: ${ONECOMPUTER_CONTROL_CONTAINER:?set ONECOMPUTER_CONTROL_CONTAINER in .env}
+    container_name: ${LEMMACOMPUTER_CONTROL_CONTAINER:?set LEMMACOMPUTER_CONTROL_CONTAINER in .env}
     user: node
-    command: ["npm", "run", "start", "--workspace", "@onecomputer/control-api"]
+    command: ["npm", "run", "start", "--workspace", "@lemmacomputer/control-api"]
     env_file:
       - path: .runtime-env/control-api.env
         format: raw
@@ -327,7 +327,7 @@ services:
   channel-broker:
     <<: [*control-runtime, *hardened]
     user: node
-    command: ["npm", "run", "start", "--workspace", "@onecomputer/channel-broker"]
+    command: ["npm", "run", "start", "--workspace", "@lemmacomputer/channel-broker"]
     env_file:
       - path: .runtime-env/channel-broker.env
         format: raw
@@ -353,7 +353,7 @@ services:
   scheduler-worker:
     <<: [*control-runtime, *hardened]
     user: node
-    command: ["npm", "run", "start", "--workspace", "@onecomputer/scheduler-worker"]
+    command: ["npm", "run", "start", "--workspace", "@lemmacomputer/scheduler-worker"]
     env_file:
       - path: .runtime-env/scheduler-worker.env
         format: raw
@@ -399,7 +399,7 @@ services:
   workspace-ingress:
     <<: [*control-runtime, *hardened]
     user: node
-    command: ["npm", "run", "start", "--workspace", "@onecomputer/workspace-ingress-server"]
+    command: ["npm", "run", "start", "--workspace", "@lemmacomputer/workspace-ingress-server"]
     env_file:
       - path: .runtime-env/workspace-ingress.env
         format: raw
@@ -409,7 +409,7 @@ services:
       - control-private
       - gateway-private
     ports:
-      - "${ONECOMPUTER_HTTP_BIND_ADDRESS:?set ONECOMPUTER_HTTP_BIND_ADDRESS in .env}:${ONECOMPUTER_WEB_PORT:?set ONECOMPUTER_WEB_PORT in .env}:4174"
+      - "${LEMMACOMPUTER_HTTP_BIND_ADDRESS:?set LEMMACOMPUTER_HTTP_BIND_ADDRESS in .env}:${LEMMACOMPUTER_WEB_PORT:?set LEMMACOMPUTER_WEB_PORT in .env}:4174"
     depends_on:
       web:
         condition: service_healthy
@@ -422,7 +422,7 @@ services:
         - CMD
         - node
         - -e
-        - fetch('http://127.0.0.1:4174/__onecomputer/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+        - fetch('http://127.0.0.1:4174/__lemmacomputer/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 5s
       timeout: 3s
       retries: 20
@@ -432,7 +432,7 @@ services:
   workspace-image:
     profiles:
       - build
-    image: ${ONECOMPUTER_WORKSPACE_IMAGE:?set ONECOMPUTER_WORKSPACE_IMAGE in .env}
+    image: ${LEMMACOMPUTER_WORKSPACE_IMAGE:?set LEMMACOMPUTER_WORKSPACE_IMAGE in .env}
     build:
       context: .
       dockerfile: docker/Dockerfile.workspace
@@ -443,7 +443,7 @@ networks:
   web-edge:
     internal: true
   control-private:
-    name: ${ONECOMPUTER_CONTROL_NETWORK:?set ONECOMPUTER_CONTROL_NETWORK in .env}
+    name: ${LEMMACOMPUTER_CONTROL_NETWORK:?set LEMMACOMPUTER_CONTROL_NETWORK in .env}
     internal: true
   consent-private:
     internal: true

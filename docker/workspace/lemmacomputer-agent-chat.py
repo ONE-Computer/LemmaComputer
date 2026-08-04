@@ -33,7 +33,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-from onecomputer_work_trace import (
+from lemmacomputer_work_trace import (
     approach_summary,
     extract_sources,
     safe_trace_text,
@@ -42,25 +42,25 @@ from onecomputer_work_trace import (
     web_action_for_tool,
 )
 
-AGENT = os.environ["ONECOMPUTER_CHAT_AGENT"]
-API_KEY = os.environ["ONECOMPUTER_CHAT_API_KEY"]
-MODEL = os.environ["ONECOMPUTER_CHAT_MODEL_ALIAS"]
-ALLOWED_TOOLS = tuple(item for item in os.environ["ONECOMPUTER_CHAT_ALLOWED_TOOLS"].split(",") if item)
-BROKER = os.environ["ONECOMPUTER_CHAT_BROKER"]
-PORT = int(os.environ["ONECOMPUTER_CHAT_PORT"])
-EXECUTION_MODE = os.environ.get("ONECOMPUTER_EXECUTION_MODE", "managed")
-CONFIGURED_TIME_ZONE = os.environ.get("ONECOMPUTER_TIME_ZONE", "").strip()
-HERMES_URL = os.environ.get("ONECOMPUTER_HERMES_CHAT_URL", "")
-HERMES_KEY = os.environ.get("ONECOMPUTER_HERMES_CHAT_KEY", "")
+AGENT = os.environ["LEMMACOMPUTER_CHAT_AGENT"]
+API_KEY = os.environ["LEMMACOMPUTER_CHAT_API_KEY"]
+MODEL = os.environ["LEMMACOMPUTER_CHAT_MODEL_ALIAS"]
+ALLOWED_TOOLS = tuple(item for item in os.environ["LEMMACOMPUTER_CHAT_ALLOWED_TOOLS"].split(",") if item)
+BROKER = os.environ["LEMMACOMPUTER_CHAT_BROKER"]
+PORT = int(os.environ["LEMMACOMPUTER_CHAT_PORT"])
+EXECUTION_MODE = os.environ.get("LEMMACOMPUTER_EXECUTION_MODE", "managed")
+CONFIGURED_TIME_ZONE = os.environ.get("LEMMACOMPUTER_TIME_ZONE", "").strip()
+HERMES_URL = os.environ.get("LEMMACOMPUTER_HERMES_CHAT_URL", "")
+HERMES_KEY = os.environ.get("LEMMACOMPUTER_HERMES_CHAT_KEY", "")
 HOME = Path("/home/kasm-user")
-STATE_DIR = HOME / ".onecomputer-chat" / AGENT
+STATE_DIR = HOME / ".lemmacomputer-chat" / AGENT
 STATE_FILE = STATE_DIR / "structured-sessions.json"
 ATTACHMENT_ROOT = STATE_DIR / "attachments"
-ATTACHMENT_INBOX_ROOT = HOME / "ONEComputer" / "Inbox"
+ATTACHMENT_INBOX_ROOT = HOME / "LemmaComputer" / "Inbox"
 ARTIFACT_ROOT = STATE_DIR / "artifacts"
-ARTIFACT_OUTBOX_ROOT = HOME / "ONEComputer" / "Outbox"
+ARTIFACT_OUTBOX_ROOT = HOME / "LemmaComputer" / "Outbox"
 try:
-    ATTACHMENT_RETENTION_DAYS = int(os.environ.get("ONECOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS", "90"))
+    ATTACHMENT_RETENTION_DAYS = int(os.environ.get("LEMMACOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS", "90"))
 except ValueError:
     raise SystemExit("invalid chat attachment retention") from None
 if not 1 <= ATTACHMENT_RETENTION_DAYS <= 3_650:
@@ -102,11 +102,11 @@ ARTIFACT_MEDIA_TYPES = {
 ARTIFACT_ID_PATTERN = re.compile(r"^artifact-[a-f0-9]{32}$")
 TELEGRAM_ARTIFACT_INSTRUCTION = (
     "This request came from Telegram. If you create or modify a file that should be returned to the employee, "
-    "write the final deliverable directly inside /home/kasm-user/ONEComputer/Outbox. "
+    "write the final deliverable directly inside /home/kasm-user/LemmaComputer/Outbox. "
     "Use a clear filename with a supported extension. Only newly created or modified files in that directory "
     "are returned; do not place drafts, source files, credentials, or unrelated workspace data there."
 )
-NEEDS_INPUT_MARKER = "[ONECOMPUTER_NEEDS_INPUT]"
+NEEDS_INPUT_MARKER = "[LEMMACOMPUTER_NEEDS_INPUT]"
 BASE_SYSTEM_PROMPT = (
     f"You are the selected agent in a LemmaComputer {EXECUTION_MODE} workspace. "
     "Complete the employee's requested work with the assigned tools instead of "
@@ -116,7 +116,7 @@ BASE_SYSTEM_PROMPT = (
     "path, or a value visible in an attached screenshot, use assigned read and "
     "search tools to resolve the required service IDs before asking the employee "
     "for internal IDs. Do not mutate a target if discovery is ambiguous. "
-    "Use only the provided onecomputer_connectors MCP tools for connected-service work. "
+    "Use only the provided lemmacomputer_connectors MCP tools for connected-service work. "
     "Invoke an assigned MCP tool directly by its advertised tool name; never wrap "
     "an MCP call in terminal, execute_code, Python, or a tool_call helper. "
     "When upload-file-content is given a workspace-local file, pass its absolute "
@@ -140,7 +140,7 @@ BASE_SYSTEM_PROMPT = (
     + (
         "Local shell, filesystem, browser, skills, and public-web tools are available "
         "inside this disposable non-sensitive workspace. For scheduled work, read "
-        "/home/kasm-user/.onecomputer/SCHEDULING.md and use onecomputer-crontab."
+        "/home/kasm-user/.lemmacomputer/SCHEDULING.md and use lemmacomputer-crontab."
         if EXECUTION_MODE == "disposable-open"
         else (
             "Hermes has workspace-local file, terminal, skills, and vision tools for "
@@ -155,7 +155,7 @@ BASE_SYSTEM_PROMPT = (
 try:
     LOCAL_TIME_ZONE = ZoneInfo(CONFIGURED_TIME_ZONE) if CONFIGURED_TIME_ZONE else None
 except ZoneInfoNotFoundError:
-    raise SystemExit("invalid ONECOMPUTER_TIME_ZONE") from None
+    raise SystemExit("invalid LEMMACOMPUTER_TIME_ZONE") from None
 
 
 def system_prompt() -> str:
@@ -322,11 +322,11 @@ def find_session(document: dict[str, Any], session_id: str) -> dict[str, Any] | 
 
 
 def safe_identifier(prefix: str, turn_id: str, source: str) -> str:
-    return f"{prefix}-{uuid.uuid5(uuid.NAMESPACE_URL, f'onecomputer:{turn_id}:{source}').hex}"
+    return f"{prefix}-{uuid.uuid5(uuid.NAMESPACE_URL, f'lemmacomputer:{turn_id}:{source}').hex}"
 
 
 def safe_tool_name(value: object) -> str:
-    candidate = str(value or "workspace-tool").replace("mcp__onecomputer_connectors__", "")
+    candidate = str(value or "workspace-tool").replace("mcp__lemmacomputer_connectors__", "")
     cleaned = re.sub(r"[^A-Za-z0-9_.:-]", "-", candidate)[:160]
     return cleaned or "workspace-tool"
 
@@ -845,7 +845,7 @@ async def claude_vendor_events(
     # The LiteLLM key is the exact, live connector/tool ceiling. Keep the
     # aggregate MCP server discoverable so a newly connected service appears
     # without rebuilding this workspace process.
-    tool_names = ["mcp__onecomputer_connectors__*"]
+    tool_names = ["mcp__lemmacomputer_connectors__*"]
     local_tools = [
         "Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Skill",
         "Task", "TodoWrite", "WebFetch", "WebSearch", "Write",
@@ -857,11 +857,11 @@ async def claude_vendor_events(
         disallowed_tools=[] if open_mode else local_tools,
         system_prompt=system_prompt(),
         mcp_servers={
-            "onecomputer_connectors": {
+            "lemmacomputer_connectors": {
                 "type": "stdio",
-                "command": "/usr/local/libexec/onecomputer-connectors-stdio",
+                "command": "/usr/local/libexec/lemmacomputer-connectors-stdio",
                 "args": [],
-                "env": {"ONECOMPUTER_CONNECTORS_BROKER": BROKER},
+                "env": {"LEMMACOMPUTER_CONNECTORS_BROKER": BROKER},
             },
         },
         strict_mcp_config=True,
@@ -871,15 +871,15 @@ async def claude_vendor_events(
         max_turns=30,
         model=MODEL,
         cwd=str(HOME),
-        cli_path="/opt/onecomputer/claude-code/2.1.215/claude",
+        cli_path="/opt/lemmacomputer/claude-code/2.1.215/claude",
         include_partial_messages=True,
         env={
             "ANTHROPIC_BASE_URL": BROKER,
-            "ANTHROPIC_AUTH_TOKEN": "onecomputer-loopback-broker",
+            "ANTHROPIC_AUTH_TOKEN": "lemmacomputer-loopback-broker",
             "CLAUDE_CONFIG_DIR": str(HOME / ".claude-chat-sdk"),
-            "ONECOMPUTER_SITES_BROKER": BROKER,
+            "LEMMACOMPUTER_SITES_BROKER": BROKER,
             **({
-                "ANTHROPIC_CUSTOM_HEADERS": f"x-onecomputer-ai-task-binding: {usage_task_binding}",
+                "ANTHROPIC_CUSTOM_HEADERS": f"x-lemmacomputer-ai-task-binding: {usage_task_binding}",
             } if usage_task_binding else {}),
             "HOME": str(HOME),
             "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -999,9 +999,9 @@ async def codex_vendor_events(
     sandbox = Sandbox.danger_full_access if EXECUTION_MODE == "disposable-open" else Sandbox.read_only
     usage_config = ({
         "model_providers": {
-            "onecomputer": {
+            "lemmacomputer": {
                 "http_headers": {
-                    "x-onecomputer-ai-task-binding": usage_task_binding,
+                    "x-lemmacomputer-ai-task-binding": usage_task_binding,
                 },
             },
         },
@@ -1205,7 +1205,7 @@ async def hermes_vendor_events(
             "authorization": f"Bearer {HERMES_KEY}",
             "accept": "text/event-stream",
             **({
-                "x-onecomputer-ai-task-binding": usage_task_binding,
+                "x-lemmacomputer-ai-task-binding": usage_task_binding,
             } if usage_task_binding else {}),
         },
         json={"message": message, "instructions": system_prompt()},
@@ -1370,7 +1370,7 @@ async def persist_turn_messages(
 async def health(request: Request) -> Response:
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return JSONResponse({"status": "ready", "agent": AGENT, "protocol": "onecomputer-chat-events/v1"})
+    return JSONResponse({"status": "ready", "agent": AGENT, "protocol": "lemmacomputer-chat-events/v1"})
 
 
 async def sessions(request: Request) -> Response:
@@ -1464,7 +1464,7 @@ async def artifact(request: Request) -> Response:
             raise ValueError("invalid artifact")
     except (OSError, ValueError, json.JSONDecodeError):
         return JSONResponse({"error": "artifact not found"}, status_code=404)
-    return Response(data, media_type=media_type, headers={"cache-control": "no-store", "x-onecomputer-artifact-sha256": manifest["sha256"]})
+    return Response(data, media_type=media_type, headers={"cache-control": "no-store", "x-lemmacomputer-artifact-sha256": manifest["sha256"]})
 
 
 async def messages(request: Request) -> Response:
@@ -1820,7 +1820,7 @@ async def turns(request: Request) -> Response:
     return StreamingResponse(
         detached.subscribe(),
         media_type="application/x-ndjson",
-        headers={"cache-control": "no-store", "x-onecomputer-chat-protocol": "1"},
+        headers={"cache-control": "no-store", "x-lemmacomputer-chat-protocol": "1"},
     )
 
 
@@ -1856,9 +1856,9 @@ async def lifespan(_: Starlette):
             env={
                 "CODEX_HOME": str(HOME / ".codex-chat-sdk"),
                 "HOME": str(HOME),
-                "OPENAI_API_KEY": "onecomputer-loopback-broker",
+                "OPENAI_API_KEY": "lemmacomputer-loopback-broker",
                 "OPENAI_BASE_URL": f"{BROKER}/v1",
-                "ONECOMPUTER_SITES_BROKER": BROKER,
+                "LEMMACOMPUTER_SITES_BROKER": BROKER,
                 "PATH": "/usr/local/bin:/usr/bin:/bin",
                 "NO_PROXY": "localhost,127.0.0.1",
             },

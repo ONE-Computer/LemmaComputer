@@ -1,6 +1,6 @@
-const VERSION = "onecomputer-companion-sw-0.2";
+const VERSION = "lemmacomputer-companion-sw-0.2";
 const COMPANION_PATH = "/companion?from=notification";
-const OPEN_APPROVALS_MESSAGE = { type: "onecomputer-open-approvals" };
+const OPEN_APPROVALS_MESSAGE = { type: "lemmacomputer-open-approvals" };
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -24,7 +24,7 @@ self.addEventListener("push", (event) => {
   if (!validHint) return;
   event.waitUntil(self.registration.showNotification("Approval requested", {
     body: "Open LemmaComputer Companion to review a protected action.",
-    tag: "onecomputer-approval-pending",
+    tag: "lemmacomputer-approval-pending",
     renotify: true,
     requireInteraction: true,
     data: { path: COMPANION_PATH, version: VERSION },

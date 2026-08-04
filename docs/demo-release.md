@@ -4,7 +4,7 @@ The demo is a protected operational profile even without GitHub branch protectio
 
 ## Topology
 
-- Reserve Docker context `onecomputer-demo` for the demo host/stack.
+- Reserve Docker context `lemmacomputer-demo` for the demo host/stack.
 - Keep its secrets outside the repository and never copy them into a worktree.
 - Deploy an immutable `demo-*` Git tag and image digest. Do not run the demo from a dirty checkout, issue branch, or moving `main` filesystem.
 - Back up the Control PostgreSQL database, LiteLLM database, workspace volumes, secret versions, and image digests as one restore set.
@@ -48,8 +48,8 @@ Anthropic, GLM, and Bedrock routes with Provider settings:
 
 1. Capture a restore-tested, coordinated snapshot of Control PostgreSQL,
    LiteLLM PostgreSQL, workspace volumes, image digests, and the stable
-   `ONECOMPUTER_LITELLM_SALT_KEY` and
-   `ONECOMPUTER_LITELLM_CREDENTIAL_SECRET` values.
+   `LEMMACOMPUTER_LITELLM_SALT_KEY` and
+   `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET` values.
 2. Stop active demo workspaces. Their existing scoped model grants are
    intentionally not reused across the route replacement.
 3. Run the normal one-shot Control migration, deploy the promoted image and

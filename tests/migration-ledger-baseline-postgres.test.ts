@@ -9,7 +9,7 @@ import {
   assertWorkspaceSchemaCompatible,
   discoverWorkspaceMigrations,
   runWorkspaceMigrations,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 
 const legacyConnectionString = process.env.MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL;
 const freshConnectionString = process.env.MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL;
@@ -31,7 +31,7 @@ type LedgerRow = {
 
 async function createMigrationFixture() {
   const sourceDirectory = new URL("../packages/workspace-store/migrations/", import.meta.url);
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-migration-ledger-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-migration-ledger-"));
   const legacyMigrationNames = (await readdir(sourceDirectory))
     .filter((fileName) => legacyMigrationFile.test(fileName))
     .sort();
@@ -56,12 +56,12 @@ async function applyRawLegacySchema(pool: pg.Pool, directory: string, migrationN
 
 async function readLedger(pool: pg.Pool) {
   return (await pool.query<LedgerRow>(
-    "SELECT id,checksum_sha256,installation_kind FROM onecomputer_schema_migrations ORDER BY id",
+    "SELECT id,checksum_sha256,installation_kind FROM lemmacomputer_schema_migrations ORDER BY id",
   )).rows;
 }
 
 test("migration discovery rejects a forward migration that depends on a later migration", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-forward-dependency-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-forward-dependency-"));
   const firstId = "01H" + "0".repeat(23);
   const laterId = "01J" + "0".repeat(23);
   try {
@@ -131,7 +131,7 @@ test("pre-ledger 028 databases baseline only legacy migrations and execute later
     }), { applied: [], baselined: false });
 
     await legacyPool.query(
-      "UPDATE onecomputer_schema_migrations SET depends_on=ARRAY['027']::text[] WHERE id=$1",
+      "UPDATE lemmacomputer_schema_migrations SET depends_on=ARRAY['027']::text[] WHERE id=$1",
       [forwardMigrationId],
     );
     await assert.rejects(
@@ -139,7 +139,7 @@ test("pre-ledger 028 databases baseline only legacy migrations and execute later
       /dependencies differ from the applied ledger/,
     );
     await legacyPool.query(
-      "UPDATE onecomputer_schema_migrations SET depends_on=ARRAY['028']::text[] WHERE id=$1",
+      "UPDATE lemmacomputer_schema_migrations SET depends_on=ARRAY['028']::text[] WHERE id=$1",
       [forwardMigrationId],
     );
 

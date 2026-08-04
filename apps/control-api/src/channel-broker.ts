@@ -1,5 +1,5 @@
 import {
-  OneComputerError,
+  LemmaComputerError,
   channelBrokerCredentialOwnerSchema,
   channelBrokerOwnerSchema,
   channelBrokerSaveConnectionSchema,
@@ -12,7 +12,7 @@ import {
   type IdentityContext,
   type TelegramChannelConnectionStatus,
   type TelegramCredentialStatus,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 
 export interface ChannelBrokerManagementClient {
   listCredentials(identity: IdentityContext): Promise<{ credentials: TelegramCredentialStatus[] }>;
@@ -37,18 +37,18 @@ export class HttpChannelBrokerManagementClient implements ChannelBrokerManagemen
         ...init,
         headers: {
           "content-type": "application/json",
-          "x-onecomputer-channel-token": this.internalToken,
+          "x-lemmacomputer-channel-token": this.internalToken,
         },
         signal: AbortSignal.timeout(35_000),
       });
     } catch {
-      throw new OneComputerError("CHANNEL_BROKER_UNAVAILABLE", "Messaging connections are unavailable", 503, true);
+      throw new LemmaComputerError("CHANNEL_BROKER_UNAVAILABLE", "Messaging connections are unavailable", 503, true);
     }
     if (response.status === 204) return null;
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       const publicStatus = response.status === 400 ? 400 : 503;
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "CHANNEL_BROKER_REJECTED",
         response.status === 400 ? "The Telegram connection is invalid" : "Messaging connections are unavailable",
         publicStatus,

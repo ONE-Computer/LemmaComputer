@@ -57,14 +57,14 @@ export class LiteLlmTeamBudgetProjector{
       // remains an observable LemmaComputer warning.
       max_budget:input.mode==="hard"?numericLimit:null,
       metadata:{
-        onecomputer_tenant_key:createHash("sha256").update(input.tenantId).digest("hex").slice(0,24),
-        onecomputer_team_key:createHash("sha256").update(input.teamId).digest("hex").slice(0,24),
-        onecomputer_budget_version_id:input.budgetVersionId,
-        onecomputer_limit_amount:input.limitAmount,
-        onecomputer_currency:input.currency,
-        onecomputer_mode:input.mode,
-        onecomputer_period_start:input.periodStart.toISOString(),
-        onecomputer_period_end:input.periodEnd.toISOString(),
+        lemmacomputer_tenant_key:createHash("sha256").update(input.tenantId).digest("hex").slice(0,24),
+        lemmacomputer_team_key:createHash("sha256").update(input.teamId).digest("hex").slice(0,24),
+        lemmacomputer_budget_version_id:input.budgetVersionId,
+        lemmacomputer_limit_amount:input.limitAmount,
+        lemmacomputer_currency:input.currency,
+        lemmacomputer_mode:input.mode,
+        lemmacomputer_period_start:input.periodStart.toISOString(),
+        lemmacomputer_period_end:input.periodEnd.toISOString(),
       },
     };
   }
@@ -102,14 +102,14 @@ export class LiteLlmTeamBudgetProjector{
       const body=(read.payload&&typeof read.payload==="object"?read.payload:{}) as Record<string,unknown>;
       const metadata=(body.metadata&&typeof body.metadata==="object"?body.metadata:{}) as Record<string,unknown>;
       const observed={team_id:String(body.team_id??""),team_alias:String(body.team_alias??""),max_budget:body.max_budget??null,metadata:{
-        onecomputer_tenant_key:metadata.onecomputer_tenant_key,
-        onecomputer_team_key:metadata.onecomputer_team_key,
-        onecomputer_budget_version_id:metadata.onecomputer_budget_version_id,
-        onecomputer_limit_amount:metadata.onecomputer_limit_amount,
-        onecomputer_currency:metadata.onecomputer_currency,
-        onecomputer_mode:metadata.onecomputer_mode,
-        onecomputer_period_start:metadata.onecomputer_period_start,
-        onecomputer_period_end:metadata.onecomputer_period_end,
+        lemmacomputer_tenant_key:metadata.lemmacomputer_tenant_key,
+        lemmacomputer_team_key:metadata.lemmacomputer_team_key,
+        lemmacomputer_budget_version_id:metadata.lemmacomputer_budget_version_id,
+        lemmacomputer_limit_amount:metadata.lemmacomputer_limit_amount,
+        lemmacomputer_currency:metadata.lemmacomputer_currency,
+        lemmacomputer_mode:metadata.lemmacomputer_mode,
+        lemmacomputer_period_start:metadata.lemmacomputer_period_start,
+        lemmacomputer_period_end:metadata.lemmacomputer_period_end,
       }};
       const observedFingerprint=fingerprint(observed);
       const left=Buffer.from(expectedFingerprint,"hex");const right=Buffer.from(observedFingerprint,"hex");

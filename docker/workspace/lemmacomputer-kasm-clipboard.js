@@ -2,7 +2,7 @@
   "use strict";
 
   const query = new URLSearchParams(window.location.search);
-  const policyEnabled = query.get("onecomputer_clipboard") !== "disabled";
+  const policyEnabled = query.get("lemmacomputer_clipboard") !== "disabled";
   const chromium = /\b(?:Chrom(?:e|ium)|Edg|Brave)\//.test(navigator.userAgent);
   const nativeApi = Boolean(
     window.isSecureContext
@@ -12,7 +12,7 @@
   );
 
   const status = document.createElement("div");
-  status.id = "onecomputer-clipboard-status";
+  status.id = "lemmacomputer-clipboard-status";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
   Object.assign(status.style, {

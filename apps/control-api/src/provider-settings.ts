@@ -1,6 +1,6 @@
-import { OneComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@onecomputer/contracts";
-import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@onecomputer/litellm-adapter";
-import type { ProviderLifecycleExpectation, ProviderLifecycleRecord, ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@onecomputer/workspace-store";
+import { LemmaComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@lemmacomputer/contracts";
+import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
+import type { ProviderLifecycleExpectation, ProviderLifecycleRecord, ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@lemmacomputer/workspace-store";
 
 type EmissionsSelection = { emissionsRegion?: ProviderEmissionsRegion };
 type DirectProviderInput<T extends ProviderModelId> = { apiKey: string } & EmissionsSelection & (
@@ -146,15 +146,15 @@ const safeProviderError = (
   fallbackCode: "PROVIDER_CONFIGURATION_FAILED" | "PROVIDER_TEST_FAILED",
   message: string,
 ) => {
-  if (error instanceof OneComputerError && safeProviderErrorCodes.has(error.code)) {
-    return new OneComputerError(
+  if (error instanceof LemmaComputerError && safeProviderErrorCodes.has(error.code)) {
+    return new LemmaComputerError(
       error.code,
       safeProviderMessage(error.code, message),
       error.statusCode,
       error.retryable,
     );
   }
-  return new OneComputerError(fallbackCode, message, 502, true);
+  return new LemmaComputerError(fallbackCode, message, 502, true);
 };
 
 const safeErrorCode = (error: unknown) => {
@@ -163,7 +163,7 @@ const safeErrorCode = (error: unknown) => {
 };
 
 const lifecycleErrorCode = (error: unknown) => (
-  error instanceof OneComputerError ? error.code : "PROVIDER_ROUTE_FAILED"
+  error instanceof LemmaComputerError ? error.code : "PROVIDER_ROUTE_FAILED"
 );
 
 type WorkspaceGrantRevocation = { revoked: number; failed: number };
@@ -191,7 +191,7 @@ export class ProviderSettingsService {
     if (!provider) return;
     const lifecycle = await this.store.getProviderLifecycle(actor.tenantId, provider);
     if (lifecycle && lifecycle.desiredState !== "active") {
-      throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
+      throw new LemmaComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
     await this.activeRecord(actor, provider);
   }
@@ -205,7 +205,7 @@ export class ProviderSettingsService {
         updatedBy: actor.userId,
       });
       if (!lifecycle) {
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "PROVIDER_LIFECYCLE_FENCED",
           "The provider is still being disabled; reconcile it before configuring again",
           409,
@@ -216,7 +216,7 @@ export class ProviderSettingsService {
       if (input.provider === "bedrock" && current?.state === "active") {
         const existing = this.requireBedrockSelection(current);
         if (existing.region !== input.region || existing.modelProfileId !== input.modelProfileId) {
-          throw new OneComputerError(
+          throw new LemmaComputerError(
             "BEDROCK_ROUTE_RECONFIGURATION_REQUIRED",
             "Disable and reconnect Bedrock to change its approved region or inference profile",
             409,
@@ -294,7 +294,7 @@ export class ProviderSettingsService {
         });
       } catch {
         await this.cleanupFencedRoute(actor, provider, lifecycle, route.modelIds);
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "PROVIDER_CONFIGURATION_RECONCILIATION_REQUIRED",
           "The provider route changed but its settings could not be recorded. Reopen Provider settings before retrying.",
           503,
@@ -303,7 +303,7 @@ export class ProviderSettingsService {
       }
       if (!saved) {
         await this.cleanupFencedRoute(actor, provider, lifecycle, route.modelIds);
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "PROVIDER_LIFECYCLE_FENCED",
           "The provider changed state while this operation was running",
           409,
@@ -323,7 +323,7 @@ export class ProviderSettingsService {
         updatedBy: actor.userId,
       });
       if (lifecycle.desiredState !== "active") {
-        throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
+        throw new LemmaComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
       }
       const current = await this.activeRecord(actor, provider);
       try {
@@ -372,7 +372,7 @@ export class ProviderSettingsService {
           expected: this.expectation(lifecycle),
         });
       } catch {
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "PROVIDER_TEST_RECONCILIATION_REQUIRED",
           "The provider test completed but its status could not be recorded.",
           503,
@@ -381,7 +381,7 @@ export class ProviderSettingsService {
       }
       if (!saved) {
         await this.recordLifecycleEvent(lifecycle, "test-fenced", actor.userId);
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           "PROVIDER_LIFECYCLE_FENCED",
           "The provider changed state while this operation was running",
           409,
@@ -422,7 +422,7 @@ export class ProviderSettingsService {
       // either local state or a lifecycle fence. A pre-existing fence is
       // intentionally retryable: it may still carry gateway cleanup work.
       if (!current && !lifecycle) {
-        throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 404);
+        throw new LemmaComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 404);
       }
       const fenced = await this.store.fenceProviderDeleted({
         tenantId: actor.tenantId,
@@ -439,7 +439,7 @@ export class ProviderSettingsService {
     return this.store.withProviderLifecycleLock(actor.tenantId, provider, async () => {
       const lifecycle = await this.store.getProviderLifecycle(actor.tenantId, provider);
       if (!lifecycle || lifecycle.desiredState === "active") {
-        throw new OneComputerError("PROVIDER_LIFECYCLE_NOT_RECONCILABLE", "That provider does not require lifecycle reconciliation", 409);
+        throw new LemmaComputerError("PROVIDER_LIFECYCLE_NOT_RECONCILABLE", "That provider does not require lifecycle reconciliation", 409);
       }
       const workspaceGrants = await this.revokeWorkspaceGrants(actor.tenantId, provider);
       await this.reconcileFencedLifecycle(actor, provider, lifecycle);
@@ -518,7 +518,7 @@ export class ProviderSettingsService {
         errorCode: lifecycleErrorCode(error),
         updatedBy: actor.userId,
       }).catch(() => undefined);
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "PROVIDER_LIFECYCLE_RECONCILIATION_REQUIRED",
         "The provider is disabled, but gateway cleanup needs reconciliation",
         503,
@@ -564,7 +564,7 @@ export class ProviderSettingsService {
   private requireBedrockSelection(record: ProviderSettingRecord): BedrockSelection {
     const selection = bedrockSelection(record.provider, record);
     if (selection) return selection;
-    throw new OneComputerError(
+    throw new LemmaComputerError(
       "PROVIDER_CONFIGURATION_INVALID",
       "The Bedrock selection metadata is invalid; disable and reconnect the provider",
       409,
@@ -577,7 +577,7 @@ export class ProviderSettingsService {
       current?.state !== "active"
       || current.modelIds.length === 0
     ) {
-      throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
+      throw new LemmaComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
     if (requireValidBedrock && provider === "bedrock") this.requireBedrockSelection(current);
     return current;

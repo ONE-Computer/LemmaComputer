@@ -7,14 +7,14 @@ import type {
   TeamMembership,
   TeamSummary,
   UpdateTeam,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import {
   MemoryWorkspaceStore,
   type IdentityPolicyStore,
   type SessionPrincipal,
   type TeamAuditEvent,
   type TeamStore,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -26,7 +26,7 @@ const administrator: SessionPrincipal = {
   displayName: "Team Administrator",
   tenantDisplayName: "Acme",
   roles: ["employee", "administrator"],
-  identity: { tenantId: "acme", subjectId: "team-admin", audience: "onecomputer-control" },
+  identity: { tenantId: "acme", subjectId: "team-admin", audience: "lemmacomputer-control" },
 };
 const employee: SessionPrincipal = {
   ...administrator,
@@ -34,7 +34,7 @@ const employee: SessionPrincipal = {
   email: "team-member@example.test",
   displayName: "Team Member",
   roles: ["employee"],
-  identity: { tenantId: "acme", subjectId: "team-member", audience: "onecomputer-control" },
+  identity: { tenantId: "acme", subjectId: "team-member", audience: "lemmacomputer-control" },
 };
 const teamId = "1b5f0aa2-e2e2-4ca4-86ca-8f1ea74a5b61";
 const membershipId = "97d8fa9e-896f-4125-a104-bad838d0bc26";
@@ -174,7 +174,7 @@ const authentication = (actor: SessionPrincipal) => ({
   begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
   complete: async () => { throw new Error("not used"); },
   authenticate: async () => actor,
-  logout: async () => "onecomputer_session=; Max-Age=0",
+  logout: async () => "lemmacomputer_session=; Max-Age=0",
 });
 
 const identityPolicies = {
@@ -198,8 +198,8 @@ const appFor = (actor: SessionPrincipal, teamStore: TeamStore) => createControlS
 );
 
 const headers = {
-  "x-onecomputer-proxy-token": proxyToken,
-  cookie: "onecomputer_session=valid",
+  "x-lemmacomputer-proxy-token": proxyToken,
+  cookie: "lemmacomputer_session=valid",
 };
 
 test("Team administration API validates writes, stays tenant-bound, and exposes only minimal member identity", async () => {

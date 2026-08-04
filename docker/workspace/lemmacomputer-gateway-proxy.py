@@ -19,13 +19,13 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-UPSTREAM = urlsplit(os.environ["ONECOMPUTER_GATEWAY_UPSTREAM"])
-CREDENTIAL = os.environ["ONECOMPUTER_GATEWAY_CREDENTIAL"]
-MODEL_ALIAS = os.environ.get("ONECOMPUTER_TRANSPORT_MODEL_ALIAS", os.environ["ONECOMPUTER_MODEL_ALIAS"])
-DEFAULT_SERVICE_CLASS = os.environ.get("ONECOMPUTER_REQUESTED_SERVICE_CLASS", "auto")
-CONTROL = urlsplit(os.environ["ONECOMPUTER_CONTROL_UPSTREAM"])
-AGENT_BRIDGE_TOKEN = os.environ["ONECOMPUTER_AGENT_BRIDGE_TOKEN"]
-LISTEN_PORT = int(os.environ.get("ONECOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
+UPSTREAM = urlsplit(os.environ["LEMMACOMPUTER_GATEWAY_UPSTREAM"])
+CREDENTIAL = os.environ["LEMMACOMPUTER_GATEWAY_CREDENTIAL"]
+MODEL_ALIAS = os.environ.get("LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS", os.environ["LEMMACOMPUTER_MODEL_ALIAS"])
+DEFAULT_SERVICE_CLASS = os.environ.get("LEMMACOMPUTER_REQUESTED_SERVICE_CLASS", "auto")
+CONTROL = urlsplit(os.environ["LEMMACOMPUTER_CONTROL_UPSTREAM"])
+AGENT_BRIDGE_TOKEN = os.environ["LEMMACOMPUTER_AGENT_BRIDGE_TOKEN"]
+LISTEN_PORT = int(os.environ.get("LEMMACOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
 INFERENCE_PATHS = {"/v1/messages", "/v1/messages/count_tokens", "/v1/chat/completions", "/v1/responses"}
 ALLOWED_PATHS = INFERENCE_PATHS | {"/v1/models", "/mcp-rest/tools/list", "/mcp-rest/tools/call"}
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
@@ -129,7 +129,7 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
     }
     for name in list(request):
         if name in internal_request or (
-            isinstance(name, str) and name.startswith("onecomputer_")
+            isinstance(name, str) and name.startswith("lemmacomputer_")
         ):
             request.pop(name, None)
     metadata = request.get("metadata")
@@ -141,11 +141,11 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
     metadata = {
         name: value for name, value in metadata.items()
         if name not in internal_metadata
-        and not (isinstance(name, str) and name.startswith("onecomputer_"))
+        and not (isinstance(name, str) and name.startswith("lemmacomputer_"))
     }
     if task_binding is not None:
-        metadata["onecomputer_task_binding"] = task_binding
-        metadata["onecomputer_requested_service_class"] = task_service_class(task_binding)
+        metadata["lemmacomputer_task_binding"] = task_binding
+        metadata["lemmacomputer_requested_service_class"] = task_service_class(task_binding)
     request["metadata"] = metadata
     request["model"] = MODEL_ALIAS
     return json.dumps(request, separators=(",", ":")).encode(), requested_model
@@ -169,16 +169,16 @@ class Handler(BaseHTTPRequestHandler):
         self.forward()
 
     def do_POST(self) -> None:
-        if self.path == "/onecomputer/uploads":
+        if self.path == "/lemmacomputer/uploads":
             self.create_local_upload()
             return
-        if self.path == "/onecomputer/uploads/start":
+        if self.path == "/lemmacomputer/uploads/start":
             self.start_local_upload()
             return
-        if self.path == "/onecomputer/deletions":
+        if self.path == "/lemmacomputer/deletions":
             self.create_onedrive_deletion()
             return
-        if self.path == "/onecomputer/sites":
+        if self.path == "/lemmacomputer/sites":
             self.publish_site()
             return
         self.forward()
@@ -359,7 +359,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def forward(self) -> None:
         path = self.path.split("?", 1)[0]
-        operation_prefix = "/onecomputer/operations/"
+        operation_prefix = "/lemmacomputer/operations/"
         is_operation = path.startswith(operation_prefix) and len(path) > len(operation_prefix)
         if path not in ALLOWED_PATHS and not is_operation:
             self.send_error(403, "gateway path is not assigned")
@@ -384,8 +384,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(415, {"error": "encoded inference request bodies are not supported"})
                 return
             try:
-                task_binding = self.headers.get("x-onecomputer-ai-task-binding")
-                if task_binding is None and MODEL_ALIAS == "onecomputer-auto":
+                task_binding = self.headers.get("x-lemmacomputer-ai-task-binding")
+                if task_binding is None and MODEL_ALIAS == "lemmacomputer-auto":
                     task_binding = issue_task_binding()
                 if task_binding is not None and (
                     not 32 <= len(task_binding) <= 4096
@@ -408,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
             for key, value in self.headers.items()
             if key.lower() not in HOP_BY_HOP | {
                 "host", "authorization", "x-api-key", "content-length",
-                "x-onecomputer-ai-task-binding", "x-litellm-call-id",
+                "x-lemmacomputer-ai-task-binding", "x-litellm-call-id",
             }
         }
         target = CONTROL if is_operation else UPSTREAM

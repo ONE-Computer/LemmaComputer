@@ -1,11 +1,11 @@
 """Run inside the pinned LiteLLM derivative to qualify strict MCP routing.
 
 Usage (from the repository root):
-  docker build -f docker/Dockerfile.litellm -t onecomputer/litellm:egress-test .
+  docker build -f docker/Dockerfile.litellm -t lemmacomputer/litellm:egress-test .
   docker run --rm --entrypoint python \
-    -e ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL=http://litellm-gateway:test@127.0.0.1:1 \
+    -e LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL=http://litellm-gateway:test@127.0.0.1:1 \
     -v "$PWD/tests/litellm-remote-mcp-egress.py:/tmp/test.py:ro" \
-    onecomputer/litellm:egress-test /tmp/test.py
+    lemmacomputer/litellm:egress-test /tmp/test.py
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ async def main() -> None:
 
     server = await asyncio.start_server(proxy, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    os.environ["ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL"] = f"http://litellm-gateway:test@127.0.0.1:{port}"
+    os.environ["LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL"] = f"http://litellm-gateway:test@127.0.0.1:{port}"
     os.environ["NO_PROXY"] = "control-api"
     try:
         from litellm.experimental_mcp_client.client import MCPClient

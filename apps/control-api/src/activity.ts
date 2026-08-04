@@ -1,5 +1,5 @@
 import {
-  OneComputerError,
+  LemmaComputerError,
   activityEventReplaySchema,
   type ActivityEventDraft,
   type ActivityEventReplay,
@@ -7,8 +7,8 @@ import {
   type AgentChatEvent,
   type ChatAgentCatalogId,
   type IdentityContext,
-} from "@onecomputer/contracts";
-import type { ActivityEventScope, ActivityStore } from "@onecomputer/workspace-store";
+} from "@lemmacomputer/contracts";
+import type { ActivityEventScope, ActivityStore } from "@lemmacomputer/workspace-store";
 
 const sensitiveKey = /(?:authorization|cookie|password|secret|token|api[_-]?key|credential|session|signature|signed[_-]?url)/i;
 const omittedKey = /(?:system[_-]?prompt|prompt|provider[_-]?payload|raw[_-]?payload|reasoning|chain[_-]?of[_-]?thought|page[_-]?content|screenshot)/i;
@@ -266,7 +266,7 @@ export class ActivityEventService {
         occurredAt: eventTime(input.event, input.receivedAt ?? new Date()),
         draft,
       });
-      if (!event) throw new OneComputerError("ACTIVITY_TURN_NOT_FOUND", "Activity turn not found", 404);
+      if (!event) throw new LemmaComputerError("ACTIVITY_TURN_NOT_FOUND", "Activity turn not found", 404);
       recorded.push(event);
     }
     return recorded;
@@ -279,7 +279,7 @@ export class ActivityEventService {
     limit = 200,
   ): Promise<ActivityEventReplay> {
     const result = await this.store.replayActivityEvents(identity, scope, afterSequence, Math.min(500, limit));
-    if (!result.found) throw new OneComputerError("ACTIVITY_TURN_NOT_FOUND", "Activity turn not found", 404);
+    if (!result.found) throw new LemmaComputerError("ACTIVITY_TURN_NOT_FOUND", "Activity turn not found", 404);
     const returnedThrough = result.events.at(-1)?.sequence ?? afterSequence;
     const terminal = result.terminalSequence !== null && returnedThrough >= result.terminalSequence;
     return activityEventReplaySchema.parse({

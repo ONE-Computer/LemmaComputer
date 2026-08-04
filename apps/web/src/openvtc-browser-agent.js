@@ -8,14 +8,14 @@ import {
   wrapSecret,
 } from "@openvtc/pnm-core";
 
-const STORE_NAME = "onecomputer-openvtc";
+const STORE_NAME = "lemmacomputer-openvtc";
 const RECORD_KEY = "browser-approver-v2";
-const ENROLLMENT_TYPE = "https://onecomputer.dev/spec/openvtc/approver-enrollment/0.1";
+const ENROLLMENT_TYPE = "https://lemmacomputer.dev/spec/openvtc/approver-enrollment/0.1";
 const REQUEST_TYPE = "https://trusttasks.org/spec/task-consent/request/0.1";
 const DECISION_TYPE = "https://trusttasks.org/spec/task-consent/decision/0.1";
-const WRAP_ALGORITHM = "onecomputer-webauthn-prf-aes-gcm-v1";
+const WRAP_ALGORITHM = "lemmacomputer-webauthn-prf-aes-gcm-v1";
 const WRAP_INFO = new TextEncoder().encode("pnm/approver-secret/aes-gcm/v1");
-const WRAP_AAD = new TextEncoder().encode("onecomputer/openvtc/browser-approver/v2");
+const WRAP_AAD = new TextEncoder().encode("lemmacomputer/openvtc/browser-approver/v2");
 
 const openDatabase = () => new Promise((resolve, reject) => {
   const request = indexedDB.open(STORE_NAME, 1);
@@ -79,7 +79,7 @@ const createPrfCredential = async () => {
       rp: { id: location.hostname, name: "LemmaComputer" },
       user: {
         id: crypto.getRandomValues(new Uint8Array(16)),
-        name: "onecomputer-approver",
+        name: "lemmacomputer-approver",
         displayName: "LemmaComputer approval device",
       },
       challenge: crypto.getRandomValues(new Uint8Array(32)),

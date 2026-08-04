@@ -6,7 +6,7 @@ a provider model is a reviewed product change, not a best-effort price lookup.
 
 ## Current catalogue
 
-Release `onecomputer-product-rates-2026-07-31.1` is effective from
+Release `lemmacomputer-product-rates-2026-07-31.1` is effective from
 `2026-07-31T00:00:00.000Z` and contains the repository-approved
 `claude-sonnet-4-5-global` Bedrock profile:
 
@@ -22,10 +22,10 @@ Release `onecomputer-product-rates-2026-07-31.1` is effective from
 - request: an explicit `0.000000000000` per request
 
 These values translate the product-owned pricing contract in
-`@onecomputer/contracts`. The catalogue fails during module initialization if
+`@lemmacomputer/contracts`. The catalogue fails during module initialization if
 that contract changes without a reviewed catalogue release. Its canonical
 manifest SHA-256 is
-`209e32a40ce129ea93d1ea5d5e423b9840eb0e9c6c7668d6b095b122870f3b61`.
+`48fa211ad9a802d54c06ac6c8782624a78ce855e1cbb3fdf5e9d84b26ac6128b`.
 Each materialized card carries the release, source version, source hash, and
 effective timestamp needed to explain its price.
 

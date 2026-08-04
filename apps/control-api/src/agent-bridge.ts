@@ -1,8 +1,8 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { OneComputerError, type IdentityContext, type RuntimePolicy } from "@onecomputer/contracts";
+import { LemmaComputerError, type IdentityContext, type RuntimePolicy } from "@lemmacomputer/contracts";
 import { z } from "zod";
 
-export const agentBridgeAudience = "onecomputer-control-agent-bridge";
+export const agentBridgeAudience = "lemmacomputer-control-agent-bridge";
 export const agentBridgeScopes = [
   "agent:usage-bindings",
   "agent:sites",
@@ -64,7 +64,7 @@ type VerifyOptions = {
 
 const epochSeconds = (now: Date) => Math.floor(now.getTime() / 1_000);
 const unauthenticated = (code = "UNAUTHENTICATED", message = "Agent bridge authentication is invalid") => (
-  new OneComputerError(code, message, 401)
+  new LemmaComputerError(code, message, 401)
 );
 
 const toIdentity = (payload: AgentBridgePayload): AgentBridgeIdentity => ({
@@ -148,7 +148,7 @@ export class AgentBridgeAuthority {
       throw unauthenticated("AGENT_BRIDGE_GRANT_AUDIENCE_INVALID", "Agent bridge authentication is not intended for this service");
     }
     if (options.scope && !payload.scopes.includes(options.scope)) {
-      throw new OneComputerError("AGENT_BRIDGE_GRANT_SCOPE_DENIED", "Agent bridge authentication is not authorized for this endpoint", 403);
+      throw new LemmaComputerError("AGENT_BRIDGE_GRANT_SCOPE_DENIED", "Agent bridge authentication is not authorized for this endpoint", 403);
     }
     return toIdentity(payload);
   }
@@ -160,6 +160,6 @@ export class AgentBridgeAuthority {
   }
 
   private sign(payload: string) {
-    return createHmac("sha256", this.secret).update(`onecomputer:agent-bridge:v2:${payload}`).digest("base64url");
+    return createHmac("sha256", this.secret).update(`lemmacomputer:agent-bridge:v2:${payload}`).digest("base64url");
   }
 }

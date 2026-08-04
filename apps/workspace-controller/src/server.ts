@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
 import {
-  OneComputerError,
+  LemmaComputerError,
   chatAgentCatalogIdSchema,
   controllerCreateSchema,
   controllerEgressPolicyUpdateSchema,
@@ -10,9 +10,9 @@ import {
   type PolicyVerificationKeySet,
   type RuntimePolicy,
   type Sandbox,
-} from "@onecomputer/contracts";
-import { KasmLocalAdapter, KasmDeveloperApiAdapter, type SandboxAdapter } from "@onecomputer/kasm-adapter";
-import { PolicyVerificationError, verifySignedPolicyBundle } from "@onecomputer/policy-integrity";
+} from "@lemmacomputer/contracts";
+import { KasmLocalAdapter, KasmDeveloperApiAdapter, type SandboxAdapter } from "@lemmacomputer/kasm-adapter";
+import { PolicyVerificationError, verifySignedPolicyBundle } from "@lemmacomputer/policy-integrity";
 import { z } from "zod";
 
 const timeZoneSchema = z.string().trim().min(1).max(100).refine((value) => {
@@ -29,7 +29,7 @@ const envSchema = z.object({
   CONTROLLER_PORT: z.coerce.number().int().positive().default(4101),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
   SANDBOX_DRIVER: z.enum(["kasm", "kasm-local"]).default("kasm-local"),
-  ONECOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
+  LEMMACOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
   KASM_BASE_URL: z.preprocess(
     (value) => value === "" ? undefined : value,
     z.string().url().optional(),
@@ -40,13 +40,13 @@ const envSchema = z.object({
   KASM_IMAGE_ID: z.string().optional(),
   DOCKER_SOCKET_PATH: z.string().default("/var/run/docker.sock"),
   KASM_LOCAL_IMAGE: z.string().default("kasmweb/ubuntu-jammy-desktop@sha256:58b0710b320b99ab7e352342d7ec3a25b09740c523b75d794c5f7476910da580"),
-  KASM_LOCAL_NETWORK_PREFIX: z.string().default("onecomputer-workspace"),
-  KASM_LOCAL_CONTROL_NETWORK: z.string().default("onecomputer-control"),
-  KASM_LOCAL_GATEWAY_CONTAINER: z.string().default("onecomputer-litellm"),
-  KASM_LOCAL_CONTROL_CONTAINER: z.string().default("onecomputer-control-api"),
+  KASM_LOCAL_NETWORK_PREFIX: z.string().default("lemmacomputer-workspace"),
+  KASM_LOCAL_CONTROL_NETWORK: z.string().default("lemmacomputer-control"),
+  KASM_LOCAL_GATEWAY_CONTAINER: z.string().default("lemmacomputer-litellm"),
+  KASM_LOCAL_CONTROL_CONTAINER: z.string().default("lemmacomputer-control-api"),
   KASM_LOCAL_RELAY_IMAGE: z.string().default("node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2"),
   KASM_LOCAL_EGRESS_PROXY_IMAGE: z.string().optional(),
-  KASM_LOCAL_EGRESS_NETWORK: z.string().default("onecomputer-egress"),
+  KASM_LOCAL_EGRESS_NETWORK: z.string().default("lemmacomputer-egress"),
   KASM_PUBLIC_HOST: z.string().default("127.0.0.1"),
   KASM_LOCAL_KVM_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   KASM_LOCAL_STARTUP_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(300_000).default(60_000),
@@ -197,7 +197,7 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
   app.get("/healthz", async () => ({ status: "ok" }));
   app.post("/internal/v1/sandboxes", async (request, reply) => {
     if (!request.body || typeof request.body !== "object" || !Object.hasOwn(request.body, "policyBundle")) {
-      throw new OneComputerError("POLICY_SIGNATURE_REQUIRED", "A signed effective policy is required", 403);
+      throw new LemmaComputerError("POLICY_SIGNATURE_REQUIRED", "A signed effective policy is required", 403);
     }
     const input = controllerCreateSchema.parse(request.body);
     let verified: ReturnType<typeof verifySignedPolicyBundle>;
@@ -210,7 +210,7 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
       verifyGrantBindings(input, verified);
     } catch (error) {
       if (error instanceof PolicyVerificationError) {
-        throw new OneComputerError(error.code, error.message, 403);
+        throw new LemmaComputerError(error.code, error.message, 403);
       }
       throw error;
     }
@@ -243,7 +243,7 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
       verifyEgressGrantBinding(input, verified);
     } catch (error) {
       if (error instanceof PolicyVerificationError) {
-        throw new OneComputerError(error.code, error.message, 403);
+        throw new LemmaComputerError(error.code, error.message, 403);
       }
       throw error;
     }
@@ -270,11 +270,11 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
   });
 
   app.setErrorHandler((error, request, reply) => {
-    const known = error instanceof OneComputerError
+    const known = error instanceof LemmaComputerError
       ? error
       : error instanceof z.ZodError
-        ? new OneComputerError("INVALID_REQUEST", "The controller request is invalid", 400)
-        : new OneComputerError("INTERNAL_ERROR", "The workspace controller could not complete the request", 500, true);
+        ? new LemmaComputerError("INVALID_REQUEST", "The controller request is invalid", 400)
+        : new LemmaComputerError("INTERNAL_ERROR", "The workspace controller could not complete the request", 500, true);
     request.log.error({ err: { name: error instanceof Error ? error.name : "UnknownError", message: error instanceof Error ? error.message : "Unknown controller error", code: known.code } }, "controller request failed");
     reply.code(known.statusCode).send({ error: { code: known.code, message: known.message, correlationId: request.id, retryable: known.retryable } });
   });
@@ -303,7 +303,7 @@ export function adapterFromEnv(env: z.infer<typeof envSchema>): SandboxAdapter {
       chatAttachmentRetentionDays: env.CHAT_ATTACHMENT_RETENTION_DAYS,
       kvmEnabled: env.KASM_LOCAL_KVM_ENABLED,
       startupTimeoutMs: env.KASM_LOCAL_STARTUP_TIMEOUT_MS,
-      installationKind: env.ONECOMPUTER_INSTALLATION_KIND,
+      installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
     });
   }
   return new KasmDeveloperApiAdapter({

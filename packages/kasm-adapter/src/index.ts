@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   canonicalJson,
   defaultClipboardPolicy,
-  OneComputerError,
+  LemmaComputerError,
   runtimePolicySchema,
   signedPolicyBundleSchema,
   type AgentCatalogId,
@@ -14,7 +14,7 @@ import {
   type RuntimePolicy,
   type Sandbox,
   type SignedPolicyBundle,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 
 const coworkSeccompProfile = readFileSync(
   new URL("./cowork-seccomp-profile.json", import.meta.url),
@@ -119,11 +119,11 @@ const agentEnvironment = (
   policy: RuntimePolicy,
 ) => {
   const prefix = ({
-    "claude-desktop": "ONECOMPUTER",
-    "claude-cli": "ONECOMPUTER_CLAUDE_CLI",
-    "codex-cli": "ONECOMPUTER_CODEX_CLI",
-    "hermes-desktop": "ONECOMPUTER_HERMES_DESKTOP",
-    "hermes-claw": "ONECOMPUTER_HERMES",
+    "claude-desktop": "LEMMACOMPUTER",
+    "claude-cli": "LEMMACOMPUTER_CLAUDE_CLI",
+    "codex-cli": "LEMMACOMPUTER_CODEX_CLI",
+    "hermes-desktop": "LEMMACOMPUTER_HERMES_DESKTOP",
+    "hermes-claw": "LEMMACOMPUTER_HERMES",
   } as const)[grant.catalogId];
   return [
     `${prefix}_GATEWAY_UPSTREAM=${grant.gateway.baseUrl}`,
@@ -152,8 +152,8 @@ const chatRuntimeEnvironment = (
     ];
   }
   const variable = runtime.catalogId === "claude-cli"
-    ? "ONECOMPUTER_CLAUDE_CHAT_API_KEY"
-    : "ONECOMPUTER_CODEX_CHAT_API_KEY";
+    ? "LEMMACOMPUTER_CLAUDE_CHAT_API_KEY"
+    : "LEMMACOMPUTER_CODEX_CHAT_API_KEY";
   return [`${variable}=${runtime.key}`];
 };
 
@@ -166,8 +166,8 @@ export function buildKasmClipboardLaunch(launchUrl: string, policy: ClipboardPol
   launch.searchParams.set("clipboard_down", String(workspaceToLocal));
   launch.searchParams.set("clipboard_seamless", String(enabled && (localToWorkspace || workspaceToLocal)));
   launch.searchParams.set("translate_shortcuts", "true");
-  launch.searchParams.set("onecomputer_clipboard", enabled ? "enabled" : "disabled");
-  launch.searchParams.set("onecomputer_clipboard_max_bytes", String(policy.maxBytes));
+  launch.searchParams.set("lemmacomputer_clipboard", enabled ? "enabled" : "disabled");
+  launch.searchParams.set("lemmacomputer_clipboard_max_bytes", String(policy.maxBytes));
   return {
     launchUrl: launch.toString(),
     expiresAt: new Date(now.getTime() + 5 * 60_000).toISOString(),
@@ -203,7 +203,7 @@ export class KasmDeveloperApiAdapter implements SandboxAdapter {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) {
-      throw new OneComputerError("KASM_UPSTREAM_ERROR", `Kasm ${path} returned ${response.status}`, 502, response.status >= 500);
+      throw new LemmaComputerError("KASM_UPSTREAM_ERROR", `Kasm ${path} returned ${response.status}`, 502, response.status >= 500);
     }
     return asObject(await response.json());
   }
@@ -212,12 +212,12 @@ export class KasmDeveloperApiAdapter implements SandboxAdapter {
     const response = await this.call("request_kasm", { user_id: this.config.userId, image_id: this.config.imageId });
     const kasm = asObject(response.kasm ?? response);
     const providerId = textValue(kasm, "kasm_id");
-    if (!providerId) throw new OneComputerError("KASM_INVALID_RESPONSE", "Kasm did not return a session identifier", 502, true);
+    if (!providerId) throw new LemmaComputerError("KASM_INVALID_RESPONSE", "Kasm did not return a session identifier", 502, true);
     return { providerId, state: mapKasmState(textValue(kasm, "operational_status", "status")), failureCode: null };
   }
 
   async updateEgressPolicy(_providerId: string, _input: SandboxEgressPolicyUpdateInput) {
-    throw new OneComputerError("EGRESS_LIVE_UPDATE_UNSUPPORTED", "This Kasm provider cannot update its egress proxy while running", 409, true);
+    throw new LemmaComputerError("EGRESS_LIVE_UPDATE_UNSUPPORTED", "This Kasm provider cannot update its egress proxy while running", 409, true);
   }
 
   async status(providerId: string): Promise<Sandbox> {
@@ -231,11 +231,11 @@ export class KasmDeveloperApiAdapter implements SandboxAdapter {
     const response = await this.call("get_kasm_status", { kasm_id: providerId, user_id: this.config.userId });
     const kasm = asObject(response.kasm ?? response);
     if (mapKasmState(textValue(kasm, "operational_status", "status")) !== "ready") {
-      throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not ready to open", 409, true);
+      throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not ready to open", 409, true);
     }
     const kasmUrl = textValue(kasm, "kasm_url", "url") ?? textValue(response, "kasm_url", "url");
     const sessionToken = textValue(kasm, "session_token") ?? textValue(response, "session_token");
-    if (!kasmUrl) throw new OneComputerError("KASM_INVALID_RESPONSE", "Kasm did not return a launch URL", 502, true);
+    if (!kasmUrl) throw new LemmaComputerError("KASM_INVALID_RESPONSE", "Kasm did not return a launch URL", 502, true);
     const launch = new URL(kasmUrl, this.baseUrl);
     if (sessionToken && !launch.searchParams.has("token")) launch.searchParams.set("token", sessionToken);
     return buildKasmClipboardLaunch(launch.toString(), defaultClipboardPolicy);
@@ -294,7 +294,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
   private readonly socketPath: string;
   constructor(private readonly config: KasmLocalConfig) {
     if (config.kvmEnabled && config.installationKind === "hosted") {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "COWORK_HOST_ISOLATION_REQUIRED",
         "Local Cowork virtualization is not permitted on hosted multi-tenant nodes",
         503,
@@ -308,14 +308,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
     for (const value of Object.values(asObject(listed))) {
       const container = asObject(value);
       const labels = asObject(container.Labels);
-      const workspaceNetwork = labels["com.onecomputer.workspace-network"];
+      const workspaceNetwork = labels["com.lemmacomputer.workspace-network"];
       const running = container.State === "running";
       if (!running || typeof workspaceNetwork !== "string" || !this.isWorkspaceNetwork(workspaceNetwork)) continue;
-      if (labels["com.onecomputer.gateway-attached"] === "true") {
+      if (labels["com.lemmacomputer.gateway-attached"] === "true") {
         await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
       }
-      if (labels["com.onecomputer.control-attached"] === "true" && this.config.controlContainer) {
-        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
+      if (labels["com.lemmacomputer.control-attached"] === "true" && this.config.controlContainer) {
+        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control"]);
       }
     }
   }
@@ -324,22 +324,22 @@ export class KasmLocalAdapter implements SandboxAdapter {
     input = { ...input, policy: runtimePolicySchema.parse(input.policy) };
     const clipboard = clipboardPolicyFor(input.policy);
     if (!input.policyBundle || !input.policyVerificationKeys) {
-      throw new OneComputerError("POLICY_SIGNATURE_REQUIRED", "A verified signed policy is required to provision the workspace", 503);
+      throw new LemmaComputerError("POLICY_SIGNATURE_REQUIRED", "A verified signed policy is required to provision the workspace", 503);
     }
     const policyBundleDigest = createHash("sha256").update(canonicalJson(input.policyBundle), "utf8").digest("hex");
     if (input.policy.egress && (!input.egressProxy || !this.config.egressProxyImage)) {
-      throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
+      throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
     }
     const workspaceNetwork = this.workspaceNetwork(input.workspaceId);
     const workspaceVolume = await this.resolveWorkspaceVolume(input.workspaceId);
-    const name = `onecomputer-sandbox-${input.workspaceId}`;
+    const name = `lemmacomputer-sandbox-${input.workspaceId}`;
     const fallbackAgent = ({
       "claude-desktop-managed-v1": "claude-desktop",
       "claude-cli-managed-v1": "claude-cli",
       "codex-cli-managed-v1": "codex-cli",
       "hermes-desktop-managed-v1": "hermes-desktop",
       "hermes-claw-managed-v1": "hermes-claw",
-    } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";
+    } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "lemmacomputer-default-agent">] ?? "claude-desktop";
     const enabledAgents = input.agentGrants?.map((grant) => grant.catalogId) ?? [fallbackAgent];
     const enabledApplications = input.policy.applications ?? ["firefox"];
     const coworkEnabled = this.config.kvmEnabled === true && enabledAgents.includes("claude-desktop");
@@ -348,12 +348,12 @@ export class KasmLocalAdapter implements SandboxAdapter {
       await this.ensureVolume(workspaceVolume, input.workspaceId);
       await this.ensureNetwork(this.config.controlNetwork, false);
       if (input.policy.egress && input.egressProxy && this.config.egressProxyImage) {
-        await this.ensureNetwork(this.config.egressNetwork ?? "onecomputer-egress", false);
+        await this.ensureNetwork(this.config.egressNetwork ?? "lemmacomputer-egress", false);
         await this.ensureEgressProxy(input, workspaceNetwork);
       }
       if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
       if ((input.agentBridge || input.chatRuntimes?.length) && this.config.controlContainer) {
-        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
+        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control"]);
       }
     };
     const existing = await this.inspectByName(name);
@@ -370,91 +370,91 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const created = await this.createContainer(`/containers/create?name=${encodeURIComponent(name)}`, {
       Image: this.config.image,
       Labels: {
-        "com.onecomputer.sandbox.provider": "kasm-local",
-        "com.onecomputer.workspace-id": input.workspaceId,
-        "com.onecomputer.workspace-network": workspaceNetwork,
-        "com.onecomputer.workspace-volume": workspaceVolume,
-        "com.onecomputer.gateway-attached": String(Boolean(input.gateway)),
-        "com.onecomputer.control-attached": String(Boolean(input.agentBridge || input.chatRuntimes?.length)),
-        "com.onecomputer.policy-version-id": input.policy.policyVersionId,
-        "com.onecomputer.policy-hash": input.policy.policyHash,
-        "com.onecomputer.policy-signing-key-id": input.policyBundle.keyId,
-        "com.onecomputer.policy-bundle-digest": policyBundleDigest,
-        "com.onecomputer.agent-id": input.policy.agentId,
-        "com.onecomputer.sandbox-profile": input.policy.workspaceProfile,
-        "com.onecomputer.execution-mode": input.policy.executionMode,
-        "com.onecomputer.egress-mode": input.policy.egressMode,
-        "com.onecomputer.model-alias": input.policy.modelAlias,
+        "com.lemmacomputer.sandbox.provider": "kasm-local",
+        "com.lemmacomputer.workspace-id": input.workspaceId,
+        "com.lemmacomputer.workspace-network": workspaceNetwork,
+        "com.lemmacomputer.workspace-volume": workspaceVolume,
+        "com.lemmacomputer.gateway-attached": String(Boolean(input.gateway)),
+        "com.lemmacomputer.control-attached": String(Boolean(input.agentBridge || input.chatRuntimes?.length)),
+        "com.lemmacomputer.policy-version-id": input.policy.policyVersionId,
+        "com.lemmacomputer.policy-hash": input.policy.policyHash,
+        "com.lemmacomputer.policy-signing-key-id": input.policyBundle.keyId,
+        "com.lemmacomputer.policy-bundle-digest": policyBundleDigest,
+        "com.lemmacomputer.agent-id": input.policy.agentId,
+        "com.lemmacomputer.sandbox-profile": input.policy.workspaceProfile,
+        "com.lemmacomputer.execution-mode": input.policy.executionMode,
+        "com.lemmacomputer.egress-mode": input.policy.egressMode,
+        "com.lemmacomputer.model-alias": input.policy.modelAlias,
         ...(this.config.timeZone ? {
-          "com.onecomputer.time-zone": this.config.timeZone,
+          "com.lemmacomputer.time-zone": this.config.timeZone,
         } : {}),
-        "com.onecomputer.enabled-agents": enabledAgents.join(","),
-        "com.onecomputer.enabled-applications": enabledApplications.join(","),
-        "com.onecomputer.cowork-enabled": String(coworkEnabled),
-        "com.onecomputer.chat-runtime-agents": input.chatRuntimes?.map((runtime) => runtime.catalogId).join(",") ?? "",
-        "com.onecomputer.desktop-port": String(port),
-        "com.onecomputer.clipboard-enabled": String(clipboard.enabled),
-        "com.onecomputer.clipboard-local-to-workspace": String(clipboard.localToWorkspace),
-        "com.onecomputer.clipboard-workspace-to-local": String(clipboard.workspaceToLocal),
-        "com.onecomputer.clipboard-max-bytes": String(clipboard.maxBytes),
-        "com.onecomputer.egress-attached": String(Boolean(input.policy.egress)),
+        "com.lemmacomputer.enabled-agents": enabledAgents.join(","),
+        "com.lemmacomputer.enabled-applications": enabledApplications.join(","),
+        "com.lemmacomputer.cowork-enabled": String(coworkEnabled),
+        "com.lemmacomputer.chat-runtime-agents": input.chatRuntimes?.map((runtime) => runtime.catalogId).join(",") ?? "",
+        "com.lemmacomputer.desktop-port": String(port),
+        "com.lemmacomputer.clipboard-enabled": String(clipboard.enabled),
+        "com.lemmacomputer.clipboard-local-to-workspace": String(clipboard.localToWorkspace),
+        "com.lemmacomputer.clipboard-workspace-to-local": String(clipboard.workspaceToLocal),
+        "com.lemmacomputer.clipboard-max-bytes": String(clipboard.maxBytes),
+        "com.lemmacomputer.egress-attached": String(Boolean(input.policy.egress)),
         ...(input.policy.egress ? {
-          "com.onecomputer.egress-security-group-version-id": input.policy.egress.id,
-          "com.onecomputer.egress-policy-hash": input.policy.egress.documentHash,
+          "com.lemmacomputer.egress-security-group-version-id": input.policy.egress.id,
+          "com.lemmacomputer.egress-policy-hash": input.policy.egress.documentHash,
         } : {}),
       },
       Env: [
-        "VNC_PW=onecomputer",
+        "VNC_PW=lemmacomputer",
         "VNC_RESOLUTION=1440x900",
         "VNCOPTIONS=-DisableBasicAuth=1",
         ...(this.config.timeZone ? [
           `TZ=${this.config.timeZone}`,
-          `ONECOMPUTER_TIME_ZONE=${this.config.timeZone}`,
+          `LEMMACOMPUTER_TIME_ZONE=${this.config.timeZone}`,
         ] : []),
         ...(this.config.chatAttachmentRetentionDays ? [
-          `ONECOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS=${this.config.chatAttachmentRetentionDays}`,
+          `LEMMACOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS=${this.config.chatAttachmentRetentionDays}`,
         ] : []),
-        `ONECOMPUTER_CLIPBOARD_ENABLED=${clipboard.enabled}`,
-        `ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=${clipboard.localToWorkspace}`,
-        `ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL=${clipboard.workspaceToLocal}`,
-        `ONECOMPUTER_CLIPBOARD_MAX_BYTES=${clipboard.maxBytes}`,
-        `ONECOMPUTER_ENABLED_AGENTS=${enabledAgents.join(",")}`,
-        `ONECOMPUTER_ENABLED_APPLICATIONS=${enabledApplications.join(",")}`,
-        `ONECOMPUTER_COWORK_ENABLED=${coworkEnabled}`,
-        `ONECOMPUTER_EXECUTION_MODE=${input.policy.executionMode}`,
-        `ONECOMPUTER_EGRESS_MODE=${input.policy.egressMode}`,
-        `ONECOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
-        `ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(canonicalJson(input.policyVerificationKeys), "utf8").toString("base64url")}`,
+        `LEMMACOMPUTER_CLIPBOARD_ENABLED=${clipboard.enabled}`,
+        `LEMMACOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=${clipboard.localToWorkspace}`,
+        `LEMMACOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL=${clipboard.workspaceToLocal}`,
+        `LEMMACOMPUTER_CLIPBOARD_MAX_BYTES=${clipboard.maxBytes}`,
+        `LEMMACOMPUTER_ENABLED_AGENTS=${enabledAgents.join(",")}`,
+        `LEMMACOMPUTER_ENABLED_APPLICATIONS=${enabledApplications.join(",")}`,
+        `LEMMACOMPUTER_COWORK_ENABLED=${coworkEnabled}`,
+        `LEMMACOMPUTER_EXECUTION_MODE=${input.policy.executionMode}`,
+        `LEMMACOMPUTER_EGRESS_MODE=${input.policy.egressMode}`,
+        `LEMMACOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
+        `LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(canonicalJson(input.policyVerificationKeys), "utf8").toString("base64url")}`,
         ...(input.chatRuntimes?.flatMap(chatRuntimeEnvironment) ?? []),
         ...(!input.agentGrants && input.gateway ? [
-          `ONECOMPUTER_GATEWAY_UPSTREAM=${input.gateway.baseUrl}`,
-          `ONECOMPUTER_GATEWAY_CREDENTIAL=${input.gateway.credential}`,
-          `ONECOMPUTER_MODEL_ALIAS=${input.gateway.modelAlias}`,
-          `ONECOMPUTER_TRANSPORT_MODEL_ALIAS=${input.gateway.transportModelAlias}`,
-          `ONECOMPUTER_REQUESTED_SERVICE_CLASS=${input.policy.requestedServiceClass}`,
-          `ONECOMPUTER_AGENT_ID=${input.policy.agentId}`,
-          `ONECOMPUTER_POLICY_VERSION=${input.policy.policyVersion}`,
-          `ONECOMPUTER_POLICY_HASH=${input.policy.policyHash}`,
-          `ONECOMPUTER_MCP_SERVER=${input.policy.mcpServer}`,
-          `ONECOMPUTER_ALLOWED_TOOLS=${input.policy.allowedTools.join(",")}`,
-          `ONECOMPUTER_TOOL_POLICIES=${JSON.stringify(input.policy.toolPolicies)}`,
+          `LEMMACOMPUTER_GATEWAY_UPSTREAM=${input.gateway.baseUrl}`,
+          `LEMMACOMPUTER_GATEWAY_CREDENTIAL=${input.gateway.credential}`,
+          `LEMMACOMPUTER_MODEL_ALIAS=${input.gateway.modelAlias}`,
+          `LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS=${input.gateway.transportModelAlias}`,
+          `LEMMACOMPUTER_REQUESTED_SERVICE_CLASS=${input.policy.requestedServiceClass}`,
+          `LEMMACOMPUTER_AGENT_ID=${input.policy.agentId}`,
+          `LEMMACOMPUTER_POLICY_VERSION=${input.policy.policyVersion}`,
+          `LEMMACOMPUTER_POLICY_HASH=${input.policy.policyHash}`,
+          `LEMMACOMPUTER_MCP_SERVER=${input.policy.mcpServer}`,
+          `LEMMACOMPUTER_ALLOWED_TOOLS=${input.policy.allowedTools.join(",")}`,
+          `LEMMACOMPUTER_TOOL_POLICIES=${JSON.stringify(input.policy.toolPolicies)}`,
         ] : []),
         ...(!input.agentGrants && input.agentBridge ? [
-          `ONECOMPUTER_CONTROL_UPSTREAM=${input.agentBridge.baseUrl}`,
-          `ONECOMPUTER_AGENT_BRIDGE_TOKEN=${input.agentBridge.token}`,
+          `LEMMACOMPUTER_CONTROL_UPSTREAM=${input.agentBridge.baseUrl}`,
+          `LEMMACOMPUTER_AGENT_BRIDGE_TOKEN=${input.agentBridge.token}`,
         ] : []),
         ...(input.agentGrants?.flatMap((grant) => agentEnvironment(grant, input.policy)) ?? []),
         ...(input.agentGrants?.length ? [
-          `ONECOMPUTER_POLICY_VERSION=${input.policy.policyVersion}`,
-          `ONECOMPUTER_POLICY_HASH=${input.policy.policyHash}`,
+          `LEMMACOMPUTER_POLICY_VERSION=${input.policy.policyVersion}`,
+          `LEMMACOMPUTER_POLICY_HASH=${input.policy.policyHash}`,
         ] : []),
         ...(input.policy.egress && input.egressProxy ? [
-          `HTTP_PROXY=http://onecomputer:${encodeURIComponent(input.egressProxy.token)}@onecomputer-egress-proxy:3128`,
-          `HTTPS_PROXY=http://onecomputer:${encodeURIComponent(input.egressProxy.token)}@onecomputer-egress-proxy:3128`,
-          `http_proxy=http://onecomputer:${encodeURIComponent(input.egressProxy.token)}@onecomputer-egress-proxy:3128`,
-          `https_proxy=http://onecomputer:${encodeURIComponent(input.egressProxy.token)}@onecomputer-egress-proxy:3128`,
-          "NO_PROXY=localhost,127.0.0.1,litellm,onecomputer-control",
-          "no_proxy=localhost,127.0.0.1,litellm,onecomputer-control",
+          `HTTP_PROXY=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
+          `HTTPS_PROXY=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
+          `http_proxy=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
+          `https_proxy=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
+          "NO_PROXY=localhost,127.0.0.1,litellm,lemmacomputer-control",
+          "no_proxy=localhost,127.0.0.1,litellm,lemmacomputer-control",
         ] : []),
       ],
       HostConfig: {
@@ -487,7 +487,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       },
     }, workspaceNetwork, prepareRuntime);
     const providerId = textValue(created, "Id");
-    if (!providerId) throw new OneComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return a container identifier", 502);
+    if (!providerId) throw new LemmaComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return a container identifier", 502);
     try {
       await this.request("POST", `/containers/${providerId}/start`);
       await this.waitForStartup(providerId);
@@ -502,20 +502,20 @@ export class KasmLocalAdapter implements SandboxAdapter {
   async updateEgressPolicy(providerId: string, input: SandboxEgressPolicyUpdateInput) {
     input = { ...input, policy: runtimePolicySchema.parse(input.policy) };
     if (!input.policyBundle || !input.policyVerificationKeys || !input.policy.egress || !input.egressProxy) {
-      throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "A signed egress policy and proxy grant are required", 503);
+      throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "A signed egress policy and proxy grant are required", 503);
     }
     const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
     const state = asObject(inspected.State);
     const labels = asObject(asObject(inspected.Config).Labels);
-    const workspaceId = labels["com.onecomputer.workspace-id"];
-    const workspaceNetwork = labels["com.onecomputer.workspace-network"];
+    const workspaceId = labels["com.lemmacomputer.workspace-id"];
+    const workspaceNetwork = labels["com.lemmacomputer.workspace-network"];
     if (
       state.Running !== true
       || workspaceId !== input.workspaceId
       || typeof workspaceNetwork !== "string"
       || !this.isWorkspaceNetwork(workspaceNetwork)
     ) {
-      throw new OneComputerError("WORKSPACE_NOT_READY", "The running workspace could not accept the firewall update", 409, true);
+      throw new LemmaComputerError("WORKSPACE_NOT_READY", "The running workspace could not accept the firewall update", 409, true);
     }
     await this.ensureEgressProxy(input, workspaceNetwork, true);
   }
@@ -532,10 +532,10 @@ export class KasmLocalAdapter implements SandboxAdapter {
       const running = state.Running === true && !restarting && state.Paused !== true && health !== "unhealthy";
       const containerConfig = asObject(inspected.Config);
       const labels = asObject(containerConfig.Labels);
-      const workspaceNetwork = labels["com.onecomputer.workspace-network"];
+      const workspaceNetwork = labels["com.lemmacomputer.workspace-network"];
       const environment = Array.isArray(containerConfig.Env) ? containerConfig.Env : [];
       const projectedPolicyEntry = environment.find((entry) => (
-        typeof entry === "string" && entry.startsWith("ONECOMPUTER_SIGNED_POLICY_B64=")
+        typeof entry === "string" && entry.startsWith("LEMMACOMPUTER_SIGNED_POLICY_B64=")
       ));
       let projectedPolicyBundle: SignedPolicyBundle | undefined;
       let egressPolicyProjection: Sandbox["egressPolicyProjection"];
@@ -557,8 +557,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
         const proxyEnvironment = proxy
           ? asObject(proxy.Config).Env
           : undefined;
-        const proxySecurityGroupVersionId = proxyLabels?.["com.onecomputer.egress-security-group-version-id"];
-        const proxyDocumentHash = proxyLabels?.["com.onecomputer.egress-policy-hash"];
+        const proxySecurityGroupVersionId = proxyLabels?.["com.lemmacomputer.egress-security-group-version-id"];
+        const proxyDocumentHash = proxyLabels?.["com.lemmacomputer.egress-policy-hash"];
         if (
           typeof proxySecurityGroupVersionId === "string"
           && /^egv_[a-z0-9_]{3,96}$/.test(proxySecurityGroupVersionId)
@@ -571,7 +571,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
           };
         }
         const proxyPolicyEntry = Array.isArray(proxyEnvironment)
-          ? proxyEnvironment.find((entry) => typeof entry === "string" && entry.startsWith("ONECOMPUTER_SIGNED_POLICY_B64="))
+          ? proxyEnvironment.find((entry) => typeof entry === "string" && entry.startsWith("LEMMACOMPUTER_SIGNED_POLICY_B64="))
           : undefined;
         if (typeof proxyPolicyEntry === "string") {
           try {
@@ -583,19 +583,19 @@ export class KasmLocalAdapter implements SandboxAdapter {
           }
         }
       }
-      const controlAttached = labels["com.onecomputer.control-attached"] === "true"
-        || environment.some((entry) => typeof entry === "string" && entry.startsWith("ONECOMPUTER_AGENT_BRIDGE_TOKEN="));
+      const controlAttached = labels["com.lemmacomputer.control-attached"] === "true"
+        || environment.some((entry) => typeof entry === "string" && entry.startsWith("LEMMACOMPUTER_AGENT_BRIDGE_TOKEN="));
       if (running && typeof workspaceNetwork === "string" && this.isWorkspaceNetwork(workspaceNetwork)) {
         await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
         if (controlAttached && this.config.controlContainer) {
-          await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["onecomputer-control"]);
+          await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control"]);
         }
       }
       const failed = restarting || health === "unhealthy" || (typeof state.ExitCode === "number" && state.ExitCode !== 0);
       return {
         providerId,
-        ...(typeof labels["com.onecomputer.workspace-id"] === "string"
-          ? { workspaceId: String(labels["com.onecomputer.workspace-id"]) }
+        ...(typeof labels["com.lemmacomputer.workspace-id"] === "string"
+          ? { workspaceId: String(labels["com.lemmacomputer.workspace-id"]) }
           : {}),
         state: failed ? "failed" : running ? health === "starting" ? "provisioning" : "ready" : "stopped",
         failureCode: failed ? health === "unhealthy" ? "WORKSPACE_HEALTHCHECK_FAILED" : "WORKSPACE_STARTUP_FAILED" : null,
@@ -604,7 +604,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         ...(projectedPolicyBundle ? { projectedPolicyBundle } : {}),
       };
     } catch (error) {
-      if (error instanceof OneComputerError && error.statusCode === 404) return { providerId, state: "stopped", failureCode: null };
+      if (error instanceof LemmaComputerError && error.statusCode === 404) return { providerId, state: "stopped", failureCode: null };
       throw error;
     }
   }
@@ -614,31 +614,31 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const state = asObject(inspected.State);
     const health = textValue(asObject(state.Health), "Status");
     if (state.Running !== true || state.Restarting === true || state.Paused === true || (health && health !== "healthy")) {
-      throw new OneComputerError("WORKSPACE_NOT_READY", "The Kasm desktop is not healthy yet", 409, true);
+      throw new LemmaComputerError("WORKSPACE_NOT_READY", "The Kasm desktop is not healthy yet", 409, true);
     }
     const labels = asObject(asObject(inspected.Config).Labels);
     const sandboxName = textValue(inspected, "Name")?.replace(/^\//, "");
-    const workspaceId = labels["com.onecomputer.workspace-id"];
-    const port = Number(labels["com.onecomputer.desktop-port"]);
-    if (!Number.isInteger(port) || port <= 0) throw new OneComputerError("KASM_INVALID_STATE", "The Kasm desktop has no assigned session port", 502);
+    const workspaceId = labels["com.lemmacomputer.workspace-id"];
+    const port = Number(labels["com.lemmacomputer.desktop-port"]);
+    if (!Number.isInteger(port) || port <= 0) throw new LemmaComputerError("KASM_INVALID_STATE", "The Kasm desktop has no assigned session port", 502);
     if (
       typeof sandboxName !== "string"
-      || !/^onecomputer-sandbox-[0-9a-f-]{36}$/i.test(sandboxName)
+      || !/^lemmacomputer-sandbox-[0-9a-f-]{36}$/i.test(sandboxName)
       || typeof workspaceId !== "string"
       || !/^[0-9a-f-]{36}$/i.test(workspaceId)
-    ) throw new OneComputerError("KASM_INVALID_STATE", "The Kasm desktop has no routable workspace identity", 502);
+    ) throw new LemmaComputerError("KASM_INVALID_STATE", "The Kasm desktop has no routable workspace identity", 502);
     const defaultPolicy = defaultClipboardPolicy;
     const policy = {
-      enabled: labels["com.onecomputer.clipboard-enabled"] === undefined
+      enabled: labels["com.lemmacomputer.clipboard-enabled"] === undefined
         ? defaultPolicy.enabled
-        : labels["com.onecomputer.clipboard-enabled"] === "true",
-      localToWorkspace: labels["com.onecomputer.clipboard-local-to-workspace"] === undefined
+        : labels["com.lemmacomputer.clipboard-enabled"] === "true",
+      localToWorkspace: labels["com.lemmacomputer.clipboard-local-to-workspace"] === undefined
         ? defaultPolicy.localToWorkspace
-        : labels["com.onecomputer.clipboard-local-to-workspace"] === "true",
-      workspaceToLocal: labels["com.onecomputer.clipboard-workspace-to-local"] === undefined
+        : labels["com.lemmacomputer.clipboard-local-to-workspace"] === "true",
+      workspaceToLocal: labels["com.lemmacomputer.clipboard-workspace-to-local"] === undefined
         ? defaultPolicy.workspaceToLocal
-        : labels["com.onecomputer.clipboard-workspace-to-local"] === "true",
-      maxBytes: Number(labels["com.onecomputer.clipboard-max-bytes"] ?? defaultPolicy.maxBytes),
+        : labels["com.lemmacomputer.clipboard-workspace-to-local"] === "true",
+      maxBytes: Number(labels["com.lemmacomputer.clipboard-max-bytes"] ?? defaultPolicy.maxBytes),
     };
     return {
       ...buildKasmClipboardLaunch(`https://${this.config.publicHost ?? "127.0.0.1"}:${port}/`, policy),
@@ -661,12 +661,12 @@ export class KasmLocalAdapter implements SandboxAdapter {
       const containerConfig = asObject(inspected.Config);
       const labels = asObject(containerConfig.Labels);
       const environment = Array.isArray(containerConfig.Env) ? containerConfig.Env : [];
-      workspaceNetwork = typeof labels["com.onecomputer.workspace-network"] === "string" ? String(labels["com.onecomputer.workspace-network"]) : undefined;
-      gatewayAttached = labels["com.onecomputer.gateway-attached"] === "true";
-      controlAttached = labels["com.onecomputer.control-attached"] === "true"
-        || environment.some((entry) => typeof entry === "string" && entry.startsWith("ONECOMPUTER_AGENT_BRIDGE_TOKEN="));
+      workspaceNetwork = typeof labels["com.lemmacomputer.workspace-network"] === "string" ? String(labels["com.lemmacomputer.workspace-network"]) : undefined;
+      gatewayAttached = labels["com.lemmacomputer.gateway-attached"] === "true";
+      controlAttached = labels["com.lemmacomputer.control-attached"] === "true"
+        || environment.some((entry) => typeof entry === "string" && entry.startsWith("LEMMACOMPUTER_AGENT_BRIDGE_TOKEN="));
     } catch (error) {
-      if (!(error instanceof OneComputerError && error.statusCode === 404)) throw error;
+      if (!(error instanceof LemmaComputerError && error.statusCode === 404)) throw error;
     }
     if (name) await this.removeContainer(`${name}-relay`);
     if (name) await this.removeContainer(`${name}-egress`);
@@ -687,7 +687,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     try {
       await this.request("DELETE", `/containers/${encodeURIComponent(id)}?force=true&v=true`);
     } catch (error) {
-      if (!(error instanceof OneComputerError && error.statusCode === 404)) throw error;
+      if (!(error instanceof LemmaComputerError && error.statusCode === 404)) throw error;
     }
   }
 
@@ -700,11 +700,11 @@ export class KasmLocalAdapter implements SandboxAdapter {
   }
 
   private legacyWorkspaceVolume(workspaceId: string) {
-    return `onecomputer-v4-ws-home-${workspaceId.toLowerCase()}`;
+    return `lemmacomputer-v4-ws-home-${workspaceId.toLowerCase()}`;
   }
 
   private isWorkspaceNetwork(name: string) {
-    return name.startsWith(`${this.config.networkPrefix}-`) || name.startsWith("onecomputer-v4-ws-");
+    return name.startsWith(`${this.config.networkPrefix}-`) || name.startsWith("lemmacomputer-v4-ws-");
   }
 
   private async resolveWorkspaceVolume(workspaceId: string) {
@@ -724,8 +724,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
         Internal: internal,
         Attachable: true,
         Labels: {
-          "com.onecomputer.runtime": "workspace-network",
-          ...(workspaceId ? { "com.onecomputer.workspace-id": workspaceId } : {}),
+          "com.lemmacomputer.runtime": "workspace-network",
+          ...(workspaceId ? { "com.lemmacomputer.workspace-id": workspaceId } : {}),
         },
       });
     } catch (error) {
@@ -742,8 +742,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
       Name: name,
       Driver: "local",
       Labels: {
-        "com.onecomputer.runtime": "workspace-home",
-        "com.onecomputer.workspace-id": workspaceId,
+        "com.lemmacomputer.runtime": "workspace-home",
+        "com.lemmacomputer.workspace-id": workspaceId,
       },
     });
   }
@@ -756,7 +756,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     try {
       await this.request("DELETE", `/volumes/${encodeURIComponent(name)}?force=true`);
     } catch (error) {
-      if (!(error instanceof OneComputerError && error.statusCode === 404)) throw error;
+      if (!(error instanceof LemmaComputerError && error.statusCode === 404)) throw error;
     }
   }
 
@@ -781,7 +781,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         return id === container || id.startsWith(container) || name === container;
       });
     } catch (error) {
-      if (error instanceof OneComputerError && error.statusCode === 404) return false;
+      if (error instanceof LemmaComputerError && error.statusCode === 404) return false;
       throw error;
     }
   }
@@ -791,7 +791,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     try {
       await this.request("POST", `/networks/${encodeURIComponent(network)}/disconnect`, { Container: container, Force: true });
     } catch (error) {
-      if (error instanceof OneComputerError && [404, 409].includes(error.statusCode)) return;
+      if (error instanceof LemmaComputerError && [404, 409].includes(error.statusCode)) return;
       // Docker can return 500 when Compose replaces a governed service after
       // the membership check but before disconnect. Treat that race as an
       // idempotent success only when a fresh inspection confirms the endpoint
@@ -805,7 +805,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     try {
       await this.request("DELETE", `/networks/${encodeURIComponent(network)}`);
     } catch (error) {
-      if (!(error instanceof OneComputerError && error.statusCode === 404)) throw error;
+      if (!(error instanceof LemmaComputerError && error.statusCode === 404)) throw error;
     }
   }
 
@@ -813,7 +813,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     try {
       const inspected = await this.request("GET", `/containers/${encodeURIComponent(name)}/json`);
       const labels = asObject(asObject(inspected.Config).Labels);
-      const rawPort = labels["com.onecomputer.desktop-port"];
+      const rawPort = labels["com.lemmacomputer.desktop-port"];
       const state = asObject(inspected.State);
       const health = textValue(asObject(state.Health), "Status");
       return {
@@ -823,10 +823,10 @@ export class KasmLocalAdapter implements SandboxAdapter {
           && state.Paused !== true
           && (!health || health === "healthy"),
         port: typeof rawPort === "string" ? Number(rawPort) : undefined,
-        coworkEnabled: labels["com.onecomputer.cowork-enabled"] === "true",
+        coworkEnabled: labels["com.lemmacomputer.cowork-enabled"] === "true",
       };
     } catch (error) {
-      if (error instanceof OneComputerError && error.statusCode === 404) return null;
+      if (error instanceof LemmaComputerError && error.statusCode === 404) return null;
       throw error;
     }
   }
@@ -837,11 +837,11 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const listed = await this.request("GET", "/containers/json?all=1");
     const used = new Set(Object.values(asObject(listed)).flatMap((value) => {
       const labels = asObject(asObject(value).Labels);
-      const raw = labels["com.onecomputer.desktop-port"];
+      const raw = labels["com.lemmacomputer.desktop-port"];
       return typeof raw === "string" ? [Number(raw)] : [];
     }));
     for (let port = start; port <= end; port += 1) if (!used.has(port)) return port;
-    throw new OneComputerError("KASM_PORTS_EXHAUSTED", "No local Kasm desktop ports are available", 503, true);
+    throw new LemmaComputerError("KASM_PORTS_EXHAUSTED", "No local Kasm desktop ports are available", 503, true);
   }
 
   private async ensureRelay(sandboxName: string, sandboxId: string, port: number, workspaceNetwork: string) {
@@ -856,9 +856,9 @@ export class KasmLocalAdapter implements SandboxAdapter {
       Cmd: ["-e", script],
       ExposedPorts: { [`${port}/tcp`]: {} },
       Labels: {
-        "com.onecomputer.sandbox.relay": "kasm-local",
-        "com.onecomputer.sandbox-id": sandboxId,
-        "com.onecomputer.desktop-port": String(port),
+        "com.lemmacomputer.sandbox.relay": "kasm-local",
+        "com.lemmacomputer.sandbox-id": sandboxId,
+        "com.lemmacomputer.desktop-port": String(port),
       },
       HostConfig: {
         NetworkMode: this.config.controlNetwork,
@@ -868,7 +868,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       },
     });
     const relayId = textValue(created, "Id");
-    if (!relayId) throw new OneComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return a relay identifier", 502);
+    if (!relayId) throw new LemmaComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return a relay identifier", 502);
     await this.request("POST", `/containers/${relayId}/start`);
     await this.connectContainer(workspaceNetwork, relayId);
   }
@@ -882,9 +882,9 @@ export class KasmLocalAdapter implements SandboxAdapter {
       || (input.egressProxy.expectedGrant.egressMode ?? input.policy.egressMode) !== input.policy.egressMode
       || input.egressProxy.expectedGrant.policyHash !== input.policy.policyHash
     ) {
-      throw new OneComputerError("EGRESS_PROXY_GRANT_MISMATCH", "The egress proxy grant does not match the sandbox policy", 403);
+      throw new LemmaComputerError("EGRESS_PROXY_GRANT_MISMATCH", "The egress proxy grant does not match the sandbox policy", 403);
     }
-    const sandboxName = `onecomputer-sandbox-${input.workspaceId}`;
+    const sandboxName = `lemmacomputer-sandbox-${input.workspaceId}`;
     const proxyName = `${sandboxName}-egress`;
     const existing = await this.inspectByName(proxyName);
     if (existing?.running && !replace) return;
@@ -892,24 +892,24 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const policy = input.policy.egress;
     const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(proxyName)}`, {
       Image: this.config.egressProxyImage,
-      Cmd: ["npm", "run", "start", "-w", "@onecomputer/egress-proxy"],
+      Cmd: ["npm", "run", "start", "-w", "@lemmacomputer/egress-proxy"],
       Labels: {
-        "com.onecomputer.egress-proxy": "v2",
-        "com.onecomputer.workspace-id": input.workspaceId,
-        "com.onecomputer.egress-security-group-version-id": input.policy.egress.id,
-        "com.onecomputer.egress-policy-hash": input.policy.egress.documentHash,
-        "com.onecomputer.egress-mode": input.policy.egress.mode,
+        "com.lemmacomputer.egress-proxy": "v2",
+        "com.lemmacomputer.workspace-id": input.workspaceId,
+        "com.lemmacomputer.egress-security-group-version-id": input.policy.egress.id,
+        "com.lemmacomputer.egress-policy-hash": input.policy.egress.documentHash,
+        "com.lemmacomputer.egress-mode": input.policy.egress.mode,
       },
       Env: [
         "EGRESS_PROXY_PORT=3128",
         `EGRESS_POLICY_JSON=${JSON.stringify(policy)}`,
         `EGRESS_EXPECTED_GRANT_JSON=${JSON.stringify(input.egressProxy.expectedGrant)}`,
         `EGRESS_GRANT_SECRET=${input.egressProxy.verificationSecret}`,
-        `ONECOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
+        `LEMMACOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
       ],
       NetworkingConfig: {
         EndpointsConfig: {
-          [workspaceNetwork]: { Aliases: ["onecomputer-egress-proxy"] },
+          [workspaceNetwork]: { Aliases: ["lemmacomputer-egress-proxy"] },
         },
       },
       HostConfig: {
@@ -925,9 +925,9 @@ export class KasmLocalAdapter implements SandboxAdapter {
       },
     });
     const proxyId = textValue(created, "Id");
-    if (!proxyId) throw new OneComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return an egress proxy identifier", 502);
+    if (!proxyId) throw new LemmaComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return an egress proxy identifier", 502);
     try {
-      await this.connectContainer(this.config.egressNetwork ?? "onecomputer-egress", proxyId);
+      await this.connectContainer(this.config.egressNetwork ?? "lemmacomputer-egress", proxyId);
       await this.request("POST", `/containers/${proxyId}/start`);
     } catch (error) {
       await this.removeContainer(proxyId).catch(() => undefined);
@@ -944,7 +944,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     try {
       return await this.request("POST", path, body);
     } catch (error) {
-      const missingWorkspaceNetwork = error instanceof OneComputerError
+      const missingWorkspaceNetwork = error instanceof LemmaComputerError
         && error.statusCode === 404
         && error.message.includes(`network ${workspaceNetwork} not found`);
       if (!missingWorkspaceNetwork) throw error;
@@ -995,7 +995,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const diagnostic = this.safeStartupDiagnostic(logs);
     const detail = diagnostic ? ` ${diagnostic}` : "";
     if (state.OOMKilled === true) {
-      return new OneComputerError(
+      return new LemmaComputerError(
         "WORKSPACE_RESOURCE_LIMIT",
         `The workspace exceeded its memory limit during startup.${detail}`,
         503,
@@ -1003,14 +1003,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
       );
     }
     if (state.ExitCode === 78) {
-      return new OneComputerError(
+      return new LemmaComputerError(
         "WORKSPACE_STARTUP_REJECTED",
         `The workspace configuration was rejected during startup.${detail}`,
         422,
         false,
       );
     }
-    return new OneComputerError(
+    return new LemmaComputerError(
       health === "unhealthy" ? "WORKSPACE_HEALTHCHECK_FAILED" : "WORKSPACE_STARTUP_FAILED",
       `The workspace stopped before it became ready.${detail}`,
       503,
@@ -1029,7 +1029,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const logs = await this.containerLogs(providerId).catch(() => "");
     const diagnostic = this.safeStartupDiagnostic(logs);
     const detail = diagnostic ? ` ${diagnostic}` : "";
-    return new OneComputerError(
+    return new LemmaComputerError(
       health === "unhealthy" ? "WORKSPACE_HEALTHCHECK_FAILED" : "WORKSPACE_STARTUP_TIMEOUT",
       `The workspace did not become ready before the startup deadline.${detail}`,
       504,
@@ -1064,7 +1064,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         response.on("end", () => {
           const buffer = Buffer.concat(chunks);
           if ((response.statusCode ?? 500) >= 400) {
-            reject(new OneComputerError("DOCKER_API_ERROR", `Docker API returned ${response.statusCode}`, response.statusCode ?? 500));
+            reject(new LemmaComputerError("DOCKER_API_ERROR", `Docker API returned ${response.statusCode}`, response.statusCode ?? 500));
             return;
           }
           const decoded: Buffer[] = [];
@@ -1078,7 +1078,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
           resolve((decoded.length ? Buffer.concat(decoded) : buffer).toString("utf8"));
         });
       });
-      request.on("error", (error) => reject(new OneComputerError("DOCKER_UNAVAILABLE", error.message, 503, true)));
+      request.on("error", (error) => reject(new LemmaComputerError("DOCKER_UNAVAILABLE", error.message, 503, true)));
       request.end();
     });
   }
@@ -1099,14 +1099,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
             } catch {
               // Keep invalid daemon responses out of the surfaced error.
             }
-            reject(new OneComputerError("DOCKER_API_ERROR", `Docker API returned ${response.statusCode}${daemonMessage ? `: ${daemonMessage}` : ""}`, response.statusCode ?? 500));
+            reject(new LemmaComputerError("DOCKER_API_ERROR", `Docker API returned ${response.statusCode}${daemonMessage ? `: ${daemonMessage}` : ""}`, response.statusCode ?? 500));
             return;
           }
           if (!text) { resolve({}); return; }
-          try { resolve(asObject(JSON.parse(text))); } catch { reject(new OneComputerError("DOCKER_INVALID_RESPONSE", "Docker returned invalid JSON", 502)); }
+          try { resolve(asObject(JSON.parse(text))); } catch { reject(new LemmaComputerError("DOCKER_INVALID_RESPONSE", "Docker returned invalid JSON", 502)); }
         });
       });
-      request.on("error", (error) => reject(new OneComputerError("DOCKER_UNAVAILABLE", error.message, 503, true)));
+      request.on("error", (error) => reject(new LemmaComputerError("DOCKER_UNAVAILABLE", error.message, 503, true)));
       if (payload) request.write(payload);
       request.end();
     });

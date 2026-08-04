@@ -23,7 +23,7 @@ import httpx
 
 
 EXPECTED_LITELLM_VERSION = "1.93.0"
-REMOTE_PROXY_ENV = "ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL"
+REMOTE_PROXY_ENV = "LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL"
 _installed = False
 _routing_clients: dict[int, "_McpRoutingClient"] = {}
 
@@ -69,7 +69,7 @@ def _internal_http_url(url: str) -> bool:
 
 
 def _strict_profile(client: Any) -> bool:
-    profile = getattr(client, "_onecomputer_egress_profile", None)
+    profile = getattr(client, "_lemmacomputer_egress_profile", None)
     if profile == "internal":
         return False
     if profile == "strict_remote":
@@ -208,10 +208,10 @@ def _patch_mcp_http_client_modules() -> None:
     for module_name in module_names:
         module = importlib.import_module(module_name)
         original = getattr(module, "get_async_httpx_client", None)
-        if original is not None and not getattr(module, "_onecomputer_mcp_egress_patched", False):
-            setattr(module, "_onecomputer_original_get_async_httpx_client", original)
+        if original is not None and not getattr(module, "_lemmacomputer_mcp_egress_patched", False):
+            setattr(module, "_lemmacomputer_original_get_async_httpx_client", original)
             setattr(module, "get_async_httpx_client", lambda *args, _original=original, **kwargs: _routed_http_client(_original, *args, **kwargs))
-            setattr(module, "_onecomputer_mcp_egress_patched", True)
+            setattr(module, "_lemmacomputer_mcp_egress_patched", True)
 
     per_user = importlib.import_module(
         "litellm.proxy._experimental.mcp_server.outbound_credentials.per_user_oauth_store"
@@ -229,7 +229,7 @@ def _patch_runtime_mcp_client() -> None:
     mcp_client_type = client_module.MCPClient
     manager_type = manager_module.MCPServerManager
 
-    if not getattr(mcp_client_type, "_onecomputer_mcp_egress_patched", False):
+    if not getattr(mcp_client_type, "_lemmacomputer_mcp_egress_patched", False):
         original_factory = mcp_client_type._create_httpx_client_factory
 
         def strict_factory(self: Any):
@@ -252,20 +252,20 @@ def _patch_runtime_mcp_client() -> None:
             return factory
 
         mcp_client_type._create_httpx_client_factory = strict_factory
-        mcp_client_type._onecomputer_mcp_egress_patched = True
+        mcp_client_type._lemmacomputer_mcp_egress_patched = True
 
-    if not getattr(manager_type, "_onecomputer_mcp_egress_patched", False):
+    if not getattr(manager_type, "_lemmacomputer_mcp_egress_patched", False):
         original_create_client = manager_type._create_mcp_client
 
         async def create_client_with_profile(self: Any, server: Any, *args: Any, **kwargs: Any) -> Any:
             client = await original_create_client(self, server, *args, **kwargs)
             info = getattr(server, "mcp_info", None)
-            profile = info.get("onecomputer_egress_profile") if isinstance(info, dict) else None
-            setattr(client, "_onecomputer_egress_profile", profile)
+            profile = info.get("lemmacomputer_egress_profile") if isinstance(info, dict) else None
+            setattr(client, "_lemmacomputer_egress_profile", profile)
             return client
 
         manager_type._create_mcp_client = create_client_with_profile
-        manager_type._onecomputer_mcp_egress_patched = True
+        manager_type._lemmacomputer_mcp_egress_patched = True
 
 
 def verify() -> None:

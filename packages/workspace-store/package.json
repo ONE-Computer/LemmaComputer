@@ -1,5 +1,5 @@
 {
-  "name": "@onecomputer/workspace-store",
+  "name": "@lemmacomputer/workspace-store",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,9 +8,9 @@
     "build": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@onecomputer/contracts": "*",
-    "@onecomputer/model-router": "*",
-    "@onecomputer/egress-policy": "*",
+    "@lemmacomputer/contracts": "*",
+    "@lemmacomputer/model-router": "*",
+    "@lemmacomputer/egress-policy": "*",
     "cron-parser": "5.4.0",
     "pg": "8.22.0"
   },

@@ -20,10 +20,10 @@ import {
   type PolicyVerificationKeySet,
   type RuntimePolicy,
   type SignedPolicyBundle,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 
-const SIGNATURE_DOMAIN = Buffer.from("onecomputer/effective-policy/signature/v1\0", "utf8");
-const PAYLOAD_DIGEST_DOMAIN = Buffer.from("onecomputer/effective-policy/payload/v1\0", "utf8");
+const SIGNATURE_DOMAIN = Buffer.from("lemmacomputer/effective-policy/signature/v1\0", "utf8");
+const PAYLOAD_DIGEST_DOMAIN = Buffer.from("lemmacomputer/effective-policy/payload/v1\0", "utf8");
 const CLOCK_SKEW_MS = 30_000;
 
 export type { PolicyBundlePayload, PolicyVerificationKey, PolicyVerificationKeySet, SignedPolicyBundle };
@@ -154,15 +154,15 @@ export class PolicyBundleSigner {
       "codex-cli-managed-v1": "codex-cli",
       "hermes-desktop-managed-v1": "hermes-desktop",
       "hermes-claw-managed-v1": "hermes-claw",
-    } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "onecomputer-default-agent">] ?? "claude-desktop";
+    } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "lemmacomputer-default-agent">] ?? "claude-desktop";
     const selectedAgents = input.policy.agents ?? [{
       catalogId: fallbackCatalogId,
       agentId: input.policy.agentId,
     }];
     const payload = policyBundlePayloadSchema.parse({
       schemaVersion: 1,
-      issuer: "onecomputer-control",
-      audience: "onecomputer-policy-enforcement",
+      issuer: "lemmacomputer-control",
+      audience: "lemmacomputer-policy-enforcement",
       tenantId: input.identity.tenantId,
       subjectId: input.identity.subjectId,
       workspaceId: input.workspaceId,
@@ -184,7 +184,7 @@ export class PolicyBundleSigner {
     const payloadBytes = Buffer.from(canonicalJson(payload), "utf8");
     const digest = payloadDigest(payloadBytes);
     return signedPolicyBundleSchema.parse({
-      profile: "onecomputer-effective-policy/v1",
+      profile: "lemmacomputer-effective-policy/v1",
       canonicalization: "RFC8785-JCS",
       algorithm: "Ed25519",
       keyId: this.config.keyId,
@@ -215,7 +215,7 @@ export function verifySignedPolicyBundle(
     throw new PolicyVerificationError("POLICY_BUNDLE_MALFORMED", "The signed policy bundle is malformed");
   }
   if (
-    bundle.profile !== "onecomputer-effective-policy/v1"
+    bundle.profile !== "lemmacomputer-effective-policy/v1"
     || bundle.canonicalization !== "RFC8785-JCS"
     || bundle.algorithm !== "Ed25519"
   ) {

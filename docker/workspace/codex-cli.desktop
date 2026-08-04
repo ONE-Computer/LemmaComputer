@@ -2,7 +2,7 @@
 Type=Application
 Name=Codex CLI
 Comment=Governed Codex CLI through LemmaComputer
-Exec=xfce4-terminal --title="Codex CLI" --command=/usr/local/bin/onecomputer-codex
+Exec=xfce4-terminal --title="Codex CLI" --command=/usr/local/bin/lemmacomputer-codex
 Icon=utilities-terminal
 Terminal=false
 Categories=Development;Utility;

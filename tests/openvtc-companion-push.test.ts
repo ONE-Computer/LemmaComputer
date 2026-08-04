@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import webPush from "web-push";
 import { OpenVtcApprovalCoordinator } from "../apps/control-api/src/openvtc.js";
 import {
@@ -14,7 +14,7 @@ import {
 } from "../apps/control-api/src/web-push.js";
 import { TestOpenVtcConsentClient } from "./helpers/openvtc-consent.js";
 
-const identity: IdentityContext = { tenantId: "tenant-companion", subjectId: "owner-companion", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "tenant-companion", subjectId: "owner-companion", audience: "lemmacomputer-control" };
 class FakePushProvider implements CompanionPushProvider {
   readonly publicKey = "fake-vapid-public-key";
   sent: string[] = [];
@@ -84,9 +84,9 @@ test("companion subscriptions are identity-bound, redacted, and receive one dedu
     workspaceId: workspace.id,
     agentId: "agent-companion",
     capabilityId: "m365-write-protected",
-    serverName: "onecomputer_ms365",
+    serverName: "lemmacomputer_ms365",
     toolName: "send-mail",
-    schemaId: "onecomputer.m365.send-mail.v1",
+    schemaId: "lemmacomputer.m365.send-mail.v1",
     arguments: { draftId: "redacted" },
     operationDigest: "a".repeat(64),
     nonce: randomUUID(),
@@ -149,13 +149,13 @@ test("approval creation never waits for Companion network delivery", async () =>
     workspaceId: workspace.id,
     agentId: "agent-slow-companion",
     capabilityId: "m365-write-protected",
-    serverName: "onecomputer_ms365",
+    serverName: "lemmacomputer_ms365",
     toolName: "send-chat-message",
-    schemaId: "onecomputer.m365.send-chat-message.v1",
+    schemaId: "lemmacomputer.m365.send-chat-message.v1",
     arguments: {
       chatId: "chat-1",
       body: { body: { contentType: "html", content: "Hello" } },
-      onecomputerAudit: { target: "Project chat", targetType: "chat" },
+      lemmacomputerAudit: { target: "Project chat", targetType: "chat" },
     },
     operationDigest: "b".repeat(64),
     nonce: randomUUID(),

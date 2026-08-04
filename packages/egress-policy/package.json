@@ -1,5 +1,5 @@
 {
-  "name": "@onecomputer/egress-policy",
+  "name": "@lemmacomputer/egress-policy",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,6 +8,6 @@
     "build": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@onecomputer/contracts": "*"
+    "@lemmacomputer/contracts": "*"
   }
 }

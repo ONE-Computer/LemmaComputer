@@ -14,15 +14,15 @@ const sourceTree = async (relativePath: string) => {
 
 test("owned contracts do not import vendor, UI, database, or container authority", async () => {
   const contracts = await source("packages/contracts/src/index.ts");
-  assert.doesNotMatch(contracts, /@onecomputer\/(kasm-adapter|litellm-adapter|workspace-store)|from ["'](?:pg|fastify|react)|docker/i);
+  assert.doesNotMatch(contracts, /@lemmacomputer\/(kasm-adapter|litellm-adapter|workspace-store)|from ["'](?:pg|fastify|react)|docker/i);
 });
 
 test("owned persistence does not depend on Kasm, LiteLLM, or the browser", async () => {
   const persistence = await source("packages/workspace-store/src/index.ts");
-  assert.doesNotMatch(persistence, /@onecomputer\/(kasm-adapter|litellm-adapter)|apps\/web|react|docker/i);
+  assert.doesNotMatch(persistence, /@lemmacomputer\/(kasm-adapter|litellm-adapter)|apps\/web|react|docker/i);
 });
 
 test("browser source contains no server authority or credential names", async () => {
   const web = await sourceTree("apps/web/src");
-  assert.doesNotMatch(web, /ONECOMPUTER_OPENAI_API_KEY|LITELLM_MASTER_KEY|CONTROLLER_INTERNAL_TOKEN|FIXTURE_APPROVAL_SECRET|DOCKER_SOCKET|POSTGRES_PASSWORD/);
+  assert.doesNotMatch(web, /LEMMACOMPUTER_OPENAI_API_KEY|LITELLM_MASTER_KEY|CONTROLLER_INTERNAL_TOKEN|FIXTURE_APPROVAL_SECRET|DOCKER_SOCKET|POSTGRES_PASSWORD/);
 });

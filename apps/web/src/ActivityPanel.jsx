@@ -71,7 +71,7 @@ export function mergeActivityEvents(current, incoming) {
 }
 
 export function humanizeToolName(value) {
-  const name = String(value || "Workspace action").replace(/^mcp__onecomputer_connectors__/, "");
+  const name = String(value || "Workspace action").replace(/^mcp__lemmacomputer_connectors__/, "");
   return name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_:.-]+/g, " ").replace(/\s+/g, " ").trim().replace(/^./, (character) => character.toUpperCase());
 }
 

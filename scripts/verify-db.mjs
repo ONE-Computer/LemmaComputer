@@ -14,7 +14,7 @@ const must = (command, args, options = {}) => {
 };
 const migrate = (database, expectedSuccess = true) => {
   const result = exec("npm", ["run", "db:migrate"], {
-    env: { ...process.env, DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/${database}`, ONECOMPUTER_INSTALLATION_KIND: "migration-test" },
+    env: { ...process.env, DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/${database}`, LEMMACOMPUTER_INSTALLATION_KIND: "migration-test" },
   });
   if ((result.status === 0) !== expectedSuccess) throw new Error(result.stderr || result.stdout || "unexpected migration result");
   return `${result.stdout}${result.stderr}`;
@@ -45,7 +45,7 @@ try {
 
   const first = migrate("postgres");
   if (!first.includes("Applied migrations")) throw new Error("fresh database did not report applied migrations");
-  if (sql("postgres", "SELECT count(*) FROM onecomputer_schema_migrations") !== String(expectedMigrationCount)) {
+  if (sql("postgres", "SELECT count(*) FROM lemmacomputer_schema_migrations") !== String(expectedMigrationCount)) {
     throw new Error("fresh migration ledger does not contain every discovered migration");
   }
   const schemaCheck = exec("npm", ["run", "db:check"], { env: { ...process.env, DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/postgres` } });
@@ -93,11 +93,11 @@ try {
   sql("postgres", "CREATE DATABASE concurrent");
   const concurrentUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/concurrent`;
   const children = [0, 1].map(() => spawn("npm", ["run", "db:migrate"], {
-    env: { ...process.env, DATABASE_URL: concurrentUrl, ONECOMPUTER_INSTALLATION_KIND: "concurrency-test" },
+    env: { ...process.env, DATABASE_URL: concurrentUrl, LEMMACOMPUTER_INSTALLATION_KIND: "concurrency-test" },
     stdio: ["ignore", "pipe", "pipe"],
   }));
   await Promise.all(children.map(waitFor));
-  if (sql("concurrent", "SELECT count(*) FROM onecomputer_schema_migrations") !== String(expectedMigrationCount)) {
+  if (sql("concurrent", "SELECT count(*) FROM lemmacomputer_schema_migrations") !== String(expectedMigrationCount)) {
     throw new Error("concurrent migration ledger does not contain every discovered migration");
   }
 
@@ -105,10 +105,10 @@ try {
   const legacySql = (await Promise.all(legacyMigrationFiles.map((name) => readFile(`packages/workspace-store/migrations/${name}`, "utf8")))).join("\n");
   must("docker", ["exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "legacy"], { input: legacySql });
   if (!migrate("legacy").includes("baselined legacy schema")) throw new Error("legacy schema was not verified and baselined");
-  if (sql("legacy", "SELECT count(*) FROM onecomputer_schema_migrations WHERE installation_kind='verified-legacy-baseline'") !== String(legacyMigrationIds.size)) {
+  if (sql("legacy", "SELECT count(*) FROM lemmacomputer_schema_migrations WHERE installation_kind='verified-legacy-baseline'") !== String(legacyMigrationIds.size)) {
     throw new Error("legacy baseline ledger is invalid");
   }
-  if (sql("legacy", "SELECT count(*) FROM onecomputer_schema_migrations") !== String(expectedMigrationCount)) {
+  if (sql("legacy", "SELECT count(*) FROM lemmacomputer_schema_migrations") !== String(expectedMigrationCount)) {
     throw new Error("legacy cutover did not apply every later migration");
   }
 
@@ -116,11 +116,11 @@ try {
   sql("incompatible", "CREATE TABLE workspaces(id uuid PRIMARY KEY)");
   const failure = migrate("incompatible", false);
   if (!failure.includes("cannot be safely baselined")) throw new Error("incompatible legacy schema did not fail closed");
-  if (sql("incompatible", "SELECT to_regclass('public.onecomputer_schema_migrations') IS NULL") !== "t") {
+  if (sql("incompatible", "SELECT to_regclass('public.lemmacomputer_schema_migrations') IS NULL") !== "t") {
     throw new Error("failed legacy verification mutated the database");
   }
 
-  sql("postgres", "UPDATE onecomputer_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='028'");
+  sql("postgres", "UPDATE lemmacomputer_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='028'");
   if (!migrate("postgres", false).includes("historical migrations are immutable")) throw new Error("checksum drift did not fail closed");
   process.stdout.write("Database gate passed: fresh, no-op, concurrent, legacy baseline, mismatch, checksum, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
 } finally {

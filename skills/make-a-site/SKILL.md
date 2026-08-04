@@ -16,9 +16,9 @@ Create and publish the smallest useful static site. This MVP accepts exactly one
 5. Publish only after the build succeeds:
 
 ```bash
-onecomputer-sites publish --name "Site name" --slug "site-name" --dist "/absolute/project/dist"
+lemmacomputer-sites publish --name "Site name" --slug "site-name" --dist "/absolute/project/dist"
 ```
 
 Use a lowercase hyphenated slug. Publishing the same slug creates a new immutable revision of the employee's existing site.
 
-Report success only when `onecomputer-sites` returns JSON with `published:true`. Tell the employee the site is available under LemmaComputer → Sites. If the command fails, report the error plainly and do not claim the site is live.
+Report success only when `lemmacomputer-sites` returns JSON with `published:true`. Tell the employee the site is available under LemmaComputer → Sites. If the command fails, report the error plainly and do not claim the site is live.

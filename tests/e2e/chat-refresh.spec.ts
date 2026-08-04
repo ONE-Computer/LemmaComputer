@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const fixtureUrl = `http://127.0.0.1:${Number(process.env.ONECOMPUTER_E2E_FIXTURE_PORT ?? 4_399)}`;
+const fixtureUrl = `http://127.0.0.1:${Number(process.env.LEMMACOMPUTER_E2E_FIXTURE_PORT ?? 4_399)}`;
 
 test.beforeEach(async ({ request }) => {
   const response = await request.post(`${fixtureUrl}/__test/reset/chat`);

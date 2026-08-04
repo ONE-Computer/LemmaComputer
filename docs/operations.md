@@ -35,9 +35,9 @@ npm run env:init -- --force
 For an alternate path:
 
 ```bash
-npm run env:init -- --file=/absolute/path/to/onecomputer.env
-npm run env:render -- --file=/absolute/path/to/onecomputer.env
-docker compose --env-file /absolute/path/to/onecomputer.env config --quiet
+npm run env:init -- --file=/absolute/path/to/lemmacomputer.env
+npm run env:render -- --file=/absolute/path/to/lemmacomputer.env
+docker compose --env-file /absolute/path/to/lemmacomputer.env config --quiet
 ```
 
 Compose automatically loads only a root `.env`. Pass `--env-file` for any
@@ -86,28 +86,28 @@ production deployment environment.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ONECOMPUTER_HTTP_BIND_ADDRESS` | `127.0.0.1` | Host bind address for all published ports |
-| `ONECOMPUTER_WEB_PORT` | `4174` | Product and workspace-ingress port |
-| `ONECOMPUTER_PUBLIC_WEB_URL` | `http://localhost:4174` | Canonical product origin and Entra callback base |
+| `LEMMACOMPUTER_HTTP_BIND_ADDRESS` | `127.0.0.1` | Host bind address for all published ports |
+| `LEMMACOMPUTER_WEB_PORT` | `4174` | Product and workspace-ingress port |
+| `LEMMACOMPUTER_PUBLIC_WEB_URL` | `http://localhost:4174` | Canonical product origin and Entra callback base |
 
 Workspace ingress derives the browser-facing connector routes from the one
 canonical origin. It forwards only `GET /oauth/mcp/callback` to private
 LiteLLM and `GET /m365/authorize` to the private Microsoft 365 bridge. LiteLLM
 and the bridge do not publish host ports. Changing
-`ONECOMPUTER_PUBLIC_WEB_URL` requires updating the corresponding Entra and
+`LEMMACOMPUTER_PUBLIC_WEB_URL` requires updating the corresponding Entra and
 GitHub OAuth-app redirect URI.
 
 ### Identity and bootstrap
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `ONECOMPUTER_ENTRA_TENANT_ID` | Yes | Single Entra directory accepted for Web sign-in |
-| `ONECOMPUTER_ENTRA_CLIENT_ID` | Yes | Web OIDC application |
-| `ONECOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Web OIDC confidential-client secret |
-| `ONECOMPUTER_ADMINISTRATOR_EMAILS` | Yes | Comma-separated bootstrap administrators |
-| `ONECOMPUTER_BOOTSTRAP_TENANT_ID` | No | Owned tenant identifier |
-| `ONECOMPUTER_BOOTSTRAP_USER_ID` | No | Owned ID for a bootstrap administrator |
-| `ONECOMPUTER_TENANT_DISPLAY_NAME` | No | Initial organization display name |
+| `LEMMACOMPUTER_ENTRA_TENANT_ID` | Yes | Single Entra directory accepted for Web sign-in |
+| `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Yes | Web OIDC application |
+| `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Web OIDC confidential-client secret |
+| `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | Yes | Comma-separated bootstrap administrators |
+| `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID` | No | Owned tenant identifier |
+| `LEMMACOMPUTER_BOOTSTRAP_USER_ID` | No | Owned ID for a bootstrap administrator |
+| `LEMMACOMPUTER_TENANT_DISPLAY_NAME` | No | Initial organization display name |
 
 Administrator email matching is case-insensitive. Keep the allowlist small.
 After identity records and assignments exist, changing bootstrap identifiers
@@ -122,8 +122,8 @@ not automatically regain a policy that an administrator revoked.
 
 ### Microsoft 365
 
-`ONECOMPUTER_MS365_TENANT_ID`, `ONECOMPUTER_MS365_CLIENT_ID`, and
-`ONECOMPUTER_MS365_CLIENT_SECRET` are optional as a group. Empty values reuse
+`LEMMACOMPUTER_MS365_TENANT_ID`, `LEMMACOMPUTER_MS365_CLIENT_ID`, and
+`LEMMACOMPUTER_MS365_CLIENT_SECRET` are optional as a group. Empty values reuse
 the Web Entra application. A separate connector application is recommended for
 production because it isolates Graph scopes and credential rotation.
 
@@ -146,9 +146,9 @@ checks only that selected connector, then starts its per-user OAuth flow.
 Notion, Linear, and Atlassian use their official hosted MCP endpoints and
 dynamic OAuth client registration. GitHub requires an OAuth app because its
 authorization server does not expose dynamic client registration. Configure
-`ONECOMPUTER_GITHUB_MCP_CLIENT_ID` and
-`ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET`, with the LiteLLM callback
-`${ONECOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback` registered in GitHub. Other
+`LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID` and
+`LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET`, with the LiteLLM callback
+`${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback` registered in GitHub. Other
 providers can impose their own OAuth-app approval or allow-list requirements;
 an unsuccessful registration or authorization leaves the catalog card
 disconnected and contributes no tools.
@@ -189,7 +189,7 @@ For a hosted deployment, the platform/network owner must put every exact HTTPS
 origin used by the MCP and OAuth flow—endpoint, protected-resource and
 authorization-server metadata, authorization, token, and dynamic-client-
 registration origins—in
-`ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` before a tenant administrator can add
+`LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` before a tenant administrator can add
 the connector. This is deliberately deployment-owned rather than tenant-local:
 a shared LiteLLM gateway must not let one tenant create a new gateway-wide
 egress destination. Customer-managed installations can use their own
@@ -291,7 +291,7 @@ guessing capabilities from display names.
 
 The dynamic routes retain compatibility aliases required by signed policy and
 managed clients, while governed service-class workspaces receive only the
-synthetic `onecomputer-auto` transport alias. Every concrete model deployment
+synthetic `lemmacomputer-auto` transport alias. Every concrete model deployment
 is bound to a tenant-specific LiteLLM access group, so a virtual workspace key
 cannot select another organization's deployment. The current reviewed model
 and alias inventory in
@@ -332,36 +332,36 @@ docker compose config --quiet
 docker compose up -d --wait
 ```
 
-Set `ONECOMPUTER_INSTALLATION_KIND=hosted` and
-`ONECOMPUTER_LITELLM_ADMIN_URL=https://litellm-admin-listener:8443` in the
+Set `LEMMACOMPUTER_INSTALLATION_KIND=hosted` and
+`LEMMACOMPUTER_LITELLM_ADMIN_URL=https://litellm-admin-listener:8443` in the
 deployment environment. `compose.hosted.yaml` remains a compatibility marker
 only; it deliberately does not select a profile or override a security value.
 The listener is bound only to the
 internal `litellm-admin-private` network alias, and its proxy can reach the
 LiteLLM upstream without exposing the listener to workspace traffic. It accepts
-only a client certificate issued to the `onecomputer-control` workload identity.
+only a client certificate issued to the `lemmacomputer-control` workload identity.
 
 Inject the following as base64-encoded PEM from the deployment secret manager:
 
-- `ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64`
-- `ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64` and
-  `ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64`
-- `ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64` and
-  `ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64`
+- `LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64`
+- `LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64` and
+  `LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64`
+- `LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64` and
+  `LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64`
 
 The server certificate must verify for
-`ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME` (normally
+`LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME` (normally
 `litellm-admin-listener`), and the client certificate subject CN must match
-`ONECOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME` (normally
-`onecomputer-control`). Hosted startup refuses HTTP, missing or malformed mTLS
-material, and any reuse of `ONECOMPUTER_LITELLM_CREDENTIAL_SECRET` as a session
+`LEMMACOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME` (normally
+`lemmacomputer-control`). Hosted startup refuses HTTP, missing or malformed mTLS
+material, and any reuse of `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET` as a session
 or workspace-ingress secret. The proxy rejects missing client certificates at
 the TLS handshake and rejects a certificate for a different workload identity.
 
 For an upgrade from an older installation, run `npm run env:update`, put three
-independent values in `ONECOMPUTER_LITELLM_CREDENTIAL_SECRET`,
-`ONECOMPUTER_SESSION_SECRET`, and
-`ONECOMPUTER_WORKSPACE_INGRESS_SECRET`, then run the hosted profile preflight. Do not
+independent values in `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET`,
+`LEMMACOMPUTER_SESSION_SECRET`, and
+`LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET`, then run the hosted profile preflight. Do not
 rotate the credential-derivation secret merely to rotate sessions or ingress;
 those values are intentionally separate now.
 
@@ -384,14 +384,14 @@ Back these values up through an approved secret manager.
 
 ### Sandbox driver
 
-`ONECOMPUTER_SANDBOX_DRIVER=kasm-local` uses the host Docker Engine. Build the workspace
+`LEMMACOMPUTER_SANDBOX_DRIVER=kasm-local` uses the host Docker Engine. Build the workspace
 image first:
 
 ```bash
 npm run image:workspace
 ```
 
-`ONECOMPUTER_WORKSPACE_IMAGE` may be a local tag for development. Production
+`LEMMACOMPUTER_WORKSPACE_IMAGE` may be a local tag for development. Production
 deployments should use an immutable digest.
 
 Claude Cowork local execution requires hardware virtualization. On every Docker
@@ -402,7 +402,7 @@ allow additional host memory for Docker and the LemmaComputer services. Opt in
 with:
 
 ```text
-ONECOMPUTER_KASM_LOCAL_KVM_ENABLED=true
+LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED=true
 ```
 
 The local driver accepts this setting for customer-managed installations and
@@ -433,7 +433,7 @@ Docker Run Config Override in Kasm:
     "/dev/vhost-vsock:/dev/vhost-vsock:rwm"
   ],
   "memory": 8589934592,
-  "environment": {"ONECOMPUTER_COWORK_ENABLED": "true"}
+  "environment": {"LEMMACOMPUTER_COWORK_ENABLED": "true"}
 }
 ```
 
@@ -452,18 +452,18 @@ scheduler; do not place this override on a shared multi-tenant agent.
 For an external Kasm installation, set:
 
 ```text
-ONECOMPUTER_SANDBOX_DRIVER=kasm
-ONECOMPUTER_KASM_BASE_URL=https://kasm.example.com
-ONECOMPUTER_KASM_API_KEY=...
-ONECOMPUTER_KASM_API_SECRET=...
-ONECOMPUTER_KASM_USER_ID=...
-ONECOMPUTER_KASM_IMAGE_ID=...
+LEMMACOMPUTER_SANDBOX_DRIVER=kasm
+LEMMACOMPUTER_KASM_BASE_URL=https://kasm.example.com
+LEMMACOMPUTER_KASM_API_KEY=...
+LEMMACOMPUTER_KASM_API_SECRET=...
+LEMMACOMPUTER_KASM_USER_ID=...
+LEMMACOMPUTER_KASM_IMAGE_ID=...
 ```
 
 Remove the Docker socket mount from the controller when using the remote
 adapter.
 
-`ONECOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for
+`LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for
 the managed runtime readiness marker. The default is 60 seconds and the
 accepted range is 5–300 seconds. Increase it only when measured image/host
 startup needs more time; do not use it to hide an entrypoint, resource, policy,
@@ -529,7 +529,7 @@ Expected health endpoints:
 
 | Service | Endpoint |
 | --- | --- |
-| workspace ingress | `http://localhost:4174/__onecomputer/healthz` |
+| workspace ingress | `http://localhost:4174/__lemmacomputer/healthz` |
 | Web, private | `http://web:4173/healthz` |
 | Control, private | `http://control-api:4100/healthz` |
 | controller, private | `http://workspace-controller:4101/healthz` |
@@ -548,13 +548,13 @@ Common failures:
 - **Workspace startup times out:** inspect the sandbox container and its
   readiness marker, image architecture, host capacity, signed policy, selected
   agent initialization, and any Cowork device/seccomp preflight before changing
-  `ONECOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS`.
+  `LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS`.
 - **LiteLLM stays unhealthy:** inspect its database, master/salt keys, mounted
   YAML, and custom callback import.
 - **Workspace creation fails with image not found:** run
-  `npm run image:workspace` and verify `ONECOMPUTER_WORKSPACE_IMAGE`.
+  `npm run image:workspace` and verify `LEMMACOMPUTER_WORKSPACE_IMAGE`.
 - **Workspace opens but ingress returns 502:** inspect the dynamic relay,
-  `onecomputer-control` membership, and the ingress logs.
+  `lemmacomputer-control` membership, and the ingress logs.
 - **MCP calls return policy unavailable:** verify Control health and the shared
   controller/policy callback token.
 - **Microsoft connection callback fails:** verify the canonical public origin,
@@ -569,16 +569,16 @@ traffic. Correlate safe error codes and operation IDs instead.
 
 Compose manages:
 
-- `onecomputer_control-data` for Control PostgreSQL;
-- `onecomputer_gateway-data` for LiteLLM PostgreSQL.
+- `lemmacomputer_control-data` for Control PostgreSQL;
+- `lemmacomputer_gateway-data` for LiteLLM PostgreSQL.
 
 The local sandbox adapter creates separately labeled volumes named
-`onecomputer-sandbox-<workspace UUID>`. Compose does not own or delete them.
+`lemmacomputer-sandbox-<workspace UUID>`. Compose does not own or delete them.
 
 List owned workspace volumes:
 
 ```bash
-docker volume ls --filter label=com.onecomputer.runtime=workspace-home
+docker volume ls --filter label=com.lemmacomputer.runtime=workspace-home
 ```
 
 Normal `npm run compose:down` retains all state.
@@ -601,12 +601,12 @@ Example logical database backups:
 
 ```bash
 docker compose exec -T postgres \
-  pg_dump --username onecomputer --dbname onecomputer --format=custom \
-  > onecomputer-control.dump
+  pg_dump --username lemmacomputer --dbname lemmacomputer --format=custom \
+  > lemmacomputer-control.dump
 
 docker compose exec -T litellm-postgres \
   pg_dump --username litellm --dbname litellm --format=custom \
-  > onecomputer-gateway.dump
+  > lemmacomputer-gateway.dump
 ```
 
 Protect backups as credentials: they contain identity, governance, operation,
@@ -653,7 +653,7 @@ Before network exposure:
   proxy to Control-approved public origins; cloud security groups/NACLs and a
   controlled egress firewall must deny VPC, metadata, loopback, link-local,
   ULA, and other private destinations even if application code regresses;
-- in hosted mode, populate `ONECOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` from an
+- in hosted mode, populate `LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` from an
   IT-reviewed inventory before rollout, including every existing custom
   endpoint plus every OAuth/metadata/token/registration origin; do not use a
   tenant administrator's connector record as a cloud egress allowlist;
@@ -667,7 +667,7 @@ Before network exposure:
   artifacts.
 
 The published ports default to `127.0.0.1` specifically to prevent accidental
-LAN exposure. Do not change `ONECOMPUTER_HTTP_BIND_ADDRESS` to `0.0.0.0`
+LAN exposure. Do not change `LEMMACOMPUTER_HTTP_BIND_ADDRESS` to `0.0.0.0`
 without the controls above.
 
 For a concrete AWS mapping of these requirements, see [AWS deployment

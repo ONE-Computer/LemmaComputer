@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { OneComputerError, type IdentityContext } from "@onecomputer/contracts";
-import type { IdentityPolicyStore, SessionPrincipal } from "@onecomputer/workspace-store";
+import { LemmaComputerError, type IdentityContext } from "@lemmacomputer/contracts";
+import type { IdentityPolicyStore, SessionPrincipal } from "@lemmacomputer/workspace-store";
 
 export type EntraAuthConfig = {
   tenantId: string;
@@ -89,16 +89,16 @@ export class EntraAuthenticationService {
   }
 
   async complete(input: { state?: string; code?: string; error?: string; cookie?: string }) {
-    if (input.error) throw new OneComputerError("OIDC_DENIED", "Microsoft sign-in was not completed", 401);
-    if (!input.state || !input.code) throw new OneComputerError("OIDC_CALLBACK_INVALID", "Microsoft sign-in could not be verified", 400);
+    if (input.error) throw new LemmaComputerError("OIDC_DENIED", "Microsoft sign-in was not completed", 401);
+    if (!input.state || !input.code) throw new LemmaComputerError("OIDC_CALLBACK_INVALID", "Microsoft sign-in could not be verified", 400);
     const stateCookie = cookieValue(input.cookie, "oc_oidc_state");
     const left = Buffer.from(input.state);
     const right = Buffer.from(stateCookie ?? "");
     if (left.length !== right.length || !timingSafeEqual(left, right)) {
-      throw new OneComputerError("OIDC_STATE_MISMATCH", "Microsoft sign-in could not be verified", 401);
+      throw new LemmaComputerError("OIDC_STATE_MISMATCH", "Microsoft sign-in could not be verified", 401);
     }
     const attempt = await this.store.consumeLoginAttempt(hash(input.state), this.now());
-    if (!attempt) throw new OneComputerError("OIDC_STATE_EXPIRED", "Microsoft sign-in expired or was already used", 401);
+    if (!attempt) throw new LemmaComputerError("OIDC_STATE_EXPIRED", "Microsoft sign-in expired or was already used", 401);
     const tokenResponse = await this.request(`https://login.microsoftonline.com/${this.config.tenantId}/oauth2/v2.0/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -115,30 +115,30 @@ export class EntraAuthenticationService {
     }).catch(() => null);
     if (!tokenResponse?.ok) {
       await tokenResponse?.body?.cancel().catch(() => undefined);
-      throw new OneComputerError("OIDC_TOKEN_EXCHANGE_FAILED", "Microsoft sign-in could not be completed", 502, true);
+      throw new LemmaComputerError("OIDC_TOKEN_EXCHANGE_FAILED", "Microsoft sign-in could not be completed", 502, true);
     }
     const tokenPayload = await tokenResponse.json() as { id_token?: string };
-    if (!tokenPayload.id_token) throw new OneComputerError("OIDC_ID_TOKEN_MISSING", "Microsoft sign-in response was invalid", 502);
+    if (!tokenPayload.id_token) throw new LemmaComputerError("OIDC_ID_TOKEN_MISSING", "Microsoft sign-in response was invalid", 502);
     const payload = await this.verifyIdToken(tokenPayload.id_token)
-      .catch(() => { throw new OneComputerError("OIDC_ID_TOKEN_INVALID", "Microsoft sign-in response was invalid", 401); });
+      .catch(() => { throw new LemmaComputerError("OIDC_ID_TOKEN_INVALID", "Microsoft sign-in response was invalid", 401); });
     const receivedNonce = typeof payload.nonce === "string" ? Buffer.from(payload.nonce) : Buffer.alloc(0);
     const expectedNonce = Buffer.from(attempt.nonce);
     if (receivedNonce.length !== expectedNonce.length || !timingSafeEqual(receivedNonce, expectedNonce)) {
-      throw new OneComputerError("OIDC_NONCE_MISMATCH", "Microsoft sign-in response was invalid", 401);
+      throw new LemmaComputerError("OIDC_NONCE_MISMATCH", "Microsoft sign-in response was invalid", 401);
     }
     const externalSubject = typeof payload.sub === "string" ? payload.sub : "";
     const externalTenantId = typeof payload.tid === "string" ? payload.tid : "";
     const emailClaim = payload.preferred_username ?? payload.email;
     const email = typeof emailClaim === "string" ? emailClaim.toLowerCase() : "";
     if (!externalSubject || externalTenantId !== this.config.tenantId || !email) {
-      throw new OneComputerError("OIDC_IDENTITY_INVALID", "The signed-in Microsoft identity is not allowed", 403);
+      throw new LemmaComputerError("OIDC_IDENTITY_INVALID", "The signed-in Microsoft identity is not allowed", 403);
     }
     const isBootstrapAdmin = this.config.administratorEmails.map((item) => item.toLowerCase()).includes(email);
     const ownedUserId = isBootstrapAdmin
       ? this.config.bootstrapOwnedUserId
       : `user-${hash(`${externalTenantId}:${externalSubject}`).slice(0, 24)}`;
-    const identity: IdentityContext = { tenantId: this.config.bootstrapOwnedTenantId, subjectId: ownedUserId, audience: "onecomputer-control" };
-    const gatewayUserId = `oc-user-${createHash("sha256").update(`onecomputer:litellm:user:${identity.tenantId}:${identity.subjectId}`).digest("base64url")}`;
+    const identity: IdentityContext = { tenantId: this.config.bootstrapOwnedTenantId, subjectId: ownedUserId, audience: "lemmacomputer-control" };
+    const gatewayUserId = `oc-user-${createHash("sha256").update(`lemmacomputer:litellm:user:${identity.tenantId}:${identity.subjectId}`).digest("base64url")}`;
     const principal = await this.store.upsertAuthenticatedIdentity({
       ownedTenantId: this.config.bootstrapOwnedTenantId,
       ownedUserId,
@@ -157,20 +157,20 @@ export class EntraAuthenticationService {
     return {
       principal,
       returnPath: attempt.returnPath,
-      cookie: `onecomputer_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor((expiresAt.getTime() - this.now().getTime()) / 1000)}${this.secureCookie}`,
+      cookie: `lemmacomputer_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor((expiresAt.getTime() - this.now().getTime()) / 1000)}${this.secureCookie}`,
       clearStateCookie: `oc_oidc_state=; Path=/api/v1/auth/callback; HttpOnly; SameSite=Lax; Max-Age=0${this.secureCookie}`,
     };
   }
 
   async authenticate(cookieHeader: string | undefined) {
-    const token = cookieValue(cookieHeader, "onecomputer_session");
+    const token = cookieValue(cookieHeader, "lemmacomputer_session");
     return token ? this.store.getSession(hash(token), this.now()) : null;
   }
 
   async logout(cookieHeader: string | undefined) {
-    const token = cookieValue(cookieHeader, "onecomputer_session");
+    const token = cookieValue(cookieHeader, "lemmacomputer_session");
     if (token) await this.store.revokeSession(hash(token));
-    return `onecomputer_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${this.secureCookie}`;
+    return `lemmacomputer_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${this.secureCookie}`;
   }
 
   private encrypt(value: string) {
@@ -182,7 +182,7 @@ export class EntraAuthenticationService {
 
   private decrypt(value: string) {
     const [iv, tag, ciphertext] = value.split(".").map((item) => Buffer.from(item, "base64url"));
-    if (!iv || !tag || !ciphertext) throw new OneComputerError("OIDC_STATE_INVALID", "Microsoft sign-in state was invalid", 401);
+    if (!iv || !tag || !ciphertext) throw new LemmaComputerError("OIDC_STATE_INVALID", "Microsoft sign-in state was invalid", 401);
     const decipher = createDecipheriv("aes-256-gcm", this.encryptionKey, iv);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
@@ -190,8 +190,8 @@ export class EntraAuthenticationService {
 }
 
 export const testPrincipalFromHeaders = (headers: Record<string, unknown>): SessionPrincipal => {
-  const tenantId = String(headers["x-onecomputer-test-tenant-id"] ?? "test-tenant");
-  const userId = String(headers["x-onecomputer-test-user-id"] ?? "test-user");
+  const tenantId = String(headers["x-lemmacomputer-test-tenant-id"] ?? "test-tenant");
+  const userId = String(headers["x-lemmacomputer-test-user-id"] ?? "test-user");
   return {
     userId,
     tenantId,
@@ -199,7 +199,7 @@ export const testPrincipalFromHeaders = (headers: Record<string, unknown>): Sess
     displayName: userId,
     tenantDisplayName: tenantId,
     roles: ["employee", "administrator"],
-    identity: { tenantId, subjectId: userId, audience: "onecomputer-control" },
+    identity: { tenantId, subjectId: userId, audience: "lemmacomputer-control" },
   };
 };
 

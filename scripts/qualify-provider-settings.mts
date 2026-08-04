@@ -4,8 +4,8 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
-import { defaultManagedProviderModelIds, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderModels, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
-import { MemoryWorkspaceStore, PostgresProviderSettingsStore, PostgresWorkspaceStore } from "@onecomputer/workspace-store";
+import { defaultManagedProviderModelIds, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderModels, tenantManagedModelAccessGroup } from "@lemmacomputer/litellm-adapter";
+import { MemoryWorkspaceStore, PostgresProviderSettingsStore, PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 
 type JsonObject = Record<string, unknown>;
@@ -77,14 +77,14 @@ const main = async () => {
   ];
   const environment = {
     ...process.env,
-    ONECOMPUTER_PROVIDER_QUALIFICATION_PROJECT: project,
-    ONECOMPUTER_PROVIDER_QUALIFICATION_MASTER_KEY: masterKey,
-    ONECOMPUTER_PROVIDER_QUALIFICATION_SALT_KEY: randomBytes(32).toString("hex"),
-    ONECOMPUTER_PROVIDER_QUALIFICATION_LITELLM_POSTGRES_PASSWORD: litellmPostgresPassword,
-    ONECOMPUTER_PROVIDER_QUALIFICATION_CONTROL_POSTGRES_PASSWORD: controlPostgresPassword,
-    ONECOMPUTER_PROVIDER_QUALIFICATION_LITELLM_PORT: String(litellmPort),
-    ONECOMPUTER_PROVIDER_QUALIFICATION_FIXTURE_PORT: String(fixturePort),
-    ONECOMPUTER_PROVIDER_QUALIFICATION_CONTROL_POSTGRES_PORT: String(controlPostgresPort),
+    LEMMACOMPUTER_PROVIDER_QUALIFICATION_PROJECT: project,
+    LEMMACOMPUTER_PROVIDER_QUALIFICATION_MASTER_KEY: masterKey,
+    LEMMACOMPUTER_PROVIDER_QUALIFICATION_SALT_KEY: randomBytes(32).toString("hex"),
+    LEMMACOMPUTER_PROVIDER_QUALIFICATION_LITELLM_POSTGRES_PASSWORD: litellmPostgresPassword,
+    LEMMACOMPUTER_PROVIDER_QUALIFICATION_CONTROL_POSTGRES_PASSWORD: controlPostgresPassword,
+    LEMMACOMPUTER_PROVIDER_QUALIFICATION_LITELLM_PORT: String(litellmPort),
+    LEMMACOMPUTER_PROVIDER_QUALIFICATION_FIXTURE_PORT: String(fixturePort),
+    LEMMACOMPUTER_PROVIDER_QUALIFICATION_CONTROL_POSTGRES_PORT: String(controlPostgresPort),
   };
   const compose = (args: string[]) => {
     const result = spawnSync("docker", [
@@ -97,7 +97,7 @@ const main = async () => {
     return `${result.stdout ?? ""}${result.stderr ?? ""}`;
   };
   const litellmUrl = `http://127.0.0.1:${litellmPort}`;
-  const controlDatabaseUrl = `postgres://onecomputer:${controlPostgresPassword}@127.0.0.1:${controlPostgresPort}/onecomputer`;
+  const controlDatabaseUrl = `postgres://lemmacomputer:${controlPostgresPassword}@127.0.0.1:${controlPostgresPort}/lemmacomputer`;
   const providerGateway = new LiteLLMGatewayAdapter({
     adminUrl: litellmUrl,
     workspaceUrl: litellmUrl,
@@ -129,9 +129,9 @@ const main = async () => {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const headersFor = (tenantId: string, operation: string, json = false) => ({
-    "x-onecomputer-proxy-token": proxyToken,
-    "x-onecomputer-test-tenant-id": tenantId,
-    "x-onecomputer-test-user-id": "administrator",
+    "x-lemmacomputer-proxy-token": proxyToken,
+    "x-lemmacomputer-test-tenant-id": tenantId,
+    "x-lemmacomputer-test-user-id": "administrator",
     ...(json ? { "content-type": "application/json" } : {}),
     "idempotency-key": `provider-qualification-${operation}-${runId}`,
   });
@@ -177,12 +177,12 @@ const main = async () => {
       rpm_limit: 5,
       tpm_limit: 16_000,
       max_parallel_requests: 1,
-      metadata: { onecomputer_purpose: "provider-settings-qualification" },
+      metadata: { lemmacomputer_purpose: "provider-settings-qualification" },
     });
     assert.equal(generated.response.ok, true, "LiteLLM must issue a group-scoped virtual key");
     return key;
   };
-  const modelCall = async (key: string, model = "onecomputer-assistant") => json(`${litellmUrl}/chat/completions`, {
+  const modelCall = async (key: string, model = "lemmacomputer-assistant") => json(`${litellmUrl}/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -266,9 +266,9 @@ const main = async () => {
     const modelInfo = await admin("/model/info");
     assert.equal(modelInfo.response.ok, true, "Pinned LiteLLM model inspection must succeed");
     const routes = Array.isArray(modelInfo.payload.data) ? modelInfo.payload.data.map(asObject) : [];
-    const alphaGroup = tenantManagedModelAccessGroup(alphaTenant, "onecomputer-assistant");
-    const betaGroup = tenantManagedModelAccessGroup(betaTenant, "onecomputer-assistant");
-    const alphaBedrockGroup = tenantManagedModelAccessGroup(alphaTenant, "onecomputer-bedrock");
+    const alphaGroup = tenantManagedModelAccessGroup(alphaTenant, "lemmacomputer-assistant");
+    const betaGroup = tenantManagedModelAccessGroup(betaTenant, "lemmacomputer-assistant");
+    const alphaBedrockGroup = tenantManagedModelAccessGroup(alphaTenant, "lemmacomputer-bedrock");
     assert.notEqual(alphaGroup, betaGroup, "Tenant model access groups must be unique");
     assert.notEqual(alphaBedrockGroup, alphaGroup, "Bedrock must have its own tenant-scoped model group");
     for (const [tenantId, record] of [[alphaTenant, alphaRecord], [betaTenant, betaRecord]] as const) {
@@ -282,7 +282,7 @@ const main = async () => {
     }
     const alphaBedrockRoutes = routes.filter((route) => alphaBedrockRecord.modelIds.includes(String(asObject(route.model_info).id)));
     assert.equal(alphaBedrockRoutes.length, managedProviderModels.bedrock.length, "Pinned LiteLLM must hold the tenant Bedrock route");
-    assert.equal(alphaBedrockRoutes[0]!.model_name, "onecomputer-bedrock");
+    assert.equal(alphaBedrockRoutes[0]!.model_name, "lemmacomputer-bedrock");
     assert.deepEqual(asObject(alphaBedrockRoutes[0]!.model_info).access_groups, [alphaBedrockGroup]);
 
     const alphaVirtualKey = await issueScopedKey(alphaGroup, "alpha");
@@ -291,8 +291,8 @@ const main = async () => {
     assert.equal((await modelCall(alphaVirtualKey)).response.ok, true, "An alpha scoped virtual key must reach alpha dynamic model route");
     assert.equal((await modelCall(betaVirtualKey)).response.ok, true, "A beta scoped virtual key must reach beta dynamic model route");
     assert.equal((await modelCall(alphaVirtualKey, betaRecord.modelIds[0]!)).response.ok, false, "An alpha scoped key must not address beta internal model identifier");
-    assert.equal((await modelCall(alphaBedrockVirtualKey, "onecomputer-bedrock")).response.ok, true, "A Bedrock scoped virtual key must reach only its tenant Bedrock route");
-    assert.equal((await modelCall(alphaVirtualKey, "onecomputer-bedrock")).response.ok, false, "An OpenAI scoped key must not reach the Bedrock route");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, "lemmacomputer-bedrock")).response.ok, true, "A Bedrock scoped virtual key must reach only its tenant Bedrock route");
+    assert.equal((await modelCall(alphaVirtualKey, "lemmacomputer-bedrock")).response.ok, false, "An OpenAI scoped key must not reach the Bedrock route");
     assert.equal((await modelCall(alphaBedrockVirtualKey)).response.ok, false, "A Bedrock scoped key must not reach an OpenAI route");
 
     const beforeRejectedRotation = processSignature();
@@ -343,7 +343,7 @@ const main = async () => {
     const alphaBedrockAfterRejectedRotation = await providerSettingsStore.getProviderSetting(alphaTenant, "bedrock");
     assert.deepEqual(alphaBedrockAfterRejectedRotation?.modelIds, alphaBedrockRecord.modelIds, "Rejected Bedrock rotation must preserve the prior active route metadata");
     assert.deepEqual(alphaBedrockAfterRejectedRotation?.configuration, alphaBedrockRecord.configuration, "Rejected Bedrock rotation must preserve its approved selection");
-    assert.equal((await modelCall(alphaBedrockVirtualKey, "onecomputer-bedrock")).response.ok, true, "Rejected Bedrock rotation must preserve the prior scoped route");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, "lemmacomputer-bedrock")).response.ok, true, "Rejected Bedrock rotation must preserve the prior scoped route");
 
     const beforeAcceptedBedrockRotation = processSignature();
     const acceptedBedrockRotation = await configureBedrock(alphaTenant, bedrockRotatedKey, "bedrock-alpha-accepted-rotation");
@@ -353,7 +353,7 @@ const main = async () => {
     const alphaBedrockAfterAcceptedRotation = await providerSettingsStore.getProviderSetting(alphaTenant, "bedrock");
     assert.deepEqual(alphaBedrockAfterAcceptedRotation?.modelIds, alphaBedrockRecord.modelIds, "Accepted Bedrock rotation must preserve stable model identifiers");
     assert.deepEqual(alphaBedrockAfterAcceptedRotation?.configuration, bedrockSelection, "Accepted Bedrock rotation must preserve the approved selection");
-    assert.equal((await modelCall(alphaBedrockVirtualKey, "onecomputer-bedrock")).response.ok, true, "Accepted Bedrock rotation must preserve the scoped virtual key route");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, "lemmacomputer-bedrock")).response.ok, true, "Accepted Bedrock rotation must preserve the scoped virtual key route");
 
     const bedrockDisabled = await control.inject({
       method: "POST",
@@ -361,20 +361,20 @@ const main = async () => {
       headers: headersFor(alphaTenant, "bedrock-alpha-disable"),
     });
     assert.equal(bedrockDisabled.statusCode, 200, "Control must disable an active Bedrock route without restart");
-    assert.equal((await modelCall(alphaBedrockVirtualKey, "onecomputer-bedrock")).response.ok, false, "A disabled Bedrock provider must fail the old scoped virtual key closed");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, "lemmacomputer-bedrock")).response.ok, false, "A disabled Bedrock provider must fail the old scoped virtual key closed");
     assert.equal((await modelCall(betaVirtualKey)).response.ok, true, "Disabling Bedrock must not affect another tenant provider route");
 
     const alphaBedrockReconfigured = await configureBedrock(alphaTenant, bedrockReconfiguredKey, "bedrock-alpha-reconfigure");
     assert.equal(alphaBedrockReconfigured.statusCode, 200, "Control must reconfigure a disabled Bedrock provider route without restart");
     const alphaBedrockReconfiguredVirtualKey = await issueScopedKey(alphaBedrockGroup, "bedrock-alpha-reconfigured");
-    assert.equal((await modelCall(alphaBedrockReconfiguredVirtualKey, "onecomputer-bedrock")).response.ok, true, "A reconfigured Bedrock provider must issue a working scoped route");
+    assert.equal((await modelCall(alphaBedrockReconfiguredVirtualKey, "lemmacomputer-bedrock")).response.ok, true, "A reconfigured Bedrock provider must issue a working scoped route");
     const bedrockDeleted = await control.inject({
       method: "DELETE",
       url: "/v1/admin/provider-settings/bedrock",
       headers: headersFor(alphaTenant, "bedrock-alpha-delete"),
     });
     assert.equal(bedrockDeleted.statusCode, 200, "Control must delete an active Bedrock route without restart");
-    assert.equal((await modelCall(alphaBedrockReconfiguredVirtualKey, "onecomputer-bedrock")).response.ok, false, "A deleted Bedrock provider must fail the scoped virtual key closed");
+    assert.equal((await modelCall(alphaBedrockReconfiguredVirtualKey, "lemmacomputer-bedrock")).response.ok, false, "A deleted Bedrock provider must fail the scoped virtual key closed");
 
     const reads = [
       alphaConfigured.payload,
@@ -403,7 +403,7 @@ const main = async () => {
     ];
     const litellmLogs = compose(["logs", "--no-color"]);
     const litellmDump = compose(["exec", "-T", "litellm-postgres", "pg_dump", "-U", "litellm", "--data-only", "--inserts", "litellm"]);
-    const controlDump = compose(["exec", "-T", "control-postgres", "pg_dump", "-U", "onecomputer", "--data-only", "--inserts", "onecomputer"]);
+    const controlDump = compose(["exec", "-T", "control-postgres", "pg_dump", "-U", "lemmacomputer", "--data-only", "--inserts", "lemmacomputer"]);
     for (const sentinel of sentinels) {
       assert.equal(stringified(reads).includes(sentinel), false, "Control reads or safe provider metadata exposed a submitted API key");
       assert.equal(litellmLogs.includes(sentinel), false, "Pinned LiteLLM logs exposed a submitted API key");

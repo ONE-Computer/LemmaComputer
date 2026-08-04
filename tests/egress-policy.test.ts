@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   egressSecurityGroupVersionSchema,
   type EgressSecurityGroupVersion,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import {
   compileEgressSecurityGroup,
   compileRuntimeEgressPolicy,
@@ -14,7 +14,7 @@ import {
   PublicHttpsTargetValidationError,
   validatePublicHttpsTarget,
   verifyEgressProxyGrant,
-} from "@onecomputer/egress-policy";
+} from "@lemmacomputer/egress-policy";
 
 const group = egressSecurityGroupVersionSchema.parse({
   schemaVersion: 1,

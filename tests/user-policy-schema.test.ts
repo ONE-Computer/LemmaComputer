@@ -1,4 +1,4 @@
-import { discoverWorkspaceMigrations } from "@onecomputer/workspace-store";
+import { discoverWorkspaceMigrations } from "@lemmacomputer/workspace-store";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";

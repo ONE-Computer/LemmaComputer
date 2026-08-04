@@ -38,9 +38,9 @@ Run:
 
 ```bash
 npm run qualify:auto-routing
-ONECOMPUTER_LITELLM_QUALIFICATION_IMAGE='ghcr.io/berriai/litellm:v1.94.0@sha256:65d84a2282137b4dc73bbe184650a7c807177c533e4223b3bfbc87963fe3fabe' npm run qualify:providers
+LEMMACOMPUTER_LITELLM_QUALIFICATION_IMAGE='ghcr.io/berriai/litellm:v1.94.0@sha256:65d84a2282137b4dc73bbe184650a7c807177c533e4223b3bfbc87963fe3fabe' npm run qualify:providers
 npx tsx --test tests/model-router-spike.test.ts
-npm run build -w @onecomputer/model-router
+npm run build -w @lemmacomputer/model-router
 ```
 
 The credential-free image harness imports the code from the candidate image,
@@ -52,10 +52,10 @@ score, signals, cause, or routing-decision object:
 
 | Fixture | Hook-selected model group | Typed decision fields |
 | --- | --- | --- |
-| simple | `onecomputer-lite` | none |
-| medium | `onecomputer-balanced` | none |
-| complex | `onecomputer-pro` | none |
-| reasoning | `onecomputer-pro` | none |
+| simple | `lemmacomputer-lite` | none |
+| medium | `lemmacomputer-balanced` | none |
+| complex | `lemmacomputer-pro` | none |
+| reasoning | `lemmacomputer-pro` | none |
 
 Measured on the qualification host:
 
@@ -134,7 +134,7 @@ The reference proves:
 - Foundry, OpenAI, Anthropic, GLM, and Bedrock are provider-neutral deployment
   values, not product vocabulary;
 - replacing Foundry behind `Lite` with Bedrock preserves `Lite` and the stable
-  `onecomputer-auto` alias, while new evidence points to the new mapping,
+  `lemmacomputer-auto` alias, while new evidence points to the new mapping,
   deployment, and rate-card version and old evidence remains unchanged.
 
 The transport recommendation for #42 is one existing stable client alias plus a

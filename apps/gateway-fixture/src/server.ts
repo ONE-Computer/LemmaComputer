@@ -81,14 +81,14 @@ export function createGatewayFixture() {
         id,
         object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1_000),
-        model: String(body.model ?? "onecomputer-fixture"),
+        model: String(body.model ?? "lemmacomputer-fixture"),
         choices: [{ index: 0, delta: { role: "assistant", content: "LemmaComputer’s scoped model route is ready through LiteLLM." }, finish_reason: null }],
       })}\n\n`);
       reply.raw.write(`data: ${JSON.stringify({
         id,
         object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1_000),
-        model: String(body.model ?? "onecomputer-fixture"),
+        model: String(body.model ?? "lemmacomputer-fixture"),
         choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
       })}\n\n`);
       reply.raw.end("data: [DONE]\n\n");
@@ -98,7 +98,7 @@ export function createGatewayFixture() {
       id: `chatcmpl-${randomUUID()}`,
       object: "chat.completion",
       created: Math.floor(Date.now() / 1_000),
-      model: String(body.model ?? "onecomputer-fixture"),
+      model: String(body.model ?? "lemmacomputer-fixture"),
       choices: [{
         index: 0,
         message: { role: "assistant", content: "LemmaComputer’s scoped model route is ready through LiteLLM." },
@@ -149,7 +149,7 @@ export function createGatewayFixture() {
       object: "response",
       created_at: Math.floor(Date.now() / 1_000),
       status: "completed",
-      model: String(body.model ?? "onecomputer-fixture"),
+      model: String(body.model ?? "lemmacomputer-fixture"),
       output: [{
         type: "message",
         id: messageId,
@@ -187,7 +187,7 @@ export function createGatewayFixture() {
   });
 
   app.all("/mcp", async (request, reply) => {
-    const server = new McpServer({ name: "onecomputer-fixture", version: "0.1.0" });
+    const server = new McpServer({ name: "lemmacomputer-fixture", version: "0.1.0" });
     server.registerTool("search_files", {
       description: "Search the approved fixture file catalog.",
       inputSchema: { query: z.string().min(1) },
@@ -276,7 +276,7 @@ export function createGatewayFixture() {
       .slice(0, 16);
     counters.oauthCredentialFingerprints.push(credentialFingerprint);
 
-    const server = new McpServer({ name: "onecomputer-oauth-fixture", version: "0.1.0" });
+    const server = new McpServer({ name: "lemmacomputer-oauth-fixture", version: "0.1.0" });
     const credentialResult = () => {
       counters.oauthToolCall += 1;
       return { content: [{ type: "text" as const, text: JSON.stringify({ credentialFingerprint }) }] };

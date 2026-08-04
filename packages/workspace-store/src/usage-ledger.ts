@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
-import type { MinimalSpendingTeam } from "@onecomputer/contracts";
+import type { MinimalSpendingTeam } from "@lemmacomputer/contracts";
 import { pinnedRateCardForDeployment } from "./pinned-rate-catalogue.js";
 
 export const usageUnits = ["input_uncached_token","cache_read_token","cache_write_token","output_token","reasoning_token","image","audio_second","request","character","second"] as const;

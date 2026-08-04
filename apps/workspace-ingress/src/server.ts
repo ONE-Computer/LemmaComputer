@@ -6,7 +6,7 @@ import {
   workspaceIngressAccessParameter,
   workspaceIngressSessionCookie,
   type WorkspaceIngressClaims,
-} from "@onecomputer/workspace-ingress-auth";
+} from "@lemmacomputer/workspace-ingress-auth";
 import { z } from "zod";
 
 type Protocol = "http" | "https";
@@ -67,7 +67,7 @@ const sanitizedHeaders = (
   const result: IncomingHttpHeaders = {};
   for (const [name, value] of Object.entries(headers)) {
     if (hopByHopHeaders.has(name) || name === "host") continue;
-    if (options.workspace && ["authorization", "cookie", "x-onecomputer-proxy-token", "x-controller-token"].includes(name)) continue;
+    if (options.workspace && ["authorization", "cookie", "x-lemmacomputer-proxy-token", "x-controller-token"].includes(name)) continue;
     if (options.workspace && name === "origin") continue;
     result[options.websocket ? canonicalWebSocketHeaders.get(name) ?? name : name] = value;
   }
@@ -255,7 +255,7 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
   const audit = config.audit ?? ((event) => process.stdout.write(`${JSON.stringify(event)}\n`));
 
   const server = http.createServer((request, response) => {
-    if (request.url === "/__onecomputer/healthz") {
+    if (request.url === "/__lemmacomputer/healthz") {
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify({ status: "ok" }));
       return;

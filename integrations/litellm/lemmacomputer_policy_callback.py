@@ -24,20 +24,20 @@ LOGGER = logging.getLogger(__name__)
 
 
 POLICY_URL = os.environ.get(
-    "ONECOMPUTER_MCP_POLICY_URL",
+    "LEMMACOMPUTER_MCP_POLICY_URL",
     "http://control-api:4100/internal/v1/mcp/authorize",
 )
-POLICY_TOKEN = os.environ.get("ONECOMPUTER_MCP_POLICY_TOKEN", "")
+POLICY_TOKEN = os.environ.get("LEMMACOMPUTER_MCP_POLICY_TOKEN", "")
 POLICY_TIMEOUT_SECONDS = 15
 POLICY_ATTEMPTS = 2
 USAGE_URL = os.environ.get(
-    "ONECOMPUTER_AI_USAGE_URL",
+    "LEMMACOMPUTER_AI_USAGE_URL",
     "http://control-api:4100/internal/v1/ai-usage",
 ).rstrip("/")
-USAGE_TOKEN = os.environ.get("ONECOMPUTER_AI_USAGE_TOKEN", "")
-ROUTING_STATE_KEY = "onecomputer_routing_state"
-USAGE_STATE_KEY = "onecomputer_usage_state"
-USAGE_CHAIN_KEY = "onecomputer_usage_chain"
+USAGE_TOKEN = os.environ.get("LEMMACOMPUTER_AI_USAGE_TOKEN", "")
+ROUTING_STATE_KEY = "lemmacomputer_routing_state"
+USAGE_STATE_KEY = "lemmacomputer_usage_state"
+USAGE_CHAIN_KEY = "lemmacomputer_usage_chain"
 USAGE_STATE_TTL_SECONDS = 15 * 60
 ROUTING_HEALTH_TTL_SECONDS = 60
 _ROUTING_HEALTH_LOCK = threading.Lock()
@@ -45,22 +45,22 @@ _ROUTING_UNAVAILABLE_UNTIL = {}
 _USAGE_STATE_LOCK = threading.Lock()
 _USAGE_STATES_BY_CALL = {}
 _INTERNAL_ADMISSION_CONTEXT = contextvars.ContextVar(
-    "onecomputer_internal_admission_context", default=None
+    "lemmacomputer_internal_admission_context", default=None
 )
 USAGE_CHAIN_SECRET = hmac.new(
     USAGE_TOKEN.encode("utf-8"),
-    b"onecomputer-usage-chain-secret/v1",
+    b"lemmacomputer-usage-chain-secret/v1",
     hashlib.sha256,
 ).digest()
-MS365_SERVER_NAME = "onecomputer_ms365"
+MS365_SERVER_NAME = "lemmacomputer_ms365"
 MS365_SERVER_ID = hashlib.sha256(
-    b"onecomputer_ms365|http://ms365-mcp:3000/mcp|http|oauth2|"
+    b"lemmacomputer_ms365|http://ms365-mcp:3000/mcp|http|oauth2|"
 ).hexdigest()[:32]
 MS365_ACCOUNT_LOOKUP_TOOL = "get-current-user"
 MS365_ACCOUNT_LOOKUP_ARGUMENTS = {
     "$select": "displayName,mail,userPrincipalName",
 }
-AUDIT_ONLY_ARGUMENTS = {"onecomputerAudit"}
+AUDIT_ONLY_ARGUMENTS = {"lemmacomputerAudit"}
 
 _PROVIDER_INTERNAL_FIELDS = (
     "user_api_key_dict",
@@ -84,10 +84,10 @@ def _optional_string(metadata, name):
 
 
 def _server_binding(metadata, data, permitted_servers):
-    bindings = metadata.get("onecomputer_mcp_server_bindings")
+    bindings = metadata.get("lemmacomputer_mcp_server_bindings")
     if not isinstance(bindings, dict):
         bindings = {}
-    server_names = metadata.get("onecomputer_mcp_servers")
+    server_names = metadata.get("lemmacomputer_mcp_servers")
     if isinstance(server_names, list) and len(server_names) == len(permitted_servers):
         bindings = {
             **dict(zip(permitted_servers, server_names)),
@@ -108,9 +108,9 @@ def _server_binding(metadata, data, permitted_servers):
 
 def _is_connection_account_lookup(metadata, payload):
     return (
-        metadata.get("onecomputer_connection_credential") is True
-        and metadata.get("onecomputer_connection_account_lookup") is True
-        and metadata.get("onecomputer_connection_server") == MS365_SERVER_NAME
+        metadata.get("lemmacomputer_connection_credential") is True
+        and metadata.get("lemmacomputer_connection_account_lookup") is True
+        and metadata.get("lemmacomputer_connection_server") == MS365_SERVER_NAME
         and payload.get("tenantId") is not None
         and payload.get("subjectId") is not None
         and payload.get("serverName") == MS365_SERVER_NAME
@@ -173,7 +173,7 @@ def _request_decision(payload):
             method="POST",
             headers={
                 "content-type": "application/json",
-                "x-onecomputer-mcp-policy-token": POLICY_TOKEN,
+                "x-lemmacomputer-mcp-policy-token": POLICY_TOKEN,
             },
         )
         try:
@@ -253,7 +253,7 @@ def _usage_provider_deployment_id(kwargs):
         candidates.append(metadata.get("model_info"))
     for candidate in candidates:
         if isinstance(candidate, dict):
-            deployment_id = candidate.get("onecomputer_deployment_id")
+            deployment_id = candidate.get("lemmacomputer_deployment_id")
             if isinstance(deployment_id, str) and deployment_id:
                 return deployment_id
     return None
@@ -345,7 +345,7 @@ def _provider_request(kwargs):
     request = {
         name: value
         for name, value in kwargs.items()
-        if not (isinstance(name, str) and name.startswith("onecomputer_"))
+        if not (isinstance(name, str) and name.startswith("lemmacomputer_"))
     }
     for name in _PROVIDER_INTERNAL_FIELDS:
         request.pop(name, None)
@@ -354,21 +354,21 @@ def _provider_request(kwargs):
         request["metadata"] = {
             name: value
             for name, value in metadata.items()
-            if not (isinstance(name, str) and name.startswith("onecomputer_"))
+            if not (isinstance(name, str) and name.startswith("lemmacomputer_"))
         }
     params = request.get("litellm_params")
     if isinstance(params, dict):
         params = {
             name: value
             for name, value in params.items()
-            if not (isinstance(name, str) and name.startswith("onecomputer_"))
+            if not (isinstance(name, str) and name.startswith("lemmacomputer_"))
         }
         nested_metadata = params.get("metadata")
         if isinstance(nested_metadata, dict):
             params["metadata"] = {
                 name: value
                 for name, value in nested_metadata.items()
-                if not (isinstance(name, str) and name.startswith("onecomputer_"))
+                if not (isinstance(name, str) and name.startswith("lemmacomputer_"))
             }
         request["litellm_params"] = params
     return request
@@ -380,7 +380,7 @@ def _signed_usage_chain(value):
     ).decode("ascii").rstrip("=")
     signature = hmac.new(
         USAGE_CHAIN_SECRET,
-        b"onecomputer-usage-chain/v1\0" + encoded.encode("ascii"),
+        b"lemmacomputer-usage-chain/v1\0" + encoded.encode("ascii"),
         hashlib.sha256,
     ).hexdigest()
     return f"{encoded}.{signature}"
@@ -393,7 +393,7 @@ def _verified_usage_chain(value):
         encoded, signature = value.split(".", 1)
         expected = hmac.new(
             USAGE_CHAIN_SECRET,
-            b"onecomputer-usage-chain/v1\0" + encoded.encode("ascii"),
+            b"lemmacomputer-usage-chain/v1\0" + encoded.encode("ascii"),
             hashlib.sha256,
         ).hexdigest()
         if not hmac.compare_digest(signature, expected):
@@ -441,17 +441,17 @@ def _request_usage_context_and_strip_reserved(kwargs, source_attempt_id=None):
                 lineage_found = True
         requester = metadata.get("requester_metadata")
         if isinstance(requester, dict):
-            candidate = requester.get("onecomputer_task_binding")
+            candidate = requester.get("lemmacomputer_task_binding")
             if task_binding is None and isinstance(candidate, str):
                 task_binding = candidate
             for name in list(requester):
-                if isinstance(name, str) and name.startswith("onecomputer_"):
+                if isinstance(name, str) and name.startswith("lemmacomputer_"):
                     requester.pop(name, None)
-        candidate = metadata.get("onecomputer_task_binding")
+        candidate = metadata.get("lemmacomputer_task_binding")
         if task_binding is None and isinstance(candidate, str):
             task_binding = candidate
         for name in list(metadata):
-            if isinstance(name, str) and name.startswith("onecomputer_"):
+            if isinstance(name, str) and name.startswith("lemmacomputer_"):
                 metadata.pop(name, None)
     return task_binding, parent_attempt_id
 
@@ -460,7 +460,7 @@ def _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
     """Accept a signed same attempt or LiteLLM's internal Responses conversion."""
     if not isinstance(source_attempt_id, str) or not source_attempt_id:
         return False
-    route_provider = route.get("onecomputer_provider") if isinstance(route, dict) else None
+    route_provider = route.get("lemmacomputer_provider") if isinstance(route, dict) else None
     call_type_value = str(getattr(call_type, "value", call_type) or "").lower()
     internal_responses_conversion = "response" in call_type_value
     for metadata in _metadata_dicts(kwargs):
@@ -494,7 +494,7 @@ def _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
             and isinstance(chain, dict)
             and chain.get("admissionId") == state.get("admissionId")
             and context.get("provider") == route_provider
-            and context.get("deploymentId") == route.get("onecomputer_deployment_id")
+            and context.get("deploymentId") == route.get("lemmacomputer_deployment_id")
         ):
             kwargs[USAGE_STATE_KEY] = state
             metadata = kwargs.get("metadata")
@@ -517,7 +517,7 @@ def _model_info(kwargs):
     for metadata in _metadata_dicts(kwargs):
         candidates.append(metadata.get("model_info"))
     for candidate in candidates:
-        if isinstance(candidate, dict) and candidate.get("onecomputer_deployment_id"):
+        if isinstance(candidate, dict) and candidate.get("lemmacomputer_deployment_id"):
             return candidate
     return {}
 
@@ -541,7 +541,7 @@ def _usage_request(path, payload):
             method="POST",
             headers={
                 "content-type": "application/json",
-                "x-onecomputer-ai-usage-token": USAGE_TOKEN,
+                "x-lemmacomputer-ai-usage-token": USAGE_TOKEN,
             },
         )
         try:
@@ -646,12 +646,12 @@ def _routing_signals(kwargs, estimated):
 
 def _routing_payload(kwargs):
     trusted = _trusted_key_metadata(kwargs)
-    if trusted.get("onecomputer_policy_model_alias") != "onecomputer-auto":
+    if trusted.get("lemmacomputer_policy_model_alias") != "lemmacomputer-auto":
         return None
-    if kwargs.get("model") != "onecomputer-auto":
+    if kwargs.get("model") != "lemmacomputer-auto":
         raise RuntimeError("Governed routing accepts only the synthetic Auto transport alias")
-    tenant_id = trusted.get("onecomputer_tenant_id")
-    subject_id = trusted.get("onecomputer_subject_id")
+    tenant_id = trusted.get("lemmacomputer_tenant_id")
+    subject_id = trusted.get("lemmacomputer_subject_id")
     if not isinstance(tenant_id, str) or not tenant_id or not isinstance(subject_id, str) or not subject_id:
         raise RuntimeError("Governed routing authenticated identity is incomplete")
     call_id = kwargs.get("litellm_call_id")
@@ -672,14 +672,14 @@ def _routing_payload(kwargs):
     signals = list(dict.fromkeys(signals))
     maximum_output = _maximum_output_tokens(kwargs, {})
     request_metadata = _request_routing_metadata(kwargs)
-    task_binding = request_metadata.get("onecomputer_task_binding")
+    task_binding = request_metadata.get("lemmacomputer_task_binding")
     if not isinstance(task_binding, str) or len(task_binding) < 32:
         raise RuntimeError("Governed routing requires a signed AI task binding")
-    requested_class = request_metadata.get("onecomputer_requested_service_class", "auto")
+    requested_class = request_metadata.get("lemmacomputer_requested_service_class", "auto")
     if requested_class not in ("auto", "lite", "balanced", "pro"):
         raise RuntimeError("Governed routing service class is invalid")
-    workspace_id = trusted.get("onecomputer_workspace_id")
-    agent_id = trusted.get("onecomputer_agent_id")
+    workspace_id = trusted.get("lemmacomputer_workspace_id")
+    agent_id = trusted.get("lemmacomputer_agent_id")
     if not isinstance(workspace_id, str) or not workspace_id or not isinstance(agent_id, str) or not agent_id:
         raise RuntimeError("Governed routing workspace identity is incomplete")
     payload = {
@@ -774,10 +774,10 @@ def _source_attempt_id(kwargs, route):
         "litellmCallId": call_id.strip(),
         "retryOrdinal": _attempt_ordinal(kwargs),
         "fallbackDepth": _fallback_depth(kwargs),
-        "deploymentId": route["onecomputer_deployment_id"],
+        "deploymentId": route["lemmacomputer_deployment_id"],
     }
     encoded = json.dumps(identity, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    digest = hashlib.sha256(b"onecomputer-litellm-attempt/v1\0" + encoded).hexdigest()
+    digest = hashlib.sha256(b"lemmacomputer-litellm-attempt/v1\0" + encoded).hexdigest()
     return f"litellm-attempt-{digest}"
 
 
@@ -878,7 +878,7 @@ def _maximum_output_tokens(kwargs, route):
     if isinstance(declared, (int, float)) and declared > 0:
         return int(declared)
     try:
-        info = litellm.get_model_info(route.get("onecomputer_base_model"))
+        info = litellm.get_model_info(route.get("lemmacomputer_base_model"))
         declared = info.get("max_output_tokens")
         if isinstance(declared, (int, float)) and declared > 0:
             return int(declared)
@@ -904,7 +904,7 @@ def _budget_bounds(kwargs, route):
         "reservationTtlSeconds": int(seconds),
         "providerDeadlineAt": _iso(datetime.now(timezone.utc) + timedelta(seconds=seconds)),
     }
-    if route.get("onecomputer_billable_request_unit") is True:
+    if route.get("lemmacomputer_billable_request_unit") is True:
         bounds["requestUnits"] = "1"
     return bounds
 
@@ -913,24 +913,24 @@ def _admission_payload(
     kwargs, call_type, task_binding, parent_attempt_id=None, budget_bounds=None
 ):
     trusted = _trusted_key_metadata(kwargs)
-    if trusted.get("onecomputer_non_billable_exemption") == "provider-route-test-v1":
+    if trusted.get("lemmacomputer_non_billable_exemption") == "provider-route-test-v1":
         return None
     identity_names = (
-        "onecomputer_tenant_id", "onecomputer_subject_id",
-        "onecomputer_workspace_id", "onecomputer_agent_id",
+        "lemmacomputer_tenant_id", "lemmacomputer_subject_id",
+        "lemmacomputer_workspace_id", "lemmacomputer_agent_id",
     )
     missing = [name for name in identity_names if not isinstance(trusted.get(name), str) or not trusted.get(name)]
     if missing:
         raise RuntimeError(f"AI usage authenticated identity is incomplete: {','.join(missing)}")
     route = _model_info(kwargs)
     route_names = (
-        "onecomputer_provider", "onecomputer_provider_account_id",
-        "onecomputer_base_model", "onecomputer_deployment_id",
+        "lemmacomputer_provider", "lemmacomputer_provider_account_id",
+        "lemmacomputer_base_model", "lemmacomputer_deployment_id",
     )
     missing_route = [name for name in route_names if not isinstance(route.get(name), str) or not route.get(name)]
     if missing_route:
         raise RuntimeError(f"AI usage concrete route is incomplete: {','.join(missing_route)}")
-    alias = trusted.get("onecomputer_policy_model_alias") or trusted.get("onecomputer_client_model_alias")
+    alias = trusted.get("lemmacomputer_policy_model_alias") or trusted.get("lemmacomputer_client_model_alias")
     if not isinstance(alias, str) or not alias:
         raise RuntimeError("AI usage requested alias is missing")
     service_class = alias if alias in ("lite", "balanced", "pro") else None
@@ -938,25 +938,25 @@ def _admission_payload(
         "schemaVersion": 1,
         "sourceSystem": "litellm",
         "sourceAttemptId": _source_attempt_id(kwargs, route),
-        "tenantId": trusted["onecomputer_tenant_id"],
-        "subjectId": trusted["onecomputer_subject_id"],
-        "workspaceId": trusted["onecomputer_workspace_id"],
-        "agentId": trusted["onecomputer_agent_id"],
+        "tenantId": trusted["lemmacomputer_tenant_id"],
+        "subjectId": trusted["lemmacomputer_subject_id"],
+        "workspaceId": trusted["lemmacomputer_workspace_id"],
+        "agentId": trusted["lemmacomputer_agent_id"],
         "taskBinding": task_binding,
-        "policyVersionId": trusted.get("onecomputer_policy_version_id"),
-        "policyHash": trusted.get("onecomputer_policy_hash"),
+        "policyVersionId": trusted.get("lemmacomputer_policy_version_id"),
+        "policyHash": trusted.get("lemmacomputer_policy_hash"),
         "requestedAlias": alias,
         "requestedServiceClass": service_class,
         "selectedServiceClass": service_class,
-        "routeMappingVersion": trusted.get("onecomputer_route_mapping_version"),
+        "routeMappingVersion": trusted.get("lemmacomputer_route_mapping_version"),
         "attemptKind": _attempt_kind(kwargs, call_type),
-        "resolvedProvider": route["onecomputer_provider"],
-        "providerAccountId": route["onecomputer_provider_account_id"],
-        "resolvedModel": route["onecomputer_base_model"],
+        "resolvedProvider": route["lemmacomputer_provider"],
+        "providerAccountId": route["lemmacomputer_provider_account_id"],
+        "resolvedModel": route["lemmacomputer_base_model"],
         "parentAttemptId": parent_attempt_id,
-        "resolvedDeploymentId": route["onecomputer_deployment_id"],
-        "region": route.get("onecomputer_region"),
-        "providerServiceTier": route.get("onecomputer_provider_service_tier"),
+        "resolvedDeploymentId": route["lemmacomputer_deployment_id"],
+        "region": route.get("lemmacomputer_region"),
+        "providerServiceTier": route.get("lemmacomputer_provider_service_tier"),
         "admittedAt": _iso(),
         "budgetBounds": budget_bounds,
     }
@@ -1108,7 +1108,7 @@ async def _record_routing_observation(kwargs, event_result, completion_payload, 
     )
 
 
-class OneComputerMcpPolicyCallback(CustomLogger):
+class LemmaComputerMcpPolicyCallback(CustomLogger):
     async def async_pre_routing_hook(self, kwargs, call_type):
         try:
             payload = _routing_payload(kwargs)
@@ -1163,7 +1163,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         route = _model_info(kwargs)
         try:
             trusted = _trusted_key_metadata(kwargs)
-            if trusted.get("onecomputer_policy_model_alias") == "onecomputer-auto":
+            if trusted.get("lemmacomputer_policy_model_alias") == "lemmacomputer-auto":
                 if not routing_state:
                     raise RuntimeError("Governed routing decision binding is missing")
                 access_groups = route.get("access_groups")
@@ -1173,7 +1173,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
                 ):
                     raise RuntimeError("LiteLLM selected a deployment outside the governed decision")
                 actual = {
-                    "tenantId": trusted.get("onecomputer_tenant_id"),
+                    "tenantId": trusted.get("lemmacomputer_tenant_id"),
                     "requestId": routing_state.get("binding", {}).get("requestId"),
                     "deploymentId": routing_state.get("executedDeploymentId"),
                 }
@@ -1196,7 +1196,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             if payload is None:
                 return _provider_request(kwargs)
             if routing_state:
-                payload["requestedAlias"] = "onecomputer-auto"
+                payload["requestedAlias"] = "lemmacomputer-auto"
                 payload["requestedServiceClass"] = routing_state["requestedServiceClass"]
                 payload["selectedServiceClass"] = routing_state["selectedServiceClass"]
                 payload["routeMappingVersion"] = routing_state["binding"]["mappingVersionId"]
@@ -1231,7 +1231,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             "admissionId": admission_id,
             "tenantId": payload["tenantId"],
             "provider": payload["resolvedProvider"],
-            "billableRequestUnit": route.get("onecomputer_billable_request_unit") is True,
+            "billableRequestUnit": route.get("lemmacomputer_billable_request_unit") is True,
             "routingDecisionId": routing_state.get("decisionId") if routing_state else None,
             "deploymentId": routing_state.get("executedDeploymentId") if routing_state else None,
         }
@@ -1241,8 +1241,8 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         _INTERNAL_ADMISSION_CONTEXT.set({
             "state": kwargs[USAGE_STATE_KEY],
             "signedChain": kwargs["metadata"][USAGE_CHAIN_KEY],
-            "provider": route.get("onecomputer_provider"),
-            "deploymentId": route.get("onecomputer_deployment_id"),
+            "provider": route.get("lemmacomputer_provider"),
+            "deploymentId": route.get("lemmacomputer_deployment_id"),
         })
         return _provider_request(kwargs)
 
@@ -1320,8 +1320,8 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         if data.get("name") is None and data.get("arguments") is None:
             return data
         if not isinstance(data.get("server_id"), str) and len(permitted_servers) > 1:
-            bindings = metadata.get("onecomputer_mcp_server_bindings")
-            server_names = metadata.get("onecomputer_mcp_servers")
+            bindings = metadata.get("lemmacomputer_mcp_server_bindings")
+            server_names = metadata.get("lemmacomputer_mcp_servers")
             if not isinstance(bindings, dict):
                 bindings = {}
             if isinstance(server_names, list) and len(server_names) == len(permitted_servers):
@@ -1348,15 +1348,15 @@ class OneComputerMcpPolicyCallback(CustomLogger):
 
         payload = {
             "schemaVersion": 1,
-            "tenantId": _optional_string(metadata, "onecomputer_tenant_id"),
-            "subjectId": _optional_string(metadata, "onecomputer_subject_id"),
-            "workspaceId": _optional_string(metadata, "onecomputer_workspace_id"),
-            "agentId": _optional_string(metadata, "onecomputer_agent_id"),
-            "policyVersionId": _optional_string(metadata, "onecomputer_policy_version_id"),
-            "policyHash": _optional_string(metadata, "onecomputer_policy_hash"),
-            "operationId": _optional_string(metadata, "onecomputer_operation_id"),
-            "operationDigest": _optional_string(metadata, "onecomputer_operation_digest"),
-            "leaseId": _optional_string(metadata, "onecomputer_lease_id"),
+            "tenantId": _optional_string(metadata, "lemmacomputer_tenant_id"),
+            "subjectId": _optional_string(metadata, "lemmacomputer_subject_id"),
+            "workspaceId": _optional_string(metadata, "lemmacomputer_workspace_id"),
+            "agentId": _optional_string(metadata, "lemmacomputer_agent_id"),
+            "policyVersionId": _optional_string(metadata, "lemmacomputer_policy_version_id"),
+            "policyHash": _optional_string(metadata, "lemmacomputer_policy_hash"),
+            "operationId": _optional_string(metadata, "lemmacomputer_operation_id"),
+            "operationDigest": _optional_string(metadata, "lemmacomputer_operation_digest"),
+            "leaseId": _optional_string(metadata, "lemmacomputer_lease_id"),
             "serverId": server_id,
             "serverName": server_name,
             "toolName": data.get("name"),
@@ -1392,7 +1392,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
             raise HTTPException(status_code=503, detail={"error": "MCP_POLICY_UNAVAILABLE"}) from None
 
         if decision["decision"] == "allow":
-            # Audit context and onecomputerFile are bound into the signed
+            # Audit context and lemmacomputerFile are bound into the signed
             # operation but are LemmaComputer metadata, not Softeria arguments.
             if isinstance(data.get("arguments"), dict):
                 data["arguments"] = {
@@ -1401,7 +1401,7 @@ class OneComputerMcpPolicyCallback(CustomLogger):
                     if key not in AUDIT_ONLY_ARGUMENTS
                     and not (
                         payload["toolName"] == "create-upload-session"
-                        and key == "onecomputerFile"
+                        and key == "lemmacomputerFile"
                     )
                 }
             return data
@@ -1416,4 +1416,4 @@ class OneComputerMcpPolicyCallback(CustomLogger):
         raise HTTPException(status_code=403, detail={"error": decision["code"]})
 
 
-proxy_handler_instance = OneComputerMcpPolicyCallback(turn_off_message_logging=True)
+proxy_handler_instance = LemmaComputerMcpPolicyCallback(turn_off_message_logging=True)

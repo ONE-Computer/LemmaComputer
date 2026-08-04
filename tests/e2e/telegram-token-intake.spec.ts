@@ -56,8 +56,8 @@ test("Telegram credential setup encrypts in the browser before the broker-only i
       body: JSON.stringify({
         id: credentialId,
         kind: "telegram_bot_token",
-        displayName: "@onecomputer_intake_bot",
-        botUsername: "onecomputer_intake_bot",
+        displayName: "@lemmacomputer_intake_bot",
+        botUsername: "lemmacomputer_intake_bot",
         version: 1,
         workspaceId: null,
         connectionId: null,

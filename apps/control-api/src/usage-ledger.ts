@@ -1,5 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { OneComputerError } from "@onecomputer/contracts";
+import { LemmaComputerError } from "@lemmacomputer/contracts";
 import {
   AllowUsageAttemptAdmission,
   type AttemptAdmissionInput,
@@ -9,7 +9,7 @@ import {
   type TeamStore,
   type UsageAttemptAdmissionHook,
   type UsageEventInput,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import { z } from "zod";
 
 const boundedId = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/);
@@ -45,7 +45,7 @@ export type InternalUsageAdmission = z.infer<typeof internalUsageAdmissionSchema
 
 const unboundTaskId = (input: Pick<InternalUsageAdmission,"tenantId"|"sourceSystem"|"sourceAttemptId">) => {
   const digest = createHash("sha256")
-    .update("onecomputer-ai-unbound-task/v1\0")
+    .update("lemmacomputer-ai-unbound-task/v1\0")
     .update(input.tenantId).update("\0")
     .update(input.sourceSystem).update("\0")
     .update(input.sourceAttemptId)
@@ -92,7 +92,7 @@ export const decodeUsageCursor=(value:string|undefined)=>{
   try{
     const parsed=z.object({occurredAt:z.iso.datetime(),id:z.uuid()}).strict().parse(JSON.parse(Buffer.from(value,"base64url").toString("utf8")));
     return {occurredAt:new Date(parsed.occurredAt),id:parsed.id};
-  }catch{throw new OneComputerError("AI_USAGE_CURSOR_INVALID","AI usage cursor is invalid",400);}
+  }catch{throw new LemmaComputerError("AI_USAGE_CURSOR_INVALID","AI usage cursor is invalid",400);}
 };
 export const encodeUsageCursor=(value:{occurredAt:string;id:string}|null)=>value?Buffer.from(JSON.stringify(value)).toString("base64url"):null;
 
@@ -129,17 +129,17 @@ export class UsageTaskBindingAuthority {
   }
   verify(token: string): UsageTaskBinding {
     const [encoded,signature,...extra] = token.split(".");
-    if (!encoded || !signature || extra.length) throw new OneComputerError("AI_USAGE_TASK_BINDING_INVALID","AI task binding is invalid",403);
+    if (!encoded || !signature || extra.length) throw new LemmaComputerError("AI_USAGE_TASK_BINDING_INVALID","AI task binding is invalid",403);
     const expected = Buffer.from(this.sign(encoded));
     const received = Buffer.from(signature);
-    if (expected.length !== received.length || !timingSafeEqual(expected,received)) throw new OneComputerError("AI_USAGE_TASK_BINDING_INVALID","AI task binding is invalid",403);
+    if (expected.length !== received.length || !timingSafeEqual(expected,received)) throw new LemmaComputerError("AI_USAGE_TASK_BINDING_INVALID","AI task binding is invalid",403);
     let decoded: unknown;
-    try { decoded = JSON.parse(Buffer.from(encoded,"base64url").toString("utf8")); } catch { throw new OneComputerError("AI_USAGE_TASK_BINDING_INVALID","AI task binding is invalid",403); }
+    try { decoded = JSON.parse(Buffer.from(encoded,"base64url").toString("utf8")); } catch { throw new LemmaComputerError("AI_USAGE_TASK_BINDING_INVALID","AI task binding is invalid",403); }
     const parsed = taskBindingSchema.safeParse(decoded);
-    if (!parsed.success || new Date(parsed.data.expiresAt) <= this.now() || new Date(parsed.data.issuedAt) > this.now()) throw new OneComputerError("AI_USAGE_TASK_BINDING_INVALID","AI task binding is invalid or expired",403);
+    if (!parsed.success || new Date(parsed.data.expiresAt) <= this.now() || new Date(parsed.data.issuedAt) > this.now()) throw new LemmaComputerError("AI_USAGE_TASK_BINDING_INVALID","AI task binding is invalid or expired",403);
     return parsed.data;
   }
-  private sign(encoded: string) { return createHmac("sha256",this.secret).update("onecomputer-ai-task/v1\0").update(encoded).digest("base64url"); }
+  private sign(encoded: string) { return createHmac("sha256",this.secret).update("lemmacomputer-ai-task/v1\0").update(encoded).digest("base64url"); }
 }
 
 export class UsageLedgerService {
@@ -156,7 +156,7 @@ export class UsageLedgerService {
     if (binding && (
       binding.tenantId !== input.tenantId || binding.subjectId !== input.subjectId
       || binding.workspaceId !== input.workspaceId || binding.agentId !== input.agentId
-    )) throw new OneComputerError("AI_USAGE_TASK_BINDING_MISMATCH","AI task binding does not match the authenticated gateway identity",403);
+    )) throw new LemmaComputerError("AI_USAGE_TASK_BINDING_MISMATCH","AI task binding does not match the authenticated gateway identity",403);
     const attempt: AttemptAdmissionSemanticInput = {
       tenantId:input.tenantId,sourceSystem:input.sourceSystem,sourceAttemptId:input.sourceAttemptId,subjectId:input.subjectId,
       ...(input.workspaceId?{workspaceId:input.workspaceId}:{}),...(input.agentId?{agentId:input.agentId}:{}),
@@ -171,8 +171,8 @@ export class UsageLedgerService {
       ...(input.budgetBounds?{budgetBounds:{...input.budgetBounds,routingOverhead:input.budgetBounds.routingOverhead as AttemptBudgetBounds["routingOverhead"],providerDeadlineAt:input.budgetBounds.providerDeadlineAt?new Date(input.budgetBounds.providerDeadlineAt):undefined}}:{}),
     };
     const finish = (result: Awaited<ReturnType<PostgresUsageLedgerStore["admitAttempt"]>>) => {
-      if (result.status === "denied") throw new OneComputerError(result.denialCode,"AI usage admission was denied",429,true);
-      if (result.status === "conflict") throw new OneComputerError("AI_USAGE_ATTEMPT_CONFLICT","The source attempt key was reused with different facts",409);
+      if (result.status === "denied") throw new LemmaComputerError(result.denialCode,"AI usage admission was denied",429,true);
+      if (result.status === "conflict") throw new LemmaComputerError("AI_USAGE_ATTEMPT_CONFLICT","The source attempt key was reused with different facts",409);
       return { schemaVersion:1,admissionId:result.admissionId,status:result.status,taskId:attempt.taskId,taskBindingProvenance:attempt.taskBindingProvenance,contextKind:attempt.contextKind,team:result.team };
     };
     const replay = await this.store.replayAttempt(attempt);
@@ -192,7 +192,7 @@ export class UsageLedgerService {
       units:input.units as UsageEventInput["units"],...(input.costDrivers?{costDrivers:input.costDrivers}:{}),
     };
     const result = await this.store.appendUsageEvent(event);
-    if (result.status === "conflict") throw new OneComputerError("AI_USAGE_EVENT_CONFLICT","The source event key was reused with different facts",409);
+    if (result.status === "conflict") throw new LemmaComputerError("AI_USAGE_EVENT_CONFLICT","The source event key was reused with different facts",409);
     if (result.status === "pending") return { schemaVersion:1,...result };
     if (input.eventType === "usage") {
       if (!result.eventId) throw new Error("Recorded AI usage event did not return an event id");

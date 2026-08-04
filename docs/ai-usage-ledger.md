@@ -23,7 +23,7 @@ and priced independently. Per-attempt budget bounds consequently declare zero
 additional retries and fallbacks.
 
 The workspace passes a signed task binding in
-`x-onecomputer-ai-task-binding`. The loopback gateway removes any requester
+`x-lemmacomputer-ai-task-binding`. The loopback gateway removes any requester
 supplied LemmaComputer or LiteLLM identity/route metadata, installs the
 header-derived binding, and removes the header before forwarding. The callback
 accepts identity only from LiteLLM's authenticated key projection. It carries

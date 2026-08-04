@@ -21,7 +21,7 @@ use trust_tasks_rs::{
     validate::ValidatedPayload,
 };
 
-pub const ENROLLMENT_TYPE: &str = "https://onecomputer.dev/spec/openvtc/approver-enrollment/0.1";
+pub const ENROLLMENT_TYPE: &str = "https://lemmacomputer.dev/spec/openvtc/approver-enrollment/0.1";
 pub const REQUEST_TYPE: &str = "https://trusttasks.org/spec/task-consent/request/0.1";
 pub const DECISION_TYPE: &str = "https://trusttasks.org/spec/task-consent/decision/0.1";
 const MAX_CLOCK_SKEW_SECONDS: i64 = 60;
@@ -711,20 +711,20 @@ mod tests {
             issued_at,
             expires_at: issued_at + Duration::minutes(10),
             challenge: challenge.into(),
-            task_type: "https://onecomputer.dev/spec/microsoft365/tool-call/0.1".into(),
+            task_type: "https://lemmacomputer.dev/spec/microsoft365/tool-call/0.1".into(),
             task_payload: json!({
                 "operationDigest": "a".repeat(64),
                 "arguments": {"confirm": true, "private": "must-not-leak"}
             }),
-            requester_did: "did:onecomputer:agent:test".into(),
-            approver_set: "onecomputer-workspace-owners".into(),
+            requester_did: "did:lemmacomputer:agent:test".into(),
+            approver_set: "lemmacomputer-workspace-owners".into(),
             min_approvals: 1,
             exclude_requester: true,
             side_effects: "destructive".into(),
             exposure: json!({"discloses": "none", "actsAsSubject": true}),
             effects: json!([{"kind": "delete", "summary": "Delete the selected resource."}]),
             consequences: json!(["The selected resource is removed."]),
-            subject: Some("urn:onecomputer:operation:test".into()),
+            subject: Some("urn:lemmacomputer:operation:test".into()),
             origin: Some("LemmaComputer Control".into()),
             state_pin: Some(json!({"resource": "resource-1", "version": "etag-1"})),
         }

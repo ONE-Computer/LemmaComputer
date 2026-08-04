@@ -1,24 +1,24 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { OneComputerError, runtimePolicySchema, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@onecomputer/contracts";
+import { LemmaComputerError, runtimePolicySchema, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@lemmacomputer/contracts";
 import type {
   McpConnectorAdministrationGateway,
   OAuthConnectionGateway,
   OAuthConnectionStatus,
   OAuthConnectionTool,
-} from "@onecomputer/litellm-adapter";
+} from "@lemmacomputer/litellm-adapter";
 import {
   normalizeEgressHost,
   PublicHttpsTargetValidationError,
   validatePublicHttpsTarget,
   type PublicHttpsTargetResolver,
   type ValidatedPublicHttpsTarget,
-} from "@onecomputer/egress-policy";
+} from "@lemmacomputer/egress-policy";
 import {
   MemoryConnectorRegistryStore,
   type ConnectorCategory,
   type ConnectorConnectionStateRecord,
   type ConnectorRegistryStore,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import { connectorActivation, connectorCatalog, type ConnectorDefinition } from "./connector-catalog.js";
 
 type PendingConnection = {
@@ -289,20 +289,20 @@ export class McpConnectionService {
     const connector = await this.connector(identity.tenantId, connectorId);
     this.requireConnectionManagement(connector, isAdministrator);
     this.pruneExpired();
-    if (!input.state) throw new OneComputerError("MCP_OAUTH_STATE_MISSING", `The ${connector.name} connection could not be verified`, 400);
+    if (!input.state) throw new LemmaComputerError("MCP_OAUTH_STATE_MISSING", `The ${connector.name} connection could not be verified`, 400);
     const key = stateDigest(input.state);
     const pending = this.sessions.get(key);
     this.sessions.delete(key);
-    if (!pending) throw new OneComputerError("MCP_OAUTH_STATE_INVALID", `The ${connector.name} connection expired or was already used`, 400);
-    if (pending.expiresAt <= this.now()) throw new OneComputerError("MCP_OAUTH_STATE_EXPIRED", `The ${connector.name} connection expired; please try again`, 400);
+    if (!pending) throw new LemmaComputerError("MCP_OAUTH_STATE_INVALID", `The ${connector.name} connection expired or was already used`, 400);
+    if (pending.expiresAt <= this.now()) throw new LemmaComputerError("MCP_OAUTH_STATE_EXPIRED", `The ${connector.name} connection expired; please try again`, 400);
     if (pending.tenantId !== identity.tenantId || pending.subjectId !== identity.subjectId) {
-      throw new OneComputerError("MCP_OAUTH_IDENTITY_MISMATCH", `The ${connector.name} connection belongs to another user`, 403);
+      throw new LemmaComputerError("MCP_OAUTH_IDENTITY_MISMATCH", `The ${connector.name} connection belongs to another user`, 403);
     }
     if (pending.connectorId !== connector.id) {
-      throw new OneComputerError("MCP_OAUTH_CONNECTOR_MISMATCH", "The connection returned to a different connector", 400);
+      throw new LemmaComputerError("MCP_OAUTH_CONNECTOR_MISMATCH", "The connection returned to a different connector", 400);
     }
-    if (input.error) throw new OneComputerError("MCP_OAUTH_DENIED", `${connector.name} access was not granted`, 400);
-    if (!input.code || input.code.length > 4096) throw new OneComputerError("MCP_OAUTH_CODE_INVALID", `${connector.name} returned an invalid authorization response`, 400);
+    if (input.error) throw new LemmaComputerError("MCP_OAUTH_DENIED", `${connector.name} access was not granted`, 400);
+    if (!input.code || input.code.length > 4096) throw new LemmaComputerError("MCP_OAUTH_CODE_INVALID", `${connector.name} returned an invalid authorization response`, 400);
     const result = await this.gateway.completeUserOAuthConnection({
       identity,
       serverName: connector.serverName,
@@ -354,7 +354,7 @@ export class McpConnectionService {
   ) {
     await this.connector(identity.tenantId, connectorId);
     const saved = await this.registry.updateAccessPolicy(identity.tenantId, connectorId, { ...input, updatedBy });
-    if (!saved) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
     this.invalidateTenantProjection(identity.tenantId);
     return this.publicConnector(saved);
   }
@@ -389,25 +389,25 @@ export class McpConnectionService {
     this.pruneExpired();
     const administrator = this.administratorGateway();
     if (!validatedInput.discoveryToken) {
-      throw new OneComputerError("MCP_CONNECTOR_DISCOVERY_REQUIRED", "Check the connector server before adding it", 400);
+      throw new LemmaComputerError("MCP_CONNECTOR_DISCOVERY_REQUIRED", "Check the connector server before adding it", 400);
     }
     const discoveryKey = stateDigest(validatedInput.discoveryToken);
     const discovered = this.connectorDiscoveries.get(discoveryKey);
     this.connectorDiscoveries.delete(discoveryKey);
     if (!discovered || discovered.expiresAt <= this.now() || discovered.inputDigest !== connectorInputDigest(validatedInput)) {
-      throw new OneComputerError("MCP_CONNECTOR_DISCOVERY_INVALID", "The connector check expired or its details changed; check the server again", 400);
+      throw new LemmaComputerError("MCP_CONNECTOR_DISCOVERY_INVALID", "The connector check expired or its details changed; check the server again", 400);
     }
     const authorization = await this.validateCustomAuthorizationOrigin(discovered.authorizationOrigin);
     const slug = validatedInput.name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
-    if (!slug) throw new OneComputerError("MCP_CONNECTOR_NAME_INVALID", "Enter a connector name using letters or numbers", 400);
+    if (!slug) throw new LemmaComputerError("MCP_CONNECTOR_NAME_INVALID", "Enter a connector name using letters or numbers", 400);
     const existing = await this.connectors(identity.tenantId);
     const id = existing.some((connector) => connector.id === slug)
       ? `${slug}-${createHash("sha256").update(validatedInput.endpointUrl).digest("hex").slice(0, 8)}`
       : slug;
     const serverId = randomUUID();
-    const serverName = `onecomputer_${id.replace(/-/g, "_")}`.slice(0, 96);
+    const serverName = `lemmacomputer_${id.replace(/-/g, "_")}`.slice(0, 96);
     if (existing.some((connector) => connector.serverName === serverName)) {
-      throw new OneComputerError("MCP_CONNECTOR_EXISTS", "A connector with this name already exists", 409);
+      throw new LemmaComputerError("MCP_CONNECTOR_EXISTS", "A connector with this name already exists", 409);
     }
     const record = {
       tenantId: identity.tenantId,
@@ -452,10 +452,10 @@ export class McpConnectionService {
 
   async deleteConnector(identity: IdentityContext, connectorId: string) {
     const connector = await this.connector(identity.tenantId, connectorId);
-    if (connector.source !== "custom") throw new OneComputerError("MCP_CONNECTOR_MANAGED", "Built-in connectors cannot be removed", 409);
+    if (connector.source !== "custom") throw new LemmaComputerError("MCP_CONNECTOR_MANAGED", "Built-in connectors cannot be removed", 409);
     await this.administratorGateway().removeMcpServer(connector.serverId);
     const deleted = await this.registry.deleteConnector(identity.tenantId, connector.id);
-    if (!deleted) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    if (!deleted) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
     this.invalidateProjection(identity);
     return { deleted: true };
   }
@@ -463,24 +463,24 @@ export class McpConnectionService {
   async updateConnectorIcon(identity: IdentityContext, connectorId: string, iconDataUrl: string | null) {
     const connector = await this.connector(identity.tenantId, connectorId);
     if (connector.source !== "custom") {
-      throw new OneComputerError("MCP_CONNECTOR_MANAGED", "Built-in connector icons cannot be changed", 409);
+      throw new LemmaComputerError("MCP_CONNECTOR_MANAGED", "Built-in connector icons cannot be changed", 409);
     }
     if (iconDataUrl) this.validateConnectorIcon(iconDataUrl);
     const saved = await this.registry.updateIcon(identity.tenantId, connectorId, iconDataUrl);
-    if (!saved) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
     return this.publicConnector(saved);
   }
 
   async connectorToolPolicy(identity: IdentityContext, connectorId: string) {
     const connector = await this.connector(identity.tenantId, connectorId);
     if (connector.id === "microsoft-365") {
-      throw new OneComputerError("MCP_CONNECTOR_POLICY_MANAGED", "Use the Microsoft 365 tool policy", 409);
+      throw new LemmaComputerError("MCP_CONNECTOR_POLICY_MANAGED", "Use the Microsoft 365 tool policy", 409);
     }
     const stored = await this.registry.getConnectionState(identity.tenantId, identity.subjectId, connector.id);
-    if (!stored) throw new OneComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
+    if (!stored) throw new LemmaComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
     const status = await this.connectionStatus(identity, connector);
     if (status.state !== "connected") {
-      throw new OneComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
+      throw new LemmaComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
     }
     const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
     const discoveredToolNames = new Set(discoveredTools.map((tool) => tool.name));
@@ -529,7 +529,7 @@ export class McpConnectionService {
   ) {
     const current = await this.connectorToolPolicy(identity, connectorId);
     if (current.documentHash !== expectedDocumentHash) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "TOOL_SET_CHANGED_REVIEW_AGAIN",
         `${current.connectorName} changed while it was being reviewed. Refresh the tool list and review it again.`,
         409,
@@ -537,11 +537,11 @@ export class McpConnectionService {
     }
     const expected = current.tools.map((tool) => tool.name).sort();
     if (Object.keys(tools).sort().join("\0") !== expected.join("\0")) {
-      throw new OneComputerError("INVALID_TOOL_POLICY", `A decision is required for every ${current.connectorName} tool`, 400);
+      throw new LemmaComputerError("INVALID_TOOL_POLICY", `A decision is required for every ${current.connectorName} tool`, 400);
     }
     const toolDefinitionHashes = Object.fromEntries(current.tools.map((tool) => [tool.name, tool.definitionHash]));
     const saved = await this.registry.updateToolPolicies(identity.tenantId, connectorId, { toolPolicies: tools, toolDefinitionHashes });
-    if (!saved) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
     this.invalidateTenantProjection(identity.tenantId);
     return this.connectorToolPolicy(identity, connectorId);
   }
@@ -779,7 +779,7 @@ export class McpConnectionService {
     const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
     await this.registry.seedConnectors(tenantId, seeded);
     const connector = await this.registry.getConnector(tenantId, connectorId);
-    if (!connector) throw new OneComputerError("MCP_CONNECTOR_NOT_FOUND", "That connector is not in the approved catalog", 404);
+    if (!connector) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "That connector is not in the approved catalog", 404);
     return connector;
   }
 
@@ -800,7 +800,7 @@ export class McpConnectionService {
       }));
     if (!managed.length) return;
     if (typeof this.gateway.ensureOAuthMcpServers !== "function") {
-      throw new OneComputerError("MCP_ADMINISTRATION_NOT_CONFIGURED", "Managed connector registration is unavailable", 503, true);
+      throw new LemmaComputerError("MCP_ADMINISTRATION_NOT_CONFIGURED", "Managed connector registration is unavailable", 503, true);
     }
     await this.gateway.ensureOAuthMcpServers(managed);
   }
@@ -831,17 +831,17 @@ export class McpConnectionService {
 
   private requireConnectionManagement(connector: ConnectorDefinition, isAdministrator: boolean) {
     if (!connector.enabled) {
-      throw new OneComputerError("MCP_CONNECTOR_DISABLED", `${connector.name} is disabled by your organization`, 403);
+      throw new LemmaComputerError("MCP_CONNECTOR_DISABLED", `${connector.name} is disabled by your organization`, 403);
     }
     if (!isAdministrator && !connector.membersCanManage) {
-      throw new OneComputerError("MCP_CONNECTOR_LOCKED", `${connector.name} connections are managed by your administrator`, 403);
+      throw new LemmaComputerError("MCP_CONNECTOR_LOCKED", `${connector.name} connections are managed by your administrator`, 403);
     }
   }
 
   private requireConnectionActivation(connector: Pick<ConnectorDefinition, "id" | "source">) {
     const activation = connectorActivation(connector);
     if (activation.action === "connect") return;
-    throw new OneComputerError(
+    throw new LemmaComputerError(
       activation.readiness === "setup_required" ? "MCP_CONNECTOR_SETUP_REQUIRED" : "MCP_CONNECTOR_REQUEST_REQUIRED",
       activation.message,
       409,
@@ -853,16 +853,16 @@ export class McpConnectionService {
       typeof this.gateway.discoverOAuthMcpServer !== "function"
       || typeof this.gateway.registerOAuthMcpServer !== "function"
       || typeof this.gateway.removeMcpServer !== "function"
-    ) throw new OneComputerError("MCP_ADMINISTRATION_NOT_CONFIGURED", "Connector administration is unavailable", 503, true);
+    ) throw new LemmaComputerError("MCP_ADMINISTRATION_NOT_CONFIGURED", "Connector administration is unavailable", 503, true);
     return this.gateway as OAuthConnectionGateway & McpConnectorAdministrationGateway;
   }
 
   private async validateCustomConnector(input: CreateConnectorInput): Promise<ValidatedPublicHttpsTarget> {
     if (!input.name.trim() || !input.shortDescription.trim() || !input.description.trim()) {
-      throw new OneComputerError("MCP_CONNECTOR_DETAILS_REQUIRED", "Name and descriptions are required", 400);
+      throw new LemmaComputerError("MCP_CONNECTOR_DETAILS_REQUIRED", "Name and descriptions are required", 400);
     }
     if (input.clientSecret && !input.clientId) {
-      throw new OneComputerError("MCP_CONNECTOR_CLIENT_INVALID", "Client ID is required when a client secret is supplied", 400);
+      throw new LemmaComputerError("MCP_CONNECTOR_CLIENT_INVALID", "Client ID is required when a client secret is supplied", 400);
     }
     if (input.iconDataUrl) this.validateConnectorIcon(input.iconDataUrl);
     let endpoint: ValidatedPublicHttpsTarget;
@@ -875,9 +875,9 @@ export class McpConnectionService {
         error instanceof PublicHttpsTargetValidationError
         && (error.reasonCode === "EGRESS_IP_LITERAL_DENIED" || error.reasonCode === "EGRESS_DESTINATION_RESERVED")
       ) {
-        throw new OneComputerError("MCP_CONNECTOR_URL_PRIVATE", "Private and local connector addresses are not allowed", 400);
+        throw new LemmaComputerError("MCP_CONNECTOR_URL_PRIVATE", "Private and local connector addresses are not allowed", 400);
       }
-      throw new OneComputerError("MCP_CONNECTOR_URL_INVALID", "Enter a valid public HTTPS connector address", 400);
+      throw new LemmaComputerError("MCP_CONNECTOR_URL_INVALID", "Enter a valid public HTTPS connector address", 400);
     }
     this.requireCustomConnectorEgressApproval(endpoint.origin);
     return endpoint;
@@ -890,7 +890,7 @@ export class McpConnectionService {
         resolveHostname: this.resolveCustomConnectorHostname,
       });
     } catch {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "MCP_CONNECTOR_AUTHORIZATION_ORIGIN_INVALID",
         "The connector did not provide a valid public HTTPS authorization address",
         400,
@@ -902,7 +902,7 @@ export class McpConnectionService {
 
   private requireCustomConnectorEgressApproval(origin: string) {
     if (this.installationKind === "hosted" && !this.hostedCustomConnectorEgressOrigins.has(origin)) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "MCP_CONNECTOR_EGRESS_NOT_APPROVED",
         `Deployment network approval is required for ${origin} before this connector can be added`,
         403,
@@ -931,11 +931,11 @@ export class McpConnectionService {
   private validateConnectorIcon(iconDataUrl: string) {
     const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(iconDataUrl);
     if (!match) {
-      throw new OneComputerError("MCP_CONNECTOR_ICON_INVALID", "Use a PNG, JPEG, or WebP connector icon", 400);
+      throw new LemmaComputerError("MCP_CONNECTOR_ICON_INVALID", "Use a PNG, JPEG, or WebP connector icon", 400);
     }
     const bytes = Buffer.from(match[2]!, "base64");
     if (!bytes.length || bytes.length > 256 * 1024) {
-      throw new OneComputerError("MCP_CONNECTOR_ICON_INVALID", "Connector icons must be 256 KB or smaller", 400);
+      throw new LemmaComputerError("MCP_CONNECTOR_ICON_INVALID", "Connector icons must be 256 KB or smaller", 400);
     }
     const mediaType = match[1];
     const validSignature = mediaType === "png"
@@ -944,7 +944,7 @@ export class McpConnectionService {
         ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
         : bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
     if (!validSignature) {
-      throw new OneComputerError("MCP_CONNECTOR_ICON_INVALID", "The connector icon does not match its image format", 400);
+      throw new LemmaComputerError("MCP_CONNECTOR_ICON_INVALID", "The connector icon does not match its image format", 400);
     }
   }
 

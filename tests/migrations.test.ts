@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { discoverWorkspaceMigrations } from "@onecomputer/workspace-store";
+import { discoverWorkspaceMigrations } from "@lemmacomputer/workspace-store";
 
 const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 

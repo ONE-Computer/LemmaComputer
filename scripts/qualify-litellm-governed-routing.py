@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 
 
-spec = importlib.util.spec_from_file_location("onecomputer_callback", "/callback.py")
+spec = importlib.util.spec_from_file_location("lemmacomputer_callback", "/callback.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
@@ -65,17 +65,17 @@ def authority(path, payload):
 
 
 module._usage_request = authority
-callback = module.OneComputerMcpPolicyCallback()
+callback = module.LemmaComputerMcpPolicyCallback()
 auth = SimpleNamespace(metadata={
-    "onecomputer_policy_model_alias": "onecomputer-auto",
-    "onecomputer_tenant_id": "tenant-a",
-    "onecomputer_subject_id": "user-a",
-    "onecomputer_workspace_id": "workspace-a",
-    "onecomputer_agent_id": "agent-a",
-}, models=["onecomputer-auto"])
+    "lemmacomputer_policy_model_alias": "lemmacomputer-auto",
+    "lemmacomputer_tenant_id": "tenant-a",
+    "lemmacomputer_subject_id": "user-a",
+    "lemmacomputer_workspace_id": "workspace-a",
+    "lemmacomputer_agent_id": "agent-a",
+}, models=["lemmacomputer-auto"])
 
 
-async def routed(text, requested="auto", model="onecomputer-auto"):
+async def routed(text, requested="auto", model="lemmacomputer-auto"):
     data = {
         "model": model,
         "litellm_call_id": f"call-{len(captured)}",
@@ -83,10 +83,10 @@ async def routed(text, requested="auto", model="onecomputer-auto"):
         "user_api_key_metadata": {"untrusted": True},
         "metadata": {
             "requester_metadata": {
-                "onecomputer_task_binding": "signed." + "x" * 64,
-                "onecomputer_requested_service_class": requested,
+                "lemmacomputer_task_binding": "signed." + "x" * 64,
+                "lemmacomputer_requested_service_class": requested,
             },
-            "onecomputer_task_binding": "signed." + "x" * 64,
+            "lemmacomputer_task_binding": "signed." + "x" * 64,
         },
     }
     return await callback.async_pre_call_hook(auth, None, data, "completion")
@@ -98,10 +98,10 @@ async def qualify():
 
     ambiguous["litellm_params"] = {
         "model_info": {
-            "onecomputer_provider": "openai",
-            "onecomputer_provider_account_id": "account-openai",
-            "onecomputer_base_model": "openai/gpt-qualification",
-            "onecomputer_deployment_id": "deployment-balanced",
+            "lemmacomputer_provider": "openai",
+            "lemmacomputer_provider_account_id": "account-openai",
+            "lemmacomputer_base_model": "openai/gpt-qualification",
+            "lemmacomputer_deployment_id": "deployment-balanced",
         }
     }
     provider_request = await callback.async_pre_call_deployment_hook(
@@ -110,13 +110,13 @@ async def qualify():
     assert "user_api_key_dict" in ambiguous
     assert "user_api_key_dict" not in provider_request
     assert "user_api_key_metadata" not in provider_request
-    assert provider_request["onecomputer_usage_state"]["admissionId"] == "admission-1"
+    assert provider_request["lemmacomputer_usage_state"]["admissionId"] == "admission-1"
     assert captured_verifications[0]["actual"]["deploymentId"] == "deployment-balanced"
     assert captured_admissions[0]["resolvedProvider"] == "openai"
 
     probe_auth = SimpleNamespace(metadata={
-        "onecomputer_non_billable_exemption": "provider-route-test-v1",
-        "onecomputer_policy_model_alias": "balanced",
+        "lemmacomputer_non_billable_exemption": "provider-route-test-v1",
+        "lemmacomputer_policy_model_alias": "balanced",
     })
     probe = await callback.async_pre_call_hook(probe_auth, None, {
         "model": "openai/gpt-qualification",
@@ -125,10 +125,10 @@ async def qualify():
         "user_api_key_metadata": {"untrusted": True},
         "litellm_params": {
             "model_info": {
-                "onecomputer_provider": "openai",
-                "onecomputer_provider_account_id": "account-openai",
-                "onecomputer_base_model": "openai/gpt-qualification",
-                "onecomputer_deployment_id": "deployment-balanced",
+                "lemmacomputer_provider": "openai",
+                "lemmacomputer_provider_account_id": "account-openai",
+                "lemmacomputer_base_model": "openai/gpt-qualification",
+                "lemmacomputer_deployment_id": "deployment-balanced",
             }
         },
     }, "completion")

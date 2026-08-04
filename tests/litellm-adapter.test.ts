@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { LiteLLMGatewayAdapter, tenantManagedModelAccessGroup, workspaceModelGrantProjection } from "@onecomputer/litellm-adapter";
+import { LiteLLMGatewayAdapter, tenantManagedModelAccessGroup, workspaceModelGrantProjection } from "@lemmacomputer/litellm-adapter";
 
-const identity = { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" as const };
+const identity = { tenantId: "acme", subjectId: "alex-morgan", audience: "lemmacomputer-control" as const };
 
 const adapter = new LiteLLMGatewayAdapter({
   adminUrl: "http://litellm.internal:4000",
@@ -23,17 +23,17 @@ test("workspace credentials are deterministic, scoped by workspace, and not the 
 });
 
 test("governed routing grants only the synthetic Auto alias", () => {
-  const projection = workspaceModelGrantProjection("tenant-a", "onecomputer-auto");
-  assert.deepEqual(projection.grantModels, ["onecomputer-auto"]);
-  assert.equal(projection.clientModelAlias, "onecomputer-auto");
+  const projection = workspaceModelGrantProjection("tenant-a", "lemmacomputer-auto");
+  assert.deepEqual(projection.grantModels, ["lemmacomputer-auto"]);
+  assert.equal(projection.clientModelAlias, "lemmacomputer-auto");
   assert.equal(projection.providerAccessGroup, null);
   assert.equal(projection.grantModels.some((model) => model.includes("bedrock") || model.includes("openai") || model.includes("anthropic")), false);
 });
 test("Claude clients keep a compatible model name while governed routing uses Auto transport", () => {
-  const projection = workspaceModelGrantProjection("tenant-a", "onecomputer-auto", { agentProfile: "claude-cli-managed-v1" } as never);
+  const projection = workspaceModelGrantProjection("tenant-a", "lemmacomputer-auto", { agentProfile: "claude-cli-managed-v1" } as never);
   assert.equal(projection.clientModelAlias, "claude-sonnet-4-6");
-  assert.equal(projection.transportModelAlias, "onecomputer-auto");
-  assert.deepEqual(projection.grantModels, ["onecomputer-auto"]);
+  assert.equal(projection.transportModelAlias, "lemmacomputer-auto");
+  assert.deepEqual(projection.grantModels, ["lemmacomputer-auto"]);
 });
 
 test("Auto model readiness stays healthy when an optional connector is unavailable", async () => {
@@ -44,7 +44,7 @@ test("Auto model readiness stays healthy when an optional connector is unavailab
     }
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/models") {
-      response.end(JSON.stringify({ data: [{ id: "onecomputer-auto" }] }));
+      response.end(JSON.stringify({ data: [{ id: "lemmacomputer-auto" }] }));
       return;
     }
     if (request.url === "/mcp-rest/tools/list") {
@@ -76,7 +76,7 @@ test("Auto model readiness stays healthy when an optional connector is unavailab
   });
   try {
     const readiness = await liveAdapter.readiness("workspace-a", "claude-cli", {
-      modelAlias: "onecomputer-auto",
+      modelAlias: "lemmacomputer-auto",
       agentId: "claude-cli",
       allowedTools: ["list_issues"],
     } as never);
@@ -109,10 +109,10 @@ test("gateway identity separates OAuth owner, agent actor, and workspace", () =>
 });
 
 test("connection credentials are unique per lease and scoped by user and MCP server", () => {
-  const connection = adapter.connectionCredentialFor(identity, "onecomputer_ms365", "lease-a");
-  assert.equal(connection, adapter.connectionCredentialFor(identity, "onecomputer_ms365", "lease-a"));
-  assert.notEqual(connection, adapter.connectionCredentialFor(identity, "onecomputer_ms365", "lease-b"));
-  assert.notEqual(connection, adapter.connectionCredentialFor({ ...identity, subjectId: "another-user" }, "onecomputer_ms365", "lease-a"));
+  const connection = adapter.connectionCredentialFor(identity, "lemmacomputer_ms365", "lease-a");
+  assert.equal(connection, adapter.connectionCredentialFor(identity, "lemmacomputer_ms365", "lease-a"));
+  assert.notEqual(connection, adapter.connectionCredentialFor(identity, "lemmacomputer_ms365", "lease-b"));
+  assert.notEqual(connection, adapter.connectionCredentialFor({ ...identity, subjectId: "another-user" }, "lemmacomputer_ms365", "lease-a"));
   assert.notEqual(connection, adapter.connectionCredentialFor(identity, "another-server", "lease-a"));
   assert.notEqual(connection, adapter.credentialFor("workspace-a"));
   assert.notEqual(connection, "sk-master-test-not-used-00001");
@@ -129,7 +129,7 @@ test("concurrent connection reads use independent temporary grants and revoke ea
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/mcp/server") {
-      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "onecomputer_ms365" }]));
+      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "lemmacomputer_ms365" }]));
       return;
     }
     if (request.url === "/key/generate") generated.push(body);
@@ -151,8 +151,8 @@ test("concurrent connection reads use independent temporary grants and revoke ea
   });
   try {
     const results = await Promise.all([
-      liveAdapter.userOAuthConnectionStatus(identity, "onecomputer_ms365"),
-      liveAdapter.userOAuthConnectionStatus(identity, "onecomputer_ms365"),
+      liveAdapter.userOAuthConnectionStatus(identity, "lemmacomputer_ms365"),
+      liveAdapter.userOAuthConnectionStatus(identity, "lemmacomputer_ms365"),
     ]);
     assert.deepEqual(results.map((result) => result.state), ["disconnected", "disconnected"]);
     assert.equal(generated.length, 2);
@@ -180,7 +180,7 @@ test("expired Microsoft 365 connection discovery re-reads status without a tool 
     requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? "") });
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/mcp/server") {
-      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "onecomputer_ms365" }]));
+      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "lemmacomputer_ms365" }]));
       return;
     }
     if (request.url === "/v1/mcp/server/ms365-server-id/oauth-user-credential/status") {
@@ -224,7 +224,7 @@ test("expired Microsoft 365 connection discovery re-reads status without a tool 
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    const tools = await liveAdapter.userOAuthConnectionTools(identity, "onecomputer_ms365");
+    const tools = await liveAdapter.userOAuthConnectionTools(identity, "lemmacomputer_ms365");
     assert.deepEqual(tools.map(({ definitionPreview: _definitionPreview, ...tool }) => tool), [{
       name: "list_issues",
       description: "List issues",
@@ -240,7 +240,7 @@ test("expired Microsoft 365 connection discovery re-reads status without a tool 
     assert.equal(JSON.stringify(tools).includes(marker), false);
     failDiscovery = true;
     await assert.rejects(
-      () => liveAdapter.userOAuthConnectionTools(identity, "onecomputer_ms365"),
+      () => liveAdapter.userOAuthConnectionTools(identity, "lemmacomputer_ms365"),
       (error: unknown) => {
         const failure = error as { code?: unknown; message?: unknown };
         assert.equal(failure.code, "MCP_TOOL_DISCOVERY_FAILED");
@@ -262,7 +262,7 @@ test("OAuth tool discovery canonicalizes definitions, excludes transport metadat
     }
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/mcp/server") {
-      response.end(JSON.stringify([{ server_id: "connector-server-id", server_name: "onecomputer_connector" }]));
+      response.end(JSON.stringify([{ server_id: "connector-server-id", server_name: "lemmacomputer_connector" }]));
       return;
     }
     if (request.url === "/v1/mcp/server/connector-server-id/oauth-user-credential/status") {
@@ -332,7 +332,7 @@ test("OAuth tool discovery canonicalizes definitions, excludes transport metadat
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    const tools = await liveAdapter.userOAuthConnectionTools(identity, "onecomputer_connector");
+    const tools = await liveAdapter.userOAuthConnectionTools(identity, "lemmacomputer_connector");
     assert.deepEqual(tools.map(({ definitionPreview: _definitionPreview, ...tool }) => tool), [
       {
         name: "alpha",
@@ -351,7 +351,7 @@ test("OAuth tool discovery canonicalizes definitions, excludes transport metadat
     ]);
     assert.match(tools.find((tool) => tool.name === "alpha")?.definitionPreview ?? "", /"project"/);
     await assert.rejects(
-      () => liveAdapter.userOAuthConnectionTools(identity, "onecomputer_connector"),
+      () => liveAdapter.userOAuthConnectionTools(identity, "lemmacomputer_connector"),
       (error: unknown) => {
         const failure = error as { code?: unknown; message?: unknown };
         assert.equal(failure.code, "MCP_TOOL_DISCOVERY_CONFLICT");
@@ -360,7 +360,7 @@ test("OAuth tool discovery canonicalizes definitions, excludes transport metadat
       },
     );
     await assert.rejects(
-      () => liveAdapter.userOAuthConnectionTools(identity, "onecomputer_connector"),
+      () => liveAdapter.userOAuthConnectionTools(identity, "lemmacomputer_connector"),
       (error: unknown) => {
         const failure = error as { code?: unknown; message?: unknown };
         assert.equal(failure.code, "MCP_TOOL_DISCOVERY_INVALID");
@@ -390,7 +390,7 @@ test("connector discovery and registration keep provider credentials inside Lite
       response.end(JSON.stringify({ ok: true }));
       return;
     }
-    if (request.url?.startsWith("/v1/mcp/server/oauth/onecomputer_discovery_") && request.url.includes("/authorize?")) {
+    if (request.url?.startsWith("/v1/mcp/server/oauth/lemmacomputer_discovery_") && request.url.includes("/authorize?")) {
       response.statusCode = 302;
       response.setHeader("location", "https://login.acme.example/oauth/authorize");
       response.end();
@@ -418,7 +418,7 @@ test("connector discovery and registration keep provider credentials inside Lite
   try {
     const discovered = await liveAdapter.discoverOAuthMcpServer({
       ...connector,
-      callbackUrl: "https://onecomputer.example/callback",
+      callbackUrl: "https://lemmacomputer.example/callback",
     });
     assert.deepEqual(discovered, {
       authorizationOrigin: "https://login.acme.example",
@@ -427,11 +427,11 @@ test("connector discovery and registration keep provider credentials inside Lite
     await liveAdapter.registerOAuthMcpServer({
       ...connector,
       serverId: "acme-server-id",
-      serverName: "onecomputer_acme_projects",
+      serverName: "lemmacomputer_acme_projects",
     });
     const discovery = requests.find((request) => request.url === "/v1/mcp/server/oauth/session")!;
     const registration = requests.find((request) => request.url === "/v1/mcp/server" && request.method === "POST")!;
-    assert.match(String(discovery.body.server_name), /^onecomputer_discovery_[a-f0-9]{20}$/);
+    assert.match(String(discovery.body.server_name), /^lemmacomputer_discovery_[a-f0-9]{20}$/);
     assert.doesNotMatch(String(discovery.body.server_name), /-/);
     assert.deepEqual(discovery.body.credentials, {
       client_id: "acme-client",
@@ -439,10 +439,10 @@ test("connector discovery and registration keep provider credentials inside Lite
       scopes: ["projects:read", "projects:write"],
     });
     assert.deepEqual(registration.body.credentials, discovery.body.credentials);
-    assert.deepEqual(discovery.body.mcp_info, { onecomputer_egress_profile: "strict_remote" });
-    assert.deepEqual(registration.body.mcp_info, { onecomputer_egress_profile: "strict_remote" });
+    assert.deepEqual(discovery.body.mcp_info, { lemmacomputer_egress_profile: "strict_remote" });
+    assert.deepEqual(registration.body.mcp_info, { lemmacomputer_egress_profile: "strict_remote" });
     assert.equal(registration.body.server_id, "acme-server-id");
-    assert.equal(registration.body.server_name, "onecomputer_acme_projects");
+    assert.equal(registration.body.server_name, "lemmacomputer_acme_projects");
     assert.equal("client_secret" in registration.body, false);
     assert.ok(requests.every((request) => request.authorization === "Bearer sk-master-test-not-used-00001"));
   } finally {
@@ -464,7 +464,7 @@ test("managed remote registrations repair the strict egress profile on legacy Li
     if (request.method === "GET" && request.url === "/v1/mcp/server") {
       response.end(JSON.stringify([{
         server_id: "legacy-remote-id",
-        server_name: "onecomputer_legacy_remote",
+        server_name: "lemmacomputer_legacy_remote",
         url: "https://mcp.example.com/mcp",
         mcp_info: {},
       }]));
@@ -483,7 +483,7 @@ test("managed remote registrations repair the strict egress profile on legacy Li
   try {
     await liveAdapter.ensureOAuthMcpServers([{
       serverId: "legacy-remote-id",
-      serverName: "onecomputer_legacy_remote",
+      serverName: "lemmacomputer_legacy_remote",
       name: "Legacy remote",
       description: "A legacy remote connector.",
       url: "https://mcp.example.com/mcp",
@@ -494,7 +494,7 @@ test("managed remote registrations repair the strict egress profile on legacy Li
     assert.ok(repair);
     assert.deepEqual(repair.body, {
       server_id: "legacy-remote-id",
-      mcp_info: { onecomputer_egress_profile: "strict_remote" },
+      mcp_info: { lemmacomputer_egress_profile: "strict_remote" },
     });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -515,11 +515,11 @@ test("managed remote registrations rediscover missing OAuth metadata without rep
     if (request.method === "GET" && request.url === "/v1/mcp/server") {
       response.end(JSON.stringify([{
         server_id: "linear-server-id",
-        server_name: "onecomputer_linear",
+        server_name: "lemmacomputer_linear",
         url: "https://mcp.linear.app/mcp",
         authorization_url: null,
         token_url: null,
-        mcp_info: { onecomputer_egress_profile: "strict_remote" },
+        mcp_info: { lemmacomputer_egress_profile: "strict_remote" },
       }]));
       return;
     }
@@ -536,7 +536,7 @@ test("managed remote registrations rediscover missing OAuth metadata without rep
   try {
     await liveAdapter.ensureOAuthMcpServers([{
       serverId: "linear-server-id",
-      serverName: "onecomputer_linear",
+      serverName: "lemmacomputer_linear",
       name: "Linear",
       description: "Linear connector.",
       url: "https://mcp.linear.app/mcp",
@@ -596,7 +596,7 @@ test("connector discovery performs dynamic client registration when credentials 
       description: "Work with Acme projects.",
       url: "https://mcp.acme.example/mcp",
       scopes: ["projects:read"],
-      callbackUrl: "https://onecomputer.example/callback",
+      callbackUrl: "https://lemmacomputer.example/callback",
     });
     assert.deepEqual(discovered, {
       authorizationOrigin: "https://login.acme.example",
@@ -644,7 +644,7 @@ test("connector discovery asks for provider credentials when LiteLLM reports its
         description: "Requires a pre-registered provider app.",
         url: "https://mcp.static.example/mcp",
         scopes: ["read"],
-        callbackUrl: "https://onecomputer.example/callback",
+        callbackUrl: "https://lemmacomputer.example/callback",
       }),
       (error: Error & { code?: string }) => error.code === "MCP_OAUTH_CLIENT_REQUIRED",
     );
@@ -664,7 +664,7 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
     requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? ""), body });
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/mcp/server") {
-      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "onecomputer_ms365" }]));
+      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "lemmacomputer_ms365" }]));
       return;
     }
     if (request.url === "/v1/mcp/server/oauth/ms365-server-id/register") {
@@ -691,9 +691,9 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
   try {
     const started = await liveAdapter.beginUserOAuthConnection({
       identity,
-      serverName: "onecomputer_ms365",
+      serverName: "lemmacomputer_ms365",
       redirectUri: "http://localhost:4174/api/v1/connections/microsoft-365/callback",
-      state: "opaque-onecomputer-state",
+      state: "opaque-lemmacomputer-state",
       codeChallenge: "a".repeat(43),
       authorizationOrigin: "http://localhost:3001",
     });
@@ -704,12 +704,12 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
     assert.equal(grant.body.user_id, liveAdapter.userIdFor(identity));
     assert.equal("max_budget" in grant.body, false);
     assert.equal(
-      (grant.body.metadata as Record<string, unknown>).onecomputer_connection_account_lookup,
+      (grant.body.metadata as Record<string, unknown>).lemmacomputer_connection_account_lookup,
       false,
     );
     assert.deepEqual(grant.body.object_permission, {
-      mcp_servers: ["onecomputer_ms365"],
-      mcp_tool_permissions: { onecomputer_ms365: [] },
+      mcp_servers: ["lemmacomputer_ms365"],
+      mcp_tool_permissions: { lemmacomputer_ms365: [] },
     });
     assert.deepEqual(grant.body.allowed_routes, [
       "/v1/mcp/server/oauth/ms365-server-id/authorize",
@@ -738,7 +738,7 @@ test("owned OAuth registers and retries a persistent MCP server when LiteLLM rep
     requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? ""), body });
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/mcp/server") {
-      response.end(JSON.stringify([{ server_id: "linear-server-id", server_name: "onecomputer_linear" }]));
+      response.end(JSON.stringify([{ server_id: "linear-server-id", server_name: "lemmacomputer_linear" }]));
       return;
     }
     if (request.url?.startsWith("/v1/mcp/server/oauth/linear-server-id/authorize?")) {
@@ -770,9 +770,9 @@ test("owned OAuth registers and retries a persistent MCP server when LiteLLM rep
   try {
     const started = await liveAdapter.beginUserOAuthConnection({
       identity,
-      serverName: "onecomputer_linear",
-      redirectUri: "https://onecomputer.example/api/v1/connections/linear/callback",
-      state: "opaque-onecomputer-state",
+      serverName: "lemmacomputer_linear",
+      redirectUri: "https://lemmacomputer.example/api/v1/connections/linear/callback",
+      state: "opaque-lemmacomputer-state",
       codeChallenge: "a".repeat(43),
       authorizationOrigins: ["https://mcp.linear.app"],
     });
@@ -799,7 +799,7 @@ test("hosted MCP status grants cannot call tools or expose provider credentials"
     requests.push({ url: request.url ?? "", body });
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/mcp/server") {
-      response.end(JSON.stringify([{ server_id: "linear-server-id", server_name: "onecomputer_linear" }]));
+      response.end(JSON.stringify([{ server_id: "linear-server-id", server_name: "lemmacomputer_linear" }]));
       return;
     }
     if (request.url === "/v1/mcp/server/linear-server-id/oauth-user-credential/status") {
@@ -817,12 +817,12 @@ test("hosted MCP status grants cannot call tools or expose provider credentials"
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    const status = await liveAdapter.userOAuthConnectionStatus(identity, "onecomputer_linear");
+    const status = await liveAdapter.userOAuthConnectionStatus(identity, "lemmacomputer_linear");
     assert.deepEqual(status, { state: "disconnected", connectedAt: null, expiresAt: null, account: null });
     const grant = requests.find((request) => request.url === "/key/generate")!.body;
     assert.deepEqual(grant.object_permission, {
-      mcp_servers: ["onecomputer_linear"],
-      mcp_tool_permissions: { onecomputer_linear: [] },
+      mcp_servers: ["lemmacomputer_linear"],
+      mcp_tool_permissions: { lemmacomputer_linear: [] },
     });
     assert.deepEqual(grant.allowed_routes, [
       "/v1/mcp/server/oauth/linear-server-id/authorize",
@@ -831,7 +831,7 @@ test("hosted MCP status grants cannot call tools or expose provider credentials"
       "/v1/mcp/server/linear-server-id/oauth-user-credential/status",
       "/mcp-rest/tools/list",
     ]);
-    assert.equal((grant.metadata as Record<string, unknown>).onecomputer_connection_account_lookup, false);
+    assert.equal((grant.metadata as Record<string, unknown>).lemmacomputer_connection_account_lookup, false);
     assert.ok(!requests.some((request) => request.url === "/mcp-rest/tools/call"));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -849,7 +849,7 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
     requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? ""), body });
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/mcp/server") {
-      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "onecomputer_ms365" }]));
+      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "lemmacomputer_ms365" }]));
       return;
     }
     if (request.url === "/v1/mcp/server/oauth/ms365-server-id/token") {
@@ -886,7 +886,7 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
   try {
     const status = await liveAdapter.completeUserOAuthConnection({
       identity,
-      serverName: "onecomputer_ms365",
+      serverName: "lemmacomputer_ms365",
       code: "one-time-authorization-code",
       codeVerifier: "v".repeat(48),
     });
@@ -901,7 +901,7 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
       },
     });
     assert.deepEqual(
-      await liveAdapter.userOAuthConnectionStatus(identity, "onecomputer_ms365"),
+      await liveAdapter.userOAuthConnectionStatus(identity, "lemmacomputer_ms365"),
       status,
       "a post-redirect detail status check must retain the safe account label",
     );
@@ -923,7 +923,7 @@ test("OAuth token exchange stays inside the adapter response boundary and expose
     const connectionGrants = requests
       .filter((item) => item.url === "/key/generate")
       .map((item) => JSON.parse(item.body));
-    assert.ok(connectionGrants.every((grant) => grant.metadata.onecomputer_connection_account_lookup === true));
+    assert.ok(connectionGrants.every((grant) => grant.metadata.lemmacomputer_connection_account_lookup === true));
     assert.ok(connectionGrants.every((grant) => grant.allowed_routes.includes("/mcp-rest/tools/call")));
     assert.equal(requests.at(-1)?.url, "/key/delete");
   } finally {
@@ -983,10 +983,10 @@ test("a policy projection change bypasses the grant cache immediately", async ()
     policyHash: "1".repeat(64),
     workspaceProfile: "kasm-persistent-standard" as const,
     agentId: "persisted-agent-id",
-    agentProfile: "onecomputer-default-agent" as const,
+    agentProfile: "lemmacomputer-default-agent" as const,
     networkProfile: "controlled-egress-v1" as const,
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-folders"],
   };
   try {
@@ -1037,7 +1037,7 @@ test("a managed model change replaces and verifies the existing workspace grant"
     if (request.url === "/v1/models") {
       modelChecks += 1;
       const metadata = storedKey?.metadata as Record<string, unknown> | undefined;
-      response.end(JSON.stringify({ data: [{ id: metadata?.onecomputer_client_model_alias }] }));
+      response.end(JSON.stringify({ data: [{ id: metadata?.lemmacomputer_client_model_alias }] }));
       return;
     }
     response.end(JSON.stringify({ ok: true }));
@@ -1059,8 +1059,8 @@ test("a managed model change replaces and verifies the existing workspace grant"
     agentId: "persisted-agent-id",
     agentProfile: "hermes-claw-managed-v1" as const,
     networkProfile: "controlled-egress-v1" as const,
-    modelAlias: "onecomputer-claude",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-claude",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-folders"],
   };
   try {
@@ -1068,17 +1068,17 @@ test("a managed model change replaces and verifies the existing workspace grant"
     const switched = await routedAdapter.ensureGrant({
       workspaceId: "workspace-a",
       identity,
-      policy: { ...basePolicy, modelAlias: "onecomputer-glm" },
+      policy: { ...basePolicy, modelAlias: "lemmacomputer-glm" },
     });
 
-    assert.equal(switched.modelAlias, "onecomputer-glm");
+    assert.equal(switched.modelAlias, "lemmacomputer-glm");
     assert.equal(requests.filter(({ url }) => url === "/key/generate").length, 2);
     assert.equal(requests.filter(({ url }) => url === "/key/delete").length, 1);
     assert.equal(requests.filter(({ url }) => url === "/key/update").length, 0);
     assert.equal(modelChecks, 1);
-    assert.deepEqual(storedKey?.models, [tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-glm")]);
-    assert.equal((storedKey?.metadata as Record<string, unknown>).onecomputer_policy_model_alias, "onecomputer-glm");
-    assert.equal((storedKey?.metadata as Record<string, unknown>).onecomputer_client_model_alias, "onecomputer-glm");
+    assert.deepEqual(storedKey?.models, [tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-glm")]);
+    assert.equal((storedKey?.metadata as Record<string, unknown>).lemmacomputer_policy_model_alias, "lemmacomputer-glm");
+    assert.equal((storedKey?.metadata as Record<string, unknown>).lemmacomputer_client_model_alias, "lemmacomputer-glm");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -1094,22 +1094,22 @@ test("a model grant replacement fails closed when LiteLLM keeps the stale allowl
   const credential = routedAdapter.credentialFor("workspace-a", "persisted-agent-id");
   const gatewayUserId = routedAdapter.userIdFor(identity);
   const gatewayAgentId = routedAdapter.agentIdFor("workspace-a", "persisted-agent-id");
-  const claudeAccessGroup = tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-claude");
+  const claudeAccessGroup = tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-claude");
   const staleKey = {
     token: createHash("sha256").update(credential).digest("hex"),
     user_id: gatewayUserId,
     agent_id: gatewayAgentId,
     models: [claudeAccessGroup],
     metadata: {
-      onecomputer_tenant_id: identity.tenantId,
-      onecomputer_subject_id: identity.subjectId,
-      onecomputer_workspace_id: "workspace-a",
-      onecomputer_agent_id: "persisted-agent-id",
-      onecomputer_policy_version_id: "policy-version-1",
-      onecomputer_policy_hash: "1".repeat(64),
-      onecomputer_policy_model_alias: "onecomputer-claude",
-      onecomputer_client_model_alias: "onecomputer-claude",
-      onecomputer_provider_access_group: claudeAccessGroup,
+      lemmacomputer_tenant_id: identity.tenantId,
+      lemmacomputer_subject_id: identity.subjectId,
+      lemmacomputer_workspace_id: "workspace-a",
+      lemmacomputer_agent_id: "persisted-agent-id",
+      lemmacomputer_policy_version_id: "policy-version-1",
+      lemmacomputer_policy_hash: "1".repeat(64),
+      lemmacomputer_policy_model_alias: "lemmacomputer-claude",
+      lemmacomputer_client_model_alias: "lemmacomputer-claude",
+      lemmacomputer_provider_access_group: claudeAccessGroup,
     },
   };
   let deleteRequests = 0;
@@ -1132,7 +1132,7 @@ test("a model grant replacement fails closed when LiteLLM keeps the stale allowl
       return;
     }
     if (request.url === "/v1/models") {
-      response.end(JSON.stringify({ data: [{ id: "onecomputer-claude" }] }));
+      response.end(JSON.stringify({ data: [{ id: "lemmacomputer-claude" }] }));
       return;
     }
     response.end(JSON.stringify({ ok: true }));
@@ -1154,8 +1154,8 @@ test("a model grant replacement fails closed when LiteLLM keeps the stale allowl
     agentId: "persisted-agent-id",
     agentProfile: "hermes-claw-managed-v1" as const,
     networkProfile: "controlled-egress-v1" as const,
-    modelAlias: "onecomputer-glm",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-glm",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-folders"],
   };
   try {
@@ -1190,8 +1190,8 @@ test("workspace grants bind LiteLLM user and agent identities without making eit
     await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, agentId: "research" });
     assert.equal(grantBody.user_id, liveAdapter.userIdFor(identity));
     assert.equal(grantBody.agent_id, liveAdapter.agentIdFor("workspace-a", "research"));
-    assert.equal((grantBody.metadata as Record<string, unknown>).onecomputer_agent_id, "research");
-    assert.equal((grantBody.metadata as Record<string, unknown>).onecomputer_subject_id, "alex-morgan");
+    assert.equal((grantBody.metadata as Record<string, unknown>).lemmacomputer_agent_id, "research");
+    assert.equal((grantBody.metadata as Record<string, unknown>).lemmacomputer_subject_id, "alex-morgan");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -1221,38 +1221,38 @@ test("workspace grant preserves the Control alias while scoping a managed-provid
     policyHash: "b".repeat(64),
     workspaceProfile: "kasm-persistent-standard" as const,
     agentId: "persisted-agent-id",
-    agentProfile: "onecomputer-default-agent" as const,
+    agentProfile: "lemmacomputer-default-agent" as const,
     networkProfile: "controlled-egress-v1" as const,
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
-    mcpServers: ["onecomputer_ms365", "onecomputer_notion"],
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
+    mcpServers: ["lemmacomputer_ms365", "lemmacomputer_notion"],
     mcpToolPermissions: {
-      onecomputer_ms365: ["list-mail-folders", "list-calendars", "list-drives"],
-      onecomputer_notion: ["search", "fetch"],
+      lemmacomputer_ms365: ["list-mail-folders", "list-calendars", "list-drives"],
+      lemmacomputer_notion: ["search", "fetch"],
     },
     allowedTools: ["list-mail-folders", "list-calendars", "list-drives", "search", "fetch"],
   };
   try {
     await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy });
-    assert.deepEqual(grantBody.models, [tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-assistant")]);
+    assert.deepEqual(grantBody.models, [tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-assistant")]);
     assert.equal("max_budget" in grantBody, false);
     assert.equal("budget_duration" in grantBody, false);
     assert.equal(grantBody.rpm_limit, 30);
     assert.equal("tpm_limit" in grantBody, false);
     assert.equal(grantBody.max_parallel_requests, 30);
     assert.deepEqual(grantBody.object_permission, {
-      mcp_servers: ["onecomputer_ms365", "onecomputer_notion"],
+      mcp_servers: ["lemmacomputer_ms365", "lemmacomputer_notion"],
       mcp_tool_permissions: {
-        onecomputer_ms365: ["list-mail-folders", "list-calendars", "list-drives"],
-        onecomputer_notion: ["search", "fetch"],
+        lemmacomputer_ms365: ["list-mail-folders", "list-calendars", "list-drives"],
+        lemmacomputer_notion: ["search", "fetch"],
       },
     });
     assert.equal(grantBody.agent_id, liveAdapter.agentIdFor("workspace-a", "persisted-agent-id"));
     const metadata = grantBody.metadata as Record<string, unknown>;
-    assert.equal(metadata.onecomputer_policy_version_id, "policy-version-6");
-    assert.equal(metadata.onecomputer_policy_model_alias, "onecomputer-assistant");
-    assert.equal(metadata.onecomputer_client_model_alias, "onecomputer-assistant");
-    assert.equal(metadata.onecomputer_policy_hash, "b".repeat(64));
+    assert.equal(metadata.lemmacomputer_policy_version_id, "policy-version-6");
+    assert.equal(metadata.lemmacomputer_policy_model_alias, "lemmacomputer-assistant");
+    assert.equal(metadata.lemmacomputer_client_model_alias, "lemmacomputer-assistant");
+    assert.equal(metadata.lemmacomputer_policy_hash, "b".repeat(64));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -1286,8 +1286,8 @@ test("managed Claude Desktop and CLI Bedrock policies receive only their scoped 
     agentId: "desktop-agent",
     agentProfile: "claude-desktop-managed-v1" as const,
     networkProfile: "controlled-egress-v1" as const,
-    modelAlias: "onecomputer-bedrock" as const,
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-bedrock" as const,
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-drives"],
   };
   try {
@@ -1298,20 +1298,20 @@ test("managed Claude Desktop and CLI Bedrock policies receive only their scoped 
         identity,
         policy: { ...policy, agentProfile },
       });
-      assert.equal(grant.modelAlias, "onecomputer-bedrock");
+      assert.equal(grant.modelAlias, "lemmacomputer-bedrock");
       assert.notEqual(grant.credential, masterKey);
       assert.match(grant.credential, /^sk-ocw-[A-Za-z0-9_-]+$/);
     }
     assert.equal(grantBodies.length, 2);
     for (const grantBody of grantBodies) {
-      assert.deepEqual(grantBody.models, [tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-bedrock")]);
+      assert.deepEqual(grantBody.models, [tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-bedrock")]);
       assert.equal(JSON.stringify(grantBody).includes(masterKey), false);
       assert.equal(JSON.stringify(grantBody).includes("api_key"), false);
       assert.equal(JSON.stringify(grantBody).includes("aws_access_key_id"), false);
       const metadata = grantBody.metadata as Record<string, unknown>;
-      assert.equal(metadata.onecomputer_policy_model_alias, "onecomputer-bedrock");
-      assert.equal(metadata.onecomputer_client_model_alias, "onecomputer-bedrock");
-      assert.equal(metadata.onecomputer_provider_access_group, tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-bedrock"));
+      assert.equal(metadata.lemmacomputer_policy_model_alias, "lemmacomputer-bedrock");
+      assert.equal(metadata.lemmacomputer_client_model_alias, "lemmacomputer-bedrock");
+      assert.equal(metadata.lemmacomputer_provider_access_group, tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-bedrock"));
     }
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -1342,7 +1342,7 @@ test("a pre-existing key with mismatched identity is deleted by alias and replac
           token: createHash("sha256").update(credential).digest("hex"),
           user_id: "wrong-user",
           agent_id: "wrong-agent",
-          metadata: { onecomputer_workspace_id: "workspace-a" },
+          metadata: { lemmacomputer_workspace_id: "workspace-a" },
         }],
       }));
       return;
@@ -1350,7 +1350,7 @@ test("a pre-existing key with mismatched identity is deleted by alias and replac
     if (request.url === "/model/info") {
       response.end(JSON.stringify({
         data: [{
-          model_name: "onecomputer-assistant",
+          model_name: "lemmacomputer-assistant",
           model_info: { supports_vision: true },
         }],
       }));
@@ -1371,7 +1371,7 @@ test("a pre-existing key with mismatched identity is deleted by alias and replac
     assert.equal(requests.filter(({ url }) => url === "/key/generate").length, 1);
     assert.ok(requests.some(({ url }) => url.startsWith("/key/list?")));
     assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
-      key_aliases: [`onecomputer-agent-${liveAdapter.agentIdFor("workspace-a")}`],
+      key_aliases: [`lemmacomputer-agent-${liveAdapter.agentIdFor("workspace-a")}`],
     });
     assert.ok(!requests.some(({ url }) => url === "/key/update"));
   } finally {
@@ -1399,15 +1399,15 @@ test("a matching existing workspace key is updated without a duplicate generatio
           token: createHash("sha256").update(credential).digest("hex"),
           user_id: gatewayUserId,
           agent_id: gatewayAgentId,
-          models: [tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-assistant")],
+          models: [tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-assistant")],
           metadata: {
-            onecomputer_tenant_id: identity.tenantId,
-            onecomputer_subject_id: identity.subjectId,
-            onecomputer_workspace_id: "workspace-a",
-            onecomputer_agent_id: "workspace-default:workspace-a",
-            onecomputer_policy_model_alias: "onecomputer-assistant",
-            onecomputer_client_model_alias: "onecomputer-assistant",
-            onecomputer_provider_access_group: tenantManagedModelAccessGroup(identity.tenantId, "onecomputer-assistant"),
+            lemmacomputer_tenant_id: identity.tenantId,
+            lemmacomputer_subject_id: identity.subjectId,
+            lemmacomputer_workspace_id: "workspace-a",
+            lemmacomputer_agent_id: "workspace-default:workspace-a",
+            lemmacomputer_policy_model_alias: "lemmacomputer-assistant",
+            lemmacomputer_client_model_alias: "lemmacomputer-assistant",
+            lemmacomputer_provider_access_group: tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-assistant"),
           },
         }],
       }));
@@ -1460,10 +1460,10 @@ test("a legacy token-capped workspace key is replaced so the allowance cannot su
           agent_id: gatewayAgentId,
           tpm_limit: 500_000,
           metadata: {
-            onecomputer_tenant_id: identity.tenantId,
-            onecomputer_subject_id: identity.subjectId,
-            onecomputer_workspace_id: "workspace-a",
-            onecomputer_agent_id: "workspace-default:workspace-a",
+            lemmacomputer_tenant_id: identity.tenantId,
+            lemmacomputer_subject_id: identity.subjectId,
+            lemmacomputer_workspace_id: "workspace-a",
+            lemmacomputer_agent_id: "workspace-default:workspace-a",
           },
         }],
       }));
@@ -1482,7 +1482,7 @@ test("a legacy token-capped workspace key is replaced so the allowance cannot su
   try {
     await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
     assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
-      key_aliases: [`onecomputer-agent-${routedAdapter.agentIdFor("workspace-a")}`],
+      key_aliases: [`lemmacomputer-agent-${routedAdapter.agentIdFor("workspace-a")}`],
     });
     const generated = requests.find(({ url }) => url === "/key/generate")?.body ?? {};
     assert.equal("tpm_limit" in generated, false);
@@ -1518,10 +1518,10 @@ test("a legacy budgeted workspace key is replaced so the cap cannot survive reco
           max_budget: 1,
           budget_duration: "30d",
           metadata: {
-            onecomputer_tenant_id: identity.tenantId,
-            onecomputer_subject_id: identity.subjectId,
-            onecomputer_workspace_id: "workspace-a",
-            onecomputer_agent_id: "workspace-default:workspace-a",
+            lemmacomputer_tenant_id: identity.tenantId,
+            lemmacomputer_subject_id: identity.subjectId,
+            lemmacomputer_workspace_id: "workspace-a",
+            lemmacomputer_agent_id: "workspace-default:workspace-a",
           },
         }],
       }));
@@ -1540,7 +1540,7 @@ test("a legacy budgeted workspace key is replaced so the cap cannot survive reco
   try {
     await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
     assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
-      key_aliases: [`onecomputer-agent-${routedAdapter.agentIdFor("workspace-a")}`],
+      key_aliases: [`lemmacomputer-agent-${routedAdapter.agentIdFor("workspace-a")}`],
     });
     const generated = requests.find(({ url }) => url === "/key/generate")?.body ?? {};
     assert.equal("max_budget" in generated, false);
@@ -1566,7 +1566,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
     requests.push(request.url ?? "");
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/models") {
-      response.end(JSON.stringify({ data: [{ id: "onecomputer-assistant" }] }));
+      response.end(JSON.stringify({ data: [{ id: "lemmacomputer-assistant" }] }));
       return;
     }
     if (request.url === "/mcp-rest/tools/list") {
@@ -1586,7 +1586,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
     if (request.url === "/model/info") {
       response.end(JSON.stringify({
         data: [{
-          model_name: "onecomputer-assistant",
+          model_name: "lemmacomputer-assistant",
           model_info: { supports_vision: true },
         }],
       }));
@@ -1615,7 +1615,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
   try {
     const result = await routedAdapter.test("workspace-a");
     assert.equal(result.availability, "ready");
-    assert.equal(result.model, "onecomputer-assistant");
+    assert.equal(result.model, "lemmacomputer-assistant");
     assert.equal(result.modelRoute.fallback, "none");
     assert.equal(result.modelRoute.capabilities.vision, true);
     assert.equal(result.modelRoute.limits.tokensPerMinute, null);
@@ -1663,13 +1663,13 @@ test("governed execution uses one exact-tool key, resolved server id, and revoca
       operationId: "15eaf54f-5f29-4b2d-9e21-890e8711720d",
       operationDigest: "0".repeat(64),
       leaseId: "73bc3cc4-34da-42ea-a933-0d6bf2bfd968",
-      serverName: "onecomputer_fixture",
+      serverName: "lemmacomputer_fixture",
       toolName: "delete_file",
       arguments: { path: "/Finance/2026/Q3-draft.docx" },
     });
     const grant = requests.find((item) => item.url === "/key/generate")!;
     const call = requests.find((item) => item.url === "/mcp-rest/tools/call")!;
-    assert.deepEqual((grant.body.object_permission as Record<string, unknown>).mcp_tool_permissions, { onecomputer_fixture: ["delete_file"] });
+    assert.deepEqual((grant.body.object_permission as Record<string, unknown>).mcp_tool_permissions, { lemmacomputer_fixture: ["delete_file"] });
     assert.equal(grant.body.user_id, liveAdapter.userIdFor(identity));
     assert.equal(grant.body.agent_id, liveAdapter.agentIdFor("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508"));
     assert.notEqual(call.authorization, "Bearer sk-master-test-not-used-00001");
@@ -1716,7 +1716,7 @@ test("governed execution preserves the connector's safe failure summary", async 
         operationId: "15eaf54f-5f29-4b2d-9e21-890e8711720d",
         operationDigest: "0".repeat(64),
         leaseId: "73bc3cc4-34da-42ea-a933-0d6bf2bfd968",
-        serverName: "onecomputer_ms365",
+        serverName: "lemmacomputer_ms365",
         toolName: "upload-file-content",
         arguments: { driveId: "drive", driveItemId: "root:/happy.txt:", body: "aGFwcHk=" },
       }),

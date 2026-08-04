@@ -23,33 +23,33 @@ class MemoryCache:
 router_instance = MagicMock()
 router_instance.cache = MemoryCache()
 router = ComplexityRouter(
-    model_name="onecomputer-auto",
+    model_name="lemmacomputer-auto",
     litellm_router_instance=router_instance,
     complexity_router_config={
         "tiers": {
-            "SIMPLE": "onecomputer-lite",
-            "MEDIUM": "onecomputer-balanced",
-            "COMPLEX": "onecomputer-pro",
-            "REASONING": "onecomputer-pro",
+            "SIMPLE": "lemmacomputer-lite",
+            "MEDIUM": "lemmacomputer-balanced",
+            "COMPLEX": "lemmacomputer-pro",
+            "REASONING": "lemmacomputer-pro",
         },
-        "default_model": "onecomputer-balanced",
+        "default_model": "lemmacomputer-balanced",
         "classifier_type": "heuristic",
         "session_affinity": True,
     },
 )
 
 fixtures = [
-    ("simple", "Hello", "onecomputer-lite"),
-    ("medium", "Explain how an API endpoint works.", "onecomputer-balanced"),
+    ("simple", "Hello", "lemmacomputer-lite"),
+    ("medium", "Explain how an API endpoint works.", "lemmacomputer-balanced"),
     (
         "complex",
         "Design a distributed scalable architecture with encryption, concurrency, database and API requirements.",
-        "onecomputer-pro",
+        "lemmacomputer-pro",
     ),
     (
         "reasoning",
         "Think through the pros and cons step by step, then compare and contrast every option.",
-        "onecomputer-pro",
+        "lemmacomputer-pro",
     ),
 ]
 
@@ -57,7 +57,7 @@ fixtures = [
 async def hook(prompt, metadata=None):
     request_kwargs = {"metadata": metadata or {}}
     result = await router.async_pre_routing_hook(
-        model="onecomputer-auto",
+        model="lemmacomputer-auto",
         request_kwargs=request_kwargs,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -80,12 +80,12 @@ async def qualify():
         results.append({"fixture": name, "selected_model": result.model, "typed_fields": sorted(typed)})
 
     no_user = await router.async_pre_routing_hook(
-        model="onecomputer-auto",
+        model="lemmacomputer-auto",
         request_kwargs={},
         messages=[{"role": "assistant", "content": "No user message"}],
     )
-    if no_user is None or no_user.model != "onecomputer-balanced":
-        raise AssertionError("no-user default did not route to onecomputer-balanced")
+    if no_user is None or no_user.model != "lemmacomputer-balanced":
+        raise AssertionError("no-user default did not route to lemmacomputer-balanced")
 
     first, _ = await hook("Hello", {"session_id": "session-1", "user_api_key_hash": "key-a"})
     pinned, _ = await hook(
@@ -96,9 +96,9 @@ async def qualify():
         "Think through the pros and cons step by step, then compare and contrast every option.",
         {"session_id": "session-1", "user_api_key_hash": "key-b"},
     )
-    if first.model != "onecomputer-lite" or pinned.model != "onecomputer-lite":
+    if first.model != "lemmacomputer-lite" or pinned.model != "lemmacomputer-lite":
         raise AssertionError("session affinity did not pin the first selected model")
-    if isolated.model != "onecomputer-pro":
+    if isolated.model != "lemmacomputer-pro":
         raise AssertionError("session affinity was not isolated by authenticated key hash")
 
     measurements_ms = []

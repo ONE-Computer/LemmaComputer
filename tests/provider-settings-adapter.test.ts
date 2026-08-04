@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { OneComputerError } from "@onecomputer/contracts";
-import { LiteLLMProviderAdministration, managedProviderAliasForAccessGroup, managedProviderModelOptions, tenantManagedModelAccessGroup } from "@onecomputer/litellm-adapter";
+import { LemmaComputerError } from "@lemmacomputer/contracts";
+import { LiteLLMProviderAdministration, managedProviderAliasForAccessGroup, managedProviderModelOptions, tenantManagedModelAccessGroup } from "@lemmacomputer/litellm-adapter";
 
 const alphaKey = "sk-provider-alpha-never-log-000000000001";
 const betaKey = "sk-provider-beta-never-log-000000000002";
@@ -70,7 +70,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
 
     if (item.method === "GET" && item.url === "/model/info") {
       response.end(JSON.stringify({
-        data: staticOpenAi ? [{ model_name: "onecomputer-assistant", model_info: {} }] : [],
+        data: staticOpenAi ? [{ model_name: "lemmacomputer-assistant", model_info: {} }] : [],
       }));
       return;
     }
@@ -172,15 +172,15 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.equal(stableModels.filter((document) => document.litellm_params.model === "anthropic/claude-opus-4-8").length, 2);
     assert.equal(stableModels.filter((document) => document.litellm_params.model === "zai/glm-5.2").length, 2);
     for (const document of stableModels) {
-      assert.ok(["onecomputer-assistant", "onecomputer-openai", "claude-opus-4-6", "onecomputer-claude", "claude-sonnet-4-6", "onecomputer-glm", "claude-sonnet-4-5"].includes(document.model_name));
+      assert.ok(["lemmacomputer-assistant", "lemmacomputer-openai", "claude-opus-4-6", "lemmacomputer-claude", "claude-sonnet-4-6", "lemmacomputer-glm", "claude-sonnet-4-5"].includes(document.model_name));
       assert.equal("api_key" in document.litellm_params, false);
-      assert.match(String(document.litellm_params.litellm_credential_name), /^onecomputer-provider-/);
+      assert.match(String(document.litellm_params.litellm_credential_name), /^lemmacomputer-provider-/);
       const groups = document.model_info.access_groups as unknown[];
       assert.equal(groups.length, 1);
       assert.match(String(groups[0]), /^ocp-[A-Za-z0-9_-]+-/);
-      assert.equal(document.model_info.onecomputer_deployment_id, groups[0]);
+      assert.equal(document.model_info.lemmacomputer_deployment_id, groups[0]);
     }
-    const assistantRoutes = stableModels.filter((document) => document.model_name === "onecomputer-assistant");
+    const assistantRoutes = stableModels.filter((document) => document.model_name === "lemmacomputer-assistant");
     assert.equal(assistantRoutes.length, 2);
     assert.notEqual(assistantRoutes[0]!.model_info.id, assistantRoutes[1]!.model_info.id);
     assert.notEqual(
@@ -196,16 +196,16 @@ test("managed provider configuration isolates tenants, validates candidates, and
     const grants = requests.filter((request) => request.url === "/key/generate");
     assert.equal(grants.length, 8);
     for (const grant of grants) {
-      assert.match(String((grant.body.models as unknown[])[0]), /^(?:ocp-|onecomputer-)/);
+      assert.match(String((grant.body.models as unknown[])[0]), /^(?:ocp-|lemmacomputer-)/);
       assert.match(grant.authorization, /^Bearer sk-provider-admin-/);
       assert.equal(
-        (grant.body.metadata as Record<string, unknown>).onecomputer_non_billable_exemption,
+        (grant.body.metadata as Record<string, unknown>).lemmacomputer_non_billable_exemption,
         "provider-route-test-v1",
       );
     }
     const stableProbes = requests.filter((request) => (
       request.url === "/chat/completions"
-      && ["onecomputer-assistant", "onecomputer-claude", "onecomputer-glm"].includes(String(request.body.model))
+      && ["lemmacomputer-assistant", "lemmacomputer-claude", "lemmacomputer-glm"].includes(String(request.body.model))
     ));
     assert.equal(stableProbes.length, 4);
     for (const probe of stableProbes) assert.match(probe.authorization, /^Bearer sk-ocp-/);
@@ -230,7 +230,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
         existingModelIds: [],
       }),
       (error: unknown) => {
-        assert.ok(error instanceof OneComputerError);
+        assert.ok(error instanceof LemmaComputerError);
         assert.equal(error.code, "PROVIDER_CREDENTIAL_REJECTED");
         assert.equal(error.message.includes(rejectedKey), false);
         return true;
@@ -257,7 +257,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
         existingModelIds: alpha.modelIds,
       }),
       (error: unknown) => {
-        assert.ok(error instanceof OneComputerError);
+        assert.ok(error instanceof LemmaComputerError);
         assert.equal(error.code, "PROVIDER_ROUTE_FAILED");
         assert.equal(error.message.includes(rotatedKey), false);
         return true;
@@ -303,7 +303,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
       "gpt-5.6-luna",
     ]);
     assert.equal(modelSet.deployments[0]!.primary, true);
-    assert.ok(modelSet.deployments[0]!.aliases.includes("onecomputer-assistant"));
+    assert.ok(modelSet.deployments[0]!.aliases.includes("lemmacomputer-assistant"));
     assert.match(modelSet.deployments[0]!.providerDeployment, /^ocp-/);
     assert.deepEqual(modelSet.deployments[1]!.modelCapabilities, {
       vision: true,
@@ -312,7 +312,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
     });
     assert.equal(
       managedProviderAliasForAccessGroup("tenant-alpha", modelSet.deployments[0]!.providerDeployment),
-      "onecomputer-openai-gpt-5-6-sol",
+      "lemmacomputer-openai-gpt-5-6-sol",
     );
     assert.equal(managedProviderAliasForAccessGroup("tenant-beta", modelSet.deployments[0]!.providerDeployment), null);
     assert.notEqual(modelSet.deployments[0]!.id, modelSet.deployments[1]!.id);
@@ -320,15 +320,15 @@ test("managed provider configuration isolates tenants, validates candidates, and
       .filter((request) => request.method === "PATCH" && request.url.startsWith("/model/"))
       .map(modelDocument);
     assert.equal(modelSetUpdates.length, 5);
-    assert.equal(modelSetUpdates.filter((document) => document.model_info.onecomputer_legacy_alias === false).length, 2);
+    assert.equal(modelSetUpdates.filter((document) => document.model_info.lemmacomputer_legacy_alias === false).length, 2);
     assert.deepEqual(
       modelSetUpdates
-        .filter((document) => document.model_info.onecomputer_legacy_alias === false)
-        .map((document) => document.model_info.onecomputer_upstream_model_id),
+        .filter((document) => document.model_info.lemmacomputer_legacy_alias === false)
+        .map((document) => document.model_info.lemmacomputer_upstream_model_id),
       ["gpt-5.6-sol", "gpt-5.6-luna"],
     );
     assert.ok(modelSetUpdates
-      .filter((document) => document.model_info.onecomputer_legacy_alias === false)
+      .filter((document) => document.model_info.lemmacomputer_legacy_alias === false)
       .every((document) => document.model_info.supports_function_calling === true));
 
     const retireStart = requests.length;
@@ -367,7 +367,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
         existingModelIds: [],
       }),
       (error: unknown) => {
-        assert.ok(error instanceof OneComputerError);
+        assert.ok(error instanceof LemmaComputerError);
         assert.equal(error.code, "PROVIDER_STATIC_CUTOVER_REQUIRED");
         return true;
       },
@@ -452,7 +452,7 @@ test("Bedrock managed provider routes are tenant-scoped, write-only, and reject 
     const stableModel = requests
       .filter((request) => request.url === "/model/new")
       .map(modelDocument)
-      .find((document) => document.model_name === "onecomputer-bedrock" && (document.model_info.access_groups as unknown[]).length > 0);
+      .find((document) => document.model_name === "lemmacomputer-bedrock" && (document.model_info.access_groups as unknown[]).length > 0);
     assert.ok(stableModel);
     assert.equal(stableModel.litellm_params.model, "bedrock/converse/global.anthropic.claude-sonnet-4-5-20250929-v1:0");
     assert.equal(stableModel.litellm_params.aws_region_name, selection.region);
@@ -461,7 +461,7 @@ test("Bedrock managed provider routes are tenant-scoped, write-only, and reject 
     for (const key of ["api_key", "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "aws_role_name"]) {
       assert.equal(key in stableModel.litellm_params, false);
     }
-    assert.deepEqual(stableModel.model_info.access_groups, [tenantManagedModelAccessGroup("tenant-bedrock", "onecomputer-bedrock")]);
+    assert.deepEqual(stableModel.model_info.access_groups, [tenantManagedModelAccessGroup("tenant-bedrock", "lemmacomputer-bedrock")]);
     assert.equal(stableModel.model_info.supports_vision, true);
     assert.equal(stableModel.model_info.supports_function_calling, true);
     assert.equal(stableModel.model_info.supports_response_schema, true);
@@ -473,8 +473,8 @@ test("Bedrock managed provider routes are tenant-scoped, write-only, and reject 
     assert.ok(stableCredential);
     assert.deepEqual(stableCredential.body.credential_info, {
       provider: "bedrock",
-      managed_by: "onecomputer",
-      route_alias: "onecomputer-bedrock",
+      managed_by: "lemmacomputer",
+      route_alias: "lemmacomputer-bedrock",
       region: selection.region,
       model_profile_id: selection.modelProfileId,
     });
@@ -500,7 +500,7 @@ test("Bedrock managed provider routes are tenant-scoped, write-only, and reject 
         existingModelIds: route.modelIds,
       }),
       (error: unknown) => {
-        assert.ok(error instanceof OneComputerError);
+        assert.ok(error instanceof LemmaComputerError);
         assert.equal(error.code, "BEDROCK_API_KEY_INVALID");
         assert.equal(error.message.includes(rejectedKey), false);
         return true;

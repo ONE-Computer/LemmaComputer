@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
-import { OneComputerError, type IdentityContext } from "@onecomputer/contracts";
+import { LemmaComputerError, type IdentityContext } from "@lemmacomputer/contracts";
 import {
   managedProviderDeploymentDescriptors,
   managedProviderModels,
@@ -10,8 +10,8 @@ import {
   type ManagedProviderOperation,
   type ManagedProviderRoute,
   type ProviderAdministrationGateway,
-} from "@onecomputer/litellm-adapter";
-import { PostgresProviderSettingsStore, type SessionPrincipal } from "@onecomputer/workspace-store";
+} from "@lemmacomputer/litellm-adapter";
+import { PostgresProviderSettingsStore, type SessionPrincipal } from "@lemmacomputer/workspace-store";
 import { ProviderSettingsService } from "../apps/control-api/src/provider-settings.js";
 
 const connectionString = process.env.PROVIDER_SETTINGS_TEST_DATABASE_URL;
@@ -108,7 +108,7 @@ test("PostgreSQL lifecycle fencing survives concurrent Control instances and kee
   const identity: IdentityContext = {
     tenantId,
     subjectId: "provider-lifecycle-admin",
-    audience: "onecomputer-control",
+    audience: "lemmacomputer-control",
   };
   const actor: SessionPrincipal = {
     userId: identity.subjectId,
@@ -162,7 +162,7 @@ test("PostgreSQL lifecycle fencing survives concurrent Control instances and kee
     const disabled = await disable;
     assert.equal(disabled.provider.state, "disabled");
     const rotationError = await rotation;
-    assert.ok(rotationError instanceof OneComputerError);
+    assert.ok(rotationError instanceof LemmaComputerError);
     assert.equal(rotationError.code, "PROVIDER_LIFECYCLE_FENCED");
 
     const setting = await secondStore.getProviderSetting(tenantId, "openai");
@@ -200,7 +200,7 @@ test("PostgreSQL disable epoch blocks a configure from another Control instance 
   const identity: IdentityContext = {
     tenantId,
     subjectId: "provider-disable-epoch-admin",
-    audience: "onecomputer-control",
+    audience: "lemmacomputer-control",
   };
   const actor: SessionPrincipal = {
     userId: identity.subjectId,
@@ -246,7 +246,7 @@ test("PostgreSQL disable epoch blocks a configure from another Control instance 
     try {
       await assert.rejects(
         reconfigure,
-        (error: unknown) => error instanceof OneComputerError && error.code === "PROVIDER_LIFECYCLE_FENCED",
+        (error: unknown) => error instanceof LemmaComputerError && error.code === "PROVIDER_LIFECYCLE_FENCED",
       );
     } finally {
       releaseRevocation.resolve();

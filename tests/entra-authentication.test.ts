@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { EntraAuthenticationService } from "../apps/control-api/src/auth.js";
-import type { IdentityPolicyStore, OidcLoginAttempt, SessionPrincipal } from "@onecomputer/workspace-store";
+import type { IdentityPolicyStore, OidcLoginAttempt, SessionPrincipal } from "@lemmacomputer/workspace-store";
 
 const principal: SessionPrincipal = {
   userId: "alex-morgan",
@@ -11,7 +11,7 @@ const principal: SessionPrincipal = {
   displayName: "Mike",
   tenantDisplayName: "ME TECH",
   roles: ["employee", "administrator"],
-  identity: { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" },
+  identity: { tenantId: "acme", subjectId: "alex-morgan", audience: "lemmacomputer-control" },
 };
 
 test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaque session", async () => {
@@ -63,11 +63,11 @@ test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaq
   const completed = await auth.complete({ state, code: "one-time-code", cookie: stateCookie });
   assert.equal(completed.principal.email, "mike@metech.dev");
   assert.equal(completed.returnPath, "/?view=connections");
-  assert.match(completed.cookie, /^onecomputer_session=/);
+  assert.match(completed.cookie, /^lemmacomputer_session=/);
   assert.doesNotMatch(completed.cookie, /one-time-code|signed-id-token|test-client-secret/);
   assert.match(tokenRequestBody, /code_verifier=/);
   assert.equal(storedIdentity?.ownedUserId, "alex-morgan");
-  const expectedGatewayUserId = `oc-user-${createHash("sha256").update("onecomputer:litellm:user:acme:alex-morgan").digest("base64url")}`;
+  const expectedGatewayUserId = `oc-user-${createHash("sha256").update("lemmacomputer:litellm:user:acme:alex-morgan").digest("base64url")}`;
   assert.equal(storedIdentity?.gatewayUserId, expectedGatewayUserId);
 
   await assert.rejects(() => auth.complete({ state, code: "replay", cookie: stateCookie }), { code: "OIDC_STATE_EXPIRED" });

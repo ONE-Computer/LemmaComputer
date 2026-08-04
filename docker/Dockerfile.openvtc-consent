@@ -16,7 +16,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --system --uid 10001 --no-create-home openvtc
 
-COPY --from=build /build/target/release/onecomputer-openvtc-consent /usr/local/bin/openvtc-consent
+COPY --from=build /build/target/release/lemmacomputer-openvtc-consent /usr/local/bin/openvtc-consent
 
 USER 10001
 EXPOSE 8788

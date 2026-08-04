@@ -18,13 +18,13 @@ if (!integrationCheckout) {
   }
 }
 const context = run("docker", ["context", "show"]);
-if (context.status === 0 && context.stdout.trim() === (process.env.ONECOMPUTER_DEMO_DOCKER_CONTEXT ?? "onecomputer-demo")) {
+if (context.status === 0 && context.stdout.trim() === (process.env.LEMMACOMPUTER_DEMO_DOCKER_CONTEXT ?? "lemmacomputer-demo")) {
   failures.push("the active Docker context is reserved for the demo deployment");
 }
 if (failures.length) {
   process.stderr.write(["Development safety check failed:", ...failures.map((item) => `- ${item}`), ""].join("\n"));
   process.exitCode = 1;
 } else {
-  const environment = value("ONECOMPUTER_COMPOSE_PROJECT_NAME") ?? (integrationCheckout ? "integration checkout" : "unknown environment");
+  const environment = value("LEMMACOMPUTER_COMPOSE_PROJECT_NAME") ?? (integrationCheckout ? "integration checkout" : "unknown environment");
   process.stdout.write(`Development safety check passed for ${branch} (${environment}).\n`);
 }

@@ -6,13 +6,13 @@ import {
   TelegramTokenIntakeGrantIssuer,
   TelegramTokenIntakeGrantVerifier,
   telegramTokenIntakeGrantSchema,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import { encryptTelegramBotTokenEnvelope } from "../apps/web/src/telegram-token-intake.js";
 
 const identity = {
   tenantId: "tenant-alpha",
   subjectId: "user-alpha",
-  audience: "onecomputer-control" as const,
+  audience: "lemmacomputer-control" as const,
 };
 const credentialId = "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24";
 const botToken = "123456789:telegram-token-that-must-never-reach-control";

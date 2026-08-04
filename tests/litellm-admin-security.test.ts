@@ -60,20 +60,20 @@ test("hosted LiteLLM administration requires HTTPS mutual TLS and distinct secre
 
 test("environment initialization and upgrades never derive session or ingress secrets from LiteLLM credentials", async () => {
   const template = [
-    "ONECOMPUTER_LITELLM_CREDENTIAL_SECRET=generated",
-    "ONECOMPUTER_SESSION_SECRET=generated",
-    "ONECOMPUTER_WORKSPACE_INGRESS_SECRET=generated",
+    "LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET=generated",
+    "LEMMACOMPUTER_SESSION_SECRET=generated",
+    "LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET=generated",
   ].join("\n");
   const initialized = initializeEnvironment(await readFile(new URL("../.env.example", import.meta.url), "utf8"), "Etc/UTC");
   const initialValues = parseEnvironment(initialized).values;
-  assert.notEqual(initialValues.get("ONECOMPUTER_LITELLM_CREDENTIAL_SECRET"), initialValues.get("ONECOMPUTER_SESSION_SECRET"));
-  assert.notEqual(initialValues.get("ONECOMPUTER_LITELLM_CREDENTIAL_SECRET"), initialValues.get("ONECOMPUTER_WORKSPACE_INGRESS_SECRET"));
+  assert.notEqual(initialValues.get("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"), initialValues.get("LEMMACOMPUTER_SESSION_SECRET"));
+  assert.notEqual(initialValues.get("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"), initialValues.get("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET"));
 
-  const merged = mergeEnvironment(template, `ONECOMPUTER_LITELLM_CREDENTIAL_SECRET=${credentialSecret}`, initialized);
+  const merged = mergeEnvironment(template, `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET=${credentialSecret}`, initialized);
   const mergedValues = parseEnvironment(merged.contents).values;
-  assert.equal(mergedValues.get("ONECOMPUTER_LITELLM_CREDENTIAL_SECRET"), credentialSecret);
-  assert.notEqual(mergedValues.get("ONECOMPUTER_SESSION_SECRET"), credentialSecret);
-  assert.notEqual(mergedValues.get("ONECOMPUTER_WORKSPACE_INGRESS_SECRET"), credentialSecret);
+  assert.equal(mergedValues.get("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"), credentialSecret);
+  assert.notEqual(mergedValues.get("LEMMACOMPUTER_SESSION_SECRET"), credentialSecret);
+  assert.notEqual(mergedValues.get("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET"), credentialSecret);
   assert.equal(merged.mapped, 0);
 });
 
@@ -108,19 +108,19 @@ test("Compose separates model egress from strict remote-MCP egress", async () =>
   const remoteProxy = compose.split("\n  remote-mcp-egress-proxy:\n")[1]?.split("\n  # Control uses this dedicated listener")[0] ?? "";
   const workspaceIngress = compose.split("\n  workspace-ingress:\n")[1]?.split("\n  # This is a build target")[0] ?? "";
   const dockerfile = await readFile(new URL("../docker/Dockerfile.litellm", import.meta.url), "utf8");
-  const patch = await readFile(new URL("../integrations/litellm/onecomputer_remote_mcp_egress.py", import.meta.url), "utf8");
+  const patch = await readFile(new URL("../integrations/litellm/lemmacomputer_remote_mcp_egress.py", import.meta.url), "utf8");
   const projected = projectServiceEnvironment();
   const litellmEnvironment = projected.litellm;
   const modelProxyEnvironment = projected["gateway-egress-proxy"];
   const remoteProxyEnvironment = projected["remote-mcp-egress-proxy"];
   const controlEnvironment = projected["control-api"];
 
-  assert.match(litellm, /image: onecomputer\/litellm:v1\.93\.0-onecomputer-egress/);
+  assert.match(litellm, /image: lemmacomputer\/litellm:v1\.93\.0-lemmacomputer-egress/);
   assert.match(litellm, /dockerfile: docker\/Dockerfile\.litellm/);
   assert.match(litellm, /env_file:\s+- path: \.runtime-env\/litellm\.env\s+format: raw/);
   assert.match(litellmEnvironment.HTTP_PROXY, /^http:\/\/litellm-gateway:.*@gateway-egress-proxy:3128$/);
   assert.equal(litellmEnvironment.HTTPS_PROXY, litellmEnvironment.HTTP_PROXY);
-  assert.match(litellmEnvironment.ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL, /^http:\/\/litellm-gateway:.*@remote-mcp-egress-proxy:3128$/);
+  assert.match(litellmEnvironment.LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL, /^http:\/\/litellm-gateway:.*@remote-mcp-egress-proxy:3128$/);
   assert.equal(litellmEnvironment.AIOHTTP_TRUST_ENV, "true");
   assert.match(litellmEnvironment.NO_PROXY, /ms365-mcp.*control-api/);
   assert.match(litellm, /networks:\n\s+- gateway-private/);
@@ -128,7 +128,7 @@ test("Compose separates model egress from strict remote-MCP egress", async () =>
   assert.doesNotMatch(litellm, /\n\s+- model-egress/);
   assert.doesNotMatch(litellm, /\n\s+ports:/);
   assert.doesNotMatch(ms365, /\n\s+ports:/);
-  assert.match(workspaceIngress, /\$\{ONECOMPUTER_WEB_PORT:\?set ONECOMPUTER_WEB_PORT in \.env\}:4174/);
+  assert.match(workspaceIngress, /\$\{LEMMACOMPUTER_WEB_PORT:\?set LEMMACOMPUTER_WEB_PORT in \.env\}:4174/);
   assert.match(litellm, /socket\.create_connection\(\('remote-mcp-egress-proxy',3128\),2\)/);
   assert.match(modelProxy, /env_file:\s+- path: \.runtime-env\/gateway-egress-proxy\.env\s+format: raw/);
   assert.match(modelProxy, /model-egress: \{\}/);
@@ -144,9 +144,9 @@ test("Compose separates model egress from strict remote-MCP egress", async () =>
   assert.ok("EGRESS_PROXY_SERVICE_PASSWORD" in remoteProxyEnvironment);
   assert.ok("EGRESS_DYNAMIC_AUTHORIZATION_TOKEN" in remoteProxyEnvironment);
   assert.ok("MCP_EGRESS_PROXY_TOKEN" in controlEnvironment);
-  assert.ok(!("ONECOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL" in controlEnvironment));
+  assert.ok(!("LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL" in controlEnvironment));
   assert.match(dockerfile, /FROM ghcr\.io\/berriai\/litellm:v1\.93\.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e/);
-  assert.match(dockerfile, /onecomputer_remote_mcp_egress\.py/);
+  assert.match(dockerfile, /lemmacomputer_remote_mcp_egress\.py/);
   assert.match(patch, /trust_env=False/);
   assert.match(patch, /follow_redirects=True/);
   assert.match(patch, /EXPECTED_LITELLM_VERSION = "1\.93\.0"/);

@@ -1,4 +1,4 @@
-import { discoverWorkspaceMigrations } from "@onecomputer/workspace-store";
+import { discoverWorkspaceMigrations } from "@lemmacomputer/workspace-store";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -14,13 +14,13 @@ test("LemmaComputer branding appears in the primary, mobile, sign-in, and compan
   ]);
   assert.match(app, /aria-label="LemmaComputer"><strong>Lemma<\/strong><span>Computer<\/span>/);
   assert.match(app, /className="mobile-brand"><strong>Lemma<\/strong><span>Computer<\/span>/);
-  assert.match(app, /"onecomputer-glm": "GLM"/);
+  assert.match(app, /"lemmacomputer-glm": "GLM"/);
   assert.match(app, /workspaceModelName\(workspace\.modelRoute\?\.alias/);
   assert.match(companion, /aria-label="LemmaComputer"><strong>Lemma<\/strong><span>Computer<\/span><em>Companion<\/em>/);
   assert.match(index, /<title>LemmaComputer<\/title>/);
   assert.match(manifest, /"name": "LemmaComputer Companion"/);
   assert.match(manifest, /"short_name": "Lemma"/);
-  assert.doesNotMatch(`${app}\n${companion}\n${index}\n${manifest}`, /ONEComputer/);
+  assert.doesNotMatch(`${app}\n${companion}\n${index}\n${manifest}`, new RegExp(["One", "Computer"].join("")));
 });
 
 test("Workspace is the single multi-workspace overview without redundant reassurance or activity", async () => {
@@ -476,8 +476,8 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
   assert.doesNotMatch(chatScreen, /workspaces\?\.length > 1 && <div className="chat-agent-selector">/);
   assert.match(chatScreen, /preferredAgentId/);
   assert.match(chatScreen, /onAgentChange\?\.\(workspace\.id, preferred\.catalogId\)/);
-  assert.match(app, /onecomputer\.active-workspace-id/);
-  assert.match(app, /onecomputer\.active-chat-agent:/);
+  assert.match(app, /lemmacomputer\.active-workspace-id/);
+  assert.match(app, /lemmacomputer\.active-chat-agent:/);
   assert.match(app, /sidebar-chat-load-more/);
   assert.match(api, /sessions: \(workspaceId, catalogId, \{ cursor, limit = 20 \} = \{\}\)/);
   assert.match(api, /query\.set\("cursor", cursor\)/);

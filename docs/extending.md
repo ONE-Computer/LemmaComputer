@@ -29,7 +29,7 @@ This order keeps provider payloads from becoming implicit policy.
 A model route has two identities:
 
 - the product contract or compatibility alias; governed service-class traffic
-  uses `onecomputer-auto` plus requested Auto/Lite/Balanced/Pro context;
+  uses `lemmacomputer-auto` plus requested Auto/Lite/Balanced/Pro context;
 - the provider deployment configured in LiteLLM.
 
 Do not place provider model IDs directly in employee policy. This allows an
@@ -59,7 +59,7 @@ policy versions.
    encryption root remains a deployment secret.
 6. Project the deployment descriptor into the administrator Pricing and Model
    routes inventory. Current employee workspace policy remains on
-   `onecomputer-auto`; do not add a provider model ID or concrete deployment to
+   `lemmacomputer-auto`; do not add a provider model ID or concrete deployment to
    employee policy.
 7. If a managed client validates model names locally and a compatibility route
    is required, add an explicit transport
@@ -77,7 +77,7 @@ audit semantics explicitly represent every possible destination.
 
 ### Dynamic Bedrock API-key route
 
-`onecomputer-bedrock` is a narrow dynamic route for the reviewed global Claude
+`lemmacomputer-bedrock` is a narrow dynamic route for the reviewed global Claude
 Sonnet 4.5 Bedrock Converse inference profile. It accepts only the approved
 region/profile combinations in `packages/contracts/src/index.ts`; it does not
 accept AWS access-key pairs, IAM role parameters, arbitrary model IDs, or
@@ -88,7 +88,7 @@ private credential API, whose pinned implementation encrypts credential values
 in its database. The LiteLLM model record stores only
 `litellm_credential_name`, region, and reviewed capability/pricing metadata.
 Legacy direct-route workspace keys receive only the stable compatibility alias.
-Governed service-class workspace keys receive `onecomputer-auto`; Control's
+Governed service-class workspace keys receive `lemmacomputer-auto`; Control's
 signed decision selects the Bedrock deployment only when its region, profile,
 rate card, Team policy, health, and budget are eligible.
 
@@ -219,7 +219,7 @@ calling an adapter. A new adapter must additionally:
 - make destroy retry-safe;
 - avoid returning provider credentials in launch data or errors.
 
-Add a `ONECOMPUTER_SANDBOX_DRIVER` discriminator and validate all driver-specific
+Add a `LEMMACOMPUTER_SANDBOX_DRIVER` discriminator and validate all driver-specific
 configuration at startup. A production provider should not require the Docker
 socket mounted by the local reference driver.
 

@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 const connector = {
   id: "reports",
-  serverName: "onecomputer_reports",
+  serverName: "lemmacomputer_reports",
   name: "Reports",
   shortDescription: "Company reports",
   description: "Use approved reports.",

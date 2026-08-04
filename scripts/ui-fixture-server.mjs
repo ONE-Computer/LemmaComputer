@@ -27,7 +27,7 @@ const workspace = {
     { id: "hermes-claw", displayName: "Hermes Agent CLI", clientVersion: "0.19.0", agentId: "agent-alex:hermes", state: "ready" },
   ],
   modelRoute: {
-    alias: "onecomputer-glm",
+    alias: "lemmacomputer-glm",
     status: "ready",
     fallback: "none",
     limits: { requestsPerMinute: 30, tokensPerMinute: 50000, maxParallelRequests: 4 },
@@ -44,7 +44,7 @@ const workspace = {
     id: "claude-desktop-standard-v1",
     client: "LemmaComputer managed workspace",
     clientVersion: "managed-v1",
-    modelAlias: "onecomputer-glm",
+    modelAlias: "lemmacomputer-glm",
     executionMode: "managed",
     egressMode: "restricted",
     persistence: "persistent-home",
@@ -68,7 +68,7 @@ const sandboxWorkspace = {
     id: "disposable-open-v1",
     client: "LemmaComputer open workspace",
     clientVersion: "disposable-open-v1",
-    modelAlias: "onecomputer-openai",
+    modelAlias: "lemmacomputer-openai",
     executionMode: "disposable-open",
     egressMode: "full-web",
     persistence: "persistent-home",
@@ -86,7 +86,7 @@ const productWorkspace = {
     { id: "codex-cli", displayName: "Codex CLI", clientVersion: "0.116.0", agentId: "agent-alex:product-codex", state: "ready" },
   ],
   modelRoute: {
-    alias: "onecomputer-auto",
+    alias: "lemmacomputer-auto",
     status: "ready",
     fallback: "none",
     limits: { requestsPerMinute: 30, tokensPerMinute: 50000, maxParallelRequests: 4 },
@@ -187,13 +187,13 @@ let sandboxSettings = {
   grantId: "personal",
   profileId: profile.id,
   applicationIds: ["firefox"],
-  modelAlias: "onecomputer-auto",
+  modelAlias: "lemmacomputer-auto",
   requestedServiceClass: "auto",
   routePreferenceMigrationRequired: false,
   profile,
   availableProfiles: [profile, disposableProfile],
   availableApplications,
-  availableModels: [{ alias: "onecomputer-auto", displayName: "Governed routing", provider: "LemmaComputer" }],
+  availableModels: [{ alias: "lemmacomputer-auto", displayName: "Governed routing", provider: "LemmaComputer" }],
   availableServiceClasses: [
     { value: "auto", displayName: "Auto", description: "LemmaComputer chooses the best eligible tier for each task." },
     { value: "lite", displayName: "Lite", description: "Fast, economical work." },
@@ -207,7 +207,7 @@ let sandboxSettings = {
     profileId: profile.id,
     applicationIds: ["firefox"],
     agentIds: ["claude-desktop", "hermes-claw"],
-    modelAlias: "onecomputer-auto",
+    modelAlias: "lemmacomputer-auto",
     requestedServiceClass: "auto",
     egress: null,
   },
@@ -515,7 +515,7 @@ let fixtureWorkspaces = [workspace, sandboxWorkspace, productWorkspace];
 let fixtureMcpConnections = [
   {
     id: "microsoft-365",
-    serverName: "onecomputer_ms365",
+    serverName: "lemmacomputer_ms365",
     name: "Microsoft 365",
     shortDescription: "Mail, calendar, files, and Teams",
     description: "Use approved Microsoft 365 tools through the LemmaComputer AI gateway.",
@@ -531,7 +531,7 @@ let fixtureMcpConnections = [
   },
   {
     id: "notion",
-    serverName: "onecomputer_notion",
+    serverName: "lemmacomputer_notion",
     name: "Notion",
     shortDescription: "Search and update workspace knowledge",
     description: "Search and update the pages, databases, and knowledge your Notion account can access.",
@@ -547,7 +547,7 @@ let fixtureMcpConnections = [
   },
   {
     id: "linear",
-    serverName: "onecomputer_linear",
+    serverName: "lemmacomputer_linear",
     name: "Linear",
     shortDescription: "Plan projects, issues, and product work",
     description: "Plan and follow product work across the issues, projects, and comments your account can access.",
@@ -563,7 +563,7 @@ let fixtureMcpConnections = [
   },
   {
     id: "atlassian",
-    serverName: "onecomputer_atlassian",
+    serverName: "lemmacomputer_atlassian",
     name: "Atlassian",
     shortDescription: "Work across Jira and Confluence",
     description: "Bring approved Jira work and Confluence knowledge into your workspace.",
@@ -579,7 +579,7 @@ let fixtureMcpConnections = [
   },
   {
     id: "github",
-    serverName: "onecomputer_github",
+    serverName: "lemmacomputer_github",
     name: "GitHub",
     shortDescription: "Repositories, issues, and pull requests",
     description: "Work with repositories, issues, and pull requests allowed by your GitHub organization.",
@@ -702,7 +702,7 @@ const responses = new Map([
   }],
   ["GET /v1/connections/microsoft-365", fixtureMcpConnections[0]],
   ["GET /v1/admin/mcp-policy", {
-    serverName: "onecomputer_ms365",
+    serverName: "lemmacomputer_ms365",
     version: 7,
     documentHash: digest,
     tools: [{
@@ -724,8 +724,8 @@ const responses = new Map([
   ["GET /v1/admin/provider-settings", {
     providers: [{
       provider: "openai",
-      aliases: ["onecomputer-assistant", "onecomputer-openai", "claude-opus-4-6"],
-      primaryAlias: "onecomputer-openai",
+      aliases: ["lemmacomputer-assistant", "lemmacomputer-openai", "claude-opus-4-6"],
+      primaryAlias: "lemmacomputer-openai",
       upstreamModelDisplayName: "OpenAI GPT-5.6 Luna",
       state: "not-configured",
       fingerprint: null,
@@ -745,8 +745,8 @@ const responses = new Map([
       updatedAt: null,
     }, {
       provider: "anthropic",
-      aliases: ["onecomputer-claude", "claude-sonnet-4-6"],
-      primaryAlias: "onecomputer-claude",
+      aliases: ["lemmacomputer-claude", "claude-sonnet-4-6"],
+      primaryAlias: "lemmacomputer-claude",
       upstreamModelDisplayName: "Anthropic Claude Sonnet 4.6",
       state: "active",
       fingerprint: "fp_fixture_anthropic",
@@ -759,7 +759,7 @@ const responses = new Map([
         providerDeployment: "anthropic/claude-sonnet-4-6",
         providerServiceTier: "standard",
         displayName: "Anthropic Claude Sonnet 4.6",
-        aliases: ["onecomputer-claude"],
+        aliases: ["lemmacomputer-claude"],
       }, {
         id: "anthropic-opus-4-8",
         providerAccountId: "anthropic-primary",
@@ -781,8 +781,8 @@ const responses = new Map([
       updatedAt: now,
     }, {
       provider: "glm",
-      aliases: ["onecomputer-glm", "claude-sonnet-4-5"],
-      primaryAlias: "onecomputer-glm",
+      aliases: ["lemmacomputer-glm", "claude-sonnet-4-5"],
+      primaryAlias: "lemmacomputer-glm",
       upstreamModelDisplayName: "Z.ai GLM-5",
       state: "active",
       fingerprint: "fp_fixture_glm",
@@ -795,7 +795,7 @@ const responses = new Map([
         providerDeployment: "glm/glm-5",
         providerServiceTier: "standard",
         displayName: "Z.ai GLM-5",
-        aliases: ["onecomputer-glm"],
+        aliases: ["lemmacomputer-glm"],
       }],
       modelOptions: [
         { id: "glm-5", displayName: "Z.ai GLM-5" },
@@ -813,8 +813,8 @@ const responses = new Map([
     credentials: [{
       id: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
       kind: "telegram_bot_token",
-      displayName: "@onecomputer_demo_bot",
-      botUsername: "onecomputer_demo_bot",
+      displayName: "@lemmacomputer_demo_bot",
+      botUsername: "lemmacomputer_demo_bot",
       version: 1,
       workspaceId,
       connectionId: "92b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
@@ -830,7 +830,7 @@ const responses = new Map([
     allowedUserCount: 1,
     defaultAgentId: "hermes-claw",
     allowAgentSwitch: true,
-    botUsername: "onecomputer_demo_bot",
+    botUsername: "lemmacomputer_demo_bot",
     tokenVersion: 1,
     updatedAt: now,
   }],
@@ -1076,7 +1076,7 @@ const server = http.createServer((request, response) => {
       const id = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       const connector = {
         id,
-        serverName: `onecomputer_${id.replaceAll("-", "_")}`,
+        serverName: `lemmacomputer_${id.replaceAll("-", "_")}`,
         name: input.name,
         shortDescription: input.shortDescription,
         description: input.description,
@@ -1326,12 +1326,12 @@ const server = http.createServer((request, response) => {
   }
   if (request.method === "GET" && url.pathname === "/v1/admin/spend/export") {
     if (url.searchParams.get("format") === "json") {
-      response.setHeader("content-disposition", "attachment; filename=\"onecomputer-ai-spend.json\"");
+      response.setHeader("content-disposition", "attachment; filename=\"lemmacomputer-ai-spend.json\"");
       response.end(JSON.stringify({ report: fixtureSpendReport() }));
       return;
     }
     response.setHeader("content-type", "text/csv; charset=utf-8");
-    response.setHeader("content-disposition", "attachment; filename=\"onecomputer-ai-spend.csv\"");
+    response.setHeader("content-disposition", "attachment; filename=\"lemmacomputer-ai-spend.csv\"");
     response.end("contract_version,team_id,user_id,task_id,currency,provider_cost\r\n1,11111111-1111-4111-8111-111111111111,alex-morgan,quarterly-analysis-001,USD,74.25\r\n");
     return;
   }

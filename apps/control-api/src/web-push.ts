@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import webPush, { type PushSubscription } from "web-push";
 
-export const COMPANION_PUSH_PROTOCOL = "onecomputer-companion-push-0.1" as const;
+export const COMPANION_PUSH_PROTOCOL = "lemmacomputer-companion-push-0.1" as const;
 
 export type CompanionPushSubscription = {
   endpoint: string;
@@ -32,7 +32,7 @@ export const genericCompanionPushPayload = JSON.stringify({
   event: "approval-pending",
 });
 
-const encryptionKey = (secret: string) => createHash("sha256").update(`onecomputer/web-push/subscription/v1:${secret}`).digest();
+const encryptionKey = (secret: string) => createHash("sha256").update(`lemmacomputer/web-push/subscription/v1:${secret}`).digest();
 const endpointHash = (endpoint: string) => createHash("sha256").update(endpoint).digest("hex");
 
 export class WebPushProvider implements CompanionPushProvider {
@@ -53,7 +53,7 @@ export class WebPushProvider implements CompanionPushProvider {
   protect(subscription: CompanionPushSubscription) {
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", this.key, iv);
-    cipher.setAAD(Buffer.from("onecomputer/openvtc/companion-subscription/v1"));
+    cipher.setAAD(Buffer.from("lemmacomputer/openvtc/companion-subscription/v1"));
     const encrypted = Buffer.concat([cipher.update(JSON.stringify(subscription), "utf8"), cipher.final()]);
     return {
       endpointHash: endpointHash(subscription.endpoint),
@@ -72,7 +72,7 @@ export class WebPushProvider implements CompanionPushProvider {
       const [version, iv, tag, encrypted, extra] = ciphertext.split(".");
       if (version !== "v1" || !iv || !tag || !encrypted || extra) throw new Error("invalid protected subscription");
       const decipher = createDecipheriv("aes-256-gcm", this.key, Buffer.from(iv, "base64url"));
-      decipher.setAAD(Buffer.from("onecomputer/openvtc/companion-subscription/v1"));
+      decipher.setAAD(Buffer.from("lemmacomputer/openvtc/companion-subscription/v1"));
       decipher.setAuthTag(Buffer.from(tag, "base64url"));
       subscription = JSON.parse(Buffer.concat([
         decipher.update(Buffer.from(encrypted, "base64url")),
@@ -86,7 +86,7 @@ export class WebPushProvider implements CompanionPushProvider {
       await webPush.sendNotification(subscription as PushSubscription, genericCompanionPushPayload, {
         TTL: 300,
         urgency: "high",
-        topic: "onecomputer-approval",
+        topic: "lemmacomputer-approval",
       });
       return { delivered: true, terminal: false };
     } catch (error) {

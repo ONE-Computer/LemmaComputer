@@ -1,5 +1,5 @@
 {
-  "name": "@onecomputer/control-api",
+  "name": "@lemmacomputer/control-api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,13 +9,13 @@
     "build": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@onecomputer/contracts": "*",
-    "@onecomputer/egress-policy": "*",
-    "@onecomputer/model-router": "*",
-    "@onecomputer/litellm-adapter": "*",
-    "@onecomputer/policy-integrity": "*",
-    "@onecomputer/workspace-ingress-auth": "*",
-    "@onecomputer/workspace-store": "*",
+    "@lemmacomputer/contracts": "*",
+    "@lemmacomputer/egress-policy": "*",
+    "@lemmacomputer/model-router": "*",
+    "@lemmacomputer/litellm-adapter": "*",
+    "@lemmacomputer/policy-integrity": "*",
+    "@lemmacomputer/workspace-ingress-auth": "*",
+    "@lemmacomputer/workspace-store": "*",
     "ai": "7.0.37",
     "fastify": "5.10.0",
     "jose": "6.1.3",

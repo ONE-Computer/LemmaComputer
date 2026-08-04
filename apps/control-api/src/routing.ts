@@ -1,17 +1,17 @@
 import { z } from "zod";
-import { managedProviderAliasForAccessGroup } from "@onecomputer/litellm-adapter";
+import { managedProviderAliasForAccessGroup } from "@lemmacomputer/litellm-adapter";
 import {
   DeterministicModelRouter,
   RoutingDecisionBindingAuthority,
   type ModelRoutingPolicy,
   type SignedRoutingBinding,
-} from "@onecomputer/model-router";
+} from "@lemmacomputer/model-router";
 import type {
   RoutingStore,
   TeamBudgetStore,
   TeamStore,
   UsageAmount,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import { UsageTaskBindingAuthority } from "./usage-ledger.js";
 const serviceClass = z.enum(["lite", "balanced", "pro"]);
 const managedProvider = z.enum([

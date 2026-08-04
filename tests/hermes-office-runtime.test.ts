@@ -12,14 +12,14 @@ const execFileAsync = promisify(execFile);
 test("the pinned Hermes runtime forwards each AI usage binding without shared state", async () => {
   const [dockerfile, patch, chatAdapter] = await Promise.all([
     source("docker/Dockerfile.workspace"),
-    source("docker/workspace/hermes-agent-onecomputer.patch"),
-    source("docker/workspace/onecomputer-agent-chat.py"),
+    source("docker/workspace/hermes-agent-lemmacomputer.patch"),
+    source("docker/workspace/lemmacomputer-agent-chat.py"),
   ]);
   assert.match(dockerfile, /HERMES_AGENT_TAG=v2026\.7\.20/);
   assert.match(dockerfile, /HERMES_AGENT_SHA256=285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990/);
   assert.match(
     dockerfile,
-    /patch --batch --forward --fuzz=0 -d \/opt\/onecomputer\/hermes-agent -p1 < \/tmp\/hermes-agent-onecomputer\.patch/,
+    /patch --batch --forward --fuzz=0 -d \/opt\/lemmacomputer\/hermes-agent -p1 < \/tmp\/hermes-agent-lemmacomputer\.patch/,
   );
 
   const additions = patch
@@ -41,7 +41,7 @@ test("the pinned Hermes runtime forwards each AI usage binding without shared st
   );
   assert.doesNotMatch(additions, /ContextVar|os\.environ|self\.usage_task_binding/);
 
-  assert.match(chatAdapter, /"x-onecomputer-ai-task-binding": usage_task_binding/);
+  assert.match(chatAdapter, /"x-lemmacomputer-ai-task-binding": usage_task_binding/);
   assert.match(chatAdapter, /f"\{HERMES_URL\}\/api\/sessions\/\{vendor_session_id\}\/chat\/stream"/);
 });
 
@@ -61,11 +61,11 @@ test("the workspace image pins the Hermes Office skills and their native runtime
   for (const skill of ["docx", "pdf", "powerpoint", "xlsx", "ocr-and-documents"]) {
     assert.match(
       dockerfile,
-      new RegExp(`hermes-office-skills/skills/productivity/${skill} /opt/onecomputer/hermes-agent/skills/productivity/${skill}`),
+      new RegExp(`hermes-office-skills/skills/productivity/${skill} /opt/lemmacomputer/hermes-agent/skills/productivity/${skill}`),
     );
     assert.match(
       dockerfile,
-      new RegExp(`/opt/onecomputer/hermes-agent/skills/productivity/${skill}/SKILL\\.md`),
+      new RegExp(`/opt/lemmacomputer/hermes-agent/skills/productivity/${skill}/SKILL\\.md`),
     );
   }
 
@@ -80,7 +80,7 @@ test("the workspace image pins the Hermes Office skills and their native runtime
   ]) {
     assert.match(dockerfile, new RegExp(`\\s${aptPackage}\\s`));
   }
-  assert.match(dockerfile, /onecomputer-libreoffice/);
+  assert.match(dockerfile, /lemmacomputer-libreoffice/);
   assert.match(dockerfile, /command -v npm soffice libreoffice pandoc pdftoppm pdftotext qpdf tesseract unzip zip/);
   assert.match(dockerfile, /soffice --headless --version/);
   assert.match(dockerfile, /hermes-office-venv/);
@@ -121,19 +121,19 @@ test("the workspace image pins the Hermes Office skills and their native runtime
 
 test("selected Hermes profiles seed reviewed skills by default and expose the mode-appropriate tools", async () => {
   const [entrypoint, profileConfig, cliLauncher, desktopLauncher, chatAdapter] = await Promise.all([
-    source("docker/workspace/onecomputer-workspace-entrypoint.sh"),
-    source("docker/workspace/onecomputer-hermes-config.py"),
-    source("docker/workspace/onecomputer-hermes"),
-    source("docker/workspace/onecomputer-hermes-desktop"),
-    source("docker/workspace/onecomputer-agent-chat.py"),
+    source("docker/workspace/lemmacomputer-workspace-entrypoint.sh"),
+    source("docker/workspace/lemmacomputer-hermes-config.py"),
+    source("docker/workspace/lemmacomputer-hermes"),
+    source("docker/workspace/lemmacomputer-hermes-desktop"),
+    source("docker/workspace/lemmacomputer-agent-chat.py"),
   ]);
 
   assert.match(entrypoint, /sync_hermes_skills\(\)/);
   assert.match(entrypoint, /from tools\.skills_sync import sync_skills; sync_skills\(quiet=True\)/);
   assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes/);
   assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes-desktop/);
-  assert.match(entrypoint, /HERMES_BUNDLED_SKILLS=\/opt\/onecomputer\/hermes-agent\/skills/);
-  assert.match(entrypoint, /onecomputer-hermes-config/);
+  assert.match(entrypoint, /HERMES_BUNDLED_SKILLS=\/opt\/lemmacomputer\/hermes-agent\/skills/);
+  assert.match(entrypoint, /lemmacomputer-hermes-config/);
   assert.match(profileConfig, /OFFICE_DEFAULT_SKILLS = frozenset/);
   assert.match(profileConfig, /REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS \| frozenset\(\{"make-a-site"}\)/);
   for (const skill of ["docx", "pdf", "powerpoint", "xlsx", "ocr-and-documents"]) {
@@ -142,26 +142,26 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
   assert.match(profileConfig, /current_bundled - previous_bundled/);
   assert.match(profileConfig, /disabled\.update\(skills_to_default_off - REVIEWED_DEFAULT_SKILLS\)/);
   assert.match(profileConfig, /existing\.get\("skills"\)/);
-  assert.match(profileConfig, /SKILL_STATE_FILE = "\.onecomputer-skill-defaults\.json"/);
+  assert.match(profileConfig, /SKILL_STATE_FILE = "\.lemmacomputer-skill-defaults\.json"/);
   assert.match(profileConfig, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
-  assert.match(profileConfig, /cli_toolsets = \["hermes-cli", "onecomputer_connectors"\]/);
-  assert.match(profileConfig, /api_toolsets = \["hermes-api-server", "onecomputer_connectors"\]/);
+  assert.match(profileConfig, /cli_toolsets = \["hermes-cli", "lemmacomputer_connectors"\]/);
+  assert.match(profileConfig, /api_toolsets = \["hermes-api-server", "lemmacomputer_connectors"\]/);
   assert.match(profileConfig, /managed_office_tools\.isdisjoint\(resolve_toolset\(name\)\)/);
 
   for (const launcher of [cliLauncher, desktopLauncher]) {
-    assert.match(launcher, /HERMES_BUNDLED_SKILLS=\/opt\/onecomputer\/hermes-agent\/skills/);
-    assert.match(launcher, /PATH=\/opt\/onecomputer\/hermes-office-venv\/bin:/);
-    assert.match(launcher, /NODE_PATH=\/opt\/onecomputer\/hermes-office-node\/node_modules/);
+    assert.match(launcher, /HERMES_BUNDLED_SKILLS=\/opt\/lemmacomputer\/hermes-agent\/skills/);
+    assert.match(launcher, /PATH=\/opt\/lemmacomputer\/hermes-office-venv\/bin:/);
+    assert.match(launcher, /NODE_PATH=\/opt\/lemmacomputer\/hermes-office-node\/node_modules/);
   }
-  assert.match(desktopLauncher, /HERMES_DESKTOP_PYTHON=\/opt\/onecomputer\/hermes-venv\/bin\/python/);
+  assert.match(desktopLauncher, /HERMES_DESKTOP_PYTHON=\/opt\/lemmacomputer\/hermes-venv\/bin\/python/);
 
   assert.match(chatAdapter, /Hermes has workspace-local file, terminal, skills, and vision tools/);
   assert.match(chatAdapter, /public-web and unrelated native toolsets remain restricted/);
   assert.match(chatAdapter, /Invoke an assigned MCP tool directly/);
   assert.match(chatAdapter, /path as localFilePath; do not read or base64-encode/);
   assert.match(chatAdapter, /ATTACHMENT_ROOT = STATE_DIR \/ "attachments"/);
-  assert.match(chatAdapter, /ATTACHMENT_INBOX_ROOT = HOME \/ "ONEComputer" \/ "Inbox"/);
-  assert.match(chatAdapter, /ONECOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS/);
+  assert.match(chatAdapter, /ATTACHMENT_INBOX_ROOT = HOME \/ "LemmaComputer" \/ "Inbox"/);
+  assert.match(chatAdapter, /LEMMACOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS/);
   assert.match(chatAdapter, /def persist_attachment\(filename: str, media_type: str, data: bytes, source: str\)/);
   assert.match(chatAdapter, /os\.O_EXCL \| getattr\(os, "O_NOFOLLOW", 0\)/);
   assert.match(chatAdapter, /"originalFilename": filename/);
@@ -181,19 +181,19 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
 });
 
 test("chat attachments retain original metadata, appear in the workspace Inbox, and expire together", async () => {
-  const chatAdapter = await source("docker/workspace/onecomputer-agent-chat.py");
+  const chatAdapter = await source("docker/workspace/lemmacomputer-agent-chat.py");
   const functions = chatAdapter.slice(
     chatAdapter.indexOf("def cleanup_expired_attachments"),
     chatAdapter.indexOf("def validate_user_message"),
   );
-  const home = await mkdtemp(path.join(tmpdir(), "onecomputer-attachment-test-"));
+  const home = await mkdtemp(path.join(tmpdir(), "lemmacomputer-attachment-test-"));
   const program = `
 import hashlib, json, os, re, shutil, sys, time, uuid
 from pathlib import Path
 from typing import Any
 HOME = Path(sys.argv[1])
-ATTACHMENT_ROOT = HOME / ".onecomputer-chat" / "hermes-claw" / "attachments"
-ATTACHMENT_INBOX_ROOT = HOME / "ONEComputer" / "Inbox"
+ATTACHMENT_ROOT = HOME / ".lemmacomputer-chat" / "hermes-claw" / "attachments"
+ATTACHMENT_INBOX_ROOT = HOME / "LemmaComputer" / "Inbox"
 ATTACHMENT_RETENTION_DAYS = 1
 def now(): return "2026-07-29T00:00:00Z"
 ${functions}
@@ -216,24 +216,24 @@ print(json.dumps(result))
     assert.equal(result.manifest.originalFilename, "Business Overview.pptx");
     assert.equal(result.manifest.source, "telegram");
     assert.equal(result.manifest.byteLength, 10);
-    assert.match(result.manifest.inboxPath, /ONEComputer\/Inbox\/Telegram/);
+    assert.match(result.manifest.inboxPath, /LemmaComputer\/Inbox\/Telegram/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
 
 test("Telegram deliverables are snapshotted from a bounded Outbox into immutable artifact storage", async () => {
-  const chatAdapter = await source("docker/workspace/onecomputer-agent-chat.py");
+  const chatAdapter = await source("docker/workspace/lemmacomputer-agent-chat.py");
   const functions = chatAdapter.slice(chatAdapter.indexOf("def snapshot_outbox"), chatAdapter.indexOf("def validate_user_message"));
-  const home = await mkdtemp(path.join(tmpdir(), "onecomputer-outbox-test-"));
+  const home = await mkdtemp(path.join(tmpdir(), "lemmacomputer-outbox-test-"));
   const program = `
 import hashlib, json, os, re, shutil, stat, sys, time, uuid
 from pathlib import Path
 from typing import Any
 HOME = Path(sys.argv[1])
-STATE_DIR = HOME / ".onecomputer-chat" / "hermes-claw"
+STATE_DIR = HOME / ".lemmacomputer-chat" / "hermes-claw"
 ARTIFACT_ROOT = STATE_DIR / "artifacts"
-ARTIFACT_OUTBOX_ROOT = HOME / "ONEComputer" / "Outbox"
+ARTIFACT_OUTBOX_ROOT = HOME / "LemmaComputer" / "Outbox"
 ATTACHMENT_RETENTION_DAYS = 1
 MAX_ARTIFACT_BYTES = 50 * 1024 * 1024
 MAX_TOTAL_ARTIFACT_BYTES = 100 * 1024 * 1024
@@ -269,7 +269,7 @@ print(json.dumps(result))
 });
 
 test("governed Calendar discovery advertises only argument shapes Control allows", async () => {
-  const bridge = await source("docker/workspace/onecomputer-connectors-stdio.py");
+  const bridge = await source("docker/workspace/lemmacomputer-connectors-stdio.py");
   const schemas = bridge.slice(bridge.indexOf("BOUNDED_LIST_INPUT_PROPERTIES"), bridge.indexOf("LIST_DRIVES_INPUT_SCHEMA"));
 
   assert.match(schemas, /CALENDAR_VIEW_INPUT_SCHEMA/);
@@ -283,14 +283,14 @@ test("governed Calendar discovery advertises only argument shapes Control allows
 
 test("governed OneDrive deletion carries the resolved filename into approval metadata", async () => {
   const [bridge, broker, control] = await Promise.all([
-    source("docker/workspace/onecomputer-connectors-stdio.py"),
-    source("docker/workspace/onecomputer-gateway-proxy.py"),
+    source("docker/workspace/lemmacomputer-connectors-stdio.py"),
+    source("docker/workspace/lemmacomputer-gateway-proxy.py"),
     source("apps/control-api/src/server.ts"),
   ]);
 
   assert.match(bridge, /"required": \["driveId", "driveItemId", "resourceName", "If-Match"\]/);
   assert.match(bridge, /exact name as resourceName/);
-  assert.match(bridge, /request_json\("\/onecomputer\/deletions"/);
+  assert.match(bridge, /request_json\("\/lemmacomputer\/deletions"/);
   assert.match(broker, /\/internal\/v1\/agent\/deletions/);
   assert.match(control, /safeSummary: `Delete \$\{input\.resourceName\} from OneDrive`/);
   assert.match(control, /resourceName: input\.resourceName/);

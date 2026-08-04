@@ -13,7 +13,7 @@ import {
   type SpendEventRow,
   type SpendObservabilityStore,
   type SpendRange,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 
 const proxyToken = "spend-api-proxy-token-at-least-24-characters";
 const administrator: SessionPrincipal = {
@@ -23,21 +23,21 @@ const administrator: SessionPrincipal = {
   displayName: "Spend Administrator",
   tenantDisplayName: "Acme",
   roles: ["employee", "administrator"],
-  identity: { tenantId: "acme", subjectId: "spend-admin", audience: "onecomputer-control" },
+  identity: { tenantId: "acme", subjectId: "spend-admin", audience: "lemmacomputer-control" },
 };
 const employee: SessionPrincipal = {
   ...administrator,
   userId: "employee",
   roles: ["employee"],
-  identity: { tenantId: "acme", subjectId: "employee", audience: "onecomputer-control" },
+  identity: { tenantId: "acme", subjectId: "employee", audience: "lemmacomputer-control" },
 };
 const otherAdministrator: SessionPrincipal = {
   ...administrator,
   userId: "other-admin",
   tenantId: "other",
-  identity: { tenantId: "other", subjectId: "other-admin", audience: "onecomputer-control" },
+  identity: { tenantId: "other", subjectId: "other-admin", audience: "lemmacomputer-control" },
 };
-const headers = { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid" };
+const headers = { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid" };
 
 const event = (task: string, cost: string, receivedAt: string, overrides: Partial<SpendEventRow> = {}): SpendEventRow => ({
   eventId: `event-${task}`,
@@ -138,7 +138,7 @@ const authentication = (actor: SessionPrincipal) => ({
   begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
   complete: async () => { throw new Error("not used"); },
   authenticate: async () => actor,
-  logout: async () => "onecomputer_session=; Max-Age=0",
+  logout: async () => "lemmacomputer_session=; Max-Age=0",
 });
 const identityPolicies = {
   getEffectivePolicy: async () => null,

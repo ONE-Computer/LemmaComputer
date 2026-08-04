@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { IdentityContext, RuntimePolicy } from "@onecomputer/contracts";
-import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway, OAuthConnectionStatus } from "@onecomputer/litellm-adapter";
-import { MemoryConnectorRegistryStore, MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext, RuntimePolicy } from "@lemmacomputer/contracts";
+import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway, OAuthConnectionStatus } from "@lemmacomputer/litellm-adapter";
+import { MemoryConnectorRegistryStore, MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "proxy-test-token-at-least-24-characters";
-const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
 const headers = {
-  "x-onecomputer-proxy-token": proxyToken,
-  "x-onecomputer-test-tenant-id": identity.tenantId,
-  "x-onecomputer-test-user-id": identity.subjectId,
+  "x-lemmacomputer-proxy-token": proxyToken,
+  "x-lemmacomputer-test-tenant-id": identity.tenantId,
+  "x-lemmacomputer-test-user-id": identity.subjectId,
 };
 
 const connected = (): OAuthConnectionStatus => ({
@@ -43,7 +43,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
       return {
         baseUrl: "http://gateway",
         credential: "scoped-" + input.workspaceId,
-        modelAlias: "onecomputer-assistant",
+        modelAlias: "lemmacomputer-assistant",
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
       };
     },
@@ -52,7 +52,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
       models: "ready",
       tools: "ready",
       modelRoute: {
-        alias: "onecomputer-assistant",
+        alias: "lemmacomputer-assistant",
         status: "ready",
         fallback: "none",
         capabilities: { vision: true },
@@ -60,10 +60,10 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
       },
     }),
     test: async () => ({
-      model: "onecomputer-assistant",
+      model: "lemmacomputer-assistant",
       availability: "ready",
       modelRoute: {
-        alias: "onecomputer-assistant",
+        alias: "lemmacomputer-assistant",
         status: "ready",
         fallback: "none",
         capabilities: { vision: true },
@@ -82,7 +82,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     completeUserOAuthConnection: async () => connected(),
     userOAuthConnectionStatus: async (_identity, serverName) => {
       statusServers.push(serverName);
-      if (serverName === "onecomputer_linear") {
+      if (serverName === "lemmacomputer_linear") {
         if (linearState === "connected") return connected();
         if (linearState === "expired") return expired();
       }
@@ -90,7 +90,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     },
     userOAuthConnectionTools: async (_identity, serverName) => {
       toolServers.push(serverName);
-      if (serverName !== "onecomputer_linear") return [];
+      if (serverName !== "lemmacomputer_linear") return [];
       if (linearState === "expired") {
         renewalAttempts += 1;
         if (renewalFails) throw new Error("provider refresh was denied");
@@ -129,8 +129,8 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     });
     assert.equal(created.statusCode, 201);
     assert.equal(issuedPolicies.length, 1);
-    assert.deepEqual(issuedPolicies[0]!.mcpServers, ["onecomputer_fixture"]);
-    assert.equal(issuedPolicies[0]!.mcpToolPermissions?.onecomputer_linear, undefined);
+    assert.deepEqual(issuedPolicies[0]!.mcpServers, ["lemmacomputer_fixture"]);
+    assert.equal(issuedPolicies[0]!.mcpToolPermissions?.lemmacomputer_linear, undefined);
 
     const unconnected = await app.inject({ method: "GET", url: "/v1/connections", headers });
     assert.equal(unconnected.statusCode, 200);
@@ -151,8 +151,8 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     });
     assert.equal(callback.statusCode, 303);
     assert.equal(issuedPolicies.length, 2);
-    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["onecomputer_fixture"], "a connected provider is still fail-closed until its tools are reviewed");
-    assert.equal(issuedPolicies.at(-1)!.mcpToolPermissions?.onecomputer_linear, undefined);
+    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["lemmacomputer_fixture"], "a connected provider is still fail-closed until its tools are reviewed");
+    assert.equal(issuedPolicies.at(-1)!.mcpToolPermissions?.lemmacomputer_linear, undefined);
 
     const pendingReview = await app.inject({
       method: "GET",
@@ -180,8 +180,8 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     });
     assert.equal(reviewedStatus.statusCode, 200);
     assert.equal(issuedPolicies.length, 3, "an administrator's current-definition review refreshes connected workspace grants");
-    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["onecomputer_fixture", "onecomputer_linear"]);
-    assert.deepEqual(issuedPolicies.at(-1)!.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["lemmacomputer_fixture", "lemmacomputer_linear"]);
+    assert.deepEqual(issuedPolicies.at(-1)!.mcpToolPermissions?.lemmacomputer_linear, ["create_issue"]);
 
     statusServers.length = 0;
     toolServers.length = 0;
@@ -190,7 +190,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.equal(issuedPolicies.length, 3, "a stable connected marker must not reissue a workspace grant");
     const stableLinear = stable.json().connections.find((connector: { id: string }) => connector.id === "linear");
     assert.equal(stableLinear.state, "connected");
-    assert.deepEqual(statusServers, ["onecomputer_linear"]);
+    assert.deepEqual(statusServers, ["lemmacomputer_linear"]);
     assert.deepEqual(toolServers, []);
 
     linearState = "expired";
@@ -212,11 +212,11 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.ok(renewalAttempts >= 1);
     assert.equal(issuedPolicies.length, 4, "an expired durable marker must remove its stale remote projection");
     const staleReplacement = issuedPolicies.at(-1)!;
-    assert.ok(!staleReplacement.mcpServers?.includes("onecomputer_linear"));
-    assert.equal(staleReplacement.mcpToolPermissions?.onecomputer_linear, undefined);
+    assert.ok(!staleReplacement.mcpServers?.includes("lemmacomputer_linear"));
+    assert.equal(staleReplacement.mcpToolPermissions?.lemmacomputer_linear, undefined);
     assert.ok(!staleReplacement.allowedTools.includes("create_issue"));
-    assert.ok(statusServers.every((serverName) => serverName === "onecomputer_linear"));
-    assert.ok(toolServers.every((serverName) => serverName === "onecomputer_linear"));
+    assert.ok(statusServers.every((serverName) => serverName === "lemmacomputer_linear"));
+    assert.ok(toolServers.every((serverName) => serverName === "lemmacomputer_linear"));
 
     renewalFails = false;
     statusServers.length = 0;
@@ -227,10 +227,10 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.equal(recoveredLinear.state, "connected");
     assert.equal(issuedPolicies.length, 5, "a renewed marker must restore its remote projection");
     const restored = issuedPolicies.at(-1)!;
-    assert.ok(restored.mcpServers?.includes("onecomputer_linear"));
-    assert.deepEqual(restored.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
-    assert.ok(statusServers.every((serverName) => serverName === "onecomputer_linear"));
-    assert.ok(toolServers.every((serverName) => serverName === "onecomputer_linear"));
+    assert.ok(restored.mcpServers?.includes("lemmacomputer_linear"));
+    assert.deepEqual(restored.mcpToolPermissions?.lemmacomputer_linear, ["create_issue"]);
+    assert.ok(statusServers.every((serverName) => serverName === "lemmacomputer_linear"));
+    assert.ok(toolServers.every((serverName) => serverName === "lemmacomputer_linear"));
 
     linearState = "disconnected";
     statusServers.length = 0;
@@ -241,11 +241,11 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.equal(revokedLinear.state, "disconnected");
     assert.equal(issuedPolicies.length, 6, "a revoked marker must remove its remote projection");
     const revokedReplacement = issuedPolicies.at(-1)!;
-    assert.ok(!revokedReplacement.mcpServers?.includes("onecomputer_linear"));
-    assert.equal(revokedReplacement.mcpToolPermissions?.onecomputer_linear, undefined);
+    assert.ok(!revokedReplacement.mcpServers?.includes("lemmacomputer_linear"));
+    assert.equal(revokedReplacement.mcpToolPermissions?.lemmacomputer_linear, undefined);
     assert.ok(!revokedReplacement.allowedTools.includes("create_issue"));
     assert.equal(await connectorRegistry.getConnectionState(identity.tenantId, identity.subjectId, "linear"), null);
-    assert.ok(statusServers.every((serverName) => serverName === "onecomputer_linear"));
+    assert.ok(statusServers.every((serverName) => serverName === "lemmacomputer_linear"));
     assert.deepEqual(toolServers, []);
 
     statusServers.length = 0;

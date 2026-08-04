@@ -39,7 +39,7 @@ test("administrator filters spend, drills Team to user to 201 tasks, explains co
   const download = page.waitForEvent("download");
   await page.getByRole("link", { name: "Export CSV" }).click();
   const exported = await download;
-  expect(exported.suggestedFilename()).toBe("onecomputer-ai-spend.csv");
+  expect(exported.suggestedFilename()).toBe("lemmacomputer-ai-spend.csv");
 
   await page.getByLabel("Spend from date").fill("2020-01-01");
   await page.getByLabel("Spend to date").fill("2020-02-01");

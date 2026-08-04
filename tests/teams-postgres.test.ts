@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import pg from "pg";
-import { OneComputerError } from "@onecomputer/contracts";
-import { PostgresTeamStore } from "@onecomputer/workspace-store";
+import { LemmaComputerError } from "@lemmacomputer/contracts";
+import { PostgresTeamStore } from "@lemmacomputer/workspace-store";
 
 const connectionString = process.env.TEAM_TEST_DATABASE_URL;
 
@@ -78,7 +78,7 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
         updatedBy: administratorId,
         displayName: "  unallocated  ",
       }),
-      (error) => error instanceof OneComputerError && error.code === "TEAM_NAME_RESERVED",
+      (error) => error instanceof LemmaComputerError && error.code === "TEAM_NAME_RESERVED",
     );
     await assert.rejects(
       pool.query("UPDATE allocation_units SET display_name='Unallocated' WHERE tenant_id=$1 AND id=$2", [tenantId, finance.id]),
@@ -101,7 +101,7 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
         updatedBy: administratorId,
         displayName: "Unallocated",
       }),
-      (error) => error instanceof OneComputerError && error.code === "TEAM_NAME_RESERVED",
+      (error) => error instanceof LemmaComputerError && error.code === "TEAM_NAME_RESERVED",
     );
 
     const engineering = await first.createTeam({
@@ -139,11 +139,11 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
     const future = new Date(Date.now() + 60_000);
     await assert.rejects(
       first.assignMembership({ tenantId, teamId: finance.id, userId: otherMemberId, assignedBy: administratorId, effectiveFrom: future }),
-      (error) => error instanceof OneComputerError && error.code === "TEAM_MEMBERSHIP_FUTURE_UNSUPPORTED",
+      (error) => error instanceof LemmaComputerError && error.code === "TEAM_MEMBERSHIP_FUTURE_UNSUPPORTED",
     );
     await assert.rejects(
       first.setDefaultSpendingTeam({ tenantId, teamId: finance.id, userId: otherMemberId, assignedBy: administratorId, effectiveFrom: future }),
-      (error) => error instanceof OneComputerError && error.code === "TEAM_DEFAULT_FUTURE_UNSUPPORTED",
+      (error) => error instanceof LemmaComputerError && error.code === "TEAM_DEFAULT_FUTURE_UNSUPPORTED",
     );
 
     const initialMembership = await first.assignMembership({
@@ -222,7 +222,7 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
         updatedBy: outsiderId,
         displayName: "Stolen",
       }),
-      (error) => error instanceof OneComputerError && error.code === "TEAM_NOT_FOUND",
+      (error) => error instanceof LemmaComputerError && error.code === "TEAM_NOT_FOUND",
     );
     await assert.rejects(
       first.createTeam({
@@ -233,7 +233,7 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
         ownerUserId: outsiderId,
         costCenterCode: "OUTSIDER-CODE",
       }),
-      (error) => error instanceof OneComputerError && error.code === "TEAM_OWNER_NOT_FOUND",
+      (error) => error instanceof LemmaComputerError && error.code === "TEAM_OWNER_NOT_FOUND",
     );
     await assert.rejects(
       first.assignMembership({
@@ -242,7 +242,7 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
         userId: outsiderId,
         assignedBy: outsiderId,
       }),
-      (error) => error instanceof OneComputerError && error.code === "TEAM_NOT_FOUND",
+      (error) => error instanceof LemmaComputerError && error.code === "TEAM_NOT_FOUND",
     );
     await assert.rejects(
       first.setDefaultSpendingTeam({
@@ -251,7 +251,7 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
         userId: outsiderId,
         assignedBy: outsiderId,
       }),
-      (error) => error instanceof OneComputerError && error.code === "TEAM_NOT_FOUND",
+      (error) => error instanceof LemmaComputerError && error.code === "TEAM_NOT_FOUND",
     );
     await assert.rejects(
       pool.query(
@@ -321,7 +321,7 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
     assert.equal(membershipRace[0].status, "fulfilled");
     if (membershipRace[1].status === "rejected") {
       assert.ok(
-        membershipRace[1].reason instanceof OneComputerError
+        membershipRace[1].reason instanceof LemmaComputerError
         && membershipRace[1].reason.code === "TEAM_NOT_FOUND",
       );
     }
@@ -351,7 +351,7 @@ test("PostgreSQL Teams preserve tenant boundaries, default history, and permissi
     assert.equal(defaultRace[0].status, "fulfilled");
     if (defaultRace[1].status === "rejected") {
       assert.ok(
-        defaultRace[1].reason instanceof OneComputerError
+        defaultRace[1].reason instanceof LemmaComputerError
         && defaultRace[1].reason.code === "TEAM_NOT_FOUND",
       );
     }

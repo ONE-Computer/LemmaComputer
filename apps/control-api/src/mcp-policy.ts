@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  OneComputerError,
+  LemmaComputerError,
   canonicalJson,
   m365ToolCatalog,
   ownedAgentCatalog,
@@ -8,8 +8,8 @@ import {
   type McpPolicyDecision,
   type McpPolicyRequest,
   type OwnedJson,
-} from "@onecomputer/contracts";
-import { runtimePolicyFor, type GovernanceStore, type IdentityPolicyStore, type WorkspaceStore } from "@onecomputer/workspace-store";
+} from "@lemmacomputer/contracts";
+import { runtimePolicyFor, type GovernanceStore, type IdentityPolicyStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
 import type { GovernedOperationService } from "./operations.js";
 
@@ -73,11 +73,11 @@ const canonicalizeOperationAudit = (
 ): Record<string, OwnedJson> => {
   const targetType = governedTargetType[toolName];
   if (!targetType) return argumentsValue;
-  const context = argumentsValue.onecomputerAudit;
+  const context = argumentsValue.lemmacomputerAudit;
   if (!context || typeof context !== "object" || Array.isArray(context)) return argumentsValue;
   return {
     ...argumentsValue,
-    onecomputerAudit: {
+    lemmacomputerAudit: {
       ...context,
       // The tool determines whether a destination is a chat or a channel.
       // Keeping this out of model control makes retries of the same provider
@@ -120,7 +120,7 @@ const resumableUploadArguments = z.strictObject({
       "@microsoft.graph.conflictBehavior": z.enum(["fail", "replace", "rename"]),
     }),
   }),
-  onecomputerFile: z.strictObject({
+  lemmacomputerFile: z.strictObject({
     name: z.string().trim().min(1).max(255),
     size: z.number().int().positive(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -173,10 +173,10 @@ const definition = (
   mode,
   parse: (value) => {
     if (risk !== "write" || !value || typeof value !== "object" || Array.isArray(value)) return schema.parse(value);
-    const { onecomputerAudit, ...toolArguments } = value as Record<string, OwnedJson>;
+    const { lemmacomputerAudit, ...toolArguments } = value as Record<string, OwnedJson>;
     return {
       ...schema.parse(toolArguments),
-      onecomputerAudit: operationAuditContext.parse(onecomputerAudit),
+      lemmacomputerAudit: operationAuditContext.parse(lemmacomputerAudit),
     };
   },
 });
@@ -240,7 +240,7 @@ const displayNames: Record<keyof typeof m365ToolCatalog, string> = {
 export const m365CapabilityDefinitions = Object.fromEntries(
   Object.entries(m365ToolCatalog).map(([name, metadata]) => [name, definition(
     `m365.${name}`,
-    `onecomputer.m365.${name}.v1`,
+    `lemmacomputer.m365.${name}.v1`,
     displayNames[name as keyof typeof m365ToolCatalog],
     metadata.risk === "read" ? `Read Microsoft 365 data using ${name}.` : `Change Microsoft 365 data using ${name}.`,
     metadata.service,
@@ -252,7 +252,7 @@ export const m365CapabilityDefinitions = Object.fromEntries(
 
 export const resumableUploadCapability = definition(
   "m365.create-upload-session",
-  "onecomputer.m365.create-upload-session.v1",
+  "lemmacomputer.m365.create-upload-session.v1",
   "Upload large OneDrive file",
   "Create an approval-bound resumable upload session for one workspace-local file.",
   "onedrive",
@@ -262,7 +262,7 @@ export const resumableUploadCapability = definition(
 );
 
 export const m365LiteLlmServerId = createHash("sha256")
-  .update("onecomputer_ms365|http://ms365-mcp:3000/mcp|http|oauth2|")
+  .update("lemmacomputer_ms365|http://ms365-mcp:3000/mcp|http|oauth2|")
   .digest("hex")
   .slice(0, 32);
 
@@ -288,14 +288,14 @@ export class McpPolicyService {
     const capability = request.toolName === "create-upload-session"
       ? resumableUploadCapability
       : m365CapabilityDefinitions[request.toolName as keyof typeof m365CapabilityDefinitions];
-    if (request.serverId !== m365LiteLlmServerId || request.serverName !== "onecomputer_ms365" || !capability) {
+    if (request.serverId !== m365LiteLlmServerId || request.serverName !== "lemmacomputer_ms365" || !capability) {
       return this.authorizeHosted(request, correlationId);
     }
 
     const identity: IdentityContext = {
       tenantId: request.tenantId,
       subjectId: request.subjectId,
-      audience: "onecomputer-control",
+      audience: "lemmacomputer-control",
     };
     const [principal, effectivePolicy, workspace] = await Promise.all([
       this.identityPolicies.getPrincipal(request.subjectId),
@@ -428,12 +428,12 @@ export class McpPolicyService {
     const identity: IdentityContext = {
       tenantId: request.tenantId,
       subjectId: request.subjectId,
-      audience: "onecomputer-control",
+      audience: "lemmacomputer-control",
     };
     const hosted = await this.hostedToolPolicy(identity, request.serverName, request.toolName);
     if (!hosted || hosted.serverId !== request.serverId) return denied("MCP_TOOL_NOT_GOVERNED");
     const capabilityId = `mcp.${hosted.connectorId}.${request.toolName}`.slice(0, 128);
-    const schemaId = `onecomputer.mcp.${createHash("sha256").update(`${request.serverName}\0${request.toolName}`).digest("hex").slice(0, 32)}.v1`;
+    const schemaId = `lemmacomputer.mcp.${createHash("sha256").update(`${request.serverName}\0${request.toolName}`).digest("hex").slice(0, 32)}.v1`;
     const schemaHash = createHash("sha256").update(canonicalJson({
       schemaVersion: 1,
       serverName: request.serverName,
@@ -529,6 +529,6 @@ export class McpPolicyService {
 }
 
 export const requireMcpPolicyAllow = (decision: McpPolicyDecision) => {
-  if (decision.decision !== "allow") throw new OneComputerError(decision.code, "The Microsoft 365 tool call is not approved for execution", 403);
+  if (decision.decision !== "allow") throw new LemmaComputerError(decision.code, "The Microsoft 365 tool call is not approved for execution", 403);
   return decision;
 };

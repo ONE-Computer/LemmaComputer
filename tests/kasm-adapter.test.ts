@@ -9,7 +9,7 @@ import {
   DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS,
   KasmLocalAdapter,
   mapKasmState,
-} from "@onecomputer/kasm-adapter";
+} from "@lemmacomputer/kasm-adapter";
 import { policyFixture } from "./policy-fixture.js";
 
 test("Kasm launch forces the native clipboard contract instead of browser-local defaults", () => {
@@ -63,7 +63,7 @@ test("local Kasm gives workspace initialization a production-safe startup window
 });
 
 test("local Kasm observes readiness at the timeout boundary", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
   let inspections = 0;
   const server = createServer(async (request, response) => {
@@ -89,9 +89,9 @@ test("local Kasm observes readiness at the timeout boundary", async () => {
     const adapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
       startupPollMs: 50,
@@ -107,7 +107,7 @@ test("local Kasm observes readiness at the timeout boundary", async () => {
 });
 
 test("local Kasm allows a running workspace to recover from transient unhealthy readiness", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
   let inspections = 0;
   const server = createServer(async (request, response) => {
@@ -134,9 +134,9 @@ test("local Kasm allows a running workspace to recover from transient unhealthy 
     const adapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
       startupPollMs: 1,
@@ -152,9 +152,9 @@ test("local Kasm allows a running workspace to recover from transient unhealthy 
 });
 
 test("local Kasm reconciliation restores governed endpoints after Compose replaces them", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
-  const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const workspaceNetwork = "lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
   const connections: Array<Record<string, unknown>> = [];
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -164,9 +164,9 @@ test("local Kasm reconciliation restores governed endpoints after Compose replac
     response.setHeader("content-type", "application/json");
     if (request.method === "GET" && path === "/containers/json?all=1") {
       response.end(JSON.stringify([{ State: "running", Labels: {
-        "com.onecomputer.workspace-network": workspaceNetwork,
-        "com.onecomputer.gateway-attached": "true",
-        "com.onecomputer.control-attached": "true",
+        "com.lemmacomputer.workspace-network": workspaceNetwork,
+        "com.lemmacomputer.gateway-attached": "true",
+        "com.lemmacomputer.control-attached": "true",
       } }]));
       return;
     }
@@ -182,17 +182,17 @@ test("local Kasm reconciliation restores governed endpoints after Compose replac
     const adapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
-      controlContainer: "onecomputer-control-api",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      controlContainer: "lemmacomputer-control-api",
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
     });
     await adapter.reconcile();
     assert.deepEqual(connections, [
-      { Container: "onecomputer-litellm", EndpointConfig: { Aliases: ["litellm"] } },
-      { Container: "onecomputer-control-api", EndpointConfig: { Aliases: ["onecomputer-control"] } },
+      { Container: "lemmacomputer-litellm", EndpointConfig: { Aliases: ["litellm"] } },
+      { Container: "lemmacomputer-control-api", EndpointConfig: { Aliases: ["lemmacomputer-control"] } },
     ]);
   } finally {
     server.closeAllConnections();
@@ -202,9 +202,9 @@ test("local Kasm reconciliation restores governed endpoints after Compose replac
 });
 
 test("local Kasm destroy tolerates a governed endpoint disappearing during disconnect", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
-  const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const workspaceNetwork = "lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
   const requests: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
   let gatewayConnected = true;
   let networkRemoved = false;
@@ -219,20 +219,20 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
       response.end(JSON.stringify({
         Config: {
           Labels: {
-            "com.onecomputer.workspace-network": workspaceNetwork,
-            "com.onecomputer.gateway-attached": "true",
-            "com.onecomputer.control-attached": "true",
+            "com.lemmacomputer.workspace-network": workspaceNetwork,
+            "com.lemmacomputer.gateway-attached": "true",
+            "com.lemmacomputer.control-attached": "true",
           },
           Env: [],
         },
-        Name: "/onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+        Name: "/lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
       }));
       return;
     }
     if (request.method === "GET" && path === `/networks/${workspaceNetwork}`) {
       response.end(JSON.stringify({
         Containers: gatewayConnected
-          ? { "gateway-container-id": { Name: "onecomputer-litellm" } }
+          ? { "gateway-container-id": { Name: "lemmacomputer-litellm" } }
           : {},
       }));
       return;
@@ -240,14 +240,14 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
     if (
       request.method === "POST"
       && path === `/networks/${workspaceNetwork}/disconnect`
-      && body.Container === "onecomputer-litellm"
+      && body.Container === "lemmacomputer-litellm"
     ) {
       // Reproduce Docker's observed race: Compose drops the endpoint after
       // inspection, then Docker reports "not connected" as a 500 response.
       gatewayConnected = false;
       response.statusCode = 500;
       response.end(JSON.stringify({
-        message: "container gateway-container-id is not connected to network onecomputer-workspace",
+        message: "container gateway-container-id is not connected to network lemmacomputer-workspace",
       }));
       return;
     }
@@ -261,10 +261,10 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
     const adapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
-      controlContainer: "onecomputer-control-api",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      controlContainer: "lemmacomputer-control-api",
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
     });
@@ -273,7 +273,7 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
     assert.equal(
       requests.some((item) => (
         item.path === `/networks/${workspaceNetwork}/disconnect`
-        && item.body.Container === "onecomputer-control-api"
+        && item.body.Container === "lemmacomputer-control-api"
       )),
       false,
     );
@@ -288,10 +288,10 @@ test("local Cowork virtualization is rejected on hosted multi-tenant nodes", () 
   assert.throws(
     () => new KasmLocalAdapter({
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
-      controlContainer: "onecomputer-control-api",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      controlContainer: "lemmacomputer-control-api",
       relayImage: "sha256:pinned-relay",
       installationKind: "hosted",
       kvmEnabled: true,
@@ -307,7 +307,7 @@ test("local Cowork virtualization is rejected on hosted multi-tenant nodes", () 
 });
 
 test("local Kasm creates a hardened internal network and reconciles governed service attachments", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
   const requests: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
   let createCount = 0;
@@ -330,22 +330,22 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
         State: { Running: true, ExitCode: 0 },
         Config: {
           Labels: {
-            "com.onecomputer.workspace-id": "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
-            "com.onecomputer.workspace-network": "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
-            "com.onecomputer.control-attached": "true",
-            "com.onecomputer.desktop-port": "16920",
+            "com.lemmacomputer.workspace-id": "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+            "com.lemmacomputer.workspace-network": "lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+            "com.lemmacomputer.control-attached": "true",
+            "com.lemmacomputer.desktop-port": "16920",
           },
-          Env: ["ONECOMPUTER_AGENT_BRIDGE_TOKEN=scoped-agent-bridge-token"],
+          Env: ["LEMMACOMPUTER_AGENT_BRIDGE_TOKEN=scoped-agent-bridge-token"],
         },
-        Name: "/onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+        Name: "/lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
       }));
       return;
     }
-    if (request.method === "GET" && path === "/networks/onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508" && workspaceNetworkExists) {
+    if (request.method === "GET" && path === "/networks/lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508" && workspaceNetworkExists) {
       response.end(JSON.stringify({
         Containers: {
-          ...(gatewayConnected ? { "gateway-container-id": { Name: "onecomputer-litellm" } } : {}),
-          ...(controlConnected ? { "control-container-id": { Name: "onecomputer-control-api" } } : {}),
+          ...(gatewayConnected ? { "gateway-container-id": { Name: "lemmacomputer-litellm" } } : {}),
+          ...(controlConnected ? { "control-container-id": { Name: "lemmacomputer-control-api" } } : {}),
         },
       }));
       return;
@@ -363,13 +363,13 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       }));
       return;
     }
-    if (request.method === "POST" && path === "/networks/create" && body.Name === "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508") {
+    if (request.method === "POST" && path === "/networks/create" && body.Name === "lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508") {
       workspaceNetworkExists = true;
     }
-    if (request.method === "POST" && path === "/networks/onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508/connect" && body.Container === "onecomputer-litellm") {
+    if (request.method === "POST" && path === "/networks/lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508/connect" && body.Container === "lemmacomputer-litellm") {
       gatewayConnected = true;
     }
-    if (request.method === "POST" && path === "/networks/onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508/connect" && body.Container === "onecomputer-control-api") {
+    if (request.method === "POST" && path === "/networks/lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508/connect" && body.Container === "lemmacomputer-control-api") {
       controlConnected = true;
     }
     response.end(JSON.stringify({ ok: true }));
@@ -382,7 +382,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     policyHash: "d".repeat(64),
     workspaceProfile: "kasm-persistent-standard" as const,
     agentId: "agent-alex",
-    agentProfile: "onecomputer-default-agent" as const,
+    agentProfile: "lemmacomputer-default-agent" as const,
     networkProfile: "controlled-egress-v1" as const,
     clipboard: {
       enabled: true,
@@ -408,8 +408,8 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
         purpose: "Download Claude Desktop updates",
       }],
     },
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-folders", "list-calendars", "list-drives"],
     toolPolicies: {
       "list-mail-folders": "allow" as const,
@@ -422,14 +422,14 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const adapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
-      controlContainer: "onecomputer-control-api",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      controlContainer: "lemmacomputer-control-api",
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
       egressProxyImage: "sha256:pinned-egress-proxy",
-      egressNetwork: "onecomputer-egress",
+      egressNetwork: "lemmacomputer-egress",
       timeZone: "Asia/Singapore",
       kvmEnabled: true,
       portStart: 16920,
@@ -443,11 +443,11 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       gateway: {
         baseUrl: "http://litellm:4000",
         credential: "sk-scoped-workspace-agent-key",
-        modelAlias: "onecomputer-assistant",
+        modelAlias: "lemmacomputer-assistant",
         expiresAt: "2026-07-21T00:00:00.000Z",
       },
       agentBridge: {
-        baseUrl: "http://onecomputer-control:4100",
+        baseUrl: "http://lemmacomputer-control:4100",
         token: "scoped-agent-bridge-token-at-least-24-characters",
         expiresAt: "2026-07-21T00:00:00.000Z",
       },
@@ -471,15 +471,15 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       }],
     };
     await adapter.create(createInput);
-    const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+    const workspaceNetwork = "lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
     const networkCreate = requests.find((item) => item.path === "/networks/create" && item.body.Name === workspaceNetwork)!;
     assert.equal(networkCreate.body.Internal, true);
-    assert.equal((networkCreate.body.Labels as Record<string, unknown>)["com.onecomputer.workspace-id"], "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
-    const gatewayAttach = requests.find((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "onecomputer-litellm")!;
+    assert.equal((networkCreate.body.Labels as Record<string, unknown>)["com.lemmacomputer.workspace-id"], "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
+    const gatewayAttach = requests.find((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "lemmacomputer-litellm")!;
     assert.deepEqual((gatewayAttach.body.EndpointConfig as Record<string, unknown>).Aliases, ["litellm"]);
-    const controlAttach = requests.find((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "onecomputer-control-api")!;
-    assert.deepEqual((controlAttach.body.EndpointConfig as Record<string, unknown>).Aliases, ["onecomputer-control"]);
-    const sandboxCreate = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=onecomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"))!;
+    const controlAttach = requests.find((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "lemmacomputer-control-api")!;
+    assert.deepEqual((controlAttach.body.EndpointConfig as Record<string, unknown>).Aliases, ["lemmacomputer-control"]);
+    const sandboxCreate = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=lemmacomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"))!;
     const host = sandboxCreate.body.HostConfig as Record<string, unknown>;
     assert.equal(host.NetworkMode, workspaceNetwork);
     assert.equal(host.Memory, 8_589_934_592);
@@ -513,38 +513,38 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       PathInContainer: "/dev/vhost-vsock",
       CgroupPermissions: "rwm",
     }]);
-    const workspaceVolume = "onecomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+    const workspaceVolume = "lemmacomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
     assert.deepEqual(host.Mounts, [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }]);
     const volumeCreate = requests.find((item) => item.path === "/volumes/create")!;
     assert.equal(volumeCreate.body.Name, workspaceVolume);
     const serialized = JSON.stringify(sandboxCreate.body);
-    assert.ok(serialized.includes("ONECOMPUTER_ALLOWED_TOOLS=list-mail-folders,list-calendars,list-drives"));
-    assert.ok(serialized.includes("ONECOMPUTER_GATEWAY_UPSTREAM=http://litellm:4000"));
-    assert.ok(serialized.includes("ONECOMPUTER_GATEWAY_CREDENTIAL=sk-scoped-workspace-agent-key"));
-    assert.ok(serialized.includes("ONECOMPUTER_SIGNED_POLICY_B64="));
-    assert.ok(serialized.includes("ONECOMPUTER_POLICY_VERIFICATION_KEYS_B64="));
-    assert.ok(serialized.includes("com.onecomputer.policy-signing-key-id"));
-    assert.ok(serialized.includes("com.onecomputer.policy-bundle-digest"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_ALLOWED_TOOLS=list-mail-folders,list-calendars,list-drives"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_GATEWAY_UPSTREAM=http://litellm:4000"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_GATEWAY_CREDENTIAL=sk-scoped-workspace-agent-key"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_SIGNED_POLICY_B64="));
+    assert.ok(serialized.includes("LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64="));
+    assert.ok(serialized.includes("com.lemmacomputer.policy-signing-key-id"));
+    assert.ok(serialized.includes("com.lemmacomputer.policy-bundle-digest"));
     assert.ok(!serialized.includes("POLICY_SIGNING_PRIVATE_KEY"));
-    assert.ok(serialized.includes("ONECOMPUTER_CONTROL_UPSTREAM=http://onecomputer-control:4100"));
-    assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_ENABLED=true"));
-    assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=true"));
-    assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL=true"));
-    assert.ok(serialized.includes("ONECOMPUTER_CLIPBOARD_MAX_BYTES=65536"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_CONTROL_UPSTREAM=http://lemmacomputer-control:4100"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_CLIPBOARD_ENABLED=true"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_CLIPBOARD_LOCAL_TO_WORKSPACE=true"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL=true"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_CLIPBOARD_MAX_BYTES=65536"));
     assert.ok(serialized.includes("TZ=Asia/Singapore"));
-    assert.ok(serialized.includes("ONECOMPUTER_TIME_ZONE=Asia/Singapore"));
-    assert.ok(serialized.includes("ONECOMPUTER_COWORK_ENABLED=true"));
-    assert.ok(serialized.includes('"com.onecomputer.cowork-enabled":"true"'));
-    assert.ok(serialized.includes('"com.onecomputer.time-zone":"Asia/Singapore"'));
+    assert.ok(serialized.includes("LEMMACOMPUTER_TIME_ZONE=Asia/Singapore"));
+    assert.ok(serialized.includes("LEMMACOMPUTER_COWORK_ENABLED=true"));
+    assert.ok(serialized.includes('"com.lemmacomputer.cowork-enabled":"true"'));
+    assert.ok(serialized.includes('"com.lemmacomputer.time-zone":"Asia/Singapore"'));
     assert.ok(serialized.includes("API_SERVER_ENABLED=true"));
     assert.ok(serialized.includes("API_SERVER_HOST=0.0.0.0"));
     assert.ok(serialized.includes("API_SERVER_PORT=8642"));
     assert.ok(serialized.includes("API_SERVER_KEY=workspace-specific-hermes-api-key-at-least-32-characters"));
     assert.equal(host.PortBindings, undefined);
-    assert.ok(serialized.includes("HTTPS_PROXY=http://onecomputer:"));
-    assert.ok(serialized.includes("@onecomputer-egress-proxy:3128"));
+    assert.ok(serialized.includes("HTTPS_PROXY=http://lemmacomputer:"));
+    assert.ok(serialized.includes("@lemmacomputer-egress-proxy:3128"));
     assert.ok(!serialized.includes("EGRESS_GRANT_SECRET"));
-    assert.ok(serialized.includes("com.onecomputer.control-attached"));
+    assert.ok(serialized.includes("com.lemmacomputer.control-attached"));
     assert.ok(!serialized.includes("OPENAI_API_KEY"));
     assert.ok(!serialized.includes("LITELLM_MASTER_KEY"));
     assert.ok(!serialized.includes("CLIENT_SECRET"));
@@ -556,9 +556,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.deepEqual(egressHost.CapDrop, ["ALL"]);
     assert.equal(egressHost.ReadonlyRootfs, true);
     const egressNetworking = egressCreate.body.NetworkingConfig as { EndpointsConfig: Record<string, { Aliases: string[] }> };
-    assert.deepEqual(egressNetworking.EndpointsConfig[workspaceNetwork]?.Aliases, ["onecomputer-egress-proxy"]);
+    assert.deepEqual(egressNetworking.EndpointsConfig[workspaceNetwork]?.Aliases, ["lemmacomputer-egress-proxy"]);
     assert.ok(JSON.stringify(egressCreate.body).includes("downloads.claude.ai"));
-    assert.ok(requests.some((item) => item.path === "/networks/onecomputer-egress/connect" && item.body.Container === "egress-id"));
+    assert.ok(requests.some((item) => item.path === "/networks/lemmacomputer-egress/connect" && item.body.Container === "egress-id"));
     const updatedPolicy = {
       ...policy,
       policyHash: "f".repeat(64),
@@ -606,36 +606,36 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     // Simulate Compose replacing Control and dropping its dynamic endpoint.
     controlConnected = false;
     await adapter.status("sandbox-id");
-    assert.equal(requests.filter((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "onecomputer-litellm").length, 1);
-    assert.equal(requests.filter((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "onecomputer-control-api").length, 2);
+    assert.equal(requests.filter((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "lemmacomputer-litellm").length, 1);
+    assert.equal(requests.filter((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "lemmacomputer-control-api").length, 2);
     const launch = await adapter.open("sandbox-id");
     assert.deepEqual(launch.ingressTarget, {
       protocol: "https",
-      host: "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
+      host: "lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
       port: 16_920,
     });
     const standardAdapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
-      controlContainer: "onecomputer-control-api",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      controlContainer: "lemmacomputer-control-api",
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
       egressProxyImage: "sha256:pinned-egress-proxy",
-      egressNetwork: "onecomputer-egress",
+      egressNetwork: "lemmacomputer-egress",
       kvmEnabled: false,
       portStart: 16920,
       portEnd: 16920,
     });
     await standardAdapter.create(createInput);
-    const sandboxCreates = requests.filter((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=onecomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"));
+    const sandboxCreates = requests.filter((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=lemmacomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"));
     const standardHost = sandboxCreates.at(-1)!.body.HostConfig as Record<string, unknown>;
     assert.equal(standardHost.Memory, 4_294_967_296);
     assert.equal(standardHost.Devices, undefined);
     assert.deepEqual(standardHost.SecurityOpt, ["no-new-privileges"]);
-    assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("ONECOMPUTER_COWORK_ENABLED=false"));
+    assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("LEMMACOMPUTER_COWORK_ENABLED=false"));
 
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
     assert.ok(requests.some((item) => item.method === "DELETE" && item.path === `/volumes/${workspaceVolume}?force=true`));
@@ -648,9 +648,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
 
 
 test("local Kasm retries container creation when Docker drops the workspace network", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
-  const workspaceNetwork = "onecomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const workspaceNetwork = "lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
   let creates = 0;
   const server = createServer(async (request, response) => {
     for await (const _chunk of request) { /* drain */ }
@@ -674,9 +674,9 @@ test("local Kasm retries container creation when Docker drops the workspace netw
     const adapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
     });
@@ -695,7 +695,7 @@ test("local Kasm retries container creation when Docker drops the workspace netw
 });
 
 test("local Kasm surfaces allowlisted exit-78 diagnostics before cleanup", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "onecomputer-docker-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
   const message = "Cowork cannot create an AF_VSOCK socket; check the workspace seccomp profile";
   const frame = Buffer.alloc(8 + Buffer.byteLength(message));
@@ -722,9 +722,9 @@ test("local Kasm surfaces allowlisted exit-78 diagnostics before cleanup", async
     const adapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
-      networkPrefix: "onecomputer-workspace",
-      controlNetwork: "onecomputer-control",
-      gatewayContainer: "onecomputer-litellm",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
       startupPollMs: 1,

@@ -1,5 +1,5 @@
 {
-  "name": "@onecomputer/workspace-controller",
+  "name": "@lemmacomputer/workspace-controller",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,9 +9,9 @@
     "build": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@onecomputer/contracts": "*",
-    "@onecomputer/kasm-adapter": "*",
-    "@onecomputer/policy-integrity": "*",
+    "@lemmacomputer/contracts": "*",
+    "@lemmacomputer/kasm-adapter": "*",
+    "@lemmacomputer/policy-integrity": "*",
     "fastify": "5.10.0",
     "zod": "4.4.3"
   }

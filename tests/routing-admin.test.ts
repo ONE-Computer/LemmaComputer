@@ -8,7 +8,7 @@ import {
   saveRoutingPolicySchema,
   saveRoutingReviewSchema,
 } from "../apps/control-api/src/routing.js";
-import type { RoutingStore } from "@onecomputer/workspace-store";
+import type { RoutingStore } from "@lemmacomputer/workspace-store";
 const uuid = {
   team: "11111111-1111-4111-8111-111111111111",
   mapping: "22222222-2222-4222-8222-222222222222",

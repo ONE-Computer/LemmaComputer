@@ -1,6 +1,6 @@
 import Fastify from "fastify";
-import { OneComputerError, executeScheduleRunSchema } from "@onecomputer/contracts";
-import { PostgresScheduleStore, type ScheduleStore } from "@onecomputer/workspace-store";
+import { LemmaComputerError, executeScheduleRunSchema } from "@lemmacomputer/contracts";
+import { PostgresScheduleStore, type ScheduleStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -32,16 +32,16 @@ export class HttpScheduleControlClient implements ScheduleControlClient {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-onecomputer-scheduler-token": this.internalToken,
+          "x-lemmacomputer-scheduler-token": this.internalToken,
         },
         body: JSON.stringify(executeScheduleRunSchema.parse({ runId, leaseToken })),
         signal: AbortSignal.timeout(15 * 60_000),
       });
     } catch {
-      throw new OneComputerError("SCHEDULE_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
+      throw new LemmaComputerError("SCHEDULE_CONTROL_UNAVAILABLE", "LemmaComputer Control is unavailable", 503, true);
     }
     if (!response.ok) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "SCHEDULE_EXECUTION_REJECTED",
         "LemmaComputer rejected the scheduled run",
         response.status,
@@ -95,7 +95,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       app.log.error({
         err: {
           name: error instanceof Error ? error.name : "UnknownError",
-          code: error instanceof OneComputerError ? error.code : "SCHEDULE_POLL_FAILED",
+          code: error instanceof LemmaComputerError ? error.code : "SCHEDULE_POLL_FAILED",
         },
       }, "schedule polling failed");
     } finally {

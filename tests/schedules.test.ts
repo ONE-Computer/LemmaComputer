@@ -5,14 +5,14 @@ import type {
   ChatAgentCatalogId,
   IdentityContext,
   ScheduleRunState,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import {
   nextScheduleAt,
   type ClaimedScheduleRun,
   type ScheduleRecord,
   type ScheduleRunRecord,
   type ScheduleStore,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import { SchedulePromptVault, ScheduleService } from "../apps/control-api/src/schedules.js";
 import { SchedulerWorker } from "../apps/scheduler-worker/src/server.js";
 import type { AgentChatAccess, AgentChatClient } from "../apps/control-api/src/agent-chat.js";
@@ -20,7 +20,7 @@ import type { AgentChatAccess, AgentChatClient } from "../apps/control-api/src/a
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "alex",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 

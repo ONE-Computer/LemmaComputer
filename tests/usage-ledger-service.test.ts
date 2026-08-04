@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MinimalSpendingTeam } from "@onecomputer/contracts";
-import { MemoryWorkspaceStore, attemptAdmissionFingerprint, type AdmissionResult, type AttemptAdmissionInput, type AttemptAdmissionSemanticInput, type PostgresUsageLedgerStore, type TeamStore, type UsageAttemptAdmissionHook, type UsageEventInput } from "@onecomputer/workspace-store";
-import type { UsageEventResult } from "@onecomputer/workspace-store";
+import type { MinimalSpendingTeam } from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore, attemptAdmissionFingerprint, type AdmissionResult, type AttemptAdmissionInput, type AttemptAdmissionSemanticInput, type PostgresUsageLedgerStore, type TeamStore, type UsageAttemptAdmissionHook, type UsageEventInput } from "@lemmacomputer/workspace-store";
+import type { UsageEventResult } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 import { UsageLedgerService, UsageTaskBindingAuthority, internalUsageAdmissionSchema, type InternalUsageAdmission } from "../apps/control-api/src/usage-ledger.js";
@@ -181,7 +181,7 @@ test("internal usage endpoints require their dedicated token and reject raw payl
 
     const rawContent = await app.inject({
       method: "POST", url: "/internal/v1/ai-usage/attempts/admit",
-      headers: { "x-onecomputer-ai-usage-token": internalToken },
+      headers: { "x-lemmacomputer-ai-usage-token": internalToken },
       payload: { ...admission(), rawPrompt: "must never enter the ledger" },
     });
     assert.equal(rawContent.statusCode, 400);
@@ -189,7 +189,7 @@ test("internal usage endpoints require their dedicated token and reject raw payl
 
     const accepted = await app.inject({
       method: "POST", url: "/internal/v1/ai-usage/attempts/admit",
-      headers: { "x-onecomputer-ai-usage-token": internalToken }, payload: admission(),
+      headers: { "x-lemmacomputer-ai-usage-token": internalToken }, payload: admission(),
     });
     assert.equal(accepted.statusCode, 201);
     assert.equal(ledger.admissions[0]?.contextKind, "background");

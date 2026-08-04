@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext, OwnedJson } from "@onecomputer/contracts";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext, OwnedJson } from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 
-const identity: IdentityContext = { tenantId: "tenant-openvtc", subjectId: "owner-openvtc", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "tenant-openvtc", subjectId: "owner-openvtc", audience: "lemmacomputer-control" };
 const NOW = new Date("2026-07-21T02:00:00.000Z");
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -17,9 +17,9 @@ const setupOperation = async (store: MemoryWorkspaceStore) => {
     workspaceId: workspace.id,
     agentId: "agent-openvtc",
     capabilityId: "onedrive-delete-protected",
-    serverName: "onecomputer_ms365",
+    serverName: "lemmacomputer_ms365",
     toolName: "delete-onedrive-file",
-    schemaId: "onecomputer.m365.delete-onedrive-file.v1",
+    schemaId: "lemmacomputer.m365.delete-onedrive-file.v1",
     arguments: { driveId: "drive", driveItemId: "item", "If-Match": "etag", confirm: true, excludeResponse: true },
     operationDigest: "a".repeat(64),
     nonce: randomUUID(),
@@ -66,7 +66,7 @@ const createTask = async (
     approverId,
     executorDid: "did:key:zExecutor",
     challenge: "challenge-with-at-least-128-bits",
-    taskType: "https://onecomputer.dev/spec/microsoft365/delete-onedrive-file/0.1",
+    taskType: "https://lemmacomputer.dev/spec/microsoft365/delete-onedrive-file/0.1",
     payloadDigest: "b".repeat(64),
     requestDocument,
     requestHash: sha256(JSON.stringify(requestDocument)),

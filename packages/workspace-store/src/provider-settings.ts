@@ -1,4 +1,4 @@
-import { providerSettingMetadataSchema, type ProviderSettingMetadata } from "@onecomputer/contracts";
+import { providerSettingMetadataSchema, type ProviderSettingMetadata } from "@lemmacomputer/contracts";
 import pg from "pg";
 
 export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock"] as const;

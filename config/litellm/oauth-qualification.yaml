@@ -3,13 +3,13 @@
 model_list: []
 
 mcp_servers:
-  onecomputer_oauth_fixture:
+  lemmacomputer_oauth_fixture:
     transport: http
     url: http://gateway-fixture:4200/oauth-mcp
     description: Isolated OAuth renewal qualification fixture
     auth_type: oauth2
     oauth2_flow: authorization_code
-    client_id: onecomputer-oauth-qualification
+    client_id: lemmacomputer-oauth-qualification
     authorization_url: http://gateway-fixture:4200/oauth/authorize
     token_url: http://gateway-fixture:4200/oauth/token
     scopes:

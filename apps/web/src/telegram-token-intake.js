@@ -14,7 +14,7 @@ const fromBase64 = (value) => {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 };
 
-const intakeAad = (grantId) => encoder.encode(`onecomputer.telegram-token-intake.v1:${grantId}`);
+const intakeAad = (grantId) => encoder.encode(`lemmacomputer.telegram-token-intake.v1:${grantId}`);
 
 export async function encryptTelegramBotTokenEnvelope({ grantId, encryptionPublicKeySpkiBase64, botToken }) {
   if (!globalThis.crypto?.subtle) throw new Error("This browser cannot securely store a Telegram bot token.");

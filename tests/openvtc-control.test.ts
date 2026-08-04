@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import type { GovernedToolExecutionInput, GovernedToolExecutionResult, GovernedToolExecutor } from "@onecomputer/litellm-adapter";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
+import type { GovernedToolExecutionInput, GovernedToolExecutionResult, GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { OpenVtcApprovalCoordinator, openVtcTimestamp } from "../apps/control-api/src/openvtc.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "../apps/control-api/src/operations.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 import { TestOpenVtcConsentClient, type TestDidSigner } from "./helpers/openvtc-consent.js";
 
-const identity: IdentityContext = { tenantId: "tenant-browser", subjectId: "mike", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "tenant-browser", subjectId: "mike", audience: "lemmacomputer-control" };
 
 test("OpenVTC enrollment timestamps retain the verifier's whole-second RFC 3339 form", () => {
   assert.equal(openVtcTimestamp(new Date("2026-07-25T12:35:45.000Z")), "2026-07-25T12:35:45Z");
@@ -115,9 +115,9 @@ test("a protected Calendar write uses the generic redacted OpenVTC path and exec
     workspace.id,
     {
       capabilityId: "m365.create-calendar-event",
-      serverName: "onecomputer_ms365",
+      serverName: "lemmacomputer_ms365",
       toolName: "create-calendar-event",
-      schemaId: "onecomputer.m365.create-calendar-event.v1",
+      schemaId: "lemmacomputer.m365.create-calendar-event.v1",
       arguments: {
         confirm: true,
         body: {
@@ -252,9 +252,9 @@ test("Control exposes session-bound enrollment and bearer-scoped browser transpo
   const coordinator = new OpenVtcApprovalCoordinator(store, consent);
   const proxyToken = "openvtc-api-proxy-token-at-least-24-characters";
   const headers = {
-    "x-onecomputer-proxy-token": proxyToken,
-    "x-onecomputer-test-tenant-id": identity.tenantId,
-    "x-onecomputer-test-user-id": identity.subjectId,
+    "x-lemmacomputer-proxy-token": proxyToken,
+    "x-lemmacomputer-test-tenant-id": identity.tenantId,
+    "x-lemmacomputer-test-user-id": identity.subjectId,
   };
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, { testIdentityMode: true, openVtc: coordinator });
   try {

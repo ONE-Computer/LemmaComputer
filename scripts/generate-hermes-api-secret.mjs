@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 
 const envFileIndex = process.argv.indexOf("--write-env");
 const envFile = envFileIndex === -1 ? undefined : process.argv[envFileIndex + 1];
-const entry = `ONECOMPUTER_HERMES_API_SECRET=${randomBytes(32).toString("base64url")}`;
+const entry = `LEMMACOMPUTER_HERMES_API_SECRET=${randomBytes(32).toString("base64url")}`;
 
 if (!envFile) {
   process.stdout.write(`${entry}\n`);
@@ -15,7 +15,7 @@ if (!envFile) {
   });
   const retained = existing
     .split(/\r?\n/)
-    .filter((line) => !line.startsWith("ONECOMPUTER_HERMES_API_SECRET="))
+    .filter((line) => !line.startsWith("LEMMACOMPUTER_HERMES_API_SECRET="))
     .join("\n")
     .replace(/\n+$/, "");
   await writeFile(envFile, `${retained ? `${retained}\n` : ""}${entry}\n`, { mode: 0o600 });

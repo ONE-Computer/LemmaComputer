@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-canonical_dir="/home/kasm-user/.onecomputer"
+canonical_dir="/home/kasm-user/.lemmacomputer"
 canonical_file="${canonical_dir}/crontab"
 runtime_crontab="/usr/bin/crontab"
 
 if [[ "$(id -u)" -ne 1000 ]]; then
-  echo "onecomputer-crontab must run as kasm-user" >&2
+  echo "lemmacomputer-crontab must run as kasm-user" >&2
   exit 77
 fi
 
@@ -14,7 +14,7 @@ install -d -m 0700 "$canonical_dir"
 
 case "${1:-}" in
   -l)
-    [[ "$#" -eq 1 ]] || { echo "usage: onecomputer-crontab -l" >&2; exit 64; }
+    [[ "$#" -eq 1 ]] || { echo "usage: lemmacomputer-crontab -l" >&2; exit 64; }
     if [[ -f "$canonical_file" ]]; then
       cat "$canonical_file"
     else
@@ -24,19 +24,19 @@ case "${1:-}" in
     exit 0
     ;;
   -r)
-    [[ "$#" -eq 1 ]] || { echo "usage: onecomputer-crontab -r" >&2; exit 64; }
+    [[ "$#" -eq 1 ]] || { echo "usage: lemmacomputer-crontab -r" >&2; exit 64; }
     "$runtime_crontab" -r 2>/dev/null || true
     rm -f "$canonical_file"
     exit 0
     ;;
   -e)
-    echo "Use 'onecomputer-crontab -l > schedule', edit the file, then run 'onecomputer-crontab schedule'." >&2
+    echo "Use 'lemmacomputer-crontab -l > schedule', edit the file, then run 'lemmacomputer-crontab schedule'." >&2
     exit 64
     ;;
 esac
 
 source_file="${1:--}"
-[[ "$#" -le 1 ]] || { echo "usage: onecomputer-crontab [file|-]" >&2; exit 64; }
+[[ "$#" -le 1 ]] || { echo "usage: lemmacomputer-crontab [file|-]" >&2; exit 64; }
 temporary="$(mktemp "${canonical_dir}/.crontab.XXXXXX")"
 trap 'rm -f "$temporary"' EXIT
 if [[ "$source_file" == "-" ]]; then

@@ -6,7 +6,7 @@ import {
   TelegramTokenIntakeGrantIssuer,
   TelegramTokenIntakeGrantVerifier,
   type IdentityContext,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import {
   ChannelBrokerService,
   ChannelCredentialVault,
@@ -19,7 +19,7 @@ import { encryptTelegramBotTokenEnvelope } from "../apps/web/src/telegram-token-
 
 const brokerToken = "broker-internal-token-at-least-32-characters";
 const vaultSecret = "channel-vault-test-secret-at-least-32-characters";
-const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
+const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
 const credentialId = "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24";
 const firstToken = "123456789:telegram-token-for-broker-only-intake";
 const rotatedToken = "987654321:telegram-token-for-broker-only-rotation";
@@ -28,7 +28,7 @@ class IntakeTelegram implements TelegramBotClient {
   validated: string[] = [];
   async validate(token: string) {
     this.validated.push(token);
-    return { botId: token.slice(0, token.indexOf(":")), username: "onecomputer_intake_bot" };
+    return { botId: token.slice(0, token.indexOf(":")), username: "lemmacomputer_intake_bot" };
   }
   async getUpdates() { return []; }
   async downloadFile() { return Buffer.alloc(0); }
@@ -165,7 +165,7 @@ test("the public broker endpoint accepts a signed envelope but rejects deprecate
     const rejected = await app.inject({
       method: "POST",
       url: "/internal/v1/credentials/telegram",
-      headers: { "x-onecomputer-channel-token": brokerToken, "content-type": "application/json" },
+      headers: { "x-lemmacomputer-channel-token": brokerToken, "content-type": "application/json" },
       payload: { identity: alpha, botToken: firstToken },
     });
     assert.equal(rejected.statusCode, 410);

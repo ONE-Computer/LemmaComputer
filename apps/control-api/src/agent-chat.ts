@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import type { InferUIMessageChunk } from "ai";
 import {
-  OneComputerError,
+  LemmaComputerError,
   agentChatEventSchema,
   chatAgentCatalogIdSchema,
   channelArtifactMaxBytes,
@@ -14,7 +14,7 @@ import {
   type ChatUiMessage,
   type IdentityContext,
   type RuntimePolicy,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 
 export type AgentChatAccess = {
   workspaceId: string;
@@ -77,7 +77,7 @@ export class AgentChatAuthority {
     if (!assignedChatAgentIds(policy).includes(catalogId)) return undefined;
     const agentId = policy.agents?.find((agent) => agent.catalogId === catalogId)?.agentId ?? policy.agentId;
     const key = createHmac("sha256", this.rootSecret)
-      .update("onecomputer-agent-chat/v1\0")
+      .update("lemmacomputer-agent-chat/v1\0")
       .update(identity.tenantId).update("\0")
       .update(identity.subjectId).update("\0")
       .update(workspaceId).update("\0")
@@ -90,7 +90,7 @@ export class AgentChatAuthority {
       displayName: chatDisplayNames[catalogId],
       agentId,
       key,
-      baseUrl: `http://onecomputer-sandbox-${workspaceId}:${chatRuntimePorts[catalogId]}`,
+      baseUrl: `http://lemmacomputer-sandbox-${workspaceId}:${chatRuntimePorts[catalogId]}`,
     };
   }
 
@@ -215,7 +215,7 @@ const agentTurnTimeoutMs = 15 * 60_000;
 const session = (value: unknown): AgentChatSession => {
   const item = object(value);
   const id = chatSessionIdSchema.safeParse(item.id);
-  if (!id.success) throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid session", 502, true);
+  if (!id.success) throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid session", 502, true);
   return {
     id: id.data,
     title: nullableText(item.title),
@@ -224,7 +224,7 @@ const session = (value: unknown): AgentChatSession => {
   };
 };
 
-const upstreamError = (access: AgentChatAccess, status: number) => new OneComputerError(
+const upstreamError = (access: AgentChatAccess, status: number) => new LemmaComputerError(
   status === 400
     ? "CHAT_SESSION_REJECTED"
     : status === 404
@@ -259,9 +259,9 @@ export class HttpAgentChatClient implements AgentChatClient {
       if (!response.ok) throw upstreamError(access, response.status);
       return response;
     } catch (error) {
-      if (error instanceof OneComputerError) throw error;
+      if (error instanceof LemmaComputerError) throw error;
       if (init?.signal?.aborted) throw error;
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "CHAT_RUNTIME_UNAVAILABLE",
         `${access.displayName} is not available in this workspace`,
         503,
@@ -274,7 +274,7 @@ export class HttpAgentChatClient implements AgentChatClient {
     const response = await this.response(access, path, init);
     if (response.status === 204) return {};
     return response.json().catch(() => {
-      throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid response", 502, true);
+      throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid response", 502, true);
     });
   }
 
@@ -284,11 +284,11 @@ export class HttpAgentChatClient implements AgentChatClient {
 
   async downloadArtifact(access: AgentChatAccess, artifactId: string) {
     const response = await this.response(access, `/api/artifacts/${encodeURIComponent(artifactId)}`, undefined, 60_000);
-    if (!response.body) throw new OneComputerError("CHAT_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", 502, true);
+    if (!response.body) throw new LemmaComputerError("CHAT_ARTIFACT_UNAVAILABLE", "The generated file is unavailable", 502, true);
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > channelArtifactMaxBytes) {
       await response.body.cancel().catch(() => undefined);
-      throw new OneComputerError("CHAT_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
+      throw new LemmaComputerError("CHAT_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
     }
     const reader = response.body.getReader();
     const chunks: Buffer[] = [];
@@ -300,14 +300,14 @@ export class HttpAgentChatClient implements AgentChatClient {
         size += value.byteLength;
         if (size > channelArtifactMaxBytes) {
           await reader.cancel().catch(() => undefined);
-          throw new OneComputerError("CHAT_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
+          throw new LemmaComputerError("CHAT_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
         }
         chunks.push(Buffer.from(value));
       }
     } finally {
       reader.releaseLock();
     }
-    if (!size) throw new OneComputerError("CHAT_ARTIFACT_UNAVAILABLE", "The generated file is empty", 502);
+    if (!size) throw new LemmaComputerError("CHAT_ARTIFACT_UNAVAILABLE", "The generated file is empty", 502);
     return Buffer.concat(chunks, size);
   }
 
@@ -335,12 +335,12 @@ export class HttpAgentChatClient implements AgentChatClient {
     const id = chatSessionIdSchema.parse(sessionId);
     const payload = object(await this.json(access, `/api/sessions/${encodeURIComponent(id)}/messages`));
     if (!Array.isArray(payload.messages)) {
-      throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
+      throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
     }
     return payload.messages.map((value) => {
       const parsed = chatUiMessageSchema.safeParse(value);
       if (!parsed.success || parsed.data.metadata.agentCatalogId !== access.catalogId) {
-        throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
+        throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
       }
       return parsed.data;
     });
@@ -368,7 +368,7 @@ export class HttpAgentChatClient implements AgentChatClient {
     }, agentTurnTimeoutMs);
     if (!response.body || !response.headers.get("content-type")?.startsWith("application/x-ndjson")) {
       await response.body?.cancel();
-      throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid event stream", 502, true);
+      throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid event stream", 502, true);
     }
 
     const reader = response.body.getReader();
@@ -384,7 +384,7 @@ export class HttpAgentChatClient implements AgentChatClient {
         if (result.done) break;
         buffer += decoder.decode(result.value, { stream: true });
         if (buffer.length > 64 * 1024) {
-          throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent event stream exceeded its frame limit", 502, true);
+          throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent event stream exceeded its frame limit", 502, true);
         }
         while (buffer.includes("\n")) {
           const index = buffer.indexOf("\n");
@@ -395,7 +395,7 @@ export class HttpAgentChatClient implements AgentChatClient {
           try {
             decoded = JSON.parse(line);
           } catch {
-            throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned a malformed event", 502, true);
+            throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned a malformed event", 502, true);
           }
           const parsed = agentChatEventSchema.safeParse(decoded);
           if (
@@ -406,7 +406,7 @@ export class HttpAgentChatClient implements AgentChatClient {
             || (turnId && parsed.data.turnId !== turnId)
             || terminal
           ) {
-            throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid event sequence", 502, true);
+            throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid event sequence", 502, true);
           }
           const event = parsed.data;
           turnId ||= event.turnId;
@@ -414,7 +414,7 @@ export class HttpAgentChatClient implements AgentChatClient {
           if (event.type === "text-delta") {
             textSize += event.delta.length;
             if (textSize > 128_000) {
-              throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent response exceeded its text limit", 502, true);
+              throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent response exceeded its text limit", 502, true);
             }
           }
           terminal = event.type === "turn-finish";
@@ -423,7 +423,7 @@ export class HttpAgentChatClient implements AgentChatClient {
       }
       buffer += decoder.decode();
       if (buffer.trim() || !terminal) {
-        throw new OneComputerError("CHAT_INVALID_RESPONSE", "The agent event stream ended unexpectedly", 502, true);
+        throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent event stream ended unexpectedly", 502, true);
       }
     } finally {
       await reader.cancel().catch(() => undefined);

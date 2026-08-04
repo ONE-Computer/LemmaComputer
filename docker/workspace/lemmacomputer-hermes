@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export LEMMACOMPUTER_SITES_BROKER=http://127.0.0.1:4314
+
+export HERMES_HOME=/home/kasm-user/.hermes
+export HERMES_BUNDLED_SKILLS=/opt/lemmacomputer/hermes-agent/skills
+export PATH=/opt/lemmacomputer/hermes-office-venv/bin:/opt/lemmacomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin
+export NODE_PATH=/opt/lemmacomputer/hermes-office-node/node_modules
+export OPENAI_API_KEY=lemmacomputer-loopback-broker
+export LEMMACOMPUTER_CONNECTORS_BROKER=http://127.0.0.1:4314
+
+exec /opt/lemmacomputer/hermes-venv/bin/hermes chat "$@"

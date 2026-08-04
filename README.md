@@ -64,7 +64,7 @@ The system separates four concerns:
 2. **Control plane:** identity, policy, workspace lifecycle, scoped grant
    issuance, model-routing decisions, Team budgets, immutable usage accounting,
    operation state, audit receipts, and channel routing.
-3. **Data plane:** LiteLLM accepts the governed `onecomputer-auto` transport
+3. **Data plane:** LiteLLM accepts the governed `lemmacomputer-auto` transport
    alias, executes only the concrete deployment authorized by Control, and
    routes MCP traffic using revocable workspace-and-agent credentials; egress
    proxies enforce signed domain rules.

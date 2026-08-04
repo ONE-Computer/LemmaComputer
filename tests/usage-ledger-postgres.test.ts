@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import pg from "pg";
-import { PostgresTeamStore, PostgresUsageLedgerStore, type UsageAttemptAdmissionHook } from "@onecomputer/workspace-store";
+import { PostgresTeamStore, PostgresUsageLedgerStore, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { UsageLedgerService, UsageTaskBindingAuthority, internalUsageAdmissionSchema, type InternalUsageAdmission } from "../apps/control-api/src/usage-ledger.js";
 
 const connectionString = process.env.USAGE_LEDGER_TEST_DATABASE_URL;
@@ -31,7 +31,7 @@ test("PostgreSQL usage ledger preserves attribution, pricing, idempotency, and c
 
     const january = new Date("2026-01-01T00:00:00.000Z");
     const february = new Date("2026-02-01T00:00:00.000Z");
-    const pinnedId = await ledger.createRateCard({ tenantId,...deployment,currency:"USD",source:"pinned_catalogue",sourceVersion:"catalogue-v1",sourceHash:hash("a"),catalogueRelease:"onecomputer-test",effectiveFrom:january,effectiveTo:february,rates:rate("1") });
+    const pinnedId = await ledger.createRateCard({ tenantId,...deployment,currency:"USD",source:"pinned_catalogue",sourceVersion:"catalogue-v1",sourceHash:hash("a"),catalogueRelease:"lemmacomputer-test",effectiveFrom:january,effectiveTo:february,rates:rate("1") });
     await ledger.createRateCard({ tenantId,...deployment,currency:"USD",source:"conservative",sourceVersion:"conservative-v1",sourceHash:hash("b"),effectiveFrom:january,effectiveTo:february,rates:rate("9") });
     const overrideId = await ledger.createRateCard({ tenantId,...deployment,currency:"USD",source:"contract_override",sourceVersion:"contract-v1",sourceHash:hash("c"),effectiveFrom:new Date("2026-01-15T00:00:00.000Z"),effectiveTo:february,approvedBy:adminId,overrideReason:"Negotiated test contract",rates:rate("0.5") });
     assert.equal((await ledger.selectEffectiveRateCard({ tenantId,...deployment,at:new Date("2026-01-14T23:59:59.999Z") }))!.id,pinnedId);
@@ -266,7 +266,7 @@ test("fresh PostgreSQL ledger materializes supported catalogue cards exactly onc
     });
     assert.equal((await firstLedger.selectEffectiveRateCard({
       ...conservativeDeployment,at:new Date("2026-08-01T00:00:00.000Z"),
-    }))?.sourceVersion,"onecomputer-product-rates-2026-07-31.1");
+    }))?.sourceVersion,"lemmacomputer-product-rates-2026-07-31.1");
     assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
       WHERE tenant_id=$1 AND provider_account_id=$2 AND source='pinned_catalogue'`, [tenantId,conservativeDeployment.providerAccountId])).rows[0].count,1);
 
@@ -278,9 +278,9 @@ test("fresh PostgreSQL ledger materializes supported catalogue cards exactly onc
     });
     assert.equal((await firstLedger.selectEffectiveRateCard({
       ...olderPinnedDeployment,at:new Date("2026-08-01T00:00:00.000Z"),
-    }))?.sourceVersion,"onecomputer-product-rates-2026-07-31.1");
+    }))?.sourceVersion,"lemmacomputer-product-rates-2026-07-31.1");
     assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
-      WHERE tenant_id=$1 AND provider_account_id=$2 AND source_version='onecomputer-product-rates-2026-07-31.1'`, [tenantId,olderPinnedDeployment.providerAccountId])).rows[0].count,1);
+      WHERE tenant_id=$1 AND provider_account_id=$2 AND source_version='lemmacomputer-product-rates-2026-07-31.1'`, [tenantId,olderPinnedDeployment.providerAccountId])).rows[0].count,1);
 
     const overrideDeployment = { ...concurrentDeployment,providerAccountId:`bedrock-override-${suffix}` };
     const existingOverrideId = await firstLedger.createRateCard({
@@ -304,7 +304,7 @@ test("fresh PostgreSQL ledger materializes supported catalogue cards exactly onc
     assert.ok(selections.every((selection) => selection?.id === selections[0]?.id));
     assert.equal(selections[0]?.currency,"USD");
     assert.equal(selections[0]?.source,"pinned_catalogue");
-    assert.equal(selections[0]?.sourceVersion,"onecomputer-product-rates-2026-07-31.1");
+    assert.equal(selections[0]?.sourceVersion,"lemmacomputer-product-rates-2026-07-31.1");
     assert.deepEqual(selections[0]?.rates, [
       { unit:"input_uncached_token",amountPerUnit:"3.000000000000",unitScale:"1000000.000000" },
       { unit:"output_token",amountPerUnit:"15.000000000000",unitScale:"1000000.000000" },
@@ -340,7 +340,7 @@ test("fresh PostgreSQL ledger materializes supported catalogue cards exactly onc
     assert.equal(usage.currency,"USD");
     const eventEvidence = await pool.query(`SELECT rate_card_source,rate_card_source_version FROM ai_usage_events WHERE tenant_id=$1 AND id=$2`, [tenantId,usage.eventId]);
     assert.equal(eventEvidence.rows[0].rate_card_source,"pinned_catalogue");
-    assert.equal(eventEvidence.rows[0].rate_card_source_version,"onecomputer-product-rates-2026-07-31.1");
+    assert.equal(eventEvidence.rows[0].rate_card_source_version,"lemmacomputer-product-rates-2026-07-31.1");
     assert.equal((await pool.query(`SELECT count(*)::integer AS count FROM ai_deployment_rate_cards
       WHERE tenant_id=$1 AND provider_account_id=$2 AND source='pinned_catalogue'`, [tenantId,eventOnlyDeployment.providerAccountId])).rows[0].count,1);
 

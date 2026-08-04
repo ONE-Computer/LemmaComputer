@@ -1,4 +1,4 @@
-name: ${ONECOMPUTER_OAUTH_QUALIFICATION_PROJECT:?set an isolated qualification project name}
+name: ${LEMMACOMPUTER_OAUTH_QUALIFICATION_PROJECT:?set an isolated qualification project name}
 
 services:
   litellm-postgres:
@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: litellm
       POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: ${ONECOMPUTER_OAUTH_QUALIFICATION_POSTGRES_PASSWORD:?set an isolated qualification database password}
+      POSTGRES_PASSWORD: ${LEMMACOMPUTER_OAUTH_QUALIFICATION_POSTGRES_PASSWORD:?set an isolated qualification database password}
     networks:
       - oauth-qualification
     volumes:
@@ -24,7 +24,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.node
-    command: ["npm", "run", "start", "--workspace", "@onecomputer/gateway-fixture"]
+    command: ["npm", "run", "start", "--workspace", "@lemmacomputer/gateway-fixture"]
     environment:
       FIXTURE_HOST: 0.0.0.0
       FIXTURE_PORT: "4200"
@@ -34,7 +34,7 @@ services:
     networks:
       - oauth-qualification
     ports:
-      - "127.0.0.1:${ONECOMPUTER_OAUTH_QUALIFICATION_FIXTURE_PORT:?set an isolated qualification fixture port}:4200"
+      - "127.0.0.1:${LEMMACOMPUTER_OAUTH_QUALIFICATION_FIXTURE_PORT:?set an isolated qualification fixture port}:4200"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 3s
@@ -54,15 +54,15 @@ services:
       - --num_workers
       - "1"
     environment:
-      LITELLM_MASTER_KEY: ${ONECOMPUTER_OAUTH_QUALIFICATION_MASTER_KEY:?set an isolated qualification master key}
-      LITELLM_SALT_KEY: ${ONECOMPUTER_OAUTH_QUALIFICATION_SALT_KEY:?set an isolated qualification salt key}
-      DATABASE_URL: postgres://litellm:${ONECOMPUTER_OAUTH_QUALIFICATION_POSTGRES_PASSWORD}@litellm-postgres:5432/litellm
+      LITELLM_MASTER_KEY: ${LEMMACOMPUTER_OAUTH_QUALIFICATION_MASTER_KEY:?set an isolated qualification master key}
+      LITELLM_SALT_KEY: ${LEMMACOMPUTER_OAUTH_QUALIFICATION_SALT_KEY:?set an isolated qualification salt key}
+      DATABASE_URL: postgres://litellm:${LEMMACOMPUTER_OAUTH_QUALIFICATION_POSTGRES_PASSWORD}@litellm-postgres:5432/litellm
       DISABLE_ADMIN_UI: "true"
-      PROXY_BASE_URL: http://127.0.0.1:${ONECOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT}
+      PROXY_BASE_URL: http://127.0.0.1:${LEMMACOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT}
     networks:
       - oauth-qualification
     ports:
-      - "127.0.0.1:${ONECOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT:?set an isolated qualification LiteLLM port}:4000"
+      - "127.0.0.1:${LEMMACOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT:?set an isolated qualification LiteLLM port}:4000"
     volumes:
       - ./config/litellm/oauth-qualification.yaml:/app/oauth-qualification.yaml:ro
     depends_on:

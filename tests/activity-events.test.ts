@@ -6,8 +6,8 @@ import {
   type ActivityEventDraft,
   type AgentChatEvent,
   type IdentityContext,
-} from "@onecomputer/contracts";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+} from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import {
   ActivityEventMapper,
   ActivityEventService,
@@ -189,8 +189,8 @@ test("golden mapper output is stable for existing progress, tool, and approval e
   ]);
 });
 
-const owner: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "onecomputer-control" };
-const outsider: IdentityContext = { tenantId: "other-tenant", subjectId: "alex", audience: "onecomputer-control" };
+const owner: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
+const outsider: IdentityContext = { tenantId: "other-tenant", subjectId: "alex", audience: "lemmacomputer-control" };
 
 async function seededActivity() {
   const store = new MemoryWorkspaceStore();
@@ -274,13 +274,13 @@ test("replay and live-stream requests reconnect after a sequence without cross-t
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, { testIdentityMode: true });
   const path = `/v1/workspaces/${workspace.id}/chat/agents/codex-cli/sessions/${sessionId}/turns/${turnId}/activity`;
   const headers = {
-    "x-onecomputer-proxy-token": proxyToken,
-    "x-onecomputer-test-tenant-id": owner.tenantId,
-    "x-onecomputer-test-user-id": owner.subjectId,
+    "x-lemmacomputer-proxy-token": proxyToken,
+    "x-lemmacomputer-test-tenant-id": owner.tenantId,
+    "x-lemmacomputer-test-user-id": owner.subjectId,
   };
   const outsiderHeaders = {
     ...headers,
-    "x-onecomputer-test-tenant-id": outsider.tenantId,
+    "x-lemmacomputer-test-tenant-id": outsider.tenantId,
   };
   try {
     const replay = await app.inject({ method: "GET", url: `${path}?after=1`, headers });

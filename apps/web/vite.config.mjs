@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  cacheDir: process.env.ONECOMPUTER_VITE_CACHE_DIR,
+  cacheDir: process.env.LEMMACOMPUTER_VITE_CACHE_DIR,
   optimizeDeps: {
     include: ["react", "react-dom/client"],
   },
@@ -14,16 +14,16 @@ export default defineConfig({
     },
     proxy: {
       "/api/channel-intake": {
-        target: process.env.ONECOMPUTER_CHANNEL_BROKER_INTAKE_URL ?? "http://127.0.0.1:4102",
+        target: process.env.LEMMACOMPUTER_CHANNEL_BROKER_INTAKE_URL ?? "http://127.0.0.1:4102",
         changeOrigin: false,
         rewrite: (path) => path.replace(/^\/api\/channel-intake/, ""),
       },
       "/api": {
-        target: process.env.ONECOMPUTER_CONTROL_URL ?? "http://127.0.0.1:4100",
+        target: process.env.LEMMACOMPUTER_CONTROL_URL ?? "http://127.0.0.1:4100",
         changeOrigin: false,
         rewrite: (path) => path.replace(/^\/api/, ""),
         headers: {
-          "x-onecomputer-proxy-token": process.env.ONECOMPUTER_WEB_PROXY_TOKEN ?? "local-web-proxy-token-change-me",
+          "x-lemmacomputer-proxy-token": process.env.LEMMACOMPUTER_WEB_PROXY_TOKEN ?? "local-web-proxy-token-change-me",
         },
       },
     },

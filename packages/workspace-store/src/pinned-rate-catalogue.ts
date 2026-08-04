@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { approvedBedrockApiKeyModelProfiles } from "@onecomputer/contracts";
+import { approvedBedrockApiKeyModelProfiles } from "@lemmacomputer/contracts";
 import type { RateAmount, RateCardInput } from "./usage-ledger.js";
 
 const PRODUCT_PROFILE_ID = "claude-sonnet-4-5-global";
-const CATALOGUE_RELEASE = "onecomputer-product-rates-2026-07-31.1";
+const CATALOGUE_RELEASE = "lemmacomputer-product-rates-2026-07-31.1";
 const EFFECTIVE_FROM = "2026-07-31T00:00:00.000Z";
 const SERVICE_TIER = "standard";
 

@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use onecomputer_openvtc_consent::{AppState, router};
+use lemmacomputer_openvtc_consent::{AppState, router};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]

@@ -1,5 +1,5 @@
 {
-  "name": "onecomputer-hermes-office-runtime",
+  "name": "lemmacomputer-hermes-office-runtime",
   "version": "1.0.0",
   "private": true,
   "description": "Pinned Node.js dependencies for Hermes bundled Office skills.",

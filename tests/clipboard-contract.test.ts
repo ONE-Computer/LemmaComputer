@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipboardPolicySchema, launchSchema } from "@onecomputer/contracts";
+import { clipboardPolicySchema, launchSchema } from "@lemmacomputer/contracts";
 
 test("clipboard policy is bounded to explicit text directions and size", () => {
   assert.deepEqual(clipboardPolicySchema.parse({

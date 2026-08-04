@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AgentChatEvent, IdentityContext } from "@onecomputer/contracts";
-import { PostgresWorkspaceStore } from "@onecomputer/workspace-store";
+import type { AgentChatEvent, IdentityContext } from "@lemmacomputer/contracts";
+import { PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { ActivityEventService } from "../apps/control-api/src/activity.js";
 
 const connectionString = process.env.ACTIVITY_TEST_DATABASE_URL;
@@ -13,12 +13,12 @@ test("PostgreSQL Activity events are append-only, deduplicated, tenant-scoped, a
   const owner: IdentityContext = {
     tenantId: `activity-owner-${crypto.randomUUID()}`,
     subjectId: "owner",
-    audience: "onecomputer-control",
+    audience: "lemmacomputer-control",
   };
   const outsider: IdentityContext = {
     tenantId: `activity-outsider-${crypto.randomUUID()}`,
     subjectId: "owner",
-    audience: "onecomputer-control",
+    audience: "lemmacomputer-control",
   };
   const sessionId = "postgres-session";
   const turnId = "turn-postgres-1";

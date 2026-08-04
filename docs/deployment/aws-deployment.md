@@ -21,7 +21,7 @@ on a remote Kasm deployment in a separate workspace compute boundary.
 
 Do not run the production `kasm-local` controller with the Docker socket inside
 the control-plane ECS service. The socket is host-root-equivalent authority.
-Use `ONECOMPUTER_SANDBOX_DRIVER=kasm`, the Kasm Developer API adapter, and
+Use `LEMMACOMPUTER_SANDBOX_DRIVER=kasm`, the Kasm Developer API adapter, and
 dedicated Kasm agents for the managed workspace image.
 
 AWS WAF, a network firewall, and security groups solve different problems:
@@ -179,7 +179,7 @@ administrator interface, or the M365 bridge `:3000` directly. Register this
 exact MCP callback with Entra, GitHub, and any provider-owned OAuth app:
 
 ```text
-https://<onecomputer-origin>/oauth/mcp/callback
+https://<lemmacomputer-origin>/oauth/mcp/callback
 ```
 
 ## Subnets and route tables

@@ -4,7 +4,7 @@ import {
   bedrockApiKeyModelProfileIdSchema,
   bedrockApiKeyRegionSchema,
   bedrockApiKeyRouteAlias,
-  OneComputerError,
+  LemmaComputerError,
   type AnthropicProviderModelId,
   type BedrockApiKeyModelProfile,
   type BedrockApiKeyModelProfileId,
@@ -13,7 +13,7 @@ import {
   type OpenAiProviderModelId,
   type ProviderModelId,
   type ProviderSettingMetadata,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import type { FetchLike } from "./mtls-fetch.js";
 
 export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock"] as const;
@@ -134,15 +134,15 @@ export const managedProviderModel = (provider: SelectableProviderName, modelId: 
 
 export const managedProviderDisplayMetadata: Record<ManagedProviderName, ManagedProviderDisplayMetadata> = {
   openai: {
-    primaryAlias: "onecomputer-openai",
+    primaryAlias: "lemmacomputer-openai",
     upstreamModelDisplayName: managedProviderModel("openai", defaultManagedProviderModelIds.openai)!.displayName,
   },
   anthropic: {
-    primaryAlias: "onecomputer-claude",
+    primaryAlias: "lemmacomputer-claude",
     upstreamModelDisplayName: managedProviderModel("anthropic", defaultManagedProviderModelIds.anthropic)!.displayName,
   },
   glm: {
-    primaryAlias: "onecomputer-glm",
+    primaryAlias: "lemmacomputer-glm",
     upstreamModelDisplayName: managedProviderModel("glm", defaultManagedProviderModelIds.glm)!.displayName,
   },
   bedrock: {
@@ -153,16 +153,16 @@ export const managedProviderDisplayMetadata: Record<ManagedProviderName, Managed
 
 export const managedProviderModels: Record<ManagedProviderName, readonly ManagedProviderModel[]> = {
   openai: [
-    { alias: "onecomputer-assistant", model: "openai/gpt-5.6-luna", vision: true },
-    { alias: "onecomputer-openai", model: "openai/gpt-5.6-luna", vision: true },
+    { alias: "lemmacomputer-assistant", model: "openai/gpt-5.6-luna", vision: true },
+    { alias: "lemmacomputer-openai", model: "openai/gpt-5.6-luna", vision: true },
     { alias: "claude-opus-4-6", model: "openai/gpt-5.6-luna", vision: true },
   ],
   anthropic: [
-    { alias: "onecomputer-claude", model: "anthropic/claude-sonnet-4-6", vision: true },
+    { alias: "lemmacomputer-claude", model: "anthropic/claude-sonnet-4-6", vision: true },
     { alias: "claude-sonnet-4-6", model: "anthropic/claude-sonnet-4-6", vision: true },
   ],
   glm: [
-    { alias: "onecomputer-glm", model: "zai/glm-5", vision: false },
+    { alias: "lemmacomputer-glm", model: "zai/glm-5", vision: false },
     { alias: "claude-sonnet-4-5", model: "zai/glm-5", vision: false },
   ],
   bedrock: [
@@ -171,7 +171,7 @@ export const managedProviderModels: Record<ManagedProviderName, readonly Managed
 };
 
 export const managedProviderModelAlias = (provider: SelectableProviderName, modelId: ProviderModelId) =>
-  `onecomputer-${provider}-${modelId.replaceAll(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}`;
+  `lemmacomputer-${provider}-${modelId.replaceAll(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}`;
 
 export const managedProviderForAlias = (alias: string) => managedProviderNames.find((provider) => {
   if (managedProviderModels[provider].some((model) => model.alias === alias)) return true;
@@ -180,7 +180,7 @@ export const managedProviderForAlias = (alias: string) => managedProviderNames.f
 });
 
 const tenantRouteHash = (tenantId: string) => createHash("sha256")
-  .update(`onecomputer:provider-route:${tenantId}`)
+  .update(`lemmacomputer:provider-route:${tenantId}`)
   .digest("base64url")
   .slice(0, 18);
 
@@ -199,8 +199,8 @@ const managedProviderAliases = [
 export const managedProviderAliasForAccessGroup = (tenantId: string, accessGroup: string) =>
   managedProviderAliases.find((alias) => tenantManagedModelAccessGroup(tenantId, alias) === accessGroup) ?? null;
 
-const tenantCredentialName = (tenantId: string, provider: ManagedProviderName) => `onecomputer-provider-${tenantRouteHash(tenantId)}-${provider}`;
-const tenantModelId = (tenantId: string, provider: ManagedProviderName, alias: string) => `onecomputer-provider-${tenantRouteHash(tenantId)}-${provider}-${alias}`;
+const tenantCredentialName = (tenantId: string, provider: ManagedProviderName) => `lemmacomputer-provider-${tenantRouteHash(tenantId)}-${provider}`;
+const tenantModelId = (tenantId: string, provider: ManagedProviderName, alias: string) => `lemmacomputer-provider-${tenantRouteHash(tenantId)}-${provider}-${alias}`;
 
 export type LiteLLMProviderAdministrationConfig = { adminUrl: string; masterKey: string; credentialSecret: string; requestTimeoutMs?: number; bedrockRuntimeEndpoint?: string; adminFetch?: FetchLike };
 type JsonObject = Record<string, unknown>;
@@ -223,7 +223,7 @@ export const managedProviderSelectedModelIds = (
   const requestedSet = new Set(requested);
   const selected = managedProviderModelProfiles[provider].filter((profile) => requestedSet.has(profile.id));
   if (selected.length !== requested.length || selected.length !== requestedSet.size || selected.length === 0) {
-    throw new OneComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider models are not approved", 400);
+    throw new LemmaComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider models are not approved", 400);
   }
   return selected.map((profile) => profile.id);
 };
@@ -354,11 +354,11 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
 
   async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
     const apiKey = input.apiKey.trim();
-    if (!apiKey) throw new OneComputerError("PROVIDER_KEY_REQUIRED", "A provider API key is required", 400);
+    if (!apiKey) throw new LemmaComputerError("PROVIDER_KEY_REQUIRED", "A provider API key is required", 400);
     const configuration = this.configurationFor(input);
     const models = templatesFor(input.provider, configuration);
     if (models.length === 0) {
-      throw new OneComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider models are not approved", 400);
+      throw new LemmaComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider models are not approved", 400);
     }
     const descriptors = managedProviderDeploymentDescriptors(input.tenantId, input.provider, configuration);
     const credentialName = tenantCredentialName(input.tenantId, input.provider);
@@ -394,7 +394,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       existing.length > 0
       && (existing.length !== previousIds.length || existing.some((id) => !previousIdSet.has(id)))
     )) {
-      throw new OneComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The existing provider route cannot be safely changed", 409);
+      throw new LemmaComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The existing provider route cannot be safely changed", 409);
     }
 
     await this.ensureRetiringAliasesAreGone(input.provider);
@@ -415,7 +415,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
           for (const deployment of targetDeployments) {
             const updated = await this.upsertModel(deployment);
             if (updated.id !== deployment.id) {
-              throw new OneComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The provider route identity changed unexpectedly", 409);
+              throw new LemmaComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The provider route identity changed unexpectedly", 409);
             }
           }
           const primary = targetDeployments[0]!;
@@ -448,7 +448,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         for (const deployment of targetDeployments) {
           const updated = await this.upsertModel(deployment);
           if (updated.id !== deployment.id) {
-            throw new OneComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The provider route identity changed unexpectedly", 409);
+            throw new LemmaComputerError("PROVIDER_ROUTE_INTEGRITY_FAILED", "The provider route identity changed unexpectedly", 409);
           }
           if (updated.created) createdModelIds.push(updated.id);
         }
@@ -466,8 +466,8 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         throw error;
       }
     } catch (error) {
-      if (error instanceof OneComputerError) throw error;
-      throw new OneComputerError("PROVIDER_CONFIGURATION_FAILED", "The provider configuration could not be validated", 502, true);
+      if (error instanceof LemmaComputerError) throw error;
+      throw new LemmaComputerError("PROVIDER_CONFIGURATION_FAILED", "The provider configuration could not be validated", 502, true);
     } finally {
       await Promise.all(candidates.map(({ id }) => this.deleteModel(id, input.provider).catch(() => undefined)));
       await this.deleteCredential(candidateCredentialName, input.provider).catch(() => undefined);
@@ -486,7 +486,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     const expectedIds = models.map((item) => tenantModelId(input.tenantId, input.provider, item.alias));
     if (!model || input.existingModelIds.length !== expectedIds.length
       || input.existingModelIds.some((id) => !expectedIds.includes(id))) {
-      throw new OneComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
+      throw new LemmaComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
     await this.ensureRetiringAliasesAreGone(input.provider);
     await this.probe(model.alias, tenantManagedModelAccessGroup(input.tenantId, model.alias), input.provider);
@@ -509,11 +509,11 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     const region = bedrockApiKeyRegionSchema.safeParse(input.region);
     const modelProfileId = bedrockApiKeyModelProfileIdSchema.safeParse(input.modelProfileId);
     if (!region.success || !modelProfileId.success) {
-      throw new OneComputerError("BEDROCK_ROUTE_UNAPPROVED", "The selected Bedrock region or inference profile is not approved", 400);
+      throw new LemmaComputerError("BEDROCK_ROUTE_UNAPPROVED", "The selected Bedrock region or inference profile is not approved", 400);
     }
     const profile = approvedBedrockApiKeyModelProfiles.find((candidate) => candidate.id === modelProfileId.data);
     if (!profile || !profile.regions.includes(region.data)) {
-      throw new OneComputerError("BEDROCK_ROUTE_UNAPPROVED", "The selected Bedrock region or inference profile is not approved", 400);
+      throw new LemmaComputerError("BEDROCK_ROUTE_UNAPPROVED", "The selected Bedrock region or inference profile is not approved", 400);
     }
     return { region: region.data, modelProfileId: modelProfileId.data };
   }
@@ -522,7 +522,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     const result = await this.call("/model/new", { method: "POST", body: this.modelDocument(deployment) });
     if (!result.ok) throw this.providerFailure(result.status, "route", deployment.provider, result.payload);
     const id = this.modelId(result.payload);
-    if (!id) throw new OneComputerError("PROVIDER_ROUTE_FAILED", "The model gateway did not confirm a provider route", 502, true);
+    if (!id) throw new LemmaComputerError("PROVIDER_ROUTE_FAILED", "The model gateway did not confirm a provider route", 502, true);
     return id;
   }
 
@@ -540,15 +540,15 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         method: "POST",
         body: {
           key: credential,
-          key_alias: `onecomputer-provider-probe-${randomBytes(12).toString("hex")}`,
+          key_alias: `lemmacomputer-provider-probe-${randomBytes(12).toString("hex")}`,
           key_type: "llm_api",
           duration: "60s",
           models: [accessGroup ?? model],
           rpm_limit: 2,
           max_parallel_requests: 1,
           metadata: {
-            onecomputer_purpose: "provider-route-test",
-            onecomputer_non_billable_exemption: "provider-route-test-v1",
+            lemmacomputer_purpose: "provider-route-test",
+            lemmacomputer_non_billable_exemption: "provider-route-test-v1",
           },
         },
       });
@@ -577,9 +577,9 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       const alias = deployment.model_name;
       const info = asObject(deployment.model_info);
       return typeof alias === "string" && aliases.has(alias)
-        && !(typeof info.id === "string" && info.id.startsWith("onecomputer-provider-") && Array.isArray(info.access_groups) && info.access_groups.length > 0 && info.access_groups.every((group) => typeof group === "string" && group.startsWith("ocp-")));
+        && !(typeof info.id === "string" && info.id.startsWith("lemmacomputer-provider-") && Array.isArray(info.access_groups) && info.access_groups.length > 0 && info.access_groups.every((group) => typeof group === "string" && group.startsWith("ocp-")));
     });
-    if (retiring) throw new OneComputerError("PROVIDER_STATIC_CUTOVER_REQUIRED", "Restart the installation with retired provider routes removed before configuring this provider", 409);
+    if (retiring) throw new LemmaComputerError("PROVIDER_STATIC_CUTOVER_REQUIRED", "Restart the installation with retired provider routes removed before configuring this provider", 409);
   }
 
   private async createCredential(name: string, input: ManagedProviderConfiguration, apiKey: string) {
@@ -606,7 +606,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       : {};
     return {
       credential_name: name,
-      credential_info: { provider: input.provider, managed_by: "onecomputer", ...bedrock },
+      credential_info: { provider: input.provider, managed_by: "lemmacomputer", ...bedrock },
       credential_values: { api_key: apiKey },
     };
   }
@@ -632,15 +632,15 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       },
       model_info: {
         id: deployment.id,
-        onecomputer_provider: deployment.provider,
-        onecomputer_provider_account_id: deployment.credentialName,
-        onecomputer_base_model: deployment.model.model,
-        onecomputer_deployment_id: deployment.accessGroups[0],
-        onecomputer_provider_service_tier: "standard",
-        ...(bedrock ? { onecomputer_region: bedrock.region } : {}),
-        ...(deployment.upstreamModelId ? { onecomputer_upstream_model_id: deployment.upstreamModelId } : {}),
-        onecomputer_primary_deployment: deployment.primary,
-        onecomputer_legacy_alias: deployment.legacyAlias,
+        lemmacomputer_provider: deployment.provider,
+        lemmacomputer_provider_account_id: deployment.credentialName,
+        lemmacomputer_base_model: deployment.model.model,
+        lemmacomputer_deployment_id: deployment.accessGroups[0],
+        lemmacomputer_provider_service_tier: "standard",
+        ...(bedrock ? { lemmacomputer_region: bedrock.region } : {}),
+        ...(deployment.upstreamModelId ? { lemmacomputer_upstream_model_id: deployment.upstreamModelId } : {}),
+        lemmacomputer_primary_deployment: deployment.primary,
+        lemmacomputer_legacy_alias: deployment.legacyAlias,
         supports_vision: deployment.model.vision,
         ...(deployment.model.modelCapabilities ? {
           supports_function_calling: deployment.model.modelCapabilities.tools,
@@ -670,7 +670,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
 
   private fingerprint(apiKey: string) {
     const digest = createHmac("sha256", this.credentialSecret)
-      .update(`onecomputer:provider-fingerprint:${apiKey}`)
+      .update(`lemmacomputer:provider-fingerprint:${apiKey}`)
       .digest("base64url")
       .slice(0, 20);
     return `fp_${digest}`;
@@ -700,7 +700,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         embeddedError: embeddedStatus !== undefined,
       };
     } catch {
-      throw new OneComputerError("PROVIDER_GATEWAY_UNAVAILABLE", "The provider gateway is unavailable", 503, true);
+      throw new LemmaComputerError("PROVIDER_GATEWAY_UNAVAILABLE", "The provider gateway is unavailable", 503, true);
     }
   }
 
@@ -727,15 +727,15 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   ) {
     if (provider === "bedrock") return this.bedrockFailure(status, payload);
     if (kind === "credential" && [401, 403, 404].includes(status)) {
-      return new OneComputerError("PROVIDER_CREDENTIAL_REJECTED", "The provider API key or approved model access was rejected", 422);
+      return new LemmaComputerError("PROVIDER_CREDENTIAL_REJECTED", "The provider API key or approved model access was rejected", 422);
     }
     if (kind === "credential" && status === 429) {
-      return new OneComputerError("PROVIDER_THROTTLED", "The provider throttled the route test; retry shortly", 429, true);
+      return new LemmaComputerError("PROVIDER_THROTTLED", "The provider throttled the route test; retry shortly", 429, true);
     }
     if (kind === "credential" && status >= 400 && status < 500) {
-      return new OneComputerError("PROVIDER_TEST_REQUEST_REJECTED", "The provider rejected the route test request", 422);
+      return new LemmaComputerError("PROVIDER_TEST_REQUEST_REJECTED", "The provider rejected the route test request", 422);
     }
-    return new OneComputerError("PROVIDER_ROUTE_FAILED", "The provider route could not be configured", 502, true);
+    return new LemmaComputerError("PROVIDER_ROUTE_FAILED", "The provider route could not be configured", 502, true);
   }
 
   private bedrockFailure(status: number, payload: unknown) {
@@ -753,30 +753,30 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     ].filter((value): value is string => typeof value === "string").join(" ").toLowerCase();
 
     if (status === 429 || /throttl|rate.?limit/.test(diagnostic)) {
-      return new OneComputerError("BEDROCK_THROTTLED", "Bedrock is throttling this route; retry shortly", 429, true);
+      return new LemmaComputerError("BEDROCK_THROTTLED", "Bedrock is throttling this route; retry shortly", 429, true);
     }
     if (status === 408 || status === 504 || /timeout|timed out/.test(diagnostic)) {
-      return new OneComputerError("BEDROCK_TIMEOUT", "Bedrock did not respond before the route timeout", 504, true);
+      return new LemmaComputerError("BEDROCK_TIMEOUT", "Bedrock did not respond before the route timeout", 504, true);
     }
     if (/marketplace|eula|subscription|model access|access to (?:the )?model|enable.*model/.test(diagnostic)) {
-      return new OneComputerError(
+      return new LemmaComputerError(
         "BEDROCK_MODEL_ACCESS_REQUIRED",
         "Enable the approved model and accept its applicable Bedrock terms before retrying",
         403,
       );
     }
     if (/unsupported.*region|region.*(?:unsupported|not supported|invalid)/.test(diagnostic)) {
-      return new OneComputerError("BEDROCK_REGION_UNSUPPORTED", "The approved Bedrock inference profile is not available in that region", 422);
+      return new LemmaComputerError("BEDROCK_REGION_UNSUPPORTED", "The approved Bedrock inference profile is not available in that region", 422);
     }
     if (/invalid.*(?:api|bearer).*key|(?:api|bearer).*key.*invalid|authentication/.test(diagnostic) || status === 401) {
-      return new OneComputerError("BEDROCK_API_KEY_INVALID", "Bedrock rejected the API key", 401);
+      return new LemmaComputerError("BEDROCK_API_KEY_INVALID", "Bedrock rejected the API key", 401);
     }
     if (/accessdenied|access denied|not authorized|permission/.test(diagnostic)) {
-      return new OneComputerError("BEDROCK_ACCESS_DENIED", "Bedrock denied access to the approved route", 403);
+      return new LemmaComputerError("BEDROCK_ACCESS_DENIED", "Bedrock denied access to the approved route", 403);
     }
     if (status >= 500) {
-      return new OneComputerError("BEDROCK_ROUTE_UNAVAILABLE", "The Bedrock route is temporarily unavailable", 503, true);
+      return new LemmaComputerError("BEDROCK_ROUTE_UNAVAILABLE", "The Bedrock route is temporarily unavailable", 503, true);
     }
-    return new OneComputerError("BEDROCK_ROUTE_REJECTED", "Bedrock rejected the route configuration or test request", status || 502);
+    return new LemmaComputerError("BEDROCK_ROUTE_REJECTED", "Bedrock rejected the route configuration or test request", status || 502);
   }
 }

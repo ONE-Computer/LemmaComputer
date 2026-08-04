@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import type { GovernedToolExecutionInput, GovernedToolExecutionResult, GovernedToolExecutor } from "@onecomputer/litellm-adapter";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
+import type { GovernedToolExecutionInput, GovernedToolExecutionResult, GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService, type FixtureApprovalEnvelope } from "../apps/control-api/src/operations.js";
 
-const identity: IdentityContext = { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "acme", subjectId: "alex-morgan", audience: "lemmacomputer-control" };
 const approvalSecret = "fixture-approval-test-secret-at-least-32-characters";
 
 class FakeExecutor implements GovernedToolExecutor {
@@ -44,7 +44,7 @@ test("mutated approval proof is denied before execution", async () => {
   const now = new Date();
   const envelope: FixtureApprovalEnvelope = {
     version: "1",
-    issuer: "onecomputer-local-fixture",
+    issuer: "lemmacomputer-local-fixture",
     keyId: "fixture-hmac-v1",
     ...identity,
     operationId: view.id,
@@ -69,7 +69,7 @@ test("approval binding rejects issuer, key, identity, audience, digest, nonce, e
   const now = new Date();
   const valid: FixtureApprovalEnvelope = {
     version: "1",
-    issuer: "onecomputer-local-fixture",
+    issuer: "lemmacomputer-local-fixture",
     keyId: "fixture-hmac-v1",
     ...identity,
     operationId: view.id,
@@ -206,14 +206,14 @@ test("approved multi-gigabyte OneDrive uploads use one exact resumable session a
     workspace.id,
     {
       capabilityId: "m365.create-upload-session",
-      schemaId: "onecomputer.m365.create-upload-session.v1",
-      serverName: "onecomputer_ms365",
+      schemaId: "lemmacomputer.m365.create-upload-session.v1",
+      serverName: "lemmacomputer_ms365",
       toolName: "create-upload-session",
       arguments: {
         driveId: "drive-1",
         driveItemId: "root:/huge.iso:",
         body: { item: { "@microsoft.graph.conflictBehavior": "replace" } },
-        onecomputerFile: {
+        lemmacomputerFile: {
           name: "huge.iso",
           size: fileSize,
           sha256: "a".repeat(64),
@@ -257,8 +257,8 @@ test("approved multi-gigabyte OneDrive uploads use one exact resumable session a
   );
   assert.equal(started.uploadUrl, "https://example.up.1drv.com/up/session-secret");
   assert.equal(executor.calls.length, 1);
-  assert.equal((executor.calls[0]!.arguments as Record<string, unknown>).onecomputerFile instanceof Uint8Array, false);
-  assert.deepEqual((executor.calls[0]!.arguments as Record<string, unknown>).onecomputerFile, {
+  assert.equal((executor.calls[0]!.arguments as Record<string, unknown>).lemmacomputerFile instanceof Uint8Array, false);
+  assert.deepEqual((executor.calls[0]!.arguments as Record<string, unknown>).lemmacomputerFile, {
     name: "huge.iso",
     size: fileSize,
     sha256: "a".repeat(64),

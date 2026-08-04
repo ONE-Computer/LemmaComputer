@@ -15,7 +15,7 @@ changing the bind address or publishing it behind a shared hostname.
 A setup is complete when:
 
 - `docker compose ps` reports every long-running service healthy;
-- `onecomputer/workspace:dev`, or the configured workspace image, exists;
+- `lemmacomputer/workspace:dev`, or the configured workspace image, exists;
 - `http://localhost:4174` accepts Microsoft sign-in;
 - the configured administrator has the administrator role;
 - **Connections → Microsoft 365** completes consent and reports connected;
@@ -74,8 +74,8 @@ is described below.
    rejects an ID token from another tenant.
 4. Register the application.
 5. From **Overview**, record:
-   - **Directory (tenant) ID** for `ONECOMPUTER_ENTRA_TENANT_ID`;
-   - **Application (client) ID** for `ONECOMPUTER_ENTRA_CLIENT_ID`.
+   - **Directory (tenant) ID** for `LEMMACOMPUTER_ENTRA_TENANT_ID`;
+   - **Application (client) ID** for `LEMMACOMPUTER_ENTRA_CLIENT_ID`.
 
 Microsoft's current registration guide is
 [Register an application in Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app).
@@ -113,7 +113,7 @@ path changes, update both `.env` and the app registration. See Microsoft's
 1. Open **Certificates & secrets → Client secrets → New client secret**.
 2. Choose a short, operationally manageable lifetime and create the secret.
 3. Copy the secret **Value** immediately. Use the value, not the secret ID, for
-   `ONECOMPUTER_ENTRA_CLIENT_SECRET`.
+   `LEMMACOMPUTER_ENTRA_CLIENT_SECRET`.
 
 The value is shown only once. Do not paste it into an issue, chat, shell
 history, log, or committed file. Microsoft documents the current workflow in
@@ -164,15 +164,15 @@ rotation from product sign-in:
 
 - The Web sign-in app uses
   `http://localhost:4174/api/v1/auth/callback` and the
-  `ONECOMPUTER_ENTRA_*` variables. It needs only the OpenID sign-in scopes used
+  `LEMMACOMPUTER_ENTRA_*` variables. It needs only the OpenID sign-in scopes used
   by LemmaComputer.
 - The Microsoft 365 connector app uses
   `http://localhost:4174/oauth/mcp/callback`, the delegated Graph permissions above, and
-  the `ONECOMPUTER_MS365_*` variables.
+  the `LEMMACOMPUTER_MS365_*` variables.
 
 Both apps should be single-tenant. If one app is used for both roles, leave all
-three `ONECOMPUTER_MS365_*` values empty so the canonical service projection reuses
-`ONECOMPUTER_ENTRA_*`. If a separate connector app is used, set all three
+three `LEMMACOMPUTER_MS365_*` values empty so the canonical service projection reuses
+`LEMMACOMPUTER_ENTRA_*`. If a separate connector app is used, set all three
 Microsoft 365 values; do not partially configure the group.
 
 ## Initialize the environment
@@ -225,11 +225,11 @@ provider keys there; replace these placeholders instead:
 
 | Variable | Required for the reference path | Value |
 | --- | --- | --- |
-| `ONECOMPUTER_ENTRA_TENANT_ID` | Yes | Entra Directory (tenant) ID |
-| `ONECOMPUTER_ENTRA_CLIENT_ID` | Yes | Entra Application (client) ID |
-| `ONECOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Entra client secret **Value** |
-| `ONECOMPUTER_ADMINISTRATOR_EMAILS` | Yes | Comma-separated Entra email addresses that bootstrap as administrators |
-| `ONECOMPUTER_WEB_PUSH_VAPID_SUBJECT` | Recommended | A monitored `mailto:` security/contact address |
+| `LEMMACOMPUTER_ENTRA_TENANT_ID` | Yes | Entra Directory (tenant) ID |
+| `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Yes | Entra Application (client) ID |
+| `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Entra client secret **Value** |
+| `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | Yes | Comma-separated Entra email addresses that bootstrap as administrators |
+| `LEMMACOMPUTER_WEB_PUSH_VAPID_SUBJECT` | Recommended | A monitored `mailto:` security/contact address |
 
 Administrator email comparison is case-insensitive. Keep the bootstrap list
 small. Every user in the configured Entra tenant may authenticate, but only the
@@ -248,12 +248,12 @@ their values, so remove them manually after the managed-provider cutover.
 
 | Variables | Set when |
 | --- | --- |
-| `ONECOMPUTER_MS365_TENANT_ID`, `ONECOMPUTER_MS365_CLIENT_ID`, `ONECOMPUTER_MS365_CLIENT_SECRET` | A separate Microsoft 365 app registration is used |
-| `ONECOMPUTER_GITHUB_MCP_CLIENT_ID`, `ONECOMPUTER_GITHUB_MCP_CLIENT_SECRET` | The built-in GitHub connector is enabled |
-| `ONECOMPUTER_BOOTSTRAP_TENANT_ID`, `ONECOMPUTER_BOOTSTRAP_USER_ID`, `ONECOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
+| `LEMMACOMPUTER_MS365_TENANT_ID`, `LEMMACOMPUTER_MS365_CLIENT_ID`, `LEMMACOMPUTER_MS365_CLIENT_SECRET` | A separate Microsoft 365 app registration is used |
+| `LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID`, `LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET` | The built-in GitHub connector is enabled |
+| `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID`, `LEMMACOMPUTER_BOOTSTRAP_USER_ID`, `LEMMACOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
 | Public URL and port variables | The deployment is intentionally using origins other than the localhost defaults |
-| `ONECOMPUTER_KASM_LOCAL_KVM_ENABLED=true` | Claude Cowork is enabled on a customer-managed host that exposes `/dev/kvm` and `/dev/vhost-vsock` and has memory/disk headroom |
-| `ONECOMPUTER_KASM_*` variables | `ONECOMPUTER_SANDBOX_DRIVER=kasm` uses an external Kasm installation |
+| `LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED=true` | Claude Cowork is enabled on a customer-managed host that exposes `/dev/kvm` and `/dev/vhost-vsock` and has memory/disk headroom |
+| `LEMMACOMPUTER_KASM_*` variables | `LEMMACOMPUTER_SANDBOX_DRIVER=kasm` uses an external Kasm installation |
 
 Leave generated secrets unchanged and stable while their dependent state
 exists. See [Configuration and operations](operations.md) for the complete
@@ -295,13 +295,13 @@ docker compose --profile build build workspace-image
 
 The build downloads checksum-pinned desktop applications and language
 runtimes, so it can take a long time and use substantial disk space. It
-produces the image named by `ONECOMPUTER_WORKSPACE_IMAGE`, which defaults to
-`onecomputer/workspace:dev`.
+produces the image named by `LEMMACOMPUTER_WORKSPACE_IMAGE`, which defaults to
+`lemmacomputer/workspace:dev`.
 
 Confirm the default image exists:
 
 ```bash
-docker image inspect onecomputer/workspace:dev >/dev/null
+docker image inspect lemmacomputer/workspace:dev >/dev/null
 ```
 
 If the image name was customized, inspect that exact value instead.
@@ -342,7 +342,7 @@ traffic are sensitive.
 Check the two published health endpoints:
 
 ```bash
-curl --fail --silent http://localhost:4174/__onecomputer/healthz
+curl --fail --silent http://localhost:4174/__lemmacomputer/healthz
 curl --fail --silent http://localhost:4000/health/liveliness
 ```
 
@@ -350,7 +350,7 @@ Then:
 
 1. Open `http://localhost:4174`.
 2. Sign in with an address listed in
-   `ONECOMPUTER_ADMINISTRATOR_EMAILS`.
+   `LEMMACOMPUTER_ADMINISTRATOR_EMAILS`.
 3. Verify the account has administrator navigation.
 4. Open **AI control plane → Models & providers**, save the key for every
    provider referenced by the policy, choose its approved models, and confirm
@@ -425,7 +425,7 @@ the same application/client ID and has not expired.
 
 ### Sign-in succeeds but the user is not an administrator
 
-Confirm `ONECOMPUTER_ADMINISTRATOR_EMAILS` contains the email claim returned by
+Confirm `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` contains the email claim returned by
 the configured tenant. If the user already exists, inspect the owned identity
 and role assignment rather than changing bootstrap identifiers blindly.
 
@@ -452,7 +452,7 @@ uses dynamic managed-provider routes; it does not read provider keys from
 ### Workspace creation reports image not found
 
 Run `npm run image:workspace` and verify that
-`ONECOMPUTER_WORKSPACE_IMAGE` matches the built image tag.
+`LEMMACOMPUTER_WORKSPACE_IMAGE` matches the built image tag.
 
 ### Compose does not become healthy
 

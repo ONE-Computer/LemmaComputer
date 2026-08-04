@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import test from "node:test";
-import { channelAttachmentMaxBytes, type ChannelTurnRequest, type IdentityContext } from "@onecomputer/contracts";
+import { channelAttachmentMaxBytes, type ChannelTurnRequest, type IdentityContext } from "@lemmacomputer/contracts";
 import {
   ChannelBrokerService,
   ChannelCredentialVault,
@@ -19,12 +19,12 @@ import { MemoryChannelStore } from "../apps/channel-broker/src/store.js";
 const alpha: IdentityContext = {
   tenantId: "acme",
   subjectId: "alpha",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const bravo: IdentityContext = {
   tenantId: "acme",
   subjectId: "bravo",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const token = "123456789:telegram-token-that-must-remain-write-only";
 const secondToken = "987654321:telegram-token-for-the-second-workspace";
@@ -54,8 +54,8 @@ class FakeTelegram implements TelegramBotClient {
   async validate(received: string) {
     assert.ok(received === token || received === secondToken);
     return received === token
-      ? { botId: "123456789", username: "onecomputer_test_bot" }
-      : { botId: "987654321", username: "onecomputer_second_bot" };
+      ? { botId: "123456789", username: "lemmacomputer_test_bot" }
+      : { botId: "987654321", username: "lemmacomputer_second_bot" };
   }
 
   async getUpdates(received: string, offset: string, timeoutSeconds?: number) {
@@ -227,7 +227,7 @@ test("the channel control client downloads only hash-bound generated artifacts",
     byteLength: deck.length, sha256: createHash("sha256").update(deck).digest("hex") };
   const server = createServer((request, response) => {
     assert.equal(request.url, "/internal/v1/channels/artifacts");
-    assert.equal(request.headers["x-onecomputer-channel-token"], "channel-control-test-secret-at-least-32-characters");
+    assert.equal(request.headers["x-lemmacomputer-channel-token"], "channel-control-test-secret-at-least-32-characters");
     response.writeHead(200, { "content-type": artifact.mediaType, "content-length": deck.length });
     response.end(deck);
   });
@@ -635,9 +635,9 @@ test("/agent presents available agent buttons and callback selections switch the
     text: "Tap an agent below, then wait for its confirmation before sending a message:",
     options: {
       inlineKeyboard: [
-        [{ text: "Hermes Agent", callbackData: "onecomputer:agent:hermes-claw" }],
-        [{ text: "Claude CLI", callbackData: "onecomputer:agent:claude-cli" }],
-        [{ text: "Codex CLI", callbackData: "onecomputer:agent:codex-cli" }],
+        [{ text: "Hermes Agent", callbackData: "lemmacomputer:agent:hermes-claw" }],
+        [{ text: "Claude CLI", callbackData: "lemmacomputer:agent:claude-cli" }],
+        [{ text: "Codex CLI", callbackData: "lemmacomputer:agent:codex-cli" }],
       ],
     },
   });
@@ -647,7 +647,7 @@ test("/agent presents available agent buttons and callback selections switch the
     chatId: "10001",
     senderId: "10001",
     chatType: "private",
-    callbackData: "onecomputer:agent:codex-cli",
+    callbackData: "lemmacomputer:agent:codex-cli",
     callbackQueryId: "callback-1",
   }];
   await service.pollOnce();

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
-import { PostgresWorkspaceStore } from "@onecomputer/workspace-store";
+import { PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
 
 const connectionString = process.env.TELEGRAM_INTAKE_TEST_DATABASE_URL;
 

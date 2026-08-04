@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
-const fixturePort = Number(process.env.ONECOMPUTER_E2E_FIXTURE_PORT ?? 4_399);
-const webPort = Number(process.env.ONECOMPUTER_E2E_WEB_PORT ?? 24_965);
+const fixturePort = Number(process.env.LEMMACOMPUTER_E2E_FIXTURE_PORT ?? 4_399);
+const webPort = Number(process.env.LEMMACOMPUTER_E2E_WEB_PORT ?? 24_965);
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 const baseURL = `http://127.0.0.1:${webPort}`;
 
@@ -41,7 +41,7 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: `ONECOMPUTER_CONTROL_URL=${fixtureUrl} npm run dev -w web -- --host 127.0.0.1 --port ${webPort}`,
+      command: `LEMMACOMPUTER_CONTROL_URL=${fixtureUrl} npm run dev -w web -- --host 127.0.0.1 --port ${webPort}`,
       url: baseURL,
       timeout: 60_000,
       reuseExistingServer: false,

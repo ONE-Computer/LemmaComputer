@@ -4,16 +4,16 @@ model_list: []
 # are never supplied through deployment environment variables or static YAML.
 
 mcp_servers:
-  onecomputer_ms365:
+  lemmacomputer_ms365:
     transport: http
     url: http://ms365-mcp:3000/mcp
     mcp_info:
-      onecomputer_egress_profile: internal
+      lemmacomputer_egress_profile: internal
     description: Governed Outlook Mail, Calendar, OneDrive, and Teams connector
     auth_type: oauth2
     oauth2_flow: authorization_code
-    client_id: onecomputer-litellm
-    authorization_url: os.environ/ONECOMPUTER_M365_AUTHORIZATION_URL
+    client_id: lemmacomputer-litellm
+    authorization_url: os.environ/LEMMACOMPUTER_M365_AUTHORIZATION_URL
     token_url: http://ms365-mcp:3000/token
     scopes:
       - User.Read
@@ -76,7 +76,7 @@ mcp_servers:
     allow_all_keys: false
     available_on_public_internet: false
     delegate_auth_to_upstream: false
-  onecomputer_github:
+  lemmacomputer_github:
     alias: github
     transport: http
     url: https://api.githubcopilot.com/mcp/
@@ -97,7 +97,7 @@ general_settings:
   store_model_in_db: true
 
 litellm_settings:
-  callbacks: onecomputer_policy_callback.proxy_handler_instance
+  callbacks: lemmacomputer_policy_callback.proxy_handler_instance
   drop_params: true
   set_verbose: false
   turn_off_message_logging: true

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { m365ToolCatalog, type IdentityContext, type McpPolicyRequest } from "@onecomputer/contracts";
-import type { GovernedToolExecutor } from "@onecomputer/litellm-adapter";
-import { MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@onecomputer/workspace-store";
+import { m365ToolCatalog, type IdentityContext, type McpPolicyRequest } from "@lemmacomputer/contracts";
+import type { GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
+import { MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@lemmacomputer/workspace-store";
 import { McpPolicyService, m365CapabilityDefinitions, type HostedToolPolicy } from "../apps/control-api/src/mcp-policy.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "../apps/control-api/src/operations.js";
 
-const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
 const agentId = randomUUID();
 const policyVersionId = randomUUID();
 const policyHash = "a".repeat(64);
@@ -38,10 +38,10 @@ const setup = async (hostedToolPolicy?: (identity: IdentityContext, serverName: 
     document: {
       schemaVersion: 1,
       workspaceProfile: "kasm-persistent-standard",
-      agentProfile: "onecomputer-default-agent",
-      modelAliases: ["onecomputer-assistant"],
+      agentProfile: "lemmacomputer-default-agent",
+      modelAliases: ["lemmacomputer-assistant"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { onecomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "get-calendar-view", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file", "list-chats", "list-joined-teams", "send-chat-message"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "get-calendar-view", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file", "list-chats", "list-joined-teams", "send-chat-message"] } } },
       capabilities: ["m365-read", "onedrive-delete-protected"],
       protectedOperations: { "onedrive-delete-protected": "approval_required", defaultWrite: "deny" },
     },
@@ -64,8 +64,8 @@ const setup = async (hostedToolPolicy?: (identity: IdentityContext, serverName: 
     operationId: null,
     operationDigest: null,
     leaseId: null,
-    serverId: "9885e7f76089931fc5365104183af8ea",
-    serverName: "onecomputer_ms365",
+    serverId: "7feb3420d6cbdd27ad8d987ecb8343c5",
+    serverName: "lemmacomputer_ms365",
     toolName: "list-mail-folders",
     arguments: {},
   };
@@ -75,10 +75,10 @@ const setup = async (hostedToolPolicy?: (identity: IdentityContext, serverName: 
 test("hosted connector policy defaults can allow, block, or hold an exact tool for approval", async () => {
   let decision: HostedToolPolicy["decision"] = "allow";
   const hosted = async (_identity: IdentityContext, serverName: string, toolName: string): Promise<HostedToolPolicy | null> => (
-    serverName === "onecomputer_linear" ? {
+    serverName === "lemmacomputer_linear" ? {
       connectorId: "linear",
       connectorName: "Linear",
-      serverId: "onecomputer_linear",
+      serverId: "lemmacomputer_linear",
       serverName,
       toolName,
       displayName: "Create Issue",
@@ -88,8 +88,8 @@ test("hosted connector policy defaults can allow, block, or hold an exact tool f
   const { policy, base, store } = await setup(hosted);
   const request: McpPolicyRequest = {
     ...base,
-    serverId: "onecomputer_linear",
-    serverName: "onecomputer_linear",
+    serverId: "lemmacomputer_linear",
+    serverName: "lemmacomputer_linear",
     toolName: "create_issue",
     arguments: { title: "Investigate connector policy" },
   };
@@ -106,7 +106,7 @@ test("hosted connector policy defaults can allow, block, or hold an exact tool f
   const held = await policy.authorize(request, "hosted-approval");
   assert.equal(held.decision, "approval_required");
   const operation = await store.getOwnedOperation(identity, held.operationId!);
-  assert.equal(operation?.serverName, "onecomputer_linear");
+  assert.equal(operation?.serverName, "lemmacomputer_linear");
   assert.equal(operation?.toolName, "create_issue");
   assert.equal(operation?.resourceLocation, "Linear");
   assert.equal((await policy.authorize({ ...request, serverId: "another_server" }, "hosted-server-mutation")).code, "MCP_TOOL_NOT_GOVERNED");
@@ -126,7 +126,7 @@ test("upload-file-content rejects Graph endpoint wrappers before approval", () =
       driveId: "drive",
       driveItemId: "/items/root:/happy.txt:/content",
       body: "aGFwcHk=",
-      onecomputerAudit: { target: "happy.txt", targetType: "file" },
+      lemmacomputerAudit: { target: "happy.txt", targetType: "file" },
     }),
     /driveItemId must be an item ID or drive-relative path selector/,
   );
@@ -134,12 +134,12 @@ test("upload-file-content rejects Graph endpoint wrappers before approval", () =
     driveId: "drive",
     driveItemId: "root:/happy.txt:",
     body: "aGFwcHk=",
-    onecomputerAudit: { target: "happy.txt", targetType: "file" },
+    lemmacomputerAudit: { target: "happy.txt", targetType: "file" },
   }), {
     driveId: "drive",
     driveItemId: "root:/happy.txt:",
     body: "aGFwcHk=",
-    onecomputerAudit: { target: "happy.txt", targetType: "file" },
+    lemmacomputerAudit: { target: "happy.txt", targetType: "file" },
   });
 });
 
@@ -191,7 +191,7 @@ test("one user-scoped connector policy serves every owned workspace but no forei
   const foreignIdentity: IdentityContext = {
     tenantId: identity.tenantId,
     subjectId: "mallory",
-    audience: "onecomputer-control",
+    audience: "lemmacomputer-control",
   };
   const foreign = await store.createOrGet(foreignIdentity, "workspace-research", randomUUID());
   await store.update(foreign.id, { state: "ready" });
@@ -214,8 +214,8 @@ test("MCP authorization requires the exact owned workspace to be active", async 
   const hosted = async (): Promise<HostedToolPolicy> => ({
     connectorId: "linear",
     connectorName: "Linear",
-    serverId: "onecomputer_linear",
-    serverName: "onecomputer_linear",
+    serverId: "lemmacomputer_linear",
+    serverName: "lemmacomputer_linear",
     toolName: "create_issue",
     displayName: "Create Issue",
     decision: "allow",
@@ -224,8 +224,8 @@ test("MCP authorization requires the exact owned workspace to be active", async 
   await hostedSetup.store.update(hostedSetup.workspace.id, { state: "stopped" });
   assert.equal((await hostedSetup.policy.authorize({
     ...hostedSetup.base,
-    serverId: "onecomputer_linear",
-    serverName: "onecomputer_linear",
+    serverId: "lemmacomputer_linear",
+    serverName: "lemmacomputer_linear",
     toolName: "create_issue",
     arguments: { title: "Blocked while stopped" },
   }, "stopped-hosted-workspace")).code, "MCP_WORKSPACE_NOT_READY");
@@ -280,13 +280,13 @@ test("Teams reads are bounded and Teams sends are held for approval", async () =
   const held = await policy.authorize({
     ...base,
     toolName: "send-chat-message",
-    arguments: { chatId: "chat-1", onecomputerAudit: { target: "Alex Morgan", targetType: "recipient" }, body: { body: { contentType: "html", content: "Hello" } }, confirm: true },
+    arguments: { chatId: "chat-1", lemmacomputerAudit: { target: "Alex Morgan", targetType: "recipient" }, body: { body: { contentType: "html", content: "Hello" } }, confirm: true },
   }, "teams-send");
   assert.equal(held.decision, "approval_required");
   const operation = await store.getOwnedOperation(identity, held.operationId!);
   assert.equal(operation?.toolName, "send-chat-message");
   assert.equal((operation?.arguments as Record<string, unknown>).confirm, true);
-  assert.deepEqual((operation?.arguments as Record<string, unknown>).onecomputerAudit, {
+  assert.deepEqual((operation?.arguments as Record<string, unknown>).lemmacomputerAudit, {
     target: "Alex Morgan",
     targetType: "chat",
   });
@@ -295,7 +295,7 @@ test("Teams reads are bounded and Teams sends are held for approval", async () =
     toolName: "send-chat-message",
     arguments: {
       chatId: "chat-1",
-      onecomputerAudit: { target: "Alex Morgan", targetType: "channel" },
+      lemmacomputerAudit: { target: "Alex Morgan", targetType: "channel" },
       body: { body: { contentType: "html", content: "Hello" } },
       confirm: true,
     },
@@ -304,15 +304,15 @@ test("Teams reads are bounded and Teams sends are held for approval", async () =
   assert.equal((await policy.authorize({
     ...base,
     toolName: "send-chat-message",
-    arguments: { chatId: "chat-1", onecomputerAudit: { target: "Alex Morgan", targetType: "recipient" }, body: { body: { contentType: "text", content: "Hello" } }, confirm: true },
+    arguments: { chatId: "chat-1", lemmacomputerAudit: { target: "Alex Morgan", targetType: "recipient" }, body: { body: { contentType: "text", content: "Hello" } }, confirm: true },
   }, "teams-send-text")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
 });
 
 test("Control treats Softeria confirmation as a connector flag, not a policy decision", async () => {
   const { policy, base, effective } = await setup();
-  effective.document.mcp.servers.onecomputer_ms365.tools.push("create-calendar-event");
-  effective.document.mcp.servers.onecomputer_ms365.toolPolicies = {
-    ...effective.document.mcp.servers.onecomputer_ms365.toolPolicies,
+  effective.document.mcp.servers.lemmacomputer_ms365.tools.push("create-calendar-event");
+  effective.document.mcp.servers.lemmacomputer_ms365.toolPolicies = {
+    ...effective.document.mcp.servers.lemmacomputer_ms365.toolPolicies,
     "create-calendar-event": "allow",
   };
 
@@ -325,7 +325,7 @@ test("Control treats Softeria confirmation as a connector flag, not a policy dec
         start: { dateTime: "2026-07-23T15:00:00", timeZone: "Singapore Standard Time" },
         end: { dateTime: "2026-07-23T15:15:00", timeZone: "Singapore Standard Time" },
       },
-      onecomputerAudit: { target: "OC-MVP-ALLOW", targetType: "event" },
+      lemmacomputerAudit: { target: "OC-MVP-ALLOW", targetType: "event" },
       confirm: true,
     },
   }, "calendar-write-allow");
@@ -336,7 +336,7 @@ test("Control treats Softeria confirmation as a connector flag, not a policy dec
 
 test("the effective per-tool policy can require approval or deny an otherwise bounded read", async () => {
   const { store, policy, base, effective, operations } = await setup();
-  effective.document.mcp.servers.onecomputer_ms365.toolPolicies = {
+  effective.document.mcp.servers.lemmacomputer_ms365.toolPolicies = {
     "list-mail-folders": "approval_required",
     "list-calendars": "deny",
     "list-drives": "allow",
@@ -367,8 +367,8 @@ test("the effective per-tool policy can require approval or deny an otherwise bo
 
 test("a policy edit affects new calls without mutating an already-bound operation", async () => {
   const { store, policy, base, effective, operations } = await setup();
-  effective.document.mcp.servers.onecomputer_ms365.toolPolicies = {
-    ...effective.document.mcp.servers.onecomputer_ms365.toolPolicies,
+  effective.document.mcp.servers.lemmacomputer_ms365.toolPolicies = {
+    ...effective.document.mcp.servers.lemmacomputer_ms365.toolPolicies,
     "list-mail-folders": "approval_required",
   };
 
@@ -383,7 +383,7 @@ test("a policy edit affects new calls without mutating an already-bound operatio
   effective.policyVersionId = nextPolicyVersionId;
   effective.version = 3;
   effective.documentHash = nextPolicyHash;
-  effective.document.mcp.servers.onecomputer_ms365.toolPolicies["list-mail-folders"] = "deny";
+  effective.document.mcp.servers.lemmacomputer_ms365.toolPolicies["list-mail-folders"] = "deny";
 
   const next = await policy.authorize({
     ...base,
@@ -415,7 +415,7 @@ test("protected OneDrive delete persists before approval and an exact lease disp
   const requested = await policy.authorize({
     ...base,
     toolName: "delete-onedrive-file",
-    arguments: { driveId: "drive-1", driveItemId: "item-1", "If-Match": "etag-1", onecomputerAudit: { target: "Q3 draft.docx", targetType: "file" } },
+    arguments: { driveId: "drive-1", driveItemId: "item-1", "If-Match": "etag-1", lemmacomputerAudit: { target: "Q3 draft.docx", targetType: "file" } },
   }, "delete-request");
   assert.equal(requested.decision, "approval_required");
   assert.ok(requested.operationId);
@@ -426,7 +426,7 @@ test("protected OneDrive delete persists before approval and an exact lease disp
     driveId: "drive-1",
     driveItemId: "item-1",
     excludeResponse: true,
-    onecomputerAudit: { target: "Q3 draft.docx", targetType: "file" },
+    lemmacomputerAudit: { target: "Q3 draft.docx", targetType: "file" },
   });
 
   const decidedAt = new Date();
@@ -436,7 +436,7 @@ test("protected OneDrive delete persists before approval and an exact lease disp
     approvalId: randomUUID(),
     decision: "approve",
     channel: "local-fixture",
-    issuer: "onecomputer-local-fixture",
+    issuer: "lemmacomputer-local-fixture",
     keyId: "fixture-hmac-v1",
     operationDigest: operation!.operationDigest,
     nonce: operation!.nonce,
@@ -467,7 +467,7 @@ test("a repeated protected MCP action reuses the active approval and replaces a 
   const request: McpPolicyRequest = {
     ...base,
     toolName: "delete-onedrive-file",
-    arguments: { driveId: "drive-1", driveItemId: "item-1", "If-Match": "etag-1", onecomputerAudit: { target: "Q3 draft.docx", targetType: "file" } },
+    arguments: { driveId: "drive-1", driveItemId: "item-1", "If-Match": "etag-1", lemmacomputerAudit: { target: "Q3 draft.docx", targetType: "file" } },
   };
 
   const first = await policy.authorize(request, "delete-attempt-1");

@@ -6,7 +6,7 @@ index 65d5b32..0faa6bd 100644
      # that the sanitized form is safe to pass into Honcho / state.db.
      _MAX_SESSION_HEADER_LEN = 256
  
-+    _AI_USAGE_TASK_BINDING_HEADER = "x-onecomputer-ai-task-binding"
++    _AI_USAGE_TASK_BINDING_HEADER = "x-lemmacomputer-ai-task-binding"
 +    _AI_USAGE_TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 +
 +    def _parse_ai_usage_task_binding_header(

@@ -8,18 +8,18 @@ import { controlRequestTimeout } from "./proxy-timeout.mjs";
 
 const host = process.env.WEB_HOST ?? "127.0.0.1";
 const port = Number(process.env.WEB_PORT ?? 4173);
-const controlUrl = new URL(process.env.ONECOMPUTER_CONTROL_URL ?? "http://127.0.0.1:4100");
-const channelBrokerIntakeUrl = process.env.ONECOMPUTER_CHANNEL_BROKER_INTAKE_URL
-  ? new URL(process.env.ONECOMPUTER_CHANNEL_BROKER_INTAKE_URL)
+const controlUrl = new URL(process.env.LEMMACOMPUTER_CONTROL_URL ?? "http://127.0.0.1:4100");
+const channelBrokerIntakeUrl = process.env.LEMMACOMPUTER_CHANNEL_BROKER_INTAKE_URL
+  ? new URL(process.env.LEMMACOMPUTER_CHANNEL_BROKER_INTAKE_URL)
   : null;
-const proxyToken = process.env.ONECOMPUTER_WEB_PROXY_TOKEN;
+const proxyToken = process.env.LEMMACOMPUTER_WEB_PROXY_TOKEN;
 const distribution = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "dist");
 
 if (!Number.isInteger(port) || port < 1 || port > 65_535) {
   throw new Error("WEB_PORT must be a valid TCP port");
 }
 if (!proxyToken || proxyToken.length < 24) {
-  throw new Error("ONECOMPUTER_WEB_PROXY_TOKEN must contain at least 24 characters");
+  throw new Error("LEMMACOMPUTER_WEB_PROXY_TOKEN must contain at least 24 characters");
 }
 
 const contentTypes = new Map([
@@ -93,7 +93,7 @@ const proxy = (request, response, requestUrl) => {
   const headers = {
     ...request.headers,
     host: upstreamUrl.host,
-    "x-onecomputer-proxy-token": proxyToken,
+    "x-lemmacomputer-proxy-token": proxyToken,
   };
   delete headers.connection;
 
@@ -179,7 +179,7 @@ const proxyTelegramIntake = (request, response, requestUrl) => {
 };
 
 const server = http.createServer(async (request, response) => {
-  const requestUrl = new URL(request.url ?? "/", "http://onecomputer.invalid");
+  const requestUrl = new URL(request.url ?? "/", "http://lemmacomputer.invalid");
   if (requestUrl.pathname === "/healthz") {
     response.writeHead(200, {
       "content-type": "application/json",

@@ -2,14 +2,14 @@ import { lookup } from "node:dns/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import net from "node:net";
-import { runtimeEgressPolicySchema } from "@onecomputer/contracts";
+import { runtimeEgressPolicySchema } from "@lemmacomputer/contracts";
 import {
   compileRuntimeEgressPolicy,
   decideEgress,
   normalizeEgressHost,
   verifyEgressProxyGrant,
   type EgressProxyGrantClaims,
-} from "@onecomputer/egress-policy";
+} from "@lemmacomputer/egress-policy";
 
 type ProxySharedConfig = {
   policy: ReturnType<typeof compileRuntimeEgressPolicy>;
@@ -421,7 +421,7 @@ export function createEgressProxy(config: ProxyConfig) {
     const result = await resolveAndDecide(config, "https", target.hostname, port);
     if (result.decision.decision !== "allow" || !result.addresses[0]) {
       audit(config, result.decision.reasonCode, result.decision.ruleId, { protocol: "https", host: target.hostname, port });
-      client.end(`HTTP/1.1 403 Forbidden\r\nX-OneComputer-Reason: ${result.decision.reasonCode}\r\nConnection: close\r\n\r\n`);
+      client.end(`HTTP/1.1 403 Forbidden\r\nX-LemmaComputer-Reason: ${result.decision.reasonCode}\r\nConnection: close\r\n\r\n`);
       return;
     }
     client.write("HTTP/1.1 200 Connection Established\r\n\r\n");

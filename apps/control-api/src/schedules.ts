@@ -6,7 +6,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import {
-  OneComputerError,
+  LemmaComputerError,
   scheduleRunSchema,
   scheduleSchema,
   type ChatAgentCatalogId,
@@ -16,23 +16,23 @@ import {
   type Schedule,
   type ScheduleRun,
   type UpdateSchedule,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import {
   nextScheduleAt,
   type ClaimedScheduleRun,
   type ScheduleRecord,
   type ScheduleRunRecord,
   type ScheduleStore,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import type { AgentChatAccess, AgentChatClient } from "./agent-chat.js";
 
 const key = (secret: string) => createHash("sha256")
-  .update("onecomputer/schedule-prompt/k1\0")
+  .update("lemmacomputer/schedule-prompt/k1\0")
   .update(secret)
   .digest();
 
 const additionalData = (identity: IdentityContext, scheduleId: string) => Buffer.from(
-  `onecomputer/schedule-prompt/k1:${identity.tenantId}:${identity.subjectId}:${scheduleId}`,
+  `lemmacomputer/schedule-prompt/k1:${identity.tenantId}:${identity.subjectId}:${scheduleId}`,
   "utf8",
 );
 
@@ -64,7 +64,7 @@ export class SchedulePromptVault {
         decipher.final(),
       ]).toString("utf8");
     } catch {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "SCHEDULE_PROMPT_UNAVAILABLE",
         "The saved schedule prompt could not be unlocked",
         503,
@@ -77,7 +77,7 @@ export class SchedulePromptVault {
 const identityFor = (record: Pick<ScheduleRecord, "tenantId" | "subjectId">): IdentityContext => ({
   tenantId: record.tenantId,
   subjectId: record.subjectId,
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 });
 
 const scheduleView = (record: ScheduleRecord, prompt: string): Schedule => scheduleSchema.parse({
@@ -109,7 +109,7 @@ const runView = (record: ScheduleRunRecord): ScheduleRun => scheduleRunSchema.pa
   updatedAt: record.updatedAt.toISOString(),
 });
 
-const invalidSchedule = () => new OneComputerError(
+const invalidSchedule = () => new LemmaComputerError(
   "SCHEDULE_INVALID",
   "The schedule or timezone is invalid",
   400,
@@ -179,14 +179,14 @@ export class ScheduleService {
       nextRunAt,
     });
     if (!created) {
-      throw new OneComputerError("SCHEDULE_TARGET_INVALID", "The selected workspace is unavailable", 409);
+      throw new LemmaComputerError("SCHEDULE_TARGET_INVALID", "The selected workspace is unavailable", 409);
     }
     return this.view(created);
   }
 
   async update(identity: IdentityContext, scheduleId: string, input: UpdateSchedule) {
     const current = await this.store.getSchedule(identity, scheduleId);
-    if (!current) throw new OneComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
+    if (!current) throw new LemmaComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
     const workspaceId = input.workspaceId ?? current.workspaceId;
     const agentCatalogId = input.agentCatalogId ?? current.agentCatalogId;
     if (input.workspaceId || input.agentCatalogId) {
@@ -207,19 +207,19 @@ export class ScheduleService {
       ...(prompt ? { promptCiphertext: this.vault.protect(identity, scheduleId, prompt) } : {}),
       nextRunAt,
     });
-    if (!updated) throw new OneComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
+    if (!updated) throw new LemmaComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
     return this.view(updated);
   }
 
   async remove(identity: IdentityContext, scheduleId: string) {
     if (!await this.store.deleteSchedule(identity, scheduleId)) {
-      throw new OneComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
+      throw new LemmaComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
     }
   }
 
   async runs(identity: IdentityContext, scheduleId: string, limit = 20) {
     if (!await this.store.getSchedule(identity, scheduleId)) {
-      throw new OneComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
+      throw new LemmaComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
     }
     return {
       runs: (await this.store.listScheduleRuns(identity, scheduleId, limit)).map(runView),
@@ -228,16 +228,16 @@ export class ScheduleService {
 
   async runNow(identity: IdentityContext, scheduleId: string) {
     const schedule = await this.store.getSchedule(identity, scheduleId);
-    if (!schedule) throw new OneComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
+    if (!schedule) throw new LemmaComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
     const queued = await this.store.queueScheduleRun(identity, scheduleId, new Date());
-    if (!queued) throw new OneComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
+    if (!queued) throw new LemmaComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
     return runView(queued);
   }
 
   async executeClaimed(runId: string, leaseToken: string) {
     const claimed = await this.store.beginScheduleRun(runId, leaseToken, new Date());
     if (!claimed) {
-      throw new OneComputerError("SCHEDULE_RUN_LEASE_INVALID", "The scheduled run lease is invalid or expired", 409);
+      throw new LemmaComputerError("SCHEDULE_RUN_LEASE_INVALID", "The scheduled run lease is invalid or expired", 409);
     }
     return this.execute(claimed);
   }
@@ -276,7 +276,7 @@ export class ScheduleService {
         }
       }
       if (terminal !== "completed") {
-        throw new OneComputerError(
+        throw new LemmaComputerError(
           terminal === "cancelled"
             ? "SCHEDULE_TURN_CANCELLED"
             : terminal === "needs_input" ? "SCHEDULE_NEEDS_INPUT" : "SCHEDULE_TURN_FAILED",
@@ -297,7 +297,7 @@ export class ScheduleService {
       if (!completed) throw new Error("Scheduled run ownership was lost");
       return runView(completed);
     } catch (error) {
-      const known = error instanceof OneComputerError ? error : new OneComputerError(
+      const known = error instanceof LemmaComputerError ? error : new LemmaComputerError(
         "SCHEDULE_EXECUTION_FAILED",
         "The scheduled agent turn failed",
         500,

@@ -9,7 +9,7 @@ test("Telegram credential authority exists only in the trusted channel broker", 
   const [compose, hostedCompose, entrypoint, kasm, controller, contracts, web] = await Promise.all([
     source("compose.yaml"),
     source("compose.hosted.yaml"),
-    source("docker/workspace/onecomputer-workspace-entrypoint.sh"),
+    source("docker/workspace/lemmacomputer-workspace-entrypoint.sh"),
     source("packages/kasm-adapter/src/index.ts"),
     source("apps/workspace-controller/src/server.ts"),
     source("packages/contracts/src/index.ts"),
@@ -26,8 +26,8 @@ test("Telegram credential authority exists only in the trusted channel broker", 
   assert.match(control, /env_file:\s+- path: \.runtime-env\/control-api\.env\s+format: raw/);
   assert.ok("CHANNEL_CREDENTIAL_SECRET" in brokerEnvironment);
   assert.ok("TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64" in brokerEnvironment);
-  assert.equal(brokerEnvironment.ONECOMPUTER_INSTALLATION_KIND, "customer-managed");
-  assert.equal(controlEnvironment.ONECOMPUTER_INSTALLATION_KIND, "customer-managed");
+  assert.equal(brokerEnvironment.LEMMACOMPUTER_INSTALLATION_KIND, "customer-managed");
+  assert.equal(controlEnvironment.LEMMACOMPUTER_INSTALLATION_KIND, "customer-managed");
   assert.match(hostedCompose, /services:\s*\{\}/);
   assert.match(broker, /networks:\s+- control-private\s+- web-edge\s+- channel-egress/);
   assert.doesNotMatch(broker, /gateway-private|docker\.sock/);

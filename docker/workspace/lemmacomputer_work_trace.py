@@ -19,7 +19,7 @@ SENSITIVE_QUERY_KEY = re.compile(r"^(?:access_token|api[_-]?key|awsaccesskeyid|c
 def safe_trace_text(value: object, maximum: int = MAX_TRACE_TEXT) -> str | None:
     if not isinstance(value, str):
         return None
-    text = value.replace("[ONECOMPUTER_NEEDS_INPUT]", "")
+    text = value.replace("[LEMMACOMPUTER_NEEDS_INPUT]", "")
     text = MARKDOWN_LINK.sub(lambda match: match.group(1), text)
     text = MARKDOWN_MARKER.sub("", text)
     text = re.sub(r"[*_`~]+", "", text)
@@ -64,7 +64,7 @@ def normalized_tool_name(value: object) -> str:
 
 def humanize_tool_name(value: object) -> str:
     name = str(value or "workspace tool")
-    name = name.replace("mcp__onecomputer_connectors__", "")
+    name = name.replace("mcp__lemmacomputer_connectors__", "")
     name = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
     name = re.sub(r"[_:.-]+", " ", name)
     return " ".join(name.split()).strip().capitalize() or "Workspace tool"

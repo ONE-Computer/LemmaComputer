@@ -10,7 +10,7 @@ import {
   type EgressProtocol,
   type RuntimeEgressPolicy,
   type EgressSecurityGroupVersion,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 
 export type CompiledEgressRule = {
   id: string;
@@ -104,7 +104,7 @@ export class PublicHttpsTargetValidationError extends Error {
 }
 
 export type EgressProxyGrantClaims = {
-  aud: "onecomputer-egress-proxy";
+  aud: "lemmacomputer-egress-proxy";
   tenantId: string;
   subjectId: string;
   workspaceId: string;
@@ -130,7 +130,7 @@ const sign = (value: string, secret: string) => encode(createHmac("sha256", secr
 
 export function deriveEgressProxySecret(rootSecret: string, workspaceId: string) {
   if (rootSecret.length < 32) throw new Error("Egress proxy root secret must be at least 32 characters");
-  return createHmac("sha256", rootSecret).update(`onecomputer-egress-proxy\0${workspaceId}`).digest("base64url");
+  return createHmac("sha256", rootSecret).update(`lemmacomputer-egress-proxy\0${workspaceId}`).digest("base64url");
 }
 
 export function issueEgressProxyGrant(
@@ -141,7 +141,7 @@ export function issueEgressProxyGrant(
 ) {
   const issuedAt = Math.floor(now.getTime() / 1000);
   const payload: EgressProxyGrantClaims = {
-    aud: "onecomputer-egress-proxy",
+    aud: "lemmacomputer-egress-proxy",
     ...claims,
     iat: issuedAt,
     exp: issuedAt + ttlSeconds,
@@ -170,7 +170,7 @@ export function verifyEgressProxyGrant(
   }
   const nowSeconds = Math.floor(now.getTime() / 1000);
   if (
-    claims.aud !== "onecomputer-egress-proxy"
+    claims.aud !== "lemmacomputer-egress-proxy"
     || !Number.isInteger(claims.iat)
     || !Number.isInteger(claims.exp)
     || claims.iat > nowSeconds + 30

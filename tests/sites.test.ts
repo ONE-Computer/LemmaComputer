@@ -1,24 +1,24 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import { MemorySiteStore } from "@onecomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
+import { MemorySiteStore } from "@lemmacomputer/workspace-store";
 import { SitesService } from "../apps/control-api/src/sites.js";
 
 const owner: IdentityContext = {
   tenantId: "acme",
   subjectId: "alex",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const otherOwner: IdentityContext = {
   tenantId: "acme",
   subjectId: "sam",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const otherTenant: IdentityContext = {
   tenantId: "globex",
   subjectId: "alex",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const html = "<!doctype html><html lang=\"en\"><body>Hello world</body></html>";

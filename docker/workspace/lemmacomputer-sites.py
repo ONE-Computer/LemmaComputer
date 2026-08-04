@@ -16,8 +16,8 @@ from pathlib import Path
 
 def broker_url() -> str:
     value = (
-        os.environ.get("ONECOMPUTER_SITES_BROKER")
-        or os.environ.get("ONECOMPUTER_CONNECTORS_BROKER")
+        os.environ.get("LEMMACOMPUTER_SITES_BROKER")
+        or os.environ.get("LEMMACOMPUTER_CONNECTORS_BROKER")
         or ""
     ).rstrip("/")
     if value not in {
@@ -48,7 +48,7 @@ def publish(arguments: argparse.Namespace) -> int:
         "artifactSha256": hashlib.sha256(content).hexdigest(),
     }, separators=(",", ":")).encode()
     request = urllib.request.Request(
-        f"{broker_url()}/onecomputer/sites",
+        f"{broker_url()}/lemmacomputer/sites",
         data=body,
         method="POST",
         headers={"content-type": "application/json", "content-length": str(len(body))},
@@ -77,7 +77,7 @@ def publish(arguments: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="onecomputer-sites")
+    parser = argparse.ArgumentParser(prog="lemmacomputer-sites")
     commands = parser.add_subparsers(dest="command", required=True)
     publish_parser = commands.add_parser("publish", help="Publish a built single-file Vite site")
     publish_parser.add_argument("--name", required=True)

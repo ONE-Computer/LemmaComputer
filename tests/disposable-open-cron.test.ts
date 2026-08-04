@@ -8,26 +8,26 @@ test("the workspace image pins cron and installs the persistent scheduling helpe
   const dockerfile = await source("docker/Dockerfile.workspace");
   assert.match(dockerfile, /cron=3\.0pl1-137ubuntu3/);
   assert.match(dockerfile, /dpkg-query[\s\S]+cron[\s\S]+3\.0pl1-137ubuntu3/);
-  assert.match(dockerfile, /onecomputer-crontab/);
-  assert.match(dockerfile, /onecomputer-cron-run/);
+  assert.match(dockerfile, /lemmacomputer-crontab/);
+  assert.match(dockerfile, /lemmacomputer-cron-run/);
   assert.match(dockerfile, /SCHEDULING\.md/);
 });
 
 test("cron is confined to disposable-open workspaces and restored from persistent home", async () => {
-  const entrypoint = await source("docker/workspace/onecomputer-workspace-entrypoint.sh");
-  assert.match(entrypoint, /ONECOMPUTER_EXECUTION_MODE" == "disposable-open"/);
-  assert.match(entrypoint, /canonical_crontab="\/home\/kasm-user\/\.onecomputer\/crontab"/);
+  const entrypoint = await source("docker/workspace/lemmacomputer-workspace-entrypoint.sh");
+  assert.match(entrypoint, /LEMMACOMPUTER_EXECUTION_MODE" == "disposable-open"/);
+  assert.match(entrypoint, /canonical_crontab="\/home\/kasm-user\/\.lemmacomputer\/crontab"/);
   assert.match(entrypoint, /\/usr\/bin\/crontab -u kasm-user "\$canonical_crontab"/);
   assert.match(entrypoint, /\/usr\/sbin\/cron -f -L 0/);
   assert.match(entrypoint, /kill -0 "\$cron_supervisor_pid"/);
-  assert.match(entrypoint, /install -o 1000 -g 1000 -m 0600 \/dev\/null \/run\/onecomputer\/cron-events\.log/);
+  assert.match(entrypoint, /install -o 1000 -g 1000 -m 0600 \/dev\/null \/run\/lemmacomputer\/cron-events\.log/);
   assert.match(entrypoint, /\/usr\/bin\/crontab -u kasm-user -r/);
 });
 
 test("the cron helper persists updates and the runner bounds time, overlap, and logs", async () => {
   const [crontab, runner, guidance] = await Promise.all([
-    source("docker/workspace/onecomputer-crontab"),
-    source("docker/workspace/onecomputer-cron-run"),
+    source("docker/workspace/lemmacomputer-crontab"),
+    source("docker/workspace/lemmacomputer-cron-run"),
     source("docker/workspace/SCHEDULING.md"),
   ]);
   assert.match(crontab, /canonical_file="\$\{canonical_dir\}\/crontab"/);

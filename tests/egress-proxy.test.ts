@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
 import test from "node:test";
-import { egressSecurityGroupVersionSchema } from "@onecomputer/contracts";
-import { compileEgressSecurityGroup, compileRuntimeEgressPolicy, deriveEgressProxySecret, issueEgressProxyGrant } from "@onecomputer/egress-policy";
+import { egressSecurityGroupVersionSchema } from "@lemmacomputer/contracts";
+import { compileEgressSecurityGroup, compileRuntimeEgressPolicy, deriveEgressProxySecret, issueEgressProxyGrant } from "@lemmacomputer/egress-policy";
 import { createEgressProxy, createHttpDynamicDestinationAuthorizer } from "../apps/egress-proxy/src/server.js";
 
 const policy = egressSecurityGroupVersionSchema.parse({
@@ -33,7 +33,7 @@ const expectedGrant = {
 
 const proxyAuthorization = (username: string, password: string) => `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 
-const connect = (port: number, path: string, token?: string, username = "onecomputer") => new Promise<{ statusCode: number; socket?: net.Socket }>((resolve, reject) => {
+const connect = (port: number, path: string, token?: string, username = "lemmacomputer") => new Promise<{ statusCode: number; socket?: net.Socket }>((resolve, reject) => {
   const request = http.request({
     host: "127.0.0.1",
     port,
@@ -158,7 +158,7 @@ test("gateway service authentication permits only public HTTPS tunnels", async (
     const invalidPassword = await connect(proxyPort, "downloads.claude.ai:443", "not-the-service-password", "litellm-gateway");
     assert.equal(invalidPassword.statusCode, 407);
 
-    const wrongService = await connect(proxyPort, "downloads.claude.ai:443", servicePassword, "onecomputer");
+    const wrongService = await connect(proxyPort, "downloads.claude.ai:443", servicePassword, "lemmacomputer");
     assert.equal(wrongService.statusCode, 407);
 
     const allowed = await connect(proxyPort, "downloads.claude.ai:443", servicePassword, "litellm-gateway");

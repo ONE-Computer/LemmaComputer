@@ -1,5 +1,5 @@
 import {
-  OneComputerError,
+  LemmaComputerError,
   readinessFor,
   runtimePolicySchema,
   type IdentityContext,
@@ -12,15 +12,15 @@ import {
   type Sandbox,
   type SignedPolicyBundle,
   type WorkspaceView,
-} from "@onecomputer/contracts";
-import { deriveEgressProxySecret, issueEgressProxyGrant } from "@onecomputer/egress-policy";
-import type { GatewayClient, GatewayGrant, GatewayReadiness } from "@onecomputer/litellm-adapter";
-import { PolicyBundleSigner, PolicyVerificationError, verifySignedPolicyBundle, type VerifiedPolicyBundle } from "@onecomputer/policy-integrity";
+} from "@lemmacomputer/contracts";
+import { deriveEgressProxySecret, issueEgressProxyGrant } from "@lemmacomputer/egress-policy";
+import type { GatewayClient, GatewayGrant, GatewayReadiness } from "@lemmacomputer/litellm-adapter";
+import { PolicyBundleSigner, PolicyVerificationError, verifySignedPolicyBundle, type VerifiedPolicyBundle } from "@lemmacomputer/policy-integrity";
 import {
   WorkspaceIngressAuthority,
   workspaceIngressAccessParameter,
-} from "@onecomputer/workspace-ingress-auth";
-import type { WorkspaceRecord, WorkspaceStore } from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-ingress-auth";
+import type { WorkspaceRecord, WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { AgentChatAuthority, type AgentChatAccess } from "./agent-chat.js";
 
 export type ControllerLaunch = Launch & {
@@ -123,7 +123,7 @@ export class PolicyBundleAuthority {
       });
     } catch (error) {
       if (error instanceof PolicyVerificationError) {
-        throw new OneComputerError(error.code, error.message, 503);
+        throw new LemmaComputerError(error.code, error.message, 503);
       }
       throw error;
     }
@@ -141,7 +141,7 @@ export class HttpControllerClient implements ControllerClient {
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string; retryable?: boolean } };
-      throw new OneComputerError(payload.error?.code ?? "CONTROLLER_ERROR", payload.error?.message ?? "Workspace controller request failed", response.status, payload.error?.retryable ?? response.status >= 500);
+      throw new LemmaComputerError(payload.error?.code ?? "CONTROLLER_ERROR", payload.error?.message ?? "Workspace controller request failed", response.status, payload.error?.retryable ?? response.status >= 500);
     }
     return response.status === 204 ? {} : response.json();
   }
@@ -314,7 +314,7 @@ export class WorkspaceService {
         await this.revokeAgentGrants(workspaceId, policy);
         return;
       } catch (error) {
-        const retryable = error instanceof OneComputerError && error.retryable;
+        const retryable = error instanceof LemmaComputerError && error.retryable;
         if (!retryable || attempt >= delays.length) throw error;
         await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
       }
@@ -418,7 +418,7 @@ export class WorkspaceService {
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
       const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
-      if (verifiedPolicy.egress && !egressProxy) throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
+      if (verifiedPolicy.egress && !egressProxy) throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
         workspaceId: claimed.id,
         correlationId,
@@ -432,14 +432,14 @@ export class WorkspaceService {
       return this.view(record, policy, authorized, sandbox.policyIntegrity);
     } catch (error) {
       await this.revokePolicyGrant(claimed.id, policy).catch(() => undefined);
-      await this.store.finish(claimed.id, claimed.operationToken!, { state: "failed", failureCode: error instanceof OneComputerError ? error.code : "PROVISION_FAILED" });
+      await this.store.finish(claimed.id, claimed.operationToken!, { state: "failed", failureCode: error instanceof LemmaComputerError ? error.code : "PROVISION_FAILED" });
       throw error;
     }
   }
 
   async open(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
-    if (!record.providerId || !["ready", "open"].includes(record.state)) throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not ready to open", 409, true);
+    if (!record.providerId || !["ready", "open"].includes(record.state)) throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not ready to open", 409, true);
     const authorized = this.authorizePolicy(identity, record.id, policy);
     await this.ensureAgentGrants(identity, record, authorized?.payload.policy ?? policy);
     const controllerLaunch = await this.controller.open(record.providerId);
@@ -473,7 +473,7 @@ export class WorkspaceService {
   async restart(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string, correlationId: string) {
     const record = await this.owned(identity, workspaceId);
     const claimed = await this.store.claim(record.id, ["ready", "open", "stopped", "failed"], "restarting");
-    if (!claimed) throw new OneComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
+    if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
     try {
       const bridgeGeneration = await this.store.revokeBridgeGrants(claimed.id);
       if (claimed.providerId) await this.controller.destroy(claimed.providerId);
@@ -483,7 +483,7 @@ export class WorkspaceService {
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
       const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
-      if (verifiedPolicy.egress && !egressProxy) throw new OneComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
+      if (verifiedPolicy.egress && !egressProxy) throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
         workspaceId: claimed.id,
         correlationId,
@@ -501,7 +501,7 @@ export class WorkspaceService {
       );
     } catch (error) {
       await this.revokePolicyGrant(claimed.id, policy).catch(() => undefined);
-      await this.store.finish(claimed.id, claimed.operationToken!, { state: "failed", providerId: null, failureCode: error instanceof OneComputerError ? error.code : "RESTART_FAILED" });
+      await this.store.finish(claimed.id, claimed.operationToken!, { state: "failed", providerId: null, failureCode: error instanceof LemmaComputerError ? error.code : "RESTART_FAILED" });
       throw error;
     }
   }
@@ -514,7 +514,7 @@ export class WorkspaceService {
       ? ["stopped" as const]
       : ["ready" as const, "open" as const, "provisioning" as const, "restarting" as const, "failed" as const];
     const claimed = await this.store.claim(record.id, allowed, "stopping");
-    if (!claimed) throw new OneComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
+    if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
     await this.store.revokeBridgeGrants(claimed.id);
     try {
       if (claimed.providerId) await this.controller.destroy(claimed.providerId);
@@ -522,7 +522,7 @@ export class WorkspaceService {
       await this.store.finish(claimed.id, claimed.operationToken!, {
         state: "failed",
         providerId: claimed.providerId,
-        failureCode: error instanceof OneComputerError ? error.code : "WORKSPACE_STOP_FAILED",
+        failureCode: error instanceof LemmaComputerError ? error.code : "WORKSPACE_STOP_FAILED",
       });
       throw error;
     }
@@ -534,8 +534,8 @@ export class WorkspaceService {
         providerId: null,
         failureCode: "WORKSPACE_ACCESS_CLEANUP_FAILED",
       });
-      const retryable = error instanceof OneComputerError ? error.retryable : true;
-      throw new OneComputerError(
+      const retryable = error instanceof LemmaComputerError ? error.retryable : true;
+      throw new LemmaComputerError(
         "WORKSPACE_ACCESS_CLEANUP_FAILED",
         retryable
           ? "The workspace stopped, but access cleanup could not be confirmed. LemmaComputer will retry safely."
@@ -558,8 +558,8 @@ export class WorkspaceService {
 
   async testGateway(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
-    if (!["ready", "open"].includes(record.state)) throw new OneComputerError("WORKSPACE_NOT_READY", "The workspace is not ready", 409, true);
-    if (!this.gateway) throw new OneComputerError("GATEWAY_NOT_CONFIGURED", "The model gateway is not configured", 503, true);
+    if (!["ready", "open"].includes(record.state)) throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not ready", 409, true);
+    if (!this.gateway) throw new LemmaComputerError("GATEWAY_NOT_CONFIGURED", "The model gateway is not configured", 503, true);
     const authorized = this.authorizePolicy(identity, record.id, policy);
     const verifiedPolicy = authorized?.payload.policy ?? policy;
     await this.ensureAgentGrants(identity, record, verifiedPolicy);
@@ -569,7 +569,7 @@ export class WorkspaceService {
   async agentChatAgents(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
     if (!this.agentChatAuthority) {
-      throw new OneComputerError("CHAT_NOT_CONFIGURED", "Sandbox Chat is not configured", 503, true);
+      throw new LemmaComputerError("CHAT_NOT_CONFIGURED", "Sandbox Chat is not configured", 503, true);
     }
     return {
       state: record.state,
@@ -585,16 +585,16 @@ export class WorkspaceService {
   ): Promise<AgentChatAccess> {
     const { state, accesses } = await this.agentChatAgents(identity, policy, workspaceId);
     const access = accesses.find((candidate) => candidate.catalogId === catalogId);
-    if (!access) throw new OneComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
+    if (!access) throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
     if (!["ready", "open"].includes(state)) {
-      throw new OneComputerError("WORKSPACE_NOT_READY", "Start this sandbox to use Chat", 409, true);
+      throw new LemmaComputerError("WORKSPACE_NOT_READY", "Start this sandbox to use Chat", 409, true);
     }
     return access;
   }
 
   private async owned(identity: IdentityContext, workspaceId: string) {
     const record = await this.store.getOwned(identity, workspaceId);
-    if (!record) throw new OneComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    if (!record) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
     return record;
   }
 }

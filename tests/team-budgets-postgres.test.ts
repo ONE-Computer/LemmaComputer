@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import pg from "pg";
-import { BudgetUsageAttemptAdmission, MemoryWorkspaceStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresUsageLedgerStore, usageFingerprint, type AttemptAdmissionInput } from "@onecomputer/workspace-store";
+import { BudgetUsageAttemptAdmission, MemoryWorkspaceStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresUsageLedgerStore, usageFingerprint, type AttemptAdmissionInput } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -40,7 +40,7 @@ test("PostgreSQL Team budgets reserve atomically, fail closed, and preserve immu
       requestedAlias:"balanced",requestedServiceClass:"balanced",selectedServiceClass:"lite",routeMappingVersion:"mapping-1",attemptKind:"inference",
       resolvedProvider:"openai",providerAccountId:"primary",resolvedModel:"gpt-concrete",resolvedDeploymentId:"deployment-a",admittedAt:now.toISOString(),
       budgetBounds:{inputTokens:"1",maximumOutputTokens:"1",cacheStatus:"unknown",maxRetries:0,maxFallbacks:0,maxAgentSteps:1,reservationTtlSeconds:30,providerDeadlineAt:new Date(now.getTime()+120_000).toISOString()}});
-    const simultaneous=await Promise.all(["parallel-a","parallel-b"].map((sourceAttemptId)=>app.inject({method:"POST",url:"/internal/v1/ai-usage/attempts/admit",headers:{"x-onecomputer-ai-usage-token":internalToken},payload:apiAttempt(sourceAttemptId)})));
+    const simultaneous=await Promise.all(["parallel-a","parallel-b"].map((sourceAttemptId)=>app.inject({method:"POST",url:"/internal/v1/ai-usage/attempts/admit",headers:{"x-lemmacomputer-ai-usage-token":internalToken},payload:apiAttempt(sourceAttemptId)})));
     assert.deepEqual(simultaneous.map((response)=>response.statusCode).sort(),[201,429]);
     const acceptedIndex=simultaneous.findIndex((response)=>response.statusCode===201);
     const acceptedAttempt=acceptedIndex===0?"parallel-a":"parallel-b";
@@ -48,8 +48,8 @@ test("PostgreSQL Team budgets reserve atomically, fail closed, and preserve immu
     assert.match(simultaneous.find((response)=>response.statusCode===429)!.body,/TEAM_BUDGET_EXHAUSTED/);
     assert.equal((await first.getBudgetStatus(tenantId,team.id,now)).outstandingReservations,"2.000000000000");
     const completion={schemaVersion:1,tenantId,admissionId:accepted.admissionId,sourceSystem:"litellm",sourceEventId:`event-${acceptedAttempt}`,eventType:"usage",occurredAt:new Date(now.getTime()+1_000).toISOString(),outcome:"success",units:[{unit:"input_uncached_token",quantity:"0.1"},{unit:"output_token",quantity:"0.1"}]};
-    assert.equal((await app.inject({method:"POST",url:"/internal/v1/ai-usage/events",headers:{"x-onecomputer-ai-usage-token":internalToken},payload:completion})).statusCode,201);
-    assert.equal((await app.inject({method:"POST",url:"/internal/v1/ai-usage/events",headers:{"x-onecomputer-ai-usage-token":internalToken},payload:completion})).statusCode,200);
+    assert.equal((await app.inject({method:"POST",url:"/internal/v1/ai-usage/events",headers:{"x-lemmacomputer-ai-usage-token":internalToken},payload:completion})).statusCode,201);
+    assert.equal((await app.inject({method:"POST",url:"/internal/v1/ai-usage/events",headers:{"x-lemmacomputer-ai-usage-token":internalToken},payload:completion})).statusCode,200);
     const completedStatus=await first.getBudgetStatus(tenantId,team.id,new Date(now.getTime()+1_000));
     assert.equal(completedStatus.settledProviderCost,"0.200000000000");
     assert.equal(completedStatus.outstandingReservations,"0.000000000000");

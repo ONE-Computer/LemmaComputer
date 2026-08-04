@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { shouldAssignDefaultPolicyOnAuthentication } from "@onecomputer/workspace-store";
+import { shouldAssignDefaultPolicyOnAuthentication } from "@lemmacomputer/workspace-store";
 
 test("first-time ME TECH members receive the default policy without restoring a revoked returning member", () => {
   assert.equal(shouldAssignDefaultPolicyOnAuthentication(false, false), true);

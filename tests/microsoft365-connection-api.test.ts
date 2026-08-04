@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
+import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway } from "@lemmacomputer/litellm-adapter";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "proxy-test-token-at-least-24-characters";
-const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
+const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
 const headersFor = (identity: IdentityContext) => ({
-  "x-onecomputer-proxy-token": proxyToken,
-  "x-onecomputer-test-tenant-id": identity.tenantId,
-  "x-onecomputer-test-user-id": identity.subjectId,
+  "x-lemmacomputer-proxy-token": proxyToken,
+  "x-lemmacomputer-test-tenant-id": identity.tenantId,
+  "x-lemmacomputer-test-user-id": identity.subjectId,
 });
 
 test("Control exposes an owned Microsoft 365 redirect, callback, status, and disconnect surface", async () => {
@@ -78,12 +78,12 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     const connectorCards = catalog.json().connections as Array<{ id: string; serverName: string }>;
     assert.equal(connectorCards.length, 22);
     assert.deepEqual(connectorCards.slice(0, 6).map((connector) => [connector.id, connector.serverName]), [
-      ["microsoft-365", "onecomputer_ms365"],
-      ["notion", "onecomputer_notion"],
-      ["linear", "onecomputer_linear"],
-      ["atlassian", "onecomputer_atlassian"],
-      ["asana", "onecomputer_asana"],
-      ["figma", "onecomputer_figma"],
+      ["microsoft-365", "lemmacomputer_ms365"],
+      ["notion", "lemmacomputer_notion"],
+      ["linear", "lemmacomputer_linear"],
+      ["atlassian", "lemmacomputer_atlassian"],
+      ["asana", "lemmacomputer_asana"],
+      ["figma", "lemmacomputer_figma"],
     ]);
     assert.ok(connectorCards.some((connector) => connector.id === "stripe"));
     assert.ok(connectorCards.some((connector) => connector.id === "slack"));
@@ -115,8 +115,8 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.equal(callback.headers.location, "http://localhost:4174/?view=connections&m365=connected");
     assert.ok(!String(callback.headers.location).includes(callbackCode));
     assert.deepEqual(completions, [callbackCode]);
-    assert.deepEqual(startedServers, ["onecomputer_ms365"]);
-    assert.deepEqual(completedServers, ["onecomputer_ms365"]);
+    assert.deepEqual(startedServers, ["lemmacomputer_ms365"]);
+    assert.deepEqual(completedServers, ["lemmacomputer_ms365"]);
 
     const connectedCatalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
     assert.equal(connectedCatalog.statusCode, 200);
@@ -144,8 +144,8 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     });
     assert.equal(linearCallback.statusCode, 303);
     assert.equal(linearCallback.headers.location, "http://localhost:4174/?view=connections&connector=linear&connection=connected");
-    assert.deepEqual(startedServers, ["onecomputer_ms365", "onecomputer_linear"]);
-    assert.deepEqual(completedServers, ["onecomputer_ms365", "onecomputer_linear"]);
+    assert.deepEqual(startedServers, ["lemmacomputer_ms365", "lemmacomputer_linear"]);
+    assert.deepEqual(completedServers, ["lemmacomputer_ms365", "lemmacomputer_linear"]);
 
     const disconnected = await app.inject({ method: "DELETE", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(disconnected.statusCode, 200);

@@ -6,8 +6,8 @@ import {
   PostgresRoutingStore,
   PostgresTeamStore,
   PostgresUsageLedgerStore,
-} from "@onecomputer/workspace-store";
-import type { ModelRoutingDecision } from "@onecomputer/model-router";
+} from "@lemmacomputer/workspace-store";
+import type { ModelRoutingDecision } from "@lemmacomputer/model-router";
 const connectionString = process.env.ROUTING_TEST_DATABASE_URL;
 const classPolicy = (id: string) => ({
   capabilityFloor: {
@@ -272,7 +272,7 @@ test(
         candidateIds = [deployment],
       ): ModelRoutingDecision => ({
         requestId,
-        requestedAlias: "onecomputer-auto",
+        requestedAlias: "lemmacomputer-auto",
         requestedServiceClass: "auto",
         selectedServiceClass: "lite",
         selectionStatus: "selected",
@@ -370,7 +370,7 @@ test(
         taskBindingProvenance: "explicit_signed",
         contextKind: "chat",
         policyVersionId: policy,
-        requestedAlias: "onecomputer-auto",
+        requestedAlias: "lemmacomputer-auto",
         requestedServiceClass: "auto",
         selectedServiceClass: "lite",
         routeMappingVersion: mapping,

@@ -33,7 +33,7 @@ test("keeps a retryable workspace start in Preparing instead of Needs attention"
           id: "disposable-open-v1",
           client: "LemmaComputer open workspace",
           clientVersion: "disposable-open-v1",
-          modelAlias: "onecomputer-openai",
+          modelAlias: "lemmacomputer-openai",
           executionMode: "disposable-open",
           egressMode: "full-web",
           persistence: "persistent-home",

@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "docker" / "workspace"))
 
-from onecomputer_work_trace import (  # noqa: E402
+from lemmacomputer_work_trace import (  # noqa: E402
     approach_summary,
     extract_sources,
     humanize_tool_name,
@@ -22,14 +22,14 @@ class WorkTraceTests(unittest.TestCase):
     def test_workspace_image_installs_helper_as_readable_module(self) -> None:
         dockerfile = (Path(__file__).resolve().parents[1] / "docker" / "Dockerfile.workspace").read_text()
         self.assertIn(
-            "COPY --chmod=0644 docker/workspace/onecomputer_work_trace.py "
-            "/usr/local/libexec/onecomputer_work_trace.py",
+            "COPY --chmod=0644 docker/workspace/lemmacomputer_work_trace.py "
+            "/usr/local/libexec/lemmacomputer_work_trace.py",
             dockerfile,
         )
 
     def test_visible_approach_is_flattened_without_markdown_or_marker(self) -> None:
         self.assertEqual(
-            approach_summary("[ONECOMPUTER_NEEDS_INPUT]\n## Plan\n- Compare **trusted** recipes."),
+            approach_summary("[LEMMACOMPUTER_NEEDS_INPUT]\n## Plan\n- Compare **trusted** recipes."),
             "Plan Compare trusted recipes.",
         )
         self.assertEqual(

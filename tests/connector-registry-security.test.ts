@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MemoryConnectorRegistryStore, type SaveConnectorRegistryRecord } from "@onecomputer/workspace-store";
+import { MemoryConnectorRegistryStore, type SaveConnectorRegistryRecord } from "@lemmacomputer/workspace-store";
 
 const connector = (
   tenantId: string,
@@ -10,7 +10,7 @@ const connector = (
   tenantId,
   id,
   serverId: `server-${tenantId}-${id}`,
-  serverName: `onecomputer_${tenantId}_${id}`,
+  serverName: `lemmacomputer_${tenantId}_${id}`,
   name: id,
   shortDescription: `${id} connector`,
   description: `${id} connector for tests`,

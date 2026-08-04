@@ -1,6 +1,6 @@
 # Hosted deployment marker.
 #
-# Deployment policy is selected only by ONECOMPUTER_INSTALLATION_KIND in the
+# Deployment policy is selected only by LEMMACOMPUTER_INSTALLATION_KIND in the
 # canonical environment contract. Before using this file, run:
 #   npm run env:check -- --profile=hosted
 #

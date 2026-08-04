@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 test("the LiteLLM policy callback retries one lost idempotent Control response", () => {
-  const callback = path.resolve(import.meta.dirname, "../integrations/litellm/onecomputer_policy_callback.py");
+  const callback = path.resolve(import.meta.dirname, "../integrations/litellm/lemmacomputer_policy_callback.py");
   const script = String.raw`
 import json
 import runpy
@@ -36,7 +36,7 @@ decision = {
     "decision": "approval_required",
     "code": "MCP_APPROVAL_REQUIRED",
     "capabilityId": "m365.send-chat-message",
-    "schemaId": "onecomputer.m365.send-chat-message.v1",
+    "schemaId": "lemmacomputer.m365.send-chat-message.v1",
     "schemaHash": "a" * 64,
     "operationId": "11111111-1111-4111-8111-111111111111",
 }
@@ -83,7 +83,7 @@ assert http_calls == [15]
 });
 
 test("the pinned LiteLLM callback normalizes provider units and preserves governed attempt lineage", () => {
-  const callback = path.resolve(import.meta.dirname, "../integrations/litellm/onecomputer_policy_callback.py");
+  const callback = path.resolve(import.meta.dirname, "../integrations/litellm/lemmacomputer_policy_callback.py");
   const script = String.raw`
 import asyncio
 import json
@@ -92,7 +92,7 @@ import runpy
 import sys
 import types
 
-os.environ["ONECOMPUTER_AI_USAGE_TOKEN"] = "u" * 32
+os.environ["LEMMACOMPUTER_AI_USAGE_TOKEN"] = "u" * 32
 
 fastapi = types.ModuleType("fastapi")
 fastapi.HTTPException = type("HTTPException", (Exception,), {
@@ -121,7 +121,7 @@ source_attempt_id = module["_source_attempt_id"]
 verified_usage_chain = module["_verified_usage_chain"]
 completion_payload = module["_completion_payload"]
 routing_payload = module["_routing_payload"]
-callback_type = module["OneComputerMcpPolicyCallback"]
+callback_type = module["LemmaComputerMcpPolicyCallback"]
 set_routing_state = module["_set_routing_state"]
 
 # These are the supported callback names in the pinned LiteLLM v1.93 image.
@@ -211,25 +211,25 @@ assert request_total is None
 
 class Auth:
     metadata = {
-        "onecomputer_tenant_id": "tenant-real",
-        "onecomputer_subject_id": "subject-real",
-        "onecomputer_workspace_id": "workspace-real",
-        "onecomputer_agent_id": "agent-real",
-        "onecomputer_policy_model_alias": "balanced",
-        "onecomputer_policy_version_id": "policy-real",
-        "onecomputer_route_mapping_version": "mapping-real",
+        "lemmacomputer_tenant_id": "tenant-real",
+        "lemmacomputer_subject_id": "subject-real",
+        "lemmacomputer_workspace_id": "workspace-real",
+        "lemmacomputer_agent_id": "agent-real",
+        "lemmacomputer_policy_model_alias": "balanced",
+        "lemmacomputer_policy_version_id": "policy-real",
+        "lemmacomputer_route_mapping_version": "mapping-real",
     }
 
 class AutoAuth:
-    metadata = {**Auth.metadata, "onecomputer_policy_model_alias": "onecomputer-auto"}
+    metadata = {**Auth.metadata, "lemmacomputer_policy_model_alias": "lemmacomputer-auto"}
 
 routing = routing_payload({
     "user_api_key_dict": AutoAuth(),
-    "model": "onecomputer-auto",
+    "model": "lemmacomputer-auto",
     "litellm_call_id": "route-call",
     "messages": [{"role": "user", "content": "hi"}],
     "max_tokens": 8,
-    "metadata": {"onecomputer_task_binding": "b" * 64},
+    "metadata": {"lemmacomputer_task_binding": "b" * 64},
 })
 assert routing["expectedUsage"] == [
     {"unit": "input_uncached_token", "quantity": "7"},
@@ -237,21 +237,21 @@ assert routing["expectedUsage"] == [
 ]
 
 openai_route = {
-    "onecomputer_provider": "openai",
-    "onecomputer_provider_account_id": "account-real",
-    "onecomputer_base_model": "openai/gpt-real",
-    "onecomputer_deployment_id": "deployment-openai",
-    "onecomputer_region": "us-east",
+    "lemmacomputer_provider": "openai",
+    "lemmacomputer_provider_account_id": "account-real",
+    "lemmacomputer_base_model": "openai/gpt-real",
+    "lemmacomputer_deployment_id": "deployment-openai",
+    "lemmacomputer_region": "us-east",
 }
 spoofed_request_metadata = {
-    "onecomputer_task_binding": "initial.signed-binding",
+    "lemmacomputer_task_binding": "initial.signed-binding",
     "user_api_key_metadata": {
-        "onecomputer_tenant_id": "tenant-foreign",
-        "onecomputer_subject_id": "subject-foreign",
+        "lemmacomputer_tenant_id": "tenant-foreign",
+        "lemmacomputer_subject_id": "subject-foreign",
     },
     "model_info": {
-        "onecomputer_provider": "foreign-provider",
-        "onecomputer_deployment_id": "foreign-deployment",
+        "lemmacomputer_provider": "foreign-provider",
+        "lemmacomputer_deployment_id": "foreign-deployment",
     },
 }
 first = {
@@ -267,7 +267,7 @@ first = {
 task_binding, parent = request_context(first)
 assert task_binding == "initial.signed-binding"
 assert parent is None
-assert all(not key.startswith("onecomputer_") for key in first["metadata"])
+assert all(not key.startswith("lemmacomputer_") for key in first["metadata"])
 
 first_bounds = budget_bounds(first, openai_route)
 first_payload = admission_payload(first, "acompletion", task_binding, parent, first_bounds)
@@ -286,7 +286,7 @@ assert "requestUnits" not in first_payload["budgetBounds"]
 # same source attempt instead of creating another charge.
 first_replay = admission_payload(first, "acompletion", task_binding, parent, first_bounds)
 assert first_replay["sourceAttemptId"] == first_payload["sourceAttemptId"]
-request_billed_route = {**openai_route, "onecomputer_billable_request_unit": True}
+request_billed_route = {**openai_route, "lemmacomputer_billable_request_unit": True}
 assert budget_bounds(first, request_billed_route)["requestUnits"] == "1"
 
 set_usage_state(first, {
@@ -297,7 +297,7 @@ set_usage_state(first, {
 
 # A second entry into the deployment hook for the same concrete invocation
 # must preserve the original no-parent lineage and duplicate source identity.
-first_chain = verified_usage_chain(first["metadata"]["onecomputer_usage_chain"])
+first_chain = verified_usage_chain(first["metadata"]["lemmacomputer_usage_chain"])
 assert first_chain == {
     "admissionId": "admission-first",
     "originalParentAttemptId": None,
@@ -354,10 +354,10 @@ set_usage_state(retry, {
     "provider": "openai",
 }, retry_binding, retry_payload["sourceAttemptId"], retry_payload.get("parentAttemptId"))
 anthropic_route = {
-    "onecomputer_provider": "anthropic",
-    "onecomputer_provider_account_id": "account-real",
-    "onecomputer_base_model": "anthropic/claude-real",
-    "onecomputer_deployment_id": "deployment-anthropic",
+    "lemmacomputer_provider": "anthropic",
+    "lemmacomputer_provider_account_id": "account-real",
+    "lemmacomputer_base_model": "anthropic/claude-real",
+    "lemmacomputer_deployment_id": "deployment-anthropic",
 }
 fallback = {
     "user_api_key_dict": Auth(),
@@ -392,12 +392,12 @@ fallback_replay = admission_payload(
 assert fallback_replay["sourceAttemptId"] == fallback_payload["sourceAttemptId"]
 
 # A tampered request chain cannot invent a parent admission.
-signed_chain = first["metadata"]["onecomputer_usage_chain"]
+signed_chain = first["metadata"]["lemmacomputer_usage_chain"]
 tampered_chain = signed_chain[:-1] + ("0" if signed_chain[-1] != "0" else "1")
 tampered = {
     "metadata": {
-        "onecomputer_task_binding": "proxy.initial-binding",
-        "onecomputer_usage_chain": tampered_chain,
+        "lemmacomputer_task_binding": "proxy.initial-binding",
+        "lemmacomputer_usage_chain": tampered_chain,
     },
 }
 tampered_binding, tampered_parent = request_context(
@@ -405,7 +405,7 @@ tampered_binding, tampered_parent = request_context(
 )
 assert tampered_binding == "proxy.initial-binding"
 assert tampered_parent is None
-assert all(not key.startswith("onecomputer_") for key in tampered["metadata"])
+assert all(not key.startswith("lemmacomputer_") for key in tampered["metadata"])
 
 completion = completion_payload(
     {"metadata": retry["metadata"], "messages": first["messages"]},
@@ -427,7 +427,7 @@ try:
         "user_api_key_dict": ForeignAuth(),
         "metadata": {
             "user_api_key_metadata": Auth.metadata,
-            "onecomputer_tenant_id": "tenant-foreign",
+            "lemmacomputer_tenant_id": "tenant-foreign",
         },
         "litellm_params": {"model_info": openai_route},
     }, "acompletion", None)
@@ -460,7 +460,7 @@ def usage_authority(path, payload):
         return {
             "decisionId": "decision-ceiling",
             "executedDeploymentId": "routing-deployment-balanced",
-            "executedModelGroup": "onecomputer-openai-balanced",
+            "executedModelGroup": "lemmacomputer-openai-balanced",
             "executedProviderDeployment": "ocp-tenant-real-balanced",
             "requestedServiceClass": "auto",
             "selectedServiceClass": "balanced",
@@ -487,23 +487,23 @@ callback = callback_type()
 
 class ProbeAuth:
     metadata = {
-        "onecomputer_non_billable_exemption": "provider-route-test-v1",
-        "onecomputer_policy_model_alias": "balanced",
+        "lemmacomputer_non_billable_exemption": "provider-route-test-v1",
+        "lemmacomputer_policy_model_alias": "balanced",
     }
 
 async def assert_provider_boundary():
     transport_request = {
-        "model": "onecomputer-auto",
+        "model": "lemmacomputer-auto",
         "messages": [{"role": "user", "content": "large client ceiling"}],
         "max_tokens": 32768,
         "litellm_params": {"max_tokens": 32768},
         "litellm_call_id": "route-ceiling-call",
-        "metadata": {"onecomputer_task_binding": "signed." + "z" * 64},
+        "metadata": {"lemmacomputer_task_binding": "signed." + "z" * 64},
     }
     routed_transport = await callback.async_pre_call_hook(
         AutoAuth(), None, transport_request, "acompletion"
     )
-    assert routed_transport["model"] == "onecomputer-openai-balanced"
+    assert routed_transport["model"] == "lemmacomputer-openai-balanced"
     assert routed_transport["max_tokens"] == 8192
     assert routed_transport["litellm_params"]["max_tokens"] == 8192
     authority_calls.clear()
@@ -535,7 +535,7 @@ async def assert_provider_boundary():
         "messages": [{"role": "user", "content": "billable request"}],
         "litellm_call_id": "admitted-call",
         "litellm_params": {"model_info": openai_route},
-        "metadata": {"onecomputer_task_binding": "signed." + "x" * 64},
+        "metadata": {"lemmacomputer_task_binding": "signed." + "x" * 64},
         "user_api_key_metadata": {"untrusted": True},
     }
     routed_admitted = await callback.async_pre_call_hook(
@@ -549,37 +549,37 @@ async def assert_provider_boundary():
     assert "user_api_key_dict" in routed_admitted
     assert "user_api_key_dict" not in provider_admitted
     assert "user_api_key_metadata" not in provider_admitted
-    assert all(not key.startswith("onecomputer_") for key in provider_admitted)
-    assert all(not key.startswith("onecomputer_") for key in provider_admitted["metadata"])
+    assert all(not key.startswith("lemmacomputer_") for key in provider_admitted)
+    assert all(not key.startswith("lemmacomputer_") for key in provider_admitted["metadata"])
     signed_reentry = {
         **provider_admitted,
         "metadata": dict(routed_admitted["metadata"]),
-        "onecomputer_usage_state": routed_admitted["onecomputer_usage_state"],
+        "lemmacomputer_usage_state": routed_admitted["lemmacomputer_usage_state"],
     }
     authority_count = len(authority_calls)
     provider_reentry = await callback.async_pre_call_deployment_hook(
         signed_reentry, "acompletion"
     )
     assert len(authority_calls) == authority_count
-    assert all(not key.startswith("onecomputer_") for key in provider_reentry)
+    assert all(not key.startswith("lemmacomputer_") for key in provider_reentry)
     assert "user_api_key_dict" not in provider_reentry
 
     internal_responses = {
         key: value
         for key, value in provider_admitted.items()
-        if key != "onecomputer_usage_state"
+        if key != "lemmacomputer_usage_state"
     }
     internal_responses["litellm_call_id"] = "internal-responses-call"
     internal_responses["metadata"] = {
         key: value
         for key, value in provider_admitted["metadata"].items()
-        if key not in ("onecomputer_usage_state", "onecomputer_usage_chain")
+        if key not in ("lemmacomputer_usage_state", "lemmacomputer_usage_chain")
     }
     internal_provider = await callback.async_pre_call_deployment_hook(
         internal_responses, "aresponses"
     )
     assert len(authority_calls) == authority_count
-    assert all(not key.startswith("onecomputer_") for key in internal_provider)
+    assert all(not key.startswith("lemmacomputer_") for key in internal_provider)
 
     ordinary_changed_call = {**internal_responses, "litellm_call_id": "ordinary-changed-call"}
     try:
@@ -594,8 +594,8 @@ async def assert_provider_boundary():
         **signed_reentry,
         "metadata": {
             **signed_reentry["metadata"],
-            "onecomputer_usage_state": {
-                **signed_reentry["metadata"]["onecomputer_usage_state"],
+            "lemmacomputer_usage_state": {
+                **signed_reentry["metadata"]["lemmacomputer_usage_state"],
                 "admissionId": "tampered-admission",
             },
         },
@@ -633,11 +633,11 @@ async def assert_provider_boundary():
         "access_groups": ["ocp-tenant-real-balanced"],
     }
     auto_request = {
-        "model": "onecomputer-openai-balanced",
+        "model": "lemmacomputer-openai-balanced",
         "messages": [{"role": "user", "content": "auto-routed request"}],
         "litellm_call_id": "auto-routed-call",
         "litellm_params": {"model_info": auto_route},
-        "metadata": {"onecomputer_task_binding": "signed." + "y" * 64},
+        "metadata": {"lemmacomputer_task_binding": "signed." + "y" * 64},
     }
     routed_auto = {**auto_request, "user_api_key_dict": AutoAuth()}
     set_routing_state(routed_auto, {
@@ -652,8 +652,8 @@ async def assert_provider_boundary():
         },
     })
     auto_provider = await callback.async_pre_call_deployment_hook(routed_auto, "acompletion")
-    assert all(not key.startswith("onecomputer_") for key in auto_provider)
-    assert all(not key.startswith("onecomputer_") for key in auto_provider["litellm_params"])
+    assert all(not key.startswith("lemmacomputer_") for key in auto_provider)
+    assert all(not key.startswith("lemmacomputer_") for key in auto_provider["litellm_params"])
     verify_call = next(item for item in authority_calls if item[0] == "routing/verify")
     assert verify_call[1]["actual"] == {
         "tenantId": "tenant-real",

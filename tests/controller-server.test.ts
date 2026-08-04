@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SandboxAdapter } from "@onecomputer/kasm-adapter";
+import type { SandboxAdapter } from "@lemmacomputer/kasm-adapter";
 import { createControllerServer } from "../apps/workspace-controller/src/server.js";
 import { policyFixture } from "./policy-fixture.js";
 
@@ -13,10 +13,10 @@ const runtimePolicy = {
   policyHash: "a".repeat(64),
   workspaceProfile: "kasm-persistent-standard" as const,
   agentId: "agent-alex",
-  agentProfile: "onecomputer-default-agent" as const,
+  agentProfile: "lemmacomputer-default-agent" as const,
   networkProfile: "controlled-egress-v1" as const,
-  modelAlias: "onecomputer-assistant",
-  mcpServer: "onecomputer_ms365",
+  modelAlias: "lemmacomputer-assistant",
+  mcpServer: "lemmacomputer_ms365",
   allowedTools: ["list-mail-folders", "list-calendars", "list-drives"],
   toolPolicies: { "list-mail-folders": "allow" as const, "list-calendars": "allow" as const, "list-drives": "allow" as const },
 };
@@ -131,12 +131,12 @@ test("controller passes a validated scoped gateway grant to the sandbox adapter"
       gateway: {
         baseUrl: "http://litellm:4000",
         credential: "sk-scoped-controller-test-000001",
-        modelAlias: "onecomputer-assistant",
-        transportModelAlias: "onecomputer-assistant",
+        modelAlias: "lemmacomputer-assistant",
+        transportModelAlias: "lemmacomputer-assistant",
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
       },
       agentBridge: {
-        baseUrl: "http://onecomputer-control:4100",
+        baseUrl: "http://lemmacomputer-control:4100",
         token: "scoped-agent-bridge-test-token-000001",
       },
     },
@@ -144,7 +144,7 @@ test("controller passes a validated scoped gateway grant to the sandbox adapter"
   assert.equal(response.statusCode, 201);
   assert.equal(lastGatewayCredential, "sk-scoped-controller-test-000001");
   assert.deepEqual(lastAgentBridge, {
-    baseUrl: "http://onecomputer-control:4100",
+    baseUrl: "http://lemmacomputer-control:4100",
     token: "scoped-agent-bridge-test-token-000001",
   });
   await app.close();
@@ -159,12 +159,12 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
     gateway: {
       baseUrl: "http://litellm:4000",
       credential: "sk-scoped-controller-test-000001",
-      modelAlias: "onecomputer-assistant",
-      transportModelAlias: "onecomputer-assistant",
+      modelAlias: "lemmacomputer-assistant",
+      transportModelAlias: "lemmacomputer-assistant",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     },
     agentBridge: {
-      baseUrl: "http://onecomputer-control:4100",
+      baseUrl: "http://lemmacomputer-control:4100",
       token: "scoped-agent-bridge-test-token-000001",
     },
   };

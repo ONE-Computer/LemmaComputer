@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OneComputerError, type IdentityContext, type Launch, type RuntimePolicy, type Sandbox, type SignedPolicyBundle } from "@onecomputer/contracts";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
-import type { GatewayClient, GatewayGrant } from "@onecomputer/litellm-adapter";
+import { LemmaComputerError, type IdentityContext, type Launch, type RuntimePolicy, type Sandbox, type SignedPolicyBundle } from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
+import type { GatewayClient, GatewayGrant } from "@lemmacomputer/litellm-adapter";
 import { PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "../apps/control-api/src/service.js";
-import { WorkspaceIngressAuthority, workspaceIngressAccessParameter } from "@onecomputer/workspace-ingress-auth";
+import { WorkspaceIngressAuthority, workspaceIngressAccessParameter } from "@lemmacomputer/workspace-ingress-auth";
 import { policyFixture } from "./policy-fixture.js";
 
 class FakeController implements ControllerClient {
@@ -42,13 +42,13 @@ class FakeGateway implements GatewayClient {
   async ensureGrant(input: { workspaceId: string; policy?: RuntimePolicy }): Promise<GatewayGrant> {
     this.grants += 1;
     this.lastPolicy = input.policy;
-    return { baseUrl: "http://litellm:4000", credential: `sk-${input.workspaceId}`, modelAlias: "onecomputer-assistant", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    return { baseUrl: "http://litellm:4000", credential: `sk-${input.workspaceId}`, modelAlias: "lemmacomputer-assistant", expiresAt: new Date(Date.now() + 60_000).toISOString() };
   }
   async modelCapabilities() { return { vision: true }; }
   async readiness() { return { models: "ready" as const, tools: "ready" as const, modelRoute: fakeModelRoute }; }
   async test() {
     return {
-      model: "onecomputer-assistant",
+      model: "lemmacomputer-assistant",
       availability: "ready" as const,
       modelRoute: fakeModelRoute,
       tools: [{ name: "search_files", description: "Search files" }],
@@ -60,14 +60,14 @@ class FakeGateway implements GatewayClient {
 }
 
 const fakeModelRoute = {
-  alias: "onecomputer-assistant",
+  alias: "lemmacomputer-assistant",
   status: "ready" as const,
   fallback: "none" as const,
   capabilities: { vision: true },
   limits: { requestsPerMinute: 30, tokensPerMinute: 50_000, maxParallelRequests: 4 },
 };
 
-const alex: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "onecomputer-control" };
+const alex: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
 const policy: RuntimePolicy = {
   schemaVersion: 1,
   policyVersionId: "policy-version-1",
@@ -75,10 +75,10 @@ const policy: RuntimePolicy = {
   policyHash: "a".repeat(64),
   workspaceProfile: "kasm-persistent-standard",
   agentId: "agent-alex",
-  agentProfile: "onecomputer-default-agent",
+  agentProfile: "lemmacomputer-default-agent",
   networkProfile: "controlled-egress-v1",
-  modelAlias: "onecomputer-assistant",
-  mcpServer: "onecomputer_ms365",
+  modelAlias: "lemmacomputer-assistant",
+  mcpServer: "lemmacomputer_ms365",
   allowedTools: ["list-mail-folders", "list-calendars", "list-drives"],
   toolPolicies: {},
 };
@@ -100,7 +100,7 @@ test("workspace identifiers do not confer cross-tenant access", async () => {
   const service = new WorkspaceService(new MemoryWorkspaceStore(), controller);
   const workspace = await service.create(alex, policy, "personal", "tenant-key-0001", "correlation-1");
   await assert.rejects(
-    service.open({ tenantId: "other", subjectId: "alex", audience: "onecomputer-control" }, policy, workspace.id),
+    service.open({ tenantId: "other", subjectId: "alex", audience: "lemmacomputer-control" }, policy, workspace.id),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "WORKSPACE_NOT_FOUND"),
   );
 });
@@ -109,7 +109,7 @@ test("workspace identifiers do not confer cross-subject access", async () => {
   const service = new WorkspaceService(new MemoryWorkspaceStore(), new FakeController());
   const workspace = await service.create(alex, policy, "personal", "subject-key-001", "correlation-1");
   await assert.rejects(
-    service.open({ tenantId: "acme", subjectId: "mallory", audience: "onecomputer-control" }, policy, workspace.id),
+    service.open({ tenantId: "acme", subjectId: "mallory", audience: "lemmacomputer-control" }, policy, workspace.id),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "WORKSPACE_NOT_FOUND"),
   );
 });
@@ -121,7 +121,7 @@ test("local controller targets become signed same-origin workspace launch URLs",
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
     ingressTarget: {
       protocol: "https",
-      host: "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
+      host: "lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
       port: 16_920,
     },
   });
@@ -135,7 +135,7 @@ test("local controller targets become signed same-origin workspace launch URLs",
     undefined,
     undefined,
     {
-      publicUrl: "https://onecomputer.example.test",
+      publicUrl: "https://lemmacomputer.example.test",
       authority,
     },
   );
@@ -143,7 +143,7 @@ test("local controller targets become signed same-origin workspace launch URLs",
   const result = await service.open(alex, policy, workspace.id);
   const launch = new URL(result.launch.launchUrl);
 
-  assert.equal(launch.origin, "https://onecomputer.example.test");
+  assert.equal(launch.origin, "https://lemmacomputer.example.test");
   assert.equal(launch.pathname, `/workspaces/${workspace.id}/`);
   assert.equal(launch.searchParams.get("clipboard_up"), "true");
   assert.equal(launch.searchParams.get("clipboard_down"), "true");
@@ -151,7 +151,7 @@ test("local controller targets become signed same-origin workspace launch URLs",
   const token = launch.searchParams.get(workspaceIngressAccessParameter);
   assert.ok(token);
   const exchanged = authority.exchangeLaunch(token, workspace.id);
-  assert.equal(exchanged?.claims.host, "onecomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay");
+  assert.equal(exchanged?.claims.host, "lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay");
   assert.equal(exchanged?.claims.port, 16_920);
 });
 
@@ -159,13 +159,13 @@ test("sandbox inventory projects each sandbox using its own configuration policy
   const service = new WorkspaceService(new MemoryWorkspaceStore(), new FakeController());
   await service.create(alex, policy, "personal", "inventory-personal-1", "correlation-1");
   await service.create(alex, policy, "research", "inventory-research-1", "correlation-2");
-  const researchPolicy = { ...policy, workspaceProfile: "claude-desktop-standard-v1" as const, modelAlias: "onecomputer-claude" as const };
+  const researchPolicy = { ...policy, workspaceProfile: "claude-desktop-standard-v1" as const, modelAlias: "lemmacomputer-claude" as const };
 
   const inventory = await service.list(alex, async (grantId) => grantId === "research" ? researchPolicy : policy);
 
   assert.equal(inventory.length, 2);
-  assert.equal(inventory.find((workspace) => workspace.grantId === "research")?.profile?.modelAlias, "onecomputer-claude");
-  assert.equal(inventory.find((workspace) => workspace.grantId === "personal")?.profile?.modelAlias, "onecomputer-assistant");
+  assert.equal(inventory.find((workspace) => workspace.grantId === "research")?.profile?.modelAlias, "lemmacomputer-claude");
+  assert.equal(inventory.find((workspace) => workspace.grantId === "personal")?.profile?.modelAlias, "lemmacomputer-assistant");
 });
 
 test("workspace lifetime remains UI-managed while its gateway grant can renew", async () => {
@@ -225,7 +225,7 @@ test("workspace restart rotates the persisted bridge generation before projectin
     controller,
     undefined,
     {
-      baseUrl: "http://onecomputer-control:4100",
+      baseUrl: "http://lemmacomputer-control:4100",
       issue: (_identity, workspace) => {
         issuedGenerations.push(workspace.bridgeGrantGeneration);
         return `v2-bridge-generation-${workspace.bridgeGrantGeneration}`;
@@ -276,7 +276,7 @@ test("workspace lifecycle provisions, reports, tests, and revokes a scoped gatew
   assert.equal(workspace.readiness.models, "ready");
   assert.equal(workspace.readiness.tools, "ready");
   assert.equal(workspace.modelRoute?.limits.requestsPerMinute, 30);
-  assert.equal(controller.lastGateway?.modelAlias, "onecomputer-assistant");
+  assert.equal(controller.lastGateway?.modelAlias, "lemmacomputer-assistant");
   assert.equal(gateway.grants, 1);
   assert.equal(controller.lastPolicy?.policyHash, policy.policyHash);
   assert.deepEqual(gateway.lastPolicy?.allowedTools, policy.allowedTools);
@@ -292,13 +292,13 @@ test("Control signs and self-verifies policy before issuing grants or calling th
   const authority = new PolicyBundleAuthority(
     signed.signer,
     signed.keys,
-    { modelGateway: "http://litellm:4000", mcpControl: "http://onecomputer-control:4100" },
+    { modelGateway: "http://litellm:4000", mcpControl: "http://lemmacomputer-control:4100" },
   );
   const service = new WorkspaceService(
     new MemoryWorkspaceStore(),
     controller,
     gateway,
-    { baseUrl: "http://onecomputer-control:4100", issue: () => "agent-bridge-token-at-least-24-characters" },
+    { baseUrl: "http://lemmacomputer-control:4100", issue: () => "agent-bridge-token-at-least-24-characters" },
     undefined,
     authority,
   );
@@ -318,7 +318,7 @@ class FlakyRevokeGateway extends FakeGateway {
     this.revocations += 1;
     if (this.remainingFailures > 0) {
       this.remainingFailures -= 1;
-      throw new OneComputerError("GATEWAY_UNAVAILABLE", "Gateway is temporarily unavailable", 503, true);
+      throw new LemmaComputerError("GATEWAY_UNAVAILABLE", "Gateway is temporarily unavailable", 503, true);
     }
   }
 }

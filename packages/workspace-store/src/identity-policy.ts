@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
-import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, OneComputerError, m365ToolCatalog, ownedAgentCatalog, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId } from "@onecomputer/contracts";
-import { compileEgressSecurityGroup } from "@onecomputer/egress-policy";
+import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId } from "@lemmacomputer/contracts";
+import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 
-export type OneComputerRole = "employee" | "administrator";
-export type OneComputerUserStatus = "active" | "disabled";
+export type LemmaComputerRole = "employee" | "administrator";
+export type LemmaComputerUserStatus = "active" | "disabled";
 
 export const shouldAssignDefaultPolicyOnAuthentication = (
   hasExistingIdentityMapping: boolean,
@@ -17,7 +17,7 @@ export type SessionPrincipal = {
   email: string;
   displayName: string;
   tenantDisplayName: string;
-  roles: OneComputerRole[];
+  roles: LemmaComputerRole[];
   identity: IdentityContext;
 };
 
@@ -70,7 +70,7 @@ export const runtimePolicyFor = (
   const mcp = document.mcp as Record<string, unknown> | undefined;
   const servers = mcp?.servers as Record<string, unknown> | undefined;
   const entries = Object.entries(servers ?? {});
-  if (entries.length !== 1) throw new OneComputerError("POLICY_INVALID", "The active workspace policy must assign exactly one MCP server", 500);
+  if (entries.length !== 1) throw new LemmaComputerError("POLICY_INVALID", "The active workspace policy must assign exactly one MCP server", 500);
   const [mcpServer, serverPolicy] = entries[0]!;
   const tools = (serverPolicy as Record<string, unknown>)?.tools;
   const configuredToolPolicies = (serverPolicy as Record<string, unknown>)?.toolPolicies as Record<string, unknown> | undefined;
@@ -89,8 +89,8 @@ export const runtimePolicyFor = (
   const clipboard = document.clipboard && typeof document.clipboard === "object" && !Array.isArray(document.clipboard)
     ? document.clipboard as Record<string, unknown>
     : defaultClipboardPolicy;
-  if (!modelAlias || !allowedModelAliases.includes(modelAlias)) throw new OneComputerError("MODEL_NOT_ASSIGNED", "The selected model route is not assigned by the active policy", 403);
-  if (!workspaceProfile || !workspaceProfiles.includes(workspaceProfile)) throw new OneComputerError("PROFILE_NOT_ASSIGNED", "The selected sandbox profile is not assigned by the active policy", 403);
+  if (!modelAlias || !allowedModelAliases.includes(modelAlias)) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "The selected model route is not assigned by the active policy", 403);
+  if (!workspaceProfile || !workspaceProfiles.includes(workspaceProfile)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "The selected sandbox profile is not assigned by the active policy", 403);
   const hasAgentCatalog = Array.isArray(document.agents) || selectedAgentIds !== undefined;
   const configuredAgentIds = Array.isArray(document.agents)
     ? document.agents.filter((value): value is AgentCatalogId => typeof value === "string" && ownedAgentCatalog.some((agent) => agent.id === value))
@@ -102,10 +102,10 @@ export const runtimePolicyFor = (
     : configuredAgentIds;
   const agentIds = hasAgentCatalog ? selectedAgentIds ?? defaultAgentIds : configuredAgentIds;
   if (!agentIds.length || new Set(agentIds).size !== agentIds.length) {
-    throw new OneComputerError("AGENT_SELECTION_INVALID", "At least one unique workspace agent must be selected", 400);
+    throw new LemmaComputerError("AGENT_SELECTION_INVALID", "At least one unique workspace agent must be selected", 400);
   }
   if (agentIds.some((id) => !configuredAgentIds.includes(id))) {
-    throw new OneComputerError("AGENT_NOT_ASSIGNED", "A selected agent is not assigned by the active policy", 403);
+    throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "A selected agent is not assigned by the active policy", 403);
   }
   const configuredApplicationIds = Array.isArray(document.applications)
     ? document.applications.filter((value): value is SandboxApplicationId => typeof value === "string" && sandboxApplicationIds.includes(value as SandboxApplicationId))
@@ -115,14 +115,14 @@ export const runtimePolicyFor = (
     : configuredApplicationIds;
   const applicationIds = selectedApplicationIds ?? defaultApplicationIds;
   if (!applicationIds.length || new Set(applicationIds).size !== applicationIds.length) {
-    throw new OneComputerError("APPLICATION_SELECTION_INVALID", "At least one unique sandbox application must be selected", 400);
+    throw new LemmaComputerError("APPLICATION_SELECTION_INVALID", "At least one unique sandbox application must be selected", 400);
   }
   if (applicationIds.some((id) => !configuredApplicationIds.includes(id))) {
-    throw new OneComputerError("APPLICATION_NOT_ASSIGNED", "A selected application is not assigned by the active policy", 403);
+    throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "A selected application is not assigned by the active policy", 403);
   }
   const agents = hasAgentCatalog ? agentIds.map((catalogId) => {
     const catalog = ownedAgentCatalog.find((entry) => entry.id === catalogId);
-    if (!catalog) throw new OneComputerError("AGENT_UNAVAILABLE", "A selected agent is unavailable in the owned catalog", 500);
+    if (!catalog) throw new LemmaComputerError("AGENT_UNAVAILABLE", "A selected agent is unavailable in the owned catalog", 500);
     return {
       catalogId,
       agentId: `${policy.agentId}:${catalogId}`,
@@ -156,7 +156,7 @@ export const runtimePolicyFor = (
         defaultAction: "allow-public-http-https" as const,
         rules: attachedEgress?.rules.filter((rule) => rule.action === "deny") ?? [],
         documentHash: createHash("sha256")
-          .update(`onecomputer-full-web-v2\0${policy.documentHash}\0${attachedEgress?.documentHash ?? "no-explicit-rules"}`)
+          .update(`lemmacomputer-full-web-v2\0${policy.documentHash}\0${attachedEgress?.documentHash ?? "no-explicit-rules"}`)
           .digest("hex"),
       }
     : attachedEgress ? {
@@ -202,8 +202,8 @@ export type AdminUserSummary = {
   userId: string;
   email: string;
   displayName: string;
-  status: OneComputerUserStatus;
-  roles: OneComputerRole[];
+  status: LemmaComputerUserStatus;
+  roles: LemmaComputerRole[];
   effectivePolicy: EffectivePolicy | null;
 };
 
@@ -228,7 +228,7 @@ export interface IdentityPolicyStore {
   getPrincipal(userId: string): Promise<SessionPrincipal | null>;
   getEffectivePolicy(userId: string): Promise<EffectivePolicy | null>;
   listUsers(tenantId: string): Promise<AdminUserSummary[]>;
-  setUserStatus(input: { tenantId: string; targetUserId: string; status: OneComputerUserStatus; updatedBy: string }): Promise<{ status: OneComputerUserStatus; revokedSessions: number }>;
+  setUserStatus(input: { tenantId: string; targetUserId: string; status: LemmaComputerUserStatus; updatedBy: string }): Promise<{ status: LemmaComputerUserStatus; revokedSessions: number }>;
   revokeUserSessions(input: { tenantId: string; targetUserId: string; revokedBy: string }): Promise<number>;
   assignMvpPolicy(input: { tenantId: string; targetUserId: string; assignedBy: string }): Promise<EffectivePolicy>;
   revokeMvpPolicy(input: { tenantId: string; targetUserId: string; revokedBy: string }): Promise<boolean>;
@@ -246,11 +246,11 @@ const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-deskto
 const mvpDefaultAgentIds = ["claude-desktop", "hermes-claw"] as const;
 const mvpApplicationIds = ["firefox", "google-chrome"] as const;
 const mvpDefaultApplicationIds = ["firefox"] as const;
-const mvpDefaultModelAliases = ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm", "onecomputer-bedrock"] as const;
+const mvpDefaultModelAliases = ["lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-glm", "lemmacomputer-bedrock"] as const;
 const historicMvpDefaultModelAliasSets = [
-  ["onecomputer-claude", "onecomputer-openai"],
-  ["onecomputer-claude", "onecomputer-openai", "onecomputer-glm"],
-  ["onecomputer-claude", "onecomputer-openai", "onecomputer-bedrock"],
+  ["lemmacomputer-claude", "lemmacomputer-openai"],
+  ["lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-glm"],
+  ["lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-bedrock"],
 ] as const;
 
 const applyMvpSandboxCatalog = (document: Record<string, OwnedJson>) => {
@@ -297,7 +297,7 @@ export const mvpPolicyDocument = (
   clipboard: defaultClipboardPolicy,
   mcp: {
     servers: {
-      onecomputer_ms365: {
+      lemmacomputer_ms365: {
         tools: Object.keys(m365ToolCatalog),
         toolPolicies: Object.fromEntries(Object.entries(m365ToolCatalog).map(([name, tool]) => [name, tool.decision])),
       },
@@ -346,8 +346,8 @@ const mapPrincipal = (row: Record<string, unknown>): SessionPrincipal => ({
   email: String(row.email),
   displayName: String(row.display_name),
   tenantDisplayName: String(row.tenant_display_name),
-  roles: (row.roles as OneComputerRole[] | null) ?? [],
-  identity: { tenantId: String(row.tenant_id), subjectId: String(row.user_id), audience: "onecomputer-control" },
+  roles: (row.roles as LemmaComputerRole[] | null) ?? [],
+  identity: { tenantId: String(row.tenant_id), subjectId: String(row.user_id), audience: "lemmacomputer-control" },
 });
 
 const principalSelect = `
@@ -660,12 +660,12 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     );
     return Promise.all(result.rows.map(async (row) => ({
       userId: String(row.user_id), email: String(row.email), displayName: String(row.display_name),
-      status: String(row.status) as OneComputerUserStatus,
-      roles: (row.roles as OneComputerRole[] | null) ?? [], effectivePolicy: await this.getEffectivePolicy(String(row.user_id)),
+      status: String(row.status) as LemmaComputerUserStatus,
+      roles: (row.roles as LemmaComputerRole[] | null) ?? [], effectivePolicy: await this.getEffectivePolicy(String(row.user_id)),
     })));
   }
 
-  async setUserStatus(input: { tenantId: string; targetUserId: string; status: OneComputerUserStatus; updatedBy: string }) {
+  async setUserStatus(input: { tenantId: string; targetUserId: string; status: LemmaComputerUserStatus; updatedBy: string }) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -673,7 +673,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         "SELECT id FROM users WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
         [input.targetUserId, input.tenantId],
       );
-      if (!target.rowCount) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+      if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
       await client.query("UPDATE users SET status=$3,updated_at=now() WHERE id=$1 AND tenant_id=$2", [
         input.targetUserId,
         input.tenantId,
@@ -702,7 +702,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       "SELECT id FROM users WHERE id=$1 AND tenant_id=$2",
       [input.targetUserId, input.tenantId],
     );
-    if (!target.rowCount) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+    if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
     const revoked = await this.pool.query(
       "UPDATE browser_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL RETURNING id",
       [input.targetUserId],
@@ -774,7 +774,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       document.revisionNote = "Updated Microsoft 365 tool approval rules";
       const mcp = document.mcp as Record<string, OwnedJson>;
       const servers = mcp.servers as Record<string, OwnedJson>;
-      const server = servers.onecomputer_ms365 as Record<string, OwnedJson>;
+      const server = servers.lemmacomputer_ms365 as Record<string, OwnedJson>;
       server.tools = Object.keys(input.tools);
       server.toolPolicies = input.tools;
       const documentHash = policyHash(document);
@@ -853,14 +853,14 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     try {
       await client.query("BEGIN");
       const actor = await client.query("SELECT id FROM users WHERE id=$1 AND tenant_id=$2", [input.updatedBy, input.tenantId]);
-      if (!actor.rowCount) throw new OneComputerError("EGRESS_TENANT_MISMATCH", "Firewall editor is outside the tenant", 403);
+      if (!actor.rowCount) throw new LemmaComputerError("EGRESS_TENANT_MISMATCH", "Firewall editor is outside the tenant", 403);
       const securityGroupId = input.securityGroupId ?? `esg_${randomUUID().replaceAll("-", "")}`;
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`egress-security-group:${securityGroupId}`]);
       const existingGroup = await client.query(
         "SELECT id FROM egress_security_groups WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
         [securityGroupId, input.tenantId],
       );
-      if (input.securityGroupId && !existingGroup.rowCount) throw new OneComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group not found", 404);
+      if (input.securityGroupId && !existingGroup.rowCount) throw new LemmaComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group not found", 404);
       if (!existingGroup.rowCount) {
         await client.query(
           `INSERT INTO egress_security_groups (id,tenant_id,name,description,created_by)
@@ -1000,7 +1000,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         "SELECT id FROM users WHERE id=$1 AND tenant_id=$2",
         [input.subjectId, input.tenantId],
       );
-      if (!target.rowCount) throw new OneComputerError("USER_NOT_FOUND", "Workspace owner not found", 404);
+      if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "Workspace owner not found", 404);
       const version = await client.query(
         `SELECT esg.tenant_id,esgv.id AS egress_version_id,esgv.security_group_id,
          esgv.version AS egress_version,esgv.document AS egress_document,
@@ -1011,7 +1011,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
          WHERE esgv.id=$1 AND esg.tenant_id=$2`,
         [input.securityGroupVersionId, input.tenantId],
       );
-      if (!version.rowCount) throw new OneComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Security group version not found", 404);
+      if (!version.rowCount) throw new LemmaComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Security group version not found", 404);
       await client.query(
         `INSERT INTO workspace_egress_security_group_assignments
          (tenant_id,subject_id,grant_id,security_group_id,assigned_by,assigned_at)
@@ -1038,21 +1038,21 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`policy-assignment:${input.tenantId}:${input.targetUserId}`]);
       const target = await client.query("SELECT id FROM users WHERE id=$1 AND tenant_id=$2", [input.targetUserId, input.tenantId]);
-      if (!target.rowCount) throw new OneComputerError("USER_NOT_FOUND", "User not found", 404);
+      if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
       const groupVersion = await client.query(
         `SELECT esgv.id FROM egress_security_group_versions esgv
          JOIN egress_security_groups esg ON esg.id=esgv.security_group_id
          WHERE esgv.id=$1 AND esg.tenant_id=$2`,
         [input.securityGroupVersionId, input.tenantId],
       );
-      if (!groupVersion.rowCount) throw new OneComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group version not found", 404);
+      if (!groupVersion.rowCount) throw new LemmaComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group version not found", 404);
       const current = await client.query(
         `SELECT id,tenant_id,user_id,agent_id,policy_version_id
          FROM policy_assignments WHERE user_id=$1 AND tenant_id=$2 AND revoked_at IS NULL
          ORDER BY assigned_at DESC LIMIT 1 FOR UPDATE`,
         [input.targetUserId, input.tenantId],
       );
-      if (!current.rowCount) throw new OneComputerError("POLICY_ASSIGNMENT_NOT_FOUND", "Assign a workspace policy before attaching a network security group", 409);
+      if (!current.rowCount) throw new LemmaComputerError("POLICY_ASSIGNMENT_NOT_FOUND", "Assign a workspace policy before attaching a network security group", 409);
       const assignment = current.rows[0];
       await client.query("UPDATE policy_assignments SET revoked_at=now(),revoked_by=$2 WHERE id=$1", [assignment.id, input.assignedBy]);
       const replacementId = randomUUID();

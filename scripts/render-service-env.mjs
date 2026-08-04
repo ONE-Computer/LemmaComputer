@@ -14,7 +14,7 @@ const profile = process.argv.find((argument) => argument.startsWith("--profile="
 const check = process.argv.includes("--check");
 const current = await readFile(source, "utf8");
 const values = Object.fromEntries(
-  [...parseEnvironment(current).values].filter(([key]) => !key.startsWith("ONECOMPUTER_") || environmentVariableNameSet.has(key)),
+  [...parseEnvironment(current).values].filter(([key]) => !key.startsWith("LEMMACOMPUTER_") || environmentVariableNameSet.has(key)),
 );
 const validated = validateDeploymentEnvironment(values, { profile, strict: true });
 const services = projectServiceEnvironment(validated);

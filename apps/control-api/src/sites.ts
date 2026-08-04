@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { OneComputerError, type IdentityContext } from "@onecomputer/contracts";
-import type { SiteRecord, SiteStore } from "@onecomputer/workspace-store";
+import { LemmaComputerError, type IdentityContext } from "@lemmacomputer/contracts";
+import type { SiteRecord, SiteStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
 
 const siteSlugSchema = z.string().trim().min(2).max(80).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
@@ -36,18 +36,18 @@ export class SitesService {
     const input = publishSiteSchema.parse(raw);
     const content = Buffer.from(input.htmlBase64, "base64");
     if (!content.length || content.length > 512 * 1024) {
-      throw new OneComputerError("SITE_ARTIFACT_TOO_LARGE", "The demo site must be 512 KB or smaller", 413);
+      throw new LemmaComputerError("SITE_ARTIFACT_TOO_LARGE", "The demo site must be 512 KB or smaller", 413);
     }
     if (content.toString("base64") !== input.htmlBase64) {
-      throw new OneComputerError("SITE_ARTIFACT_INVALID", "The site artifact is invalid", 400);
+      throw new LemmaComputerError("SITE_ARTIFACT_INVALID", "The site artifact is invalid", 400);
     }
     const html = content.toString("utf8");
     if (!Buffer.from(html, "utf8").equals(content) || html.includes("\0") || !/<html(?:\s|>)/i.test(html)) {
-      throw new OneComputerError("SITE_ARTIFACT_INVALID", "The demo site must be one UTF-8 HTML document", 400);
+      throw new LemmaComputerError("SITE_ARTIFACT_INVALID", "The demo site must be one UTF-8 HTML document", 400);
     }
     const digest = createHash("sha256").update(content).digest("hex");
     if (digest !== input.artifactSha256) {
-      throw new OneComputerError("SITE_ARTIFACT_MISMATCH", "The site artifact changed before publishing", 409);
+      throw new LemmaComputerError("SITE_ARTIFACT_MISMATCH", "The site artifact changed before publishing", 409);
     }
     const site = await this.store.publishSite(identity, {
       slug: input.slug,
@@ -63,7 +63,7 @@ export class SitesService {
 
   async preview(identity: IdentityContext, siteId: string) {
     const result = await this.store.getOwnedSiteRevision(identity, z.uuid().parse(siteId));
-    if (!result) throw new OneComputerError("SITE_NOT_FOUND", "Site not found", 404);
+    if (!result) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
     return {
       site: siteView(result.site),
       revision: result.revision.revision,
@@ -74,7 +74,7 @@ export class SitesService {
 
   async delete(identity: IdentityContext, siteId: string) {
     if (!await this.store.deleteOwnedSite(identity, z.uuid().parse(siteId))) {
-      throw new OneComputerError("SITE_NOT_FOUND", "Site not found", 404);
+      throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
     }
   }
 }

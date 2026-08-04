@@ -3,14 +3,14 @@ import test from "node:test";
 import {
   m365ToolCatalog,
   type IdentityContext,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import {
   MemoryWorkspaceStore,
   runtimePolicyFor,
   type EffectivePolicy,
   type IdentityPolicyStore,
   type SessionPrincipal,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import { AgentBridgeAuthority } from "../apps/control-api/src/agent-bridge.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
@@ -20,7 +20,7 @@ const agentBridgeSecret = "agent-deletion-bridge-secret-at-least-32-characters";
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "alex",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 const principal: SessionPrincipal = {
   userId: identity.subjectId,
@@ -50,11 +50,11 @@ const effectivePolicy: EffectivePolicy = {
     defaultAgents: ["hermes-claw"],
     applications: ["firefox"],
     defaultApplications: ["firefox"],
-    modelAliases: ["onecomputer-assistant"],
+    modelAliases: ["lemmacomputer-assistant"],
     networkProfile: "controlled-egress-v1",
     mcp: {
       servers: {
-        onecomputer_ms365: {
+        lemmacomputer_ms365: {
           tools: ["delete-onedrive-file"],
           toolPolicies: {
             "delete-onedrive-file": m365ToolCatalog["delete-onedrive-file"].decision,

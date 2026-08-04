@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
+import type { IdentityContext } from "@lemmacomputer/contracts";
 import {
   MemorySiteStore,
   MemoryWorkspaceStore,
@@ -9,14 +9,14 @@ import {
   type EffectivePolicy,
   type IdentityPolicyStore,
   type SessionPrincipal,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 import { AgentBridgeAuthority } from "../apps/control-api/src/agent-bridge.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "sites-api-proxy-token-at-least-24-characters";
 const agentBridgeSecret = "sites-api-bridge-secret-at-least-32-characters";
-const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
 const principal: SessionPrincipal = {
   userId: identity.subjectId,
   tenantId: identity.tenantId,
@@ -45,11 +45,11 @@ const effectivePolicy: EffectivePolicy = {
     defaultAgents: ["hermes-claw"],
     applications: ["firefox"],
     defaultApplications: ["firefox"],
-    modelAliases: ["onecomputer-assistant"],
+    modelAliases: ["lemmacomputer-assistant"],
     networkProfile: "controlled-egress-v1",
     mcp: {
       servers: {
-        onecomputer_fixture: {
+        lemmacomputer_fixture: {
           tools: ["search_files"],
           toolPolicies: { search_files: "allow" },
         },
@@ -62,9 +62,9 @@ const identityPolicies = {
   getEffectivePolicy: async (userId: string) => userId === principal.userId ? effectivePolicy : null,
 } as unknown as IdentityPolicyStore;
 const browserHeaders = {
-  "x-onecomputer-proxy-token": proxyToken,
-  "x-onecomputer-test-tenant-id": identity.tenantId,
-  "x-onecomputer-test-user-id": identity.subjectId,
+  "x-lemmacomputer-proxy-token": proxyToken,
+  "x-lemmacomputer-test-tenant-id": identity.tenantId,
+  "x-lemmacomputer-test-user-id": identity.subjectId,
 };
 const html = Buffer.from("<!doctype html><html><body>Hello world</body></html>");
 const payload = {

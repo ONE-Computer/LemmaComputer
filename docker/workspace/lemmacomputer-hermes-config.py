@@ -21,7 +21,7 @@ OFFICE_DEFAULT_SKILLS = frozenset({
 })
 REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS | frozenset({"make-a-site"})
 SKILL_DEFAULTS_VERSION = 1
-SKILL_STATE_FILE = ".onecomputer-skill-defaults.json"
+SKILL_STATE_FILE = ".lemmacomputer-skill-defaults.json"
 
 
 def normalized_strings(value: Any) -> set[str]:
@@ -90,7 +90,7 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
 def main() -> None:
     if len(sys.argv) != 7:
         raise SystemExit(
-            "usage: onecomputer-hermes-config HOME MODEL ALLOWED_TOOLS "
+            "usage: lemmacomputer-hermes-config HOME MODEL ALLOWED_TOOLS "
             "BROKER_PORT EXECUTION_MODE BUNDLED_SKILLS"
         )
 
@@ -125,18 +125,18 @@ def main() -> None:
     skills_config["disabled"] = sorted(disabled)
 
     managed_office_toolsets = ["file", "skills", "terminal", "vision"]
-    cli_toolsets = managed_office_toolsets + ["onecomputer_connectors"]
-    api_toolsets = managed_office_toolsets + ["onecomputer_connectors"]
+    cli_toolsets = managed_office_toolsets + ["lemmacomputer_connectors"]
+    api_toolsets = managed_office_toolsets + ["lemmacomputer_connectors"]
     if execution_mode == "disposable-open":
-        cli_toolsets = ["hermes-cli", "onecomputer_connectors"]
-        api_toolsets = ["hermes-api-server", "onecomputer_connectors"]
+        cli_toolsets = ["hermes-cli", "lemmacomputer_connectors"]
+        api_toolsets = ["hermes-api-server", "lemmacomputer_connectors"]
 
     document: dict[str, Any] = {
         "model": {
             "default": model,
             "provider": "custom",
             "base_url": f"http://127.0.0.1:{broker_port}/v1",
-            "api_key": "onecomputer-loopback-broker",
+            "api_key": "lemmacomputer-loopback-broker",
         },
         # Hermes does not attach globally configured MCP servers to the API
         # platform by default. Web Chat uses api_server, so name the governed
@@ -153,11 +153,11 @@ def main() -> None:
             "reasoning_effort": False,
         },
         "mcp_servers": {
-            "onecomputer_connectors": {
-                "command": "/usr/local/libexec/onecomputer-connectors-stdio",
+            "lemmacomputer_connectors": {
+                "command": "/usr/local/libexec/lemmacomputer-connectors-stdio",
                 "args": [],
                 "env": {
-                    "ONECOMPUTER_CONNECTORS_BROKER": f"http://127.0.0.1:{broker_port}",
+                    "LEMMACOMPUTER_CONNECTORS_BROKER": f"http://127.0.0.1:{broker_port}",
                 },
             },
         },

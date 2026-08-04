@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext, RuntimeAgentPolicy, RuntimePolicy } from "@onecomputer/contracts";
-import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@onecomputer/litellm-adapter";
-import { MemoryConnectorRegistryStore } from "@onecomputer/workspace-store";
+import type { IdentityContext, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
+import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@lemmacomputer/litellm-adapter";
+import { MemoryConnectorRegistryStore } from "@lemmacomputer/workspace-store";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
 
-const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
-const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "onecomputer-control" };
+const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
+const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "lemmacomputer-control" };
 const connected: OAuthConnectionStatus = {
   state: "connected",
   connectedAt: "2026-07-20T01:02:03Z",
@@ -112,7 +112,7 @@ test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaCompu
   const request = gateway.started[0]!;
   assert.equal(started.location, "http://localhost:3001/authorize");
   assert.equal(request.identity, alpha);
-  assert.equal(request.serverName, "onecomputer_ms365");
+  assert.equal(request.serverName, "lemmacomputer_ms365");
   assert.equal(request.redirectUri, "http://localhost:4174/api/v1/connections/microsoft-365/callback");
   assert.match(request.state, /^[A-Za-z0-9_-]{40,}$/);
   assert.match(request.codeChallenge, /^[A-Za-z0-9_-]{40,}$/);
@@ -121,7 +121,7 @@ test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaCompu
   assert.deepEqual(result, connected);
   assert.equal(gateway.completed.length, 1);
   assert.equal(gateway.completed[0]!.identity, alpha);
-  assert.equal(gateway.completed[0]!.serverName, "onecomputer_ms365");
+  assert.equal(gateway.completed[0]!.serverName, "lemmacomputer_ms365");
   assert.notEqual(gateway.completed[0]!.codeVerifier, request.codeChallenge);
 });
 
@@ -173,23 +173,23 @@ test("the default catalog covers the required categories and registers a remote 
   const defaultCards = catalog.connections.map((connector) => [connector.id, connector.serverName]);
   assert.equal(defaultCards.length, 22);
   const neon = catalog.connections.find((connector) => connector.id === "neon");
-  assert.equal(neon?.serverName, "onecomputer_neon");
+  assert.equal(neon?.serverName, "lemmacomputer_neon");
   assert.equal(neon?.brand, "neon");
   assert.equal(neon?.source, "built-in");
   assert.deepEqual(defaultCards.slice(0, 6), [
-    ["microsoft-365", "onecomputer_ms365"],
-    ["notion", "onecomputer_notion"],
-    ["linear", "onecomputer_linear"],
-    ["atlassian", "onecomputer_atlassian"],
-    ["asana", "onecomputer_asana"],
-    ["figma", "onecomputer_figma"],
+    ["microsoft-365", "lemmacomputer_ms365"],
+    ["notion", "lemmacomputer_notion"],
+    ["linear", "lemmacomputer_linear"],
+    ["atlassian", "lemmacomputer_atlassian"],
+    ["asana", "lemmacomputer_asana"],
+    ["figma", "lemmacomputer_figma"],
   ]);
   assert.deepEqual(gateway.statusServers, [], "browsing cards without a marker must not probe a provider");
   assert.deepEqual(gateway.toolServers, [], "browsing cards must not discover provider tools");
   assert.equal(gateway.ensured.length, 0, "listing the catalog must not register remote MCP servers");
   await service.start(alpha, "notion");
   assert.deepEqual(gateway.ensured.map((connectors) => connectors.map((connector) => connector.serverName)), [
-    ["onecomputer_notion"],
+    ["lemmacomputer_notion"],
   ]);
   assert.ok(catalog.connections.every((connector) => connector.available));
   assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));
@@ -208,16 +208,16 @@ test("every approved remote MCP card lazily starts its provider flow only after 
   });
   for (const connectorId of ["github", "figma", "slack", "asana"]) await service.start(alpha, connectorId);
   assert.deepEqual(gateway.started.map((request) => request.serverName), [
-    "onecomputer_github",
-    "onecomputer_figma",
-    "onecomputer_slack",
-    "onecomputer_asana",
+    "lemmacomputer_github",
+    "lemmacomputer_figma",
+    "lemmacomputer_slack",
+    "lemmacomputer_asana",
   ]);
   assert.deepEqual(gateway.ensured.map((connectors) => connectors[0]?.serverName), [
-    "onecomputer_github",
-    "onecomputer_figma",
-    "onecomputer_slack",
-    "onecomputer_asana",
+    "lemmacomputer_github",
+    "lemmacomputer_figma",
+    "lemmacomputer_slack",
+    "lemmacomputer_asana",
   ]);
 });
 
@@ -233,7 +233,7 @@ test("unconnected connector policy inspection never probes provider grants or to
     { code: "MCP_CONNECTOR_NOT_CONNECTED" },
   );
 
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
   assert.deepEqual(gateway.statusServers, []);
   assert.deepEqual(gateway.toolServers, []);
 });
@@ -259,9 +259,9 @@ test("catalog re-entry probes only durable markers and flags a changed connector
     expiresAt: new Date("2026-07-20T02:02:03Z"),
   });
   const expired: OAuthConnectionStatus = { state: "expired", connectedAt: connected.connectedAt, expiresAt: connected.expiresAt, account: null };
-  gateway.statusByServer.set("onecomputer_linear", expired);
+  gateway.statusByServer.set("lemmacomputer_linear", expired);
   gateway.onTools = (_identity, serverName) => {
-    assert.equal(serverName, "onecomputer_linear");
+    assert.equal(serverName, "lemmacomputer_linear");
     gateway.statusByServer.set(serverName, connected);
     return ["create_issue"];
   };
@@ -271,15 +271,15 @@ test("catalog re-entry probes only durable markers and flags a changed connector
   assert.equal(linear.state, "connected");
   assert.equal(renewed.connectionProjectionChanged, true);
   assert.equal(linear.account, null);
-  assert.deepEqual(gateway.statusServers, ["onecomputer_linear", "onecomputer_linear"]);
-  assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
+  assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear", "lemmacomputer_linear"]);
+  assert.deepEqual(gateway.toolServers, ["lemmacomputer_linear"]);
   assert.equal((await registry.getConnectionState(alpha.tenantId, alpha.subjectId, "linear"))?.state, "connected");
 
   gateway.statusServers.length = 0;
   gateway.toolServers.length = 0;
   const stable = await service.list(alpha);
   assert.equal(stable.connectionProjectionChanged, false);
-  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
+  assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear"]);
   assert.deepEqual(gateway.toolServers, []);
   await registry.saveConnectionState({
     tenantId: alpha.tenantId,
@@ -298,13 +298,13 @@ test("catalog re-entry probes only durable markers and flags a changed connector
   assert.equal(unavailableLinear.state, "expired");
   assert.equal(unavailableLinear.account, null);
   assert.equal(unavailable.connectionProjectionChanged, true);
-  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
+  assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear"]);
 });
 
 test("hosted tool policy requires an explicit tool decision and a current connection", async () => {
   const gateway = new FakeConnectionGateway();
-  gateway.statusByServer.set("onecomputer_linear", connected);
-  gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
+  gateway.statusByServer.set("lemmacomputer_linear", connected);
+  gateway.toolsByServer.set("lemmacomputer_linear", ["create_issue"]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
@@ -313,36 +313,36 @@ test("hosted tool policy requires an explicit tool decision and a current connec
 
   gateway.statusServers.length = 0;
   gateway.toolServers.length = 0;
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
   assert.deepEqual(gateway.statusServers, []);
   assert.deepEqual(gateway.toolServers, []);
 
   await saveCurrentConnectorToolPolicy(service, alpha, "linear", { create_issue: "allow" });
   gateway.statusServers.length = 0;
   gateway.toolServers.length = 0;
-  assert.equal((await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"))?.decision, "allow");
-  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
-  assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
+  assert.equal((await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"))?.decision, "allow");
+  assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear"]);
+  assert.deepEqual(gateway.toolServers, ["lemmacomputer_linear"]);
 
-  gateway.statusByServer.set("onecomputer_linear", { state: "disconnected", connectedAt: null, expiresAt: null, account: null });
+  gateway.statusByServer.set("lemmacomputer_linear", { state: "disconnected", connectedAt: null, expiresAt: null, account: null });
   gateway.statusServers.length = 0;
   gateway.toolServers.length = 0;
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
-  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
+  assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear"]);
   assert.deepEqual(gateway.toolServers, []);
 
   gateway.statusServers.length = 0;
   gateway.toolServers.length = 0;
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
   assert.deepEqual(gateway.statusServers, []);
   assert.deepEqual(gateway.toolServers, []);
 });
 
 test("only explicitly approved connected catalog services contribute workspace tools", async () => {
   const gateway = new FakeConnectionGateway();
-  gateway.statusByServer.set("onecomputer_linear", connected);
-  gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
-  gateway.toolsByServer.set("onecomputer_asana", ["create_task"]);
+  gateway.statusByServer.set("lemmacomputer_linear", connected);
+  gateway.toolsByServer.set("lemmacomputer_linear", ["create_issue"]);
+  gateway.toolsByServer.set("lemmacomputer_asana", ["create_task"]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
@@ -359,19 +359,19 @@ test("only explicitly approved connected catalog services contribute workspace t
     agentId: "agent-alpha",
     agentProfile: "claude-desktop-managed-v1",
     networkProfile: "controlled-egress-v1",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
 
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
 
-  assert.deepEqual(projected.mcpServers, ["onecomputer_ms365"]);
-  assert.equal(projected.mcpToolPermissions?.onecomputer_linear, undefined);
-  assert.equal(projected.mcpToolPermissions?.onecomputer_asana, undefined);
-  assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
-  assert.deepEqual(gateway.statusServers, ["onecomputer_linear"]);
+  assert.deepEqual(projected.mcpServers, ["lemmacomputer_ms365"]);
+  assert.equal(projected.mcpToolPermissions?.lemmacomputer_linear, undefined);
+  assert.equal(projected.mcpToolPermissions?.lemmacomputer_asana, undefined);
+  assert.deepEqual(gateway.toolServers, ["lemmacomputer_linear"]);
+  assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear"]);
 });
 
 test("hosted connector OAuth binds the selected catalog entry and refuses cross-connector callbacks", async () => {
@@ -383,7 +383,7 @@ test("hosted connector OAuth binds the selected catalog entry and refuses cross-
 
   await service.start(alpha, "linear");
   const request = gateway.started.at(-1)!;
-  assert.equal(request.serverName, "onecomputer_linear");
+  assert.equal(request.serverName, "lemmacomputer_linear");
   assert.equal(request.redirectUri, "http://localhost:4174/api/v1/connections/linear/callback");
   assert.deepEqual(request.authorizationOrigins, ["https://mcp.linear.app"]);
 
@@ -396,8 +396,8 @@ test("hosted connector OAuth binds the selected catalog entry and refuses cross-
 
 test("new hosted connector tools are blocked pending review and persist explicit approval rules", async () => {
   const gateway = new FakeConnectionGateway();
-  gateway.statusByServer.set("onecomputer_linear", connected);
-  gateway.toolsByServer.set("onecomputer_linear", ["create_issue", "list_issues"]);
+  gateway.statusByServer.set("lemmacomputer_linear", connected);
+  gateway.toolsByServer.set("lemmacomputer_linear", ["create_issue", "list_issues"]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
@@ -410,7 +410,7 @@ test("new hosted connector tools are blocked pending review and persist explicit
     ["list_issues", "deny", true],
   ]);
   assert.match(initial.tools[0]!.description, /Blocked until an administrator reviews/i);
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
 
   const saved = await service.saveConnectorToolPolicy(alpha, "linear", {
     create_issue: "approval_required",
@@ -420,17 +420,17 @@ test("new hosted connector tools are blocked pending review and persist explicit
     ["create_issue", "approval_required", false],
     ["list_issues", "deny", false],
   ]);
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "list_issues"), null);
-  assert.equal((await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"))?.decision, "approval_required");
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "list_issues"), null);
+  assert.equal((await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"))?.decision, "approval_required");
 
-  gateway.toolsByServer.set("onecomputer_linear", ["create_issue", "list_issues", "delete_issue"]);
+  gateway.toolsByServer.set("lemmacomputer_linear", ["create_issue", "list_issues", "delete_issue"]);
   const changed = await service.connectorToolPolicy(alpha, "linear");
   assert.deepEqual(changed.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [
     ["create_issue", "approval_required", false],
     ["list_issues", "deny", false],
     ["delete_issue", "deny", true],
   ]);
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "delete_issue"), null);
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "delete_issue"), null);
 
   const projected = await service.projectConnectedConnectors(alpha, {
     schemaVersion: 1,
@@ -443,12 +443,12 @@ test("new hosted connector tools are blocked pending review and persist explicit
     agentId: "agent-alpha",
     agentProfile: "claude-desktop-managed-v1",
     networkProfile: "controlled-egress-v1",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   });
-  assert.deepEqual(projected.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+  assert.deepEqual(projected.mcpToolPermissions?.lemmacomputer_linear, ["create_issue"]);
   assert.equal(projected.toolPolicies.delete_issue, undefined);
 
   await assert.rejects(
@@ -459,8 +459,8 @@ test("new hosted connector tools are blocked pending review and persist explicit
 
 test("a same-name provider tool change revokes cached projection and rejects a stale review", async () => {
   const gateway = new FakeConnectionGateway();
-  gateway.statusByServer.set("onecomputer_linear", connected);
-  gateway.toolsByServer.set("onecomputer_linear", [{ name: "create_issue", definitionHash: "a".repeat(64) }]);
+  gateway.statusByServer.set("lemmacomputer_linear", connected);
+  gateway.toolsByServer.set("lemmacomputer_linear", [{ name: "create_issue", definitionHash: "a".repeat(64) }]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
@@ -479,14 +479,14 @@ test("a same-name provider tool change revokes cached projection and rejects a s
     agentId: "agent-alpha",
     agentProfile: "claude-desktop-managed-v1",
     networkProfile: "controlled-egress-v1",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
-  assert.deepEqual((await service.projectConnectedConnectors(alpha, policy)).mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+  assert.deepEqual((await service.projectConnectedConnectors(alpha, policy)).mcpToolPermissions?.lemmacomputer_linear, ["create_issue"]);
 
-  gateway.toolsByServer.set("onecomputer_linear", [{ name: "create_issue", definitionHash: "b".repeat(64) }]);
+  gateway.toolsByServer.set("lemmacomputer_linear", [{ name: "create_issue", definitionHash: "b".repeat(64) }]);
   const changed = await service.connectorToolPolicy(alpha, "linear");
   assert.deepEqual(changed.changes, { added: [], changed: ["create_issue"], removed: [] });
   assert.deepEqual(changed.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [["create_issue", "deny", true]]);
@@ -494,15 +494,15 @@ test("a same-name provider tool change revokes cached projection and rejects a s
     () => service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }, review.documentHash),
     { code: "TOOL_SET_CHANGED_REVIEW_AGAIN" },
   );
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
   const afterChange = await service.projectConnectedConnectors(alpha, policy);
-  assert.deepEqual(afterChange.mcpServers, ["onecomputer_ms365"], "a cache hit cannot retain a changed definition");
+  assert.deepEqual(afterChange.mcpServers, ["lemmacomputer_ms365"], "a cache hit cannot retain a changed definition");
 });
 
 test("organization connector access policy locks member changes and removes disabled tools from grants", async () => {
   const gateway = new FakeConnectionGateway();
-  gateway.statusByServer.set("onecomputer_linear", connected);
-  gateway.toolsByServer.set("onecomputer_linear", ["create_issue", "list_issues"]);
+  gateway.statusByServer.set("lemmacomputer_linear", connected);
+  gateway.toolsByServer.set("lemmacomputer_linear", ["create_issue", "list_issues"]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
@@ -535,13 +535,13 @@ test("organization connector access policy locks member changes and removes disa
     agentId: "agent-alpha",
     agentProfile: "claude-desktop-managed-v1",
     networkProfile: "controlled-egress-v1",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
-  assert.deepEqual(projected.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+  assert.deepEqual(projected.mcpToolPermissions?.lemmacomputer_linear, ["create_issue"]);
   assert.equal(projected.toolPolicies.create_issue, "approval_required");
   assert.equal(projected.toolPolicies.list_issues, undefined);
 
@@ -550,9 +550,9 @@ test("organization connector access policy locks member changes and removes disa
     membersCanManage: false,
   });
   await assert.rejects(() => service.start(alpha, "linear", true), { code: "MCP_CONNECTOR_DISABLED" });
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
   const disabledProjection = await service.projectConnectedConnectors(alpha, basePolicy);
-  assert.deepEqual(disabledProjection.mcpServers, ["onecomputer_ms365"]);
+  assert.deepEqual(disabledProjection.mcpServers, ["lemmacomputer_ms365"]);
   assert.equal(disabledProjection.toolPolicies.create_issue, undefined);
 });
 
@@ -618,13 +618,13 @@ test("administrators can add a connector without code, then explicitly approve t
     agentId: "agent-alpha",
     agentProfile: "claude-desktop-managed-v1",
     networkProfile: "controlled-egress-v1",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
   const unreviewed = await service.projectConnectedConnectors(alpha, basePolicy);
-  assert.deepEqual(unreviewed.mcpServers, ["onecomputer_ms365"]);
+  assert.deepEqual(unreviewed.mcpServers, ["lemmacomputer_ms365"]);
   assert.equal(unreviewed.mcpToolPermissions?.[serverName], undefined);
 
   await saveCurrentConnectorToolPolicy(service, alpha, created.id, {
@@ -632,7 +632,7 @@ test("administrators can add a connector without code, then explicitly approve t
     list_tasks: "approval_required",
   });
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
-  assert.deepEqual(projected.mcpServers, ["onecomputer_ms365", serverName]);
+  assert.deepEqual(projected.mcpServers, ["lemmacomputer_ms365", serverName]);
   assert.deepEqual(projected.mcpToolPermissions?.[serverName], ["create_task", "list_tasks"]);
   assert.equal(projected.toolPolicies.create_task, "allow");
   assert.equal(projected.toolPolicies.list_tasks, "approval_required");
@@ -738,14 +738,14 @@ test("custom connector discovery uses a short permit and hosted origins require 
 test("expired connections share one safe renewal and re-read the connected state", async () => {
   const gateway = new FakeConnectionGateway();
   const expired: OAuthConnectionStatus = { state: "expired", connectedAt: connected.connectedAt, expiresAt: connected.expiresAt, account: null };
-  gateway.statusByServer.set("onecomputer_linear", expired);
+  gateway.statusByServer.set("lemmacomputer_linear", expired);
   let startDiscovery: () => void = () => undefined;
   const discoveryStarted = new Promise<void>((resolve) => { startDiscovery = resolve; });
   let releaseDiscovery: () => void = () => undefined;
   const discoveryReleased = new Promise<void>((resolve) => { releaseDiscovery = resolve; });
   gateway.onTools = async (identity, serverName) => {
     assert.equal(identity, alpha);
-    assert.equal(serverName, "onecomputer_linear");
+    assert.equal(serverName, "lemmacomputer_linear");
     startDiscovery();
     await discoveryReleased;
     gateway.statusByServer.set(serverName, connected);
@@ -763,15 +763,15 @@ test("expired connections share one safe renewal and re-read the connected state
   releaseDiscovery();
   const statuses = await Promise.all([first, second]);
   assert.deepEqual(statuses, [connected, connected]);
-  assert.deepEqual(gateway.toolServers, ["onecomputer_linear"]);
-  assert.equal(gateway.statusServers.filter((serverName) => serverName === "onecomputer_linear").length, 2);
+  assert.deepEqual(gateway.toolServers, ["lemmacomputer_linear"]);
+  assert.equal(gateway.statusServers.filter((serverName) => serverName === "lemmacomputer_linear").length, 2);
 });
 
 test("failed silent renewal exposes reconnect state and removes stale connector tools", async () => {
   const gateway = new FakeConnectionGateway();
   const expired: OAuthConnectionStatus = { state: "expired", connectedAt: connected.connectedAt, expiresAt: connected.expiresAt, account: null };
-  gateway.statusByServer.set("onecomputer_linear", connected);
-  gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
+  gateway.statusByServer.set("lemmacomputer_linear", connected);
+  gateway.toolsByServer.set("lemmacomputer_linear", ["create_issue"]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
@@ -788,33 +788,33 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
     agentId: "agent-alpha",
     agentProfile: "claude-desktop-managed-v1",
     networkProfile: "controlled-egress-v1",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
   await saveCurrentConnectorToolPolicy(service, alpha, "linear", { create_issue: "allow" });
   const initial = await service.projectConnectedConnectors(alpha, policy);
-  assert.deepEqual(initial.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+  assert.deepEqual(initial.mcpToolPermissions?.lemmacomputer_linear, ["create_issue"]);
 
-  gateway.statusByServer.set("onecomputer_linear", expired);
+  gateway.statusByServer.set("lemmacomputer_linear", expired);
   gateway.onTools = () => {
     throw new Error("fixture refresh denied");
   };
   const after = await service.projectConnectedConnectors(alpha, policy);
-  assert.deepEqual(after.mcpServers, ["onecomputer_ms365"]);
-  assert.equal(after.mcpToolPermissions?.onecomputer_linear, undefined);
+  assert.deepEqual(after.mcpServers, ["lemmacomputer_ms365"]);
+  assert.equal(after.mcpToolPermissions?.lemmacomputer_linear, undefined);
   const catalog = await service.list(alpha);
   const linear = catalog.connections.find((connector) => connector.id === "linear")!;
   assert.equal(linear.state, "expired");
-  assert.ok(gateway.toolServers.every((serverName) => serverName === "onecomputer_linear"));
-  assert.equal(await service.hostedToolPolicy(alpha, "onecomputer_linear", "create_issue"), null);
+  assert.ok(gateway.toolServers.every((serverName) => serverName === "lemmacomputer_linear"));
+  assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
 });
 
 test("connector projection cache preserves the current workspace agent selection", async () => {
   const gateway = new FakeConnectionGateway();
-  gateway.statusByServer.set("onecomputer_linear", connected);
-  gateway.toolsByServer.set("onecomputer_linear", ["create_issue"]);
+  gateway.statusByServer.set("lemmacomputer_linear", connected);
+  gateway.toolsByServer.set("lemmacomputer_linear", ["create_issue"]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
@@ -826,8 +826,8 @@ test("connector projection cache preserves the current workspace agent selection
     agentProfile: "claude-desktop-managed-v1",
     displayName: "Claude Desktop",
     clientVersion: "1.0.0",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
@@ -837,8 +837,8 @@ test("connector projection cache preserves the current workspace agent selection
     agentProfile: "hermes-claw-managed-v1",
     displayName: "Hermes Agent CLI",
     clientVersion: "1.0.0",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };
@@ -854,8 +854,8 @@ test("connector projection cache preserves the current workspace agent selection
     agentProfile: claude.agentProfile,
     agents: [claude, hermes],
     networkProfile: "controlled-egress-v1",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-messages"],
     toolPolicies: { "list-mail-messages": "allow" },
   };

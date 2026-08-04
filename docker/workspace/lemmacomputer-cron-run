@@ -8,11 +8,11 @@ if [[ ! "$job_id" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] \
   || [[ ! "$timeout_seconds" =~ ^[0-9]+$ ]] \
   || (( timeout_seconds < 1 || timeout_seconds > 86400 )) \
   || [[ "$#" -eq 0 ]]; then
-  echo "usage: onecomputer-cron-run JOB_ID TIMEOUT_SECONDS COMMAND [ARG ...]" >&2
+  echo "usage: lemmacomputer-cron-run JOB_ID TIMEOUT_SECONDS COMMAND [ARG ...]" >&2
   exit 64
 fi
 
-state_dir="/home/kasm-user/.onecomputer"
+state_dir="/home/kasm-user/.lemmacomputer"
 log_dir="${state_dir}/logs"
 lock_dir="${state_dir}/locks"
 install -d -m 0700 "$log_dir" "$lock_dir"
@@ -22,7 +22,7 @@ touch "$log_file"
 chmod 0600 "$log_file"
 
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-printf '{"event":"cron_job_start","jobId":"%s","startedAt":"%s"}\n' "$job_id" "$started_at" >> /run/onecomputer/cron-events.log
+printf '{"event":"cron_job_start","jobId":"%s","startedAt":"%s"}\n' "$job_id" "$started_at" >> /run/lemmacomputer/cron-events.log
 
 exec 9>"$lock_file"
 if ! flock -n 9; then
@@ -43,7 +43,7 @@ else
 fi
 completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf '{"event":"cron_job_finish","jobId":"%s","completedAt":"%s","outcome":"%s","exitStatus":%d}\n' \
-  "$job_id" "$completed_at" "$outcome" "$status" >> /run/onecomputer/cron-events.log
+  "$job_id" "$completed_at" "$outcome" "$status" >> /run/lemmacomputer/cron-events.log
 
 if [[ "$(stat -c %s "$log_file")" -gt 5242880 ]]; then
   tail -c 2097152 "$log_file" > "${log_file}.rotate"

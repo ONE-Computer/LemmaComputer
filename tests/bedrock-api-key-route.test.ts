@@ -9,9 +9,9 @@ import {
   bedrockApiKeyModelProfileSchema,
   bedrockApiKeyRouteAlias,
   bedrockApiKeyRouteConfigurationSchema,
-  OneComputerError,
-} from "@onecomputer/contracts";
-import { LiteLLMGatewayAdapter } from "@onecomputer/litellm-adapter";
+  LemmaComputerError,
+} from "@lemmacomputer/contracts";
+import { LiteLLMGatewayAdapter } from "@lemmacomputer/litellm-adapter";
 
 const root = path.resolve(import.meta.dirname, "..");
 const source = (relativePath: string) => readFile(path.join(root, relativePath), "utf8");
@@ -91,7 +91,7 @@ test("the pinned LiteLLM API-key route uses encrypted credentials and a dynamic 
       response.end(JSON.stringify({ success: true }));
       return;
     }
-    if (request.method === "PATCH" && request.url === "/model/onecomputer-bedrock-api-key-v1/update") {
+    if (request.method === "PATCH" && request.url === "/model/lemmacomputer-bedrock-api-key-v1/update") {
       response.statusCode = 404;
       response.end(JSON.stringify({ detail: { error: "Model not found" } }));
       return;
@@ -112,7 +112,7 @@ test("the pinned LiteLLM API-key route uses encrypted credentials and a dynamic 
   const adapter = adapterFor(address.port);
   try {
     const route = await adapter.configureBedrockApiKeyRoute({
-      credentialName: "onecomputer-bedrock-integration-v1",
+      credentialName: "lemmacomputer-bedrock-integration-v1",
       apiKey: testApiKey,
       region: "ap-southeast-1",
       modelProfileId: "claude-sonnet-4-5-global",
@@ -141,7 +141,7 @@ test("the pinned LiteLLM API-key route uses encrypted credentials and a dynamic 
     const modelInfo = model.body.model_info as Record<string, unknown>;
     assert.equal(model.body.model_name, bedrockApiKeyRouteAlias);
     assert.equal(modelParams.model, "bedrock/converse/global.anthropic.claude-sonnet-4-5-20250929-v1:0");
-    assert.equal(modelParams.litellm_credential_name, "onecomputer-bedrock-integration-v1");
+    assert.equal(modelParams.litellm_credential_name, "lemmacomputer-bedrock-integration-v1");
     assert.equal(modelParams.aws_region_name, "ap-southeast-1");
     assert.equal(modelParams.timeout, 60);
     assert.equal(modelParams.max_retries, 2);
@@ -214,7 +214,7 @@ test("Bedrock API-key diagnostics distinguish safe remediation without reflectin
           modelProfileId: "claude-sonnet-4-5-global",
         }),
         (error: unknown) => {
-          assert.ok(error instanceof OneComputerError);
+          assert.ok(error instanceof LemmaComputerError);
           assert.equal(error.code, scenario.code);
           assert.equal(error.retryable, scenario.retryable);
           assert.doesNotMatch(error.message, new RegExp(testApiKey));
@@ -233,11 +233,11 @@ test("Bedrock stays out of static configuration and uses the pinned database-man
     source("config/litellm/config.yaml"),
     source("docker/Dockerfile.litellm"),
   ]);
-  assert.match(compose, /image: onecomputer\/litellm:v1\.93\.0-onecomputer-egress/);
+  assert.match(compose, /image: lemmacomputer\/litellm:v1\.93\.0-lemmacomputer-egress/);
   assert.match(dockerfile, /FROM ghcr\.io\/berriai\/litellm:v1\.93\.0@sha256:/);
   assert.match(config, /store_model_in_db: true/);
-  assert.doesNotMatch(compose, /(?:AWS_BEARER_TOKEN_BEDROCK|ONECOMPUTER_BEDROCK_API_KEY)/);
-  assert.doesNotMatch(config, /model_name: onecomputer-bedrock/);
+  assert.doesNotMatch(compose, /(?:AWS_BEARER_TOKEN_BEDROCK|LEMMACOMPUTER_BEDROCK_API_KEY)/);
+  assert.doesNotMatch(config, /model_name: lemmacomputer-bedrock/);
   assert.doesNotMatch(config, /AWS_BEARER_TOKEN_BEDROCK/);
 });
 
@@ -262,7 +262,7 @@ test("the dynamically stored Bedrock route supports streaming, tool calls, and s
       response.end(JSON.stringify({ success: true }));
       return;
     }
-    if (request.method === "PATCH" && request.url === "/model/onecomputer-bedrock-api-key-v1/update") {
+    if (request.method === "PATCH" && request.url === "/model/lemmacomputer-bedrock-api-key-v1/update") {
       response.statusCode = 404;
       response.end(JSON.stringify({ detail: { error: "Model not found" } }));
       return;
@@ -286,7 +286,7 @@ test("the dynamically stored Bedrock route supports streaming, tool calls, and s
         && Array.isArray(tools)
         && (tools[0] as Record<string, unknown> | undefined)?.type === "function"
         && responseFormat?.type === "json_schema"
-        && modelParams?.litellm_credential_name === "onecomputer-bedrock-streaming-v1"
+        && modelParams?.litellm_credential_name === "lemmacomputer-bedrock-streaming-v1"
         && modelParams?.aws_region_name === "us-east-1"
         && modelInfo?.supports_streaming === true
         && modelInfo?.supports_function_calling === true
@@ -315,7 +315,7 @@ test("the dynamically stored Bedrock route supports streaming, tool calls, and s
   const address = server.address() as AddressInfo;
   try {
     await adapterFor(address.port).configureBedrockApiKeyRoute({
-      credentialName: "onecomputer-bedrock-streaming-v1",
+      credentialName: "lemmacomputer-bedrock-streaming-v1",
       apiKey: testApiKey,
       region: "us-east-1",
       modelProfileId: "claude-sonnet-4-5-global",

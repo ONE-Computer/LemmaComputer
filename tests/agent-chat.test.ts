@@ -20,8 +20,8 @@ import {
   type Launch,
   type RuntimePolicy,
   type Sandbox,
-} from "@onecomputer/contracts";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+} from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import {
   AgentChatAuthority,
   AgentUiStreamMapper,
@@ -36,22 +36,22 @@ const execFileAsync = promisify(execFile);
 const identity: IdentityContext = {
   tenantId: "acme",
   subjectId: "alex",
-  audience: "onecomputer-control",
+  audience: "lemmacomputer-control",
 };
 
 test("Hermes session titles stay in the LemmaComputer adapter so duplicate user titles cannot block a new chat", async () => {
-  const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
   const creation = adapter.slice(adapter.indexOf('if AGENT == "hermes-claw":'), adapter.indexOf("async with state_lock:", adapter.indexOf('if AGENT == "hermes-claw":')));
   assert.match(creation, /json=\{\}/);
   assert.doesNotMatch(creation, /json=\{"title": item\["title"\]\}/);
   assert.match(adapter, /nextCursor/);
-  assert.match(adapter, /NEEDS_INPUT_MARKER = "\[ONECOMPUTER_NEEDS_INPUT\]"/);
+  assert.match(adapter, /NEEDS_INPUT_MARKER = "\[LEMMACOMPUTER_NEEDS_INPUT\]"/);
   assert.match(adapter, /terminal_state = "needs_input"/);
   assert.equal(chatTurnStateSchema.safeParse("needs_input").success, true);
 });
 
 test("agent turns durably upsert submitted and streaming messages before terminal completion", async () => {
-  const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
   const persistence = adapter.slice(
     adapter.indexOf("def upsert_session_message"),
     adapter.indexOf("async def health"),
@@ -60,7 +60,7 @@ test("agent turns durably upsert submitted and streaming messages before termina
     adapter.indexOf("def apply_event"),
     adapter.indexOf("async def claude_vendor_events"),
   );
-  const home = await mkdtemp(path.join(tmpdir(), "onecomputer-chat-persistence-"));
+  const home = await mkdtemp(path.join(tmpdir(), "lemmacomputer-chat-persistence-"));
   const program = `
 import asyncio, json, sys
 from pathlib import Path
@@ -118,7 +118,7 @@ asyncio.run(run())
 });
 
 test("detached turn production survives subscriber disconnect and remains replayable", async () => {
-  const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
+  const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
   const detachedTurn = adapter.slice(
     adapter.indexOf("class DetachedTurn"),
     adapter.indexOf("def now"),
@@ -175,8 +175,8 @@ test("Control pumps workspace events independently of the browser response", asy
 });
 
 test("agent turns receive a fresh trusted timezone context and require clarification without one", async () => {
-  const adapter = await readFile(new URL("../docker/workspace/onecomputer-agent-chat.py", import.meta.url), "utf8");
-  assert.match(adapter, /CONFIGURED_TIME_ZONE = os\.environ\.get\("ONECOMPUTER_TIME_ZONE", ""\)\.strip\(\)/);
+  const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
+  assert.match(adapter, /CONFIGURED_TIME_ZONE = os\.environ\.get\("LEMMACOMPUTER_TIME_ZONE", ""\)\.strip\(\)/);
   assert.match(adapter, /datetime\.now\(LOCAL_TIME_ZONE\)/);
   assert.match(adapter, /current local date and time/);
   assert.match(adapter, /explicit timezone in the employee's latest request overrides/);
@@ -261,8 +261,8 @@ const hermesPolicy: RuntimePolicy = {
   agentId: "agent-alex:hermes-claw",
   agentProfile: "hermes-claw-managed-v1",
   networkProfile: "controlled-egress-v1",
-  modelAlias: "onecomputer-assistant",
-  mcpServer: "onecomputer_ms365",
+  modelAlias: "lemmacomputer-assistant",
+  mcpServer: "lemmacomputer_ms365",
   allowedTools: ["list-mail-folders"],
   toolPolicies: { "list-mail-folders": "allow" },
   agents: [{
@@ -271,8 +271,8 @@ const hermesPolicy: RuntimePolicy = {
     agentProfile: "hermes-claw-managed-v1",
     displayName: "Hermes",
     clientVersion: "v2026.7.20",
-    modelAlias: "onecomputer-assistant",
-    mcpServer: "onecomputer_ms365",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
     allowedTools: ["list-mail-folders"],
     toolPolicies: { "list-mail-folders": "allow" },
   }],
@@ -297,7 +297,7 @@ test("agent chat grants are deterministic, workspace-and-runtime-bound, and only
   const other = authority.issue(identity, "22222222-2222-4222-8222-222222222222", hermesPolicy, "hermes-claw");
   assert.deepEqual(first, same);
   assert.notEqual(first?.key, other?.key);
-  assert.equal(first?.baseUrl, "http://onecomputer-sandbox-11111111-1111-4111-8111-111111111111:8642");
+  assert.equal(first?.baseUrl, "http://lemmacomputer-sandbox-11111111-1111-4111-8111-111111111111:8642");
 
   const claudePolicy = { ...hermesPolicy, agentProfile: "claude-desktop-managed-v1" as const, agents: undefined };
   assert.equal(authority.issue(identity, "11111111-1111-4111-8111-111111111111", claudePolicy, "hermes-claw"), undefined);

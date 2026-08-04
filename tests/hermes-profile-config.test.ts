@@ -8,7 +8,7 @@ import test from "node:test";
 
 const execute = promisify(execFile);
 const root = path.resolve(import.meta.dirname, "..");
-const configurator = path.join(root, "docker/workspace/onecomputer-hermes-config.py");
+const configurator = path.join(root, "docker/workspace/lemmacomputer-hermes-config.py");
 const officeSkills = ["docx", "ocr-and-documents", "pdf", "powerpoint", "xlsx"];
 
 const installSkill = async (bundle: string, name: string) => {
@@ -21,7 +21,7 @@ const installSkill = async (bundle: string, name: string) => {
 };
 
 test("Hermes enables reviewed default skills and preserves later employee toggles", async (context) => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), "onecomputer-hermes-profile-"));
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "lemmacomputer-hermes-profile-"));
   context.after(() => rm(temporary, { recursive: true, force: true }));
   const home = path.join(temporary, "profile");
   const bundle = path.join(temporary, "bundle");
@@ -38,7 +38,7 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
   const configure = () => execute("python3", [
     configurator,
     home,
-    "onecomputer-glm",
+    "lemmacomputer-glm",
     "allowed-tool",
     "4314",
     "disposable-open",
@@ -67,7 +67,7 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
   assert.ok(!second.skills.disabled.includes("teams-meeting-pipeline"));
 
   const state = JSON.parse(
-    await readFile(path.join(home, ".onecomputer-skill-defaults.json"), "utf8"),
+    await readFile(path.join(home, ".lemmacomputer-skill-defaults.json"), "utf8"),
   );
   assert.equal(state.version, 1);
   assert.ok(state.bundledSkills.includes("airtable"));

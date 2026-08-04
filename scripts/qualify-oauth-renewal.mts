@@ -3,9 +3,9 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
-import type { IdentityContext, RuntimePolicy } from "@onecomputer/contracts";
-import { LiteLLMGatewayAdapter, type OAuthConnectionGateway } from "@onecomputer/litellm-adapter";
-import { MemoryConnectorRegistryStore, type SaveConnectorRegistryRecord } from "@onecomputer/workspace-store";
+import type { IdentityContext, RuntimePolicy } from "@lemmacomputer/contracts";
+import { LiteLLMGatewayAdapter, type OAuthConnectionGateway } from "@lemmacomputer/litellm-adapter";
+import { MemoryConnectorRegistryStore, type SaveConnectorRegistryRecord } from "@lemmacomputer/workspace-store";
 import { McpConnectionService } from "../apps/control-api/src/connections.js";
 
 type FixtureCounters = {
@@ -15,7 +15,7 @@ type FixtureCounters = {
   oauthCredentialFingerprints: string[];
 };
 
-const serverName = "onecomputer_oauth_fixture";
+const serverName = "lemmacomputer_oauth_fixture";
 const refreshLifetimeMs = 66_000;
 
 const waitForRefreshExpiry = async () => {
@@ -93,8 +93,8 @@ const policyFor = (agentId: string): RuntimePolicy => ({
   agentId,
   agentProfile: "claude-desktop-managed-v1",
   networkProfile: "controlled-egress-v1",
-  modelAlias: "onecomputer-assistant",
-  mcpServer: "onecomputer_ms365",
+  modelAlias: "lemmacomputer-assistant",
+  mcpServer: "lemmacomputer_ms365",
   allowedTools: ["list-mail-messages"],
   toolPolicies: { "list-mail-messages": "allow" },
 });
@@ -107,12 +107,12 @@ const main = async () => {
   const credentialSecret = randomBytes(32).toString("base64url");
   const environment = {
     ...process.env,
-    ONECOMPUTER_OAUTH_QUALIFICATION_PROJECT: project,
-    ONECOMPUTER_OAUTH_QUALIFICATION_POSTGRES_PASSWORD: randomBytes(24).toString("hex"),
-    ONECOMPUTER_OAUTH_QUALIFICATION_MASTER_KEY: masterKey,
-    ONECOMPUTER_OAUTH_QUALIFICATION_SALT_KEY: randomBytes(32).toString("hex"),
-    ONECOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT: String(litellmPort),
-    ONECOMPUTER_OAUTH_QUALIFICATION_FIXTURE_PORT: String(fixturePort),
+    LEMMACOMPUTER_OAUTH_QUALIFICATION_PROJECT: project,
+    LEMMACOMPUTER_OAUTH_QUALIFICATION_POSTGRES_PASSWORD: randomBytes(24).toString("hex"),
+    LEMMACOMPUTER_OAUTH_QUALIFICATION_MASTER_KEY: masterKey,
+    LEMMACOMPUTER_OAUTH_QUALIFICATION_SALT_KEY: randomBytes(32).toString("hex"),
+    LEMMACOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT: String(litellmPort),
+    LEMMACOMPUTER_OAUTH_QUALIFICATION_FIXTURE_PORT: String(fixturePort),
   };
   const compose = (args: string[]) => {
     const result = spawnSync("docker", [
@@ -153,10 +153,10 @@ const main = async () => {
     authorizationOrigin: fixtureUrl,
     registry,
   });
-  const alpha: IdentityContext = { tenantId: `tenant-${runId}`, subjectId: "alpha", audience: "onecomputer-control" };
-  const beta: IdentityContext = { tenantId: `tenant-${runId}`, subjectId: "beta", audience: "onecomputer-control" };
-  const failure: IdentityContext = { tenantId: `tenant-${runId}`, subjectId: "failure", audience: "onecomputer-control" };
-  const revoked: IdentityContext = { tenantId: `tenant-${runId}`, subjectId: "revoked", audience: "onecomputer-control" };
+  const alpha: IdentityContext = { tenantId: `tenant-${runId}`, subjectId: "alpha", audience: "lemmacomputer-control" };
+  const beta: IdentityContext = { tenantId: `tenant-${runId}`, subjectId: "beta", audience: "lemmacomputer-control" };
+  const failure: IdentityContext = { tenantId: `tenant-${runId}`, subjectId: "failure", audience: "lemmacomputer-control" };
+  const revoked: IdentityContext = { tenantId: `tenant-${runId}`, subjectId: "revoked", audience: "lemmacomputer-control" };
   await registry.saveConnector({
     tenantId: alpha.tenantId,
     id: "oauth-qualification",
@@ -285,7 +285,7 @@ const main = async () => {
     assert.equal(counters.oauthTokenRefresh - failureBeforeRenewal.oauthTokenRefresh, 1, "the controlled fixture credential must make exactly one refresh request before revocation");
     const failurePolicy = policyFor("agent-failure");
     const initialFailureProjection = await connectionService.projectConnectedConnectors(failure, failurePolicy);
-    assert.deepEqual(initialFailureProjection.mcpServers, ["onecomputer_ms365", serverName]);
+    assert.deepEqual(initialFailureProjection.mcpServers, ["lemmacomputer_ms365", serverName]);
     assert.deepEqual(initialFailureProjection.mcpToolPermissions?.[serverName], ["credential_identity", "credential_secondary"]);
     const revokeResponse = await fetch(`${fixtureUrl}/oauth/qualification/revoke/${credentialSuffix(failureCode)}`, {
       method: "POST",
@@ -297,7 +297,7 @@ const main = async () => {
     await waitForRefreshExpiry();
     const toolCallsBeforeFailure = failureBeforeRevocation.oauthToolCall;
     const failedProjection = await connectionService.projectConnectedConnectors(failure, failurePolicy);
-    assert.deepEqual(failedProjection.mcpServers, ["onecomputer_ms365"], "a failed silent renewal must remove the cached connector server");
+    assert.deepEqual(failedProjection.mcpServers, ["lemmacomputer_ms365"], "a failed silent renewal must remove the cached connector server");
     assert.equal(failedProjection.mcpToolPermissions?.[serverName], undefined, "a failed silent renewal must remove cached connector tools");
     counters = await readCounters(fixtureUrl);
     assert.ok(counters.oauthTokenRefresh - failureBeforeRevocation.oauthTokenRefresh >= 1, "the provider-revoked credential must attempt a failed refresh; LiteLLM may retry a denied resolution");

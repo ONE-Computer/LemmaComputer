@@ -1,5 +1,5 @@
 {
-  "name": "@onecomputer/policy-integrity",
+  "name": "@lemmacomputer/policy-integrity",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,6 +8,6 @@
     "build": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@onecomputer/contracts": "*"
+    "@lemmacomputer/contracts": "*"
   }
 }

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { GatewayBudgetProjection, GatewayBudgetReconciliation, LiteLlmTeamBudgetProjector } from "@onecomputer/litellm-adapter";
-import { usageFingerprint, type TeamBudgetStore } from "@onecomputer/workspace-store";
+import type { GatewayBudgetProjection, GatewayBudgetReconciliation, LiteLlmTeamBudgetProjector } from "@lemmacomputer/litellm-adapter";
+import { usageFingerprint, type TeamBudgetStore } from "@lemmacomputer/workspace-store";
 import type { InternalUsageCompletion, UsageEventRecordedHook } from "./usage-ledger.js";
 
 const money=z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,12})?$/);

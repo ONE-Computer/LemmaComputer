@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import type pg from "pg";
 
 const migrationFile = /^((?:\d{3})|(?:[0-9A-HJKMNP-TV-Z]{26}))_([a-z0-9][a-z0-9_-]*)\.sql$/;
-const ledgerTable = "onecomputer_schema_migrations";
+const ledgerTable = "lemmacomputer_schema_migrations";
 const lockKeys: [number, number] = [1_326_843_779, 1];
 const legacyMigrationIds = Array.from({ length: 28 }, (_, index) => String(index + 1).padStart(3, "0"));
 const legacyMigrationIdSet = new Set(legacyMigrationIds);
@@ -200,8 +200,8 @@ export async function runWorkspaceMigrations(
   options: { appVersion?: string; installationKind?: string; migrationDirectory?: URL } = {},
 ): Promise<MigrationRunReport> {
   const migrations = await discoverWorkspaceMigrations(options.migrationDirectory);
-  const appVersion = options.appVersion ?? process.env.ONECOMPUTER_APP_VERSION ?? "development";
-  const installationKind = options.installationKind ?? process.env.ONECOMPUTER_INSTALLATION_KIND ?? "managed";
+  const appVersion = options.appVersion ?? process.env.LEMMACOMPUTER_APP_VERSION ?? "development";
+  const installationKind = options.installationKind ?? process.env.LEMMACOMPUTER_INSTALLATION_KIND ?? "managed";
   const client = await pool.connect();
   let locked = false;
   try {

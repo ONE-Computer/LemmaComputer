@@ -1,4 +1,4 @@
-import { OneComputerError, type OwnedJson } from "@onecomputer/contracts";
+import { LemmaComputerError, type OwnedJson } from "@lemmacomputer/contracts";
 
 export type SignedConsentRequest = {
   document: OwnedJson;
@@ -98,7 +98,7 @@ export class HttpOpenVtcConsentClient implements OpenVtcConsentClient {
         signal: AbortSignal.timeout(5_000),
       });
     } catch {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         "OPENVTC_CONSENT_UNAVAILABLE",
         "The OpenVTC consent verifier is unavailable",
         503,
@@ -109,7 +109,7 @@ export class HttpOpenVtcConsentClient implements OpenVtcConsentClient {
       error?: { code?: string; message?: string };
     };
     if (!response.ok) {
-      throw new OneComputerError(
+      throw new LemmaComputerError(
         value.error?.code ?? "OPENVTC_CONSENT_REJECTED",
         value.error?.message ?? "The OpenVTC consent verifier rejected the document",
         response.status,

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import type { McpToolPolicyDecision } from "@onecomputer/contracts";
+import type { McpToolPolicyDecision } from "@lemmacomputer/contracts";
 
 export type ConnectorCategory = "Productivity" | "Developer tools" | "Business" | "Communication" | "Data and analytics" | "Other";
 

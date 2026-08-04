@@ -11,7 +11,7 @@ import type {
   RoutingPolicyScope,
   ServiceClassPolicy,
   SessionAffinity,
-} from "@onecomputer/model-router";
+} from "@lemmacomputer/model-router";
 import {
   PostgresUsageLedgerStore,
   priceUsage,

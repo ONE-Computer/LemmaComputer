@@ -33,7 +33,7 @@ below.
 
 ## Decision flow
 
-1. LiteLLM accepts only the synthetic `onecomputer-auto` transport alias.
+1. LiteLLM accepts only the synthetic `lemmacomputer-auto` transport alias.
 2. The callback validates the signed task binding and trusted workspace identity.
 3. Control resolves the user's default Team and its immutable rollout and policy versions.
 4. The router applies explicit class requests or privacy-safe task signals, then capability, residency, approval, health, rate-card, currency, and budget constraints.

@@ -6,7 +6,7 @@ import type {
   IdentityContext,
   ScheduleRunState,
   ScheduleState,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 
 export type ScheduleRecord = {
   id: string;

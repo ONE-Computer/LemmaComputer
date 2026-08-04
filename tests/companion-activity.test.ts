@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "companion-activity-proxy-token-at-least-24-characters";
-const identity: IdentityContext = { tenantId: "activity-tenant", subjectId: "activity-owner", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "activity-tenant", subjectId: "activity-owner", audience: "lemmacomputer-control" };
 const otherIdentity: IdentityContext = { ...identity, subjectId: "other-owner" };
 const headersFor = (value: IdentityContext) => ({
-  "x-onecomputer-proxy-token": proxyToken,
-  "x-onecomputer-test-tenant-id": value.tenantId,
-  "x-onecomputer-test-user-id": value.subjectId,
+  "x-lemmacomputer-proxy-token": proxyToken,
+  "x-lemmacomputer-test-tenant-id": value.tenantId,
+  "x-lemmacomputer-test-user-id": value.subjectId,
 });
 
 test("companion activity is owned, redacted, stable across pages, and read-only", async () => {
@@ -33,9 +33,9 @@ test("companion activity is owned, redacted, stable across pages, and read-only"
       workspaceId: input.workspaceId,
       agentId: "private-agent-identifier",
       capabilityId: "m365-write-protected",
-      serverName: "onecomputer_ms365",
+      serverName: "lemmacomputer_ms365",
       toolName: "send-mail",
-      schemaId: "onecomputer.m365.send-mail.v1",
+      schemaId: "lemmacomputer.m365.send-mail.v1",
       arguments: { privateBody: input.secret },
       operationDigest: "d".repeat(64),
       nonce: `private-nonce-${input.id}`,
@@ -140,12 +140,12 @@ test("companion activity exposes a whitelisted human-readable request audit", as
     workspaceId: workspace.id,
     agentId: "workspace-agent:codex-cli",
     capabilityId: "m365.send-chat-message",
-    serverName: "onecomputer_ms365",
+    serverName: "lemmacomputer_ms365",
     toolName: "send-chat-message",
-    schemaId: "onecomputer.m365.send-chat-message.v1",
+    schemaId: "lemmacomputer.m365.send-chat-message.v1",
     arguments: {
       chatId: "opaque-chat-id-that-must-not-be-projected",
-      onecomputerAudit: { target: "Alex Morgan", targetType: "chat" },
+      lemmacomputerAudit: { target: "Alex Morgan", targetType: "chat" },
       body: { body: { contentType: "html", content: "<p>Hello <strong>Alex</strong>,</p><p>The report is ready.</p>" } },
       confirm: true,
     },
@@ -199,7 +199,7 @@ test("the normalized request and audit model applies across mail, calendar, and 
       resourceName: "Finance team",
       resourceLocation: "Outlook Mail",
       arguments: {
-        onecomputerAudit: { target: "Finance team", targetType: "recipient" },
+        lemmacomputerAudit: { target: "Finance team", targetType: "recipient" },
         body: { Message: {
           subject: "Quarterly close",
           body: { contentType: "text", content: "The close is complete." },
@@ -214,7 +214,7 @@ test("the normalized request and audit model applies across mail, calendar, and 
       resourceName: "Quarterly review",
       resourceLocation: "Outlook Calendar",
       arguments: {
-        onecomputerAudit: { target: "Quarterly review", targetType: "event" },
+        lemmacomputerAudit: { target: "Quarterly review", targetType: "event" },
         body: {
           subject: "Quarterly review",
           start: { dateTime: "2026-07-30T10:00:00", timeZone: "Singapore Standard Time" },
@@ -229,7 +229,7 @@ test("the normalized request and audit model applies across mail, calendar, and 
       resourceName: "Board reports",
       resourceLocation: "OneDrive",
       arguments: {
-        onecomputerAudit: { target: "Board reports", targetType: "folder" },
+        lemmacomputerAudit: { target: "Board reports", targetType: "folder" },
         driveId: "opaque-drive",
         driveItemId: "opaque-parent",
         body: { name: "Board reports", folder: {} },
@@ -243,8 +243,8 @@ test("the normalized request and audit model applies across mail, calendar, and 
       workspaceId: workspace.id,
       agentId: "workspace-agent:codex-cli",
       capabilityId: `m365.${fixture.toolName}`,
-      serverName: "onecomputer_ms365",
-      schemaId: `onecomputer.m365.${fixture.toolName}.v1`,
+      serverName: "lemmacomputer_ms365",
+      schemaId: `lemmacomputer.m365.${fixture.toolName}.v1`,
       operationDigest: "d".repeat(64),
       nonce: `private-nonce-${fixture.id}`,
       correlationId: `private-correlation-${fixture.id}`,

@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 
-BROKER = os.environ.get("ONECOMPUTER_CONNECTORS_BROKER", "http://127.0.0.1:4312")
+BROKER = os.environ.get("LEMMACOMPUTER_CONNECTORS_BROKER", "http://127.0.0.1:4312")
 if BROKER not in {
     "http://127.0.0.1:4312",
     "http://127.0.0.1:4314",
@@ -77,10 +77,10 @@ LIST_JOINED_TEAMS_DESCRIPTION = """List every Microsoft Teams team joined by the
 
 This Graph endpoint does not accept generic OData paging or filtering options. Call it with no arguments, then match the returned displayName and id locally. Use the selected id with list-team-channels."""
 TEAMS_TOOL_DESCRIPTIONS = {
-    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation selected during discovery with targetType chat. LemmaComputer obtains signed approval before sending.",
-    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact human-facing recipient or conversation with targetType chat. LemmaComputer obtains signed approval before sending.",
-    "send-channel-message": "Post one HTML message to a Teams channel. Get teamId from list-joined-teams and channelId from list-team-channels. Put the post in body.body.content and set body.body.contentType to html. Set onecomputerAudit to the exact team and channel display names selected during discovery. LemmaComputer obtains signed approval before posting.",
-    "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Set onecomputerAudit to the exact team and channel display names. Put the reply in body.body.content and set body.body.contentType to html. LemmaComputer obtains signed approval before posting.",
+    "send-chat-message": "Send one HTML message to an existing Teams chat. Get chatId from list-chats. Put the message in body.body.content and set body.body.contentType to html. Set lemmacomputerAudit to the exact human-facing recipient or conversation selected during discovery with targetType chat. LemmaComputer obtains signed approval before sending.",
+    "reply-to-chat-message": "Reply with one HTML message to an existing Teams chat message. Get chatId from list-chats and chatMessageId from list-chat-messages. Put the reply in body.body.content and set body.body.contentType to html. Set lemmacomputerAudit to the exact human-facing recipient or conversation with targetType chat. LemmaComputer obtains signed approval before sending.",
+    "send-channel-message": "Post one HTML message to a Teams channel. Get teamId from list-joined-teams and channelId from list-team-channels. Put the post in body.body.content and set body.body.contentType to html. Set lemmacomputerAudit to the exact team and channel display names selected during discovery. LemmaComputer obtains signed approval before posting.",
+    "reply-to-channel-message": "Reply with one HTML message to a Teams channel post. Get teamId from list-joined-teams, channelId from list-team-channels, and the parent chatMessageId from list-channel-messages. Set lemmacomputerAudit to the exact team and channel display names. Put the reply in body.body.content and set body.body.contentType to html. LemmaComputer obtains signed approval before posting.",
 }
 
 BOUNDED_LIST_INPUT_PROPERTIES = {
@@ -658,8 +658,8 @@ def discover_tools() -> list[dict]:
         mcp_info = raw.get("mcp_info") if isinstance(raw.get("mcp_info"), dict) else {}
         server_label = str(mcp_info.get("server_name") or mcp_info.get("server_id") or "connector")
         server_label = re.sub(r"[^A-Za-z0-9_-]+", "_", server_label).strip("_").lower()
-        if server_label.startswith("onecomputer_"):
-            server_label = server_label.removeprefix("onecomputer_")
+        if server_label.startswith("lemmacomputer_"):
+            server_label = server_label.removeprefix("lemmacomputer_")
         if server_label == "ms365":
             server_label = "microsoft365"
         server_label = server_label[:32] or "connector"
@@ -672,7 +672,7 @@ def discover_tools() -> list[dict]:
         visible_name = unique_name
         used_names.add(visible_name)
         selected = dict(raw)
-        selected["_onecomputer_upstream_name"] = upstream_name
+        selected["_lemmacomputer_upstream_name"] = upstream_name
         TOOLS[visible_name] = selected
         input_schema = raw.get("inputSchema", raw.get("input_schema", {"type": "object"}))
         if upstream_name == "get-calendar-view":
@@ -700,13 +700,13 @@ def discover_tools() -> list[dict]:
                 properties.pop("confirm", None)
                 properties.pop("excludeResponse", None)
                 properties.pop("includeHeaders", None)
-                properties["onecomputerAudit"] = AUDIT_CONTEXT_SCHEMA
+                properties["lemmacomputerAudit"] = AUDIT_CONTEXT_SCHEMA
             required = input_schema.get("required")
             if isinstance(required, list):
                 required = [item for item in required if item not in {"confirm", "excludeResponse", "includeHeaders"}]
                 if upstream_name == "delete-onedrive-file":
                     required = list(dict.fromkeys(required + ["If-Match"]))
-                required = list(dict.fromkeys(required + ["onecomputerAudit"]))
+                required = list(dict.fromkeys(required + ["lemmacomputerAudit"]))
                 input_schema["required"] = required
             input_schema["additionalProperties"] = False
         result.append({
@@ -723,7 +723,7 @@ def discover_tools() -> list[dict]:
             ),
             "inputSchema": input_schema,
         })
-    TOOLS[WAIT_TOOL_NAME] = {"name": WAIT_TOOL_NAME, "onecomputer_local": True}
+    TOOLS[WAIT_TOOL_NAME] = {"name": WAIT_TOOL_NAME, "lemmacomputer_local": True}
     result.append({
         "name": WAIT_TOOL_NAME,
         "description": "Wait for a protected LemmaComputer operation after another Microsoft 365 tool reports that signed approval is pending. Waits for up to 75 seconds. If the operation is still pending, call this tool again with the same operationId. Do not retry the original destructive tool.",
@@ -746,12 +746,12 @@ def wait_for_operation(identifier: str, timeout_seconds: int = 75) -> dict:
     deadline = time.monotonic() + timeout_seconds
     operation: dict = {"id": identifier, "state": "approval_required"}
     while time.monotonic() < deadline:
-        operation = request_json(f"/onecomputer/operations/{identifier}")
+        operation = request_json(f"/lemmacomputer/operations/{identifier}")
         state = operation.get("state")
         if state in {"succeeded", "denied", "failed", "expired"}:
             return operation
         if state == "approved" and identifier in LOCAL_UPLOADS:
-            request_json("/onecomputer/uploads/start", {"operationId": identifier})
+            request_json("/lemmacomputer/uploads/start", {"operationId": identifier})
         time.sleep(1)
     return operation
 
@@ -763,14 +763,14 @@ def operation_result(operation: dict, identifier: str) -> dict:
         return {
             "content": [{"type": "text", "text": str(summary)}],
             "isError": False,
-            "_meta": {"onecomputer": {"operationId": identifier, "state": "succeeded", "approval": "openvtc-task-consent"}},
+            "_meta": {"lemmacomputer": {"operationId": identifier, "state": "succeeded", "approval": "openvtc-task-consent"}},
         }
     state = operation.get("state", "failed")
     if state in {"approval_required", "approved", "executing"}:
         return {
             "content": [{"type": "text", "text": f"The signed approval for operation {identifier} is still pending or being executed. The protected action has not returned a final result. Call {WAIT_TOOL_NAME} again with this same operationId; do not retry the original destructive tool."}],
             "isError": False,
-            "_meta": {"onecomputer": {"operationId": identifier, "state": state, "approval": "openvtc-task-consent"}},
+            "_meta": {"lemmacomputer": {"operationId": identifier, "state": state, "approval": "openvtc-task-consent"}},
         }
     if state == "failed" and isinstance(operation.get("approval"), dict) and operation["approval"].get("decision") == "approve":
         failure_code = operation.get("failureCode") or "TOOL_EXECUTION_FAILED"
@@ -798,7 +798,7 @@ def call_tool(name: str, arguments: dict) -> dict:
     server_id = (selected or {}).get("mcp_info", {}).get("server_id")
     if not isinstance(server_id, str):
         return error_result("That tool is not assigned to this workspace.")
-    upstream_name = (selected or {}).get("_onecomputer_upstream_name", name)
+    upstream_name = (selected or {}).get("_lemmacomputer_upstream_name", name)
     if upstream_name in WRITE_TOOLS:
         # Connector execution flags are never accepted from the model. The
         # managed bridge supplies Softeria's confirmation flag, while Control
@@ -817,7 +817,7 @@ def call_tool(name: str, arguments: dict) -> dict:
             )
         if local_upload:
             try:
-                response = request_json("/onecomputer/uploads", {
+                response = request_json("/lemmacomputer/uploads", {
                     "driveId": arguments["driveId"],
                     "driveItemId": arguments["driveItemId"],
                     "localFilePath": arguments["localFilePath"],
@@ -836,7 +836,7 @@ def call_tool(name: str, arguments: dict) -> dict:
                 return {
                     "content": [{"type": "text", "text": f"Signed approval is required for resumable upload operation {identifier}. The file has not been uploaded. Call {WAIT_TOOL_NAME} now with this operationId."}],
                     "isError": False,
-                    "_meta": {"onecomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
+                    "_meta": {"lemmacomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
                 }
             except (OSError, ValueError, urllib.error.URLError):
                 return error_result("The governed resumable upload service is unavailable.")
@@ -848,7 +848,7 @@ def call_tool(name: str, arguments: dict) -> dict:
             return error_result(DELETE_ONEDRIVE_MISSING_METADATA)
         arguments["If-Match"] = normalize_graph_etag(arguments["If-Match"])
         try:
-            response = request_json("/onecomputer/deletions", {
+            response = request_json("/lemmacomputer/deletions", {
                 "driveId": arguments["driveId"],
                 "driveItemId": arguments["driveItemId"],
                 "resourceName": arguments["resourceName"].strip(),
@@ -863,7 +863,7 @@ def call_tool(name: str, arguments: dict) -> dict:
             return {
                 "content": [{"type": "text", "text": f"Signed approval is required to delete {arguments['resourceName']} from OneDrive. The file has not been deleted. Call {WAIT_TOOL_NAME} now with operationId {identifier}."}],
                 "isError": False,
-                "_meta": {"onecomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
+                "_meta": {"lemmacomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
             }
         except (OSError, ValueError, KeyError, urllib.error.URLError):
             return error_result("The governed OneDrive deletion service is unavailable.")
@@ -889,7 +889,7 @@ def call_tool(name: str, arguments: dict) -> dict:
     return {
         "content": [{"type": "text", "text": f"Signed approval is required for operation {identifier}. The action has not run. Call {WAIT_TOOL_NAME} now with this operationId and keep calling it while approval remains pending. Do not retry the original destructive tool."}],
         "isError": False,
-        "_meta": {"onecomputer": {"operationId": identifier, "state": "approval_required", "approval": "openvtc-task-consent"}},
+        "_meta": {"lemmacomputer": {"operationId": identifier, "state": "approval_required", "approval": "openvtc-task-consent"}},
     }
 
 
@@ -908,7 +908,7 @@ def nested_error(value: object) -> str | None:
 def error_result(message: str, identifier: str | None = None, state: str | None = None) -> dict:
     result = {"content": [{"type": "text", "text": message}], "isError": True}
     if identifier:
-        result["_meta"] = {"onecomputer": {"operationId": identifier, "state": state}}
+        result["_meta"] = {"lemmacomputer": {"operationId": identifier, "state": state}}
     return result
 
 
@@ -923,7 +923,7 @@ def execute_tool_call(identifier: object, name: str, arguments: dict) -> None:
     try:
         respond(identifier, call_tool(name, arguments))
     except Exception as error:  # Tool failures must not terminate the managed connector.
-        print(f"onecomputer-connectors: {type(error).__name__}", file=sys.stderr, flush=True)
+        print(f"lemmacomputer-connectors: {type(error).__name__}", file=sys.stderr, flush=True)
         respond(identifier, error={
             "code": -32603,
             "message": "The governed connector bridge is unavailable.",
@@ -940,7 +940,7 @@ def handle(message: dict) -> None:
             respond(identifier, {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "onecomputer-connectors", "version": "0.1.0"},
+                "serverInfo": {"name": "lemmacomputer-connectors", "version": "0.1.0"},
                 "instructions": "Tools are prefixed with their connected service name and operate on remote service resources. Use the corresponding MCP tool directly. Read calls normally run immediately. Writes may return a governed operation; call wait-for-governed-operation with that operationId until signed approval or denial is final. Never substitute Cowork or local-filesystem permission tools for remote-service actions. LemmaComputer Control enforces policy and obtains signed approval inside protected tool calls.",
             })
         elif method == "ping":
@@ -961,12 +961,12 @@ def handle(message: dict) -> None:
                 target=execute_tool_call,
                 args=(identifier, name, arguments),
                 daemon=True,
-                name=f"onecomputer-connectors-call-{identifier}",
+                name=f"lemmacomputer-connectors-call-{identifier}",
             ).start()
         else:
             respond(identifier, error={"code": -32601, "message": "Method not found"})
     except Exception as error:  # MCP must report failures without terminating the managed connector.
-        print(f"onecomputer-connectors: {type(error).__name__}", file=sys.stderr, flush=True)
+        print(f"lemmacomputer-connectors: {type(error).__name__}", file=sys.stderr, flush=True)
         respond(identifier, error={"code": -32603, "message": "The governed connector bridge is unavailable."})
 
 
@@ -976,4 +976,4 @@ for line in sys.stdin:
         if isinstance(message, dict):
             handle(message)
     except json.JSONDecodeError:
-        print("onecomputer-connectors: ignored malformed input", file=sys.stderr, flush=True)
+        print("lemmacomputer-connectors: ignored malformed input", file=sys.stderr, flush=True)

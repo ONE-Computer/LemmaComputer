@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext } from "@onecomputer/contracts";
-import type { GatewayClient, GovernedToolExecutionInput, GovernedToolExecutor } from "@onecomputer/litellm-adapter";
-import { MemoryWorkspaceStore } from "@onecomputer/workspace-store";
+import type { IdentityContext } from "@lemmacomputer/contracts";
+import type { GatewayClient, GovernedToolExecutionInput, GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
+import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "proxy-test-token-at-least-24-characters";
-const identity: IdentityContext = { tenantId: "acme", subjectId: "alex-morgan", audience: "onecomputer-control" };
+const identity: IdentityContext = { tenantId: "acme", subjectId: "alex-morgan", audience: "lemmacomputer-control" };
 const authHeaders = {
-  "x-onecomputer-proxy-token": proxyToken,
-  "x-onecomputer-test-tenant-id": identity.tenantId,
-  "x-onecomputer-test-user-id": identity.subjectId,
+  "x-lemmacomputer-proxy-token": proxyToken,
+  "x-lemmacomputer-test-tenant-id": identity.tenantId,
+  "x-lemmacomputer-test-user-id": identity.subjectId,
 };
 
 test("Control API exposes a durable approval-required operation and fixture decision", async () => {

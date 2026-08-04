@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import pg from "pg";
-import { PostgresSpendObservabilityStore } from "@onecomputer/workspace-store";
+import { PostgresSpendObservabilityStore } from "@lemmacomputer/workspace-store";
 
 const connectionString = process.env.SPEND_COVERAGE_TEST_DATABASE_URL;
 

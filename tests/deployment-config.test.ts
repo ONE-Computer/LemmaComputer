@@ -20,8 +20,8 @@ import {
   parseEnvironment,
 } from "../scripts/environment-template.mjs";
 
-const onecomputerReferences = (contents: string) => new Set(
-  [...contents.matchAll(/\$\{(ONECOMPUTER_[A-Z0-9_]+)/g)].map(([, key]) => key),
+const lemmacomputerReferences = (contents: string) => new Set(
+  [...contents.matchAll(/\$\{(LEMMACOMPUTER_[A-Z0-9_]+)/g)].map(([, key]) => key),
 );
 
 const assignmentKeys = (contents: string) => (
@@ -43,17 +43,17 @@ const validHostedEnvironment = () => {
   }
 
   Object.assign(values, {
-    ONECOMPUTER_INSTALLATION_KIND: "hosted",
-    ONECOMPUTER_LITELLM_ADMIN_URL: "https://litellm-admin-listener:8443",
-    ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64: pemBase64("CERTIFICATE"),
-    ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64: pemBase64("CERTIFICATE"),
-    ONECOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64: pemBase64("PRIVATE KEY"),
-    ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64: pemBase64("CERTIFICATE"),
-    ONECOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64: pemBase64("PRIVATE KEY"),
-    ONECOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE: "reject",
-    ONECOMPUTER_LITELLM_CREDENTIAL_SECRET: "credential-secret-that-is-long-enough-0000001",
-    ONECOMPUTER_SESSION_SECRET: "session-secret-that-is-long-enough-0000000001",
-    ONECOMPUTER_WORKSPACE_INGRESS_SECRET: "ingress-secret-that-is-long-enough-0000000001",
+    LEMMACOMPUTER_INSTALLATION_KIND: "hosted",
+    LEMMACOMPUTER_LITELLM_ADMIN_URL: "https://litellm-admin-listener:8443",
+    LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64: pemBase64("PRIVATE KEY"),
+    LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64: pemBase64("PRIVATE KEY"),
+    LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE: "reject",
+    LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET: "credential-secret-that-is-long-enough-0000001",
+    LEMMACOMPUTER_SESSION_SECRET: "session-secret-that-is-long-enough-0000000001",
+    LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET: "ingress-secret-that-is-long-enough-0000000001",
   });
   return values;
 };
@@ -79,10 +79,10 @@ test("the checked-in environment example is rendered from the canonical deployme
   assert.equal(rendered, checkedIn, ".env.example must be generated from the contract without manual drift");
   assert.deepEqual(assignmentKeys(rendered), keys, "the template must list every registered operator variable once");
 
-  const installationKind = environmentContract.find(({ key }) => key === "ONECOMPUTER_INSTALLATION_KIND");
-  assert.equal(installationKind?.key, "ONECOMPUTER_INSTALLATION_KIND");
+  const installationKind = environmentContract.find(({ key }) => key === "LEMMACOMPUTER_INSTALLATION_KIND");
+  assert.equal(installationKind?.key, "LEMMACOMPUTER_INSTALLATION_KIND");
   assert.equal(installationKind?.default, "customer-managed");
-  const credentialSecret = environmentContract.find(({ key }) => key === "ONECOMPUTER_LITELLM_CREDENTIAL_SECRET");
+  const credentialSecret = environmentContract.find(({ key }) => key === "LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET");
   assert.equal(credentialSecret?.generated, true);
   assert.equal(credentialSecret?.secret, true);
 });
@@ -90,7 +90,7 @@ test("the checked-in environment example is rendered from the canonical deployme
 test("every production Compose operator reference and worktree override is registered", async () => {
   const compose = await readFile(new URL("../compose.yaml", import.meta.url), "utf8");
   const keys = registeredKeys();
-  const unregisteredComposeReferences = [...onecomputerReferences(compose)].filter((key) => !keys.has(key));
+  const unregisteredComposeReferences = [...lemmacomputerReferences(compose)].filter((key) => !keys.has(key));
   assert.deepEqual(unregisteredComposeReferences, [], "Compose must not introduce an unregistered operator variable");
 
   const overrides = worktreeEnvironmentOverrides({
@@ -99,9 +99,9 @@ test("every production Compose operator reference and worktree override is regis
     portOffset: 1234,
   });
   assert.ok(overrides instanceof Map);
-  assert.equal(overrides.get("ONECOMPUTER_COMPOSE_PROJECT_NAME"), "oc-a1b2c3d4e5");
-  assert.equal(overrides.get("ONECOMPUTER_WEB_PORT"), "5408");
-  assert.equal(overrides.get("ONECOMPUTER_INSTALLATION_KIND"), "worktree");
+  assert.equal(overrides.get("LEMMACOMPUTER_COMPOSE_PROJECT_NAME"), "oc-a1b2c3d4e5");
+  assert.equal(overrides.get("LEMMACOMPUTER_WEB_PORT"), "5408");
+  assert.equal(overrides.get("LEMMACOMPUTER_INSTALLATION_KIND"), "worktree");
   assert.deepEqual([...overrides.keys()].filter((key) => !keys.has(key)), [], "worktree initialization must not create unregistered configuration");
 });
 
@@ -111,7 +111,7 @@ test("qualification Compose inputs are registered separately from deployment inp
     readFile(new URL("../compose.provider-qualification.yaml", import.meta.url), "utf8"),
     readFile(new URL("../.env.qualification.example", import.meta.url), "utf8"),
   ]);
-  const references = [...onecomputerReferences(oauthCompose), ...onecomputerReferences(providerCompose)];
+  const references = [...lemmacomputerReferences(oauthCompose), ...lemmacomputerReferences(providerCompose)];
   assert.deepEqual(references.filter((key) => !allEnvironmentVariableNameSet.has(key)), []);
   assert.equal(qualificationExample, renderQualificationEnvironmentTemplate());
 });
@@ -126,7 +126,7 @@ test("a complete hosted configuration passes the shared profile validation", () 
 test("the public ingress owns the browser-facing LiteLLM OAuth callback", () => {
   const values = validHostedEnvironment();
   const services = projectServiceEnvironment(values);
-  const publicOrigin = new URL(values.ONECOMPUTER_PUBLIC_WEB_URL).origin;
+  const publicOrigin = new URL(values.LEMMACOMPUTER_PUBLIC_WEB_URL).origin;
   const litellmPublicUrl = `${publicOrigin}/oauth/mcp`;
 
   assert.equal(
@@ -138,34 +138,34 @@ test("the public ingress owns the browser-facing LiteLLM OAuth callback", () => 
   assert.equal(services["control-api"].LITELLM_PUBLIC_URL, litellmPublicUrl);
   assert.equal(services["ms365-mcp"].MS365_MCP_PUBLIC_URL, `${publicOrigin}/m365`);
   assert.equal(services["ms365-mcp"].MS365_MCP_ALLOWED_REDIRECT_URIS, `${litellmPublicUrl}/callback`);
-  assert.equal(services.litellm.ONECOMPUTER_M365_AUTHORIZATION_URL, `${publicOrigin}/m365/authorize`);
+  assert.equal(services.litellm.LEMMACOMPUTER_M365_AUTHORIZATION_URL, `${publicOrigin}/m365/authorize`);
 });
 
 test("env:update normalizes a historical blank LiteLLM admin URL to the catalog default", () => {
   const template = renderEnvironmentTemplate();
   const initialized = initializeEnvironment(template, "Etc/UTC");
-  const merged = mergeEnvironment(template, "ONECOMPUTER_LITELLM_ADMIN_URL=\n", initialized);
+  const merged = mergeEnvironment(template, "LEMMACOMPUTER_LITELLM_ADMIN_URL=\n", initialized);
   const values = Object.fromEntries(parseEnvironment(merged.contents).values);
   const services = projectServiceEnvironment(values);
 
-  assert.equal(values.ONECOMPUTER_LITELLM_ADMIN_URL, "http://litellm-admin-listener:8443");
+  assert.equal(values.LEMMACOMPUTER_LITELLM_ADMIN_URL, "http://litellm-admin-listener:8443");
   assert.equal(services["control-api"].LITELLM_ADMIN_URL, "http://litellm-admin-listener:8443");
 });
 
 test("environment migration preserves retired variables without projecting them into services", async () => {
-  const root = await mkdtemp(join(tmpdir(), "onecomputer-env-migration-"));
+  const root = await mkdtemp(join(tmpdir(), "lemmacomputer-env-migration-"));
   const source = join(root, "deployment.env");
   const destination = join(root, "service-env");
   const retiredValue = "legacy-provider-key-that-must-not-reach-services";
   try {
-    await writeFile(source, `${initializeEnvironment(renderEnvironmentTemplate(), "Etc/UTC")}ONECOMPUTER_OPENAI_API_KEY=${retiredValue}\n`, { mode: 0o600 });
+    await writeFile(source, `${initializeEnvironment(renderEnvironmentTemplate(), "Etc/UTC")}LEMMACOMPUTER_OPENAI_API_KEY=${retiredValue}\n`, { mode: 0o600 });
     const update = spawnSync(process.execPath, [
       new URL("../scripts/update-env.mjs", import.meta.url).pathname,
       `--file=${source}`,
       "--write",
     ], { cwd: new URL("..", import.meta.url).pathname, encoding: "utf8" });
     assert.equal(update.status, 0, update.stderr);
-    assert.match(await readFile(source, "utf8"), new RegExp(`ONECOMPUTER_OPENAI_API_KEY=${retiredValue}`));
+    assert.match(await readFile(source, "utf8"), new RegExp(`LEMMACOMPUTER_OPENAI_API_KEY=${retiredValue}`));
 
     const render = spawnSync(process.execPath, [
       new URL("../scripts/render-service-env.mjs", import.meta.url).pathname,
@@ -181,50 +181,50 @@ test("environment migration preserves retired variables without projecting them 
 
 test("hosted validation fails closed for missing or non-HTTPS LiteLLM mutual TLS", () => {
   const missingMaterial = validHostedEnvironment();
-  missingMaterial.ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64 = "";
+  missingMaterial.LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64 = "";
   assert.throws(
     () => validateDeploymentEnvironment(missingMaterial, { profile: "hosted", strict: true }),
-    /ONECOMPUTER_LITELLM_ADMIN_TLS_CA_B64/i,
+    /LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64/i,
   );
 
   const insecureTransport = validHostedEnvironment();
-  insecureTransport.ONECOMPUTER_LITELLM_ADMIN_URL = "http://litellm-admin-listener:8443";
+  insecureTransport.LEMMACOMPUTER_LITELLM_ADMIN_URL = "http://litellm-admin-listener:8443";
   assert.throws(
     () => validateDeploymentEnvironment(insecureTransport, { profile: "hosted", strict: true }),
-    /HTTPS|ONECOMPUTER_LITELLM_ADMIN_URL/i,
+    /HTTPS|LEMMACOMPUTER_LITELLM_ADMIN_URL/i,
   );
 });
 
 test("hosted validation rejects secret reuse and raw Telegram token compatibility mode", () => {
   const reusedSessionSecret = validHostedEnvironment();
-  reusedSessionSecret.ONECOMPUTER_LITELLM_CREDENTIAL_SECRET = reusedSessionSecret.ONECOMPUTER_SESSION_SECRET;
+  reusedSessionSecret.LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET = reusedSessionSecret.LEMMACOMPUTER_SESSION_SECRET;
   assert.throws(
     () => validateDeploymentEnvironment(reusedSessionSecret, { profile: "hosted", strict: true }),
     /LITELLM_CREDENTIAL_SECRET.*SESSION_SECRET|must not equal/i,
   );
 
   const reusedIngressSecret = validHostedEnvironment();
-  reusedIngressSecret.ONECOMPUTER_LITELLM_CREDENTIAL_SECRET = reusedIngressSecret.ONECOMPUTER_WORKSPACE_INGRESS_SECRET;
+  reusedIngressSecret.LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET = reusedIngressSecret.LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET;
   assert.throws(
     () => validateDeploymentEnvironment(reusedIngressSecret, { profile: "hosted", strict: true }),
     /LITELLM_CREDENTIAL_SECRET.*WORKSPACE_INGRESS_SECRET|must not equal/i,
   );
 
   const legacyTelegram = validHostedEnvironment();
-  legacyTelegram.ONECOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE = "legacy";
+  legacyTelegram.LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE = "legacy";
   assert.throws(
     () => validateDeploymentEnvironment(legacyTelegram, { profile: "hosted", strict: true }),
     /TELEGRAM_RAW_TOKEN_INPUT_MODE.*reject|broker-only/i,
   );
 });
 
-test("strict validation rejects unregistered ONECOMPUTER variables", () => {
+test("strict validation rejects unregistered LEMMACOMPUTER variables", () => {
   assert.throws(
     () => validateDeploymentEnvironment({
       ...validHostedEnvironment(),
-      ONECOMPUTER_UNREGISTERED_FLAG: "unexpected",
+      LEMMACOMPUTER_UNREGISTERED_FLAG: "unexpected",
     }, { profile: "hosted", strict: true }),
-    /ONECOMPUTER_UNREGISTERED_FLAG.*unknown|unknown.*ONECOMPUTER_UNREGISTERED_FLAG/i,
+    /LEMMACOMPUTER_UNREGISTERED_FLAG.*unknown|unknown.*LEMMACOMPUTER_UNREGISTERED_FLAG/i,
   );
 });
 
@@ -240,13 +240,13 @@ test("service projections preserve credential and TLS key custody", () => {
   assert.ok(!("LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64" in services["control-api"]));
   assert.ok("LITELLM_ADMIN_TLS_CLIENT_KEY_B64" in services["control-api"]);
   assert.ok(!("LITELLM_ADMIN_TLS_CLIENT_KEY_B64" in services["litellm-admin-proxy"]));
-  assert.ok(!("ONECOMPUTER_WEB_PROXY_TOKEN" in services["channel-broker"]));
+  assert.ok(!("LEMMACOMPUTER_WEB_PROXY_TOKEN" in services["channel-broker"]));
   assert.match(serializeEnvironment(services["channel-broker"]), /^CHANNEL_CREDENTIAL_SECRET=/m);
 });
 
 test("the hosted Compose overlay does not select a deployment policy", async () => {
   const hostedOverlay = await readFile(new URL("../compose.hosted.yaml", import.meta.url), "utf8");
-  assert.doesNotMatch(hostedOverlay, /^\s+ONECOMPUTER_INSTALLATION_KIND:\s*hosted\s*$/m);
+  assert.doesNotMatch(hostedOverlay, /^\s+LEMMACOMPUTER_INSTALLATION_KIND:\s*hosted\s*$/m);
   assert.doesNotMatch(hostedOverlay, /^\s+LITELLM_ADMIN_URL:\s*https:\/\//m);
 });
 
@@ -256,7 +256,7 @@ test("reference service env files use raw Compose parsing and renderer repairs r
   const rawServiceNames = [...compose.matchAll(/env_file:\s*\n\s*- path: \.runtime-env\/([^\s]+)\.env\s*\n\s*format: raw/g)].map(([, name]) => name);
   assert.deepEqual(new Set(rawServiceNames), new Set(serviceNames));
 
-  const root = await mkdtemp(join(tmpdir(), "onecomputer-service-env-"));
+  const root = await mkdtemp(join(tmpdir(), "lemmacomputer-service-env-"));
   const source = join(root, "deployment.env");
   const destination = join(root, "service-env");
   try {
@@ -289,8 +289,8 @@ test("raw Compose env files preserve secret literals without interpolation", asy
     return;
   }
 
-  const root = await mkdtemp(join(tmpdir(), "onecomputer-raw-env-"));
-  const project = `onecomputer-raw-env-${root.split("-").at(-1)?.toLowerCase()}`;
+  const root = await mkdtemp(join(tmpdir(), "lemmacomputer-raw-env-"));
+  const project = `lemmacomputer-raw-env-${root.split("-").at(-1)?.toLowerCase()}`;
   const literal = " leading $VALUE # quote' and backslash\\ trailing ";
   try {
     await writeFile(join(root, "service.env"), serializeEnvironment({ TEST_SECRET: literal }), { mode: 0o600 });

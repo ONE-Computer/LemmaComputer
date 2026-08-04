@@ -2,8 +2,8 @@
 Type=Application
 Name=Hermes Agent Desktop
 Comment=Governed Hermes Agent desktop through LemmaComputer
-Exec=/usr/local/bin/onecomputer-hermes-desktop
-Icon=/opt/onecomputer/hermes-desktop-icon.png
+Exec=/usr/local/bin/lemmacomputer-hermes-desktop
+Icon=/opt/lemmacomputer/hermes-desktop-icon.png
 Terminal=false
 Categories=Development;Utility;
 StartupNotify=true

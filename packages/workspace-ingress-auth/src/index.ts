@@ -1,8 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import type { IdentityContext } from "@onecomputer/contracts";
+import type { IdentityContext } from "@lemmacomputer/contracts";
 
 export const workspaceIngressAccessParameter = "oc_workspace_access";
-export const workspaceIngressSessionCookie = "onecomputer_workspace_session";
+export const workspaceIngressSessionCookie = "lemmacomputer_workspace_session";
 
 export type WorkspaceIngressTarget = {
   protocol: "http" | "https";
@@ -102,7 +102,7 @@ export class WorkspaceIngressAuthority {
       identity: {
         tenantId: launch.tenantId,
         subjectId: launch.subjectId,
-        audience: "onecomputer-control",
+        audience: "lemmacomputer-control",
       },
       workspaceId: launch.workspaceId,
       target: {
@@ -142,7 +142,7 @@ export class WorkspaceIngressAuthority {
   private sign(claims: WorkspaceIngressClaims) {
     const payload = encode(claims);
     const signature = createHmac("sha256", this.secret)
-      .update(`onecomputer:workspace-ingress:v1:${payload}`, "utf8")
+      .update(`lemmacomputer:workspace-ingress:v1:${payload}`, "utf8")
       .digest("base64url");
     return `${payload}.${signature}`;
   }
@@ -154,7 +154,7 @@ export class WorkspaceIngressAuthority {
     const payload = token.slice(0, separator);
     const receivedSignature = token.slice(separator + 1);
     const expectedSignature = createHmac("sha256", this.secret)
-      .update(`onecomputer:workspace-ingress:v1:${payload}`, "utf8")
+      .update(`lemmacomputer:workspace-ingress:v1:${payload}`, "utf8")
       .digest("base64url");
     if (!safeEqual(receivedSignature, expectedSignature)) return null;
     let decoded: unknown;

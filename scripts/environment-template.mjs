@@ -48,7 +48,7 @@ export function initializeEnvironment(template, timeZone) {
 
   replace(nameFor("master-key"), `sk-${randomSecret()}`);
   replace(nameFor("seed"), randomBytes(32).toString("base64"));
-  replace(environmentContract.find((item) => item.initialize === "time-zone")?.key ?? "ONECOMPUTER_TIME_ZONE", timeZone);
+  replace(environmentContract.find((item) => item.initialize === "time-zone")?.key ?? "LEMMACOMPUTER_TIME_ZONE", timeZone);
 
   const vapid = webPush.generateVAPIDKeys();
   replace(nameFor("vapid-public"), vapid.publicKey);
@@ -57,7 +57,7 @@ export function initializeEnvironment(template, timeZone) {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const keyId = `psk_policy_${new Date().toISOString().slice(0, 10).replaceAll("-", "_")}`;
   const keySet = {
-    profile: "onecomputer-policy-key-set/v1",
+    profile: "lemmacomputer-policy-key-set/v1",
     keys: [{
       keyId,
       algorithm: "Ed25519",

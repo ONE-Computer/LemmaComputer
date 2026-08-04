@@ -2,7 +2,7 @@
 Type=Application
 Name=Claude CLI
 Comment=Governed Claude CLI through LemmaComputer
-Exec=xfce4-terminal --title="Claude CLI" --command=/usr/local/bin/onecomputer-claude
+Exec=xfce4-terminal --title="Claude CLI" --command=/usr/local/bin/lemmacomputer-claude
 Icon=utilities-terminal
 Terminal=false
 Categories=Development;Utility;

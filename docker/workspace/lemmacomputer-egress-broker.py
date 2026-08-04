@@ -12,13 +12,13 @@ import sys
 from urllib.parse import unquote, urlsplit
 
 MAX_HEADER_BYTES = 64 * 1024
-UPSTREAM_URL = urlsplit(os.environ["ONECOMPUTER_EGRESS_UPSTREAM"])
+UPSTREAM_URL = urlsplit(os.environ["LEMMACOMPUTER_EGRESS_UPSTREAM"])
 
 if (
     UPSTREAM_URL.scheme != "http"
     or not UPSTREAM_URL.hostname
     or not UPSTREAM_URL.port
-    or UPSTREAM_URL.username != "onecomputer"
+    or UPSTREAM_URL.username != "lemmacomputer"
     or not UPSTREAM_URL.password
 ):
     raise SystemExit("invalid egress broker configuration")

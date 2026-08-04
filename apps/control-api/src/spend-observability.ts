@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { OneComputerError } from "@onecomputer/contracts";
-import type { SpendRange, SpendReport } from "@onecomputer/workspace-store";
+import { LemmaComputerError } from "@lemmacomputer/contracts";
+import type { SpendRange, SpendReport } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
 
 const dateTime = z.string().datetime({ offset: true });
@@ -25,7 +25,7 @@ export const parseUnpricedUsageAcknowledgement = (input: unknown, now = new Date
   const parsed = z.strictObject({ receivedBefore: dateTime }).parse(input ?? {});
   const receivedBefore = new Date(parsed.receivedBefore);
   if (receivedBefore.getTime() > now.getTime() + 60_000) {
-    throw new OneComputerError("COST_COVERAGE_BASELINE_INVALID", "The acknowledgement cutoff cannot be in the future", 400);
+    throw new LemmaComputerError("COST_COVERAGE_BASELINE_INVALID", "The acknowledgement cutoff cannot be in the future", 400);
   }
   return { receivedBefore };
 };
@@ -48,7 +48,7 @@ const stable = (value: Record<string, unknown>) => JSON.stringify(
   Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b))),
 );
 const signatureFor = (snapshot: CursorSnapshot) => createHash("sha256").update(stable(snapshot)).digest("hex");
-const invalidCursor = () => new OneComputerError("SPEND_CURSOR_INVALID", "The spend cursor is invalid for this view", 400);
+const invalidCursor = () => new LemmaComputerError("SPEND_CURSOR_INVALID", "The spend cursor is invalid for this view", 400);
 const decodeCursor = (cursor: string) => {
   try {
     const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
@@ -65,7 +65,7 @@ const decodeCursor = (cursor: string) => {
     if (!parsed.success || !snapshot.from || !snapshot.to || !snapshot.asOf || value[2] !== signatureFor(snapshot)) throw invalidCursor();
     return { offset: value[1] as number, signature: value[2] as string, snapshot };
   } catch (error) {
-    if (error instanceof OneComputerError) throw error;
+    if (error instanceof LemmaComputerError) throw error;
     throw invalidCursor();
   }
 };
@@ -93,7 +93,7 @@ export const parseSpendQuery = (input: unknown, now = new Date()): ParsedSpendQu
   const asOf = new Date(snapshot.asOf);
   const duration = to.getTime() - from.getTime();
   if (duration <= 0 || duration > 366 * 86_400_000 || asOf.getTime() < from.getTime()) {
-    throw new OneComputerError("SPEND_RANGE_INVALID", "Choose a date range of up to 366 days", 400);
+    throw new LemmaComputerError("SPEND_RANGE_INVALID", "Choose a date range of up to 366 days", 400);
   }
   const range: SpendRange = {
     from,

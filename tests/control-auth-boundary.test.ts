@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { m365ToolCatalog, type EgressSecurityGroupVersion, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@onecomputer/contracts";
-import type { GatewayClient } from "@onecomputer/litellm-adapter";
-import { MemoryConnectorRegistryStore, MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@onecomputer/workspace-store";
+import { m365ToolCatalog, type EgressSecurityGroupVersion, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@lemmacomputer/contracts";
+import type { GatewayClient } from "@lemmacomputer/litellm-adapter";
+import { MemoryConnectorRegistryStore, MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "proxy-test-token-at-least-24-characters";
-const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "onecomputer-control" };
-const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "onecomputer-control" };
+const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
+const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "lemmacomputer-control" };
 const principal: SessionPrincipal = {
   userId: "alpha",
   tenantId: "acme",
@@ -22,8 +22,8 @@ const principal: SessionPrincipal = {
 const authentication = (authenticated: SessionPrincipal | null) => ({
   begin: async () => ({ location: "https://login.microsoftonline.com/tenant/oauth2/v2.0/authorize", cookie: "state=opaque" }),
   complete: async () => { throw new Error("not used"); },
-  authenticate: async (cookie: string | undefined) => cookie === "onecomputer_session=valid" ? authenticated : null,
-  logout: async () => "onecomputer_session=; Max-Age=0",
+  authenticate: async (cookie: string | undefined) => cookie === "lemmacomputer_session=valid" ? authenticated : null,
+  logout: async () => "lemmacomputer_session=; Max-Age=0",
 });
 
 test("the authenticated MCP policy route accepts bounded upload-sized authorization envelopes", async () => {
@@ -47,7 +47,7 @@ test("the authenticated MCP policy route accepts bounded upload-sized authorizat
       url: "/internal/v1/mcp/authorize",
       headers: {
         "content-type": "application/json",
-        "x-onecomputer-mcp-policy-token": mcpPolicyToken,
+        "x-lemmacomputer-mcp-policy-token": mcpPolicyToken,
       },
       payload: { invalidPadding: "x".repeat(40 * 1024) },
     });
@@ -132,10 +132,10 @@ test("runtime identity comes only from the authenticated server session", async 
       method: "GET",
       url: "/v1/workspaces/current",
       headers: {
-        "x-onecomputer-proxy-token": proxyToken,
-        "x-onecomputer-tenant-id": "acme",
-        "x-onecomputer-subject-id": "alpha",
-        "x-onecomputer-role": "administrator",
+        "x-lemmacomputer-proxy-token": proxyToken,
+        "x-lemmacomputer-tenant-id": "acme",
+        "x-lemmacomputer-subject-id": "alpha",
+        "x-lemmacomputer-role": "administrator",
       },
     });
     assert.equal(spoofedOnly.statusCode, 401);
@@ -144,11 +144,11 @@ test("runtime identity comes only from the authenticated server session", async 
       method: "GET",
       url: "/v1/workspaces/current",
       headers: {
-        "x-onecomputer-proxy-token": proxyToken,
-        cookie: "onecomputer_session=valid",
-        "x-onecomputer-tenant-id": "other",
-        "x-onecomputer-subject-id": "attacker",
-        "x-onecomputer-role": "administrator",
+        "x-lemmacomputer-proxy-token": proxyToken,
+        cookie: "lemmacomputer_session=valid",
+        "x-lemmacomputer-tenant-id": "other",
+        "x-lemmacomputer-subject-id": "attacker",
+        "x-lemmacomputer-role": "administrator",
       },
     });
     assert.equal(authenticated.statusCode, 200);
@@ -157,21 +157,21 @@ test("runtime identity comes only from the authenticated server session", async 
     const admin = await app.inject({
       method: "GET",
       url: "/v1/admin/users",
-      headers: { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid", "x-onecomputer-role": "administrator" },
+      headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid", "x-lemmacomputer-role": "administrator" },
     });
     assert.equal(admin.statusCode, 403);
 
     const employeePolicyRead = await app.inject({
       method: "GET",
       url: "/v1/admin/mcp-policy",
-      headers: { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid" },
+      headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid" },
     });
     assert.equal(employeePolicyRead.statusCode, 403);
 
     const employeePolicyWrite = await app.inject({
       method: "PUT",
       url: "/v1/admin/mcp-policy",
-      headers: { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid", "content-type": "application/json" },
+      headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid", "content-type": "application/json" },
       payload: { tools: {} },
     });
     assert.equal(employeePolicyWrite.statusCode, 403);
@@ -179,7 +179,7 @@ test("runtime identity comes only from the authenticated server session", async 
     const employeeSuspend = await app.inject({
       method: "PATCH",
       url: "/v1/admin/users/another-user/status",
-      headers: { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid", "content-type": "application/json" },
+      headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid", "content-type": "application/json" },
       payload: { status: "disabled" },
     });
     assert.equal(employeeSuspend.statusCode, 403);
@@ -228,11 +228,11 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     workspaceProfile: "claude-desktop-standard-v1",
     workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
     agentProfile: "claude-desktop-managed-v1",
-    modelAliases: ["onecomputer-claude"],
+    modelAliases: ["lemmacomputer-claude"],
     networkProfile: "controlled-egress-v1",
     mcp: {
       servers: {
-        onecomputer_ms365: {
+        lemmacomputer_ms365: {
           tools: Object.keys(m365ToolCatalog),
           toolPolicies: Object.fromEntries(Object.entries(m365ToolCatalog).map(([name, tool]) => [name, tool.decision])),
         },
@@ -248,7 +248,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     grantId: string;
     profileId: "disposable-open-v1";
     applicationIds: ["firefox"];
-    modelAlias: "onecomputer-claude";
+    modelAlias: "lemmacomputer-claude";
     agentIds: ["claude-desktop"];
     updatedAt: Date;
   }>();
@@ -259,7 +259,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       grantId,
       profileId: "disposable-open-v1" as const,
       applicationIds: ["firefox"] as const,
-      modelAlias: "onecomputer-claude" as const,
+      modelAlias: "lemmacomputer-claude" as const,
       agentIds: ["claude-desktop"] as const,
       updatedAt: new Date(),
     } : null),
@@ -267,7 +267,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       grantId: string;
       profileId: "disposable-open-v1";
       applicationIds: ["firefox"];
-      modelAlias: "onecomputer-claude";
+      modelAlias: "lemmacomputer-claude";
       agentIds: ["claude-desktop"];
     }) => {
       const saved = { tenantId: targetIdentity.tenantId, subjectId: targetIdentity.subjectId, ...input, updatedAt: new Date() };
@@ -300,9 +300,9 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       effectivePolicy.version = 2;
       effectivePolicy.documentHash = "b".repeat(64);
       const document = effectivePolicy.document as {
-        mcp: { servers: { onecomputer_ms365: { toolPolicies: Record<string, McpToolPolicyDecision> } } };
+        mcp: { servers: { lemmacomputer_ms365: { toolPolicies: Record<string, McpToolPolicyDecision> } } };
       };
-      document.mcp.servers.onecomputer_ms365.toolPolicies = tools;
+      document.mcp.servers.lemmacomputer_ms365.toolPolicies = tools;
       return { id: "version-2", version: 2, documentHash: "b".repeat(64) };
     },
     listEgressSecurityGroups: async () => [firewallVersion],
@@ -336,7 +336,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     }),
     disconnectUserOAuthConnection: async () => ({ state: "disconnected" as const, connectedAt: null, expiresAt: null, account: null }),
     ensureOAuthMcpServers: async () => undefined,
-    userOAuthConnectionStatus: async (_identity: IdentityContext, serverName: string) => serverName === "onecomputer_linear"
+    userOAuthConnectionStatus: async (_identity: IdentityContext, serverName: string) => serverName === "lemmacomputer_linear"
       ? {
           state: "connected" as const,
           connectedAt: "2026-07-28T00:00:00.000Z",
@@ -344,7 +344,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
           account: null,
         }
       : { state: "disconnected" as const, connectedAt: null, expiresAt: null, account: null },
-    userOAuthConnectionTools: async (_identity: IdentityContext, serverName: string) => serverName === "onecomputer_linear"
+    userOAuthConnectionTools: async (_identity: IdentityContext, serverName: string) => serverName === "lemmacomputer_linear"
       ? [{ name: "create_issue", definitionHash: "a".repeat(64) }]
       : [],
   } as unknown as GatewayClient;
@@ -353,7 +353,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     authentication: authentication(administrator), identityPolicyStore, connectorRegistryStore: connectorRegistry,
     agentBridgeSecret: "control-auth-policy-agent-bridge-secret-at-least-32-characters",
   });
-  const headers = { "x-onecomputer-proxy-token": proxyToken, cookie: "onecomputer_session=valid" };
+  const headers = { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid" };
   try {
     const adminUsers = await app.inject({ method: "GET", url: "/v1/admin/users", headers });
     assert.equal(adminUsers.statusCode, 200);
@@ -407,8 +407,8 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     assert.ok(refreshedPolicies.every((runtime) => runtime.toolPolicies["list-calendars"] === "deny"));
 
     for (const runtime of refreshedPolicies) {
-      assert.ok(runtime.mcpServers?.includes("onecomputer_linear"));
-      assert.deepEqual(runtime.mcpToolPermissions?.onecomputer_linear, ["create_issue"]);
+      assert.ok(runtime.mcpServers?.includes("lemmacomputer_linear"));
+      assert.deepEqual(runtime.mcpToolPermissions?.lemmacomputer_linear, ["create_issue"]);
     }
     const firewalls = await app.inject({ method: "GET", url: "/v1/admin/egress-security-groups", headers });
     assert.equal(firewalls.statusCode, 200);
@@ -485,7 +485,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
         grantId: "personal",
         profileId: "disposable-open-v1",
         applicationIds: ["firefox"],
-        modelAlias: "onecomputer-claude",
+        modelAlias: "lemmacomputer-claude",
         agentIds: ["claude-desktop"],
       },
     });

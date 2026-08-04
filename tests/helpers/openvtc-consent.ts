@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type { OwnedJson } from "@onecomputer/contracts";
+import type { OwnedJson } from "@lemmacomputer/contracts";
 import type {
   OpenVtcConsentClient,
   SignedConsentRequest,
@@ -151,7 +151,7 @@ export class TestOpenVtcConsentClient implements OpenVtcConsentClient {
     const issuedAt = new Date().toISOString();
     return signer.sign({
       id: `urn:uuid:${randomUUID()}`,
-      type: "https://onecomputer.dev/spec/openvtc/approver-enrollment/0.1",
+      type: "https://lemmacomputer.dev/spec/openvtc/approver-enrollment/0.1",
       issuer: signer.did,
       recipient: challenge.recipientDid,
       issuedAt,

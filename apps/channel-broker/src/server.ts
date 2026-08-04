@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
 import {
-  OneComputerError,
+  LemmaComputerError,
   TelegramTokenIntakeEnvelope,
   TelegramTokenIntakeGrantVerifier,
   channelBrokerCredentialOwnerSchema,
@@ -9,7 +9,7 @@ import {
   channelBrokerSaveConnectionSchema,
   channelBrokerSaveCredentialSchema,
   identityContextSchema,
-} from "@onecomputer/contracts";
+} from "@lemmacomputer/contracts";
 import { z } from "zod";
 import {
   ChannelBrokerService,
@@ -26,7 +26,7 @@ const envSchema = z.object({
   CHANNEL_CREDENTIAL_SECRET: z.string().min(32),
   CONTROL_URL: z.string().url().default("http://127.0.0.1:4100"),
   DATABASE_URL: z.string().min(1),
-  ONECOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
+  LEMMACOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
   TELEGRAM_RAW_TOKEN_INPUT_MODE: z.preprocess(
     (value) => value === "" ? undefined : value,
     z.enum(["legacy", "reject"]).optional(),
@@ -54,7 +54,7 @@ export function createChannelBrokerServer(
   const app = Fastify({
     logger: {
       redact: [
-        "req.headers.x-onecomputer-channel-token",
+        "req.headers.x-lemmacomputer-channel-token",
         "req.body",
         "*.credentialCiphertext",
       ],
@@ -66,7 +66,7 @@ export function createChannelBrokerServer(
     const publicTelegramIntake = request.url === "/public/v1/telegram/intake"
       || request.url.startsWith("/public/v1/telegram/intake?");
     if (request.url === "/healthz" || publicTelegramIntake) return;
-    if (!sameSecret(request.headers["x-onecomputer-channel-token"], internalToken)) {
+    if (!sameSecret(request.headers["x-lemmacomputer-channel-token"], internalToken)) {
       return reply.code(401).send({
         error: {
           code: "UNAUTHENTICATED",
@@ -88,17 +88,17 @@ export function createChannelBrokerServer(
   });
   app.post("/internal/v1/credentials/telegram", async (request) => {
     if (rawTokenInputMode === "reject") {
-      throw new OneComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
+      throw new LemmaComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
     }
     const { identity, botToken } = channelBrokerSaveCredentialSchema.parse(request.body ?? {});
     return service.saveCredential(identityContextSchema.parse(identity), { botToken });
   });
   app.put("/internal/v1/credentials/telegram", async (request) => {
     if (rawTokenInputMode === "reject") {
-      throw new OneComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
+      throw new LemmaComputerError("TELEGRAM_RAW_TOKEN_INPUT_REJECTED", "Broker-only Telegram credential intake is required", 410);
     }
     const { identity, credentialId, botToken } = channelBrokerSaveCredentialSchema.parse(request.body ?? {});
-    if (!credentialId) throw new OneComputerError("CHANNEL_CREDENTIAL_ID_REQUIRED", "Credential ID is required", 400);
+    if (!credentialId) throw new LemmaComputerError("CHANNEL_CREDENTIAL_ID_REQUIRED", "Credential ID is required", 400);
     return service.saveCredential(identityContextSchema.parse(identity), { botToken }, credentialId);
   });
   app.delete("/internal/v1/credentials/telegram", async (request, reply) => {
@@ -108,7 +108,7 @@ export function createChannelBrokerServer(
   });
   app.post("/internal/v1/connections/telegram/status", async (request, reply) => {
     const { identity, workspaceId } = channelBrokerOwnerSchema.parse(request.body ?? {});
-    if (!workspaceId) throw new OneComputerError("CHANNEL_WORKSPACE_ID_REQUIRED", "Workspace ID is required", 400);
+    if (!workspaceId) throw new LemmaComputerError("CHANNEL_WORKSPACE_ID_REQUIRED", "Workspace ID is required", 400);
     const status = await service.status(identityContextSchema.parse(identity), workspaceId);
     return status ? reply.send(status) : reply.code(204).send();
   });
@@ -118,18 +118,18 @@ export function createChannelBrokerServer(
   });
   app.delete("/internal/v1/connections/telegram", async (request, reply) => {
     const { identity, workspaceId } = channelBrokerOwnerSchema.parse(request.body ?? {});
-    if (!workspaceId) throw new OneComputerError("CHANNEL_WORKSPACE_ID_REQUIRED", "Workspace ID is required", 400);
+    if (!workspaceId) throw new LemmaComputerError("CHANNEL_WORKSPACE_ID_REQUIRED", "Workspace ID is required", 400);
     await service.disconnect(identityContextSchema.parse(identity), workspaceId);
     return reply.code(204).send();
   });
 
   app.setErrorHandler((error, request, reply) => {
     const validation = error instanceof Error && error.name === "ZodError";
-    const known = error instanceof OneComputerError
+    const known = error instanceof LemmaComputerError
       ? error
       : validation
-        ? new OneComputerError("INVALID_REQUEST", "The request is invalid", 400)
-        : new OneComputerError("CHANNEL_BROKER_ERROR", "The channel broker could not complete the request", 500, true);
+        ? new LemmaComputerError("INVALID_REQUEST", "The request is invalid", 400)
+        : new LemmaComputerError("CHANNEL_BROKER_ERROR", "The channel broker could not complete the request", 500, true);
     request.log.error({ err: { name: error instanceof Error ? error.name : "UnknownError", code: known.code } }, "channel broker request failed");
     reply.code(known.statusCode).send({
       error: {
@@ -149,10 +149,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   if (tokenIntakeValues.some(Boolean) && !tokenIntakeValues.every(Boolean)) {
     throw new Error("Telegram intake grant verification and encryption keys must be configured together");
   }
-  if (env.ONECOMPUTER_INSTALLATION_KIND === "hosted" && !tokenIntakeValues.every(Boolean)) {
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !tokenIntakeValues.every(Boolean)) {
     throw new Error("Hosted deployments require broker-only Telegram credential intake keys");
   }
-  const rawTokenInputMode = env.TELEGRAM_RAW_TOKEN_INPUT_MODE ?? (env.ONECOMPUTER_INSTALLATION_KIND === "hosted" ? "reject" : "legacy");
+  const rawTokenInputMode = env.TELEGRAM_RAW_TOKEN_INPUT_MODE ?? (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" ? "reject" : "legacy");
   const store = PostgresChannelStore.fromConnectionString(env.DATABASE_URL);
   const service = new ChannelBrokerService(
     store,
@@ -179,7 +179,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       app.log.error({
         err: {
           name: error instanceof Error ? error.name : "UnknownError",
-          code: error instanceof OneComputerError ? error.code : "CHANNEL_POLL_FAILED",
+          code: error instanceof LemmaComputerError ? error.code : "CHANNEL_POLL_FAILED",
         },
       }, "channel polling failed");
     } finally {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { priceUsage, usageFingerprint } from "@onecomputer/workspace-store";
+import { priceUsage, usageFingerprint } from "@lemmacomputer/workspace-store";
 
 test("provider cost uses exact decimals and mutually exclusive cache/reasoning buckets", () => {
   const priced = priceUsage([

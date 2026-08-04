@@ -5,7 +5,7 @@ import {
   pinnedRateCardForDeployment,
   pinnedRateCatalogueEvidence,
   priceUsage,
-} from "@onecomputer/workspace-store";
+} from "@lemmacomputer/workspace-store";
 
 const baseDeployment = {
   tenantId: "tenant-1",
@@ -131,14 +131,14 @@ test("catalogue evidence is fixed, hashed, and implemented without egress", asyn
       effectiveFrom: pinnedRateCatalogueEvidence.effectiveFrom,
     },
     {
-      catalogueRelease: "onecomputer-product-rates-2026-07-31.1",
-      sourceVersion: "onecomputer-product-rates-2026-07-31.1",
+      catalogueRelease: "lemmacomputer-product-rates-2026-07-31.1",
+      sourceVersion: "lemmacomputer-product-rates-2026-07-31.1",
       effectiveFrom: "2026-07-31T00:00:00.000Z",
     },
   );
   assert.equal(
     pinnedRateCatalogueEvidence.sourceHash,
-    "209e32a40ce129ea93d1ea5d5e423b9840eb0e9c6c7668d6b095b122870f3b61",
+    "48fa211ad9a802d54c06ac6c8782624a78ce855e1cbb3fdf5e9d84b26ac6128b",
   );
 
   const source = await readFile(

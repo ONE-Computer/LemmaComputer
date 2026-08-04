@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LiteLlmTeamBudgetProjector, type GatewayBudgetProjection } from "@onecomputer/litellm-adapter";
+import { LiteLlmTeamBudgetProjector, type GatewayBudgetProjection } from "@lemmacomputer/litellm-adapter";
 
 const input:GatewayBudgetProjection={tenantId:"customer-sensitive-tenant",teamId:"00000000-0000-4000-8000-000000000001",budgetVersionId:"00000000-0000-4000-8000-000000000002",limitAmount:"123.450000000000",currency:"USD",mode:"hard",periodStart:new Date("2026-03-01T00:00:00Z"),periodEnd:new Date("2026-04-01T00:00:00Z")};
 const response=(status:number,payload:unknown)=>new Response(JSON.stringify(payload),{status,headers:{"content-type":"application/json"}});
@@ -19,7 +19,7 @@ test("LiteLLM projection uses supported Team APIs and sends only opaque identifi
   assert.equal(calls[1]!.body.team_alias,projected.projectionKey);
   assert.equal(calls[1]!.body.team_id,projected.projectionKey);
   assert.equal(calls[1]!.body.max_budget,123.45);
-  assert.equal((calls[1]!.body.metadata as Record<string,unknown>).onecomputer_limit_amount,"123.450000000000");
+  assert.equal((calls[1]!.body.metadata as Record<string,unknown>).lemmacomputer_limit_amount,"123.450000000000");
   const serialized=JSON.stringify(calls);
   assert.equal(serialized.includes(input.tenantId),false);
   assert.equal(serialized.includes("prompt"),false);
@@ -57,5 +57,5 @@ test("soft budgets project observability metadata without a blocking LiteLLM max
   const projector=new LiteLlmTeamBudgetProjector({adminUrl:"http://litellm",masterKey:"secret",fetch:async(_url,init)=>{body=JSON.parse(String(init!.body));return response(200,{ok:true});}});
   await projector.project({...input,mode:"soft"});
   assert.equal(body.max_budget,null);
-  assert.equal((body.metadata as Record<string,unknown>).onecomputer_mode,"soft");
+  assert.equal((body.metadata as Record<string,unknown>).lemmacomputer_mode,"soft");
 });
