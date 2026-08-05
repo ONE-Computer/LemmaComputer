@@ -106,7 +106,8 @@ const sections = [
     variable("LEMMACOMPUTER_ENTRA_TENANT_ID", "replace-with-entra-directory-tenant-id", "Microsoft Entra directory tenant ID."),
     variable("LEMMACOMPUTER_ENTRA_CLIENT_ID", "replace-with-entra-application-client-id", "Microsoft Entra Web application client ID."),
     variable("LEMMACOMPUTER_ENTRA_CLIENT_SECRET", "replace-with-entra-application-client-secret", "Microsoft Entra Web application client secret.", { secret: true }),
-    variable("LEMMACOMPUTER_ADMINISTRATOR_EMAILS", "admin@example.com", "Comma-separated initial administrator email addresses."),
+    variable("LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS", "replace-with-entra-object-id", "Comma-separated immutable Entra object IDs allowed to perform the one-time owner bootstrap."),
+    variable("LEMMACOMPUTER_ADMINISTRATOR_EMAILS", "", "Deprecated compatibility input. Email addresses never grant organization roles."),
     variable("LEMMACOMPUTER_MS365_TENANT_ID", "", "Dedicated Microsoft 365 MCP Entra tenant ID, or blank to reuse the Web sign-in app."),
     variable("LEMMACOMPUTER_MS365_CLIENT_ID", "", "Dedicated Microsoft 365 MCP Entra client ID, or blank to reuse the Web sign-in app."),
     variable("LEMMACOMPUTER_MS365_CLIENT_SECRET", "", "Dedicated Microsoft 365 MCP Entra client secret, or blank to reuse the Web sign-in app.", { secret: true }),
@@ -596,7 +597,7 @@ export function projectServiceEnvironment(input = {}) {
       BOOTSTRAP_TENANT_ID: v("LEMMACOMPUTER_BOOTSTRAP_TENANT_ID"),
       BOOTSTRAP_USER_ID: v("LEMMACOMPUTER_BOOTSTRAP_USER_ID"),
       TENANT_DISPLAY_NAME: v("LEMMACOMPUTER_TENANT_DISPLAY_NAME"),
-      ADMINISTRATOR_EMAILS: v("LEMMACOMPUTER_ADMINISTRATOR_EMAILS"),
+      BOOTSTRAP_OWNER_OBJECT_IDS: v("LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS"),
     },
     "channel-broker": {
       CHANNEL_BROKER_HOST: runtimeDefaults.channelBrokerHost,

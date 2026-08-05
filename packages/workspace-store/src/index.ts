@@ -4,6 +4,8 @@ import { activityEventSchema } from "@lemmacomputer/contracts";
 import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceRequestedServiceClass, WorkspaceState } from "@lemmacomputer/contracts";
 import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migrations.js";
 export * from "./identity-policy.js";
+export * from "./rbac.js";
+export * from "./organization-rbac-backfill.js";
 export * from "./connector-registry.js";
 export * from "./migrations.js";
 export * from "./provider-settings.js";

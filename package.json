@@ -46,6 +46,7 @@
     "verify:release": "node scripts/verify-release.mjs",
     "release:tag": "node scripts/release-tag.mjs",
     "db:migration:new": "node scripts/migration-new.mjs",
+    "db:backfill:organization-rbac": "node --import tsx scripts/backfill-organization-rbac.ts",
     "db:check": "tsx apps/control-api/src/check-schema.ts"
   },
   "devDependencies": {
