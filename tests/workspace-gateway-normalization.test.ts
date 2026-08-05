@@ -201,6 +201,10 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(ready, true, stderr);
+    for (let attempt = 0; attempt < 100 && renewalRequests === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(renewalRequests, 1, "the broker renews a near-expiry grant without waiting for agent traffic");
     const response = await fetch(`http://127.0.0.1:${brokerPort}/v1/messages`, {
       method: "POST",
       headers: {
@@ -220,7 +224,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       }),
     });
     assert.equal(response.status, 200, await response.text());
-    assert.equal(renewalRequests, 1, "a near-expiry bridge grant is renewed before a Control request");
+    assert.equal(renewalRequests, 1, "the proactive renewal is reused for the Control request");
     assert.equal(bindingRequests, 1);
     assert.equal(received.url, "/v1/messages");
     assert.equal(received.authorization, "Bearer scoped-credential-at-least-24-characters");

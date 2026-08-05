@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -28,6 +29,8 @@ PROTOCOL_VERSION = "2024-11-05"
 TOOLS: dict[str, dict] = {}
 LOCAL_UPLOADS: dict[str, dict] = {}
 RESPONSE_LOCK = threading.Lock()
+TOOL_MONITOR_LOCK = threading.Lock()
+TOOL_MONITOR_STARTED = False
 WAIT_TOOL_NAME = "wait-for-governed-operation"
 LOCAL_UPLOAD_ROOT = os.path.realpath(os.path.expanduser("~"))
 MAX_INLINE_UPLOAD_BYTES = 4 * 1024 * 1024
@@ -742,6 +745,61 @@ def discover_tools() -> list[dict]:
     return result
 
 
+def connector_tool_signature() -> str:
+    """Fingerprint the governed remote tool surface without retaining payloads."""
+    response = request_json("/mcp-rest/tools/list")
+    tools = response.get("tools", [])
+    if not isinstance(tools, list):
+        raise RuntimeError("gateway returned an invalid tool list")
+    canonical = [raw for raw in tools if isinstance(raw, dict)]
+    canonical.sort(key=lambda raw: (
+        str((raw.get("mcp_info") or {}).get("server_id", "")) if isinstance(raw.get("mcp_info"), dict) else "",
+        str(raw.get("name", "")),
+    ))
+    return hashlib.sha256(
+        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def notify_tools_changed() -> None:
+    document = {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
+    with RESPONSE_LOCK:
+        print(json.dumps(document, separators=(",", ":")), flush=True)
+
+
+def monitor_tool_changes() -> None:
+    try:
+        interval = float(os.environ.get("LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS", "5"))
+    except ValueError:
+        interval = 5.0
+    interval = min(60.0, max(0.1, interval))
+    last_signature: str | None = None
+    while True:
+        try:
+            signature = connector_tool_signature()
+            if last_signature is not None and signature != last_signature:
+                notify_tools_changed()
+            last_signature = signature
+        except Exception as error:
+            # Transient discovery failures must neither terminate the MCP
+            # transport nor make the previous tool snapshot disappear.
+            print(f"lemmacomputer-connectors-monitor: {type(error).__name__}", file=sys.stderr, flush=True)
+        time.sleep(interval)
+
+
+def start_tool_change_monitor() -> None:
+    global TOOL_MONITOR_STARTED
+    with TOOL_MONITOR_LOCK:
+        if TOOL_MONITOR_STARTED:
+            return
+        TOOL_MONITOR_STARTED = True
+    threading.Thread(
+        target=monitor_tool_changes,
+        daemon=True,
+        name="lemmacomputer-connectors-tool-monitor",
+    ).start()
+
+
 def wait_for_operation(identifier: str, timeout_seconds: int = 75) -> dict:
     deadline = time.monotonic() + timeout_seconds
     operation: dict = {"id": identifier, "state": "approval_required"}
@@ -939,10 +997,11 @@ def handle(message: dict) -> None:
         if method == "initialize":
             respond(identifier, {
                 "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": {"name": "lemmacomputer-connectors", "version": "0.1.0"},
                 "instructions": "Tools are prefixed with their connected service name and operate on remote service resources. Use the corresponding MCP tool directly. Read calls normally run immediately. Writes may return a governed operation; call wait-for-governed-operation with that operationId until signed approval or denial is final. Never substitute Cowork or local-filesystem permission tools for remote-service actions. LemmaComputer Control enforces policy and obtains signed approval inside protected tool calls.",
             })
+            start_tool_change_monitor()
         elif method == "ping":
             respond(identifier, {})
         elif method == "tools/list":

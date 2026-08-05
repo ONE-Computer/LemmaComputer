@@ -669,6 +669,7 @@ if agent_enabled hermes-claw; then
       TZ="${TZ:-Etc/UTC}" \
       LEMMACOMPUTER_TIME_ZONE="$LEMMACOMPUTER_TIME_ZONE" \
       OPENAI_API_KEY=lemmacomputer-loopback-broker \
+      LEMMACOMPUTER_REQUIRED_MCP_SERVER=lemmacomputer_connectors \
       LEMMACOMPUTER_CONNECTORS_BROKER=http://127.0.0.1:4314 \
       LEMMACOMPUTER_SITES_BROKER=http://127.0.0.1:4314 \
       API_SERVER_ENABLED=true \

@@ -41,7 +41,9 @@ const identity: IdentityContext = {
 
 test("Hermes session titles stay in the LemmaComputer adapter so duplicate user titles cannot block a new chat", async () => {
   const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
-  const creation = adapter.slice(adapter.indexOf('if AGENT == "hermes-claw":'), adapter.indexOf("async with state_lock:", adapter.indexOf('if AGENT == "hermes-claw":')));
+  const sessionsStart = adapter.indexOf("async def sessions");
+  const hermesCreation = adapter.indexOf('if AGENT == "hermes-claw":', sessionsStart);
+  const creation = adapter.slice(hermesCreation, adapter.indexOf("async with state_lock:", hermesCreation));
   assert.match(creation, /json=\{\}/);
   assert.doesNotMatch(creation, /json=\{"title": item\["title"\]\}/);
   assert.match(adapter, /nextCursor/);

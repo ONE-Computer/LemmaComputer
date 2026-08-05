@@ -1370,7 +1370,43 @@ async def persist_turn_messages(
 async def health(request: Request) -> Response:
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return JSONResponse({"status": "ready", "agent": AGENT, "protocol": "lemmacomputer-chat-events/v1"})
+    if AGENT == "hermes-claw":
+        if http is None:
+            return JSONResponse(
+                {"status": "unavailable", "code": "hermes_connectors_unavailable"},
+                status_code=503,
+            )
+        try:
+            upstream = await http.get(
+                f"{HERMES_URL}/health/detailed",
+                headers={"authorization": f"Bearer {HERMES_KEY}"},
+                timeout=5.0,
+            )
+            document = upstream.json()
+        except (httpx.HTTPError, ValueError):
+            return JSONResponse(
+                {"status": "unavailable", "code": "hermes_connectors_unavailable"},
+                status_code=503,
+            )
+        required_mcp = document.get("required_mcp") if isinstance(document, dict) else None
+        if (
+            upstream.status_code != 200
+            or not isinstance(required_mcp, dict)
+            or required_mcp.get("ready") is not True
+            or not isinstance(required_mcp.get("tool_count"), int)
+            or isinstance(required_mcp.get("tool_count"), bool)
+            or required_mcp.get("tool_count", 0) < 1
+        ):
+            return JSONResponse(
+                {"status": "unavailable", "code": "hermes_connectors_unavailable"},
+                status_code=503,
+            )
+    return JSONResponse({
+        "status": "ready",
+        "agent": AGENT,
+        "protocol": "lemmacomputer-chat-events/v1",
+        "connectors": "ready" if AGENT == "hermes-claw" else "not_applicable",
+    })
 
 
 async def sessions(request: Request) -> Response:

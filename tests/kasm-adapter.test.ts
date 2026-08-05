@@ -192,7 +192,7 @@ test("local Kasm reconciliation restores governed endpoints after Compose replac
     await adapter.reconcile();
     assert.deepEqual(connections, [
       { Container: "lemmacomputer-litellm", EndpointConfig: { Aliases: ["litellm"] } },
-      { Container: "lemmacomputer-control-api", EndpointConfig: { Aliases: ["lemmacomputer-control"] } },
+      { Container: "lemmacomputer-control-api", EndpointConfig: { Aliases: ["lemmacomputer-control", "control-api"] } },
     ]);
   } finally {
     server.closeAllConnections();
@@ -478,7 +478,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const gatewayAttach = requests.find((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "lemmacomputer-litellm")!;
     assert.deepEqual((gatewayAttach.body.EndpointConfig as Record<string, unknown>).Aliases, ["litellm"]);
     const controlAttach = requests.find((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "lemmacomputer-control-api")!;
-    assert.deepEqual((controlAttach.body.EndpointConfig as Record<string, unknown>).Aliases, ["lemmacomputer-control"]);
+    assert.deepEqual((controlAttach.body.EndpointConfig as Record<string, unknown>).Aliases, ["lemmacomputer-control", "control-api"]);
     const sandboxCreate = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create?name=lemmacomputer-sandbox") && !item.path.includes("-egress") && !item.path.includes("-relay"))!;
     const host = sandboxCreate.body.HostConfig as Record<string, unknown>;
     assert.equal(host.NetworkMode, workspaceNetwork);

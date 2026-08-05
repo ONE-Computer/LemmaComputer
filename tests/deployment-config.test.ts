@@ -30,6 +30,15 @@ const assignmentKeys = (contents: string) => (
 
 const registeredKeys = () => new Set(environmentContract.map(({ key }) => key));
 
+test("runtime sources do not retain the retired OneComputer namespace", () => {
+  const result = spawnSync("git", [
+    "grep", "-n", "-i", "onecomputer", "--",
+    "apps", "docker", "integrations", "packages", "scripts", "skills",
+    ":(exclude)packages/workspace-store/migrations/**",
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 1, result.stdout || result.stderr);
+});
+
 const pemBase64 = (kind: "CERTIFICATE" | "PRIVATE KEY") => Buffer
   .from(`-----BEGIN ${kind}-----\ntest-fixture\n-----END ${kind}-----\n`)
   .toString("base64");

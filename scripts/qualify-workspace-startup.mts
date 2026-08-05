@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import type { RuntimePolicy } from "@lemmacomputer/contracts";
+import { LiteLLMGatewayAdapter } from "@lemmacomputer/litellm-adapter";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { AgentBridgeAuthority } from "../apps/control-api/src/agent-bridge.js";
+
+const { AgentBridgeAuthority } = await import(pathToFileURL(
+  `${process.cwd()}/apps/control-api/src/agent-bridge.ts`,
+).href);
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -19,9 +24,9 @@ const signer = new PolicyBundleSigner({
 });
 const workspaceId = randomUUID();
 const agentId = `release-hermes-${workspaceId.slice(0, 8)}`;
-const modelGateway = "http://litellm:4000";
+const modelGateway = required("LITELLM_WORKSPACE_URL");
 const mcpControl = "http://lemmacomputer-control:4100";
-const expiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
+const chatRuntimeKey = "release-hermes-chat-runtime-key-at-least-32-characters";
 const policy: RuntimePolicy = {
   schemaVersion: 1,
   policyVersionId: `release-policy-${workspaceId}`,
@@ -56,13 +61,12 @@ const policyBundle = signer.issue({
 const agentBridgeToken = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspaceId, policy, {
   workspaceGeneration: 1,
 });
-const gatewayGrant = {
-  baseUrl: modelGateway,
-  credential: "release-workspace-gateway-key-at-least-32-characters",
-  modelAlias: policy.modelAlias,
-  transportModelAlias: "openai/gpt-5.6-terra",
-  expiresAt,
-};
+const gateway = new LiteLLMGatewayAdapter({
+  adminUrl: required("LITELLM_ADMIN_URL"),
+  workspaceUrl: modelGateway,
+  masterKey: required("LITELLM_MASTER_KEY"),
+  credentialSecret: required("LITELLM_CREDENTIAL_SECRET"),
+});
 const agentBridge = { baseUrl: mcpControl, token: agentBridgeToken };
 
 const controller = async (path: string, init?: RequestInit) => {
@@ -80,9 +84,12 @@ const controller = async (path: string, init?: RequestInit) => {
 };
 
 let providerId: string | undefined;
+let gatewayGranted = false;
 let qualificationError: unknown;
 const startedAt = Date.now();
 try {
+  const gatewayGrant = await gateway.ensureGrant({ workspaceId, identity, agentId, policy });
+  gatewayGranted = true;
   const created = await controller("/internal/v1/sandboxes", {
     method: "POST",
     body: JSON.stringify({
@@ -100,7 +107,7 @@ try {
       }],
       chatRuntimes: [{
         catalogId: "hermes-claw",
-        key: "release-hermes-chat-runtime-key-at-least-32-characters",
+        key: chatRuntimeKey,
       }],
     }),
   });
@@ -110,10 +117,19 @@ try {
   }
   const status = await controller(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`);
   if (status?.state !== "ready") throw new Error(`Workspace readiness was not durable: ${JSON.stringify(status)}`);
+  const hermesResponse = await fetch(`http://lemmacomputer-sandbox-${workspaceId}:8642/health`, {
+    headers: { authorization: `Bearer ${chatRuntimeKey}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const hermesHealth = await hermesResponse.json().catch(() => null) as Record<string, unknown> | null;
+  if (!hermesResponse.ok || hermesHealth?.status !== "ready" || hermesHealth?.connectors !== "ready") {
+    throw new Error(`Hermes connector readiness failed: ${JSON.stringify({ status: hermesResponse.status, body: hermesHealth })}`);
+  }
   process.stdout.write(`${JSON.stringify({
     workspaceId,
     providerId,
     state: status.state,
+    connectors: hermesHealth.connectors,
     startupMs: Date.now() - startedAt,
     agent: "hermes-claw",
   })}\n`);
@@ -124,6 +140,9 @@ try {
   if (providerId) {
     await controller(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`, { method: "DELETE" })
       .catch((error) => cleanupErrors.push(error));
+  }
+  if (gatewayGranted) {
+    await gateway.revoke(workspaceId, agentId).catch((error) => cleanupErrors.push(error));
   }
   if (!qualificationError || !keepFailedWorkspace) {
     await controller(`/internal/v1/workspaces/${workspaceId}/storage`, { method: "DELETE" })

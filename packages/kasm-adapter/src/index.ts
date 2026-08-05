@@ -320,7 +320,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
       }
       if (labels["com.lemmacomputer.control-attached"] === "true" && this.config.controlContainer) {
-        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control"]);
+        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control", "control-api"]);
       }
     }
   }
@@ -358,7 +358,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       }
       if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
       if ((input.agentBridge || input.chatRuntimes?.length) && this.config.controlContainer) {
-        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control"]);
+        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control", "control-api"]);
       }
     };
     const existing = await this.inspectByName(name);
@@ -458,8 +458,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
           `HTTPS_PROXY=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
           `http_proxy=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
           `https_proxy=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
-          "NO_PROXY=localhost,127.0.0.1,litellm,lemmacomputer-control",
-          "no_proxy=localhost,127.0.0.1,litellm,lemmacomputer-control",
+          "NO_PROXY=localhost,127.0.0.1,litellm,lemmacomputer-control,control-api",
+          "no_proxy=localhost,127.0.0.1,litellm,lemmacomputer-control,control-api",
         ] : []),
       ],
       HostConfig: {
@@ -593,7 +593,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       if (running && typeof workspaceNetwork === "string" && this.isWorkspaceNetwork(workspaceNetwork)) {
         await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
         if (controlAttached && this.config.controlContainer) {
-          await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control"]);
+          await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control", "control-api"]);
         }
       }
       const failed = restarting || health === "unhealthy" || (typeof state.ExitCode === "number" && state.ExitCode !== 0);

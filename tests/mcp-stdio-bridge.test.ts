@@ -8,6 +8,62 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
 
+test("the workspace MCP bridge notifies Hermes when a connector changes its tool surface", async (context) => {
+  let listReads = 0;
+  let connected = false;
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      listReads += 1;
+      response.end(JSON.stringify({ tools: connected ? [{
+        name: "web_search_exa",
+        description: "Search the web",
+        inputSchema: { type: "object" },
+        mcp_info: { server_id: "exa-1", server_name: "lemmacomputer_exa" },
+      }] : [] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    env: { ...process.env, LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS: "0.1" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" })}\n`);
+  const baselineDeadline = Date.now() + 2_000;
+  while (listReads < 1 && Date.now() < baselineDeadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(listReads >= 1, "the connector monitor must establish an initial tool snapshot");
+  connected = true;
+
+  const notificationDeadline = Date.now() + 2_000;
+  while (!responses.some((response) => response.method === "notifications/tools/list_changed") && Date.now() < notificationDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(
+    responses.some((response) => response.method === "notifications/tools/list_changed"),
+    "Hermes must be told to refresh when Exa becomes available",
+  );
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 2_000;
+  while (!responses.some((response) => response.id === 2) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const listed = responses.find((response) => response.id === 2)?.result as { tools: Array<{ name: string }> };
+  assert.ok(listed.tools.some((tool) => tool.name === "exa__web_search_exa"));
+});
+
 test("Claude Desktop MCP call returns a governed handle while the bridge remains responsive during the wait", async (context) => {
   const operationId = "11111111-1111-4111-8111-111111111111";
   let statusReads = 0;

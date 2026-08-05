@@ -52,11 +52,17 @@ try {
   if (!webUrl) throw new Error("LEMMACOMPUTER_PUBLIC_WEB_URL is missing");
   run("curl", ["--fail", "--silent", "--show-error", `${webUrl}/__lemmacomputer/healthz`]);
   const qualifier = `${process.cwd()}/scripts/qualify-workspace-startup.mts`;
+  // Run from the persistent Control container. The Kasm adapter attaches this
+  // exact container to each workspace network, so the qualifier can challenge
+  // the private chat endpoint instead of merely trusting public state. Stream
+  // the source over stdin so the production container remains read-only.
   run("docker", [
-    "compose", "run", "--rm", "--no-deps",
-    "-v", `${qualifier}:/app/scripts/qualify-workspace-startup.mts:ro`,
-    "control-api", "./node_modules/.bin/tsx", "/app/scripts/qualify-workspace-startup.mts",
-  ]);
+    "compose", "exec", "-T", "control-api",
+    "node", "--import", "tsx", "-",
+  ], {
+    input: await readFile(qualifier),
+    stdio: ["pipe", "inherit", "inherit"],
+  });
 } finally {
   if (composeAttempted) run(process.execPath, ["scripts/compose-down.mjs", "--volumes"]);
 }

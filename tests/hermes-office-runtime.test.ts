@@ -39,10 +39,43 @@ test("the pinned Hermes runtime forwards each AI usage binding without shared st
     3,
     "sync, stream, and executor-to-agent boundaries must each forward the request-local value",
   );
-  assert.doesNotMatch(additions, /ContextVar|os\.environ|self\.usage_task_binding/);
+  assert.doesNotMatch(additions, /ContextVar|os\.environ[^\n]*AI_USAGE_TASK_BINDING|self\.usage_task_binding/);
 
   assert.match(chatAdapter, /"x-lemmacomputer-ai-task-binding": usage_task_binding/);
   assert.match(chatAdapter, /f"\{HERMES_URL\}\/api\/sessions\/\{vendor_session_id\}\/chat\/stream"/);
+});
+
+test("the Hermes API cannot report ready before the required connector MCP is registered", async () => {
+  const [patch, entrypoint, chatAdapter, workspaceDockerfile] = await Promise.all([
+    source("docker/workspace/hermes-agent-lemmacomputer.patch"),
+    source("docker/workspace/lemmacomputer-workspace-entrypoint.sh"),
+    source("docker/workspace/lemmacomputer-agent-chat.py"),
+    source("docker/Dockerfile.workspace"),
+  ]);
+  const additions = patch
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1))
+    .join("\n");
+
+  assert.match(entrypoint, /LEMMACOMPUTER_REQUIRED_MCP_SERVER=lemmacomputer_connectors/);
+  assert.match(additions, /def _required_mcp_server_readiness\(\)/);
+  assert.match(additions, /get_mcp_status/);
+  assert.match(additions, /LEMMACOMPUTER_REQUIRED_MCP_SERVER/);
+  assert.match(additions, /for attempt in range\(1, 6\)/);
+  assert.match(additions, /Required MCP server did not register tools/);
+  assert.match(additions, /"required_mcp_unavailable"/);
+  assert.match(additions, /status=503/);
+  assert.match(additions, /"required_mcp": required_mcp/);
+  assert.doesNotMatch(additions, /"server": required_server/);
+
+  assert.match(chatAdapter, /f"\{HERMES_URL\}\/health\/detailed"/);
+  assert.match(chatAdapter, /"required_mcp"/);
+  assert.match(chatAdapter, /"hermes_connectors_unavailable"/);
+  assert.match(
+    workspaceDockerfile,
+    /hermes-gateway\.pid[\s\S]+127\.0\.0\.1:8652\/health[\s\S]+hermes-claw-chat\.pid[\s\S]+\/dev\/tcp\/127\.0\.0\.1\/8642/,
+  );
 });
 
 test("the workspace image pins the Hermes Office skills and their native runtimes", async () => {

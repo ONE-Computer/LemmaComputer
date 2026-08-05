@@ -156,6 +156,7 @@ def main() -> None:
             "lemmacomputer_connectors": {
                 "command": "/usr/local/libexec/lemmacomputer-connectors-stdio",
                 "args": [],
+                "connect_timeout": 5,
                 "env": {
                     "LEMMACOMPUTER_CONNECTORS_BROKER": f"http://127.0.0.1:{broker_port}",
                 },

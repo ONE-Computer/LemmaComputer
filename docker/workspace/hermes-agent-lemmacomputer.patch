@@ -118,3 +118,114 @@ index 65d5b32..0faa6bd 100644
                      )
                      if agent_ref is not None:
                          agent_ref[0] = agent
+diff --git a/gateway/run.py b/gateway/run.py
+index 1c961db..ad77f51 100644
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -70,7 +70,34 @@
+ _ADAPTER_DISCONNECT_TIMEOUT_SECS_DEFAULT = 5.0
+ _GATEWAY_PROXY_SSE_BUFFER_MAX_CHARS = 16 * 1024 * 1024
+ _TELEGRAM_COMMAND_MENTION_RE = re.compile(r"(?<![\w:/])/([A-Za-z0-9][A-Za-z0-9_-]*)")
+-
++_REQUIRED_MCP_SERVER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
++def _required_mcp_server() -> Optional[str]:
++    """Return the product-required MCP server, rejecting unsafe names."""
++    name = os.environ.get("LEMMACOMPUTER_REQUIRED_MCP_SERVER", "").strip()
++    if not name:
++        return None
++    if _REQUIRED_MCP_SERVER_RE.fullmatch(name) is None:
++        raise RuntimeError("Invalid required MCP server configuration")
++    return name
++def _required_mcp_server_readiness() -> Dict[str, Any]:
++    """Return a safe readiness summary without exposing server or tool names."""
++    required_server = _required_mcp_server()
++    if required_server is None:
++        return {"configured": False, "ready": True, "tool_count": 0}
++    from tools.mcp_tool import get_mcp_status
++
++    status = next(
++        (item for item in get_mcp_status() if item.get("name") == required_server),
++        None,
++    )
++    tool_count = status.get("tools", 0) if isinstance(status, dict) else 0
++    if not isinstance(tool_count, int) or isinstance(tool_count, bool):
++        tool_count = 0
++    return {
++        "configured": True,
++        "ready": bool(status and status.get("connected") is True and tool_count > 0),
++        "tool_count": tool_count,
++    }
+ _TELEGRAM_NOISY_STATUS_RE = re.compile(
+     r"("  # transient/auxiliary status that should stay in logs, not gateway chats
+     r"auxiliary\s+.+\s+failed"
+@@ -22798,13 +22825,26 @@
+     # internally; calling it from the loop thread would freeze platform
+     # heartbeats (Discord shard, Telegram polling) until it returned.
+     # See #16856.
+-    try:
+-        from tools.mcp_tool import discover_mcp_tools
+-        _loop = asyncio.get_running_loop()
+-        await _loop.run_in_executor(None, discover_mcp_tools)
+-    except Exception as e:
+-        logger.debug("MCP tool discovery failed: %s", e)
+-
++    required_server = _required_mcp_server()
++    required_mcp = _required_mcp_server_readiness()
++    for attempt in range(1, 6):
++        try:
++            from tools.mcp_tool import discover_mcp_tools
++            _loop = asyncio.get_running_loop()
++            await _loop.run_in_executor(None, discover_mcp_tools)
++        except Exception as e:
++            if required_server is None:
++                logger.debug("MCP tool discovery failed: %s", e)
++                break
++            logger.warning("Required MCP discovery attempt %d failed: %s", attempt, e)
++        required_mcp = _required_mcp_server_readiness()
++        if required_server is None or required_mcp["ready"]:
++            break
++        if attempt < 5:
++            logger.warning("Required MCP server is not ready after attempt %d", attempt)
++            await asyncio.sleep(0.5)
++    if required_server is not None and not required_mcp["ready"]:
++        raise RuntimeError("Required MCP server did not register tools")
+     # Start the gateway
+     success = await runner.start()
+     if not success:
+diff --git a/gateway/platforms/api_server.py b/gateway/platforms/api_server.py
+index 65d5b32..d63e0f8 100644
+--- a/gateway/platforms/api_server.py
++++ b/gateway/platforms/api_server.py
+@@ -1919,5 +1919,13 @@
+     async def _handle_health(self, request: "web.Request") -> "web.Response":
+         """GET /health — simple health check."""
++        from gateway.run import _required_mcp_server_readiness
++
++        required_mcp = _required_mcp_server_readiness()
++        if not required_mcp["ready"]:
++            return web.json_response(
++                {"status": "unavailable", "code": "required_mcp_unavailable"},
++                status=503,
++            )
+         return web.json_response(
+             {"status": "ok", "platform": "hermes-agent", "version": _hermes_version()}
+         )
+@@ -1947,8 +1955,8 @@
+         # alive — gateway_running is True. Derive busy/drainable from the same
+         # shared contract /api/status uses so the two surfaces never disagree.
+         active_api_runs, process_depth, active_delegations = self._readiness_work_counts()
+-        from gateway.run import _resolve_gateway_model
+-
++        from gateway.run import _required_mcp_server_readiness, _resolve_gateway_model
++        required_mcp = _required_mcp_server_readiness()
+         readiness = collect_runtime_readiness(
+             configured_model=_resolve_gateway_model(),
+             runtime_status=runtime,
+@@ -1959,6 +1968,7 @@
+         return web.json_response({
+             "status": readiness["status"],
+             "readiness": readiness,
++            "required_mcp": required_mcp,
+             "platform": "hermes-agent",
+             "version": _hermes_version(),
+             "gateway_state": gw_state,

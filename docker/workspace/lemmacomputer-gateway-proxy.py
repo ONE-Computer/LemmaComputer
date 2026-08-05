@@ -86,6 +86,21 @@ def agent_bridge_token() -> str:
         return AGENT_BRIDGE_TOKEN
 
 
+def maintain_agent_bridge_token() -> None:
+    """Keep an active workspace grant fresh even when the agent is idle."""
+    while True:
+        expires_at = bridge_token_expiry(AGENT_BRIDGE_TOKEN)
+        now = int(time.time())
+        if expires_at is not None and expires_at > now + 60:
+            time.sleep(min(30, max(1, expires_at - now - 60)))
+            continue
+        try:
+            agent_bridge_token()
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+            print(f"gateway-broker: agent bridge renewal failed: {str(error)[:160]}", file=sys.stderr, flush=True)
+        time.sleep(15)
+
+
 def task_service_class(task_binding: str) -> str:
     try:
         encoded = task_binding.split(".", 1)[0]
@@ -506,4 +521,5 @@ def run_upload(job: dict) -> None:
 
 
 if __name__ == "__main__":
+    threading.Thread(target=maintain_agent_bridge_token, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", LISTEN_PORT), Handler).serve_forever()
