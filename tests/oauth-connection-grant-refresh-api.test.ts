@@ -129,7 +129,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     });
     assert.equal(created.statusCode, 201);
     assert.equal(issuedPolicies.length, 1);
-    assert.deepEqual(issuedPolicies[0]!.mcpServers, []);
+    assert.deepEqual(issuedPolicies[0]!.mcpServers, ["lemmacomputer_fixture"]);
     assert.equal(issuedPolicies[0]!.mcpToolPermissions?.lemmacomputer_linear, undefined);
 
     const unconnected = await app.inject({ method: "GET", url: "/v1/connections", headers });
@@ -151,7 +151,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     });
     assert.equal(callback.statusCode, 303);
     assert.equal(issuedPolicies.length, 2);
-    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, [], "a connected provider is still fail-closed until its tools are reviewed");
+    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["lemmacomputer_fixture"], "a connected provider is still fail-closed until its tools are reviewed");
     assert.equal(issuedPolicies.at(-1)!.mcpToolPermissions?.lemmacomputer_linear, undefined);
 
     const pendingReview = await app.inject({
@@ -180,7 +180,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     });
     assert.equal(reviewedStatus.statusCode, 200);
     assert.equal(issuedPolicies.length, 3, "an administrator's current-definition review refreshes connected workspace grants");
-    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["lemmacomputer_linear"]);
+    assert.deepEqual(issuedPolicies.at(-1)!.mcpServers, ["lemmacomputer_fixture", "lemmacomputer_linear"]);
     assert.deepEqual(issuedPolicies.at(-1)!.mcpToolPermissions?.lemmacomputer_linear, ["create_issue"]);
 
     statusServers.length = 0;

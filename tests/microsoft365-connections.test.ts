@@ -392,43 +392,11 @@ test("only explicitly approved connected catalog services contribute workspace t
 
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
 
-  assert.deepEqual(projected.mcpServers, []);
+  assert.deepEqual(projected.mcpServers, ["lemmacomputer_ms365"]);
   assert.equal(projected.mcpToolPermissions?.lemmacomputer_linear, undefined);
   assert.equal(projected.mcpToolPermissions?.lemmacomputer_asana, undefined);
   assert.deepEqual(gateway.toolServers, ["lemmacomputer_linear"]);
   assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear"]);
-});
-
-test("a primary MCP contributes tools only while that user is connected", async () => {
-  const gateway = new FakeConnectionGateway();
-  gateway.statusByServer.set("lemmacomputer_ms365", connected);
-  const service = new McpConnectionService(gateway, {
-    publicWebUrl: "http://localhost:4174",
-    authorizationOrigin: "http://localhost:3001",
-  });
-  const policy: RuntimePolicy = {
-    schemaVersion: 1,
-    policyVersionId: "policy-v1",
-    policyVersion: 1,
-    policyHash: "a".repeat(64),
-    workspaceProfile: "claude-desktop-standard-v1",
-    executionMode: "managed",
-    egressMode: "restricted",
-    agentId: "agent-alpha",
-    agentProfile: "claude-desktop-managed-v1",
-    networkProfile: "controlled-egress-v1",
-    modelAlias: "lemmacomputer-assistant",
-    mcpServer: "lemmacomputer_ms365",
-    allowedTools: ["list-mail-messages"],
-    toolPolicies: { "list-mail-messages": "allow" },
-  };
-
-  assert.deepEqual((await service.projectConnectedConnectors(alpha, policy)).mcpServers, []);
-
-  await completeFixtureConnection(service, gateway, alpha, "microsoft-365");
-  const connectedProjection = await service.projectConnectedConnectors(alpha, policy);
-  assert.deepEqual(connectedProjection.mcpServers, ["lemmacomputer_ms365"]);
-  assert.deepEqual(connectedProjection.mcpToolPermissions?.lemmacomputer_ms365, ["list-mail-messages"]);
 });
 
 test("hosted connector OAuth binds the selected catalog entry and refuses cross-connector callbacks", async () => {
@@ -553,7 +521,7 @@ test("a same-name provider tool change revokes cached projection and rejects a s
   );
   assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
   const afterChange = await service.projectConnectedConnectors(alpha, policy);
-  assert.deepEqual(afterChange.mcpServers, [], "a cache hit cannot retain a changed definition");
+  assert.deepEqual(afterChange.mcpServers, ["lemmacomputer_ms365"], "a cache hit cannot retain a changed definition");
 });
 
 test("organization connector access policy locks member changes and removes disabled tools from grants", async () => {
@@ -609,7 +577,7 @@ test("organization connector access policy locks member changes and removes disa
   await assert.rejects(() => service.start(alpha, "linear", true), { code: "MCP_CONNECTOR_DISABLED" });
   assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
   const disabledProjection = await service.projectConnectedConnectors(alpha, basePolicy);
-  assert.deepEqual(disabledProjection.mcpServers, []);
+  assert.deepEqual(disabledProjection.mcpServers, ["lemmacomputer_ms365"]);
   assert.equal(disabledProjection.toolPolicies.create_issue, undefined);
 });
 
@@ -683,7 +651,7 @@ test("administrators can add a connector without code, then explicitly approve t
     toolPolicies: { "list-mail-messages": "allow" },
   };
   const unreviewed = await service.projectConnectedConnectors(alpha, basePolicy);
-  assert.deepEqual(unreviewed.mcpServers, []);
+  assert.deepEqual(unreviewed.mcpServers, ["lemmacomputer_ms365"]);
   assert.equal(unreviewed.mcpToolPermissions?.[serverName], undefined);
 
   await saveCurrentConnectorToolPolicy(service, alpha, created.id, {
@@ -691,11 +659,11 @@ test("administrators can add a connector without code, then explicitly approve t
     list_tasks: "approval_required",
   });
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
-  assert.deepEqual(projected.mcpServers, [serverName]);
+  assert.deepEqual(projected.mcpServers, ["lemmacomputer_ms365", serverName]);
   assert.deepEqual(projected.mcpToolPermissions?.[serverName], ["create_task", "list_tasks"]);
   assert.equal(projected.toolPolicies.create_task, "allow");
   assert.equal(projected.toolPolicies.list_tasks, "approval_required");
-  assert.deepEqual(projected.allowedTools, ["create_task", "list_tasks"]);
+  assert.deepEqual(projected.allowedTools, ["create_task", "list-mail-messages", "list_tasks"]);
   assert.match(projected.connectionProjectionHash ?? "", /^[a-f0-9]{64}$/);
 
   await completeFixtureConnection(service, gateway, beta, created.id);
@@ -873,7 +841,7 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
     throw new Error("fixture refresh denied");
   };
   const after = await service.projectConnectedConnectors(alpha, policy);
-  assert.deepEqual(after.mcpServers, []);
+  assert.deepEqual(after.mcpServers, ["lemmacomputer_ms365"]);
   assert.equal(after.mcpToolPermissions?.lemmacomputer_linear, undefined);
   const catalog = await service.list(alpha);
   const linear = catalog.connections.find((connector) => connector.id === "linear")!;

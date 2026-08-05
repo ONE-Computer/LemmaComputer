@@ -623,15 +623,6 @@ export class McpConnectionService {
       statusStates.set(connector.serverName, status);
       return status;
     };
-    const primaryConnector = connectors.find((connector) => connector.serverName === policy.mcpServer);
-    const primaryIsConnected = async () => {
-      if (!primaryConnector?.enabled || !connectionStates.has(primaryConnector.id)) return false;
-      try {
-        return (await currentStatus(primaryConnector)).state === "connected";
-      } catch {
-        return false;
-      }
-    };
     const cacheKey = `${identity.tenantId}:${identity.subjectId}:${policyProjectionDigest(policy)}`;
     const cached = this.projectionCache.get(cacheKey);
     if (cached && cached.expiresAt > this.now()) {
@@ -650,14 +641,13 @@ export class McpConnectionService {
           return false;
         }
       }));
-      const cachedPrimaryIsConnected = (cached.policy.mcpServers ?? [policy.mcpServer]).includes(policy.mcpServer);
-      if (fresh.every(Boolean) && cachedPrimaryIsConnected === await primaryIsConnected()) return cached.policy;
+      if (fresh.every(Boolean)) return cached.policy;
       this.invalidateProjection(identity);
     }
-    const includePrimary = await primaryIsConnected();
-    const primaryToolPolicies = includePrimary
-      ? policy.toolPolicies
-      : Object.fromEntries(policy.allowedTools.map((tool) => [tool, "deny" as const]));
+    const primaryConnector = connectors.find((connector) => connector.serverName === policy.mcpServer);
+    const primaryToolPolicies = primaryConnector?.enabled === false
+      ? Object.fromEntries(policy.allowedTools.map((tool) => [tool, "deny" as const]))
+      : policy.toolPolicies;
     const connected = await Promise.all(connectors
       .filter((connector) => connector.enabled && connector.serverName !== policy.mcpServer && connectionStates.has(connector.id))
       .map(async (connector) => {
@@ -670,11 +660,11 @@ export class McpConnectionService {
         } catch {
           return null;
         }
-    }));
+      }));
     const active = connected.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
-    const mcpServers = [...(includePrimary ? [policy.mcpServer] : []), ...active.map(({ connector }) => connector.serverName)];
+    const mcpServers = [policy.mcpServer, ...active.map(({ connector }) => connector.serverName)];
     const mcpToolPermissions = {
-      ...(includePrimary ? { [policy.mcpServer]: policy.allowedTools } : {}),
+      [policy.mcpServer]: policy.allowedTools,
       ...Object.fromEntries(active.map(({ connector, tools }) => [connector.serverName, tools])),
     };
     const allowedTools = [...new Set(Object.values(mcpToolPermissions).flat())].sort();
