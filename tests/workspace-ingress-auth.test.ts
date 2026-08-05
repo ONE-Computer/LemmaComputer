@@ -5,6 +5,7 @@ import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth
 const secret = "workspace-ingress-test-secret-at-least-32-characters";
 const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
 const otherWorkspaceId = "c5b2ea8c-cc94-46e3-b6c8-59ae4ebee509";
+const relayHost = `lemma-ws-${workspaceId}-relay`;
 const now = new Date("2026-07-25T12:00:00.000Z");
 
 test("workspace launch tokens exchange into scoped, longer-lived sessions", () => {
@@ -14,7 +15,7 @@ test("workspace launch tokens exchange into scoped, longer-lived sessions", () =
     workspaceId,
     target: {
       protocol: "https",
-      host: `lemmacomputer-sandbox-${workspaceId}-relay`,
+      host: relayHost,
       port: 16_920,
     },
   }, now);
@@ -25,7 +26,8 @@ test("workspace launch tokens exchange into scoped, longer-lived sessions", () =
   assert.equal(exchanged.claims.tenantId, "acme");
   assert.equal(exchanged.claims.subjectId, "alex");
   assert.equal(exchanged.claims.workspaceId, workspaceId);
-  assert.equal(exchanged.claims.host, `lemmacomputer-sandbox-${workspaceId}-relay`);
+  assert.equal(exchanged.claims.host, relayHost);
+  assert.ok(exchanged.claims.host.length <= 63);
   assert.equal(exchanged.claims.port, 16_920);
   assert.ok(authority.verifySession(exchanged.token, workspaceId, new Date(now.getTime() + 120_000)));
   assert.equal(authority.verifySession(exchanged.token, otherWorkspaceId, new Date(now.getTime() + 120_000)), null);

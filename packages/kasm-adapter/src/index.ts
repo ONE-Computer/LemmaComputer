@@ -114,6 +114,11 @@ const textValue = (object: JsonObject, ...keys: string[]) => {
 
 const clipboardPolicyFor = (policy?: RuntimePolicy): ClipboardPolicy => policy?.clipboard ?? defaultClipboardPolicy;
 
+// Docker's embedded DNS follows the 63-character DNS label limit. The full
+// `lemmacomputer-sandbox-<uuid>-relay` container name is 64 characters, so it
+// cannot be used as a routable hostname even though Docker accepts the name.
+const relayNameForWorkspace = (workspaceId: string) => `lemma-ws-${workspaceId}-relay`;
+
 const agentEnvironment = (
   grant: NonNullable<SandboxCreateInput["agentGrants"]>[number],
   policy: RuntimePolicy,
@@ -359,7 +364,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const existing = await this.inspectByName(name);
     if (existing?.running && existing.coworkEnabled === coworkEnabled) {
       await prepareRuntime();
-      await this.ensureRelay(name, existing.id, existing.port ?? await this.allocatePort(), workspaceNetwork);
+      await this.ensureRelay(input.workspaceId, name, existing.id, existing.port ?? await this.allocatePort(), workspaceNetwork);
       return { providerId: existing.id, workspaceId: input.workspaceId, state: "ready", failureCode: null };
     }
     if (existing) await this.destroy(existing.id);
@@ -491,7 +496,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     try {
       await this.request("POST", `/containers/${providerId}/start`);
       await this.waitForStartup(providerId);
-      await this.ensureRelay(name, providerId, port, workspaceNetwork);
+      await this.ensureRelay(input.workspaceId, name, providerId, port, workspaceNetwork);
       return { providerId, workspaceId: input.workspaceId, state: "ready", failureCode: null };
     } catch (error) {
       await this.destroy(providerId).catch(() => undefined);
@@ -644,7 +649,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       ...buildKasmClipboardLaunch(`https://${this.config.publicHost ?? "127.0.0.1"}:${port}/`, policy),
       ingressTarget: {
         protocol: "https",
-        host: `${sandboxName}-relay`,
+        host: relayNameForWorkspace(workspaceId),
         port,
       },
     };
@@ -652,6 +657,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
 
   async destroy(providerId: string) {
     let name: string | undefined;
+    let workspaceId: string | undefined;
     let workspaceNetwork: string | undefined;
     let gatewayAttached = false;
     let controlAttached = false;
@@ -660,6 +666,9 @@ export class KasmLocalAdapter implements SandboxAdapter {
       name = textValue(inspected, "Name")?.replace(/^\//, "");
       const containerConfig = asObject(inspected.Config);
       const labels = asObject(containerConfig.Labels);
+      workspaceId = typeof labels["com.lemmacomputer.workspace-id"] === "string"
+        ? String(labels["com.lemmacomputer.workspace-id"])
+        : undefined;
       const environment = Array.isArray(containerConfig.Env) ? containerConfig.Env : [];
       workspaceNetwork = typeof labels["com.lemmacomputer.workspace-network"] === "string" ? String(labels["com.lemmacomputer.workspace-network"]) : undefined;
       gatewayAttached = labels["com.lemmacomputer.gateway-attached"] === "true";
@@ -668,6 +677,9 @@ export class KasmLocalAdapter implements SandboxAdapter {
     } catch (error) {
       if (!(error instanceof LemmaComputerError && error.statusCode === 404)) throw error;
     }
+    if (workspaceId) await this.removeContainer(relayNameForWorkspace(workspaceId));
+    // Remove the pre-fix relay name during rolling upgrades. Docker accepts
+    // this 64-character container name but cannot publish it through DNS.
     if (name) await this.removeContainer(`${name}-relay`);
     if (name) await this.removeContainer(`${name}-egress`);
     await this.removeContainer(providerId);
@@ -844,8 +856,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
     throw new LemmaComputerError("KASM_PORTS_EXHAUSTED", "No local Kasm desktop ports are available", 503, true);
   }
 
-  private async ensureRelay(sandboxName: string, sandboxId: string, port: number, workspaceNetwork: string) {
-    const relayName = `${sandboxName}-relay`;
+  private async ensureRelay(workspaceId: string, sandboxName: string, sandboxId: string, port: number, workspaceNetwork: string) {
+    const relayName = relayNameForWorkspace(workspaceId);
     const existing = await this.inspectByName(relayName);
     if (existing?.running) return;
     if (existing) await this.removeContainer(existing.id);

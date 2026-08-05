@@ -121,7 +121,7 @@ test("local controller targets become signed same-origin workspace launch URLs",
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
     ingressTarget: {
       protocol: "https",
-      host: "lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
+      host: "lemma-ws-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
       port: 16_920,
     },
   });
@@ -151,7 +151,7 @@ test("local controller targets become signed same-origin workspace launch URLs",
   const token = launch.searchParams.get(workspaceIngressAccessParameter);
   assert.ok(token);
   const exchanged = authority.exchangeLaunch(token, workspace.id);
-  assert.equal(exchanged?.claims.host, "lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay");
+  assert.equal(exchanged?.claims.host, "lemma-ws-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay");
   assert.equal(exchanged?.claims.port, 16_920);
 });
 

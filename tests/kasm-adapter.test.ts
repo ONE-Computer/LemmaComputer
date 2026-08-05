@@ -611,9 +611,13 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const launch = await adapter.open("sandbox-id");
     assert.deepEqual(launch.ingressTarget, {
       protocol: "https",
-      host: "lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
+      host: "lemma-ws-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
       port: 16_920,
     });
+    assert.ok(launch.ingressTarget!.host.length <= 63);
+    const relayCreate = requests.find((item) => item.method === "POST" && item.path.includes("/containers/create?name=lemma-ws-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay"));
+    assert.ok(relayCreate);
+    assert.ok(new URLSearchParams(relayCreate.path.split("?")[1]).get("name")!.length <= 63);
     const standardAdapter = new KasmLocalAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
