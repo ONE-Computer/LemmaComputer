@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@lemmacomputer/contracts": "*",
+    "@lemmacomputer/deployment-profile": "*",
     "@lemmacomputer/kasm-adapter": "*",
     "@lemmacomputer/policy-integrity": "*",
     "fastify": "5.10.0",

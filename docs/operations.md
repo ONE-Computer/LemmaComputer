@@ -325,6 +325,11 @@ configuration.
 
 ### Hosted LiteLLM administration transport
 
+The production-profile capability matrix and matching customer-managed
+preflight are documented in [Deployment profiles](deployment-profiles.md). The
+matrix is configuration policy, not user authorization; hosted routes and
+workers still require organization-scoped RBAC.
+
 Hosted deployments must use the dedicated mutual-TLS administration listener,
 not the gateway's workspace-facing endpoint:
 
