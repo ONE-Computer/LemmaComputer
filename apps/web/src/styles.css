@@ -3806,6 +3806,24 @@ textarea:focus-visible,
 .connector-appearance-card div > span[role="alert"] { display: block; margin-top: 5px; color: #9a2f2a; font-size: 12px; }
 .connector-icon-actions { display: flex; align-items: center; gap: 12px; }
 
+.connector-removal-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid #e8c9c6;
+  border-radius: 9px;
+  background: #fffafa;
+}
+
+.connector-removal-card h2,
+.connector-removal-card p { margin: 0; }
+.connector-removal-card h2 { color: #6f2521; font-size: 15px; }
+.connector-removal-card p { max-width: 660px; margin-top: 4px; color: #6c5351; font-size: 12px; line-height: 1.5; }
+.connector-removal-card .danger-button { flex: 0 0 auto; min-width: 178px; }
+
 .connector-access-policy-card {
   display: grid;
   grid-template-columns: minmax(240px, 1.4fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
@@ -5297,6 +5315,8 @@ textarea:focus-visible,
   .connector-icon-field > div { flex-wrap: wrap; }
   .connector-appearance-card { grid-template-columns: 46px minmax(0, 1fr); }
   .connector-icon-actions { grid-column: 2; flex-wrap: wrap; }
+  .connector-removal-card { align-items: flex-start; flex-direction: column; }
+  .connector-removal-card .danger-button { width: 100%; }
   .connector-access-policy-card { grid-template-columns: 1fr; align-items: stretch; }
 
   .workspace-overview-heading {

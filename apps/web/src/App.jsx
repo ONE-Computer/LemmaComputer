@@ -1782,7 +1782,19 @@ function ConnectorIconEditor({ connector, busy, onSave }) {
   );
 }
 
-function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function ConnectorRemovalCard({ connector, busy, onRemove }) {
+  return (
+    <section className="connector-removal-card" aria-labelledby="connector-removal-heading">
+      <div>
+        <h2 id="connector-removal-heading">Remove connector</h2>
+        <p>Remove this customer-added service from the organization. Everyone’s connection and workspace access will be removed; provider accounts and data stay with the provider.</p>
+      </div>
+      <button className="secondary-button danger-button" type="button" onClick={() => onRemove(connector)} disabled={busy}>{busy ? "Removing connector" : "Remove connector"}</button>
+    </section>
+  );
+}
+
+function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemove, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
   const activation = activationFor(connector);
@@ -1872,6 +1884,7 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
             : "Once connected, this service and its available tools are added to your workspace agents automatically."}</p>
         </div>
         {isAdmin && connector.source === "custom" && <ConnectorIconEditor connector={connector} busy={busy} onSave={onIconChange} />}
+        {isAdmin && connector.source === "custom" && <ConnectorRemovalCard connector={connector} busy={busy} onRemove={onRemove} />}
       </div>}
     </div>
   );
@@ -2135,7 +2148,7 @@ function AddConnectorDialog({ onCreated, onClose }) {
   );
 }
 
-function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onAddConnector, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
@@ -2143,7 +2156,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
-      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
   }
   return (
@@ -3881,6 +3894,28 @@ export function App() {
     }
   };
 
+  const removeMcpConnector = async (connector) => {
+    if (!await requestConfirmation({
+      title: `Remove ${connector.name}?`,
+      description: `This removes ${connector.name} from the organization and revokes everyone’s connection and workspace access. Provider accounts and data will not be deleted.`,
+      confirmLabel: "Remove connector",
+      danger: true,
+    })) return;
+    setConnectionBusy(connector.id);
+    setConnectionError("");
+    try {
+      await adminApi.deleteConnector(connector.id);
+      setMcpConnections((current) => current.filter((item) => item.id !== connector.id));
+      setMcpPolicy((current) => current?.connectorId === connector.id ? null : current);
+      setConnectionsView("list");
+      setToast(`${connector.name} was removed from Connections.`);
+    } catch (error) {
+      setConnectionError(error.message);
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
   const connectorCreated = async (connector) => {
     const catalog = await connectionApi.catalog();
     setMcpConnections(catalog.connections);
@@ -4714,6 +4749,7 @@ export function App() {
             onDisconnect={disconnectMcpConnector}
             onIconChange={saveConnectorIcon}
             onAccessPolicySave={saveConnectorAccessPolicy}
+            onRemoveConnector={removeMcpConnector}
             onAddConnector={() => setConnectorDialogOpen(true)}
             displayName={session.user.displayName}
             isAdmin={session.roles.includes("administrator")}

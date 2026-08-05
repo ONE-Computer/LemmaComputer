@@ -31,6 +31,7 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   disconnectedServers: string[] = [];
   registered: McpConnectorRegistrationInput[] = [];
   ensured: McpConnectorRegistrationInput[][] = [];
+  removed: string[] = [];
   discoveries = 0;
   toolServers: string[] = [];
   onStatus?: (identity: IdentityContext, serverName: string) => OAuthConnectionStatus | Promise<OAuthConnectionStatus>;
@@ -77,7 +78,7 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   async ensureOAuthMcpServers(inputs: McpConnectorRegistrationInput[]) {
     this.ensured.push(inputs);
   }
-  async removeMcpServer() {}
+  async removeMcpServer(serverId: string) { this.removed.push(serverId); }
 }
 
 const completeFixtureConnection = async (
@@ -581,12 +582,14 @@ test("organization connector access policy locks member changes and removes disa
 });
 
 test("administrators can add a connector without code, then explicitly approve tools for agent grants", async () => {
+  const registry = new MemoryConnectorRegistryStore();
   const gateway = new FakeConnectionGateway();
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
     liteLlmPublicUrl: "http://localhost:4000",
     resolveCustomConnectorHostname: publicConnectorResolver,
+    registry,
   });
   const input = {
     name: "Acme Projects",
@@ -662,6 +665,16 @@ test("administrators can add a connector without code, then explicitly approve t
   assert.equal(projected.toolPolicies.list_tasks, "approval_required");
   assert.deepEqual(projected.allowedTools, ["create_task", "list-mail-messages", "list_tasks"]);
   assert.match(projected.connectionProjectionHash ?? "", /^[a-f0-9]{64}$/);
+
+  await completeFixtureConnection(service, gateway, beta, created.id);
+  assert.equal((await registry.listConnectionStates(alpha.tenantId, alpha.subjectId)).some((state) => state.connectorId === created.id), true);
+  assert.equal((await registry.listConnectionStates(beta.tenantId, beta.subjectId)).some((state) => state.connectorId === created.id), true);
+  assert.deepEqual(await service.deleteConnector(alpha, created.id), { deleted: true });
+  assert.deepEqual(gateway.removed, [gateway.registered[0]!.serverId]);
+  assert.equal((await service.list(alpha)).connections.some((connector) => connector.id === created.id), false);
+  assert.equal((await registry.listConnectionStates(alpha.tenantId, alpha.subjectId)).some((state) => state.connectorId === created.id), false);
+  assert.equal((await registry.listConnectionStates(beta.tenantId, beta.subjectId)).some((state) => state.connectorId === created.id), false);
+  await assert.rejects(() => service.deleteConnector(alpha, "microsoft-365"), { code: "MCP_CONNECTOR_MANAGED" });
 });
 
 test("custom connector admission rejects loopback, IPv6, and DNS-rebinding destinations before LiteLLM discovery", async () => {

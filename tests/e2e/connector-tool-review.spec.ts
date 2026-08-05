@@ -126,6 +126,30 @@ test("custom connector tools stay blocked until the administrator reviews and sa
   await expect(page.locator(".tool-policy-change-summary")).toHaveCount(0);
 });
 
+test("administrators can remove a customer-added connector from Connections", async ({ page }) => {
+  let deleted = false;
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: deleted ? [] : [connector] }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports", async (route) => {
+    assert.equal(route.request().method(), "DELETE");
+    deleted = true;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ deleted: true }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connections" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await expect(page.getByRole("heading", { name: "Remove connector" })).toBeVisible();
+  await page.getByRole("button", { name: "Remove connector" }).click();
+  await expect(page.getByRole("dialog")).toContainText("revokes everyone’s connection and workspace access");
+  await page.getByRole("dialog").getByRole("button", { name: "Remove connector" }).click();
+
+  await expect.poll(() => deleted).toBe(true);
+  await expect(page.getByRole("heading", { name: "Connections" })).toBeVisible();
+  await expect(page.getByText("Reports")).toHaveCount(0);
+});
+
 test("Exa appears as an available built-in connector in the Search category", async ({ page }) => {
   await page.route("**/api/v1/connections", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [exaConnector] }) });
