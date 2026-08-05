@@ -11,6 +11,7 @@ import {
   type RuntimePolicy,
   type Sandbox,
 } from "@lemmacomputer/contracts";
+import { assertWorkspaceDriverAllowed } from "@lemmacomputer/deployment-profile";
 import { KasmLocalAdapter, KasmDeveloperApiAdapter, type SandboxAdapter } from "@lemmacomputer/kasm-adapter";
 import { PolicyVerificationError, verifySignedPolicyBundle } from "@lemmacomputer/policy-integrity";
 import { z } from "zod";
@@ -287,6 +288,7 @@ function required(value: string | undefined, name: string) {
 }
 
 export function adapterFromEnv(env: z.infer<typeof envSchema>): SandboxAdapter {
+  assertWorkspaceDriverAllowed(env.LEMMACOMPUTER_INSTALLATION_KIND, env.SANDBOX_DRIVER);
   if (env.SANDBOX_DRIVER === "kasm-local") {
     return new KasmLocalAdapter({
       socketPath: env.DOCKER_SOCKET_PATH,

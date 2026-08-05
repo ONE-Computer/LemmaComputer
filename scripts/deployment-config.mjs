@@ -1,3 +1,8 @@
+import {
+  assertWorkspaceDriverAllowed,
+  resolveDeploymentProfile,
+} from "../packages/deployment-profile/src/index.mjs";
+
 /**
  * The deployment environment contract is the single source of truth for
  * operator-provided configuration.  Compose is deliberately not a source of
@@ -263,6 +268,7 @@ export function resolveDeploymentEnvironment(input = {}) {
 }
 
 const hasValue = (value) => typeof value === "string" && value.trim().length > 0;
+const isPlaceholder = (value) => !hasValue(value) || value.startsWith("replace-with-");
 const isInteger = (value) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value));
 const isUrl = (value) => {
   try { return Boolean(new URL(value)); } catch { return false; }
@@ -278,9 +284,15 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
   const values = resolveDeploymentEnvironment(raw);
   const errors = [];
   const selectedProfile = profile ?? values.LEMMACOMPUTER_INSTALLATION_KIND;
+  let profileCapabilities;
 
-  if (!environmentContract.find(({ key }) => key === "LEMMACOMPUTER_INSTALLATION_KIND")?.values.includes(selectedProfile)) {
-    errors.push("LEMMACOMPUTER_INSTALLATION_KIND must be customer-managed, hosted, or worktree");
+  try {
+    profileCapabilities = resolveDeploymentProfile(selectedProfile);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+  if (strict && !hasValue(raw.LEMMACOMPUTER_INSTALLATION_KIND)) {
+    errors.push("LEMMACOMPUTER_INSTALLATION_KIND must be explicitly set; implicit production profiles are forbidden");
   }
   if (profile && values.LEMMACOMPUTER_INSTALLATION_KIND !== profile) {
     errors.push(`LEMMACOMPUTER_INSTALLATION_KIND must be ${profile} for this preflight`);
@@ -327,7 +339,18 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
     if (hasValue(values.LEMMACOMPUTER_KASM_BASE_URL) && !isUrl(values.LEMMACOMPUTER_KASM_BASE_URL)) errors.push("LEMMACOMPUTER_KASM_BASE_URL must be an absolute URL when LEMMACOMPUTER_SANDBOX_DRIVER=kasm");
   }
 
+  if (profileCapabilities) {
+    try {
+      assertWorkspaceDriverAllowed(profileCapabilities.id, values.LEMMACOMPUTER_SANDBOX_DRIVER);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   if (selectedProfile === "hosted") {
+    if (!values.LEMMACOMPUTER_PUBLIC_WEB_URL.startsWith("https:")) {
+      errors.push("LEMMACOMPUTER_PUBLIC_WEB_URL must use https in hosted deployments");
+    }
     if (values.LEMMACOMPUTER_LITELLM_ADMIN_URL.startsWith("http:") || !values.LEMMACOMPUTER_LITELLM_ADMIN_URL.startsWith("https:")) {
       errors.push("LEMMACOMPUTER_LITELLM_ADMIN_URL must use https in hosted deployments");
     }
@@ -349,6 +372,15 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
     }
     if (values.LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE !== "reject") {
       errors.push("LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE must be reject in hosted deployments");
+    }
+  }
+
+  if (selectedProfile === "customer-managed") {
+    if (isPlaceholder(values.LEMMACOMPUTER_ENTRA_TENANT_ID)) {
+      errors.push("LEMMACOMPUTER_ENTRA_TENANT_ID must identify the customer directory in customer-managed deployments");
+    }
+    if (hasValue(values.LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS)) {
+      errors.push("LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS is hosted-only and must be empty in customer-managed deployments");
     }
   }
 

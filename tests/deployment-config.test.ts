@@ -44,6 +44,13 @@ const validHostedEnvironment = () => {
 
   Object.assign(values, {
     LEMMACOMPUTER_INSTALLATION_KIND: "hosted",
+    LEMMACOMPUTER_PUBLIC_WEB_URL: "https://hosted.example.test",
+    LEMMACOMPUTER_SANDBOX_DRIVER: "kasm",
+    LEMMACOMPUTER_KASM_BASE_URL: "https://workspace.example.test",
+    LEMMACOMPUTER_KASM_API_KEY: "test-kasm-api-key",
+    LEMMACOMPUTER_KASM_API_SECRET: "test-kasm-api-secret",
+    LEMMACOMPUTER_KASM_USER_ID: "test-kasm-user",
+    LEMMACOMPUTER_KASM_IMAGE_ID: "test-kasm-image",
     LEMMACOMPUTER_LITELLM_ADMIN_URL: "https://litellm-admin-listener:8443",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64: pemBase64("CERTIFICATE"),
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64: pemBase64("CERTIFICATE"),
@@ -57,6 +64,26 @@ const validHostedEnvironment = () => {
   });
   return values;
 };
+
+const validCustomerManagedEnvironment = () => {
+  const initialized = initializeEnvironment(renderEnvironmentTemplate(), "Etc/UTC");
+  const values = Object.fromEntries(parseEnvironment(initialized).values);
+  Object.assign(values, {
+    LEMMACOMPUTER_INSTALLATION_KIND: "customer-managed",
+    LEMMACOMPUTER_ENTRA_TENANT_ID: "customer-directory-tenant",
+    LEMMACOMPUTER_ENTRA_CLIENT_ID: "customer-application-client",
+    LEMMACOMPUTER_ENTRA_CLIENT_SECRET: "customer-application-secret",
+  });
+  return values;
+};
+
+const initializedCustomerManagedEnvironment = () => initializeEnvironment(
+  renderEnvironmentTemplate(),
+  "Etc/UTC",
+).replace(
+  "LEMMACOMPUTER_ENTRA_TENANT_ID=replace-with-entra-directory-tenant-id",
+  "LEMMACOMPUTER_ENTRA_TENANT_ID=customer-directory-tenant",
+);
 
 test("the checked-in environment example is rendered from the canonical deployment contract", async () => {
   assert.ok(Array.isArray(environmentContract));
@@ -123,6 +150,27 @@ test("a complete hosted configuration passes the shared profile validation", () 
   }));
 });
 
+test("a complete customer-managed configuration passes the shared profile validation", () => {
+  assert.doesNotThrow(() => validateDeploymentEnvironment(validCustomerManagedEnvironment(), {
+    profile: "customer-managed",
+    strict: true,
+  }));
+});
+
+test("strict profile validation rejects implicit and mixed profile selection", () => {
+  const implicit = validCustomerManagedEnvironment();
+  delete implicit.LEMMACOMPUTER_INSTALLATION_KIND;
+  assert.throws(
+    () => validateDeploymentEnvironment(implicit, { strict: true }),
+    /must be explicitly set/i,
+  );
+
+  assert.throws(
+    () => validateDeploymentEnvironment(validCustomerManagedEnvironment(), { profile: "hosted", strict: true }),
+    /must be hosted for this preflight/i,
+  );
+});
+
 test("the public ingress owns the browser-facing LiteLLM OAuth callback", () => {
   const values = validHostedEnvironment();
   const services = projectServiceEnvironment(values);
@@ -158,7 +206,7 @@ test("environment migration preserves retired variables without projecting them 
   const destination = join(root, "service-env");
   const retiredValue = "legacy-provider-key-that-must-not-reach-services";
   try {
-    await writeFile(source, `${initializeEnvironment(renderEnvironmentTemplate(), "Etc/UTC")}LEMMACOMPUTER_OPENAI_API_KEY=${retiredValue}\n`, { mode: 0o600 });
+    await writeFile(source, `${initializedCustomerManagedEnvironment()}LEMMACOMPUTER_OPENAI_API_KEY=${retiredValue}\n`, { mode: 0o600 });
     const update = spawnSync(process.execPath, [
       new URL("../scripts/update-env.mjs", import.meta.url).pathname,
       `--file=${source}`,
@@ -218,6 +266,29 @@ test("hosted validation rejects secret reuse and raw Telegram token compatibilit
   );
 });
 
+test("profile validation rejects workspace and hosted-control contradictions", () => {
+  const localHosted = validHostedEnvironment();
+  localHosted.LEMMACOMPUTER_SANDBOX_DRIVER = "kasm-local";
+  assert.throws(
+    () => validateDeploymentEnvironment(localHosted, { profile: "hosted", strict: true }),
+    /kasm-local workspace execution is not allowed/i,
+  );
+
+  const hostedControlInCustomerDeployment = validCustomerManagedEnvironment();
+  hostedControlInCustomerDeployment.LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS = "https://hosted-control.example.test";
+  assert.throws(
+    () => validateDeploymentEnvironment(hostedControlInCustomerDeployment, { profile: "customer-managed", strict: true }),
+    /HOSTED_MCP_EGRESS_ORIGINS is hosted-only/i,
+  );
+
+  const unconfiguredCustomerIssuer = validCustomerManagedEnvironment();
+  unconfiguredCustomerIssuer.LEMMACOMPUTER_ENTRA_TENANT_ID = "replace-with-entra-directory-tenant-id";
+  assert.throws(
+    () => validateDeploymentEnvironment(unconfiguredCustomerIssuer, { profile: "customer-managed", strict: true }),
+    /ENTRA_TENANT_ID must identify the customer directory/i,
+  );
+});
+
 test("strict validation rejects unregistered LEMMACOMPUTER variables", () => {
   assert.throws(
     () => validateDeploymentEnvironment({
@@ -260,7 +331,7 @@ test("reference service env files use raw Compose parsing and renderer repairs r
   const source = join(root, "deployment.env");
   const destination = join(root, "service-env");
   try {
-    await writeFile(source, initializeEnvironment(renderEnvironmentTemplate(), "Etc/UTC"), { mode: 0o600 });
+    await writeFile(source, initializedCustomerManagedEnvironment(), { mode: 0o600 });
     await mkdir(destination, { mode: 0o755 });
     const existing = join(destination, "control-api.env");
     await writeFile(existing, "stale=true\n", { mode: 0o644 });
