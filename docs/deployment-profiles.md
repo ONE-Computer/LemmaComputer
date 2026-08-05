@@ -10,7 +10,7 @@ a third product edition.
 | Organizations | Exactly one | Multiple | Development fixtures |
 | Sign-in providers allowed by profile | Workforce Entra | External ID and enterprise Entra | Development and provider test adapters |
 | Identity and secret custody | Customer deployment | LemmaComputer deployment | Local worktree |
-| Workspace drivers | Local or remote Kasm | Remote Kasm only | Local or remote Kasm |
+| Workspace provider boundary | Customer-approved local or remote-isolated | Platform-qualified remote-isolated | Development adapters |
 | Connector administration | Customer operator | Organization administrator | Developer |
 | Usage accounting | Local | Hosted | Development |
 | Hosted telemetry and billing | Denied | Allowed | Denied |
@@ -20,6 +20,14 @@ a third product edition.
 “Allowed” means the deployment profile is eligible for that implementation; it
 does not claim the feature is already available. Issues #11 and #12 own the
 External ID and enterprise Entra sign-in implementations.
+
+The workspace row is intentionally provider-neutral. `hosted` forbids local
+Docker-socket or equivalent application-host control-plane authority; it does
+not require Kasm. A remote Kasm cluster, E2B BYOC installation, or future
+provider must independently qualify against the same controls before production
+use: tenant-context projection, signed-policy projection, governed egress,
+lifecycle audit, and verified purge. The profile topology check alone is not
+provider qualification.
 
 The executable source of this table is
 `packages/deployment-profile/src/index.mjs`. Its adjacent declaration file is the
@@ -45,7 +53,8 @@ npm run env:render -- --profile=hosted
 Customer-managed deployments must configure
 `LEMMACOMPUTER_ENTRA_TENANT_ID` for the customer's directory and must leave
 `LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` empty. They may use `kasm-local` or a
-remote `kasm` driver. No generated service projection contains a required
+remote provider approved by the customer operator. The current implemented
+remote driver is `kasm`. No generated service projection contains a required
 LemmaComputer-hosted control-plane URL.
 
 The checked-in network-deny smoke disables Node DNS, HTTP, HTTPS, TCP, TLS, and
@@ -60,8 +69,11 @@ Run `npm run qualify:deployment-profiles` to preflight both production profiles
 with the same application image tag and compare their service topology.
 
 Hosted deployments require HTTPS public and LiteLLM administration endpoints,
-mutual-TLS material, remote `kasm` workspace execution, distinct credential and
-session secrets, and broker-only Telegram credential intake.
+mutual-TLS material, a platform-qualified remote-isolated workspace provider,
+distinct credential and session secrets, and broker-only Telegram credential
+intake. The current configuration contract recognizes remote `kasm`; that
+topology recognition is not a claim that the adapter has completed production
+qualification.
 
 `npm run worktree:init` writes the `worktree` selection for isolated local
 development. A production consumer must call `resolveDeploymentProfile` with

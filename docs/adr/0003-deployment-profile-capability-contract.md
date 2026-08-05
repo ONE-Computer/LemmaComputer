@@ -29,16 +29,25 @@ variables cannot redefine the profile's security properties.
   workspace execution, and has no required LemmaComputer-hosted control-plane,
   billing, telemetry, or background-job dependency.
 - `hosted` is LemmaComputer-operated, supports multiple organizations, permits
-  hosted External ID and enterprise Entra providers, requires remote workspace
-  execution, and permits managed billing, telemetry, and hosted workers.
+  hosted External ID and enterprise Entra providers, requires a platform-qualified
+  remote-isolated workspace provider, and permits managed billing, telemetry,
+  and hosted workers.
 - `worktree` is development-only. It may exercise either profile's adapters for
   testing but is never a production edition.
 
+The profile contract selects an admissible execution boundary and required
+controls, not a workspace vendor. Production providers must project tenant
+context and signed policy, enforce governed egress, emit lifecycle audit
+evidence, and prove verified purge. A driver-name-to-topology registry lets
+preflight reject local host control-plane authority in `hosted` without making
+remote Kasm the product architecture. Provider qualification remains separate:
+passing the topology gate does not certify an adapter for production.
+
 Profile-sensitive consumers call the typed resolver or an assertion such as
 `assertSignInProviderAllowed`, `assertOrganizationCountAllowed`,
-`assertWorkspaceDriverAllowed`, or `assertHostedCapability`. They do not branch
-directly on environment variables. The assertions are capability gates, not
-substitutes for request authorization.
+`assertWorkspaceDriverTopologyAllowed`, or `assertHostedCapability`. They do
+not branch directly on environment variables. The assertions are capability
+gates, not substitutes for request authorization or provider qualification.
 
 Preflight rejects an implicit profile, a profile/command mismatch, hosted local
 workspace execution, hosted HTTP public or administration endpoints,
@@ -52,6 +61,11 @@ before adding runtime behavior. Both production profiles remain buildable from
 the same commit and expose the same service topology; platform overlays provide
 infrastructure differences. A customer-managed installation can be tested with
 network access to LemmaComputer-operated control-plane services denied.
+
+Remote Kasm, E2B BYOC, or a future provider may satisfy the hosted topology only
+after its own qualification evidence proves the required controls. Experimental
+providers stay pilots and cannot be presented as production-ready merely by
+registering a driver identifier.
 
 The capability package does not create organizations, implement sign-in, assign
 roles, or authorize users. Those remain owned by the identity and RBAC work.

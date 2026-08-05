@@ -271,7 +271,7 @@ test("profile validation rejects workspace and hosted-control contradictions", (
   localHosted.LEMMACOMPUTER_SANDBOX_DRIVER = "kasm-local";
   assert.throws(
     () => validateDeploymentEnvironment(localHosted, { profile: "hosted", strict: true }),
-    /kasm-local workspace execution is not allowed/i,
+    /local-operator-controlled workspace execution is not allowed/i,
   );
 
   const hostedControlInCustomerDeployment = validCustomerManagedEnvironment();

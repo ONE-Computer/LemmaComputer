@@ -1,5 +1,5 @@
 import {
-  assertWorkspaceDriverAllowed,
+  assertWorkspaceDriverTopologyAllowed,
   resolveDeploymentProfile,
 } from "../packages/deployment-profile/src/index.mjs";
 
@@ -341,7 +341,7 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
 
   if (profileCapabilities) {
     try {
-      assertWorkspaceDriverAllowed(profileCapabilities.id, values.LEMMACOMPUTER_SANDBOX_DRIVER);
+      assertWorkspaceDriverTopologyAllowed(profileCapabilities.id, values.LEMMACOMPUTER_SANDBOX_DRIVER);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }

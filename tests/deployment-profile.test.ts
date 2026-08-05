@@ -5,7 +5,8 @@ import {
   assertHostedCapability,
   assertOrganizationCountAllowed,
   assertSignInProviderAllowed,
-  assertWorkspaceDriverAllowed,
+  assertWorkspaceDriverTopologyAllowed,
+  assertWorkspaceProviderBoundaryAllowed,
   deploymentProfileCapabilityMatrix,
   deploymentProfileIds,
   productionDeploymentProfileIds,
@@ -28,7 +29,7 @@ const initializedEnvironment = () => Object.fromEntries(parseEnvironment(
 test("the checked-in matrix has exactly two production profiles and development-only worktree", () => {
   assert.deepEqual(productionDeploymentProfileIds, ["customer-managed", "hosted"]);
   assert.deepEqual(deploymentProfileIds, ["customer-managed", "hosted", "worktree"]);
-  assert.equal(deploymentProfileCapabilityMatrix.schemaVersion, 1);
+  assert.equal(deploymentProfileCapabilityMatrix.schemaVersion, 2);
   assert.equal(resolveDeploymentProfile("customer-managed").maximumOrganizations, 1);
   assert.equal(resolveDeploymentProfile("hosted").organizationCardinality, "multiple");
   assert.equal(resolveDeploymentProfile("worktree").production, false);
@@ -54,14 +55,26 @@ test("customer-managed denies hosted-only capabilities and a second organization
   assert.throws(() => assertHostedCapability("customer-managed", "lemmaManagedControlPlane"), /hosted-only/i);
 });
 
-test("hosted requires remote workspaces while worktree can exercise either driver", () => {
+test("hosted requires a qualified remote provider boundary without selecting a vendor", () => {
   assert.doesNotThrow(() => assertSignInProviderAllowed("hosted", "external-id"));
   assert.doesNotThrow(() => assertSignInProviderAllowed("hosted", "enterprise-entra"));
   assert.doesNotThrow(() => assertHostedCapability("hosted", "backgroundJobs"));
-  assert.throws(() => assertWorkspaceDriverAllowed("hosted", "kasm-local"), /not allowed/i);
-  assert.doesNotThrow(() => assertWorkspaceDriverAllowed("hosted", "kasm"));
-  assert.doesNotThrow(() => assertWorkspaceDriverAllowed("worktree", "kasm-local"));
-  assert.doesNotThrow(() => assertWorkspaceDriverAllowed("worktree", "kasm"));
+  assert.throws(() => assertWorkspaceDriverTopologyAllowed("hosted", "kasm-local"), /local-operator-controlled.*not allowed/i);
+  assert.doesNotThrow(() => assertWorkspaceDriverTopologyAllowed("hosted", "kasm"));
+  assert.doesNotThrow(() => assertWorkspaceProviderBoundaryAllowed("hosted", "remote-isolated"));
+  assert.doesNotThrow(() => assertWorkspaceDriverTopologyAllowed("worktree", "kasm-local"));
+  assert.doesNotThrow(() => assertWorkspaceDriverTopologyAllowed("worktree", "kasm"));
+
+  const hostedPolicy = resolveDeploymentProfile("hosted").workspaceProviderPolicy;
+  assert.deepEqual(hostedPolicy.allowedExecutionBoundaries, ["remote-isolated"]);
+  assert.equal(hostedPolicy.minimumQualification, "platform-qualified");
+  assert.deepEqual(hostedPolicy.requiredControls, [
+    "tenant-context",
+    "signed-policy",
+    "governed-egress",
+    "lifecycle-audit",
+    "verified-purge",
+  ]);
 });
 
 test("both production profiles render the same service topology from the same image contract", () => {

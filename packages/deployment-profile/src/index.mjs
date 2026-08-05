@@ -14,10 +14,27 @@ export const deploymentProfileIds = Object.freeze([
   "worktree",
 ]);
 
+export const workspaceDriverTopologies = Object.freeze({
+  "kasm-local": Object.freeze({
+    id: "kasm-local",
+    executionBoundary: "local-operator-controlled",
+  }),
+  kasm: Object.freeze({
+    id: "kasm",
+    executionBoundary: "remote-isolated",
+  }),
+});
+
+const workspaceProviderPolicy = (value) => Object.freeze({
+  ...value,
+  allowedExecutionBoundaries: Object.freeze([...value.allowedExecutionBoundaries]),
+  requiredControls: Object.freeze([...value.requiredControls]),
+});
+
 const profile = (value) => Object.freeze({
   ...value,
   allowedSignInProviders: Object.freeze([...value.allowedSignInProviders]),
-  allowedWorkspaceDrivers: Object.freeze([...value.allowedWorkspaceDrivers]),
+  workspaceProviderPolicy: workspaceProviderPolicy(value.workspaceProviderPolicy),
 });
 
 /**
@@ -26,7 +43,7 @@ const profile = (value) => Object.freeze({
  * but do not redefine its security properties.
  */
 export const deploymentProfileCapabilityMatrix = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: 2,
   profiles: Object.freeze({
     "customer-managed": profile({
       id: "customer-managed",
@@ -37,7 +54,11 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       allowedSignInProviders: ["workforce-entra"],
       identityConfigurationCustody: "customer",
       secretCustody: "customer",
-      allowedWorkspaceDrivers: ["kasm-local", "kasm"],
+      workspaceProviderPolicy: {
+        allowedExecutionBoundaries: ["local-operator-controlled", "remote-isolated"],
+        minimumQualification: "operator-approved",
+        requiredControls: ["tenant-context", "signed-policy", "governed-egress", "lifecycle-audit", "verified-purge"],
+      },
       connectorAdministration: "customer-operator",
       usageAccounting: "local",
       hostedTelemetry: false,
@@ -54,7 +75,11 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       allowedSignInProviders: ["external-id", "enterprise-entra"],
       identityConfigurationCustody: "lemmacomputer",
       secretCustody: "lemmacomputer",
-      allowedWorkspaceDrivers: ["kasm"],
+      workspaceProviderPolicy: {
+        allowedExecutionBoundaries: ["remote-isolated"],
+        minimumQualification: "platform-qualified",
+        requiredControls: ["tenant-context", "signed-policy", "governed-egress", "lifecycle-audit", "verified-purge"],
+      },
       connectorAdministration: "organization-admin",
       usageAccounting: "hosted",
       hostedTelemetry: true,
@@ -71,7 +96,11 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       allowedSignInProviders: ["development-fixture", "workforce-entra", "external-id", "enterprise-entra"],
       identityConfigurationCustody: "developer",
       secretCustody: "developer",
-      allowedWorkspaceDrivers: ["kasm-local", "kasm"],
+      workspaceProviderPolicy: {
+        allowedExecutionBoundaries: ["local-operator-controlled", "remote-isolated"],
+        minimumQualification: "development-only",
+        requiredControls: [],
+      },
       connectorAdministration: "developer",
       usageAccounting: "development",
       hostedTelemetry: false,
@@ -105,12 +134,25 @@ export function assertSignInProviderAllowed(profileId, providerId) {
   return resolved;
 }
 
-export function assertWorkspaceDriverAllowed(profileId, driverId) {
+export function assertWorkspaceProviderBoundaryAllowed(profileId, executionBoundary) {
   const resolved = resolveDeploymentProfile(profileId);
-  if (!resolved.allowedWorkspaceDrivers.includes(driverId)) {
-    throw new Error(`${driverId} workspace execution is not allowed in the ${profileId} deployment profile`);
+  if (!resolved.workspaceProviderPolicy.allowedExecutionBoundaries.includes(executionBoundary)) {
+    throw new Error(`${executionBoundary} workspace execution is not allowed in the ${profileId} deployment profile`);
   }
   return resolved;
+}
+
+/**
+ * This is a topology gate, not provider qualification. Production providers
+ * must separately prove every control and the minimum qualification level in
+ * the resolved profile's workspaceProviderPolicy.
+ */
+export function assertWorkspaceDriverTopologyAllowed(profileId, driverId) {
+  const topology = workspaceDriverTopologies[driverId];
+  if (!topology) {
+    throw new Error(`${driverId} is not a registered workspace driver`);
+  }
+  return assertWorkspaceProviderBoundaryAllowed(profileId, topology.executionBoundary);
 }
 
 export function assertOrganizationCountAllowed(profileId, organizationCount) {
