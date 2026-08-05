@@ -26,7 +26,7 @@ test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaq
       attempts.delete(stateHash);
       return value && value.expiresAt > now ? value : null;
     },
-    upsertAuthenticatedIdentity: async (input) => { storedIdentity = input; return principal; },
+    resolveAuthenticatedIdentity: async (input) => { storedIdentity = input; return principal; },
     createSession: async (input) => { sessions.set(input.tokenHash, principal); },
     getSession: async (tokenHash) => sessions.get(tokenHash) ?? null,
     revokeSession: async (tokenHash) => { sessions.delete(tokenHash); },
@@ -41,7 +41,8 @@ test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaq
     bootstrapOwnedTenantId: "acme",
     bootstrapOwnedUserId: "alex-morgan",
     tenantDisplayName: "ME TECH",
-    administratorEmails: ["mike@metech.dev"],
+    bootstrapOwnerObjectIds: ["entra-object-005"],
+    membershipAdmissionMode: "directory-jit",
     fetch: async (_url, init) => {
       tokenRequestBody = String(init?.body);
       return new Response(JSON.stringify({ id_token: "signed-id-token" }), { status: 200, headers: { "content-type": "application/json" } });
@@ -49,7 +50,7 @@ test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaq
     idTokenVerifier: async (token, expected) => {
       assert.equal(token, "signed-id-token");
       assert.deepEqual(expected, { issuer: "https://login.microsoftonline.com/tenant-005/v2.0", audience: "client-005" });
-      return { sub: "external-subject", tid: "tenant-005", preferred_username: "mike@metech.dev", name: "Mike", nonce: expectedNonce };
+      return { sub: "external-subject", oid: "entra-object-005", tid: "tenant-005", preferred_username: "mike@metech.dev", name: "Mike", nonce: expectedNonce };
     },
   });
 
@@ -66,7 +67,10 @@ test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaq
   assert.match(completed.cookie, /^lemmacomputer_session=/);
   assert.doesNotMatch(completed.cookie, /one-time-code|signed-id-token|test-client-secret/);
   assert.match(tokenRequestBody, /code_verifier=/);
-  assert.equal(storedIdentity?.ownedUserId, "alex-morgan");
+  assert.equal(storedIdentity?.userId, "alex-morgan");
+  assert.equal(storedIdentity?.providerObjectId, "entra-object-005");
+  assert.equal(storedIdentity?.bootstrapOwner, true);
+  assert.equal(storedIdentity?.membershipAdmissionMode, "directory-jit");
   const expectedGatewayUserId = `oc-user-${createHash("sha256").update("lemmacomputer:litellm:user:acme:alex-morgan").digest("base64url")}`;
   assert.equal(storedIdentity?.gatewayUserId, expectedGatewayUserId);
 
@@ -80,7 +84,8 @@ test("Entra callback rejects a caller without the initiating browser state", asy
   const auth = new EntraAuthenticationService(store, {
     tenantId: "tenant-005", clientId: "client-005", clientSecret: "secret",
     publicWebUrl: "http://localhost:4174", sessionSecret: "test-session-secret-at-least-32-characters",
-    bootstrapOwnedTenantId: "acme", bootstrapOwnedUserId: "alex-morgan", tenantDisplayName: "ME TECH", administratorEmails: [],
+    bootstrapOwnedTenantId: "acme", bootstrapOwnedUserId: "alex-morgan", tenantDisplayName: "ME TECH",
+    bootstrapOwnerObjectIds: [], membershipAdmissionMode: "existing-membership-only",
   });
   const started = await auth.begin();
   const state = new URL(started.location).searchParams.get("state")!;

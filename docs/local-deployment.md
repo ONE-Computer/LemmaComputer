@@ -228,15 +228,16 @@ provider keys there; replace these placeholders instead:
 | `LEMMACOMPUTER_ENTRA_TENANT_ID` | Yes | Entra Directory (tenant) ID |
 | `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Yes | Entra Application (client) ID |
 | `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Entra client secret **Value** |
-| `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | Yes | Comma-separated Entra email addresses that bootstrap as administrators |
+| `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` | Yes | Comma-separated immutable Entra object IDs allowed to perform the one-time organization-owner bootstrap |
+| `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | No | Deprecated compatibility input; email never grants a LemmaComputer role |
 | `LEMMACOMPUTER_WEB_PUSH_VAPID_SUBJECT` | Recommended | A monitored `mailto:` security/contact address |
 
-Administrator email comparison is case-insensitive. Keep the bootstrap list
+Entra object-ID comparison is case-insensitive. Keep the bootstrap list
 small. Every user in the configured Entra tenant may authenticate, but only the
-listed addresses bootstrap as administrators.
+listed immutable object IDs can perform the one-time organization-owner bootstrap.
 
 OpenAI, Anthropic, GLM (Z.ai), and Bedrock keys are configured only after the stack is healthy:
-sign in as a listed administrator, open **AI control plane → Models &
+sign in as the bootstrapped owner, open **AI control plane → Models &
 providers**, save the write-only key, choose the approved models, and run the
 route test before creating a workspace. Configure Pricing, a Model routes
 mapping, and the Team rollout separately; a healthy provider route alone does
@@ -349,8 +350,8 @@ curl --fail --silent http://localhost:4000/health/liveliness
 Then:
 
 1. Open `http://localhost:4174`.
-2. Sign in with an address listed in
-   `LEMMACOMPUTER_ADMINISTRATOR_EMAILS`.
+2. Configure the signing-in account's immutable Entra `oid` in
+   `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS`, then sign in with that identity.
 3. Verify the account has administrator navigation.
 4. Open **AI control plane → Models & providers**, save the key for every
    provider referenced by the policy, choose its approved models, and confirm
@@ -425,7 +426,7 @@ the same application/client ID and has not expired.
 
 ### Sign-in succeeds but the user is not an administrator
 
-Confirm `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` contains the email claim returned by
+Confirm `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` contains the immutable object ID returned by
 the configured tenant. If the user already exists, inspect the owned identity
 and role assignment rather than changing bootstrap identifiers blindly.
 

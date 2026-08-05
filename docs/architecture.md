@@ -172,15 +172,16 @@ flows, state custody, budget defense in depth, and failure matrix.
 1. The Web server proxies `/api` to Control and adds an internal proxy token.
 2. Control starts an Entra authorization-code flow with PKCE, state, and nonce.
 3. Control verifies issuer, audience, tenant, nonce, and callback state.
-4. The external Entra identity is mapped to an owned tenant/user record.
-5. A first-time user in the configured tenant receives the default employee
-   policy. Returning users keep their current assignment state, including an
-   administrator-revoked assignment.
-6. A random session token is stored as a hash and returned in an HttpOnly,
-   SameSite cookie.
-7. Control loads the user's immutable effective policy for every protected
-   route. Administrator status is derived from the configured bootstrap email
-   allowlist on first sign-in.
+4. The immutable external identity resolves to an account user, organization
+   membership, and organization-local subject; email is display/contact data.
+5. Customer-managed directory JIT creates a member. Hosted sign-in requires an
+   existing membership. Only an explicitly configured immutable Entra object
+   ID can perform the one-time organization-owner bootstrap.
+6. A random session token is stored as a hash, bound to the selected active
+   membership, and returned in an HttpOnly, SameSite cookie.
+7. Control loads the membership role and fixed permission mapping for every
+   protected route. Provider claims never grant product authority. Runtime
+   policy assignment remains separate from organization RBAC.
 
 The Web proxy token is not a user identity. It only identifies the trusted Web
 process; the session cookie establishes the employee principal.

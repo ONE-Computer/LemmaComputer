@@ -104,21 +104,24 @@ GitHub OAuth-app redirect URI.
 | `LEMMACOMPUTER_ENTRA_TENANT_ID` | Yes | Single Entra directory accepted for Web sign-in |
 | `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Yes | Web OIDC application |
 | `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Web OIDC confidential-client secret |
-| `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | Yes | Comma-separated bootstrap administrators |
+| `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` | Yes | Comma-separated immutable Entra object IDs allowed to perform the one-time organization-owner bootstrap |
+| `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | No | Deprecated compatibility input; email never grants a LemmaComputer role |
 | `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID` | No | Owned tenant identifier |
 | `LEMMACOMPUTER_BOOTSTRAP_USER_ID` | No | Owned ID for a bootstrap administrator |
 | `LEMMACOMPUTER_TENANT_DISPLAY_NAME` | No | Initial organization display name |
 
-Administrator email matching is case-insensitive. Keep the allowlist small.
-After identity records and assignments exist, changing bootstrap identifiers
+Object-ID matching is case-insensitive. Keep the one-time bootstrap allowlist small.
+After identity records and memberships exist, changing bootstrap identifiers
 does not migrate existing rows.
 
-Every user in the configured Entra directory may sign in. Control creates their
-owned user and workspace records just in time and assigns the default employee
-policy on first sign-in. An administrator can later suspend or reactivate the
-user, revoke their active sessions, change their policy assignment, and manage
-their sandbox and egress security-group configuration. A returning user does
-not automatically regain a policy that an administrator revoked.
+In `customer-managed`, every user in the configured Entra directory may sign
+in; Control creates a member account and organization-local subject just in
+time. In `hosted`, sign-in is existing-membership-only, so authentication cannot
+create an organization membership. An organization administrator can later
+suspend or reactivate a membership, revoke its active sessions, change its
+policy assignment, and manage sandbox and egress security-group configuration.
+A returning user does not automatically regain a policy that an administrator
+revoked.
 
 ### Microsoft 365
 

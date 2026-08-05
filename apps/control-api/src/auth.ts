@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { LemmaComputerError, type IdentityContext } from "@lemmacomputer/contracts";
-import type { IdentityPolicyStore, SessionPrincipal } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, type IdentityPolicyStore, type MembershipAdmissionMode, type SessionPrincipal } from "@lemmacomputer/workspace-store";
 
 export type EntraAuthConfig = {
   tenantId: string;
@@ -12,7 +12,8 @@ export type EntraAuthConfig = {
   bootstrapOwnedTenantId: string;
   bootstrapOwnedUserId: string;
   tenantDisplayName: string;
-  administratorEmails: string[];
+  bootstrapOwnerObjectIds: string[];
+  membershipAdmissionMode: MembershipAdmissionMode;
   sessionTtlMs?: number;
   now?: () => Date;
   fetch?: typeof globalThis.fetch;
@@ -128,32 +129,41 @@ export class EntraAuthenticationService {
     }
     const externalSubject = typeof payload.sub === "string" ? payload.sub : "";
     const externalTenantId = typeof payload.tid === "string" ? payload.tid : "";
+    const providerObjectId = typeof payload.oid === "string" ? payload.oid.toLowerCase() : "";
     const emailClaim = payload.preferred_username ?? payload.email;
     const email = typeof emailClaim === "string" ? emailClaim.toLowerCase() : "";
-    if (!externalSubject || externalTenantId !== this.config.tenantId || !email) {
+    if (!externalSubject || !providerObjectId || externalTenantId !== this.config.tenantId || !email) {
       throw new LemmaComputerError("OIDC_IDENTITY_INVALID", "The signed-in Microsoft identity is not allowed", 403);
     }
-    const isBootstrapAdmin = this.config.administratorEmails.map((item) => item.toLowerCase()).includes(email);
-    const ownedUserId = isBootstrapAdmin
+    const isBootstrapOwner = this.config.bootstrapOwnerObjectIds.map((item) => item.toLowerCase()).includes(providerObjectId);
+    const ownedUserId = isBootstrapOwner
       ? this.config.bootstrapOwnedUserId
-      : `user-${hash(`${externalTenantId}:${externalSubject}`).slice(0, 24)}`;
+      : `user-${hash(`${externalTenantId}:${providerObjectId}`).slice(0, 24)}`;
     const identity: IdentityContext = { tenantId: this.config.bootstrapOwnedTenantId, subjectId: ownedUserId, audience: "lemmacomputer-control" };
     const gatewayUserId = `oc-user-${createHash("sha256").update(`lemmacomputer:litellm:user:${identity.tenantId}:${identity.subjectId}`).digest("base64url")}`;
-    const principal = await this.store.upsertAuthenticatedIdentity({
-      ownedTenantId: this.config.bootstrapOwnedTenantId,
-      ownedUserId,
+    const principal = await this.store.resolveAuthenticatedIdentity({
+      provider: "entra",
+      organizationId: this.config.bootstrapOwnedTenantId,
+      userId: ownedUserId,
       externalTenantId,
-      externalSubject,
+      subject: externalSubject,
+      providerObjectId,
       issuer: this.issuer,
       email,
       displayName: typeof payload.name === "string" ? payload.name : email.split("@")[0],
-      tenantDisplayName: this.config.tenantDisplayName,
-      bootstrapAdministrator: isBootstrapAdmin,
+      organizationDisplayName: this.config.tenantDisplayName,
+      bootstrapOwner: isBootstrapOwner,
+      membershipAdmissionMode: this.config.membershipAdmissionMode,
       gatewayUserId,
     });
     const token = base64url(randomBytes(48));
     const expiresAt = new Date(this.now().getTime() + (this.config.sessionTtlMs ?? 12 * 60 * 60_000));
-    await this.store.createSession({ tokenHash: hash(token), userId: principal.userId, expiresAt });
+    await this.store.createSession({
+      tokenHash: hash(token),
+      userId: principal.userId,
+      ...(principal.membershipId ? { membershipId: principal.membershipId } : {}),
+      expiresAt,
+    });
     return {
       principal,
       returnPath: attempt.returnPath,
@@ -195,12 +205,18 @@ export const testPrincipalFromHeaders = (headers: Record<string, unknown>): Sess
   return {
     userId,
     tenantId,
+    organizationId: tenantId,
+    membershipId: `test-membership:${tenantId}:${userId}`,
+    membershipStatus: "active",
+    role: "owner",
     email: `${userId}@example.test`,
     displayName: userId,
     tenantDisplayName: tenantId,
-    roles: ["employee", "administrator"],
+    roles: ["owner", "administrator"],
     identity: { tenantId, subjectId: userId, audience: "lemmacomputer-control" },
   };
 };
 
-export const isAdministrator = (principal: SessionPrincipal) => principal.roles.includes("administrator");
+export const isAdministrator = (principal: SessionPrincipal) => (
+  hasOrganizationPermission(principal, "organization.manage_settings")
+);

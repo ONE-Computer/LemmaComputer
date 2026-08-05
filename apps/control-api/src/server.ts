@@ -5,7 +5,7 @@ import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assign
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
@@ -273,7 +273,7 @@ const envSchema = z.object({
   BOOTSTRAP_TENANT_ID: z.string().min(1).default("acme"),
   BOOTSTRAP_USER_ID: z.string().min(1).default("alex-morgan"),
   TENANT_DISPLAY_NAME: z.string().min(1).default("ME TECH"),
-  ADMINISTRATOR_EMAILS: z.string().min(1).default("mike@metech.dev"),
+  BOOTSTRAP_OWNER_OBJECT_IDS: z.string().min(1),
 });
 
 const sameSecret = (received: string | undefined, expected: string) => {
@@ -461,7 +461,7 @@ export function createControlServer(
   const telegramRawTokenInputMode = security.telegramRawTokenInputMode ?? "legacy";
   const requireSpendObservability = (request: object) => {
     const actor = principal(request);
-    if (!isAdministrator(actor)) {
+    if (!hasOrganizationPermission(actor, "usage.read")) {
       throw new LemmaComputerError("SPEND_VIEW_NOT_FOUND", "Spend view not found", 404);
     }
     if (!security.spendObservabilityStore) {
@@ -687,11 +687,14 @@ export function createControlServer(
     return value;
   };
   const identity = (request: object) => identityContextSchema.parse(principal(request).identity);
-  const requireAdministrator = (request: object) => {
+  const requirePermission = (request: object, permission: OrganizationPermission) => {
     const value = principal(request);
-    if (!isAdministrator(value)) throw new LemmaComputerError("FORBIDDEN", "Administrator access is required", 403);
+    if (!hasOrganizationPermission(value, permission)) {
+      throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
+    }
     return value;
   };
+  const requireAdministrator = (request: object) => requirePermission(request, "organization.manage_settings");
   const assignedPolicy = async (request: object) => {
     const value = principal(request);
     const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;
@@ -1311,20 +1314,20 @@ export function createControlServer(
     };
   };
   app.get("/v1/admin/ai-usage/events", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.read");
     const result = await requireUsageLedger().store.listUsageEvents(usageQueryFor(actor.tenantId, request.query));
     reply.header("cache-control", "no-store");
     return { events: result.events, nextCursor: encodeUsageCursor(result.nextCursor) };
   });
   app.get("/v1/admin/ai-usage/totals", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.read");
     const query = usageQueryFor(actor.tenantId, request.query);
     const { limit: _limit, cursor: _cursor, ...totalsQuery } = query;
     reply.header("cache-control", "no-store");
     return { totals: await requireUsageLedger().store.providerCostTotals(totalsQuery) };
   });
   app.get("/v1/admin/ai-usage/export.csv", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.read");
     const query = usageQueryFor(actor.tenantId, request.query);
     const result = await requireUsageLedger().store.listUsageEvents({ ...query, limit: Math.min(query.limit, 500) });
     const csv = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -1338,12 +1341,12 @@ export function createControlServer(
       .send(`${header.join(",")}\n${rows.join("\n")}\n`);
   });
   app.get("/v1/admin/ai-usage/rate-cards", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.read");
     reply.header("cache-control", "no-store");
     return { rateCards: await requireUsageLedger().store.listRateCards(actor.tenantId) };
   });
   app.post("/v1/admin/ai-usage/rate-cards", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.manage");
     const input = adminRateCardSchema.parse(request.body ?? {});
     const id = await requireUsageLedger().store.createRateCard({
       tenantId: actor.tenantId, provider: input.provider, providerAccountId: input.providerAccountId,
@@ -1358,7 +1361,7 @@ export function createControlServer(
     return reply.code(201).send({ id });
   });
   app.post("/v1/admin/ai-usage/reconciliation-runs", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.manage");
     const input = adminReconciliationSchema.parse(request.body ?? {});
     const result = await requireUsageLedger().store.reconcile({
       tenantId: actor.tenantId, sourceSystem: input.sourceSystem,
@@ -1526,7 +1529,7 @@ export function createControlServer(
   app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/shadow-report",async(request)=>{const actor=requireAdministrator(request);return requireRouting().report(actor,z.uuid().parse(request.params.teamId));});
   app.get<{Params:{decisionId:string}}>("/v1/admin/routing/decisions/:decisionId",async(request,reply)=>{const actor=requireAdministrator(request);const decision=await requireRouting().decision(actor,z.uuid().parse(request.params.decisionId));if(!decision)return reply.code(404).send({error:{code:"ROUTING_DECISION_NOT_FOUND",message:"Routing decision not found",correlationId:request.id,retryable:false}});return decision;});
   app.get("/v1/admin/users", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "organization.manage_members");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
@@ -1573,7 +1576,7 @@ export function createControlServer(
     };
   });
   app.patch<{ Params: { userId: string } }>("/v1/admin/users/:userId/status", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "organization.manage_members");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const input = z.strictObject({ status: z.enum(["active", "disabled"]) }).parse(request.body ?? {});
     if (request.params.userId === actor.userId && input.status === "disabled") {
@@ -1614,7 +1617,7 @@ export function createControlServer(
     return { userId: target.userId, ...updated };
   });
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/sessions/revoke", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "organization.manage_members");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const revokedSessions = await security.identityPolicyStore.revokeUserSessions({
       tenantId: actor.tenantId,
@@ -1624,14 +1627,14 @@ export function createControlServer(
     return { userId: request.params.userId, revokedSessions };
   });
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const target = (await security.identityPolicyStore.listUsers(actor.tenantId)).find((item) => item.userId === request.params.userId);
     if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
     return security.identityPolicyStore.assignMvpPolicy({ tenantId: actor.tenantId, targetUserId: request.params.userId, assignedBy: actor.userId });
   });
   app.delete<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const target = (await security.identityPolicyStore.listUsers(actor.tenantId)).find((item) => item.userId === request.params.userId);
     if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
@@ -1718,7 +1721,7 @@ export function createControlServer(
     return assigned;
   });
   app.get("/v1/admin/mcp-policy", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
     const effective = users.map((user) => user.effectivePolicy).find(Boolean) ?? null;
@@ -1738,7 +1741,7 @@ export function createControlServer(
     };
   });
   app.put("/v1/admin/mcp-policy", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const input = saveMcpToolPolicySchema.parse(request.body ?? {});
     const expected = Object.keys(m365CapabilityDefinitions).sort();
@@ -1751,11 +1754,11 @@ export function createControlServer(
     };
   });
   app.get("/v1/admin/provider-settings", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage");
     return requireProviderSettings().list(actor);
   });
   app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
     const input = provider === "bedrock"
       ? { provider, ...saveBedrockProviderApiKeySchema.parse(request.body ?? {}) }
@@ -1767,12 +1770,12 @@ export function createControlServer(
     return { provider: await requireProviderSettings().configure(actor, input) };
   });
   app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/test", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
     return { provider: await requireProviderSettings().test(actor, provider) };
   });
   app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/disable", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
     const disabled = await requireProviderSettings().disable(actor, provider);
     return {
@@ -1782,7 +1785,7 @@ export function createControlServer(
     };
   });
   app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/reconcile", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
     const reconciled = await requireProviderSettings().reconcile(actor, provider);
     return {
@@ -1792,7 +1795,7 @@ export function createControlServer(
     };
   });
   app.delete<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
     const removed = await requireProviderSettings().remove(actor, provider);
     return {
@@ -2901,7 +2904,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         bootstrapOwnedTenantId: env.BOOTSTRAP_TENANT_ID,
         bootstrapOwnedUserId: env.BOOTSTRAP_USER_ID,
         tenantDisplayName: env.TENANT_DISPLAY_NAME,
-        administratorEmails: env.ADMINISTRATOR_EMAILS.split(",").map((item) => item.trim()).filter(Boolean),
+        bootstrapOwnerObjectIds: env.BOOTSTRAP_OWNER_OBJECT_IDS.split(",").map((item) => item.trim()).filter(Boolean),
+        membershipAdmissionMode: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+          ? "existing-membership-only"
+          : "directory-jit",
       }),
       openVtc,
       egressGrantSecret: env.EGRESS_GRANT_SECRET,

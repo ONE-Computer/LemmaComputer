@@ -2,9 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId } from "@lemmacomputer/contracts";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
+import { permissionsForOrganizationRoles, type LemmaComputerRole, type OrganizationMembershipStatus, type OrganizationPermission, type OrganizationRole } from "./rbac.js";
 
-export type LemmaComputerRole = "employee" | "administrator";
 export type LemmaComputerUserStatus = "active" | "disabled";
+export type MembershipAdmissionMode = "directory-jit" | "existing-membership-only";
+export type { LemmaComputerRole, OrganizationMembershipStatus, OrganizationPermission, OrganizationRole } from "./rbac.js";
 
 export const shouldAssignDefaultPolicyOnAuthentication = (
   hasExistingIdentityMapping: boolean,
@@ -13,7 +15,13 @@ export const shouldAssignDefaultPolicyOnAuthentication = (
 
 export type SessionPrincipal = {
   userId: string;
+  accountUserId?: string;
   tenantId: string;
+  organizationId?: string;
+  membershipId?: string;
+  membershipStatus?: OrganizationMembershipStatus;
+  role?: OrganizationRole;
+  permissions?: OrganizationPermission[];
   email: string;
   displayName: string;
   tenantDisplayName: string;
@@ -200,6 +208,10 @@ export const runtimePolicyFor = (
 
 export type AdminUserSummary = {
   userId: string;
+  membershipId?: string;
+  organizationId?: string;
+  membershipStatus?: OrganizationMembershipStatus;
+  role?: OrganizationRole;
   email: string;
   displayName: string;
   status: LemmaComputerUserStatus;
@@ -207,27 +219,53 @@ export type AdminUserSummary = {
   effectivePolicy: EffectivePolicy | null;
 };
 
+export type AuthenticatedIdentity = {
+  provider: string;
+  issuer: string;
+  subject: string;
+  providerObjectId?: string;
+  externalTenantId: string;
+  email: string;
+  displayName: string;
+  organizationId: string;
+  organizationDisplayName: string;
+  userId: string;
+  bootstrapOwner: boolean;
+  membershipAdmissionMode: MembershipAdmissionMode;
+  gatewayUserId: string;
+};
+
+export type OrganizationMembershipSummary = {
+  membershipId: string;
+  organizationId: string;
+  accountUserId: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  status: OrganizationMembershipStatus;
+  role: OrganizationRole;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export interface IdentityPolicyStore {
   createLoginAttempt(input: { stateHash: string; verifierCiphertext: string; nonce: string; returnPath: string; expiresAt: Date }): Promise<void>;
   consumeLoginAttempt(stateHash: string, now: Date): Promise<OidcLoginAttempt | null>;
-  upsertAuthenticatedIdentity(input: {
-    ownedTenantId: string;
-    ownedUserId: string;
-    externalTenantId: string;
-    externalSubject: string;
-    issuer: string;
-    email: string;
-    displayName: string;
-    tenantDisplayName: string;
-    bootstrapAdministrator: boolean;
-    gatewayUserId: string;
-  }): Promise<SessionPrincipal>;
-  createSession(input: { tokenHash: string; userId: string; expiresAt: Date }): Promise<void>;
+  resolveAuthenticatedIdentity(input: AuthenticatedIdentity): Promise<SessionPrincipal>;
+  createSession(input: { tokenHash: string; userId: string; membershipId?: string; expiresAt: Date }): Promise<void>;
   getSession(tokenHash: string, now: Date): Promise<SessionPrincipal | null>;
   revokeSession(tokenHash: string): Promise<void>;
   getPrincipal(userId: string): Promise<SessionPrincipal | null>;
   getEffectivePolicy(userId: string): Promise<EffectivePolicy | null>;
   listUsers(tenantId: string): Promise<AdminUserSummary[]>;
+  listOrganizationMemberships?(organizationId: string): Promise<OrganizationMembershipSummary[]>;
+  changeOrganizationMembership?(input: {
+    organizationId: string;
+    targetUserId: string;
+    role?: OrganizationRole;
+    status?: OrganizationMembershipStatus;
+    updatedBy: string;
+  }): Promise<{ membership: OrganizationMembershipSummary; revokedSessions: number }>;
   setUserStatus(input: { tenantId: string; targetUserId: string; status: LemmaComputerUserStatus; updatedBy: string }): Promise<{ status: LemmaComputerUserStatus; revokedSessions: number }>;
   revokeUserSessions(input: { tenantId: string; targetUserId: string; revokedBy: string }): Promise<number>;
   assignMvpPolicy(input: { tenantId: string; targetUserId: string; assignedBy: string }): Promise<EffectivePolicy>;
@@ -342,20 +380,34 @@ const defaultEgressDocument = () => ({
 
 const mapPrincipal = (row: Record<string, unknown>): SessionPrincipal => ({
   userId: String(row.user_id),
-  tenantId: String(row.tenant_id),
+  accountUserId: String(row.account_user_id),
+  tenantId: String(row.organization_id),
+  organizationId: String(row.organization_id),
+  membershipId: String(row.membership_id),
+  membershipStatus: String(row.membership_status) as OrganizationMembershipStatus,
+  role: String(row.membership_role) as OrganizationRole,
+  permissions: permissionsForOrganizationRoles([String(row.membership_role) as OrganizationRole]),
   email: String(row.email),
   displayName: String(row.display_name),
   tenantDisplayName: String(row.tenant_display_name),
-  roles: (row.roles as LemmaComputerRole[] | null) ?? [],
-  identity: { tenantId: String(row.tenant_id), subjectId: String(row.user_id), audience: "lemmacomputer-control" },
+  roles: [
+    String(row.membership_role) as OrganizationRole,
+    row.membership_role === "owner" || row.membership_role === "admin" ? "administrator" : "employee",
+  ],
+  identity: { tenantId: String(row.organization_id), subjectId: String(row.user_id), audience: "lemmacomputer-control" },
 });
 
-const principalSelect = `
-  SELECT u.id AS user_id, u.tenant_id, u.email, u.display_name, t.display_name AS tenant_display_name,
-    COALESCE(array_agg(ur.role ORDER BY ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
+const principalColumns = `
+  SELECT u.id AS user_id, m.account_user_id, m.organization_id, m.id AS membership_id,
+    m.status AS membership_status, m.role AS membership_role,
+    u.email, u.display_name, t.display_name AS tenant_display_name`;
+
+const homePrincipalSelect = `${principalColumns}
   FROM users u
-  JOIN tenants t ON t.id=u.tenant_id
-  LEFT JOIN user_roles ur ON ur.user_id=u.id`;
+  JOIN organization_memberships m ON m.subject_user_id=u.id AND m.organization_id=u.tenant_id
+  JOIN account_users account_user ON account_user.id=m.account_user_id
+  JOIN organizations organization ON organization.id=m.organization_id
+  JOIN tenants t ON t.id=m.organization_id`;
 
 const effectivePolicySelect = `
   SELECT pa.id AS assignment_id, pb.id AS policy_bundle_id, pv.id AS policy_version_id, pv.version,
@@ -544,51 +596,125 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     } : null;
   }
 
-  async upsertAuthenticatedIdentity(input: {
-    ownedTenantId: string;
-    ownedUserId: string;
-    externalTenantId: string;
-    externalSubject: string;
-    issuer: string;
-    email: string;
-    displayName: string;
-    tenantDisplayName: string;
-    bootstrapAdministrator: boolean;
-    gatewayUserId: string;
-  }) {
+  async resolveAuthenticatedIdentity(input: AuthenticatedIdentity) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`identity:${input.issuer}:${input.externalSubject}`]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`identity:${input.provider}:${input.issuer}:${input.subject}`]);
       const mapped = await client.query(
-        "SELECT u.id,u.tenant_id FROM external_identities ei JOIN users u ON u.id=ei.user_id WHERE ei.provider='entra' AND ei.issuer=$1 AND ei.external_subject=$2",
-        [input.issuer, input.externalSubject],
+        `SELECT account_user_id,user_id AS legacy_user_id,
+           external_tenant_id,provider_object_id
+         FROM external_identities
+         WHERE provider=$1 AND issuer=$2 AND external_subject=$3`,
+        [input.provider, input.issuer, input.subject],
       );
-      const firstAuthentication = !mapped.rowCount;
-      const tenantId = mapped.rowCount ? String(mapped.rows[0].tenant_id) : input.ownedTenantId;
-      const userId = mapped.rowCount ? String(mapped.rows[0].id) : input.ownedUserId;
-      await client.query(
-        "INSERT INTO tenants (id,external_tenant_id,display_name) VALUES ($1,$2,$3) ON CONFLICT (external_tenant_id) DO UPDATE SET display_name=EXCLUDED.display_name",
-        [tenantId, input.externalTenantId, input.tenantDisplayName],
+      if (mapped.rowCount && input.providerObjectId) {
+        const existingObjectId = mapped.rows[0].provider_object_id
+          ? String(mapped.rows[0].provider_object_id)
+          : null;
+        if (String(mapped.rows[0].external_tenant_id) !== input.externalTenantId
+          || (existingObjectId && existingObjectId !== input.providerObjectId)) {
+          throw new LemmaComputerError("IDENTITY_IDENTIFIER_MISMATCH", "The immutable identity identifiers do not match", 403);
+        }
+      }
+      const tenantId = input.organizationId;
+      let organization = await client.query(
+        `SELECT tenant.administrator_bootstrapped_at
+         FROM tenants tenant
+         JOIN organizations organization ON organization.id=tenant.id
+         WHERE tenant.id=$1
+         FOR UPDATE OF tenant,organization`,
+        [tenantId],
       );
-      const tenant = await client.query("SELECT administrator_bootstrapped_at FROM tenants WHERE id=$1 FOR UPDATE", [tenantId]);
-      const shouldBootstrapAdministrator = input.bootstrapAdministrator && !tenant.rows[0]?.administrator_bootstrapped_at;
-      await client.query(
-        `INSERT INTO users (id,tenant_id,email,display_name) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email,display_name=EXCLUDED.display_name,updated_at=now()`,
-        [userId, tenantId, input.email.toLowerCase(), input.displayName],
+      if (!organization.rowCount) {
+        if (input.membershipAdmissionMode === "existing-membership-only") {
+          throw new LemmaComputerError("ORGANIZATION_NOT_ADMITTED", "The organization is not available for this sign-in", 403);
+        }
+        await client.query(
+          `INSERT INTO tenants (id,external_tenant_id,display_name)
+           VALUES ($1,$2,$3)
+           ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name`,
+          [tenantId, input.externalTenantId, input.organizationDisplayName],
+        );
+        await client.query(
+          `INSERT INTO organizations (id,display_name)
+           VALUES ($1,$2)
+           ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name,updated_at=now()`,
+          [tenantId, input.organizationDisplayName],
+        );
+        organization = await client.query(
+          "SELECT administrator_bootstrapped_at FROM tenants WHERE id=$1 FOR UPDATE",
+          [tenantId],
+        );
+      }
+      let accountUserId = mapped.rowCount && mapped.rows[0].account_user_id
+        ? String(mapped.rows[0].account_user_id)
+        : "";
+      if (mapped.rowCount && !accountUserId) {
+        throw new LemmaComputerError("IDENTITY_BACKFILL_REQUIRED", "The identity migration backfill must complete before sign-in", 503);
+      }
+      if (!accountUserId) {
+        if (input.membershipAdmissionMode === "existing-membership-only") {
+          throw new LemmaComputerError("MEMBERSHIP_REQUIRED", "An organization invitation is required", 403);
+        }
+        const account = await client.query("INSERT INTO account_users (status) VALUES ('active') RETURNING id");
+        accountUserId = String(account.rows[0].id);
+      }
+      let membership = await client.query(
+        `SELECT id,subject_user_id,status,role
+         FROM organization_memberships
+         WHERE organization_id=$1 AND account_user_id=$2
+         FOR UPDATE`,
+        [tenantId, accountUserId],
       );
+      const membershipCreated = !membership.rowCount;
+      if (membershipCreated && input.membershipAdmissionMode === "existing-membership-only") {
+        throw new LemmaComputerError("MEMBERSHIP_REQUIRED", "An organization invitation is required", 403);
+      }
+      const userId = membership.rowCount
+        ? String(membership.rows[0].subject_user_id)
+        : mapped.rowCount
+          ? `user-${createHash("sha256").update(`${tenantId}:${accountUserId}`).digest("hex").slice(0, 24)}`
+          : input.userId;
+      const shouldBootstrapOwner = membershipCreated
+        && input.bootstrapOwner
+        && !organization.rows[0]?.administrator_bootstrapped_at;
       await client.query(
-        `INSERT INTO external_identities (id,user_id,provider,issuer,external_subject,external_tenant_id,email,last_authenticated_at)
-         VALUES ($1,$2,'entra',$3,$4,$5,$6,now())
-         ON CONFLICT (provider,issuer,external_subject) DO UPDATE SET email=EXCLUDED.email,last_authenticated_at=now()`,
-        [randomUUID(), userId, input.issuer, input.externalSubject, input.externalTenantId, input.email.toLowerCase()],
+        `INSERT INTO users (id,tenant_id,account_user_id,email,display_name)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (id) DO UPDATE SET
+           account_user_id=COALESCE(users.account_user_id,EXCLUDED.account_user_id),
+           email=EXCLUDED.email,display_name=EXCLUDED.display_name,updated_at=now()`,
+        [userId, tenantId, accountUserId, input.email.toLowerCase(), input.displayName],
+      );
+      if (membershipCreated) {
+        membership = await client.query(
+          `INSERT INTO organization_memberships (
+             organization_id,account_user_id,subject_user_id,status,role,created_by,updated_by
+           ) VALUES ($1,$2,$3,'active',$4,$3,$3)
+           RETURNING id,subject_user_id,status,role`,
+          [tenantId, accountUserId, userId, shouldBootstrapOwner ? "owner" : "member"],
+        );
+      }
+      if (membership.rows[0].status !== "active") {
+        throw new LemmaComputerError("MEMBERSHIP_NOT_ACTIVE", "The organization membership is not active", 403);
+      }
+      await client.query(
+        `INSERT INTO external_identities (
+           id,user_id,account_user_id,provider,issuer,external_subject,
+           external_tenant_id,provider_object_id,email,last_authenticated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+         ON CONFLICT (provider,issuer,external_subject) DO UPDATE SET
+           account_user_id=COALESCE(external_identities.account_user_id,EXCLUDED.account_user_id),
+           provider_object_id=COALESCE(external_identities.provider_object_id,EXCLUDED.provider_object_id),
+           email=EXCLUDED.email,last_authenticated_at=now()`,
+        [randomUUID(), userId, accountUserId, input.provider, input.issuer, input.subject, input.externalTenantId, input.providerObjectId ?? null, input.email.toLowerCase()],
       );
       await client.query(
         "INSERT INTO user_roles (user_id,role,assigned_by) VALUES ($1,'employee',$1) ON CONFLICT DO NOTHING",
         [userId],
       );
-      if (shouldBootstrapAdministrator) {
+      if (shouldBootstrapOwner) {
         await client.query("INSERT INTO user_roles (user_id,role,assigned_by) VALUES ($1,'administrator',$1) ON CONFLICT DO NOTHING", [userId]);
         await client.query("UPDATE tenants SET administrator_bootstrapped_at=now() WHERE id=$1", [tenantId]);
       }
@@ -603,12 +729,14 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
          ON CONFLICT (user_id,vendor,mapping_kind) DO UPDATE SET vendor_user_id=EXCLUDED.vendor_user_id,verified_at=now()`,
         [randomUUID(), tenantId, userId, input.gatewayUserId],
       );
-      if (shouldAssignDefaultPolicyOnAuthentication(!firstAuthentication, shouldBootstrapAdministrator)) {
+      if (shouldAssignDefaultPolicyOnAuthentication(!membershipCreated, shouldBootstrapOwner)) {
         await this.ensurePolicyFoundation(client, tenantId, userId);
         await this.assignMvpPolicyWithClient(client, tenantId, userId, userId);
       }
       await client.query("COMMIT");
-      return (await this.getPrincipal(userId))!;
+      const principal = await this.getPrincipalForOrganization(userId, tenantId);
+      if (!principal) throw new LemmaComputerError("MEMBERSHIP_NOT_ACTIVE", "The organization membership is not active", 403);
+      return principal;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -617,19 +745,55 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     }
   }
 
-  async createSession(input: { tokenHash: string; userId: string; expiresAt: Date }) {
+  private async getPrincipalForOrganization(userId: string, organizationId: string) {
+    const result = await this.pool.query(
+      `${principalColumns}
+       FROM users u
+       JOIN organization_memberships m ON m.subject_user_id=u.id AND m.organization_id=$2
+       JOIN account_users account_user ON account_user.id=m.account_user_id
+       JOIN organizations organization ON organization.id=m.organization_id
+       JOIN tenants t ON t.id=m.organization_id
+       WHERE u.id=$1 AND u.status='active' AND m.status='active'
+         AND account_user.status='active' AND organization.status='active'`,
+      [userId, organizationId],
+    );
+    return result.rowCount ? mapPrincipal(result.rows[0]) : null;
+  }
+
+  async createSession(input: { tokenHash: string; userId: string; membershipId?: string; expiresAt: Date }) {
     await this.pool.query("DELETE FROM browser_sessions WHERE expires_at<=now() OR revoked_at IS NOT NULL");
+    const membership = await this.pool.query(
+      `SELECT m.id
+       FROM organization_memberships m
+       JOIN users u ON u.id=m.subject_user_id
+       JOIN account_users account_user ON account_user.id=m.account_user_id
+       JOIN organizations organization ON organization.id=m.organization_id
+       WHERE m.subject_user_id=$1 AND m.status='active' AND u.status='active'
+         AND account_user.status='active' AND organization.status='active'
+         AND (($2::uuid IS NOT NULL AND m.id=$2::uuid)
+           OR ($2::uuid IS NULL AND m.organization_id=u.tenant_id))`,
+      [input.userId, input.membershipId ?? null],
+    );
+    if (!membership.rowCount) throw new LemmaComputerError("MEMBERSHIP_NOT_ACTIVE", "The organization membership is not active", 403);
     await this.pool.query(
-      "INSERT INTO browser_sessions (id,token_hash,user_id,expires_at) VALUES ($1,$2,$3,$4)",
-      [randomUUID(), input.tokenHash, input.userId, input.expiresAt],
+      "INSERT INTO browser_sessions (id,token_hash,user_id,membership_id,expires_at) VALUES ($1,$2,$3,$4,$5)",
+      [randomUUID(), input.tokenHash, input.userId, membership.rows[0].id, input.expiresAt],
     );
   }
 
   async getSession(tokenHash: string, now: Date) {
     const result = await this.pool.query(
-      `${principalSelect} JOIN browser_sessions s ON s.user_id=u.id
-       WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>$2 AND u.status='active'
-       GROUP BY u.id,t.display_name`,
+      `${principalColumns}
+       FROM browser_sessions s
+       JOIN users u ON u.id=s.user_id
+       JOIN organization_memberships m ON m.subject_user_id=u.id
+         AND (m.id=s.membership_id OR s.membership_id IS NULL AND m.organization_id=u.tenant_id)
+       JOIN account_users account_user ON account_user.id=m.account_user_id
+       JOIN organizations organization ON organization.id=m.organization_id
+       JOIN tenants t ON t.id=m.organization_id
+       WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>$2
+         AND u.status='active' AND m.status='active'
+         AND account_user.status='active' AND organization.status='active'`,
       [tokenHash, now],
     );
     if (!result.rowCount) return null;
@@ -642,7 +806,11 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
   }
 
   async getPrincipal(userId: string) {
-    const result = await this.pool.query(`${principalSelect} WHERE u.id=$1 AND u.status='active' GROUP BY u.id,t.display_name`, [userId]);
+    const result = await this.pool.query(
+      `${homePrincipalSelect} WHERE u.id=$1 AND u.status='active' AND m.status='active'
+        AND account_user.status='active' AND organization.status='active'`,
+      [userId],
+    );
     return result.rowCount ? mapPrincipal(result.rows[0]) : null;
   }
 
@@ -653,37 +821,169 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
 
   async listUsers(tenantId: string) {
     const result = await this.pool.query(
-      `SELECT u.id AS user_id,u.email,u.display_name,u.status,
-       COALESCE(array_agg(ur.role ORDER BY ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
-       FROM users u LEFT JOIN user_roles ur ON ur.user_id=u.id WHERE u.tenant_id=$1 GROUP BY u.id ORDER BY u.email`,
+      `SELECT u.id AS user_id,u.email,u.display_name,m.id AS membership_id,
+       m.account_user_id,m.organization_id,m.status AS membership_status,m.role AS membership_role
+       FROM organization_memberships m
+       JOIN users u ON u.id=m.subject_user_id
+       WHERE m.organization_id=$1
+       ORDER BY u.email`,
       [tenantId],
     );
     return Promise.all(result.rows.map(async (row) => ({
-      userId: String(row.user_id), email: String(row.email), displayName: String(row.display_name),
-      status: String(row.status) as LemmaComputerUserStatus,
-      roles: (row.roles as LemmaComputerRole[] | null) ?? [], effectivePolicy: await this.getEffectivePolicy(String(row.user_id)),
+      userId: String(row.user_id),
+      membershipId: String(row.membership_id),
+      organizationId: String(row.organization_id),
+      accountUserId: String(row.account_user_id),
+      membershipStatus: String(row.membership_status) as OrganizationMembershipStatus,
+      role: String(row.membership_role) as OrganizationRole,
+      email: String(row.email),
+      displayName: String(row.display_name),
+      status: row.membership_status === "active" ? "active" as const : "disabled" as const,
+      roles: [
+        String(row.membership_role) as OrganizationRole,
+        row.membership_role === "owner" || row.membership_role === "admin" ? "administrator" as const : "employee" as const,
+      ],
+      effectivePolicy: await this.getEffectivePolicy(String(row.user_id)),
     })));
+  }
+
+  async listOrganizationMemberships(organizationId: string) {
+    const result = await this.pool.query(
+      `SELECT m.id AS membership_id,m.organization_id,m.account_user_id,m.subject_user_id AS user_id,m.status,m.role,
+        m.created_at,m.updated_at,u.email,u.display_name
+       FROM organization_memberships m
+       JOIN users u ON u.id=m.subject_user_id
+       WHERE m.organization_id=$1
+       ORDER BY u.email,m.id`,
+      [organizationId],
+    );
+    return result.rows.map((row) => this.mapMembership(row));
+  }
+
+  private mapMembership(row: Record<string, unknown>): OrganizationMembershipSummary {
+    return {
+      membershipId: String(row.membership_id),
+      organizationId: String(row.organization_id),
+      accountUserId: String(row.account_user_id),
+      userId: String(row.user_id),
+      email: String(row.email),
+      displayName: String(row.display_name),
+      status: String(row.status) as OrganizationMembershipStatus,
+      role: String(row.role) as OrganizationRole,
+      createdAt: new Date(String(row.created_at)).toISOString(),
+      updatedAt: new Date(String(row.updated_at)).toISOString(),
+    };
+  }
+
+  async changeOrganizationMembership(input: {
+    organizationId: string;
+    targetUserId: string;
+    role?: OrganizationRole;
+    status?: OrganizationMembershipStatus;
+    updatedBy: string;
+  }) {
+    if (!input.role && !input.status) throw new LemmaComputerError("MEMBERSHIP_CHANGE_EMPTY", "No membership change was requested", 400);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`organization-membership:${input.organizationId}`]);
+      const actor = await client.query(
+        `SELECT role FROM organization_memberships
+         WHERE organization_id=$1 AND subject_user_id=$2 AND status='active'`,
+        [input.organizationId, input.updatedBy],
+      );
+      if (!actor.rowCount || actor.rows[0].role === "member") {
+        throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot manage organization access", 403);
+      }
+      const targetBefore = await client.query(
+        "SELECT role FROM organization_memberships WHERE organization_id=$1 AND subject_user_id=$2",
+        [input.organizationId, input.targetUserId],
+      );
+      if (!targetBefore.rowCount) throw new LemmaComputerError("MEMBERSHIP_NOT_FOUND", "Membership not found", 404);
+      if (actor.rows[0].role !== "owner" && (input.role === "owner" || targetBefore.rows[0].role === "owner")) {
+        throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an organization owner can change ownership", 403);
+      }
+      const changed = await client.query(
+        `UPDATE organization_memberships membership
+         SET role=COALESCE($3,membership.role),
+           status=COALESCE($4,membership.status),updated_by=$5,updated_at=now()
+         FROM users user_record
+         WHERE membership.organization_id=$1 AND membership.subject_user_id=$2
+           AND user_record.id=membership.subject_user_id
+         RETURNING membership.id AS membership_id,membership.organization_id,membership.account_user_id,
+           membership.subject_user_id AS user_id,
+           membership.status,membership.role,membership.created_at,membership.updated_at,
+           user_record.email,user_record.display_name`,
+        [input.organizationId, input.targetUserId, input.role ?? null, input.status ?? null, input.updatedBy],
+      );
+      if (!changed.rowCount) throw new LemmaComputerError("MEMBERSHIP_NOT_FOUND", "Membership not found", 404);
+      let revokedSessions = 0;
+      if (input.status === "suspended" || input.status === "revoked") {
+        const revoked = await client.query(
+          `UPDATE browser_sessions SET revoked_at=now()
+           WHERE membership_id=$1 AND revoked_at IS NULL RETURNING id`,
+          [changed.rows[0].membership_id],
+        );
+        revokedSessions = revoked.rowCount ?? 0;
+      }
+      await client.query("COMMIT");
+      return { membership: this.mapMembership(changed.rows[0]), revokedSessions };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async setUserStatus(input: { tenantId: string; targetUserId: string; status: LemmaComputerUserStatus; updatedBy: string }) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`organization-membership:${input.tenantId}`]);
       const target = await client.query(
-        "SELECT id FROM users WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+        `SELECT u.id,m.id AS membership_id,m.role
+         FROM users u
+         JOIN organization_memberships m ON m.subject_user_id=u.id AND m.organization_id=$2
+         WHERE u.id=$1
+         FOR UPDATE OF u,m`,
         [input.targetUserId, input.tenantId],
       );
       if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
-      await client.query("UPDATE users SET status=$3,updated_at=now() WHERE id=$1 AND tenant_id=$2", [
+      const actor = await client.query(
+        `SELECT role FROM organization_memberships
+         WHERE organization_id=$1 AND subject_user_id=$2 AND status='active'`,
+        [input.tenantId, input.updatedBy],
+      );
+      if (!actor.rowCount || actor.rows[0].role === "member") {
+        throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot manage organization access", 403);
+      }
+      if (actor.rows[0].role !== "owner" && target.rows[0].role === "owner") {
+        throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an organization owner can change ownership", 403);
+      }
+      const membershipStatus = input.status === "active" ? "active" : "suspended";
+      await client.query(
+        `UPDATE organization_memberships
+         SET status=$3,updated_by=$4,updated_at=now()
+         WHERE subject_user_id=$1 AND organization_id=$2`, [
         input.targetUserId,
         input.tenantId,
-        input.status,
+        membershipStatus,
+        input.updatedBy,
+      ]);
+      const activeMemberships = await client.query(
+        "SELECT 1 FROM organization_memberships WHERE subject_user_id=$1 AND status='active' LIMIT 1",
+        [input.targetUserId],
+      );
+      await client.query("UPDATE users SET status=$2,updated_at=now() WHERE id=$1", [
+        input.targetUserId,
+        activeMemberships.rowCount ? "active" : "disabled",
       ]);
       let revokedSessions = 0;
       if (input.status === "disabled") {
         const revoked = await client.query(
-          "UPDATE browser_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL RETURNING id",
-          [input.targetUserId],
+          "UPDATE browser_sessions SET revoked_at=now() WHERE membership_id=$1 AND revoked_at IS NULL RETURNING id",
+          [target.rows[0].membership_id],
         );
         revokedSessions = revoked.rowCount ?? 0;
       }
@@ -699,13 +999,15 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
 
   async revokeUserSessions(input: { tenantId: string; targetUserId: string; revokedBy: string }) {
     const target = await this.pool.query(
-      "SELECT id FROM users WHERE id=$1 AND tenant_id=$2",
+      `SELECT m.id AS membership_id
+       FROM organization_memberships m
+       WHERE m.subject_user_id=$1 AND m.organization_id=$2`,
       [input.targetUserId, input.tenantId],
     );
     if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
     const revoked = await this.pool.query(
-      "UPDATE browser_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL RETURNING id",
-      [input.targetUserId],
+      "UPDATE browser_sessions SET revoked_at=now() WHERE membership_id=$1 AND revoked_at IS NULL RETURNING id",
+      [target.rows[0].membership_id],
     );
     return revoked.rowCount ?? 0;
   }

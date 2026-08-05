@@ -59,6 +59,9 @@ try {
   sql("postgres", "CREATE DATABASE migration_ledger_fresh");
   const migrationLedgerLegacyUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/migration_ledger_legacy`;
   const migrationLedgerFreshUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/migration_ledger_fresh`;
+  sql("postgres", "CREATE DATABASE organization_rbac");
+  migrate("organization_rbac");
+  const organizationRbacUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/organization_rbac`;
   const featureTests = exec(process.execPath, [
     "--import", "tsx", "--test",
     "tests/activity-events-postgres.test.ts",
@@ -71,6 +74,7 @@ try {
     "tests/provider-settings-postgres.test.ts",
     "tests/spend-cost-coverage-postgres.test.ts",
     "tests/workspace-settings-postgres.test.ts",
+    "tests/organization-rbac-postgres.test.ts",
     "tests/telegram-token-intake-postgres.test.ts",
     "tests/migration-ledger-baseline-postgres.test.ts",
   ], {
@@ -86,6 +90,7 @@ try {
       PROVIDER_SETTINGS_TEST_DATABASE_URL: postgresUrl,
       SPEND_COVERAGE_TEST_DATABASE_URL: postgresUrl,
       WORKSPACE_SETTINGS_TEST_DATABASE_URL: postgresUrl,
+      ORGANIZATION_RBAC_TEST_DATABASE_URL: organizationRbacUrl,
       TELEGRAM_INTAKE_TEST_DATABASE_URL: postgresUrl,
       MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL: migrationLedgerLegacyUrl,
       MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL: migrationLedgerFreshUrl,
@@ -125,7 +130,7 @@ try {
 
   sql("postgres", "UPDATE lemmacomputer_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='028'");
   if (!migrate("postgres", false).includes("historical migrations are immutable")) throw new Error("checksum drift did not fail closed");
-  process.stdout.write("Database gate passed: fresh, no-op, concurrent, legacy baseline, mismatch, checksum, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
+  process.stdout.write("Database gate passed: fresh, no-op, concurrent, legacy baseline, mismatch, checksum, organization RBAC, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
 } finally {
   exec("docker", ["rm", "-f", container]);
 }
