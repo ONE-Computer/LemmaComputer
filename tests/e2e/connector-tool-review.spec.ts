@@ -24,6 +24,34 @@ const connector = {
   accessPolicyUpdatedAt: "2026-08-02T00:00:00.000Z",
 };
 
+const exaConnector = {
+  id: "exa",
+  serverName: "lemmacomputer_exa",
+  name: "Exa",
+  shortDescription: "Search the web",
+  description: "Find current web information and read page content through Exa search.",
+  category: "Search",
+  services: ["Web search", "Page content", "Research"],
+  policySupport: "automatic",
+  source: "built-in",
+  brand: "exa",
+  available: true,
+  state: "disconnected",
+  connectedAt: null,
+  expiresAt: null,
+  account: null,
+  enabled: true,
+  membersCanManage: true,
+  canManageConnection: true,
+  accessPolicyVersion: 1,
+  accessPolicyUpdatedAt: "2026-08-05T00:00:00.000Z",
+  activation: {
+    readiness: "ready",
+    action: "connect",
+    message: "This approved service is ready to connect.",
+  },
+};
+
 const documentHash = "a".repeat(64);
 const policy = {
   connectorId: connector.id,
@@ -96,4 +124,20 @@ test("custom connector tools stay blocked until the administrator reviews and sa
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect.poll(() => saved).toBe(true);
   await expect(page.locator(".tool-policy-change-summary")).toHaveCount(0);
+});
+
+test("Exa appears as an available built-in connector in the Search category", async ({ page }) => {
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [exaConnector] }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connections" }).click();
+
+  const search = page.getByRole("region", { name: "Search" });
+  await expect(search).toBeVisible();
+  await expect(search.getByRole("heading", { name: "Exa" })).toBeVisible();
+  await expect(search.getByText("Search the web")).toBeVisible();
+  await expect(search.locator(".connector-mark.exa img")).toHaveAttribute("src", "/connector-icons/exa.png");
+  await expect(search.getByRole("button", { name: "Connect" })).toBeEnabled();
 });

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import type { McpToolPolicyDecision } from "@lemmacomputer/contracts";
 
-export type ConnectorCategory = "Productivity" | "Developer tools" | "Business" | "Communication" | "Data and analytics" | "Other";
+export type ConnectorCategory = "Productivity" | "Search" | "Developer tools" | "Business" | "Communication" | "Data and analytics" | "Other";
 
 /**
  * Safe per-person connection metadata. OAuth credentials remain in LiteLLM.

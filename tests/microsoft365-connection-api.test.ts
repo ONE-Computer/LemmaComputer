@@ -76,7 +76,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     const catalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
     assert.equal(catalog.statusCode, 200);
     const connectorCards = catalog.json().connections as Array<{ id: string; serverName: string }>;
-    assert.equal(connectorCards.length, 22);
+    assert.equal(connectorCards.length, 23);
     assert.deepEqual(connectorCards.slice(0, 6).map((connector) => [connector.id, connector.serverName]), [
       ["microsoft-365", "lemmacomputer_ms365"],
       ["notion", "lemmacomputer_notion"],
@@ -88,6 +88,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.ok(connectorCards.some((connector) => connector.id === "stripe"));
     assert.ok(connectorCards.some((connector) => connector.id === "slack"));
     assert.ok(connectorCards.some((connector) => connector.id === "neon"));
+    assert.ok(connectorCards.some((connector) => connector.id === "exa" && connector.serverName === "lemmacomputer_exa"));
     assert.equal(providerStatusCalls, 0, "catalog browsing must not probe a provider connection");
 
     const status = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });

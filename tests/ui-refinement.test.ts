@@ -352,8 +352,11 @@ test("built-in connectors use locally served branded icons", async () => {
     "asana", "atlassian", "box", "cloudflare", "figma", "github", "hubspot", "intercom",
     "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
   ];
+  const exaIcon = await readFile(new URL("../apps/web/public/connector-icons/exa.png", import.meta.url));
   assert.match(app, /connectorIconBrands/);
-  assert.match(app, /\/connector-icons\/\$\{iconBrand\}\.svg/);
+  assert.match(app, /const connectorIconExtensions = \{ exa: "png" \}/);
+  assert.match(app, /\/connector-icons\/\$\{iconBrand\}\.\$\{extension\}/);
+  assert.deepEqual([...exaIcon.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
   await Promise.all(brands.map(async (brand) => {
     assert.match(await source("apps/web/public/connector-icons/" + brand + ".svg"), /<svg/);
   }));
@@ -569,5 +572,5 @@ test("Connections refreshes safely on navigation, history, detail return, and OA
   assert.match(connections, /activationActionLabel\(activation\)/);
   assert.doesNotMatch(connections, /connector\.available|state === "unavailable"/);
   assert.match(app, /activation\.action === "view_setup" \? "View setup"/);
-  assert.match(app, /const categories = \["Productivity", "Developer tools", "Business", "Communication", "Data and analytics", "Other"\]/);
+  assert.match(app, /const connectorCategories = \["Productivity", "Search", "Developer tools", "Business", "Communication", "Data and analytics", "Other"\]/);
 });

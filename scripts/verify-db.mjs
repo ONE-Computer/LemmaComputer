@@ -48,6 +48,9 @@ try {
   if (sql("postgres", "SELECT count(*) FROM lemmacomputer_schema_migrations") !== String(expectedMigrationCount)) {
     throw new Error("fresh migration ledger does not contain every discovered migration");
   }
+  if (!sql("postgres", "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='connector_registry'::regclass AND conname='connector_registry_category_check'").includes("'Search'::text")) {
+    throw new Error("connector registry category constraint does not accept Search");
+  }
   const schemaCheck = exec("npm", ["run", "db:check"], { env: { ...process.env, DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/postgres` } });
   if (schemaCheck.status !== 0 || !schemaCheck.stdout.includes("schema is compatible")) throw new Error(schemaCheck.stderr || "schema compatibility check failed");
   if (!migrate("postgres").includes("no migrations applied")) throw new Error("second migration run was not a no-op");

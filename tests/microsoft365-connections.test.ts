@@ -4,6 +4,7 @@ import test from "node:test";
 import type { IdentityContext, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
 import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore } from "@lemmacomputer/workspace-store";
+import { connectorCatalog } from "../apps/control-api/src/connector-catalog.js";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
@@ -171,11 +172,32 @@ test("the default catalog covers the required categories and registers a remote 
 
   const catalog = await service.list(alpha);
   const defaultCards = catalog.connections.map((connector) => [connector.id, connector.serverName]);
-  assert.equal(defaultCards.length, 22);
+  assert.equal(defaultCards.length, 23);
   const neon = catalog.connections.find((connector) => connector.id === "neon");
   assert.equal(neon?.serverName, "lemmacomputer_neon");
   assert.equal(neon?.brand, "neon");
   assert.equal(neon?.source, "built-in");
+  const exa = catalog.connections.find((connector) => connector.id === "exa");
+  assert.deepEqual(exa && {
+    serverName: exa.serverName,
+    category: exa.category,
+    brand: exa.brand,
+  }, {
+    serverName: "lemmacomputer_exa",
+    category: "Search",
+    brand: "exa",
+  });
+  const exaDefinition = connectorCatalog(alpha.tenantId, "http://localhost:3001")
+    .find((connector) => connector.id === "exa");
+  assert.deepEqual(exaDefinition && {
+    endpointUrl: exaDefinition.endpointUrl,
+    authorizationOrigins: exaDefinition.authorizationOrigins,
+    scopes: exaDefinition.scopes,
+  }, {
+    endpointUrl: "https://mcp.exa.ai/mcp",
+    authorizationOrigins: ["https://auth.exa.ai"],
+    scopes: ["mcp:tools"],
+  });
   assert.deepEqual(defaultCards.slice(0, 6), [
     ["microsoft-365", "lemmacomputer_ms365"],
     ["notion", "lemmacomputer_notion"],
@@ -195,7 +217,7 @@ test("the default catalog covers the required categories and registers a remote 
   assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));
   assert.ok(catalog.connections.every((connector) => connector.activation.readiness === "ready"));
   assert.ok(catalog.connections.every((connector) => connector.activation.action === "connect"));
-  for (const category of ["Productivity", "Developer tools", "Business", "Communication", "Data and analytics"]) {
+  for (const category of ["Productivity", "Search", "Developer tools", "Business", "Communication", "Data and analytics"]) {
     assert.ok(catalog.connections.some((connector) => connector.category === category), `catalog includes ${category}`);
   }
 });
@@ -206,14 +228,16 @@ test("every approved remote MCP card lazily starts its provider flow only after 
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
-  for (const connectorId of ["github", "figma", "slack", "asana"]) await service.start(alpha, connectorId);
+  for (const connectorId of ["exa", "github", "figma", "slack", "asana"]) await service.start(alpha, connectorId);
   assert.deepEqual(gateway.started.map((request) => request.serverName), [
+    "lemmacomputer_exa",
     "lemmacomputer_github",
     "lemmacomputer_figma",
     "lemmacomputer_slack",
     "lemmacomputer_asana",
   ]);
   assert.deepEqual(gateway.ensured.map((connectors) => connectors[0]?.serverName), [
+    "lemmacomputer_exa",
     "lemmacomputer_github",
     "lemmacomputer_figma",
     "lemmacomputer_slack",
@@ -721,6 +745,8 @@ test("custom connector discovery uses a short permit and hosted origins require 
   assert.equal(await hosted.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.example.com", port: 443 }), true);
   assert.equal(await hosted.isGatewayEgressDestinationAllowed({ protocol: "https", host: "unapproved.example.com", port: 443 }), false);
   assert.equal(await hosted.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.notion.com", port: 443 }), true, "built-in catalog origins stay available");
+  assert.equal(await hosted.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.exa.ai", port: 443 }), true, "Exa's MCP endpoint is approved");
+  assert.equal(await hosted.isGatewayEgressDestinationAllowed({ protocol: "https", host: "auth.exa.ai", port: 443 }), true, "Exa's OAuth origin is approved");
 
   const missingAuthorizationApproval = new McpConnectionService(new FakeConnectionGateway(), {
     publicWebUrl: "http://localhost:4174",

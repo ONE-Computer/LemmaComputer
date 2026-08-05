@@ -57,3 +57,11 @@ Learn's official identity-platform branding guidance:
 The Microsoft mark is proprietary and must not be altered. Usage is subject to
 Microsoft's published guidance:
 <https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps>.
+
+## Exa
+
+`exa.png` is the user-supplied Exa mark added for the built-in Exa connector.
+Its recorded SHA-256 digest at inclusion is
+`98790e3a63d481922dc7a8e02eccc7afea130355021e8eff742811759e54732f`.
+The Exa name and mark remain the property of Exa Labs, Inc.; inclusion does not
+imply sponsorship or endorsement.

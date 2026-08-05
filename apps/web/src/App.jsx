@@ -1632,9 +1632,11 @@ function ApprovalDeviceCard({ displayName }) {
 }
 
 const connectorIconBrands = new Set([
-  "asana", "atlassian", "box", "cloudflare", "figma", "github", "hubspot", "intercom",
+  "asana", "atlassian", "box", "cloudflare", "exa", "figma", "github", "hubspot", "intercom",
   "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
 ]);
+const connectorIconExtensions = { exa: "png" };
+const connectorCategories = ["Productivity", "Search", "Developer tools", "Business", "Communication", "Data and analytics", "Other"];
 
 function ConnectorMark({ connector, large = false }) {
   const brand = connector?.brand ?? "microsoft";
@@ -1643,7 +1645,8 @@ function ConnectorMark({ connector, large = false }) {
   }
   const iconBrand = connectorIconBrands.has(brand) ? brand : connectorIconBrands.has(connector?.id) ? connector.id : null;
   if (iconBrand) {
-    return <span className={`connector-mark branded ${iconBrand}${large ? " large" : ""}`} aria-hidden="true"><img src={`/connector-icons/${iconBrand}.svg`} alt="" /></span>;
+    const extension = connectorIconExtensions[iconBrand] ?? "svg";
+    return <span className={`connector-mark branded ${iconBrand}${large ? " large" : ""}`} aria-hidden="true"><img src={`/connector-icons/${iconBrand}.${extension}`} alt="" /></span>;
   }
   const fallback = connector?.name?.trim().match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? "?";
   const glyph = { notion: "N", linear: "L", atlassian: "A", github: "GH" }[brand] ?? fallback;
@@ -2097,7 +2100,7 @@ function AddConnectorDialog({ onCreated, onClose }) {
       <div className="add-connector-fields">
         <label className="wide"><span>MCP server URL</span><input name="connector-endpoint-url" type="url" placeholder="https://service.example.com/mcp" value={draft.endpointUrl} onChange={(event) => update("endpointUrl", event.target.value)} disabled={Boolean(busy)} /></label>
         <label><span>Name</span><input name="connector-name" placeholder="Service name" value={draft.name} onChange={(event) => update("name", event.target.value)} disabled={Boolean(busy)} /></label>
-        <label><span>Category</span><SelectMenu value={draft.category} onValueChange={(value) => update("category", value)} ariaLabel="Connector category" disabled={Boolean(busy)} options={["Productivity", "Developer tools", "Business", "Communication", "Data and analytics", "Other"].map((value) => ({ value, label: value }))} /></label>
+        <label><span>Category</span><SelectMenu value={draft.category} onValueChange={(value) => update("category", value)} ariaLabel="Connector category" disabled={Boolean(busy)} options={connectorCategories.map((value) => ({ value, label: value }))} /></label>
         <label className="wide"><span>Card description</span><input name="connector-short-description" placeholder="What people can do with this service" value={draft.shortDescription} onChange={(event) => update("shortDescription", event.target.value)} disabled={Boolean(busy)} /></label>
         <label className="wide connector-icon-field">
           <span>Connector icon <em>Optional</em></span>
@@ -2143,7 +2146,6 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
       return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
   }
-  const categories = ["Productivity", "Developer tools", "Business", "Communication", "Data and analytics", "Other"];
   return (
     <div className="secondary-screen connections-screen">
       <div className="connections-page-intro">
@@ -2157,7 +2159,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
 
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connection was not updated</strong>{error}</span></div>}
 
-      {categories.map((category) => {
+      {connectorCategories.map((category) => {
         const categoryConnections = connections.filter((connector) => connector.category === category);
         if (!categoryConnections.length) return null;
         return (
