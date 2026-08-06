@@ -5,6 +5,7 @@ import { z } from "zod";
 export const agentBridgeAudience = "lemmacomputer-control-agent-bridge";
 export const agentBridgeScopes = [
   "agent:usage-bindings",
+  "agent:mcp-discovery",
   "agent:sites",
   "agent:operations:read",
   "agent:uploads",

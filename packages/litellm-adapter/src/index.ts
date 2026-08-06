@@ -565,7 +565,10 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       // credential for this safe discovery endpoint. Never execute an MCP tool
       // merely to renew a credential.
       if (status.state === "disconnected") return [];
-      const result = await this.dataCall("/mcp-rest/tools/list", grant.credential);
+      const result = await this.dataCall(
+        `/mcp-rest/tools/list?mcp_server_name=${encodeURIComponent(serverName)}`,
+        grant.credential,
+      );
       if (!result.ok) throw this.upstreamError("MCP_TOOL_DISCOVERY_FAILED", result.status, result.payload, "The connector could not refresh its saved credentials. Reconnect and try again.");
       const refreshedStatus = status.state === "expired"
         ? await this.readConnectionStatus(grant.credential, grant.serverId, serverName)
@@ -879,8 +882,20 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     );
     const mcpServer = input.policy?.mcpServer ?? this.mcpServer;
     const allowedTools = input.policy?.allowedTools ?? this.allowedTools;
-    const mcpServers = input.policy?.mcpServers ?? [mcpServer];
-    const mcpToolPermissions = input.policy?.mcpToolPermissions ?? { [mcpServer]: allowedTools };
+    const assignedMcpServers = input.policy?.mcpServers ?? [mcpServer];
+    const projectedToolPermissions = input.policy?.mcpToolPermissions ?? { [mcpServer]: allowedTools };
+    // Policy assignment and live connector availability are intentionally
+    // separate. A disconnected assigned connector remains in the signed
+    // policy, but it must not enter the callable LiteLLM key projection.
+    const requestedActiveMcpServers = input.policy?.activeMcpServers ?? assignedMcpServers;
+    const mcpServers = requestedActiveMcpServers.filter((serverName) => (
+      Array.isArray(projectedToolPermissions[serverName])
+      && projectedToolPermissions[serverName]!.length > 0
+    ));
+    const mcpToolPermissions = Object.fromEntries(mcpServers.map((serverName) => [
+      serverName,
+      projectedToolPermissions[serverName]!,
+    ]));
     const projection = JSON.stringify({
       agentId,
       modelAlias,
@@ -889,6 +904,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       transportModelAlias,
       mcpServer,
       allowedTools,
+      assignedMcpServers,
       mcpServers,
       mcpToolPermissions,
       connectionProjectionHash: input.policy?.connectionProjectionHash ?? null,
@@ -1024,24 +1040,28 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   async readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayReadiness> {
     const effectiveAgentId = policy?.agentId ?? agentId;
     const modelAlias = policy?.modelAlias ?? this.modelAlias;
-    const allowedTools = policy?.allowedTools ?? this.allowedTools;
+    const activeMcpServers = policy?.activeMcpServers ?? policy?.mcpServers ?? [policy?.mcpServer ?? this.mcpServer];
+    const projectedToolPermissions = policy?.mcpToolPermissions ?? {
+      [policy?.mcpServer ?? this.mcpServer]: policy?.allowedTools ?? this.allowedTools,
+    };
+    const allowedTools = [...new Set(activeMcpServers.flatMap((serverName) => (
+      projectedToolPermissions[serverName] ?? []
+    )))];
     const credential = this.credentialFor(workspaceId, effectiveAgentId);
     const gatewayModelAlias = this.workspaceGrantStates.get(credential)?.transportModelAlias ?? (modelAlias === "lemmacomputer-auto" ? "lemmacomputer-auto" : desktopModelAlias(modelAlias, policy));
-    const [models, tools, modelRoute] = await Promise.all([
+    const [models, discovery, modelRoute] = await Promise.all([
       this.dataCall("/v1/models", credential),
-      this.dataCall("/mcp-rest/tools/list", credential),
+      this.discoverToolsForServers(credential, activeMcpServers),
       this.modelRoute(credential, workspaceId, effectiveAgentId, modelAlias),
     ]);
     if (!models.ok) this.workspaceGrantStates.delete(credential);
     const modelIds = Array.isArray(asObject(models.payload).data)
       ? (asObject(models.payload).data as unknown[]).map((item) => String(asObject(item).id ?? ""))
       : [];
-    const toolNames = Array.isArray(asObject(tools.payload).tools)
-      ? (asObject(tools.payload).tools as unknown[]).map((item) => String(asObject(item).name ?? ""))
-      : [];
+    const toolNames = discovery.tools.map((item) => String(asObject(item).name ?? ""));
     return {
       models: models.ok && modelIds.includes(gatewayModelAlias) ? "ready" : "failed",
-      tools: tools.ok && allowedTools.every((tool) => toolNames.includes(tool)) ? "ready" : "failed",
+      tools: discovery.failedServers.length === 0 && allowedTools.every((tool) => toolNames.includes(tool)) ? "ready" : "failed",
       modelRoute: {
         ...modelRoute,
         status: models.ok && modelIds.includes(gatewayModelAlias) ? "ready" : "failed",
@@ -1343,15 +1363,16 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const effectiveAgentId = policy?.agentId ?? agentId;
     const modelAlias = policy?.modelAlias ?? this.modelAlias;
     const credential = this.credentialFor(workspaceId, effectiveAgentId);
-    const [readiness, toolList] = await Promise.all([
+    const activeMcpServers = policy?.activeMcpServers ?? policy?.mcpServers ?? [policy?.mcpServer ?? this.mcpServer];
+    const [readiness, discovery] = await Promise.all([
       this.readiness(workspaceId, effectiveAgentId, policy),
-      this.dataCall("/mcp-rest/tools/list", credential),
+      this.discoverToolsForServers(credential, activeMcpServers),
     ]);
     if (readiness.models !== "ready" || !readiness.modelRoute) throw new LemmaComputerError("MODEL_ROUTE_FAILED", "The assigned model route is unavailable", 502, true);
     // Model routing and optional MCP connectors have independent health. A stale
     // or disconnected connector must not make a working model gateway look down.
-    const tools = toolList.ok && Array.isArray(asObject(toolList.payload).tools)
-      ? (asObject(toolList.payload).tools as unknown[]).map((item) => {
+    const tools = discovery.tools.length
+      ? discovery.tools.map((item) => {
           const tool = asObject(item);
           return { name: String(tool.name ?? ""), description: String(tool.description ?? "") };
         }).filter((tool) => tool.name.length > 0)
@@ -1401,7 +1422,10 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     });
     if (!grant.ok) throw this.upstreamError("GATEWAY_EXECUTION_GRANT_FAILED", grant.status, grant.payload);
     try {
-      const availableTools = await this.dataCall("/mcp-rest/tools/list", credential);
+      const availableTools = await this.dataCall(
+        `/mcp-rest/tools/list?mcp_server_name=${encodeURIComponent(input.serverName)}`,
+        credential,
+      );
       if (!availableTools.ok) throw this.upstreamError("GATEWAY_EXECUTION_DISCOVERY_FAILED", availableTools.status, availableTools.payload);
       const tools = Array.isArray(asObject(availableTools.payload).tools) ? asObject(availableTools.payload).tools as unknown[] : [];
       const selectedTool = tools.map(asObject).find((tool) => tool.name === input.toolName);
@@ -1443,6 +1467,39 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     }, true);
     this.workspaceGrantStates.delete(credential);
     if (!result.ok && result.status !== 404) throw this.upstreamError("GATEWAY_REVOKE_FAILED", result.status, result.payload);
+  }
+
+  private async discoverToolsForServers(credential: string, serverNames: string[]) {
+    if (serverNames.length === 0) return { tools: [] as unknown[], failedServers: [] as string[] };
+    const results = await Promise.all(serverNames.map(async (serverName) => {
+      try {
+        return {
+          serverName,
+          result: await this.dataCall(
+            `/mcp-rest/tools/list?mcp_server_name=${encodeURIComponent(serverName)}`,
+            credential,
+          ),
+        };
+      } catch {
+        return { serverName, result: null };
+      }
+    }));
+    const tools: unknown[] = [];
+    const failedServers: string[] = [];
+    for (const { serverName, result } of results) {
+      if (!result) {
+        failedServers.push(serverName);
+        continue;
+      }
+      const payload = asObject(result.payload);
+      const failed = !result.ok || (typeof payload.error === "string" && payload.error.length > 0);
+      if (failed) {
+        failedServers.push(serverName);
+        continue;
+      }
+      if (Array.isArray(payload.tools)) tools.push(...payload.tools);
+    }
+    return { tools, failedServers };
   }
 
   private async adminCall(path: string, init: { method: string; body?: JsonObject }, tolerateFailure = false) {

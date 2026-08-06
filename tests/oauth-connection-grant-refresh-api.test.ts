@@ -3,10 +3,12 @@ import test from "node:test";
 import type { IdentityContext, RuntimePolicy } from "@lemmacomputer/contracts";
 import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway, OAuthConnectionStatus } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore, MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
+import { AgentBridgeAuthority } from "../apps/control-api/src/agent-bridge.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "proxy-test-token-at-least-24-characters";
+const agentBridgeSecret = "oauth-refresh-agent-bridge-secret-at-least-32-characters";
 const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
 const headers = {
   "x-lemmacomputer-proxy-token": proxyToken,
@@ -32,7 +34,9 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
   const issuedPolicies: RuntimePolicy[] = [];
   let linearState: OAuthConnectionStatus["state"] = "connected";
   let renewalFails = false;
+  let grantRefreshFails = false;
   let renewalAttempts = 0;
+  let revokedGatewayGrants = 0;
   let oauthState = "";
   const statusServers: string[] = [];
   const toolServers: string[] = [];
@@ -40,6 +44,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     ensureGrant: async (input) => {
       assert.ok(input.policy);
       issuedPolicies.push(input.policy);
+      if (grantRefreshFails) throw new Error("gateway grant refresh unavailable");
       return {
         baseUrl: "http://gateway",
         credential: "scoped-" + input.workspaceId,
@@ -73,7 +78,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
       apiBaseUrl: "http://gateway/v1",
       mcpUrl: "http://gateway/mcp",
     }),
-    revoke: async () => undefined,
+    revoke: async () => { revokedGatewayGrants += 1; },
     ensureOAuthMcpServers: async () => undefined,
     beginUserOAuthConnection: async (input) => {
       oauthState = input.state;
@@ -117,7 +122,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     gateway,
     "api-fixture-approval-secret-at-least-32-characters",
     {},
-    { testIdentityMode: true, connectorRegistryStore: connectorRegistry },
+    { testIdentityMode: true, connectorRegistryStore: connectorRegistry, agentBridgeSecret },
   );
 
   try {
@@ -128,6 +133,13 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
       payload: { grantId: "personal" },
     });
     assert.equal(created.statusCode, 201);
+    const workspaceId = created.json().id as string;
+    const createdRecord = await workspaceStore.getOwned(identity, workspaceId);
+    assert.ok(createdRecord);
+    const originalGeneration = createdRecord.bridgeGrantGeneration;
+    const bridgeToken = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspaceId, issuedPolicies[0]!, {
+      workspaceGeneration: originalGeneration,
+    });
     assert.equal(issuedPolicies.length, 1);
     assert.deepEqual(issuedPolicies[0]!.mcpServers, ["lemmacomputer_fixture"]);
     assert.equal(issuedPolicies[0]!.mcpToolPermissions?.lemmacomputer_linear, undefined);
@@ -233,6 +245,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.ok(toolServers.every((serverName) => serverName === "lemmacomputer_linear"));
 
     linearState = "disconnected";
+    grantRefreshFails = true;
     statusServers.length = 0;
     toolServers.length = 0;
     const revoked = await app.inject({ method: "GET", url: "/v1/connections", headers });
@@ -247,6 +260,16 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.equal(await connectorRegistry.getConnectionState(identity.tenantId, identity.subjectId, "linear"), null);
     assert.ok(statusServers.every((serverName) => serverName === "lemmacomputer_linear"));
     assert.deepEqual(toolServers, []);
+    const afterFailedRefresh = await workspaceStore.getOwned(identity, workspaceId);
+    assert.equal(afterFailedRefresh?.bridgeGrantGeneration, originalGeneration, "connector gateway failure must not revoke the workspace-to-Control bridge");
+    assert.ok(revokedGatewayGrants >= 1, "the failed gateway projection is still removed fail closed");
+    const renewedBridge = await app.inject({
+      method: "POST",
+      url: "/internal/v1/agent/grants/renew",
+      headers: { authorization: `Bearer ${bridgeToken}` },
+    });
+    assert.equal(renewedBridge.statusCode, 200, "Sites and other Control capabilities retain a renewable workspace bridge");
+    grantRefreshFails = false;
 
     statusServers.length = 0;
     toolServers.length = 0;

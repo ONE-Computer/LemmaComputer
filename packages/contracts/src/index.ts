@@ -772,6 +772,7 @@ export const runtimeAgentPolicySchema = z.object({
   mcpServer: z.string().min(1).max(128),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
   mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
+  activeMcpServers: z.array(z.string().min(1).max(128)).max(32).optional(),
   mcpToolPermissions: z.record(
     z.string().min(1).max(128),
     z.array(z.string().min(1).max(128)).min(1).max(512),
@@ -804,6 +805,7 @@ export const runtimePolicySchema = z.object({
   requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
   mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
+  activeMcpServers: z.array(z.string().min(1).max(128)).max(32).optional(),
   mcpToolPermissions: z.record(
     z.string().min(1).max(128),
     z.array(z.string().min(1).max(128)).min(1).max(512),

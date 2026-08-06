@@ -393,10 +393,54 @@ test("only explicitly approved connected catalog services contribute workspace t
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
 
   assert.deepEqual(projected.mcpServers, ["lemmacomputer_ms365"]);
+  assert.deepEqual(projected.activeMcpServers, [], "an assigned but disconnected primary connector is not callable");
   assert.equal(projected.mcpToolPermissions?.lemmacomputer_linear, undefined);
   assert.equal(projected.mcpToolPermissions?.lemmacomputer_asana, undefined);
   assert.deepEqual(gateway.toolServers, ["lemmacomputer_linear"]);
   assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear"]);
+});
+
+test("a disconnected Microsoft 365 primary cannot suppress an approved connected Exa server", async () => {
+  const gateway = new FakeConnectionGateway();
+  gateway.statusByServer.set("lemmacomputer_exa", connected);
+  gateway.toolsByServer.set("lemmacomputer_exa", ["web_search"]);
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  await completeFixtureConnection(service, gateway, alpha, "exa");
+  await saveCurrentConnectorToolPolicy(service, alpha, "exa", { web_search: "allow" });
+  const basePolicy: RuntimePolicy = {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: "agent-alpha",
+    agentProfile: "claude-desktop-managed-v1",
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
+    allowedTools: ["list-mail-messages"],
+    toolPolicies: { "list-mail-messages": "allow" },
+  };
+
+  const projected = await service.projectConnectedConnectors(alpha, basePolicy);
+  assert.deepEqual(projected.mcpServers, ["lemmacomputer_ms365", "lemmacomputer_exa"]);
+  assert.deepEqual(projected.activeMcpServers, ["lemmacomputer_exa"]);
+  assert.deepEqual(projected.mcpToolPermissions?.lemmacomputer_exa, ["web_search"]);
+
+  gateway.statusByServer.set("lemmacomputer_exa", {
+    state: "disconnected",
+    connectedAt: null,
+    expiresAt: null,
+    account: null,
+  });
+  const noneConnected = await service.projectConnectedConnectors(alpha, basePolicy);
+  assert.deepEqual(noneConnected.mcpServers, ["lemmacomputer_ms365"]);
+  assert.deepEqual(noneConnected.activeMcpServers, [], "zero connected connectors is an explicit safe runtime state");
 });
 
 test("hosted connector OAuth binds the selected catalog entry and refuses cross-connector callbacks", async () => {
@@ -652,6 +696,7 @@ test("administrators can add a connector without code, then explicitly approve t
   };
   const unreviewed = await service.projectConnectedConnectors(alpha, basePolicy);
   assert.deepEqual(unreviewed.mcpServers, ["lemmacomputer_ms365"]);
+  assert.deepEqual(unreviewed.activeMcpServers, []);
   assert.equal(unreviewed.mcpToolPermissions?.[serverName], undefined);
 
   await saveCurrentConnectorToolPolicy(service, alpha, created.id, {
@@ -660,6 +705,7 @@ test("administrators can add a connector without code, then explicitly approve t
   });
   const projected = await service.projectConnectedConnectors(alpha, basePolicy);
   assert.deepEqual(projected.mcpServers, ["lemmacomputer_ms365", serverName]);
+  assert.deepEqual(projected.activeMcpServers, [serverName]);
   assert.deepEqual(projected.mcpToolPermissions?.[serverName], ["create_task", "list_tasks"]);
   assert.equal(projected.toolPolicies.create_task, "allow");
   assert.equal(projected.toolPolicies.list_tasks, "approval_required");
