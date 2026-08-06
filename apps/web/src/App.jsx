@@ -2850,6 +2850,7 @@ export function ChatScreen({
   historyLoadingMore = false,
   onLoadOlder,
   newThreadRequest = 0,
+  onRunningSessionIdsChange,
 }) {
   const [agents, setAgents] = useState([]);
   const [activeAgentId, setActiveAgentId] = useState("");
@@ -2930,34 +2931,6 @@ export function ChatScreen({
     onSessionChange(sessionId);
   };
 
-  const activateThread = (thread) => {
-    if (!thread.sessionId) {
-      setActiveThreadId(thread.id);
-      onSessionChange("");
-      return;
-    }
-    openThread(thread.sessionId);
-  };
-
-  const closeThread = (threadId) => {
-    const index = threads.findIndex((thread) => thread.id === threadId);
-    if (index === -1) return;
-    const next = threads.filter((thread) => thread.id !== threadId);
-    setThreads(next);
-    setThreadBusy((current) => {
-      const { [threadId]: _closed, ...remaining } = current;
-      return remaining;
-    });
-    setThreadServiceClasses((current) => {
-      const { [threadId]: _closed, ...remaining } = current;
-      return remaining;
-    });
-    if (threadId !== activeThreadId) return;
-    const replacement = next[index] ?? next[index - 1] ?? null;
-    setActiveThreadId(replacement?.id ?? "");
-    onSessionChange(replacement?.sessionId ?? "");
-  };
-
   const changeThreadBusy = (threadId, busy) => {
     setThreadBusy((current) => current[threadId] === busy ? current : { ...current, [threadId]: busy });
   };
@@ -2970,6 +2943,14 @@ export function ChatScreen({
     }
     onSessionChange(sessionId);
   };
+
+  useEffect(() => {
+    const runningSessions = threads
+      .filter((thread) => thread.sessionId && threadBusy[thread.id])
+      .map((thread) => thread.sessionId);
+    onRunningSessionIdsChange?.(runningSessions);
+    return () => onRunningSessionIdsChange?.([]);
+  }, [onRunningSessionIdsChange, threadBusy, threads]);
 
   useEffect(() => {
     let active = true;
@@ -3190,25 +3171,6 @@ export function ChatScreen({
   return (
     <div className="secondary-screen chat-screen">
       {!companionComposer && contextSelector}
-      <div className="chat-thread-tabs" role="tablist" aria-label="Open chat threads">
-        {threads.map((thread, index) => {
-          const session = sessions.find((item) => item.id === thread.sessionId);
-          const title = session?.title || (thread.sessionId ? `Conversation ${index + 1}` : "New thread");
-          const busy = Boolean(threadBusy[thread.id]);
-          return <div className={`chat-thread-tab${thread.id === activeThreadId ? " active" : ""}`} key={thread.id}>
-            <button type="button" role="tab" aria-selected={thread.id === activeThreadId} onClick={() => activateThread(thread)}>
-              {busy && <span className="chat-thread-running" aria-label="Working" />}
-              <span>{title}</span>
-            </button>
-            <button type="button" className="chat-thread-close" aria-label={`Close ${title}`} disabled={busy} onClick={() => closeThread(thread.id)}>
-              <Dismiss16Regular aria-hidden="true" />
-            </button>
-          </div>;
-        })}
-        <button type="button" className="chat-thread-new" onClick={startNewThread} aria-label="Start a new chat thread" title="Start a new chat thread">
-          <Add24Regular aria-hidden="true" />
-        </button>
-      </div>
       <div className="chat-thread-panes">
         {threads.map((thread) => {
           const requestedServiceClass = serviceClassFor(thread);
@@ -3310,6 +3272,7 @@ export function App() {
   const [chatHistoryLoadingMore, setChatHistoryLoadingMore] = useState(false);
   const [chatHistoryLoadRequest, setChatHistoryLoadRequest] = useState(0);
   const [newChatRequest, setNewChatRequest] = useState(0);
+  const [runningChatSessionIds, setRunningChatSessionIds] = useState([]);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminTeams, setAdminTeams] = useState([]);
   const [adminTeamsLoading, setAdminTeamsLoading] = useState(false);
@@ -4747,7 +4710,10 @@ export function App() {
             <div className="sidebar-chat-history-heading"><span>Recent</span><button type="button" aria-label="Start a new chat" title="Start a new chat" onClick={() => { requestNewChat(); setMobileNavOpen(false); }}><Add24Regular aria-hidden="true" /></button></div>
             {chatSessions.length === 0
               ? <p>No recent chats</p>
-              : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => { selectChatSession(item.id); setMobileNavOpen(false); }} aria-current={activeChatSessionId === item.id ? "true" : undefined}>{item.title || `Conversation ${chatSessions.length - index}`}</button>)}
+              : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => { selectChatSession(item.id); setMobileNavOpen(false); }} aria-current={activeChatSessionId === item.id ? "true" : undefined}>
+                <span>{item.title || `Conversation ${chatSessions.length - index}`}</span>
+                {runningChatSessionIds.includes(item.id) && <span className="sidebar-chat-running" aria-hidden="true" />}
+              </button>)}
             {chatHistoryHasMore && <button className="sidebar-chat-load-more" type="button" disabled={chatHistoryLoadingMore} onClick={() => setChatHistoryLoadRequest((value) => value + 1)}>{chatHistoryLoadingMore ? "Loading chats…" : "Load older chats"}</button>}
           </div>}
         </nav>
@@ -4842,6 +4808,7 @@ export function App() {
           onAgentChange={saveChatAgentPreference}
           historyLoadRequest={chatHistoryLoadRequest}
           newThreadRequest={newChatRequest}
+          onRunningSessionIdsChange={setRunningChatSessionIds}
           onHistoryMetadataChange={({ hasMore, loading }) => {
             setChatHistoryHasMore(hasMore);
             setChatHistoryLoadingMore(loading);

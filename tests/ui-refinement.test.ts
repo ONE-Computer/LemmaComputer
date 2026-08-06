@@ -396,7 +396,9 @@ test("Chat is last in navigation, with recent threads in the sidebar and a focus
   assert.ok(primaryNav.indexOf('label="Chat"') > primaryNav.indexOf('label="Connections"'));
   assert.match(primaryNav, /sidebar-chat-history/);
   assert.match(primaryNav, /Recent chat threads/);
+  assert.match(primaryNav, /aria-label="Start a new chat"/);
   assert.doesNotMatch(chatScreen, /chat-sessions/);
+  assert.doesNotMatch(chatScreen, /chat-thread-tabs/);
   assert.match(chatScreen, /<h1>How can \{agentName\} help\?<\/h1>/);
   assert.match(chatScreen, /ariaLabel="Choose chat agent"/);
   assert.match(chatScreen, /className="chat-send-button"/);

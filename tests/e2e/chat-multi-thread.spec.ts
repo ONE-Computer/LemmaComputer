@@ -7,7 +7,7 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBe(true);
 });
 
-test("keeps two chat threads mounted and streams both turns independently", async ({ page }) => {
+test("uses the Recent sidebar to switch between independently streaming chat threads", async ({ page }) => {
   await page.goto("/?view=chat&chat=fixture-session-1");
 
   const postedSessions: string[] = [];
@@ -20,22 +20,22 @@ test("keeps two chat threads mounted and streams both turns independently", asyn
   const firstComposer = page.locator("textarea:visible");
   await firstComposer.fill("Keep working on the dashboard layout in the first thread.");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.locator(".chat-thread-tab").filter({ hasText: "Quarterly planning" }).locator(".chat-thread-running")).toBeVisible();
+  await expect(page.locator(".sidebar-chat-history > button").filter({ hasText: "Quarterly planning" }).locator(".sidebar-chat-running")).toBeVisible();
 
-  await page.getByRole("button", { name: "Start a new chat thread" }).click();
-  await expect(page.getByRole("tab", { name: "New thread" })).toBeVisible();
+  await page.getByRole("button", { name: "Start a new chat" }).click();
+  await expect(page.locator(".chat-thread-tabs")).toHaveCount(0);
   await page.locator("textarea:visible").fill("Keep working on the dashboard layout in the second thread.");
   await page.getByRole("button", { name: "Send message" }).click();
 
   await expect.poll(() => postedSessions.length).toBe(2);
   expect(new Set(postedSessions).size).toBe(2);
-  await expect(page.locator(".chat-thread-running")).toHaveCount(2);
+  await expect(page.locator(".sidebar-chat-running")).toHaveCount(2);
 
-  await page.getByRole("tab", { name: /Quarterly planning/ }).click();
+  await page.getByRole("button", { name: /Quarterly planning/ }).click();
   await expect(page.locator(".chat-thread-pane:not([hidden])").getByText("Keep working on the dashboard layout in the first thread.")).toBeVisible();
 
-  await page.getByRole("tab", { name: /Conversation 2/ }).click();
+  await page.getByRole("button", { name: /Keep working on the dashboard layout in the second/ }).click();
   await expect(page.locator(".chat-thread-pane:not([hidden])").getByText("Keep working on the dashboard layout in the second thread.")).toBeVisible();
 
-  await expect(page.locator(".chat-thread-running")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".sidebar-chat-running")).toHaveCount(0, { timeout: 10_000 });
 });
