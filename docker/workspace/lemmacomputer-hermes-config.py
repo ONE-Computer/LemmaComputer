@@ -159,6 +159,10 @@ def main() -> None:
                 "connect_timeout": 5,
                 "env": {
                     "LEMMACOMPUTER_CONNECTORS_BROKER": f"http://127.0.0.1:{broker_port}",
+                    "LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE": str(
+                        home / ".lemmacomputer-connectors-recovery.json"
+                    ),
+                    "LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS": "60",
                 },
             },
         },

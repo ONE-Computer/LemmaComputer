@@ -52,6 +52,9 @@ EXECUTION_MODE = os.environ.get("LEMMACOMPUTER_EXECUTION_MODE", "managed")
 CONFIGURED_TIME_ZONE = os.environ.get("LEMMACOMPUTER_TIME_ZONE", "").strip()
 HERMES_URL = os.environ.get("LEMMACOMPUTER_HERMES_CHAT_URL", "")
 HERMES_KEY = os.environ.get("LEMMACOMPUTER_HERMES_CHAT_KEY", "")
+CONNECTOR_RECOVERY_STATE_FILE = Path(
+    os.environ.get("LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE", "")
+)
 HOME = Path("/home/kasm-user")
 STATE_DIR = HOME / ".lemmacomputer-chat" / AGENT
 STATE_FILE = STATE_DIR / "structured-sessions.json"
@@ -1371,6 +1374,15 @@ async def health(request: Request) -> Response:
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if AGENT == "hermes-claw":
+        try:
+            recovery_state = json.loads(CONNECTOR_RECOVERY_STATE_FILE.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            recovery_state = {}
+        if isinstance(recovery_state, dict) and recovery_state.get("state") == "exhausted":
+            return JSONResponse(
+                {"status": "unavailable", "code": "hermes_connectors_recovery_exhausted"},
+                status_code=503,
+            )
         if http is None:
             return JSONResponse(
                 {"status": "unavailable", "code": "hermes_connectors_unavailable"},

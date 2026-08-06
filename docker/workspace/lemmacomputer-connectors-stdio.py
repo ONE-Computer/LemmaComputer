@@ -34,6 +34,16 @@ TOOL_REFRESH_LOCK = threading.Lock()
 TOOL_LIST_READY = False
 TOOL_REFRESH_NEXT_AT = 0.0
 TOOL_REFRESH_RETRY_SECONDS = 0.0
+TOOL_RECOVERY_STARTED_AT: float | None = None
+TOOL_RECOVERY_EXHAUSTED = False
+CONNECTOR_RECOVERY_STATE_FILE = os.environ.get("LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE", "").strip()
+try:
+    CONNECTOR_RECOVERY_DEADLINE_SECONDS = float(
+        os.environ.get("LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS", "60")
+    )
+except ValueError:
+    CONNECTOR_RECOVERY_DEADLINE_SECONDS = 60.0
+CONNECTOR_RECOVERY_DEADLINE_SECONDS = min(300.0, max(0.1, CONNECTOR_RECOVERY_DEADLINE_SECONDS))
 WAIT_TOOL_NAME = "wait-for-governed-operation"
 LOCAL_UPLOAD_ROOT = os.path.realpath(os.path.expanduser("~"))
 MAX_INLINE_UPLOAD_BYTES = 4 * 1024 * 1024
@@ -645,8 +655,75 @@ def prepare_upload_body(arguments: dict) -> bool:
     return True
 
 
-def discover_tools() -> list[dict]:
+def write_connector_recovery_state(state: str) -> None:
+    if not CONNECTOR_RECOVERY_STATE_FILE:
+        return
+    temporary = f"{CONNECTOR_RECOVERY_STATE_FILE}.tmp-{os.getpid()}-{threading.get_ident()}"
+    try:
+        with open(temporary, "w", encoding="utf-8") as output:
+            json.dump({
+                "state": state,
+                "code": "connector_tool_refresh_exhausted" if state == "exhausted" else None,
+            }, output, separators=(",", ":"))
+            output.write("\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, CONNECTOR_RECOVERY_STATE_FILE)
+    except OSError as error:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        print(f"lemmacomputer-connectors-state: {type(error).__name__}", file=sys.stderr, flush=True)
+
+
+def complete_tool_recovery() -> None:
     global TOOL_LIST_READY, TOOL_REFRESH_NEXT_AT, TOOL_REFRESH_RETRY_SECONDS
+    global TOOL_RECOVERY_STARTED_AT, TOOL_RECOVERY_EXHAUSTED
+    changed = False
+    with TOOL_REFRESH_LOCK:
+        if TOOL_RECOVERY_EXHAUSTED:
+            return
+        changed = not TOOL_LIST_READY or TOOL_RECOVERY_STARTED_AT is not None
+        TOOL_LIST_READY = True
+        TOOL_REFRESH_NEXT_AT = 0.0
+        TOOL_REFRESH_RETRY_SECONDS = 0.0
+        TOOL_RECOVERY_STARTED_AT = None
+    if changed:
+        write_connector_recovery_state("ready")
+
+
+def begin_tool_recovery(reset: bool = False) -> None:
+    global TOOL_RECOVERY_STARTED_AT, TOOL_RECOVERY_EXHAUSTED
+    started = False
+    with TOOL_REFRESH_LOCK:
+        if TOOL_RECOVERY_EXHAUSTED and not reset:
+            return
+        if reset or TOOL_RECOVERY_STARTED_AT is None:
+            TOOL_RECOVERY_STARTED_AT = time.monotonic()
+            TOOL_RECOVERY_EXHAUSTED = False
+            started = True
+    if started:
+        write_connector_recovery_state("recovering")
+
+
+def exhaust_tool_recovery_if_due() -> bool:
+    global TOOL_RECOVERY_EXHAUSTED
+    exhausted = False
+    now = time.monotonic()
+    with TOOL_REFRESH_LOCK:
+        if (
+            not TOOL_RECOVERY_EXHAUSTED
+            and TOOL_RECOVERY_STARTED_AT is not None
+            and now - TOOL_RECOVERY_STARTED_AT >= CONNECTOR_RECOVERY_DEADLINE_SECONDS
+        ):
+            TOOL_RECOVERY_EXHAUSTED = True
+            exhausted = True
+    if exhausted:
+        write_connector_recovery_state("exhausted")
+    return exhausted
+
+
+def discover_tools() -> list[dict]:
     response = request_json("/mcp-rest/tools/list")
     tools = response.get("tools", [])
     if not isinstance(tools, list):
@@ -746,10 +823,7 @@ def discover_tools() -> list[dict]:
             "additionalProperties": False,
         },
     })
-    with TOOL_REFRESH_LOCK:
-        TOOL_LIST_READY = True
-        TOOL_REFRESH_NEXT_AT = 0.0
-        TOOL_REFRESH_RETRY_SECONDS = 0.0
+    complete_tool_recovery()
     return result
 
 
@@ -777,7 +851,7 @@ def tool_refresh_notification_due(interval: float, projection_changed: bool) -> 
             TOOL_LIST_READY = False
             TOOL_REFRESH_NEXT_AT = 0.0
             TOOL_REFRESH_RETRY_SECONDS = interval
-        if TOOL_LIST_READY or now < TOOL_REFRESH_NEXT_AT:
+        if TOOL_RECOVERY_EXHAUSTED or TOOL_LIST_READY or now < TOOL_REFRESH_NEXT_AT:
             return False
         delay = TOOL_REFRESH_RETRY_SECONDS or interval
         TOOL_REFRESH_NEXT_AT = now + delay
@@ -792,17 +866,26 @@ def monitor_tool_changes() -> None:
         interval = 5.0
     interval = min(60.0, max(0.1, interval))
     last_signature: str | None = None
+    begin_tool_recovery(reset=True)
     while True:
         try:
             signature = connector_tool_signature()
             projection_changed = last_signature is not None and signature != last_signature
+            if projection_changed:
+                begin_tool_recovery(reset=True)
+            elif TOOL_LIST_READY:
+                complete_tool_recovery()
             if tool_refresh_notification_due(interval, projection_changed):
                 notify_tools_changed()
             last_signature = signature
         except Exception as error:
             # Transient discovery failures must neither terminate the MCP
             # transport nor make the previous tool snapshot disappear.
+            begin_tool_recovery()
             print(f"lemmacomputer-connectors-monitor: {type(error).__name__}", file=sys.stderr, flush=True)
+        if exhaust_tool_recovery_if_due():
+            print("lemmacomputer-connectors-monitor: recovery deadline exhausted", file=sys.stderr, flush=True)
+            return
         time.sleep(interval)
 
 
