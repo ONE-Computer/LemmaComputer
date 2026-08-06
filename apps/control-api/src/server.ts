@@ -639,7 +639,15 @@ export function createControlServer(
       if (!workspace || workspace.bridgeGrantGeneration !== actor.workspaceGeneration) {
         throw new LemmaComputerError("AGENT_BRIDGE_GRANT_REVOKED", "Agent bridge authentication is no longer active", 403);
       }
-      if (!["ready", "open"].includes(workspace.state)) {
+      // Connector discovery is part of workspace bootstrap: Hermes resolves
+      // its MCP tool catalogue before the controller can mark the sandbox
+      // ready. Keep every mutating/operational bridge scope ready-only, while
+      // allowing this read-only, generation-bound projection during the two
+      // states that actively create a replacement runtime.
+      const activeStates = agentBridgeScope === "agent:mcp-discovery"
+        ? ["provisioning", "restarting", "ready", "open"]
+        : ["ready", "open"];
+      if (!activeStates.includes(workspace.state)) {
         throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not active for agent bridge access", 403);
       }
       agentPrincipals.set(request, actor);
