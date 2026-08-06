@@ -726,6 +726,7 @@ start_sdk_chat_adapter() {
       LEMMACOMPUTER_CHAT_PORT="$port" \
       LEMMACOMPUTER_HERMES_CHAT_URL="$hermes_url" \
       LEMMACOMPUTER_HERMES_CHAT_KEY="$hermes_key" \
+      LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE="/home/kasm-user/.hermes/.lemmacomputer-connectors-recovery.json" \
       /opt/lemmacomputer/agent-chat-venv/bin/python \
       /usr/local/libexec/lemmacomputer-agent-chat \
       >>"/run/lemmacomputer/${agent}-chat.log" 2>&1 &

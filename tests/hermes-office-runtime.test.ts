@@ -169,7 +169,10 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
   assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes-desktop \\\n+  && install_agent_skill \/home\/kasm-user\/\.hermes-desktop/);
   assert.match(entrypoint, /HERMES_BUNDLED_SKILLS=\/opt\/lemmacomputer\/hermes-agent\/skills/);
   assert.match(entrypoint, /lemmacomputer-hermes-config/);
+  assert.match(entrypoint, /LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE="\/home\/kasm-user\/\.hermes\/\.lemmacomputer-connectors-recovery\.json"/);
   assert.match(profileConfig, /OFFICE_DEFAULT_SKILLS = frozenset/);
+  assert.match(profileConfig, /LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS/);
+  assert.match(chatAdapter, /"hermes_connectors_recovery_exhausted"/);
   assert.match(profileConfig, /REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS \| frozenset\(\{"make-a-site"}\)/);
   for (const skill of ["docx", "pdf", "powerpoint", "xlsx", "ocr-and-documents"]) {
     assert.match(profileConfig, new RegExp(`"${skill}"`));

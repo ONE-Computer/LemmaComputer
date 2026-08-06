@@ -49,6 +49,11 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
 
   await configure();
   const first = JSON.parse(await readFile(path.join(home, "config.yaml"), "utf8"));
+  assert.deepEqual(first.mcp_servers.lemmacomputer_connectors.env, {
+    LEMMACOMPUTER_CONNECTORS_BROKER: "http://127.0.0.1:4314",
+    LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS: "60",
+    LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE: path.join(home, ".lemmacomputer-connectors-recovery.json"),
+  });
   assert.deepEqual(first.skills.disabled, ["teams-meeting-pipeline"]);
   for (const skill of [...officeSkills, "make-a-site"]) {
     assert.ok(!first.skills.disabled.includes(skill));

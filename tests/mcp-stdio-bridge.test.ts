@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
@@ -159,6 +159,124 @@ test("the workspace MCP bridge recovers when Hermes lists tools before the broke
     "successful discovery must stop recovery notifications",
   );
   assert.equal(listReads, 2, "recovery must add one bounded provider discovery request");
+});
+
+test("the workspace MCP bridge stops polling and records visible failure after its recovery deadline", async (context) => {
+  let signatureReads = 0;
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/signature") {
+      signatureReads += 1;
+      response.statusCode = 503;
+      response.end(JSON.stringify({ error: "shared broker outage" }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const temporary = await mkdtemp(join(tmpdir(), "lemmacomputer-connector-recovery-"));
+  context.after(() => rm(temporary, { recursive: true, force: true }));
+  const stateFile = join(temporary, "state.json");
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS: "0.1",
+      LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS: "0.3",
+      LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE: stateFile,
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" })}\n`);
+  const deadline = Date.now() + 2_000;
+  let state: { state?: string; code?: string | null } = {};
+  while (state.state !== "exhausted" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    state = JSON.parse(await readFile(stateFile, "utf8").catch(() => "{}"));
+  }
+  assert.deepEqual(state, {
+    state: "exhausted",
+    code: "connector_tool_refresh_exhausted",
+  });
+  assert.ok(signatureReads >= 2, "the bridge should attempt bounded recovery before failing");
+  const readsAfterDeadline = signatureReads;
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(signatureReads, readsAfterDeadline, "the exhausted bridge must stop polling indefinitely");
+  assert.equal(
+    responses.filter((response) => response.method === "notifications/tools/list_changed").length,
+    0,
+    "an unreachable broker must not cause refresh notification traffic",
+  );
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" })}\n`);
+  const pingDeadline = Date.now() + 1_000;
+  while (!responses.some((response) => response.id === 2) && Date.now() < pingDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(responses.some((response) => response.id === 2), "the MCP transport must remain alive for visible diagnosis");
+});
+
+test("the workspace MCP bridge stops unacknowledged refresh notifications after its recovery deadline", async (context) => {
+  let signatureReads = 0;
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/signature") {
+      signatureReads += 1;
+      response.end(JSON.stringify({ signature: "a".repeat(64) }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const temporary = await mkdtemp(join(tmpdir(), "lemmacomputer-connector-notifications-"));
+  context.after(() => rm(temporary, { recursive: true, force: true }));
+  const stateFile = join(temporary, "state.json");
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS: "0.1",
+      LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS: "0.35",
+      LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE: stateFile,
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" })}\n`);
+  const deadline = Date.now() + 2_000;
+  let state: { state?: string } = {};
+  while (state.state !== "exhausted" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    state = JSON.parse(await readFile(stateFile, "utf8").catch(() => "{}"));
+  }
+  assert.equal(state.state, "exhausted");
+  const notificationCount = responses.filter((response) => response.method === "notifications/tools/list_changed").length;
+  assert.ok(notificationCount >= 2, "the bridge should make more than one bounded refresh attempt");
+  const readsAfterDeadline = signatureReads;
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(
+    responses.filter((response) => response.method === "notifications/tools/list_changed").length,
+    notificationCount,
+    "the bridge must not notify Hermes after the finite recovery budget",
+  );
+  assert.equal(signatureReads, readsAfterDeadline, "the bridge must also stop signature polling after exhaustion");
 });
 
 test("Claude Desktop MCP call returns a governed handle while the bridge remains responsive during the wait", async (context) => {
