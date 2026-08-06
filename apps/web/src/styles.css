@@ -1884,8 +1884,12 @@ textarea:focus-visible,
   display: grid;
   height: calc(100vh - 48px);
   min-height: calc(100vh - 48px);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   padding-bottom: 28px;
+}
+
+.chat-thread-panes {
+  display: grid;
 }
 
 .chat-thread-panes,
@@ -1895,6 +1899,14 @@ textarea:focus-visible,
   height: 100%;
 }
 
+.chat-thread-pane {
+  display: grid;
+}
+
+.chat-thread-pane[hidden] {
+  display: none;
+}
+
 .chat-stage {
   position: relative;
   display: grid;
@@ -1902,6 +1914,7 @@ textarea:focus-visible,
   min-height: 0;
   height: 100%;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -1914,8 +1927,39 @@ textarea:focus-visible,
   display: grid;
   min-height: 0;
   min-width: 0;
+  height: 100%;
   grid-template-rows: minmax(0, 1fr) auto auto;
   padding: 0;
+}
+
+.chat-conversation-content {
+  display: contents;
+}
+
+.chat-empty-state {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  grid-row: 1 / -1;
+  align-content: center;
+  justify-items: center;
+  gap: 22px;
+  padding: 24px 0;
+}
+
+.chat-empty-state .chat-transcript {
+  width: 100%;
+  overflow: visible;
+  padding: 0;
+}
+
+.chat-empty-state .chat-welcome {
+  min-height: 0;
+  margin: 0 auto;
+}
+
+.companion-chat-shell .chat-empty-state {
+  display: contents;
 }
 
 .chat-context-selectors {

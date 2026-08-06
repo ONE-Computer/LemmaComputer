@@ -2608,6 +2608,7 @@ function ChatConversation({
           setActivityOpen((open) => !open);
         }}
       />
+      <div className={visibleMessages.length === 0 ? "chat-empty-state" : "chat-conversation-content"}>
       <div className="chat-transcript" ref={transcriptRef} aria-live="polite" aria-busy={turnBusy || historyState === "loading"}>
         {visibleMessages.length === 0 ? (
           <div className="chat-welcome">
@@ -2815,6 +2816,7 @@ function ChatConversation({
           </>
         )}
       </form>
+      </div>
     </section>
       <ActivityPanel
         open={activityOpen}
