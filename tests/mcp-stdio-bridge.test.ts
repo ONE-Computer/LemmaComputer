@@ -10,6 +10,7 @@ import test from "node:test";
 
 test("the workspace MCP bridge notifies Hermes when a connector changes its tool surface", async (context) => {
   let listReads = 0;
+  let signatureReads = 0;
   let connected = false;
   const server = createServer((request, response) => {
     response.setHeader("content-type", "application/json");
@@ -21,6 +22,11 @@ test("the workspace MCP bridge notifies Hermes when a connector changes its tool
         inputSchema: { type: "object" },
         mcp_info: { server_id: "exa-1", server_name: "lemmacomputer_exa" },
       }] : [] }));
+      return;
+    }
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/signature") {
+      signatureReads += 1;
+      response.end(JSON.stringify({ signature: connected ? "b".repeat(64) : "a".repeat(64) }));
       return;
     }
     response.statusCode = 404;
@@ -42,8 +48,9 @@ test("the workspace MCP bridge notifies Hermes when a connector changes its tool
 
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" })}\n`);
   const baselineDeadline = Date.now() + 2_000;
-  while (listReads < 1 && Date.now() < baselineDeadline) await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.ok(listReads >= 1, "the connector monitor must establish an initial tool snapshot");
+  while (signatureReads < 2 && Date.now() < baselineDeadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(signatureReads >= 2, "the connector monitor must establish and poll a projection signature");
+  assert.equal(listReads, 0, "idle connector monitoring must not probe provider tool lists");
   connected = true;
 
   const notificationDeadline = Date.now() + 2_000;
@@ -62,6 +69,7 @@ test("the workspace MCP bridge notifies Hermes when a connector changes its tool
   }
   const listed = responses.find((response) => response.id === 2)?.result as { tools: Array<{ name: string }> };
   assert.ok(listed.tools.some((tool) => tool.name === "exa__web_search_exa"));
+  assert.equal(listReads, 1, "tool discovery runs only when Hermes explicitly refreshes its tool surface");
 });
 
 test("Claude Desktop MCP call returns a governed handle while the bridge remains responsive during the wait", async (context) => {

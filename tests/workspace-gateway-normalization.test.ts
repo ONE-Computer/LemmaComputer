@@ -250,6 +250,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
 
 test("the workspace broker isolates failed and slow connector discovery and represents zero connected servers safely", async () => {
   let activeServers = ["lemmacomputer_ms365", "lemmacomputer_slow", "lemmacomputer_exa"];
+  let projectionHash = "a".repeat(64);
   const discoveryRequests: string[] = [];
   const toolCalls: Array<Record<string, unknown>> = [];
   const upstream = createServer(async (request, response) => {
@@ -257,7 +258,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     response.setHeader("content-type", "application/json");
     if (request.url === "/internal/v1/agent/mcp-discovery-plan") {
-      response.end(JSON.stringify({ servers: activeServers, projectionHash: "a".repeat(64) }));
+      response.end(JSON.stringify({ servers: activeServers, projectionHash }));
       return;
     }
     if (request.url?.startsWith("/mcp-rest/tools/list?")) {
@@ -319,6 +320,11 @@ test("the workspace broker isolates failed and slow connector discovery and repr
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(ready, true, stderr);
+
+    const signature = await fetch(`http://127.0.0.1:${brokerPort}/mcp-rest/tools/signature`);
+    assert.equal(signature.status, 200);
+    assert.deepEqual(await signature.json(), { signature: projectionHash, servers: activeServers });
+    assert.deepEqual(discoveryRequests, [], "projection polling must not contact connector providers");
 
     const partiallyAvailable = await fetch(`http://127.0.0.1:${brokerPort}/mcp-rest/tools/list`);
     assert.equal(partiallyAvailable.status, 200);

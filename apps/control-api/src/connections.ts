@@ -122,13 +122,6 @@ const toolsetDocumentHash = (tools: OAuthConnectionTool[]) => createHash("sha256
   .sort((left, right) => left.name.localeCompare(right.name))), "utf8")
   .digest("hex");
 
-const sameToolNames = (left: string[], right: string[]) => {
-  const sortedLeft = [...left].sort();
-  const sortedRight = [...right].sort();
-  return sortedLeft.length === sortedRight.length
-    && sortedLeft.every((value, index) => value === sortedRight[index]);
-};
-
 const canonicalHttpsOrigin = (input: string): string | null => {
   try {
     const url = new URL(input);
@@ -507,6 +500,10 @@ export class McpConnectionService {
         reviewRequired,
       };
     });
+    const removedTools = Object.keys(connector.toolPolicies)
+      .filter((toolName) => !discoveredToolNames.has(toolName))
+      .sort();
+    if (addedTools.length || changedTools.length || removedTools.length) this.invalidateProjection(identity);
     return {
       connectorId: connector.id,
       connectorName: connector.name,
@@ -515,7 +512,7 @@ export class McpConnectionService {
       changes: {
         added: addedTools.sort(),
         changed: changedTools.sort(),
-        removed: Object.keys(connector.toolPolicies).filter((toolName) => !discoveredToolNames.has(toolName)).sort(),
+        removed: removedTools,
       },
       tools,
     };
@@ -615,62 +612,33 @@ export class McpConnectionService {
     const connectionStates = new Map(
       (await this.registry.listConnectionStates(identity.tenantId, identity.subjectId)).map((state) => [state.connectorId, state]),
     );
-    const statusStates = new Map<string, Promise<OAuthConnectionStatus>>();
-    const currentStatus = (connector: ConnectorDefinition) => {
-      const existing = statusStates.get(connector.serverName);
-      if (existing) return existing;
-      const status = this.connectionStatus(identity, connector);
-      statusStates.set(connector.serverName, status);
-      return status;
-    };
     const cacheKey = `${identity.tenantId}:${identity.subjectId}:${policyProjectionDigest(policy)}`;
     const primaryConnector = connectors.find((connector) => connector.serverName === policy.mcpServer);
-    const primaryIsActive = async () => {
+    const primaryIsActive = () => {
       // A policy-owned fixture or non-catalog MCP remains active by contract.
       // Catalog connectors, including Microsoft 365, require a current
       // tenant/user connection before they are projected into a gateway key.
       if (!primaryConnector) return true;
-      if (!primaryConnector.enabled || !connectionStates.has(primaryConnector.id)) return false;
-      try {
-        return (await currentStatus(primaryConnector)).state === "connected";
-      } catch {
-        return false;
-      }
+      if (!primaryConnector.enabled) return false;
+      return connectionStates.get(primaryConnector.id)?.state === "connected";
     };
     const cached = this.projectionCache.get(cacheKey);
-    if (cached && cached.expiresAt > this.now()) {
-      const cachedServers = [...new Set((cached.policy.mcpServers ?? [policy.mcpServer]).filter((serverName) => serverName !== policy.mcpServer))];
-      const cachedPrimaryActive = (cached.policy.activeMcpServers ?? cached.policy.mcpServers ?? [policy.mcpServer])
-        .includes(policy.mcpServer);
-      const [currentPrimaryActive, ...fresh] = await Promise.all([
-        primaryIsActive(),
-        ...cachedServers.map(async (serverName) => {
-          const connector = connectors.find((candidate) => candidate.enabled && candidate.serverName === serverName);
-          if (!connector || !connectionStates.has(connector.id)) return false;
-          try {
-            if ((await currentStatus(connector)).state !== "connected") return false;
-            const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
-            const current = this.reviewedToolsForProjection(connector, discoveredTools);
-            const cachedTools = cached.policy.mcpToolPermissions?.[serverName] ?? [];
-            return sameToolNames(current.tools, cachedTools)
-              && current.tools.every((toolName) => cached.policy.toolPolicies[toolName] === current.toolPolicies[toolName]);
-          } catch {
-            return false;
-          }
-        }),
-      ]);
-      if (currentPrimaryActive === cachedPrimaryActive && fresh.every(Boolean)) return cached.policy;
-      this.invalidateProjection(identity);
-    }
+    if (cached && cached.expiresAt > this.now()) return cached.policy;
     const primaryToolPolicies = primaryConnector?.enabled === false
       ? Object.fromEntries(policy.allowedTools.map((tool) => [tool, "deny" as const]))
       : policy.toolPolicies;
+    // Agent discovery is a high-frequency control-plane read. Microsoft 365's
+    // built-in policy uses durable connection state and never spends provider
+    // calls on idle discovery. Reviewed custom connectors are revalidated only
+    // on a bounded cache miss so same-name definition changes still fail closed.
     const connected = await Promise.all(connectors
-      .filter((connector) => connector.enabled && connector.serverName !== policy.mcpServer && connectionStates.has(connector.id))
+      .filter((connector) => connector.enabled
+        && connector.serverName !== policy.mcpServer
+        && connectionStates.get(connector.id)?.state === "connected"
+        && Object.keys(connector.toolPolicies).some((toolName) => explicitToolPolicy(connector.toolPolicies, toolName) !== "deny"))
       .map(async (connector) => {
         try {
-          const status = await currentStatus(connector);
-          if (status.state !== "connected") return null;
+          if ((await this.connectionStatus(identity, connector)).state !== "connected") return null;
           const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
           const { tools, toolPolicies } = this.reviewedToolsForProjection(connector, discoveredTools);
           return tools.length ? { connector, tools, toolPolicies } : null;
@@ -679,7 +647,7 @@ export class McpConnectionService {
         }
       }));
     const active = connected.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
-    const primaryActive = await primaryIsActive();
+    const primaryActive = primaryIsActive();
     const mcpServers = [policy.mcpServer, ...active.map(({ connector }) => connector.serverName)];
     const activeMcpServers = [
       ...(primaryActive ? [policy.mcpServer] : []),
@@ -710,7 +678,7 @@ export class McpConnectionService {
         })),
       } : {}),
     });
-    this.projectionCache.set(cacheKey, { expiresAt: this.now() + 15_000, policy: projected });
+    this.projectionCache.set(cacheKey, { expiresAt: this.now() + 5 * 60_000, policy: projected });
     return projected;
   }
 

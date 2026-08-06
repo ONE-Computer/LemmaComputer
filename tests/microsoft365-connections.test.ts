@@ -396,8 +396,8 @@ test("only explicitly approved connected catalog services contribute workspace t
   assert.deepEqual(projected.activeMcpServers, [], "an assigned but disconnected primary connector is not callable");
   assert.equal(projected.mcpToolPermissions?.lemmacomputer_linear, undefined);
   assert.equal(projected.mcpToolPermissions?.lemmacomputer_asana, undefined);
-  assert.deepEqual(gateway.toolServers, ["lemmacomputer_linear"]);
-  assert.deepEqual(gateway.statusServers, ["lemmacomputer_linear"]);
+  assert.deepEqual(gateway.toolServers, [], "unreviewed connectors do not spend provider calls during agent discovery");
+  assert.deepEqual(gateway.statusServers, [], "unreviewed connectors do not spend status calls during agent discovery");
 });
 
 test("a disconnected Microsoft 365 primary cannot suppress an approved connected Exa server", async () => {
@@ -438,9 +438,44 @@ test("a disconnected Microsoft 365 primary cannot suppress an approved connected
     expiresAt: null,
     account: null,
   });
+  await service.list(alpha);
   const noneConnected = await service.projectConnectedConnectors(alpha, basePolicy);
   assert.deepEqual(noneConnected.mcpServers, ["lemmacomputer_ms365"]);
   assert.deepEqual(noneConnected.activeMcpServers, [], "zero connected connectors is an explicit safe runtime state");
+});
+
+test("repeated agent discovery never probes the connected Microsoft 365 provider", async () => {
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+  await completeFixtureConnection(service, gateway, alpha, "microsoft-365");
+  gateway.statusServers.length = 0;
+  gateway.toolServers.length = 0;
+  const policy: RuntimePolicy = {
+    schemaVersion: 1,
+    policyVersionId: "policy-v1",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "claude-desktop-standard-v1",
+    executionMode: "managed",
+    egressMode: "restricted",
+    agentId: "agent-alpha",
+    agentProfile: "claude-desktop-managed-v1",
+    networkProfile: "controlled-egress-v1",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
+    allowedTools: ["list-mail-messages", "create-calendar-event"],
+    toolPolicies: { "list-mail-messages": "allow", "create-calendar-event": "allow" },
+  };
+
+  for (let count = 0; count < 100; count += 1) {
+    const projected = await service.projectConnectedConnectors(alpha, policy);
+    assert.deepEqual(projected.activeMcpServers, ["lemmacomputer_ms365"]);
+  }
+  assert.deepEqual(gateway.statusServers, []);
+  assert.deepEqual(gateway.toolServers, []);
 });
 
 test("hosted connector OAuth binds the selected catalog entry and refuses cross-connector callbacks", async () => {
@@ -886,6 +921,7 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
   gateway.onTools = () => {
     throw new Error("fixture refresh denied");
   };
+  await service.list(alpha);
   const after = await service.projectConnectedConnectors(alpha, policy);
   assert.deepEqual(after.mcpServers, ["lemmacomputer_ms365"]);
   assert.equal(after.mcpToolPermissions?.lemmacomputer_linear, undefined);

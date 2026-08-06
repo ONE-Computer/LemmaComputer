@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import json
 import os
 import re
@@ -746,19 +745,12 @@ def discover_tools() -> list[dict]:
 
 
 def connector_tool_signature() -> str:
-    """Fingerprint the governed remote tool surface without retaining payloads."""
-    response = request_json("/mcp-rest/tools/list")
-    tools = response.get("tools", [])
-    if not isinstance(tools, list):
-        raise RuntimeError("gateway returned an invalid tool list")
-    canonical = [raw for raw in tools if isinstance(raw, dict)]
-    canonical.sort(key=lambda raw: (
-        str((raw.get("mcp_info") or {}).get("server_id", "")) if isinstance(raw.get("mcp_info"), dict) else "",
-        str(raw.get("name", "")),
-    ))
-    return hashlib.sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    """Read Control's durable projection fingerprint without probing providers."""
+    response = request_json("/mcp-rest/tools/signature")
+    signature = response.get("signature")
+    if not isinstance(signature, str) or not re.fullmatch(r"[a-f0-9]{64}", signature):
+        raise RuntimeError("gateway returned an invalid connector projection signature")
+    return signature
 
 
 def notify_tools_changed() -> None:
