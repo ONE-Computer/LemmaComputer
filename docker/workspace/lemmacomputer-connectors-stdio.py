@@ -30,6 +30,10 @@ LOCAL_UPLOADS: dict[str, dict] = {}
 RESPONSE_LOCK = threading.Lock()
 TOOL_MONITOR_LOCK = threading.Lock()
 TOOL_MONITOR_STARTED = False
+TOOL_REFRESH_LOCK = threading.Lock()
+TOOL_LIST_READY = False
+TOOL_REFRESH_NEXT_AT = 0.0
+TOOL_REFRESH_RETRY_SECONDS = 0.0
 WAIT_TOOL_NAME = "wait-for-governed-operation"
 LOCAL_UPLOAD_ROOT = os.path.realpath(os.path.expanduser("~"))
 MAX_INLINE_UPLOAD_BYTES = 4 * 1024 * 1024
@@ -642,6 +646,7 @@ def prepare_upload_body(arguments: dict) -> bool:
 
 
 def discover_tools() -> list[dict]:
+    global TOOL_LIST_READY, TOOL_REFRESH_NEXT_AT, TOOL_REFRESH_RETRY_SECONDS
     response = request_json("/mcp-rest/tools/list")
     tools = response.get("tools", [])
     if not isinstance(tools, list):
@@ -741,6 +746,10 @@ def discover_tools() -> list[dict]:
             "additionalProperties": False,
         },
     })
+    with TOOL_REFRESH_LOCK:
+        TOOL_LIST_READY = True
+        TOOL_REFRESH_NEXT_AT = 0.0
+        TOOL_REFRESH_RETRY_SECONDS = 0.0
     return result
 
 
@@ -759,6 +768,23 @@ def notify_tools_changed() -> None:
         print(json.dumps(document, separators=(",", ":")), flush=True)
 
 
+def tool_refresh_notification_due(interval: float, projection_changed: bool) -> bool:
+    """Schedule bounded refresh notifications until Hermes lists tools successfully."""
+    global TOOL_LIST_READY, TOOL_REFRESH_NEXT_AT, TOOL_REFRESH_RETRY_SECONDS
+    now = time.monotonic()
+    with TOOL_REFRESH_LOCK:
+        if projection_changed:
+            TOOL_LIST_READY = False
+            TOOL_REFRESH_NEXT_AT = 0.0
+            TOOL_REFRESH_RETRY_SECONDS = interval
+        if TOOL_LIST_READY or now < TOOL_REFRESH_NEXT_AT:
+            return False
+        delay = TOOL_REFRESH_RETRY_SECONDS or interval
+        TOOL_REFRESH_NEXT_AT = now + delay
+        TOOL_REFRESH_RETRY_SECONDS = min(60.0, delay * 2)
+        return True
+
+
 def monitor_tool_changes() -> None:
     try:
         interval = float(os.environ.get("LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS", "5"))
@@ -769,7 +795,8 @@ def monitor_tool_changes() -> None:
     while True:
         try:
             signature = connector_tool_signature()
-            if last_signature is not None and signature != last_signature:
+            projection_changed = last_signature is not None and signature != last_signature
+            if tool_refresh_notification_due(interval, projection_changed):
                 notify_tools_changed()
             last_signature = signature
         except Exception as error:

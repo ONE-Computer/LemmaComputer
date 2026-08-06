@@ -165,6 +165,8 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
   assert.match(entrypoint, /from tools\.skills_sync import sync_skills; sync_skills\(quiet=True\)/);
   assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes/);
   assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes-desktop/);
+  assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes \\\n+  && install_agent_skill \/home\/kasm-user\/\.hermes/);
+  assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes-desktop \\\n+  && install_agent_skill \/home\/kasm-user\/\.hermes-desktop/);
   assert.match(entrypoint, /HERMES_BUNDLED_SKILLS=\/opt\/lemmacomputer\/hermes-agent\/skills/);
   assert.match(entrypoint, /lemmacomputer-hermes-config/);
   assert.match(profileConfig, /OFFICE_DEFAULT_SKILLS = frozenset/);
