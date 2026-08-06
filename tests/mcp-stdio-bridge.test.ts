@@ -47,29 +47,118 @@ test("the workspace MCP bridge notifies Hermes when a connector changes its tool
   lines.on("line", (line) => responses.push(JSON.parse(line)));
 
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" })}\n`);
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
   const baselineDeadline = Date.now() + 2_000;
-  while (signatureReads < 2 && Date.now() < baselineDeadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  while ((signatureReads < 2 || !responses.some((response) => response.id === 2)) && Date.now() < baselineDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   assert.ok(signatureReads >= 2, "the connector monitor must establish and poll a projection signature");
-  assert.equal(listReads, 0, "idle connector monitoring must not probe provider tool lists");
+  assert.equal(listReads, 1, "only Hermes tool discovery may probe provider tool lists");
+  const baselineNotifications = responses.filter((response) => response.method === "notifications/tools/list_changed").length;
   connected = true;
 
+  const notificationDeadline = Date.now() + 2_000;
+  while (responses.filter((response) => response.method === "notifications/tools/list_changed").length <= baselineNotifications
+      && Date.now() < notificationDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(
+    responses.filter((response) => response.method === "notifications/tools/list_changed").length > baselineNotifications,
+    "Hermes must be told to refresh when Exa becomes available",
+  );
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 2_000;
+  while (!responses.some((response) => response.id === 3) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const listed = responses.find((response) => response.id === 3)?.result as { tools: Array<{ name: string }> };
+  assert.ok(listed.tools.some((tool) => tool.name === "exa__web_search_exa"));
+  assert.equal(listReads, 2, "tool discovery runs only when Hermes explicitly refreshes its tool surface");
+});
+
+test("the workspace MCP bridge recovers when Hermes lists tools before the broker is ready", async (context) => {
+  let brokerReady = false;
+  let listReads = 0;
+  let signatureFailures = 0;
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      listReads += 1;
+      if (!brokerReady) {
+        response.statusCode = 503;
+        response.end(JSON.stringify({ error: "broker starting" }));
+        return;
+      }
+      response.end(JSON.stringify({ tools: [{
+        name: "get-calendar-view",
+        description: "Read calendar events",
+        inputSchema: { type: "object" },
+        mcp_info: { server_id: "m365-1", server_name: "lemmacomputer_ms365" },
+      }] }));
+      return;
+    }
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/signature") {
+      if (!brokerReady) {
+        signatureFailures += 1;
+        response.statusCode = 503;
+        response.end(JSON.stringify({ error: "broker starting" }));
+        return;
+      }
+      response.end(JSON.stringify({ signature: "a".repeat(64) }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    env: { ...process.env, LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS: "0.1" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const lines = createInterface({ input: child.stdout });
+  const responses: Array<Record<string, unknown>> = [];
+  lines.on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" })}\n`);
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
+  const failureDeadline = Date.now() + 2_000;
+  while ((!responses.some((response) => response.id === 2) || signatureFailures < 1) && Date.now() < failureDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(responses.find((response) => response.id === 2)?.error, "the premature discovery must fail visibly");
+  assert.ok(signatureFailures >= 1, "the monitor must observe the broker startup race");
+
+  brokerReady = true;
   const notificationDeadline = Date.now() + 2_000;
   while (!responses.some((response) => response.method === "notifications/tools/list_changed") && Date.now() < notificationDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   assert.ok(
     responses.some((response) => response.method === "notifications/tools/list_changed"),
-    "Hermes must be told to refresh when Exa becomes available",
+    "Hermes must be prompted to recover its empty startup snapshot",
   );
 
-  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
-  const listDeadline = Date.now() + 2_000;
-  while (!responses.some((response) => response.id === 2) && Date.now() < listDeadline) {
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list" })}\n`);
+  const recoveryDeadline = Date.now() + 2_000;
+  while (!responses.some((response) => response.id === 3) && Date.now() < recoveryDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  const listed = responses.find((response) => response.id === 2)?.result as { tools: Array<{ name: string }> };
-  assert.ok(listed.tools.some((tool) => tool.name === "exa__web_search_exa"));
-  assert.equal(listReads, 1, "tool discovery runs only when Hermes explicitly refreshes its tool surface");
+  const listed = responses.find((response) => response.id === 3)?.result as { tools: Array<{ name: string }> };
+  assert.ok(listed.tools.some((tool) => tool.name === "microsoft365__get-calendar-view"));
+  const recoveredNotificationCount = responses.filter((response) => response.method === "notifications/tools/list_changed").length;
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(
+    responses.filter((response) => response.method === "notifications/tools/list_changed").length,
+    recoveredNotificationCount,
+    "successful discovery must stop recovery notifications",
+  );
+  assert.equal(listReads, 2, "recovery must add one bounded provider discovery request");
 });
 
 test("Claude Desktop MCP call returns a governed handle while the bridge remains responsive during the wait", async (context) => {

@@ -501,10 +501,12 @@ sync_hermes_skills() {
 
 agent_enabled hermes-claw \
   && configure_hermes /home/kasm-user/.hermes "$LEMMACOMPUTER_HERMES_MODEL_ALIAS" "$LEMMACOMPUTER_HERMES_ALLOWED_TOOLS" 4314 "$LEMMACOMPUTER_EXECUTION_MODE" \
-  && sync_hermes_skills /home/kasm-user/.hermes
+  && sync_hermes_skills /home/kasm-user/.hermes \
+  && install_agent_skill /home/kasm-user/.hermes
 agent_enabled hermes-desktop \
   && configure_hermes /home/kasm-user/.hermes-desktop "$LEMMACOMPUTER_HERMES_DESKTOP_MODEL_ALIAS" "$LEMMACOMPUTER_HERMES_DESKTOP_ALLOWED_TOOLS" 4316 "$LEMMACOMPUTER_EXECUTION_MODE" \
-  && sync_hermes_skills /home/kasm-user/.hermes-desktop
+  && sync_hermes_skills /home/kasm-user/.hermes-desktop \
+  && install_agent_skill /home/kasm-user/.hermes-desktop
 
 install -d -o 1000 -g 1000 -m 0755 /home/kasm-user/.config/autostart /home/kasm-user/Desktop
 rm -f /home/kasm-user/.config/autostart/claude-desktop.desktop \

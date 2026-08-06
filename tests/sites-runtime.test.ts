@@ -17,7 +17,7 @@ test("the reviewed site skill and scoped publisher reach every supported agent s
 
   assert.match(dockerfile, /COPY skills\/make-a-site \/opt\/lemmacomputer\/skills\/make-a-site/);
   assert.match(dockerfile, /COPY docker\/workspace\/lemmacomputer-sites\.py \/usr\/local\/bin\/lemmacomputer-sites/);
-  for (const home of [".claude", ".claude-cli", ".claude-chat-sdk", ".codex-cli", ".codex-chat-sdk"]) {
+  for (const home of [".claude", ".claude-cli", ".claude-chat-sdk", ".codex-cli", ".codex-chat-sdk", ".hermes", ".hermes-desktop"]) {
     assert.ok(entrypoint.includes(`install_agent_skill /home/kasm-user/${home}`));
   }
   assert.match(entrypoint, /LEMMACOMPUTER_SITES_BROKER=http:\/\/127\.0\.0\.1:4314/);
