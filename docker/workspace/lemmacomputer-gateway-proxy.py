@@ -35,6 +35,7 @@ TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 AGENT_BRIDGE_TOKEN_PATTERN = re.compile(r"^ocab2_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$")
 MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 TERMINAL_AGENT_BRIDGE_CODES = {"AGENT_BRIDGE_GRANT_REVOKED", "AGENT_BRIDGE_GRANT_EXPIRED"}
+MCP_DISCOVERY_TIMEOUT_SECONDS = 5
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
 LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
 UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
@@ -264,7 +265,10 @@ def discover_mcp_server(server_name: str) -> tuple[str, list[dict] | None, str |
         "accept": "application/json",
     })
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        # This endpoint feeds an MCP stdio handshake. A disconnected or slow
+        # connector must fail within that caller's startup budget so another
+        # healthy connector (or the valid empty tool surface) can still load.
+        with urllib.request.urlopen(request, timeout=MCP_DISCOVERY_TIMEOUT_SECONDS) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as error:
         error.read()
@@ -327,12 +331,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, status: int, value: dict) -> None:
         body = json.dumps(value, separators=(",", ":")).encode()
-        self.send_response(status)
-        self.send_header("content-type", "application/json")
-        self.send_header("content-length", str(len(body)))
-        self.send_header("connection", "close")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # The MCP client can cancel discovery when its own startup budget
+            # expires. That is a closed request, not a broker failure worth a
+            # second response or an unhandled server-thread traceback.
+            pass
         self.close_connection = True
 
     def control_json(self, path: str, body: dict | None = None) -> dict:

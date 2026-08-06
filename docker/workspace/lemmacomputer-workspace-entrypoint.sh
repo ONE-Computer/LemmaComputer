@@ -685,7 +685,10 @@ if agent_enabled hermes-claw; then
       /opt/lemmacomputer/hermes-venv/bin/hermes gateway run \
       >>/run/lemmacomputer/hermes-gateway-bootstrap.log 2>&1 &
   printf '%s\n' "$!" > /run/lemmacomputer/hermes-gateway.pid
-  for _ in $(seq 1 200); do
+  # Connector discovery is isolated per server and bounded to five seconds.
+  # Leave enough room for Hermes' own required-MCP retries without allowing a
+  # disconnected connector to terminate the workspace bootstrap.
+  for _ in $(seq 1 600); do
     if curl -fsS "http://127.0.0.1:8652/health" >/dev/null; then break; fi
     sleep 0.1
   done
