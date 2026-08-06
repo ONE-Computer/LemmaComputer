@@ -161,6 +161,21 @@ asyncio.run(run())
   assert.match(adapter, /Route\("\/api\/sessions\/\{session_id:uuid\}\/turns\/active", cancel_active_turn, methods=\["DELETE"\]\)/);
 });
 
+test("agent runtime permits independent active turns for separate chat sessions", async () => {
+  const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
+  const turnHandler = adapter.slice(adapter.indexOf("async def turns"), adapter.indexOf("async def cancel_active_turn"));
+
+  // The claim intentionally uses the session identifier. A second request in
+  // one conversation is rejected, but a different conversation is allowed to
+  // run in the same workspace agent process.
+  assert.match(turnHandler, /if session_id in active_sessions:/);
+  assert.match(turnHandler, /active_sessions\.add\(session_id\)/);
+  assert.doesNotMatch(turnHandler, /if active_sessions:/);
+  assert.match(turnHandler, /active_turns\[session_id\] = detached/);
+  assert.match(turnHandler, /active_sessions\.discard\(session_id\)/);
+  assert.match(turnHandler, /active_turns\.pop\(session_id, None\)/);
+});
+
 test("Control pumps workspace events independently of the browser response", async () => {
   const control = await readFile(new URL("../apps/control-api/src/server.ts", import.meta.url), "utf8");
   const path = '"/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages"';

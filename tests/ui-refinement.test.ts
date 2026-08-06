@@ -169,7 +169,7 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
   assert.match(app, /companion-chat-composer/);
   assert.match(app, /className="companion-chat-context-button"/);
   assert.match(app, /<span>\{contextSummary\}<\/span>/);
-  assert.match(app, /New conversation/);
+  assert.match(app, /New thread/);
   assert.match(app, /Recent conversations/);
   assert.match(app, /ariaLabel="Choose workspace"/);
   assert.match(app, /sessions=\{chatSessions\}[\s\S]*companionComposer[\s\S]*historyHasMore=\{chatHistoryHasMore\}/);
@@ -452,7 +452,7 @@ test("Chat keeps the selected conversation across a page refresh", async () => {
   assert.match(app, /onSessionChange=\{\(sessionId\) => selectChatSession\(sessionId, "replace"\)\}/);
   assert.match(app, /restoredTurnActive/);
   assert.match(app, /latestMessage\.metadata\?\.state === "streaming"/);
-  assert.match(app, /chatApi\.messages\(workspaceId, agentId, activeSessionId\)/);
+  assert.match(app, /chatApi\.messages\(workspaceId, agentId, sessionId\)/);
   assert.match(app, /chatApi\.cancelTurn\(workspaceId, agentId, sessionId\)/);
   assert.match(app, /onClick=\{stopTurn\}/);
   assert.match(workspaceApi, /turns\/active/);
