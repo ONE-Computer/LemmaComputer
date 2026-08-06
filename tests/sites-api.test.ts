@@ -78,7 +78,7 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
   const workspaceStore = new MemoryWorkspaceStore();
   const siteStore = new MemorySiteStore();
   const workspace = await workspaceStore.createOrGet(identity, "personal", "sites-workspace");
-  await workspaceStore.update(workspace.id, { state: "ready" });
+  await workspaceStore.update(workspace.id, { state: "provisioning" });
   const policy = runtimePolicyFor(effectivePolicy);
   const token = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, policy, {
     workspaceGeneration: workspace.bridgeGrantGeneration,
@@ -98,6 +98,17 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
     });
     assert.equal(discoveryPlan.statusCode, 200);
     assert.deepEqual(discoveryPlan.json().servers, ["lemmacomputer_fixture"]);
+
+    const blockedWhileProvisioning = await app.inject({
+      method: "POST",
+      url: "/internal/v1/agent/sites",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      payload,
+    });
+    assert.equal(blockedWhileProvisioning.statusCode, 403);
+    assert.equal(blockedWhileProvisioning.json().error.code, "WORKSPACE_NOT_READY");
+
+    await workspaceStore.update(workspace.id, { state: "ready" });
 
     const published = await app.inject({
       method: "POST",
