@@ -240,7 +240,7 @@ def control_json_request(path: str, body: dict | None = None) -> dict:
     return value
 
 
-def mcp_discovery_servers() -> list[str]:
+def mcp_discovery_plan() -> tuple[list[str], str]:
     plan = control_json_request("/internal/v1/agent/mcp-discovery-plan")
     raw_servers = plan.get("servers")
     if not isinstance(raw_servers, list) or len(raw_servers) > 32:
@@ -251,7 +251,16 @@ def mcp_discovery_servers() -> list[str]:
             raise ValueError("Control returned an invalid MCP server name")
         if raw not in servers:
             servers.append(raw)
-    return servers
+    projection_hash = plan.get("projectionHash")
+    if not isinstance(projection_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", projection_hash):
+        projection_hash = hashlib.sha256(
+            json.dumps(servers, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    return servers, projection_hash
+
+
+def mcp_discovery_servers() -> list[str]:
+    return mcp_discovery_plan()[0]
 
 
 def discover_mcp_server(server_name: str) -> tuple[str, list[dict] | None, str | None]:
@@ -302,6 +311,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.split("?", 1)[0] == "/mcp-rest/tools/list":
             self.discover_mcp_tools()
+            return
+        if self.path.split("?", 1)[0] == "/mcp-rest/tools/signature":
+            self.mcp_tool_signature()
             return
         self.forward()
 
@@ -374,6 +386,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
         except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError):
             self.send_json(502, {"error": "connector_discovery_unavailable", "message": "Connector discovery is temporarily unavailable"})
+
+    def mcp_tool_signature(self) -> None:
+        """Return Control's durable connector projection without probing providers."""
+        try:
+            servers, signature = mcp_discovery_plan()
+            self.send_json(200, {"signature": signature, "servers": servers})
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError):
+            self.send_json(502, {"error": "connector_projection_unavailable", "message": "Connector projection is temporarily unavailable"})
 
     def create_local_upload(self) -> None:
         try:
