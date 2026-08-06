@@ -275,6 +275,11 @@ RUN chmod 0755 \
 HEALTHCHECK --interval=5s --timeout=2s --start-period=15s --retries=12 \
   CMD test -f /run/lemmacomputer/workspace-ready \
     && timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6901' \
+    && { test ! -f /run/lemmacomputer/gateway-proxy.pid || curl -fsS http://127.0.0.1:4312/healthz >/dev/null; } \
+    && { test ! -f /run/lemmacomputer/hermes-gateway-proxy.pid || curl -fsS http://127.0.0.1:4314/healthz >/dev/null; } \
+    && { test ! -f /run/lemmacomputer/claude-cli-gateway-proxy.pid || curl -fsS http://127.0.0.1:4315/healthz >/dev/null; } \
+    && { test ! -f /run/lemmacomputer/hermes-desktop-gateway-proxy.pid || curl -fsS http://127.0.0.1:4316/healthz >/dev/null; } \
+    && { test ! -f /run/lemmacomputer/codex-cli-gateway-proxy.pid || curl -fsS http://127.0.0.1:4317/healthz >/dev/null; } \
     && { test ! -f /run/lemmacomputer/hermes-gateway.pid || curl -fsS http://127.0.0.1:8652/health >/dev/null; } \
     && { test ! -f /run/lemmacomputer/hermes-claw-chat.pid || timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8642'; } \
     || exit 1

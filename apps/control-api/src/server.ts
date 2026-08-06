@@ -287,6 +287,7 @@ const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeSco
   const path = url.split("?", 1)[0];
   if (method === "POST" && path === "/internal/v1/agent/grants/renew") return "agent:renew";
   if (method === "POST" && path === "/internal/v1/agent/usage-bindings") return "agent:usage-bindings";
+  if (method === "GET" && path === "/internal/v1/agent/mcp-discovery-plan") return "agent:mcp-discovery";
   if (method === "POST" && path === "/internal/v1/agent/sites") return "agent:sites";
   if (method === "GET" && /^\/internal\/v1\/agent\/operations\/[^/]+$/.test(path)) return "agent:operations:read";
   if (method === "POST" && (
@@ -748,7 +749,10 @@ export function createControlServer(
       try {
         return await service.refreshPolicyGrant(value.identity, policy, workspace.grantId);
       } catch (error) {
-        await service.revokePolicyGrant(workspace.id, policy).catch(() => undefined);
+        // A connector/model gateway refresh failure must fail closed at the
+        // gateway without revoking unrelated workspace-to-Control capabilities
+        // such as Sites, governed uploads, or operation status.
+        await service.revokeGatewayGrants(workspace.id, policy).catch(() => undefined);
         throw error;
       }
     }));
@@ -790,7 +794,7 @@ export function createControlServer(
       const results = await Promise.allSettled(workspaces.map(async (workspace) => {
         const { policy } = await policyForGrant(owner, effective, workspace.grantId);
         if (!usesManagedProvider(policy, provider)) return false;
-        await service.revokePolicyGrant(workspace.id, policy);
+        await service.revokeGatewayGrants(workspace.id, policy);
         return true;
       }));
       return {
@@ -1087,6 +1091,20 @@ export function createControlServer(
       expiresAt: new Date(renewed.expiresAt * 1_000).toISOString(),
     };
   });
+  app.get("/internal/v1/agent/mcp-discovery-plan", async (request) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
+    const { policy } = await channelPolicy(owner, actor.workspaceId);
+    const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
+    if (!allowedAgentIds.has(actor.agentId)) {
+      throw new LemmaComputerError("MCP_POLICY_BINDING_MISMATCH", "Connector discovery is not assigned to this workspace agent", 403);
+    }
+    return {
+      servers: policy.activeMcpServers ?? policy.mcpServers ?? [policy.mcpServer],
+      projectionHash: policy.connectionProjectionHash ?? null,
+    };
+  });
   app.post("/internal/v1/agent/usage-bindings", async (request) => {
     const actor = agentPrincipals.get(request);
     if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
@@ -1097,7 +1115,7 @@ export function createControlServer(
     const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
-    if (actor.policyHash !== policy.policyHash || !allowedAgentIds.has(actor.agentId)) {
+    if (!allowedAgentIds.has(actor.agentId)) {
       throw new LemmaComputerError("AI_USAGE_TASK_BINDING_MISMATCH", "The route preference is not assigned to this workspace agent", 403);
     }
     const binding = issueUsageTaskBinding(owner, actor.workspaceId, actor.agentId, "background", input.taskId, undefined, undefined, input.requestedServiceClass);
@@ -1111,7 +1129,7 @@ export function createControlServer(
     const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
-    if (actor.policyHash !== policy.policyHash || !allowedAgentIds.has(actor.agentId)) {
+    if (!allowedAgentIds.has(actor.agentId)) {
       throw new LemmaComputerError("SITE_POLICY_BINDING_MISMATCH", "Publishing is not assigned to this workspace agent", 403);
     }
     const input = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
@@ -1147,8 +1165,7 @@ export function createControlServer(
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
     if (
-      actor.policyHash !== policy.policyHash
-      || !allowedAgentIds.has(actor.agentId)
+      !allowedAgentIds.has(actor.agentId)
       || !policy.allowedTools.includes("upload-file-content")
       || policy.toolPolicies["upload-file-content"] !== "approval_required"
     ) {
@@ -1195,8 +1212,7 @@ export function createControlServer(
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
     if (
-      actor.policyHash !== policy.policyHash
-      || !allowedAgentIds.has(actor.agentId)
+      !allowedAgentIds.has(actor.agentId)
       || !policy.allowedTools.includes("delete-onedrive-file")
       || policy.toolPolicies["delete-onedrive-file"] !== "approval_required"
     ) {

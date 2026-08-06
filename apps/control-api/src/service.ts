@@ -380,8 +380,18 @@ export class WorkspaceService {
     const record = await this.store.getCurrent(identity, grantId);
     if (!record || !this.gateway || !["ready", "open"].includes(record.state)) return false;
     const authorized = this.authorizePolicy(identity, record.id, policy);
-    await this.ensureAgentGrants(identity, record, authorized?.payload.policy ?? policy);
+    const verifiedPolicy = authorized?.payload.policy ?? policy;
+    await Promise.all(this.agentPolicies(verifiedPolicy).map((agentPolicy) => this.gateway!.ensureGrant({
+      workspaceId: record.id,
+      identity,
+      agentId: agentPolicy.agentId,
+      policy: agentPolicy,
+    })));
     return true;
+  }
+
+  async revokeGatewayGrants(workspaceId: string, policy: RuntimePolicy) {
+    await this.revokeAgentGrants(workspaceId, policy);
   }
 
   async refreshEgressPolicy(identity: IdentityContext, policy: RuntimePolicy, grantId = "personal") {
@@ -403,7 +413,7 @@ export class WorkspaceService {
 
   async revokePolicyGrant(workspaceId: string, policy: RuntimePolicy) {
     await this.store.revokeBridgeGrants(workspaceId);
-    await this.revokeAgentGrants(workspaceId, policy);
+    await this.revokeGatewayGrants(workspaceId, policy);
   }
 
   async create(identity: IdentityContext, policy: RuntimePolicy, grantId: string, idempotencyKey: string, correlationId: string) {

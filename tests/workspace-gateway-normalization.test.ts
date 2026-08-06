@@ -3,6 +3,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createInterface } from "node:readline";
 import test from "node:test";
 
 const program = String.raw`
@@ -244,5 +245,207 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     child.kill("SIGTERM");
     await once(child, "exit");
     await new Promise<void>((resolve, reject) => upstream.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("the workspace broker isolates connector discovery and represents zero connected servers safely", async () => {
+  let activeServers = ["lemmacomputer_ms365", "lemmacomputer_exa"];
+  const discoveryRequests: string[] = [];
+  const toolCalls: Array<Record<string, unknown>> = [];
+  const upstream = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/internal/v1/agent/mcp-discovery-plan") {
+      response.end(JSON.stringify({ servers: activeServers, projectionHash: "a".repeat(64) }));
+      return;
+    }
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
+      discoveryRequests.push(request.url);
+      const serverName = new URL(request.url, "http://fixture").searchParams.get("mcp_server_name");
+      if (serverName === "lemmacomputer_ms365") {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ error: "secret-oauth-token-must-not-be-logged" }));
+        return;
+      }
+      response.end(JSON.stringify({
+        tools: [{
+          name: "web_search",
+          description: "Search with Exa",
+          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+          mcp_info: { server_id: "exa-server-id", server_name: "lemmacomputer_exa" },
+        }],
+      }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      toolCalls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.end(JSON.stringify({ content: [{ type: "text", text: "Exa result" }] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const upstreamPort = (upstream.address() as AddressInfo).port;
+  const brokerPort = await availableBrokerPort();
+  const child = spawn("python3", [proxyPath], {
+    env: {
+      ...process.env,
+      LEMMACOMPUTER_GATEWAY_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
+      LEMMACOMPUTER_GATEWAY_CREDENTIAL: "scoped-credential-at-least-24-characters",
+      LEMMACOMPUTER_MODEL_ALIAS: "lemmacomputer-assistant",
+      LEMMACOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
+      LEMMACOMPUTER_AGENT_BRIDGE_TOKEN: bridgeGrant(Math.floor(Date.now() / 1_000) + 900),
+      LEMMACOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
+    },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  try {
+    let ready = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        ready = (await fetch(`http://127.0.0.1:${brokerPort}/healthz`)).ok;
+        if (ready) break;
+      } catch { /* broker is still starting */ }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(ready, true, stderr);
+
+    const partiallyAvailable = await fetch(`http://127.0.0.1:${brokerPort}/mcp-rest/tools/list`);
+    assert.equal(partiallyAvailable.status, 200);
+    const partialBody = await partiallyAvailable.json() as {
+      tools: Array<{ name: string }>;
+      error: string | null;
+      failedServers: Array<{ serverName: string; code: string }>;
+    };
+    assert.deepEqual(partialBody.tools.map((tool) => tool.name), ["web_search"]);
+    assert.equal(partialBody.error, "partial_failure");
+    assert.deepEqual(partialBody.failedServers, [{ serverName: "lemmacomputer_ms365", code: "http_401" }]);
+    assert.deepEqual(
+      discoveryRequests.map((url) => new URL(url, "http://fixture").searchParams.get("mcp_server_name")).sort(),
+      ["lemmacomputer_exa", "lemmacomputer_ms365"],
+    );
+
+    const stdio = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        LEMMACOMPUTER_CONNECTORS_BROKER: `http://127.0.0.1:${brokerPort}`,
+        LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS: "60",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const lines = createInterface({ input: stdio.stdout });
+    const stdioResponses: Array<Record<string, unknown>> = [];
+    lines.on("line", (line) => stdioResponses.push(JSON.parse(line)));
+    try {
+      stdio.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+      for (let attempt = 0; attempt < 100 && !stdioResponses.some((response) => response.id === 1); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const listed = stdioResponses.find((response) => response.id === 1)?.result as { tools: Array<{ name: string }> };
+      const listedNames = listed.tools.map((tool) => tool.name);
+      assert.ok(listedNames.includes("exa__web_search"));
+      assert.equal(listedNames.some((name) => name.startsWith("microsoft365__")), false);
+      stdio.stdin.write(`${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "exa__web_search", arguments: { query: "stable MCP bridges" } },
+      })}\n`);
+      for (let attempt = 0; attempt < 100 && !stdioResponses.some((response) => response.id === 2); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const called = stdioResponses.find((response) => response.id === 2)?.result as { content: Array<{ text: string }> };
+      assert.equal(called.content[0]?.text, "Exa result");
+      assert.deepEqual(toolCalls, [{
+        server_id: "exa-server-id",
+        name: "web_search",
+        arguments: { query: "stable MCP bridges" },
+      }]);
+    } finally {
+      stdio.kill("SIGTERM");
+      await once(stdio, "exit");
+    }
+
+    activeServers = [];
+    const beforeEmpty = discoveryRequests.length;
+    const empty = await fetch(`http://127.0.0.1:${brokerPort}/mcp-rest/tools/list`);
+    assert.equal(empty.status, 200);
+    assert.deepEqual(await empty.json(), { tools: [], error: null, message: "No connected MCP servers" });
+    assert.equal(discoveryRequests.length, beforeEmpty, "zero connectors does not widen discovery to a global gateway list");
+    assert.match(stderr, /server=lemmacomputer_ms365 code=http_401/);
+    assert.doesNotMatch(stderr, /secret-oauth-token/);
+  } finally {
+    child.kill("SIGTERM");
+    await once(child, "exit");
+    await new Promise<void>((resolve, reject) => upstream.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("a revoked bridge grant is terminal and makes workspace broker health fail visibly", async () => {
+  let renewalRequests = 0;
+  const initialBridgeGrant = bridgeGrant(Math.floor(Date.now() / 1_000) + 1);
+  const control = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain fixture request bodies.
+    }
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/internal/v1/agent/grants/renew") {
+      renewalRequests += 1;
+      response.statusCode = 403;
+      response.end(JSON.stringify({
+        error: {
+          code: "AGENT_BRIDGE_GRANT_REVOKED",
+          message: "Agent bridge authentication is no longer active",
+        },
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  await new Promise<void>((resolve) => control.listen(0, "127.0.0.1", resolve));
+  const controlPort = (control.address() as AddressInfo).port;
+  const brokerPort = await availableBrokerPort();
+  const child = spawn("python3", [proxyPath], {
+    env: {
+      ...process.env,
+      LEMMACOMPUTER_GATEWAY_UPSTREAM: `http://127.0.0.1:${controlPort}`,
+      LEMMACOMPUTER_GATEWAY_CREDENTIAL: "scoped-credential-at-least-24-characters",
+      LEMMACOMPUTER_MODEL_ALIAS: "lemmacomputer-assistant",
+      LEMMACOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${controlPort}`,
+      LEMMACOMPUTER_AGENT_BRIDGE_TOKEN: initialBridgeGrant,
+      LEMMACOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
+    },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  try {
+    let failedHealth: Response | undefined;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${brokerPort}/healthz`);
+        if (response.status === 503) {
+          failedHealth = response;
+          break;
+        }
+      } catch { /* broker is still starting */ }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(failedHealth, stderr);
+    assert.deepEqual(await failedHealth.json(), { status: "failed", code: "AGENT_BRIDGE_GRANT_REVOKED" });
+    assert.equal(renewalRequests, 1, "the revoked grant is not retried forever");
+    assert.match(stderr, /terminal agent bridge failure/);
+  } finally {
+    child.kill("SIGTERM");
+    await once(child, "exit");
+    await new Promise<void>((resolve, reject) => control.close((error) => error ? reject(error) : resolve()));
   }
 });

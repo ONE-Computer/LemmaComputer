@@ -624,27 +624,44 @@ export class McpConnectionService {
       return status;
     };
     const cacheKey = `${identity.tenantId}:${identity.subjectId}:${policyProjectionDigest(policy)}`;
+    const primaryConnector = connectors.find((connector) => connector.serverName === policy.mcpServer);
+    const primaryIsActive = async () => {
+      // A policy-owned fixture or non-catalog MCP remains active by contract.
+      // Catalog connectors, including Microsoft 365, require a current
+      // tenant/user connection before they are projected into a gateway key.
+      if (!primaryConnector) return true;
+      if (!primaryConnector.enabled || !connectionStates.has(primaryConnector.id)) return false;
+      try {
+        return (await currentStatus(primaryConnector)).state === "connected";
+      } catch {
+        return false;
+      }
+    };
     const cached = this.projectionCache.get(cacheKey);
     if (cached && cached.expiresAt > this.now()) {
       const cachedServers = [...new Set((cached.policy.mcpServers ?? [policy.mcpServer]).filter((serverName) => serverName !== policy.mcpServer))];
-      const fresh = await Promise.all(cachedServers.map(async (serverName) => {
-        const connector = connectors.find((candidate) => candidate.enabled && candidate.serverName === serverName);
-        if (!connector || !connectionStates.has(connector.id)) return false;
-        try {
-          if ((await currentStatus(connector)).state !== "connected") return false;
-          const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
-          const current = this.reviewedToolsForProjection(connector, discoveredTools);
-          const cachedTools = cached.policy.mcpToolPermissions?.[serverName] ?? [];
-          return sameToolNames(current.tools, cachedTools)
-            && current.tools.every((toolName) => cached.policy.toolPolicies[toolName] === current.toolPolicies[toolName]);
-        } catch {
-          return false;
-        }
-      }));
-      if (fresh.every(Boolean)) return cached.policy;
+      const cachedPrimaryActive = (cached.policy.activeMcpServers ?? cached.policy.mcpServers ?? [policy.mcpServer])
+        .includes(policy.mcpServer);
+      const [currentPrimaryActive, ...fresh] = await Promise.all([
+        primaryIsActive(),
+        ...cachedServers.map(async (serverName) => {
+          const connector = connectors.find((candidate) => candidate.enabled && candidate.serverName === serverName);
+          if (!connector || !connectionStates.has(connector.id)) return false;
+          try {
+            if ((await currentStatus(connector)).state !== "connected") return false;
+            const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
+            const current = this.reviewedToolsForProjection(connector, discoveredTools);
+            const cachedTools = cached.policy.mcpToolPermissions?.[serverName] ?? [];
+            return sameToolNames(current.tools, cachedTools)
+              && current.tools.every((toolName) => cached.policy.toolPolicies[toolName] === current.toolPolicies[toolName]);
+          } catch {
+            return false;
+          }
+        }),
+      ]);
+      if (currentPrimaryActive === cachedPrimaryActive && fresh.every(Boolean)) return cached.policy;
       this.invalidateProjection(identity);
     }
-    const primaryConnector = connectors.find((connector) => connector.serverName === policy.mcpServer);
     const primaryToolPolicies = primaryConnector?.enabled === false
       ? Object.fromEntries(policy.allowedTools.map((tool) => [tool, "deny" as const]))
       : policy.toolPolicies;
@@ -662,7 +679,12 @@ export class McpConnectionService {
         }
       }));
     const active = connected.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    const primaryActive = await primaryIsActive();
     const mcpServers = [policy.mcpServer, ...active.map(({ connector }) => connector.serverName)];
+    const activeMcpServers = [
+      ...(primaryActive ? [policy.mcpServer] : []),
+      ...active.map(({ connector }) => connector.serverName),
+    ];
     const mcpToolPermissions = {
       [policy.mcpServer]: policy.allowedTools,
       ...Object.fromEntries(active.map(({ connector, tools }) => [connector.serverName, tools])),
@@ -670,10 +692,11 @@ export class McpConnectionService {
     const allowedTools = [...new Set(Object.values(mcpToolPermissions).flat())].sort();
     const hostedToolPolicies = Object.assign({}, ...active.map(({ toolPolicies }) => toolPolicies));
     const toolPolicies = { ...primaryToolPolicies, ...hostedToolPolicies };
-    const projectionDocument = JSON.stringify({ mcpServers, mcpToolPermissions, toolPolicies });
+    const projectionDocument = JSON.stringify({ mcpServers, activeMcpServers, mcpToolPermissions, toolPolicies });
     const projected = runtimePolicySchema.parse({
       ...policy,
       mcpServers,
+      activeMcpServers,
       mcpToolPermissions,
       allowedTools,
       toolPolicies,
@@ -681,6 +704,7 @@ export class McpConnectionService {
       ...(policy.agents ? {
         agents: policy.agents.map((agent) => ({
           ...agent,
+          activeMcpServers,
           allowedTools,
           toolPolicies: { ...agent.toolPolicies, ...primaryToolPolicies, ...hostedToolPolicies },
         })),

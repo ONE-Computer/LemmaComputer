@@ -16,8 +16,9 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 UPSTREAM = urlsplit(os.environ["LEMMACOMPUTER_GATEWAY_UPSTREAM"])
 CREDENTIAL = os.environ["LEMMACOMPUTER_GATEWAY_CREDENTIAL"]
@@ -32,19 +33,57 @@ HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authoriza
 MODEL_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 AGENT_BRIDGE_TOKEN_PATTERN = re.compile(r"^ocab2_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$")
+MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+TERMINAL_AGENT_BRIDGE_CODES = {"AGENT_BRIDGE_GRANT_REVOKED", "AGENT_BRIDGE_GRANT_EXPIRED"}
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
 LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
 UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
 UPLOAD_JOBS: dict[str, dict] = {}
 UPLOAD_KEYS: dict[tuple, str] = {}
 UPLOAD_LOCK = threading.Lock()
-AGENT_BRIDGE_LOCK = threading.Lock()
+AGENT_BRIDGE_LOCK = threading.RLock()
+AGENT_BRIDGE_TERMINAL_CODE: str | None = None
+
+
+class AgentBridgeTerminalError(RuntimeError):
+    pass
 
 if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CREDENTIAL) < 24
         or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or not AGENT_BRIDGE_TOKEN_PATTERN.fullmatch(AGENT_BRIDGE_TOKEN)
         or not MODEL_ALIAS_PATTERN.fullmatch(MODEL_ALIAS) or DEFAULT_SERVICE_CLASS not in {"auto", "lite", "balanced", "pro"}
         or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}):
     raise SystemExit("invalid gateway broker configuration")
+
+
+def agent_bridge_terminal_code() -> str | None:
+    with AGENT_BRIDGE_LOCK:
+        return AGENT_BRIDGE_TERMINAL_CODE
+
+
+def mark_agent_bridge_terminal(code: str) -> None:
+    global AGENT_BRIDGE_TERMINAL_CODE
+    with AGENT_BRIDGE_LOCK:
+        AGENT_BRIDGE_TERMINAL_CODE = code
+
+
+def control_http_error_code(error: urllib.error.HTTPError) -> str | None:
+    try:
+        payload = json.loads(error.read(16 * 1024))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    detail = payload.get("error")
+    return detail.get("code") if isinstance(detail, dict) and isinstance(detail.get("code"), str) else None
+
+
+def recognize_terminal_control_error(error: urllib.error.HTTPError) -> None:
+    code = control_http_error_code(error)
+    if code in TERMINAL_AGENT_BRIDGE_CODES:
+        mark_agent_bridge_terminal(code)
+        raise AgentBridgeTerminalError(
+            "Workspace authorization expired or changed. Restart this workspace to restore governed actions."
+        ) from None
 
 
 def bridge_token_expiry(token: str) -> int | None:
@@ -65,6 +104,10 @@ def agent_bridge_token() -> str:
     """Renew shortly before expiry without ever widening the injected grant's scopes."""
     global AGENT_BRIDGE_TOKEN
     with AGENT_BRIDGE_LOCK:
+        if AGENT_BRIDGE_TERMINAL_CODE is not None:
+            raise AgentBridgeTerminalError(
+                "Workspace authorization expired or changed. Restart this workspace to restore governed actions."
+            )
         expires_at = bridge_token_expiry(AGENT_BRIDGE_TOKEN)
         if expires_at is not None and expires_at > int(time.time()) + 60:
             return AGENT_BRIDGE_TOKEN
@@ -77,8 +120,12 @@ def agent_bridge_token() -> str:
             "authorization": f"Bearer {AGENT_BRIDGE_TOKEN}",
             "content-type": "application/json",
         })
-        with urllib.request.urlopen(request, timeout=10) as response:
-            document = json.loads(response.read())
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                document = json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            recognize_terminal_control_error(error)
+            raise
         renewed = document.get("token") if isinstance(document, dict) else None
         if not isinstance(renewed, str) or not AGENT_BRIDGE_TOKEN_PATTERN.fullmatch(renewed):
             raise ValueError("invalid renewed agent bridge grant")
@@ -96,6 +143,9 @@ def maintain_agent_bridge_token() -> None:
             continue
         try:
             agent_bridge_token()
+        except AgentBridgeTerminalError as error:
+            print(f"gateway-broker: terminal agent bridge failure: {error}", file=sys.stderr, flush=True)
+            return
         except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
             print(f"gateway-broker: agent bridge renewal failed: {str(error)[:160]}", file=sys.stderr, flush=True)
         time.sleep(15)
@@ -166,6 +216,72 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
     return json.dumps(request, separators=(",", ":")).encode(), requested_model
 
 
+def control_json_request(path: str, body: dict | None = None) -> dict:
+    headers = {"authorization": f"Bearer {agent_bridge_token()}"}
+    encoded = None
+    if body is not None:
+        encoded = json.dumps(body, separators=(",", ":")).encode()
+        headers["content-type"] = "application/json"
+    request = urllib.request.Request(
+        f"{CONTROL.scheme}://{CONTROL.hostname}:{CONTROL.port}{CONTROL.path.rstrip('/')}{path}",
+        data=encoded,
+        method="GET" if body is None else "POST",
+        headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=70) as response:
+            value = json.load(response)
+    except urllib.error.HTTPError as error:
+        recognize_terminal_control_error(error)
+        raise
+    if not isinstance(value, dict):
+        raise ValueError("invalid Control response")
+    return value
+
+
+def mcp_discovery_servers() -> list[str]:
+    plan = control_json_request("/internal/v1/agent/mcp-discovery-plan")
+    raw_servers = plan.get("servers")
+    if not isinstance(raw_servers, list) or len(raw_servers) > 32:
+        raise ValueError("Control returned an invalid MCP discovery plan")
+    servers: list[str] = []
+    for raw in raw_servers:
+        if not isinstance(raw, str) or not MCP_SERVER_NAME_PATTERN.fullmatch(raw):
+            raise ValueError("Control returned an invalid MCP server name")
+        if raw not in servers:
+            servers.append(raw)
+    return servers
+
+
+def discover_mcp_server(server_name: str) -> tuple[str, list[dict] | None, str | None]:
+    target = UPSTREAM._replace(
+        path=f"{UPSTREAM.path.rstrip('/')}/mcp-rest/tools/list",
+        query=urlencode({"mcp_server_name": server_name}),
+        fragment="",
+    ).geturl()
+    request = urllib.request.Request(target, method="GET", headers={
+        "authorization": f"Bearer {CREDENTIAL}",
+        "accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        error.read()
+        return server_name, None, f"http_{error.code}"
+    except (OSError, ValueError, urllib.error.URLError):
+        return server_name, None, "unavailable"
+    if not isinstance(payload, dict):
+        return server_name, None, "invalid_response"
+    upstream_error = payload.get("error")
+    if isinstance(upstream_error, str) and upstream_error:
+        return server_name, None, "upstream_error"
+    tools = payload.get("tools")
+    if not isinstance(tools, list) or not all(isinstance(tool, dict) for tool in tools):
+        return server_name, None, "invalid_tool_list"
+    return server_name, tools, None
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -174,12 +290,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/healthz":
-            body = b'{"status":"ready"}'
-            self.send_response(200)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            terminal_code = agent_bridge_terminal_code()
+            self.send_json(
+                503 if terminal_code else 200,
+                {"status": "failed", "code": terminal_code} if terminal_code else {"status": "ready"},
+            )
+            return
+        if self.path.split("?", 1)[0] == "/mcp-rest/tools/list":
+            self.discover_mcp_tools()
             return
         self.forward()
 
@@ -218,22 +336,34 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def control_json(self, path: str, body: dict | None = None) -> dict:
-        headers = {"authorization": f"Bearer {agent_bridge_token()}"}
-        encoded = None
-        if body is not None:
-            encoded = json.dumps(body, separators=(",", ":")).encode()
-            headers["content-type"] = "application/json"
-        request = urllib.request.Request(
-            f"{CONTROL.scheme}://{CONTROL.hostname}:{CONTROL.port}{CONTROL.path.rstrip('/')}{path}",
-            data=encoded,
-            method="GET" if body is None else "POST",
-            headers=headers,
-        )
-        with urllib.request.urlopen(request, timeout=70) as response:
-            value = json.load(response)
-        if not isinstance(value, dict):
-            raise ValueError("invalid Control response")
-        return value
+        return control_json_request(path, body)
+
+    def discover_mcp_tools(self) -> None:
+        try:
+            servers = mcp_discovery_servers()
+            if not servers:
+                self.send_json(200, {"tools": [], "error": None, "message": "No connected MCP servers"})
+                return
+            with ThreadPoolExecutor(max_workers=min(8, len(servers))) as executor:
+                results = list(executor.map(discover_mcp_server, servers))
+            tools: list[dict] = []
+            failures: list[dict[str, str]] = []
+            for server_name, discovered, error_code in results:
+                if discovered is None:
+                    failures.append({"serverName": server_name, "code": error_code or "discovery_failed"})
+                    self.log_message("MCP discovery failed server=%s code=%s", server_name, error_code or "discovery_failed")
+                    continue
+                tools.extend(discovered)
+            self.send_json(200, {
+                "tools": tools,
+                "error": "partial_failure" if failures else None,
+                "message": "Some connectors are unavailable" if failures else "Successfully retrieved tools",
+                "failedServers": failures,
+            })
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError):
+            self.send_json(502, {"error": "connector_discovery_unavailable", "message": "Connector discovery is temporarily unavailable"})
 
     def create_local_upload(self) -> None:
         try:
@@ -282,6 +412,8 @@ class Handler(BaseHTTPRequestHandler):
                 UPLOAD_KEYS[key] = operation["id"]
                 UPLOAD_JOBS[operation["id"]] = job
             self.send_json(201, {"operation": operation})
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
             self.send_json(400, {"error": str(error)[:240]})
 
@@ -315,6 +447,8 @@ class Handler(BaseHTTPRequestHandler):
                 "artifactSha256": artifact_sha256,
             })
             self.send_json(201, site)
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
             self.send_json(400, {"error": str(error)[:240]})
 
@@ -343,6 +477,8 @@ class Handler(BaseHTTPRequestHandler):
                 "idempotencyKey": f"workspace-delete-{fingerprint}",
             })
             self.send_json(201, {"operation": operation})
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
             self.send_json(400, {"error": str(error)[:240]})
 
@@ -366,6 +502,11 @@ class Handler(BaseHTTPRequestHandler):
             job["uploadUrl"] = started["uploadUrl"]
             threading.Thread(target=run_upload, args=(job,), daemon=True).start()
             self.send_json(202, {"state": "executing"})
+        except AgentBridgeTerminalError as error:
+            if job is not None and "leaseId" not in job:
+                with UPLOAD_LOCK:
+                    job["running"] = False
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
             if job is not None and "leaseId" not in job:
                 with UPLOAD_LOCK:
@@ -427,7 +568,11 @@ class Handler(BaseHTTPRequestHandler):
             }
         }
         target = CONTROL if is_operation else UPSTREAM
-        headers["authorization"] = f"Bearer {agent_bridge_token() if is_operation else CREDENTIAL}"
+        try:
+            headers["authorization"] = f"Bearer {agent_bridge_token() if is_operation else CREDENTIAL}"
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
+            return
         if body is not None:
             headers["content-length"] = str(len(body))
         connection_class = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection

@@ -91,6 +91,14 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
   });
 
   try {
+    const discoveryPlan = await app.inject({
+      method: "GET",
+      url: "/internal/v1/agent/mcp-discovery-plan",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    assert.equal(discoveryPlan.statusCode, 200);
+    assert.deepEqual(discoveryPlan.json().servers, ["lemmacomputer_fixture"]);
+
     const published = await app.inject({
       method: "POST",
       url: "/internal/v1/agent/sites",
@@ -120,20 +128,25 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
     assert.equal(content.headers["cross-origin-opener-policy"], "same-origin");
     assert.equal(content.body, html.toString());
 
-    const staleToken = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, { ...policy, policyHash: "b".repeat(64) }, {
+    const earlierPolicyToken = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, { ...policy, policyHash: "b".repeat(64) }, {
       workspaceGeneration: workspace.bridgeGrantGeneration,
     });
-    const rejected = await app.inject({
+    const afterPolicyProjectionChange = await app.inject({
       method: "POST",
       url: "/internal/v1/agent/sites",
-      headers: { authorization: `Bearer ${staleToken}`, "content-type": "application/json" },
-      payload,
+      headers: { authorization: `Bearer ${earlierPolicyToken}`, "content-type": "application/json" },
+      payload: { ...payload, name: "Hello again", slug: "hello-again" },
     });
-    assert.equal(rejected.statusCode, 403);
-    assert.equal(rejected.json().error.code, "SITE_POLICY_BINDING_MISMATCH");
+    assert.equal(afterPolicyProjectionChange.statusCode, 201, "the active workspace generation uses current policy instead of stranding a stale token snapshot");
 
     const removed = await app.inject({ method: "DELETE", url: `/v1/sites/${published.json().id}`, headers: browserHeaders });
     assert.equal(removed.statusCode, 204);
+    const removedAfterProjectionChange = await app.inject({
+      method: "DELETE",
+      url: `/v1/sites/${afterPolicyProjectionChange.json().id}`,
+      headers: browserHeaders,
+    });
+    assert.equal(removedAfterProjectionChange.statusCode, 204);
     assert.deepEqual((await siteStore.listOwnedSites(identity)), []);
   } finally {
     await app.close();

@@ -47,7 +47,7 @@ test("Auto model readiness stays healthy when an optional connector is unavailab
       response.end(JSON.stringify({ data: [{ id: "lemmacomputer-auto" }] }));
       return;
     }
-    if (request.url === "/mcp-rest/tools/list") {
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
       response.statusCode = 401;
       response.end(JSON.stringify({ error: "connector authentication required" }));
       return;
@@ -84,6 +84,76 @@ test("Auto model readiness stays healthy when an optional connector is unavailab
     assert.equal(readiness.tools, "failed");
     assert.equal(readiness.modelRoute?.status, "ready");
     assert.deepEqual(readiness.modelRoute?.capabilities, { vision: true });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("per-server discovery preserves Exa tools when Microsoft 365 fails", async () => {
+  let liveAdapter: LiteLLMGatewayAdapter;
+  const toolRequests: string[] = [];
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain request bodies so the local HTTP connection can be reused.
+    }
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/models") {
+      response.end(JSON.stringify({ data: [{ id: "lemmacomputer-assistant" }] }));
+      return;
+    }
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
+      toolRequests.push(request.url);
+      const serverName = new URL(request.url, "http://fixture").searchParams.get("mcp_server_name");
+      if (serverName === "lemmacomputer_ms365") {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ error: "connector authentication required" }));
+        return;
+      }
+      response.end(JSON.stringify({ tools: [{ name: "web_search", description: "Search the web" }] }));
+      return;
+    }
+    if (request.url?.startsWith("/key/list?")) {
+      const credential = liveAdapter.credentialFor("workspace-a", "claude-cli");
+      response.end(JSON.stringify({
+        keys: [{
+          token: createHash("sha256").update(credential).digest("hex"),
+          rpm_limit: 30,
+          max_parallel_requests: 30,
+        }],
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: "http://127.0.0.1:" + address.port,
+    workspaceUrl: "http://127.0.0.1:" + address.port,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const policy = {
+    modelAlias: "lemmacomputer-assistant",
+    agentId: "claude-cli",
+    mcpServer: "lemmacomputer_ms365",
+    mcpServers: ["lemmacomputer_ms365", "lemmacomputer_exa"],
+    activeMcpServers: ["lemmacomputer_ms365", "lemmacomputer_exa"],
+    mcpToolPermissions: {
+      lemmacomputer_ms365: ["list-mail-messages"],
+      lemmacomputer_exa: ["web_search"],
+    },
+    allowedTools: ["list-mail-messages", "web_search"],
+  } as never;
+  try {
+    const result = await liveAdapter.test("workspace-a", "claude-cli", policy);
+    assert.equal(result.availability, "ready");
+    assert.deepEqual(result.tools, [{ name: "web_search", description: "Search the web" }]);
+    assert.deepEqual(
+      [...new Set(toolRequests.map((url) => new URL(url, "http://fixture").searchParams.get("mcp_server_name")))].sort(),
+      ["lemmacomputer_exa", "lemmacomputer_ms365"],
+    );
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -190,7 +260,7 @@ test("expired Microsoft 365 connection discovery re-reads status without a tool 
         : { has_credential: true, is_expired: false, access_token: marker }));
       return;
     }
-    if (request.url === "/mcp-rest/tools/list") {
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
       if (failDiscovery) {
         response.statusCode = 401;
         response.end(JSON.stringify({ error: marker }));
@@ -234,9 +304,9 @@ test("expired Microsoft 365 connection discovery re-reads status without a tool 
     }]);
     assert.match(tools[0]!.definitionPreview ?? "", /"inputSchema"/);
     assert.equal(statusReads, 2);
-    assert.equal(requests.filter(({ url }) => url === "/mcp-rest/tools/list").length, 1);
+    assert.equal(requests.filter(({ url }) => url.startsWith("/mcp-rest/tools/list?")).length, 1);
     assert.equal(requests.filter(({ url }) => url === "/mcp-rest/tools/call").length, 0);
-    assert.ok(requests.filter(({ url }) => url === "/mcp-rest/tools/list").every(({ authorization }) => authorization !== "Bearer sk-master-test-not-used-00001"));
+    assert.ok(requests.filter(({ url }) => url.startsWith("/mcp-rest/tools/list?")).every(({ authorization }) => authorization !== "Bearer sk-master-test-not-used-00001"));
     assert.equal(JSON.stringify(tools).includes(marker), false);
     failDiscovery = true;
     await assert.rejects(
@@ -269,7 +339,7 @@ test("OAuth tool discovery canonicalizes definitions, excludes transport metadat
       response.end(JSON.stringify({ has_credential: true, is_expired: false }));
       return;
     }
-    if (request.url === "/mcp-rest/tools/list") {
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
       toolListReads += 1;
       if (toolListReads === 1) {
         response.end(JSON.stringify({
@@ -1197,7 +1267,7 @@ test("workspace grants bind LiteLLM user and agent identities without making eit
   }
 });
 
-test("workspace grant preserves the Control alias while scoping a managed-provider route to its tenant", async () => {
+test("workspace grant preserves assignments but grants only currently active MCP servers", async () => {
   let grantBody: Record<string, unknown> = {};
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -1226,6 +1296,7 @@ test("workspace grant preserves the Control alias while scoping a managed-provid
     modelAlias: "lemmacomputer-assistant",
     mcpServer: "lemmacomputer_ms365",
     mcpServers: ["lemmacomputer_ms365", "lemmacomputer_notion"],
+    activeMcpServers: ["lemmacomputer_notion"],
     mcpToolPermissions: {
       lemmacomputer_ms365: ["list-mail-folders", "list-calendars", "list-drives"],
       lemmacomputer_notion: ["search", "fetch"],
@@ -1241,9 +1312,8 @@ test("workspace grant preserves the Control alias while scoping a managed-provid
     assert.equal("tpm_limit" in grantBody, false);
     assert.equal(grantBody.max_parallel_requests, 30);
     assert.deepEqual(grantBody.object_permission, {
-      mcp_servers: ["lemmacomputer_ms365", "lemmacomputer_notion"],
+      mcp_servers: ["lemmacomputer_notion"],
       mcp_tool_permissions: {
-        lemmacomputer_ms365: ["list-mail-folders", "list-calendars", "list-drives"],
         lemmacomputer_notion: ["search", "fetch"],
       },
     });
@@ -1253,6 +1323,7 @@ test("workspace grant preserves the Control alias while scoping a managed-provid
     assert.equal(metadata.lemmacomputer_policy_model_alias, "lemmacomputer-assistant");
     assert.equal(metadata.lemmacomputer_client_model_alias, "lemmacomputer-assistant");
     assert.equal(metadata.lemmacomputer_policy_hash, "b".repeat(64));
+    assert.deepEqual(metadata.lemmacomputer_mcp_servers, ["lemmacomputer_notion"]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -1569,7 +1640,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
       response.end(JSON.stringify({ data: [{ id: "lemmacomputer-assistant" }] }));
       return;
     }
-    if (request.url === "/mcp-rest/tools/list") {
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
       if (!connectorAvailable) {
         response.statusCode = 401;
         response.end(JSON.stringify({ error: "connector authorization expired" }));
@@ -1639,7 +1710,7 @@ test("governed execution uses one exact-tool key, resolved server id, and revoca
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
     requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? ""), body });
     response.setHeader("content-type", "application/json");
-    if (request.url === "/mcp-rest/tools/list") {
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
       response.end(JSON.stringify({ tools: [{ name: "delete_file", mcp_info: { server_id: "fixture-server-id" } }] }));
     } else if (request.url === "/mcp-rest/tools/call") {
       response.end(JSON.stringify({ content: [{ type: "text", text: "Deleted fixture Q3-draft.docx" }] }));
@@ -1688,7 +1759,7 @@ test("governed execution preserves the connector's safe failure summary", async 
       // Drain request bodies so the local HTTP connection can be reused.
     }
     response.setHeader("content-type", "application/json");
-    if (request.url === "/mcp-rest/tools/list") {
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
       response.end(JSON.stringify({ tools: [{ name: "upload-file-content", mcp_info: { server_id: "fixture-server-id" } }] }));
     } else if (request.url === "/mcp-rest/tools/call") {
       response.end(JSON.stringify({

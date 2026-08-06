@@ -45,6 +45,7 @@ test("agent bridge grants are scoped and reject mutation", () => {
   assert.equal(grant.audience, agentBridgeAudience);
   assert.deepEqual(grant.scopes, [
     "agent:usage-bindings",
+    "agent:mcp-discovery",
     "agent:sites",
     "agent:operations:read",
     "agent:uploads",

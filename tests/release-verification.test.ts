@@ -27,6 +27,12 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(verifyRelease, /input: await readFile\(qualifier\)/);
   assert.match(verifyRelease, /stdio: \["pipe", "inherit", "inherit"\]/);
   assert.match(workspaceDockerfile, /workspace-ready[\s\S]+\/dev\/tcp\/127\.0\.0\.1\/6901/);
+  for (const port of [4312, 4314, 4315, 4316, 4317]) {
+    assert.ok(
+      workspaceDockerfile.includes(`http://127.0.0.1:${port}/healthz`),
+      `workspace health must surface terminal authorization failure from broker ${port}`,
+    );
+  }
   assert.match(releaseTag, /requiredReleaseGates\.some/);
   assert.match(qualifier, /agentProfile: "hermes-claw-managed-v1"/);
   assert.match(qualifier, /chatRuntimes: \[\{/);
