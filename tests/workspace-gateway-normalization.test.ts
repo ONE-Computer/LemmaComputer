@@ -248,8 +248,8 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
   }
 });
 
-test("the workspace broker isolates connector discovery and represents zero connected servers safely", async () => {
-  let activeServers = ["lemmacomputer_ms365", "lemmacomputer_exa"];
+test("the workspace broker isolates failed and slow connector discovery and represents zero connected servers safely", async () => {
+  let activeServers = ["lemmacomputer_ms365", "lemmacomputer_slow", "lemmacomputer_exa"];
   const discoveryRequests: string[] = [];
   const toolCalls: Array<Record<string, unknown>> = [];
   const upstream = createServer(async (request, response) => {
@@ -266,6 +266,11 @@ test("the workspace broker isolates connector discovery and represents zero conn
       if (serverName === "lemmacomputer_ms365") {
         response.statusCode = 401;
         response.end(JSON.stringify({ error: "secret-oauth-token-must-not-be-logged" }));
+        return;
+      }
+      if (serverName === "lemmacomputer_slow") {
+        await new Promise((resolve) => setTimeout(resolve, 5_500));
+        response.end(JSON.stringify({ tools: [] }));
         return;
       }
       response.end(JSON.stringify({
@@ -324,10 +329,13 @@ test("the workspace broker isolates connector discovery and represents zero conn
     };
     assert.deepEqual(partialBody.tools.map((tool) => tool.name), ["web_search"]);
     assert.equal(partialBody.error, "partial_failure");
-    assert.deepEqual(partialBody.failedServers, [{ serverName: "lemmacomputer_ms365", code: "http_401" }]);
+    assert.deepEqual(partialBody.failedServers, [
+      { serverName: "lemmacomputer_ms365", code: "http_401" },
+      { serverName: "lemmacomputer_slow", code: "unavailable" },
+    ]);
     assert.deepEqual(
       discoveryRequests.map((url) => new URL(url, "http://fixture").searchParams.get("mcp_server_name")).sort(),
-      ["lemmacomputer_exa", "lemmacomputer_ms365"],
+      ["lemmacomputer_exa", "lemmacomputer_ms365", "lemmacomputer_slow"],
     );
 
     const stdio = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
@@ -344,7 +352,7 @@ test("the workspace broker isolates connector discovery and represents zero conn
     lines.on("line", (line) => stdioResponses.push(JSON.parse(line)));
     try {
       stdio.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
-      for (let attempt = 0; attempt < 100 && !stdioResponses.some((response) => response.id === 1); attempt += 1) {
+      for (let attempt = 0; attempt < 700 && !stdioResponses.some((response) => response.id === 1); attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       const listed = stdioResponses.find((response) => response.id === 1)?.result as { tools: Array<{ name: string }> };
