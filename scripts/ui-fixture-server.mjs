@@ -436,6 +436,8 @@ let adminUsers = [
     email: session.user.email,
     displayName: session.user.displayName,
     status: "active",
+    membershipStatus: "active",
+    role: "owner",
     roles: session.roles,
     effectivePolicy: { version: 7, documentHash: digest, egressSecurityGroup: egressSecurityGroups[0] },
     workspaces: firewallWorkspaces(egressSecurityGroups[0]),
@@ -445,6 +447,8 @@ let adminUsers = [
     email: "hello@metech.dev",
     displayName: "METECH",
     status: "active",
+    membershipStatus: "active",
+    role: "member",
     roles: ["employee"],
     effectivePolicy: { version: 7, documentHash: digest, egressSecurityGroup: egressSecurityGroups[0] },
     workspaces: [{
@@ -453,6 +457,8 @@ let adminUsers = [
     }],
   },
 ];
+const fixtureInvitationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+let fixtureInvitations = [];
 const fixtureSpendTeamId = "11111111-1111-4111-8111-111111111111";
 let fixtureTeams = [{
   id: fixtureSpendTeamId,
@@ -1523,6 +1529,80 @@ const server = http.createServer((request, response) => {
   }
   if (key === "GET /v1/admin/users") {
     response.end(JSON.stringify({ users: adminUsers }));
+    return;
+  }
+  if (key === "GET /v1/admin/invitations") {
+    response.end(JSON.stringify({ invitations: fixtureInvitations }));
+    return;
+  }
+  if (key === "POST /v1/admin/invitations") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const timestamp = new Date().toISOString();
+      const invitation = {
+        invitationId: fixtureInvitationId,
+        organizationId: session.tenant.id,
+        email: input.email.toLowerCase(),
+        role: input.role,
+        status: "pending",
+        deliveryGeneration: 1,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+        acceptedMembershipId: null,
+        createdBy: session.user.id,
+        updatedBy: session.user.id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      fixtureInvitations = [invitation, ...fixtureInvitations.filter((item) => item.invitationId !== invitation.invitationId)];
+      response.statusCode = 201;
+      response.end(JSON.stringify({ invitation, replayed: false, acceptancePath: "/invite?token=oci_fixture_invitation_token" }));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/invitations\/[0-9a-f-]+\/resend$/.test(url.pathname)) {
+    const invitationId = url.pathname.split("/").at(-2);
+    let resent;
+    fixtureInvitations = fixtureInvitations.map((invitation) => {
+      if (invitation.invitationId !== invitationId) return invitation;
+      resent = {
+        ...invitation,
+        status: "pending",
+        deliveryGeneration: invitation.deliveryGeneration + 1,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      return resent;
+    });
+    response.end(JSON.stringify({ invitation: resent, replayed: false, acceptancePath: "/invite?token=oci_fixture_rotated_token" }));
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/admin\/invitations\/[0-9a-f-]+$/.test(url.pathname)) {
+    const invitationId = url.pathname.split("/").at(-1);
+    let revoked;
+    fixtureInvitations = fixtureInvitations.map((invitation) => {
+      if (invitation.invitationId !== invitationId) return invitation;
+      revoked = { ...invitation, status: "revoked", updatedAt: new Date().toISOString() };
+      return revoked;
+    });
+    response.end(JSON.stringify({ invitation: revoked, replayed: false }));
+    return;
+  }
+  if (request.method === "PATCH" && /^\/v1\/admin\/memberships\/[^/]+$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const userId = decodeURIComponent(url.pathname.split("/").at(-1));
+      const input = JSON.parse(body);
+      adminUsers = adminUsers.map((user) => user.userId === userId ? {
+        ...user,
+        ...(input.role ? { role: input.role, roles: input.role === "member" ? ["member", "employee"] : [input.role, "administrator"] } : {}),
+        ...(input.status ? { membershipStatus: input.status, status: input.status === "active" ? "active" : "disabled" } : {}),
+      } : user);
+      const user = adminUsers.find((candidate) => candidate.userId === userId);
+      response.end(JSON.stringify({ membership: { userId, role: user.role, status: user.membershipStatus }, revokedSessions: input.status && input.status !== "active" ? 1 : 0, revokedWorkspaceGrants: { revoked: input.status && input.status !== "active" ? 1 : 0, failed: 0 } }));
+    });
     return;
   }
   if (request.method === "PATCH" && /^\/v1\/admin\/users\/[^/]+\/status$/.test(url.pathname)) {

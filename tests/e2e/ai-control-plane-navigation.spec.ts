@@ -63,12 +63,12 @@ test("Settings keeps account and workspace controls without duplicating AI gover
   await page.goto("/?view=settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Credentials" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Workspace administration" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "People and access" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Provider settings" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "AI spend" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Model routing" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Workspace administration" }).click();
-  await expect(page.getByRole("heading", { name: "Workspace policy" })).toBeVisible();
+  await page.getByRole("button", { name: "People and access" }).click();
+  await expect(page.getByRole("heading", { name: "People and access" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Teams" })).toHaveCount(0);
 });
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { m365ToolCatalog, type EgressSecurityGroupVersion, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@lemmacomputer/contracts";
 import type { GatewayClient } from "@lemmacomputer/litellm-adapter";
@@ -196,6 +197,12 @@ test("runtime identity comes only from the authenticated server session", async 
       payload: { role: "admin" },
     });
     assert.equal(employeeRoleChange.statusCode, 403);
+    const employeeInvitations = await app.inject({
+      method: "GET",
+      url: "/v1/admin/invitations",
+      headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid" },
+    });
+    assert.equal(employeeInvitations.statusCode, 403);
   } finally {
     await app.close();
   }
@@ -221,6 +228,22 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   let betaMembershipRole: "owner" | "admin" | "member" = "member";
   let betaMembershipStatus: "active" | "suspended" | "revoked" = "active";
   let membershipChange: Record<string, unknown> | null = null;
+  const invitationId = "11111111-1111-4111-8111-111111111111";
+  let invitationInput: Record<string, unknown> | null = null;
+  let invitation = {
+    invitationId,
+    organizationId: "acme",
+    email: "new.user@example.test",
+    role: "admin" as const,
+    status: "pending" as "pending" | "accepted" | "expired" | "revoked",
+    deliveryGeneration: 1,
+    expiresAt: "2026-08-14T00:00:00.000Z",
+    acceptedMembershipId: null,
+    createdBy: "alpha",
+    updatedBy: "alpha",
+    createdAt: "2026-08-07T00:00:00.000Z",
+    updatedAt: "2026-08-07T00:00:00.000Z",
+  };
   let revokedSessionCount = 0;
   let assignedWorkspaceSubject = "";
   let savedToolPolicy: Record<string, McpToolPolicyDecision> | null = null;
@@ -337,6 +360,33 @@ test("only an administrator can assign and revoke the tenant policy through Cont
         revokedSessions: input.status === "suspended" || input.status === "revoked" ? 2 : 0,
       };
     },
+    listOrganizationInvitations: async (organizationId: string) => organizationId === "acme" && invitationInput ? [invitation] : [],
+    createOrganizationInvitation: async (input: Record<string, unknown>) => {
+      invitationInput = input;
+      invitation = {
+        ...invitation,
+        organizationId: String(input.organizationId),
+        email: String(input.email),
+        role: input.role as "admin",
+        expiresAt: (input.expiresAt as Date).toISOString(),
+      };
+      return { invitation, replayed: false };
+    },
+    resendOrganizationInvitation: async (input: Record<string, unknown>) => {
+      invitationInput = input;
+      invitation = {
+        ...invitation,
+        deliveryGeneration: invitation.deliveryGeneration + 1,
+        expiresAt: (input.expiresAt as Date).toISOString(),
+        updatedAt: (input.now as Date).toISOString(),
+      };
+      return { invitation, replayed: false };
+    },
+    revokeOrganizationInvitation: async (input: Record<string, unknown>) => {
+      invitationInput = input;
+      invitation = { ...invitation, status: "revoked", updatedAt: (input.now as Date).toISOString() };
+      return { invitation, replayed: false };
+    },
     setUserStatus: async ({ status }: { status: "active" | "disabled" }) => {
       betaStatus = status;
       return { status, revokedSessions: status === "disabled" ? 2 : 0 };
@@ -448,6 +498,16 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       payload: { status: "suspended" },
     });
     assert.equal(selfMembershipSuspend.statusCode, 409);
+    const betaPendingWorkspace = await workspaceStore.createOrGet(beta, "pending-access-revocation", "beta-pending-access-revocation");
+    const betaPendingOperation = await workspaceStore.createGovernedOperation({
+      id: randomUUID(), identity: beta, workspaceId: betaPendingWorkspace.id,
+      capabilityId: "m365-write-protected", serverName: "lemmacomputer_ms365", toolName: "send-mail",
+      schemaId: "lemmacomputer.m365.send-mail.v1", arguments: { draftId: "redacted" },
+      operationDigest: "9".repeat(64), nonce: randomUUID(), safeSummary: "Send a prepared email",
+      resourceName: "Prepared email", resourceLocation: "Outlook Mail", correlationId: "membership-suspend",
+      idempotencyKey: "membership-suspend-operation", createdAt: new Date(), expiresAt: new Date(Date.now() + 60_000),
+    });
+    assert.ok(betaPendingOperation);
     const membershipSuspended = await app.inject({
       method: "PATCH",
       url: "/v1/admin/memberships/beta",
@@ -457,6 +517,50 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     assert.equal(membershipSuspended.statusCode, 200);
     assert.equal(membershipSuspended.json().membership.status, "suspended");
     assert.equal(membershipSuspended.json().revokedSessions, 2);
+    assert.equal(membershipSuspended.json().revokedPendingOperations, 1);
+    assert.equal((await workspaceStore.getOwnedOperation(beta, betaPendingOperation.id))?.state, "failed");
+    assert.equal((await workspaceStore.getOwnedOperation(beta, betaPendingOperation.id))?.failureCode, "MEMBERSHIP_ACCESS_REVOKED");
+    await workspaceStore.remove(beta, betaPendingWorkspace.id);
+    revokedKeys.length = 0;
+
+    const emptyInvitations = await app.inject({ method: "GET", url: "/v1/admin/invitations", headers });
+    assert.equal(emptyInvitations.statusCode, 200);
+    assert.deepEqual(emptyInvitations.json().invitations, []);
+    const invited = await app.inject({
+      method: "POST",
+      url: "/v1/admin/invitations",
+      headers: { ...headers, "content-type": "application/json", "idempotency-key": "invite-new-user-0001" },
+      payload: { email: "New.User@Example.Test", role: "admin" },
+    });
+    assert.equal(invited.statusCode, 201);
+    assert.equal(invited.json().invitation.email, "new.user@example.test");
+    assert.match(invited.json().acceptancePath, /^\/invite\?token=oci_/);
+    assert.equal(invitationInput?.organizationId, "acme");
+    assert.equal(invitationInput?.createdBy, "alpha");
+    assert.match(String(invitationInput?.tokenHash), /^[a-f0-9]{64}$/);
+    assert.doesNotMatch(String(invitationInput?.tokenHash), /oci_/);
+    const ownerInviteDenied = await app.inject({
+      method: "POST",
+      url: "/v1/admin/invitations",
+      headers: { ...headers, "content-type": "application/json", "idempotency-key": "invite-owner-user-0001" },
+      payload: { email: "owner@example.test", role: "owner" },
+    });
+    assert.equal(ownerInviteDenied.statusCode, 403);
+    const resentInvitation = await app.inject({
+      method: "POST",
+      url: `/v1/admin/invitations/${invitationId}/resend`,
+      headers: { ...headers, "idempotency-key": "resend-new-user-0001" },
+    });
+    assert.equal(resentInvitation.statusCode, 200);
+    assert.equal(resentInvitation.json().invitation.deliveryGeneration, 2);
+    assert.match(resentInvitation.json().acceptancePath, /^\/invite\?token=oci_/);
+    const revokedInvitation = await app.inject({
+      method: "DELETE",
+      url: `/v1/admin/invitations/${invitationId}`,
+      headers,
+    });
+    assert.equal(revokedInvitation.statusCode, 200);
+    assert.equal(revokedInvitation.json().invitation.status, "revoked");
 
     const connectorCatalog = await app.inject({ method: "GET", url: "/v1/connections", headers });
     assert.equal(connectorCatalog.statusCode, 200);

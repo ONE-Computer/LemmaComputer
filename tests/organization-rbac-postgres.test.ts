@@ -8,6 +8,7 @@ import {
   organizationPermissions,
   permissionsByOrganizationRole,
   PostgresIdentityPolicyStore,
+  PostgresWorkspaceStore,
 } from "@lemmacomputer/workspace-store";
 
 const connectionString = process.env.ORGANIZATION_RBAC_TEST_DATABASE_URL;
@@ -225,6 +226,159 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
     assert.ok(membershipAudit.rowCount && membershipAudit.rowCount >= 4);
     assert.ok(membershipAudit.rows.some((row) => row.old_status === "active" && row.new_status === "suspended"));
     assert.ok(membershipAudit.rows.some((row) => row.old_role === "admin" && row.new_role === "member"));
+
+    const workspaceStore = new PostgresWorkspaceStore(pool);
+    const betaMemberIdentity = {
+      tenantId: betaOrganization,
+      subjectId: alphaInBeta.userId,
+      audience: "lemmacomputer-control" as const,
+    };
+    const governedWorkspace = await workspaceStore.createOrGet(betaMemberIdentity, "rbac-revocation", randomUUID());
+    const governedNow = new Date();
+    const pendingOperation = await workspaceStore.createGovernedOperation({
+      id: randomUUID(), identity: betaMemberIdentity, workspaceId: governedWorkspace.id,
+      capabilityId: "m365-write-protected", serverName: "lemmacomputer_ms365", toolName: "send-mail",
+      schemaId: "lemmacomputer.m365.send-mail.v1", arguments: { draftId: "redacted" },
+      operationDigest: "7".repeat(64), nonce: randomUUID(), safeSummary: "Send a prepared email",
+      resourceName: "Prepared email", resourceLocation: "Outlook Mail", correlationId: "rbac-revocation-create",
+      idempotencyKey: randomUUID(), createdAt: governedNow, expiresAt: new Date(governedNow.getTime() + 60_000),
+    });
+    assert.ok(pendingOperation);
+    assert.equal(await workspaceStore.cancelPendingGovernedOperations(
+      { ...betaMemberIdentity, subjectId: betaOwner }, governedNow, "rbac-revocation-other",
+    ), 0, "pending-operation revocation is user scoped");
+    assert.equal(await workspaceStore.cancelPendingGovernedOperations(
+      betaMemberIdentity, governedNow, "rbac-revocation-target",
+    ), 1);
+    assert.equal((await workspaceStore.getOwnedOperation(betaMemberIdentity, pendingOperation.id))?.failureCode, "MEMBERSHIP_ACCESS_REVOKED");
+    const revocationAudit = await pool.query(
+      "SELECT event_type FROM governed_operation_events WHERE operation_id=$1 ORDER BY id DESC LIMIT 1",
+      [pendingOperation.id],
+    );
+    assert.equal(revocationAudit.rows[0].event_type, "access_revoked");
+    assert.equal(await workspaceStore.cancelPendingGovernedOperations(
+      betaMemberIdentity, governedNow, "rbac-revocation-replay",
+    ), 0, "pending-operation cancellation is replay safe");
+
+    const invitationNow = new Date("2026-08-07T00:00:00.000Z");
+    const invitationExpiry = new Date("2026-08-14T00:00:00.000Z");
+    const invitationCreated = await store.createOrganizationInvitation({
+      organizationId: betaOrganization,
+      email: `Invited-${suffix}@Example.Test`,
+      role: "member",
+      tokenHash: "a".repeat(64),
+      idempotencyKeyHash: "1".repeat(64),
+      expiresAt: invitationExpiry,
+      createdBy: alphaInBeta.userId,
+      now: invitationNow,
+    });
+    assert.equal(invitationCreated.replayed, false);
+    assert.equal(invitationCreated.invitation.email, `invited-${suffix}@example.test`);
+    assert.equal(invitationCreated.invitation.status, "pending");
+    const invitationReplay = await store.createOrganizationInvitation({
+      organizationId: betaOrganization,
+      email: `invited-${suffix}@example.test`,
+      role: "member",
+      tokenHash: "b".repeat(64),
+      idempotencyKeyHash: "1".repeat(64),
+      expiresAt: invitationExpiry,
+      createdBy: alphaInBeta.userId,
+      now: invitationNow,
+    });
+    assert.equal(invitationReplay.replayed, true);
+    assert.equal(invitationReplay.invitation.invitationId, invitationCreated.invitation.invitationId);
+    await assert.rejects(
+      () => store.createOrganizationInvitation({
+        organizationId: betaOrganization,
+        email: `different-${suffix}@example.test`,
+        role: "member",
+        tokenHash: "c".repeat(64),
+        idempotencyKeyHash: "1".repeat(64),
+        expiresAt: invitationExpiry,
+        createdBy: alphaInBeta.userId,
+        now: invitationNow,
+      }),
+      { code: "IDEMPOTENCY_CONFLICT" },
+    );
+    await assert.rejects(
+      () => store.createOrganizationInvitation({
+        organizationId: betaOrganization,
+        email: `owner-invite-${suffix}@example.test`,
+        role: "owner",
+        tokenHash: "d".repeat(64),
+        idempotencyKeyHash: "2".repeat(64),
+        expiresAt: invitationExpiry,
+        createdBy: alphaInBeta.userId,
+        now: invitationNow,
+      }),
+      { code: "OWNER_CHANGE_FORBIDDEN" },
+    );
+    const invitationResent = await store.resendOrganizationInvitation({
+      organizationId: betaOrganization,
+      invitationId: invitationCreated.invitation.invitationId,
+      tokenHash: "e".repeat(64),
+      idempotencyKeyHash: "3".repeat(64),
+      expiresAt: new Date("2026-08-15T00:00:00.000Z"),
+      updatedBy: alphaInBeta.userId,
+      now: new Date("2026-08-08T00:00:00.000Z"),
+    });
+    assert.equal(invitationResent.invitation.deliveryGeneration, 2);
+    const resendReplay = await store.resendOrganizationInvitation({
+      organizationId: betaOrganization,
+      invitationId: invitationCreated.invitation.invitationId,
+      tokenHash: "f".repeat(64),
+      idempotencyKeyHash: "3".repeat(64),
+      expiresAt: new Date("2026-08-16T00:00:00.000Z"),
+      updatedBy: alphaInBeta.userId,
+      now: new Date("2026-08-09T00:00:00.000Z"),
+    });
+    assert.equal(resendReplay.replayed, true);
+    assert.equal(resendReplay.invitation.deliveryGeneration, 2);
+    const expiredInvitations = await store.listOrganizationInvitations(
+      betaOrganization,
+      new Date("2026-08-16T00:00:00.000Z"),
+    );
+    assert.equal(expiredInvitations.find((item) => item.invitationId === invitationCreated.invitation.invitationId)?.status, "expired");
+    const expiredResent = await store.resendOrganizationInvitation({
+      organizationId: betaOrganization,
+      invitationId: invitationCreated.invitation.invitationId,
+      tokenHash: "0".repeat(64),
+      idempotencyKeyHash: "4".repeat(64),
+      expiresAt: new Date("2026-08-24T00:00:00.000Z"),
+      updatedBy: alphaInBeta.userId,
+      now: new Date("2026-08-17T00:00:00.000Z"),
+    });
+    assert.equal(expiredResent.invitation.status, "pending");
+    assert.equal(expiredResent.invitation.deliveryGeneration, 3);
+    const invitationRevoked = await store.revokeOrganizationInvitation({
+      organizationId: betaOrganization,
+      invitationId: invitationCreated.invitation.invitationId,
+      revokedBy: alphaInBeta.userId,
+      now: new Date("2026-08-18T00:00:00.000Z"),
+    });
+    assert.equal(invitationRevoked.invitation.status, "revoked");
+    const revokeReplay = await store.revokeOrganizationInvitation({
+      organizationId: betaOrganization,
+      invitationId: invitationCreated.invitation.invitationId,
+      revokedBy: alphaInBeta.userId,
+      now: new Date("2026-08-19T00:00:00.000Z"),
+    });
+    assert.equal(revokeReplay.replayed, true);
+    const invitationAudit = await pool.query(
+      `SELECT event_type,old_status,new_status,delivery_generation
+       FROM organization_invitation_audit_events
+       WHERE organization_id=$1 AND invitation_id=$2
+       ORDER BY occurred_at,id`,
+      [betaOrganization, invitationCreated.invitation.invitationId],
+    );
+    assert.deepEqual(invitationAudit.rows.map((row) => row.event_type), [
+      "invitation.created",
+      "invitation.resent",
+      "invitation.resent",
+      "invitation.revoked",
+    ]);
+    assert.equal(invitationAudit.rows[2].old_status, "expired");
+    assert.equal(invitationAudit.rows[2].delivery_generation, 3);
     await store.createSession({
       tokenHash: `session-alpha-beta-compat-${suffix}`,
       userId: alphaInBeta.userId,

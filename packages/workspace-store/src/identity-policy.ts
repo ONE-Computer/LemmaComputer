@@ -255,6 +255,23 @@ export type OrganizationMembershipSummary = {
   updatedAt: string;
 };
 
+export type OrganizationInvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+
+export type OrganizationInvitationSummary = {
+  invitationId: string;
+  organizationId: string;
+  email: string;
+  role: OrganizationRole;
+  status: OrganizationInvitationStatus;
+  deliveryGeneration: number;
+  expiresAt: string;
+  acceptedMembershipId: string | null;
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export interface IdentityPolicyStore {
   createLoginAttempt(input: { stateHash: string; verifierCiphertext: string; nonce: string; returnPath: string; expiresAt: Date }): Promise<void>;
   consumeLoginAttempt(stateHash: string, now: Date): Promise<OidcLoginAttempt | null>;
@@ -266,6 +283,32 @@ export interface IdentityPolicyStore {
   getEffectivePolicy(userId: string): Promise<EffectivePolicy | null>;
   listUsers(tenantId: string): Promise<AdminUserSummary[]>;
   listOrganizationMemberships?(organizationId: string): Promise<OrganizationMembershipSummary[]>;
+  listOrganizationInvitations?(organizationId: string, now: Date): Promise<OrganizationInvitationSummary[]>;
+  createOrganizationInvitation?(input: {
+    organizationId: string;
+    email: string;
+    role: OrganizationRole;
+    tokenHash: string;
+    idempotencyKeyHash: string;
+    expiresAt: Date;
+    createdBy: string;
+    now: Date;
+  }): Promise<{ invitation: OrganizationInvitationSummary; replayed: boolean }>;
+  resendOrganizationInvitation?(input: {
+    organizationId: string;
+    invitationId: string;
+    tokenHash: string;
+    idempotencyKeyHash: string;
+    expiresAt: Date;
+    updatedBy: string;
+    now: Date;
+  }): Promise<{ invitation: OrganizationInvitationSummary; replayed: boolean }>;
+  revokeOrganizationInvitation?(input: {
+    organizationId: string;
+    invitationId: string;
+    revokedBy: string;
+    now: Date;
+  }): Promise<{ invitation: OrganizationInvitationSummary; replayed: boolean }>;
   changeOrganizationMembership?(input: {
     organizationId: string;
     targetUserId: string;
@@ -865,6 +908,296 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       [organizationId],
     );
     return result.rows.map((row) => this.mapMembership(row));
+  }
+
+  async listOrganizationInvitations(organizationId: string, now: Date) {
+    const result = await this.pool.query(
+      `SELECT * FROM organization_invitations
+       WHERE organization_id=$1
+       ORDER BY created_at DESC,id DESC`,
+      [organizationId],
+    );
+    return result.rows.map((row) => this.mapInvitation(row, now));
+  }
+
+  private mapInvitation(row: Record<string, unknown>, now: Date): OrganizationInvitationSummary {
+    const storedStatus = String(row.status) as OrganizationInvitationStatus;
+    const status = storedStatus === "pending" && new Date(String(row.expires_at)) <= now
+      ? "expired"
+      : storedStatus;
+    return {
+      invitationId: String(row.id),
+      organizationId: String(row.organization_id),
+      email: String(row.email),
+      role: String(row.role) as OrganizationRole,
+      status,
+      deliveryGeneration: Number(row.delivery_generation),
+      expiresAt: new Date(String(row.expires_at)).toISOString(),
+      acceptedMembershipId: row.accepted_membership_id ? String(row.accepted_membership_id) : null,
+      createdBy: String(row.created_by),
+      updatedBy: String(row.updated_by),
+      createdAt: new Date(String(row.created_at)).toISOString(),
+      updatedAt: new Date(String(row.updated_at)).toISOString(),
+    };
+  }
+
+  private async requireInvitationActor(
+    client: pg.PoolClient,
+    organizationId: string,
+    actorUserId: string,
+    targetRole?: OrganizationRole,
+  ) {
+    const actor = await client.query(
+      `SELECT role FROM organization_memberships
+       WHERE organization_id=$1 AND subject_user_id=$2 AND status='active'`,
+      [organizationId, actorUserId],
+    );
+    if (!actor.rowCount || actor.rows[0].role === "member") {
+      throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot manage organization access", 403);
+    }
+    if (targetRole === "owner" && actor.rows[0].role !== "owner") {
+      throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an organization owner can invite another owner", 403);
+    }
+    return String(actor.rows[0].role) as OrganizationRole;
+  }
+
+  private async recordInvitationEvent(client: pg.PoolClient, input: {
+    organizationId: string;
+    invitationId: string;
+    actorUserId: string;
+    eventType: "invitation.created" | "invitation.resent" | "invitation.expired" | "invitation.revoked" | "invitation.accepted";
+    oldStatus?: OrganizationInvitationStatus;
+    newStatus: OrganizationInvitationStatus;
+    role: OrganizationRole;
+    deliveryGeneration: number;
+    occurredAt: Date;
+  }) {
+    await client.query(
+      `INSERT INTO organization_invitation_audit_events (
+         organization_id,invitation_id,actor_user_id,event_type,
+         old_status,new_status,role,delivery_generation,occurred_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        input.organizationId,
+        input.invitationId,
+        input.actorUserId,
+        input.eventType,
+        input.oldStatus ?? null,
+        input.newStatus,
+        input.role,
+        input.deliveryGeneration,
+        input.occurredAt,
+      ],
+    );
+  }
+
+  async createOrganizationInvitation(input: {
+    organizationId: string;
+    email: string;
+    role: OrganizationRole;
+    tokenHash: string;
+    idempotencyKeyHash: string;
+    expiresAt: Date;
+    createdBy: string;
+    now: Date;
+  }) {
+    const email = input.email.trim().toLowerCase();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`organization-invitation:${input.organizationId}:${email}`]);
+      await this.requireInvitationActor(client, input.organizationId, input.createdBy, input.role);
+      const expired = await client.query(
+        `UPDATE organization_invitations
+         SET status='expired',updated_by=$3,updated_at=$4
+         WHERE organization_id=$1 AND email=$2 AND status='pending' AND expires_at<=$4
+         RETURNING *`,
+        [input.organizationId, email, input.createdBy, input.now],
+      );
+      for (const row of expired.rows) await this.recordInvitationEvent(client, {
+        organizationId: input.organizationId,
+        invitationId: String(row.id),
+        actorUserId: input.createdBy,
+        eventType: "invitation.expired",
+        oldStatus: "pending",
+        newStatus: "expired",
+        role: String(row.role) as OrganizationRole,
+        deliveryGeneration: Number(row.delivery_generation),
+        occurredAt: input.now,
+      });
+      const replay = await client.query(
+        `SELECT * FROM organization_invitations
+         WHERE organization_id=$1 AND create_idempotency_key_hash=$2`,
+        [input.organizationId, input.idempotencyKeyHash],
+      );
+      if (replay.rowCount) {
+        if (String(replay.rows[0].email) !== email || String(replay.rows[0].role) !== input.role) {
+          throw new LemmaComputerError("IDEMPOTENCY_CONFLICT", "The idempotency key was already used for a different invitation", 409);
+        }
+        await client.query("COMMIT");
+        return { invitation: this.mapInvitation(replay.rows[0], input.now), replayed: true };
+      }
+      const pending = await client.query(
+        `SELECT id FROM organization_invitations
+         WHERE organization_id=$1 AND email=$2 AND status='pending'`,
+        [input.organizationId, email],
+      );
+      if (pending.rowCount) {
+        throw new LemmaComputerError("INVITATION_ALREADY_PENDING", "A pending invitation already exists for this email", 409);
+      }
+      const created = await client.query(
+        `INSERT INTO organization_invitations (
+           organization_id,email,role,token_hash,create_idempotency_key_hash,
+           expires_at,created_by,updated_by,created_at,updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8)
+         RETURNING *`,
+        [
+          input.organizationId,
+          email,
+          input.role,
+          input.tokenHash,
+          input.idempotencyKeyHash,
+          input.expiresAt,
+          input.createdBy,
+          input.now,
+        ],
+      );
+      await this.recordInvitationEvent(client, {
+        organizationId: input.organizationId,
+        invitationId: String(created.rows[0].id),
+        actorUserId: input.createdBy,
+        eventType: "invitation.created",
+        newStatus: "pending",
+        role: input.role,
+        deliveryGeneration: 1,
+        occurredAt: input.now,
+      });
+      await client.query("COMMIT");
+      return { invitation: this.mapInvitation(created.rows[0], input.now), replayed: false };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async resendOrganizationInvitation(input: {
+    organizationId: string;
+    invitationId: string;
+    tokenHash: string;
+    idempotencyKeyHash: string;
+    expiresAt: Date;
+    updatedBy: string;
+    now: Date;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`organization-invitation:${input.organizationId}:${input.invitationId}`]);
+      const current = await client.query(
+        `SELECT * FROM organization_invitations
+         WHERE organization_id=$1 AND id=$2
+         FOR UPDATE`,
+        [input.organizationId, input.invitationId],
+      );
+      if (!current.rowCount) throw new LemmaComputerError("INVITATION_NOT_FOUND", "Invitation not found", 404);
+      const row = current.rows[0];
+      await this.requireInvitationActor(client, input.organizationId, input.updatedBy, String(row.role) as OrganizationRole);
+      if (row.last_resend_idempotency_key_hash === input.idempotencyKeyHash) {
+        await client.query("COMMIT");
+        return { invitation: this.mapInvitation(row, input.now), replayed: true };
+      }
+      if (row.status === "accepted" || row.status === "revoked") {
+        throw new LemmaComputerError("INVITATION_NOT_ACTIVE", "Only pending or expired invitations can be resent", 409);
+      }
+      const oldStatus = row.status === "pending" && new Date(String(row.expires_at)) <= input.now
+        ? "expired"
+        : String(row.status) as OrganizationInvitationStatus;
+      const resent = await client.query(
+        `UPDATE organization_invitations
+         SET status='pending',token_hash=$3,last_resend_idempotency_key_hash=$4,
+           delivery_generation=delivery_generation+1,expires_at=$5,
+           updated_by=$6,updated_at=$7
+         WHERE organization_id=$1 AND id=$2
+         RETURNING *`,
+        [input.organizationId, input.invitationId, input.tokenHash, input.idempotencyKeyHash, input.expiresAt, input.updatedBy, input.now],
+      );
+      await this.recordInvitationEvent(client, {
+        organizationId: input.organizationId,
+        invitationId: input.invitationId,
+        actorUserId: input.updatedBy,
+        eventType: "invitation.resent",
+        oldStatus,
+        newStatus: "pending",
+        role: String(resent.rows[0].role) as OrganizationRole,
+        deliveryGeneration: Number(resent.rows[0].delivery_generation),
+        occurredAt: input.now,
+      });
+      await client.query("COMMIT");
+      return { invitation: this.mapInvitation(resent.rows[0], input.now), replayed: false };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeOrganizationInvitation(input: {
+    organizationId: string;
+    invitationId: string;
+    revokedBy: string;
+    now: Date;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query(
+        `SELECT * FROM organization_invitations
+         WHERE organization_id=$1 AND id=$2
+         FOR UPDATE`,
+        [input.organizationId, input.invitationId],
+      );
+      if (!current.rowCount) throw new LemmaComputerError("INVITATION_NOT_FOUND", "Invitation not found", 404);
+      const row = current.rows[0];
+      await this.requireInvitationActor(client, input.organizationId, input.revokedBy, String(row.role) as OrganizationRole);
+      if (row.status === "revoked") {
+        await client.query("COMMIT");
+        return { invitation: this.mapInvitation(row, input.now), replayed: true };
+      }
+      if (row.status === "accepted") {
+        throw new LemmaComputerError("INVITATION_NOT_ACTIVE", "An accepted invitation cannot be revoked", 409);
+      }
+      const oldStatus = row.status === "pending" && new Date(String(row.expires_at)) <= input.now
+        ? "expired"
+        : String(row.status) as OrganizationInvitationStatus;
+      const revoked = await client.query(
+        `UPDATE organization_invitations
+         SET status='revoked',revoked_at=$3,updated_by=$4,updated_at=$3
+         WHERE organization_id=$1 AND id=$2
+         RETURNING *`,
+        [input.organizationId, input.invitationId, input.now, input.revokedBy],
+      );
+      await this.recordInvitationEvent(client, {
+        organizationId: input.organizationId,
+        invitationId: input.invitationId,
+        actorUserId: input.revokedBy,
+        eventType: "invitation.revoked",
+        oldStatus,
+        newStatus: "revoked",
+        role: String(revoked.rows[0].role) as OrganizationRole,
+        deliveryGeneration: Number(revoked.rows[0].delivery_generation),
+        occurredAt: input.now,
+      });
+      await client.query("COMMIT");
+      return { invitation: this.mapInvitation(revoked.rows[0], input.now), replayed: false };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   private mapMembership(row: Record<string, unknown>): OrganizationMembershipSummary {

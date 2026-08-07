@@ -899,57 +899,115 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
   );
 }
 
-function AdminScreen({ users, currentUserId, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
+function AdminScreen({ users, invitations, currentUserId, loading, invitationBusy, busyUserId, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
+  const roleOptions = [
+    { value: "member", label: "Member" },
+    { value: "admin", label: "Administrator" },
+    { value: "owner", label: "Owner" },
+  ];
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteDraft, setInviteDraft] = useState({ email: "", role: "member" });
+  const [acceptancePath, setAcceptancePath] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
+  const invite = async () => {
+    const result = await onInvite(inviteDraft);
+    if (!result) return;
+    setInviteDraft({ email: "", role: "member" });
+    setInviteOpen(false);
+    if (result.acceptancePath) {
+      setAcceptancePath(result.acceptancePath);
+      setLinkCopied(false);
+    }
+  };
+  const resend = async (invitation) => {
+    const result = await onResendInvitation(invitation);
+    if (result?.acceptancePath) {
+      setAcceptancePath(result.acceptancePath);
+      setLinkCopied(false);
+    }
+  };
+  const acceptanceUrl = acceptancePath ? new URL(acceptancePath, window.location.origin).toString() : "";
   return (
     <div className="secondary-screen admin-screen">
       <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
       <header className="page-heading compact">
         <p>Organization administration</p>
-        <h1>Workspace policy</h1>
-        <span>Manage policy versions and who receives workspace authority. Connector-specific controls live with each connection.</span>
+        <h1>People and access</h1>
+        <span>Invite people, assign organization roles, and remove access. Identity-provider credentials remain outside LemmaComputer.</span>
       </header>
-      <div className="admin-toolbar">
-        <div><strong>MVP standard workspace</strong><small>Workspace, agent, model, network, connector, and protected-operation rules</small></div>
-        <button className="secondary-button" type="button" onClick={onVersion}>Create new version</button>
-      </div>
-      <section className="admin-connector-summary" aria-labelledby="admin-connector-heading">
-        <span className="connection-logo compact"><PlugConnected24Regular aria-hidden="true" /></span>
-        <div>
-          <p>Microsoft 365 connector</p>
-          <h2 id="admin-connector-heading">Tool controls are configured with the connection</h2>
-          <small>{mcpPolicy ? `Active policy version ${mcpPolicy.version} · ${mcpPolicy.tools.length} tools` : "Open the connector to review its tools and approval rules."}</small>
-        </div>
-        <button className="secondary-button" type="button" onClick={onConfigureConnector}>Open connector settings<ChevronRight16Regular aria-hidden="true" /></button>
+      <section className="admin-access-summary" aria-labelledby="organization-access-heading">
+        <div><p>Organization access</p><h2 id="organization-access-heading">Members and invitations</h2><span>Invitations expire after seven days. The selected organization and role cannot be changed by identity-provider claims.</span></div>
+        <button className="primary-button" type="button" onClick={() => setInviteOpen(true)}>Invite person</button>
       </section>
-      <section className="admin-user-list" aria-label="Organization users">
-        {loading ? <p>Loading organization users…</p> : users.map((item) => (
-          <article key={item.userId}>
-            <div className="admin-user-copy">
-              <strong>{item.displayName}</strong><small>{item.email}</small>
-              <div className="admin-user-badges">
-                <span>{item.roles.includes("administrator") ? "Administrator" : "Employee"}</span>
-                {item.status === "disabled" && <span className="disabled">Suspended</span>}
+      {acceptanceUrl && <section className="admin-invitation-link" aria-live="polite">
+        <div><strong>Invitation link created</strong><small>Share this single-use link with the invited person through a trusted channel. Resending rotates it.</small></div>
+        <input aria-label="Invitation link" readOnly value={acceptanceUrl} />
+        <button className="secondary-button" type="button" onClick={async () => {
+          await navigator.clipboard?.writeText(acceptanceUrl);
+          setLinkCopied(true);
+        }}>{linkCopied ? "Copied" : "Copy link"}</button>
+        <button className="connection-quiet-button" type="button" onClick={() => setAcceptancePath("")}>Dismiss</button>
+      </section>}
+      <section className="admin-invitation-list" aria-labelledby="organization-invitations-heading">
+        <div className="admin-section-heading"><div><p>Invitations</p><h2 id="organization-invitations-heading">Organization invitations</h2></div><span>{invitations.length}</span></div>
+        {!invitations.length ? <p className="admin-empty-state">No invitations have been created.</p> : invitations.map((item) => <article key={item.invitationId}>
+          <div><strong>{item.email}</strong><small>{roleOptions.find((option) => option.value === item.role)?.label ?? item.role} · expires {new Date(item.expiresAt).toLocaleDateString()}</small></div>
+          <span className={`admin-access-status ${item.status}`}>{item.status}</span>
+          <div className="admin-invitation-actions">
+            {(item.status === "pending" || item.status === "expired") && <button className="secondary-button" type="button" disabled={invitationBusy} onClick={() => resend(item)}>Resend</button>}
+            {(item.status === "pending" || item.status === "expired") && <button className="connection-quiet-button danger-button" type="button" disabled={invitationBusy} onClick={() => onRevokeInvitation(item)}>Revoke</button>}
+          </div>
+        </article>)}
+      </section>
+      <section className="admin-member-section" aria-labelledby="organization-members-heading">
+        <div className="admin-section-heading"><div><p>People</p><h2 id="organization-members-heading">Organization members</h2></div><span>{users.length}</span></div>
+        <div className="admin-user-list" aria-label="Organization users">
+          {loading ? <p>Loading organization users…</p> : users.map((item) => {
+            const membershipStatus = item.membershipStatus ?? (item.status === "disabled" ? "suspended" : "active");
+            return <article key={item.userId}>
+              <div className="admin-user-copy">
+                <strong>{item.displayName}</strong><small>{item.email}</small>
+                <div className="admin-user-badges">
+                  <span>{roleOptions.find((option) => option.value === item.role)?.label ?? (item.roles.includes("administrator") ? "Administrator" : "Member")}</span>
+                  {membershipStatus !== "active" && <span className="disabled">{membershipStatus}</span>}
+                </div>
               </div>
-            </div>
-            <div className="admin-policy-copy">
-              {item.effectivePolicy ? <>
-                <strong>Version {item.effectivePolicy.version} assigned</strong>
-                <small>Immutable policy {item.effectivePolicy.documentHash.slice(0, 12)}…</small>
-              </> : <><strong>No active policy</strong><small>Workspace and agent authority is revoked.</small></>}
-              {item.workspaces?.length ? <div className="admin-user-workspaces">
-                {item.workspaces.map((workspace) => <button className="connection-quiet-button" type="button" key={workspace.id} disabled={busyUserId === item.userId} onClick={() => onManageWorkspace(item, workspace)}>Manage {workspaceName(workspace)}</button>)}
-              </div> : <small>No workspace has been created yet.</small>}
-            </div>
-            <div className="admin-user-actions">
-              {item.effectivePolicy
-                ? <button className="secondary-button danger-button" type="button" disabled={busyUserId === item.userId} onClick={() => onRevoke(item.userId)}>Revoke policy</button>
-                : <button className="primary-button compact-button" type="button" disabled={busyUserId === item.userId || item.status === "disabled"} onClick={() => onAssign(item.userId)}>Assign policy</button>}
-              <button className="secondary-button" type="button" disabled={busyUserId === item.userId} onClick={() => onRevokeSessions(item.userId)}>Sign out sessions</button>
-              {item.userId !== currentUserId && <button className={`secondary-button${item.status === "disabled" ? "" : " danger-button"}`} type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, item.status === "disabled" ? "active" : "disabled")}>{item.status === "disabled" ? "Reactivate" : "Suspend user"}</button>}
-            </div>
-          </article>
-        ))}
+              <div className="admin-policy-copy">
+                <label><span>Organization role</span><SelectMenu value={item.role ?? (item.roles.includes("administrator") ? "admin" : "member")} options={roleOptions} ariaLabel={`Organization role for ${item.displayName}`} disabled={busyUserId === item.userId || membershipStatus !== "active"} onValueChange={(role) => onRoleChange(item, role)} /></label>
+                {item.effectivePolicy ? <small>Workspace policy version {item.effectivePolicy.version} assigned</small> : <small>No active workspace policy assigned.</small>}
+                {item.workspaces?.length ? <div className="admin-user-workspaces">
+                  {item.workspaces.map((workspace) => <button className="connection-quiet-button" type="button" key={workspace.id} disabled={busyUserId === item.userId} onClick={() => onManageWorkspace(item, workspace)}>Manage {workspaceName(workspace)}</button>)}
+                </div> : <small>No workspace has been created yet.</small>}
+              </div>
+              <div className="admin-user-actions">
+                <button className="secondary-button" type="button" disabled={busyUserId === item.userId} onClick={() => onRevokeSessions(item.userId)}>Sign out sessions</button>
+                {item.userId !== currentUserId && membershipStatus !== "revoked" && <button className={`secondary-button${membershipStatus === "active" ? " danger-button" : ""}`} type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, membershipStatus === "active" ? "suspended" : "active")}>{membershipStatus === "active" ? "Suspend" : "Reactivate"}</button>}
+                {item.userId !== currentUserId && membershipStatus !== "revoked" && <button className="connection-quiet-button danger-button" type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, "revoked")}>Remove access</button>}
+              </div>
+            </article>;
+          })}
+        </div>
       </section>
+      <section className="admin-policy-section" aria-labelledby="workspace-policy-heading">
+        <div className="admin-toolbar">
+          <div><strong id="workspace-policy-heading">MVP standard workspace</strong><small>Workspace, agent, model, network, connector, and protected-operation rules</small></div>
+          <button className="secondary-button" type="button" onClick={onVersion}>Create new version</button>
+        </div>
+        <section className="admin-connector-summary" aria-labelledby="admin-connector-heading">
+          <span className="connection-logo compact"><PlugConnected24Regular aria-hidden="true" /></span>
+          <div>
+            <p>Microsoft 365 connector</p>
+            <h2 id="admin-connector-heading">Tool controls are configured with the connection</h2>
+            <small>{mcpPolicy ? `Active policy version ${mcpPolicy.version} · ${mcpPolicy.tools.length} tools` : "Open the connector to review its tools and approval rules."}</small>
+          </div>
+          <button className="secondary-button" type="button" onClick={onConfigureConnector}>Open connector settings<ChevronRight16Regular aria-hidden="true" /></button>
+        </section>
+      </section>
+      {inviteOpen && <ModalDialog title="Invite a person" description="Create pending product access. The person will choose their password and complete supported MFA with the configured identity provider." eyebrow="Organization access" labelledBy="organization-invite-title" onClose={invitationBusy ? () => undefined : () => setInviteOpen(false)}>
+        <label className="modal-field"><span>Email address</span><input name="organization-invite-email" type="email" autoComplete="off" value={inviteDraft.email} onChange={(event) => setInviteDraft({ ...inviteDraft, email: event.target.value })} placeholder="person@example.com" disabled={invitationBusy} /></label>
+        <label className="modal-field"><span>Organization role</span><SelectMenu value={inviteDraft.role} options={roleOptions} ariaLabel="Invited organization role" disabled={invitationBusy} onValueChange={(role) => setInviteDraft({ ...inviteDraft, role })} /><small>Owner invitations require owner authority and do not remove the current owner.</small></label>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={invitationBusy} onClick={() => setInviteOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={invitationBusy || !inviteDraft.email.trim()} onClick={invite}>{invitationBusy ? "Creating invitation" : "Create invitation"}</button></div>
+      </ModalDialog>}
     </div>
   );
 }
@@ -1105,7 +1163,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
   );
 }
 
-function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, loading, busyUserId, onAssign, onRevoke, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
+function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, invitations, loading, invitationBusy, busyUserId, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
   if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
     return <WorkspaceConfigurationScreen
       settings={adminSandboxSettings}
@@ -1134,11 +1192,15 @@ function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCrede
   if (view === "admin" && isAdmin) {
     return <AdminScreen
       users={users}
+      invitations={invitations}
       currentUserId={currentUserId}
       loading={loading}
+      invitationBusy={invitationBusy}
       busyUserId={busyUserId}
-      onAssign={onAssign}
-      onRevoke={onRevoke}
+      onInvite={onInvite}
+      onResendInvitation={onResendInvitation}
+      onRevokeInvitation={onRevokeInvitation}
+      onRoleChange={onRoleChange}
       onStatusChange={onStatusChange}
       onRevokeSessions={onRevokeSessions}
       onManageWorkspace={onManageWorkspace}
@@ -1167,7 +1229,7 @@ function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCrede
         </button>
         {isAdmin && <button className="settings-item" type="button" onClick={onOpenAdmin}>
           <span className="settings-item-icon"><Settings24Regular aria-hidden="true" /></span>
-          <span className="settings-item-copy"><strong>Workspace administration</strong><small>Manage workspace policy versions, user assignments, and non-AI access controls.</small></span>
+          <span className="settings-item-copy"><strong>People and access</strong><small>Invite people, assign organization roles, and manage workspace access.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
         </button>}
       </section>
@@ -3276,6 +3338,8 @@ export function App() {
   const [newChatRequest, setNewChatRequest] = useState(0);
   const [runningChatSessionIds, setRunningChatSessionIds] = useState([]);
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminInvitations, setAdminInvitations] = useState([]);
+  const [adminInvitationBusy, setAdminInvitationBusy] = useState(false);
   const [adminTeams, setAdminTeams] = useState([]);
   const [adminTeamsLoading, setAdminTeamsLoading] = useState(false);
   const [adminTeamsBusy, setAdminTeamsBusy] = useState(false);
@@ -3610,11 +3674,13 @@ export function App() {
     if (teamsOpen) setAdminTeamsLoading(true);
     Promise.all([
       adminApi.users(),
+      workspaceAdminOpen ? adminApi.invitations() : Promise.resolve(null),
       workspaceAdminOpen ? adminApi.mcpPolicy() : Promise.resolve(null),
       teamsOpen ? adminApi.teams(true) : Promise.resolve(null),
     ])
-      .then(([users, policy, teams]) => {
+      .then(([users, invitations, policy, teams]) => {
         setAdminUsers(users.users);
+        if (invitations) setAdminInvitations(invitations.invitations);
         if (policy) setMcpPolicy(policy);
         if (teams) setAdminTeams(teams.teams);
       })
@@ -4415,6 +4481,10 @@ export function App() {
   };
 
   const refreshAdminUsers = () => adminApi.users().then((value) => setAdminUsers(value.users));
+  const refreshAdminAccess = () => Promise.all([adminApi.users(), adminApi.invitations()]).then(([users, invitations]) => {
+    setAdminUsers(users.users);
+    setAdminInvitations(invitations.invitations);
+  });
   const refreshAdminTeams = () => adminApi.teams(true).then((value) => setAdminTeams(value.teams));
   const createAdminTeam = async (input) => {
     setAdminTeamsBusy(true);
@@ -4534,21 +4604,93 @@ export function App() {
     catch (error) { showApiError(error); }
     finally { setAdminBusyUserId(""); }
   };
-  const changeUserStatus = async (user, status) => {
-    const suspending = status === "disabled";
+  const createOrganizationInvitation = async (input) => {
+    setAdminInvitationBusy(true);
+    try {
+      const result = await adminApi.createInvitation(input);
+      await refreshAdminAccess();
+      setToast(`Invitation created for ${input.email.trim().toLowerCase()}.`);
+      return result;
+    } catch (error) {
+      showApiError(error);
+      return null;
+    } finally {
+      setAdminInvitationBusy(false);
+    }
+  };
+  const resendOrganizationInvitation = async (invitation) => {
+    setAdminInvitationBusy(true);
+    try {
+      const result = await adminApi.resendInvitation(invitation.invitationId);
+      await refreshAdminAccess();
+      setToast(`A new invitation link was created for ${invitation.email}.`);
+      return result;
+    } catch (error) {
+      showApiError(error);
+      return null;
+    } finally {
+      setAdminInvitationBusy(false);
+    }
+  };
+  const revokeOrganizationInvitation = async (invitation) => {
     if (!await requestConfirmation({
-      title: suspending ? `Suspend ${user.displayName}?` : `Reactivate ${user.displayName}?`,
-      description: suspending
-        ? "Their browser sessions and active workspace gateway grants will be revoked immediately. Persistent workspace storage is retained."
-        : "They will be able to sign in again. Workspace access will resume from their existing organization policy.",
-      confirmLabel: suspending ? "Suspend user" : "Reactivate user",
-      danger: suspending,
+      title: `Revoke the invitation for ${invitation.email}?`,
+      description: "The current invitation link will stop working. No organization membership has been created yet.",
+      confirmLabel: "Revoke invitation",
+      danger: true,
+    })) return false;
+    setAdminInvitationBusy(true);
+    try {
+      await adminApi.revokeInvitation(invitation.invitationId);
+      await refreshAdminAccess();
+      setToast(`The invitation for ${invitation.email} was revoked.`);
+      return true;
+    } catch (error) {
+      showApiError(error);
+      return false;
+    } finally {
+      setAdminInvitationBusy(false);
+    }
+  };
+  const changeMembershipRole = async (user, role) => {
+    if (role === user.role) return;
+    if (!await requestConfirmation({
+      title: `Change ${user.displayName} to ${role === "admin" ? "Administrator" : role === "owner" ? "Owner" : "Member"}?`,
+      description: role === "owner"
+        ? "This grants full organization authority. It does not remove any existing owner."
+        : "The new organization permission set applies immediately.",
+      confirmLabel: "Change role",
+      danger: role === "owner",
     })) return;
     setAdminBusyUserId(user.userId);
     try {
-      await adminApi.setUserStatus(user.userId, status);
-      await refreshAdminUsers();
-      setToast(suspending ? `${user.displayName} was suspended.` : `${user.displayName} was reactivated.`);
+      await adminApi.changeMembership(user.userId, { role });
+      await refreshAdminAccess();
+      setToast(`${user.displayName}'s organization role was updated.`);
+    } catch (error) {
+      showApiError(error);
+    } finally {
+      setAdminBusyUserId("");
+    }
+  };
+  const changeUserStatus = async (user, status) => {
+    const suspending = status === "suspended";
+    const removing = status === "revoked";
+    if (!await requestConfirmation({
+      title: removing ? `Remove ${user.displayName}'s access?` : suspending ? `Suspend ${user.displayName}?` : `Reactivate ${user.displayName}?`,
+      description: removing
+        ? "Their membership is revoked and active browser sessions and workspace grants are invalidated. Persistent workspace storage is retained."
+        : suspending
+          ? "Their browser sessions and active workspace gateway grants will be revoked immediately. Persistent workspace storage is retained."
+          : "They will be able to sign in again. Workspace access resumes from their existing organization policy.",
+      confirmLabel: removing ? "Remove access" : suspending ? "Suspend" : "Reactivate",
+      danger: suspending || removing,
+    })) return;
+    setAdminBusyUserId(user.userId);
+    try {
+      await adminApi.changeMembership(user.userId, { status });
+      await refreshAdminAccess();
+      setToast(removing ? `${user.displayName}'s access was removed.` : suspending ? `${user.displayName} was suspended.` : `${user.displayName} was reactivated.`);
     } catch (error) {
       showApiError(error);
     } finally {
@@ -4917,10 +5059,14 @@ export function App() {
           onRotateCredential={rotateTelegramCredential}
           onDeleteCredential={deleteTelegramCredential}
           users={adminUsers}
+          invitations={adminInvitations}
           loading={adminLoading}
+          invitationBusy={adminInvitationBusy}
           busyUserId={adminBusyUserId}
-          onAssign={assignPolicy}
-          onRevoke={revokePolicy}
+          onInvite={createOrganizationInvitation}
+          onResendInvitation={resendOrganizationInvitation}
+          onRevokeInvitation={revokeOrganizationInvitation}
+          onRoleChange={changeMembershipRole}
           onStatusChange={changeUserStatus}
           onRevokeSessions={revokeUserSessions}
           onManageWorkspace={manageAdminWorkspace}

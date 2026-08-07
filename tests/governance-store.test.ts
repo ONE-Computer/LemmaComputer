@@ -77,3 +77,22 @@ test("an operation cannot be created against another tenant's workspace", async 
   });
   assert.equal(created, null);
 });
+
+test("access revocation cancels only the target user's pending governed operations", async () => {
+  const { store, workspace, now, envelope } = await setup();
+  const operation = await store.createGovernedOperation({
+    id: randomUUID(), identity: alex, workspaceId: workspace.id,
+    capabilityId: envelope.capabilityId, serverName: envelope.serverName, toolName: envelope.toolName,
+    schemaId: envelope.schemaId, arguments: envelope.arguments, operationDigest: governedOperationDigest(envelope),
+    nonce: envelope.nonce, safeSummary: "Delete Q3-draft.docx", resourceName: "Q3-draft.docx",
+    resourceLocation: "OneDrive / Finance / 2026", correlationId: "request-revoke",
+    idempotencyKey: "operation-request-revoke", createdAt: now, expiresAt: new Date(envelope.expiresAt),
+  });
+  assert.ok(operation);
+  assert.equal(await store.cancelPendingGovernedOperations(outsider, now, "admin-revoke-other"), 0);
+  assert.equal(await store.cancelPendingGovernedOperations(alex, now, "admin-revoke"), 1);
+  const canceled = await store.getOwnedOperation(alex, operation.id);
+  assert.equal(canceled?.state, "failed");
+  assert.equal(canceled?.failureCode, "MEMBERSHIP_ACCESS_REVOKED");
+  assert.equal(await store.cancelPendingGovernedOperations(alex, now, "admin-revoke-replay"), 0);
+});

@@ -372,6 +372,7 @@ export interface GovernanceStore {
   completeExecution(identity: IdentityContext, operationId: string, leaseId: string, receipt: { id: string; upstreamReference: string; resultSummary: string; resultHash: string; executedAt: Date }, correlationId: string): Promise<GovernedOperationRecord | null>;
   failExecution(identity: IdentityContext, operationId: string, leaseId: string, failureCode: string, correlationId: string, failureSummary?: string): Promise<GovernedOperationRecord | null>;
   recoverOperation(identity: IdentityContext, operationId: string, now: Date, correlationId: string): Promise<GovernedOperationRecord | null>;
+  cancelPendingGovernedOperations?(identity: IdentityContext, canceledAt: Date, correlationId: string): Promise<number>;
   listOwnedOperations?(identity: IdentityContext, limit: number): Promise<GovernedOperationRecord[]>;
   listOwnedOperationsPage?(identity: IdentityContext, input: {
     limit: number;
@@ -1469,6 +1470,55 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return this.getOwnedOperation(identity, operationId);
   }
 
+  async cancelPendingGovernedOperations(identity: IdentityContext, canceledAt: Date, correlationId: string) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const canceled = await client.query(
+        `UPDATE governed_operations
+         SET state='failed',failure_code='MEMBERSHIP_ACCESS_REVOKED',
+           failure_summary='Organization access was suspended or revoked',updated_at=$3
+         WHERE tenant_id=$1 AND subject_id=$2 AND state IN ('approval_required','approved')
+         RETURNING id`,
+        [identity.tenantId, identity.subjectId, canceledAt],
+      );
+      const operationIds = canceled.rows.map((row) => String(row.id));
+      if (operationIds.length) {
+        await client.query(
+          `UPDATE openvtc_consent_tasks SET state='failed'
+           WHERE operation_id=ANY($1::uuid[]) AND state IN ('queued','delivered','approved')`,
+          [operationIds],
+        );
+        await client.query(
+          `UPDATE openvtc_delivery_outbox
+           SET state='failed',last_failure_code='MEMBERSHIP_ACCESS_REVOKED',updated_at=$2
+           WHERE task_id IN (SELECT id FROM openvtc_consent_tasks WHERE operation_id=ANY($1::uuid[]))
+             AND state IN ('queued','leased')`,
+          [operationIds, canceledAt],
+        );
+        await client.query(
+          `UPDATE openvtc_companion_push_deliveries
+           SET state='failed',last_failure_code='MEMBERSHIP_ACCESS_REVOKED',updated_at=$2
+           WHERE task_id IN (SELECT id FROM openvtc_consent_tasks WHERE operation_id=ANY($1::uuid[]))
+             AND state IN ('queued','retry')`,
+          [operationIds, canceledAt],
+        );
+        await client.query(
+          `INSERT INTO governed_operation_events (operation_id,tenant_id,event_type,correlation_id,safe_detail,created_at)
+           SELECT unnest($1::uuid[]),$2,'access_revoked',$3,$4::jsonb,$5`,
+          [operationIds, identity.tenantId, correlationId, JSON.stringify({ failureCode: "MEMBERSHIP_ACCESS_REVOKED" }), canceledAt],
+        );
+      }
+      await client.query("COMMIT");
+      return operationIds.length;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async createOpenVtcEnrollmentChallenge(input: Omit<OpenVtcEnrollmentChallengeRecord, "tenantId" | "subjectId" | "consumedAt"> & { identity: IdentityContext }) {
     const result = await this.pool.query(
       `INSERT INTO openvtc_enrollment_challenges (id,tenant_id,subject_id,executor_did,challenge,created_at,expires_at)
@@ -2453,6 +2503,36 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     };
     this.operations.set(record.id, next);
     return next;
+  }
+
+  async cancelPendingGovernedOperations(identity: IdentityContext, canceledAt: Date, _correlationId: string) {
+    let canceled = 0;
+    const operationIds = new Set<string>();
+    for (const [operationId, operation] of this.operations) {
+      if (operation.tenantId !== identity.tenantId || operation.subjectId !== identity.subjectId
+        || !["approval_required", "approved"].includes(operation.state)) continue;
+      this.operations.set(operationId, {
+        ...operation,
+        state: "failed",
+        failureCode: "MEMBERSHIP_ACCESS_REVOKED",
+        failureSummary: "Organization access was suspended or revoked",
+        updatedAt: canceledAt,
+      });
+      operationIds.add(operationId);
+      canceled += 1;
+    }
+    for (const [taskId, task] of this.openVtcTasks) {
+      if (operationIds.has(task.operationId) && ["queued", "delivered", "approved"].includes(task.state)) {
+        this.openVtcTasks.set(taskId, { ...task, state: "failed" });
+      }
+    }
+    for (const [key, delivery] of this.openVtcCompanionPushDeliveries) {
+      const task = this.openVtcTasks.get(delivery.taskId);
+      if (task && operationIds.has(task.operationId) && ["queued", "retry"].includes(delivery.state)) {
+        this.openVtcCompanionPushDeliveries.set(key, { ...delivery, state: "failed" });
+      }
+    }
+    return canceled;
   }
 
   async createOpenVtcEnrollmentChallenge(input: Omit<OpenVtcEnrollmentChallengeRecord, "tenantId" | "subjectId" | "consumedAt"> & { identity: IdentityContext }) {

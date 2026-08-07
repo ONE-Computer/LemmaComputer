@@ -197,6 +197,11 @@ export const authApi = {
 
 export const adminApi = {
   users: () => request("/api/v1/admin/users"),
+  invitations: () => request("/api/v1/admin/invitations", { cache: "no-store" }),
+  createInvitation: (input) => request("/api/v1/admin/invitations", mutation("POST", input)),
+  resendInvitation: (invitationId) => request(`/api/v1/admin/invitations/${encodeURIComponent(invitationId)}/resend`, mutation()),
+  revokeInvitation: (invitationId) => request(`/api/v1/admin/invitations/${encodeURIComponent(invitationId)}`, mutation("DELETE")),
+  changeMembership: (userId, input) => request(`/api/v1/admin/memberships/${encodeURIComponent(userId)}`, mutation("PATCH", input)),
   teams: (includeArchived = true) => request(`/api/v1/admin/teams?${new URLSearchParams({ includeArchived: String(includeArchived) })}`, { cache: "no-store" }),
   team: (teamId) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}`, { cache: "no-store" }),
   spend: (filters = {}) => request(`/api/v1/admin/spend?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))}`, { cache: "no-store" }),

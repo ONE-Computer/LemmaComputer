@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@lemmacomputer/contracts";
@@ -1607,6 +1607,80 @@ export function createControlServer(
     }
     return { memberships: await membershipStore.listOrganizationMemberships(actor.tenantId) };
   });
+  app.get("/v1/admin/invitations", async (request) => {
+    const actor = requirePermission(request, "organization.manage_members");
+    const invitationStore = security.identityPolicyStore;
+    if (!invitationStore?.listOrganizationInvitations) {
+      throw new LemmaComputerError("INVITATION_ADMIN_NOT_CONFIGURED", "Organization invitation administration is unavailable", 503, true);
+    }
+    return { invitations: await invitationStore.listOrganizationInvitations(actor.tenantId, new Date()) };
+  });
+  app.post("/v1/admin/invitations", async (request, reply) => {
+    const input = z.strictObject({
+      email: z.email().max(320).transform((value) => value.toLowerCase()),
+      role: z.enum(["owner", "admin", "member"]),
+    }).parse(request.body ?? {});
+    const actor = requirePermission(request, "organization.manage_members");
+    if (input.role !== "member") requirePermission(request, "organization.manage_roles");
+    if (input.role === "owner") requirePermission(request, "organization.transfer_ownership");
+    const invitationStore = security.identityPolicyStore;
+    if (!invitationStore?.createOrganizationInvitation) {
+      throw new LemmaComputerError("INVITATION_ADMIN_NOT_CONFIGURED", "Organization invitation administration is unavailable", 503, true);
+    }
+    const token = `oci_${randomBytes(32).toString("base64url")}`;
+    const now = new Date();
+    const result = await invitationStore.createOrganizationInvitation({
+      organizationId: actor.tenantId,
+      email: input.email,
+      role: input.role,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      idempotencyKeyHash: createHash("sha256").update(idempotency(request.headers)).digest("hex"),
+      expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60_000),
+      createdBy: actor.userId,
+      now,
+    });
+    return reply.code(result.replayed ? 200 : 201).send({
+      invitation: result.invitation,
+      replayed: result.replayed,
+      acceptancePath: result.replayed ? null : `/invite?token=${encodeURIComponent(token)}`,
+    });
+  });
+  app.post<{ Params: { invitationId: string } }>("/v1/admin/invitations/:invitationId/resend", async (request) => {
+    const actor = requirePermission(request, "organization.manage_members");
+    const invitationStore = security.identityPolicyStore;
+    if (!invitationStore?.resendOrganizationInvitation) {
+      throw new LemmaComputerError("INVITATION_ADMIN_NOT_CONFIGURED", "Organization invitation administration is unavailable", 503, true);
+    }
+    const token = `oci_${randomBytes(32).toString("base64url")}`;
+    const now = new Date();
+    const result = await invitationStore.resendOrganizationInvitation({
+      organizationId: actor.tenantId,
+      invitationId: z.uuid().parse(request.params.invitationId),
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      idempotencyKeyHash: createHash("sha256").update(idempotency(request.headers)).digest("hex"),
+      expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60_000),
+      updatedBy: actor.userId,
+      now,
+    });
+    return {
+      invitation: result.invitation,
+      replayed: result.replayed,
+      acceptancePath: result.replayed ? null : `/invite?token=${encodeURIComponent(token)}`,
+    };
+  });
+  app.delete<{ Params: { invitationId: string } }>("/v1/admin/invitations/:invitationId", async (request) => {
+    const actor = requirePermission(request, "organization.manage_members");
+    const invitationStore = security.identityPolicyStore;
+    if (!invitationStore?.revokeOrganizationInvitation) {
+      throw new LemmaComputerError("INVITATION_ADMIN_NOT_CONFIGURED", "Organization invitation administration is unavailable", 503, true);
+    }
+    return invitationStore.revokeOrganizationInvitation({
+      organizationId: actor.tenantId,
+      invitationId: z.uuid().parse(request.params.invitationId),
+      revokedBy: actor.userId,
+      now: new Date(),
+    });
+  });
   app.patch<{ Params: { userId: string } }>("/v1/admin/memberships/:userId", async (request) => {
     const input = z.strictObject({
       role: z.enum(["owner", "admin", "member"]).optional(),
@@ -1641,6 +1715,9 @@ export function createControlServer(
       identity: targetIdentity,
     };
     const shouldRevoke = input.status === "suspended" || input.status === "revoked";
+    if (shouldRevoke && !store.cancelPendingGovernedOperations) {
+      throw new LemmaComputerError("ACCESS_REVOCATION_NOT_CONFIGURED", "Organization access revocation is unavailable", 503, true);
+    }
     const workspaces = shouldRevoke ? await store.listCurrent(targetIdentity) : [];
     const policies = shouldRevoke && target.effectivePolicy
       ? await Promise.all(workspaces.map(async (workspace) => ({
@@ -1655,11 +1732,15 @@ export function createControlServer(
       status: input.status,
       updatedBy: actor.userId,
     });
+    const revokedPendingOperations = shouldRevoke
+      ? await store.cancelPendingGovernedOperations!(targetIdentity, new Date(), request.id)
+      : 0;
     const revokedWorkspaceGrants = shouldRevoke
       ? await Promise.allSettled(policies.map(({ workspace, policy }) => service.revokePolicyGrant(workspace.id, policy)))
       : [];
     return {
       ...updated,
+      revokedPendingOperations,
       revokedWorkspaceGrants: {
         revoked: revokedWorkspaceGrants.filter((result) => result.status === "fulfilled").length,
         failed: revokedWorkspaceGrants.filter((result) => result.status === "rejected").length,
