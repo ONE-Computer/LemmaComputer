@@ -14,7 +14,7 @@ import { FixtureApprovalAuthority, GovernedOperationService } from "./operations
 import { McpConnectionService } from "./connections.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
-import { EntraAuthenticationService, isAdministrator, testPrincipalFromHeaders } from "./auth.js";
+import { EntraAuthenticationService, ExternalIdAuthenticationService, isAdministrator, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
 import { HttpOpenVtcConsentClient } from "./openvtc-consent-client.js";
@@ -244,6 +244,10 @@ const envSchema = z.object({
   ENTRA_TENANT_ID: z.string().min(1),
   ENTRA_CLIENT_ID: z.string().min(1),
   ENTRA_CLIENT_SECRET: z.string().min(1),
+  EXTERNAL_ID_TENANT_ID: optionalEnvString(),
+  EXTERNAL_ID_TENANT_SUBDOMAIN: optionalEnvString(),
+  EXTERNAL_ID_CLIENT_ID: optionalEnvString(),
+  EXTERNAL_ID_CLIENT_SECRET: optionalEnvString(),
   SESSION_SECRET: z.string().min(32),
   AI_USAGE_INTERNAL_TOKEN: z.string().min(32),
   AI_USAGE_TASK_BINDING_SECRET: z.string().min(32),
@@ -314,6 +318,7 @@ export function createControlServer(
   } = {},
   security: {
     authentication?: AuthenticationBoundary;
+    externalIdAuthentication?: AuthenticationBoundary;
     identityPolicyStore?: IdentityPolicyStore;
     mcpPolicyToken?: string;
     mcpEgressProxyToken?: string;
@@ -381,7 +386,8 @@ export function createControlServer(
   const app = Fastify({
     logger: { redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
-      disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url) || request.url.startsWith("/v1/auth/callback"),
+      disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url)
+        || request.url.startsWith("/v1/auth/"),
     }),
     bodyLimit: 32 * 1024,
     routerOptions: { maxParamLength: 2048 },
@@ -662,7 +668,8 @@ export function createControlServer(
     if (!sameSecret(request.headers["x-lemmacomputer-proxy-token"] as string | undefined, proxyToken)) {
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Authentication is required", correlationId: request.id, retryable: false } });
     }
-    if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")) return;
+    if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")
+      || requestPath.startsWith("/v1/auth/external-id/")) return;
     const principal = security.testIdentityMode
       ? testPrincipalFromHeaders(request.headers)
       : await security.authentication!.authenticate(request.headers.cookie);
@@ -1289,9 +1296,39 @@ export function createControlServer(
     );
   });
   app.get<{ Querystring: { return?: string } }>("/v1/auth/login", async (request, reply) => {
+    if (connectionOptions.installationKind === "hosted") {
+      if (!security.externalIdAuthentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Hosted sign-in is not configured", 503);
+      const started = await security.externalIdAuthentication.begin(request.query.return);
+      return reply.code(302).header("set-cookie", started.cookie).header("location", started.location).send();
+    }
     if (!security.authentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
     const started = await security.authentication.begin(request.query.return);
     return reply.code(302).header("set-cookie", started.cookie).header("location", started.location).send();
+  });
+  app.post<{ Body: { invitation?: string; return?: string } }>("/v1/auth/external-id/invitation", async (request, reply) => {
+    if (connectionOptions.installationKind !== "hosted" || !security.externalIdAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "This sign-in method is unavailable", 404);
+    }
+    try {
+      const input = z.strictObject({ invitation: z.string().min(20).max(512), return: z.string().optional() }).parse(request.body ?? {});
+      const started = await security.externalIdAuthentication.begin(input.return, input.invitation);
+      return reply.header("set-cookie", started.cookie).send({ location: started.location });
+    } catch {
+      throw new LemmaComputerError("EXTERNAL_ID_SIGNIN_FAILED", "This sign-in could not be started", 403);
+    }
+  });
+  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/auth/external-id/callback", async (request, reply) => {
+    if (connectionOptions.installationKind !== "hosted" || !security.externalIdAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "This sign-in method is unavailable", 404);
+    }
+    try {
+      const completed = await security.externalIdAuthentication.complete({ ...request.query, cookie: request.headers.cookie });
+      reply.header("set-cookie", [completed.cookie, completed.clearStateCookie]);
+      return reply.code(303).header("location", completed.returnPath).send();
+    } catch (error) {
+      request.log.warn({ code: error instanceof LemmaComputerError ? error.code : "EXTERNAL_ID_FAILED" }, "External ID callback rejected");
+      return reply.code(303).header("location", "/?signin=error&reason=EXTERNAL_ID_SIGNIN_FAILED").send();
+    }
   });
   app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/auth/callback", async (request, reply) => {
     if (!security.authentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
@@ -3044,6 +3081,36 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         ),
       }
     : undefined;
+  const workforceAuthentication = new EntraAuthenticationService(identityPolicyStore, {
+    tenantId: env.ENTRA_TENANT_ID,
+    clientId: env.ENTRA_CLIENT_ID,
+    clientSecret: env.ENTRA_CLIENT_SECRET,
+    publicWebUrl: env.PUBLIC_WEB_URL,
+    sessionSecret: env.SESSION_SECRET,
+    bootstrapOwnedTenantId: env.BOOTSTRAP_TENANT_ID,
+    bootstrapOwnedUserId: env.BOOTSTRAP_USER_ID,
+    tenantDisplayName: env.TENANT_DISPLAY_NAME,
+    bootstrapOwnerObjectIds: env.BOOTSTRAP_OWNER_OBJECT_IDS.split(",").map((item) => item.trim()).filter(Boolean),
+    membershipAdmissionMode: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+      ? "existing-membership-only"
+      : "directory-jit",
+  });
+  const externalIdAuthentication = env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+    && env.EXTERNAL_ID_TENANT_ID && env.EXTERNAL_ID_TENANT_SUBDOMAIN
+    && env.EXTERNAL_ID_CLIENT_ID && env.EXTERNAL_ID_CLIENT_SECRET
+    ? new ExternalIdAuthenticationService(identityPolicyStore, {
+        tenantId: env.EXTERNAL_ID_TENANT_ID,
+        tenantSubdomain: env.EXTERNAL_ID_TENANT_SUBDOMAIN,
+        clientId: env.EXTERNAL_ID_CLIENT_ID,
+        clientSecret: env.EXTERNAL_ID_CLIENT_SECRET,
+        publicWebUrl: env.PUBLIC_WEB_URL,
+        sessionSecret: env.SESSION_SECRET,
+        bootstrapOwnedTenantId: env.BOOTSTRAP_TENANT_ID,
+        bootstrapOwnedUserId: env.BOOTSTRAP_USER_ID,
+        tenantDisplayName: env.TENANT_DISPLAY_NAME,
+        bootstrapOwnerObjectIds: [],
+      })
+    : undefined;
   const app = createControlServer(
     store,
     new HttpControllerClient(env.CONTROLLER_URL, env.CONTROLLER_INTERNAL_TOKEN),
@@ -3067,20 +3134,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       mcpEgressProxyToken: env.MCP_EGRESS_PROXY_TOKEN,
       agentBridgeSecret: env.AGENT_BRIDGE_SECRET,
       agentBridgeGrantTtlSeconds: env.AGENT_BRIDGE_GRANT_TTL_SECONDS,
-      authentication: new EntraAuthenticationService(identityPolicyStore, {
-        tenantId: env.ENTRA_TENANT_ID,
-        clientId: env.ENTRA_CLIENT_ID,
-        clientSecret: env.ENTRA_CLIENT_SECRET,
-        publicWebUrl: env.PUBLIC_WEB_URL,
-        sessionSecret: env.SESSION_SECRET,
-        bootstrapOwnedTenantId: env.BOOTSTRAP_TENANT_ID,
-        bootstrapOwnedUserId: env.BOOTSTRAP_USER_ID,
-        tenantDisplayName: env.TENANT_DISPLAY_NAME,
-        bootstrapOwnerObjectIds: env.BOOTSTRAP_OWNER_OBJECT_IDS.split(",").map((item) => item.trim()).filter(Boolean),
-        membershipAdmissionMode: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
-          ? "existing-membership-only"
-          : "directory-jit",
-      }),
+      authentication: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && externalIdAuthentication
+        ? externalIdAuthentication
+        : workforceAuthentication,
+      externalIdAuthentication,
       openVtc,
       egressGrantSecret: env.EGRESS_GRANT_SECRET,
       policyBundleAuthority,

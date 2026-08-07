@@ -112,7 +112,9 @@ are:
 Public product routes use `/v1/*` and are reached through Web at `/api/v1/*`.
 The notable unauthenticated or separately authenticated endpoints are:
 
-- `/v1/auth/login` and `/v1/auth/callback` for Entra;
+- `/v1/auth/login` and `/v1/auth/callback` for customer-managed workforce Entra;
+- `/v1/auth/external-id/login` and `/v1/auth/external-id/callback` for hosted,
+  invitation-bound External ID;
 - `/v1/openvtc/inbox` and `/trust-tasks` for OpenVTC transport-token access;
 - `/healthz`.
 

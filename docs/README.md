@@ -39,6 +39,9 @@
 - [Local deployment and Entra setup](local-deployment.md) is the agent-oriented
   runbook for preparing `.env`, configuring Microsoft Entra, building the
   workspace image, starting Compose, and verifying the stack.
+- [Hosted Microsoft Entra External ID](hosted-external-id.md) separates
+  provider accounts and MFA from invitation-bound product access and Microsoft
+  365 consent, and defines the real-tenant qualification evidence.
 - [Extending LemmaComputer](extending.md) is the implementation guide for adding
   model routes, MCP connectors, tools, agents, applications, sandbox drivers,
   channels, and schema migrations.

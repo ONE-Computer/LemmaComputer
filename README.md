@@ -162,6 +162,7 @@ configuration lives in `config/` and `integrations/`.
 - [Service reference](docs/services.md)
 - [Governed model routing](docs/model-routing.md)
 - [Local deployment and Entra setup](docs/local-deployment.md)
+- [Hosted Microsoft Entra External ID](docs/hosted-external-id.md)
 - [Extending LemmaComputer](docs/extending.md)
 - [Configuration and operations](docs/operations.md)
 - [Contributing](CONTRIBUTING.md)

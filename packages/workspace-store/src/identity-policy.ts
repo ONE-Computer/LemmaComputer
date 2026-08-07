@@ -239,7 +239,17 @@ export type AuthenticatedIdentity = {
   userId: string;
   bootstrapOwner: boolean;
   membershipAdmissionMode: MembershipAdmissionMode;
-  gatewayUserId: string;
+  /** Legacy caller hint; durable gateway identity is derived from the resolved organization and user. */
+  gatewayUserId?: string;
+  invitationTokenHash?: string;
+  browserSession?: { tokenHash: string; expiresAt: Date };
+};
+
+export type OrganizationInvitationContext = {
+  organizationId: string;
+  organizationDisplayName: string;
+  invitationId: string;
+  status: "pending";
 };
 
 export type OrganizationMembershipSummary = {
@@ -279,11 +289,31 @@ export interface IdentityPolicyStore {
   createSession(input: { tokenHash: string; userId: string; membershipId?: string; expiresAt: Date }): Promise<void>;
   getSession(tokenHash: string, now: Date): Promise<SessionPrincipal | null>;
   revokeSession(tokenHash: string): Promise<void>;
+  revokeSessionWithAccessAudit?(tokenHash: string, provider: "entra" | "entra-external-id", occurredAt: Date): Promise<void>;
   getPrincipal(userId: string): Promise<SessionPrincipal | null>;
   getEffectivePolicy(userId: string): Promise<EffectivePolicy | null>;
   listUsers(tenantId: string): Promise<AdminUserSummary[]>;
   listOrganizationMemberships?(organizationId: string): Promise<OrganizationMembershipSummary[]>;
   listOrganizationInvitations?(organizationId: string, now: Date): Promise<OrganizationInvitationSummary[]>;
+  getOrganizationInvitationContext?(tokenHash: string, now: Date): Promise<OrganizationInvitationContext | null>;
+  recordOrganizationAccessEvent?(input: {
+    organizationId: string;
+    membershipId?: string;
+    invitationId?: string;
+    actorUserId?: string;
+    eventType: "authentication.login_succeeded" | "authentication.login_failed" | "authentication.logout" | "invitation.link_failed" | "session.revoked";
+    provider: "entra" | "entra-external-id" | "product";
+    reasonCode?: string;
+    occurredAt: Date;
+  }): Promise<void>;
+  recordInvitationLinkFailure?(tokenHash: string, provider: "entra" | "entra-external-id", reasonCode: string, occurredAt: Date): Promise<void>;
+  recordExternalIdentityAuthenticationFailure?(input: {
+    provider: "entra" | "entra-external-id";
+    issuer: string;
+    subject: string;
+    reasonCode: string;
+    occurredAt: Date;
+  }): Promise<void>;
   createOrganizationInvitation?(input: {
     organizationId: string;
     email: string;
@@ -652,10 +682,12 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`identity:${input.provider}:${input.issuer}:${input.subject}`]);
       const mapped = await client.query(
-        `SELECT account_user_id,user_id AS legacy_user_id,
-           external_tenant_id,provider_object_id
-         FROM external_identities
-         WHERE provider=$1 AND issuer=$2 AND external_subject=$3`,
+        `SELECT identity.account_user_id,identity.user_id AS legacy_user_id,
+           identity.external_tenant_id,identity.provider_object_id,
+           mapped_user.tenant_id AS mapped_organization_id
+         FROM external_identities identity
+         LEFT JOIN users mapped_user ON mapped_user.id=identity.user_id
+         WHERE identity.provider=$1 AND identity.issuer=$2 AND identity.external_subject=$3`,
         [input.provider, input.issuer, input.subject],
       );
       if (mapped.rowCount && input.providerObjectId) {
@@ -667,7 +699,34 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
           throw new LemmaComputerError("IDENTITY_IDENTIFIER_MISMATCH", "The immutable identity identifiers do not match", 403);
         }
       }
-      const tenantId = input.organizationId;
+      let invitation: Record<string, unknown> | null = null;
+      if (input.invitationTokenHash) {
+        const invitationResult = await client.query(
+          `SELECT invitation.*,organization.display_name AS organization_display_name,
+             invitation.expires_at>now() AS invitation_active,
+             membership.account_user_id AS accepted_account_user_id
+           FROM organization_invitations invitation
+           JOIN organizations organization ON organization.id=invitation.organization_id
+           LEFT JOIN organization_memberships membership ON membership.id=invitation.accepted_membership_id
+           WHERE invitation.token_hash=$1
+           FOR UPDATE OF invitation`,
+          [input.invitationTokenHash],
+        );
+        invitation = invitationResult.rowCount ? invitationResult.rows[0] : null;
+        const invitationUsable = invitation !== null
+          && String(invitation.organization_id) === input.organizationId
+          && String(invitation.email) === input.email.trim().toLowerCase()
+          && invitation.status === "pending"
+          && invitation.invitation_active === true;
+        if (!invitation || !invitationUsable) {
+          throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+        }
+      }
+      const tenantId = invitation
+        ? input.organizationId
+        : input.membershipAdmissionMode === "existing-membership-only" && mapped.rows[0]?.mapped_organization_id
+          ? String(mapped.rows[0].mapped_organization_id)
+          : input.organizationId;
       let organization = await client.query(
         `SELECT tenant.administrator_bootstrapped_at
          FROM tenants tenant
@@ -704,7 +763,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         throw new LemmaComputerError("IDENTITY_BACKFILL_REQUIRED", "The identity migration backfill must complete before sign-in", 503);
       }
       if (!accountUserId) {
-        if (input.membershipAdmissionMode === "existing-membership-only") {
+        if (input.membershipAdmissionMode === "existing-membership-only" && !invitation) {
           throw new LemmaComputerError("MEMBERSHIP_REQUIRED", "An organization invitation is required", 403);
         }
         const account = await client.query("INSERT INTO account_users (status) VALUES ('active') RETURNING id");
@@ -718,7 +777,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         [tenantId, accountUserId],
       );
       const membershipCreated = !membership.rowCount;
-      if (membershipCreated && input.membershipAdmissionMode === "existing-membership-only") {
+      if (membershipCreated && input.membershipAdmissionMode === "existing-membership-only" && !invitation) {
         throw new LemmaComputerError("MEMBERSHIP_REQUIRED", "An organization invitation is required", 403);
       }
       const userId = membership.rowCount
@@ -741,9 +800,10 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         membership = await client.query(
           `INSERT INTO organization_memberships (
              organization_id,account_user_id,subject_user_id,status,role,created_by,updated_by
-           ) VALUES ($1,$2,$3,'active',$4,$3,$3)
+           ) VALUES ($1,$2,$3,'active',$4,$5,$3)
            RETURNING id,subject_user_id,status,role`,
-          [tenantId, accountUserId, userId, shouldBootstrapOwner ? "owner" : "member"],
+          [tenantId, accountUserId, userId, invitation ? String(invitation.role) : shouldBootstrapOwner ? "owner" : "member",
+            invitation ? String(invitation.created_by) : userId],
         );
       }
       if (membership.rows[0].status !== "active") {
@@ -760,6 +820,27 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
            email=EXCLUDED.email,last_authenticated_at=now()`,
         [randomUUID(), userId, accountUserId, input.provider, input.issuer, input.subject, input.externalTenantId, input.providerObjectId ?? null, input.email.toLowerCase()],
       );
+      if (invitation?.status === "pending") {
+        const accepted = await client.query(
+          `UPDATE organization_invitations
+           SET status='accepted',accepted_membership_id=$3,accepted_at=now(),updated_by=$4,updated_at=now()
+           WHERE organization_id=$1 AND id=$2 AND status='pending' AND expires_at>now()
+           RETURNING id`,
+          [tenantId, invitation.id, membership.rows[0].id, userId],
+        );
+        if (!accepted.rowCount) throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+        await this.recordInvitationEvent(client, {
+          organizationId: tenantId,
+          invitationId: String(invitation.id),
+          actorUserId: userId,
+          eventType: "invitation.accepted",
+          oldStatus: "pending",
+          newStatus: "accepted",
+          role: String(invitation.role) as OrganizationRole,
+          deliveryGeneration: Number(invitation.delivery_generation),
+          occurredAt: new Date(),
+        });
+      }
       await client.query(
         "INSERT INTO user_roles (user_id,role,assigned_by) VALUES ($1,'employee',$1) ON CONFLICT DO NOTHING",
         [userId],
@@ -777,15 +858,27 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         `INSERT INTO vendor_identity_mappings (id,tenant_id,user_id,vendor,vendor_user_id,mapping_kind,verified_at)
          VALUES ($1,$2,$3,'litellm',$4,'user',now())
          ON CONFLICT (user_id,vendor,mapping_kind) DO UPDATE SET vendor_user_id=EXCLUDED.vendor_user_id,verified_at=now()`,
-        [randomUUID(), tenantId, userId, input.gatewayUserId],
+        [randomUUID(), tenantId, userId, `oc-user-${createHash("sha256").update(`lemmacomputer:litellm:user:${tenantId}:${userId}`).digest("base64url")}`],
       );
       if (shouldAssignDefaultPolicyOnAuthentication(!membershipCreated, shouldBootstrapOwner)) {
         await this.ensurePolicyFoundation(client, tenantId, userId);
         await this.assignMvpPolicyWithClient(client, tenantId, userId, userId);
       }
-      await client.query("COMMIT");
-      const principal = await this.getPrincipalForOrganization(userId, tenantId);
+      if (input.browserSession) {
+        await client.query(
+          "INSERT INTO browser_sessions (id,token_hash,user_id,membership_id,expires_at) VALUES ($1,$2,$3,$4,$5)",
+          [randomUUID(), input.browserSession.tokenHash, userId, membership.rows[0].id, input.browserSession.expiresAt],
+        );
+        await client.query(
+          `INSERT INTO organization_access_audit_events (
+             organization_id,membership_id,invitation_id,actor_user_id,event_type,provider
+           ) VALUES ($1,$2,$3,$4,'authentication.login_succeeded',$5)`,
+          [tenantId, membership.rows[0].id, invitation ? invitation.id : null, userId, input.provider],
+        );
+      }
+      const principal = await this.getPrincipalForOrganization(userId, tenantId, client);
       if (!principal) throw new LemmaComputerError("MEMBERSHIP_NOT_ACTIVE", "The organization membership is not active", 403);
+      await client.query("COMMIT");
       return principal;
     } catch (error) {
       await client.query("ROLLBACK");
@@ -795,8 +888,8 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     }
   }
 
-  private async getPrincipalForOrganization(userId: string, organizationId: string) {
-    const result = await this.pool.query(
+  private async getPrincipalForOrganization(userId: string, organizationId: string, queryable: pg.Pool | pg.PoolClient = this.pool) {
+    const result = await queryable.query(
       `${principalColumns}
        FROM users u
        JOIN organization_memberships m ON m.subject_user_id=u.id AND m.organization_id=$2
@@ -853,6 +946,24 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
 
   async revokeSession(tokenHash: string) {
     await this.pool.query("UPDATE browser_sessions SET revoked_at=now() WHERE token_hash=$1", [tokenHash]);
+  }
+
+  async revokeSessionWithAccessAudit(tokenHash: string, provider: "entra" | "entra-external-id", occurredAt: Date) {
+    await this.pool.query(
+      `WITH revoked AS (
+         UPDATE browser_sessions SET revoked_at=$3
+         WHERE token_hash=$1 AND revoked_at IS NULL
+         RETURNING user_id,membership_id
+       )
+       INSERT INTO organization_access_audit_events (
+         organization_id,membership_id,actor_user_id,event_type,provider,occurred_at
+       )
+       SELECT membership.organization_id,revoked.membership_id,revoked.user_id,
+         'authentication.logout',$2,$3
+       FROM revoked
+       JOIN organization_memberships membership ON membership.id=revoked.membership_id`,
+      [tokenHash, provider, occurredAt],
+    );
   }
 
   async getPrincipal(userId: string) {
@@ -918,6 +1029,76 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       [organizationId],
     );
     return result.rows.map((row) => this.mapInvitation(row, now));
+  }
+
+  async getOrganizationInvitationContext(tokenHash: string, now: Date): Promise<OrganizationInvitationContext | null> {
+    const result = await this.pool.query(
+      `SELECT invitation.id,invitation.organization_id,invitation.status,organization.display_name
+       FROM organization_invitations invitation
+       JOIN organizations organization ON organization.id=invitation.organization_id
+       WHERE invitation.token_hash=$1
+         AND invitation.status='pending' AND invitation.expires_at>$2`,
+      [tokenHash, now],
+    );
+    return result.rowCount ? {
+      organizationId: String(result.rows[0].organization_id),
+      organizationDisplayName: String(result.rows[0].display_name),
+      invitationId: String(result.rows[0].id),
+      status: "pending" as const,
+    } : null;
+  }
+
+  async recordOrganizationAccessEvent(input: {
+    organizationId: string;
+    membershipId?: string;
+    invitationId?: string;
+    actorUserId?: string;
+    eventType: "authentication.login_succeeded" | "authentication.login_failed" | "authentication.logout" | "invitation.link_failed" | "session.revoked";
+    provider: "entra" | "entra-external-id" | "product";
+    reasonCode?: string;
+    occurredAt: Date;
+  }) {
+    await this.pool.query(
+      `INSERT INTO organization_access_audit_events (
+         organization_id,membership_id,invitation_id,actor_user_id,event_type,provider,reason_code,occurred_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [input.organizationId, input.membershipId ?? null, input.invitationId ?? null, input.actorUserId ?? null,
+        input.eventType, input.provider, input.reasonCode ?? null, input.occurredAt],
+    );
+  }
+
+  async recordInvitationLinkFailure(tokenHash: string, provider: "entra" | "entra-external-id", reasonCode: string, occurredAt: Date) {
+    await this.pool.query(
+      `INSERT INTO organization_access_audit_events (
+         organization_id,invitation_id,event_type,provider,reason_code,occurred_at
+       )
+       SELECT organization_id,id,'invitation.link_failed',$2,$3,$4
+       FROM organization_invitations WHERE token_hash=$1`,
+      [tokenHash, provider, reasonCode, occurredAt],
+    );
+  }
+
+  async recordExternalIdentityAuthenticationFailure(input: {
+    provider: "entra" | "entra-external-id";
+    issuer: string;
+    subject: string;
+    reasonCode: string;
+    occurredAt: Date;
+  }) {
+    await this.pool.query(
+      `INSERT INTO organization_access_audit_events (
+         organization_id,membership_id,actor_user_id,event_type,provider,reason_code,occurred_at
+       )
+       SELECT user_record.tenant_id,membership.id,user_record.id,
+         'authentication.login_failed',$4,$5,$6
+       FROM external_identities identity
+       JOIN users user_record ON user_record.id=identity.user_id
+       JOIN organization_memberships membership
+         ON membership.organization_id=user_record.tenant_id
+        AND membership.subject_user_id=user_record.id
+       WHERE identity.provider=$1 AND identity.issuer=$2 AND identity.external_subject=$3`,
+      [input.provider, input.issuer, input.subject, input.provider, input.reasonCode, input.occurredAt],
+    );
   }
 
   private mapInvitation(row: Record<string, unknown>, now: Date): OrganizationInvitationSummary {
@@ -1044,6 +1225,17 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       );
       if (pending.rowCount) {
         throw new LemmaComputerError("INVITATION_ALREADY_PENDING", "A pending invitation already exists for this email", 409);
+      }
+      const existingMembership = await client.query(
+        `SELECT 1
+         FROM organization_memberships membership
+         JOIN users user_record ON user_record.id=membership.subject_user_id
+         WHERE membership.organization_id=$1 AND lower(user_record.email)=$2
+         LIMIT 1`,
+        [input.organizationId, email],
+      );
+      if (existingMembership.rowCount) {
+        throw new LemmaComputerError("MEMBERSHIP_ALREADY_EXISTS", "This email already has organization access", 409);
       }
       const created = await client.query(
         `INSERT INTO organization_invitations (
@@ -1294,6 +1486,15 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
           [changed.rows[0].membership_id],
         );
         revokedSessions = revoked.rowCount ?? 0;
+        if (revokedSessions > 0) {
+          await client.query(
+            `INSERT INTO organization_access_audit_events (
+               organization_id,membership_id,actor_user_id,event_type,provider,reason_code
+             ) VALUES ($1,$2,$3,'session.revoked','product',$4)`,
+            [input.organizationId, changed.rows[0].membership_id, input.updatedBy,
+              input.status === "suspended" ? "MEMBERSHIP_SUSPENDED" : "MEMBERSHIP_REVOKED"],
+          );
+        }
       }
       await client.query("COMMIT");
       return { membership: this.mapMembership(changed.rows[0]), revokedSessions };
@@ -1362,6 +1563,14 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
           [target.rows[0].membership_id],
         );
         revokedSessions = revoked.rowCount ?? 0;
+        if (revokedSessions > 0) {
+          await client.query(
+            `INSERT INTO organization_access_audit_events (
+               organization_id,membership_id,actor_user_id,event_type,provider,reason_code
+             ) VALUES ($1,$2,$3,'session.revoked','product','USER_DISABLED')`,
+            [input.tenantId, target.rows[0].membership_id, input.updatedBy],
+          );
+        }
       }
       await client.query("COMMIT");
       return { status: input.status, revokedSessions };
@@ -1374,18 +1583,38 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
   }
 
   async revokeUserSessions(input: { tenantId: string; targetUserId: string; revokedBy: string }) {
-    const target = await this.pool.query(
-      `SELECT m.id AS membership_id
-       FROM organization_memberships m
-       WHERE m.subject_user_id=$1 AND m.organization_id=$2`,
-      [input.targetUserId, input.tenantId],
-    );
-    if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
-    const revoked = await this.pool.query(
-      "UPDATE browser_sessions SET revoked_at=now() WHERE membership_id=$1 AND revoked_at IS NULL RETURNING id",
-      [target.rows[0].membership_id],
-    );
-    return revoked.rowCount ?? 0;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const target = await client.query(
+        `SELECT m.id AS membership_id
+         FROM organization_memberships m
+         WHERE m.subject_user_id=$1 AND m.organization_id=$2
+         FOR UPDATE`,
+        [input.targetUserId, input.tenantId],
+      );
+      if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
+      const revoked = await client.query(
+        "UPDATE browser_sessions SET revoked_at=now() WHERE membership_id=$1 AND revoked_at IS NULL RETURNING id",
+        [target.rows[0].membership_id],
+      );
+      const revokedSessions = revoked.rowCount ?? 0;
+      if (revokedSessions > 0) {
+        await client.query(
+          `INSERT INTO organization_access_audit_events (
+             organization_id,membership_id,actor_user_id,event_type,provider,reason_code
+           ) VALUES ($1,$2,$3,'session.revoked','product','ADMIN_SESSION_REVOCATION')`,
+          [input.tenantId, target.rows[0].membership_id, input.revokedBy],
+        );
+      }
+      await client.query("COMMIT");
+      return revokedSessions;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async assignMvpPolicy(input: { tenantId: string; targetUserId: string; assignedBy: string }) {

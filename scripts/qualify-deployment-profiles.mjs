@@ -39,6 +39,10 @@ const environmentFor = (profile) => {
   return {
     ...values,
     LEMMACOMPUTER_PUBLIC_WEB_URL: "https://profile-smoke.example.test",
+    LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID: "profile-smoke-external-directory",
+    LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN: "profile-smoke",
+    LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID: "profile-smoke-external-client",
+    LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET: "profile-smoke-external-secret",
     LEMMACOMPUTER_SANDBOX_DRIVER: "kasm",
     LEMMACOMPUTER_KASM_BASE_URL: "https://workspace.profile-smoke.example.test",
     LEMMACOMPUTER_KASM_API_KEY: "profile-smoke-kasm-key",

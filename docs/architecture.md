@@ -174,9 +174,11 @@ flows, state custody, budget defense in depth, and failure matrix.
 3. Control verifies issuer, audience, tenant, nonce, and callback state.
 4. The immutable external identity resolves to an account user, organization
    membership, and organization-local subject; email is display/contact data.
-5. Customer-managed directory JIT creates a member. Hosted sign-in requires an
-   existing membership. Only an explicitly configured immutable Entra object
-   ID can perform the one-time organization-owner bootstrap.
+5. Customer-managed directory JIT creates a member. Hosted first admission
+   requires a pending invitation whose email matches the verified External ID
+   identity; the invitation alone supplies its organization and role. Only an
+   explicitly configured immutable Entra object ID can perform the one-time
+   customer-managed organization-owner bootstrap.
 6. A random session token is stored as a hash, bound to the selected active
    membership, and returned in an HttpOnly, SameSite cookie.
 7. Control loads the membership role and fixed permission mapping for every

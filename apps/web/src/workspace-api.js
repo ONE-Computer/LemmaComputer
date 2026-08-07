@@ -192,6 +192,7 @@ export const approvalApi = {
 export const authApi = {
   session: () => request("/api/v1/auth/session"),
   loginUrl: "/api/v1/auth/login",
+  beginExternalIdInvitation: (invitation, returnPath = "/") => request("/api/v1/auth/external-id/invitation", mutation("POST", { invitation, return: returnPath })),
   logout: () => request("/api/v1/auth/logout", mutation()),
 };
 

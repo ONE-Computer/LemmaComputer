@@ -208,6 +208,81 @@ test("runtime identity comes only from the authenticated server session", async 
   }
 });
 
+test("External ID routes are hosted-only and expose one generic public failure", async () => {
+  const calls: Array<{ method: "begin" | "complete"; input?: unknown }> = [];
+  const externalIdAuthentication = {
+    begin: async (returnPath?: string, invitation?: string) => {
+      calls.push({ method: "begin", input: { returnPath, invitation } });
+      if (invitation === "rejected-invitation-token-value") throw new Error("invited@example.test is not eligible");
+      return { location: "https://external-tenant.ciamlogin.com/tenant/oauth2/v2.0/authorize", cookie: "oc_external_id_state=opaque" };
+    },
+    complete: async () => {
+      calls.push({ method: "complete" });
+      throw new Error("wrong issuer for invited@example.test");
+    },
+    authenticate: async () => null,
+    logout: async () => "",
+  };
+  const workforceAuthentication = authentication(null);
+  const hosted = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {
+    installationKind: "hosted",
+  }, {
+    authentication: workforceAuthentication,
+    externalIdAuthentication,
+    agentBridgeSecret: "hosted-auth-agent-bridge-secret-at-least-32-characters",
+  });
+  const customerManaged = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {
+    installationKind: "customer-managed",
+  }, {
+    authentication: workforceAuthentication,
+    externalIdAuthentication,
+    agentBridgeSecret: "customer-auth-agent-bridge-secret-at-least-32-characters",
+  });
+  const headers = { "x-lemmacomputer-proxy-token": proxyToken };
+  try {
+    const workforceHosted = await hosted.inject({ method: "GET", url: "/v1/auth/login", headers });
+    assert.equal(workforceHosted.statusCode, 302);
+    assert.deepEqual(calls[0], { method: "begin", input: { returnPath: undefined, invitation: undefined } });
+
+    const started = await hosted.inject({
+      method: "POST",
+      url: "/v1/auth/external-id/invitation",
+      headers,
+      payload: { invitation: "accepted-invitation-token-value", return: "/?view=people" },
+    });
+    assert.equal(started.statusCode, 200);
+    assert.equal(started.json().location, "https://external-tenant.ciamlogin.com/tenant/oauth2/v2.0/authorize");
+    assert.deepEqual(calls[1], {
+      method: "begin",
+      input: { returnPath: "/?view=people", invitation: "accepted-invitation-token-value" },
+    });
+
+    for (const payload of [{}, { invitation: "rejected-invitation-token-value" }]) {
+      const rejected = await hosted.inject({ method: "POST", url: "/v1/auth/external-id/invitation", headers, payload });
+      assert.equal(rejected.statusCode, 403);
+      assert.equal(rejected.json().error.code, "EXTERNAL_ID_SIGNIN_FAILED");
+      assert.doesNotMatch(rejected.body, /invited@example\.test|wrong issuer|not eligible/);
+    }
+    const callbackRejected = await hosted.inject({ method: "GET", url: "/v1/auth/external-id/callback?state=opaque&code=wrong-issuer-code", headers });
+    assert.equal(callbackRejected.statusCode, 303);
+    assert.equal(callbackRejected.headers.location, "/?signin=error&reason=EXTERNAL_ID_SIGNIN_FAILED");
+    assert.doesNotMatch(callbackRejected.body, /invited@example\.test|wrong issuer|not eligible/);
+
+    const externalIdCustomerManaged = await customerManaged.inject({
+      method: "POST",
+      url: "/v1/auth/external-id/invitation",
+      headers,
+      payload: { invitation: "accepted-invitation-token-value" },
+    });
+    assert.equal(externalIdCustomerManaged.statusCode, 404);
+    const customerBody = externalIdCustomerManaged.json();
+    assert.equal(customerBody.error.code, "AUTH_PROVIDER_NOT_AVAILABLE");
+    assert.equal(calls.filter((call) => call.method === "begin").length, 3);
+  } finally {
+    await Promise.all([hosted.close(), customerManaged.close()]);
+  }
+});
+
 test("test identities require an explicit test-only server mode", async () => {
   assert.throws(
     () => createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken),

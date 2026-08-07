@@ -169,6 +169,8 @@ const signInErrorByReason = {
   OIDC_NONCE_MISMATCH: "Microsoft returned an identity token for a different sign-in attempt.",
   OIDC_IDENTITY_INVALID: "This Microsoft identity is not allowed for the configured tenant.",
   OIDC_STATE_INVALID: "The saved sign-in state could not be decrypted.",
+  INVITATION_SIGNIN_FAILED: "This invitation cannot be used. Ask your organization administrator for a new invitation.",
+  EXTERNAL_ID_SIGNIN_FAILED: "Microsoft could not complete this sign-in. Check the account or ask your organization administrator for a new invitation.",
   OIDC_FAILED: "LemmaComputer could not finish the sign-in bootstrap.",
 };
 const attachmentMediaType = (file) => {
@@ -589,17 +591,37 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
   </div>;
 }
 
-function SignInScreen({ error }) {
+function SignInScreen({ error, invitationToken = "" }) {
+  const invited = Boolean(invitationToken);
+  const [invitationBusy, setInvitationBusy] = useState(false);
+  const [invitationError, setInvitationError] = useState("");
+  const continueInvitation = async () => {
+    setInvitationBusy(true);
+    setInvitationError("");
+    try {
+      const started = await authApi.beginExternalIdInvitation(invitationToken);
+      window.location.assign(started.location);
+    } catch {
+      setInvitationError(signInErrorByReason.EXTERNAL_ID_SIGNIN_FAILED);
+      setInvitationBusy(false);
+    }
+  };
   return (
     <main className="signin-screen">
       <section className="signin-card">
         <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
         <p>Your managed work computer</p>
-        <h1>Sign in to continue</h1>
-        <span>Use your ME TECH Microsoft account. Your organization’s workspace and agent policy will be applied after sign-in.</span>
-        {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sign-in was not completed</strong>{error}</span></div>}
-        <a className="primary-button signin-button" href={authApi.loginUrl}><Person24Regular aria-hidden="true" />Sign in with Microsoft</a>
-        <small><ShieldCheckmark24Regular aria-hidden="true" />LemmaComputer uses a secure server session. Microsoft tokens are not stored in your browser.</small>
+        <h1>{invited ? "Accept your invitation" : "Sign in to continue"}</h1>
+        <span>{invited
+          ? "Continue to your organization’s Microsoft sign-in. Microsoft manages your password and authenticator verification; LemmaComputer applies only the organization and role chosen in this invitation."
+          : "Use your ME TECH Microsoft account. Your organization’s workspace and agent policy will be applied after sign-in."}</span>
+        {(error || invitationError) && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sign-in was not completed</strong>{error || invitationError}</span></div>}
+        {invited
+          ? <button className="primary-button signin-button" type="button" disabled={invitationBusy} onClick={continueInvitation}><Person24Regular aria-hidden="true" />{invitationBusy ? "Starting secure sign-in…" : "Continue securely"}</button>
+          : <a className="primary-button signin-button" href={authApi.loginUrl}><Person24Regular aria-hidden="true" />Sign in with Microsoft</a>}
+        <small><ShieldCheckmark24Regular aria-hidden="true" />{invited
+          ? "This link does not choose your permissions. It can activate only its preassigned organization role."
+          : "LemmaComputer uses a secure server session. Microsoft tokens are not stored in your browser."}</small>
       </section>
     </main>
   );
@@ -3276,6 +3298,9 @@ export function ChatScreen({
 }
 
 export function App() {
+  const [invitationToken] = useState(() => window.location.pathname === "/invite"
+    ? new URLSearchParams(window.location.search).get("token") ?? ""
+    : "");
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
@@ -3383,6 +3408,7 @@ export function App() {
   };
 
   useEffect(() => {
+    if (invitationToken) window.history.replaceState(window.history.state, "", "/invite");
     const params = new URLSearchParams(window.location.search);
     if (params.get("signin") === "error") {
       const reason = params.get("reason") ?? "OIDC_FAILED";
@@ -3392,7 +3418,7 @@ export function App() {
       .then((value) => { setSession(value); setAuthError(""); })
       .catch((error) => { if (error.code !== "UNAUTHENTICATED") setAuthError(error.message); })
       .finally(() => setAuthLoading(false));
-  }, []);
+  }, [invitationToken]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -4831,7 +4857,9 @@ export function App() {
   };
 
   if (authLoading) return <main className="signin-screen"><div className="signin-loading">Checking your work account…</div></main>;
-  if (!session) return <SignInScreen error={authError} />;
+  if (!session) {
+    return <SignInScreen error={authError} invitationToken={invitationToken} />;
+  }
   const firstName = session.user.displayName.split(" ")[0] || session.user.displayName;
   const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen);
 

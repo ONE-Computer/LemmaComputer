@@ -54,6 +54,10 @@ const validHostedEnvironment = () => {
   Object.assign(values, {
     LEMMACOMPUTER_INSTALLATION_KIND: "hosted",
     LEMMACOMPUTER_PUBLIC_WEB_URL: "https://hosted.example.test",
+    LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID: "hosted-external-directory",
+    LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN: "hosted-test",
+    LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID: "hosted-external-client",
+    LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET: "hosted-external-secret",
     LEMMACOMPUTER_SANDBOX_DRIVER: "kasm",
     LEMMACOMPUTER_KASM_BASE_URL: "https://workspace.example.test",
     LEMMACOMPUTER_KASM_API_KEY: "test-kasm-api-key",
@@ -288,6 +292,16 @@ test("profile validation rejects workspace and hosted-control contradictions", (
   assert.throws(
     () => validateDeploymentEnvironment(hostedControlInCustomerDeployment, { profile: "customer-managed", strict: true }),
     /HOSTED_MCP_EGRESS_ORIGINS is hosted-only/i,
+  );
+
+  const externalIdInCustomerDeployment = validCustomerManagedEnvironment();
+  externalIdInCustomerDeployment.LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID = "external-directory";
+  externalIdInCustomerDeployment.LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN = "external-test";
+  externalIdInCustomerDeployment.LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID = "external-client";
+  externalIdInCustomerDeployment.LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET = "external-secret";
+  assert.throws(
+    () => validateDeploymentEnvironment(externalIdInCustomerDeployment, { profile: "customer-managed", strict: true }),
+    /EXTERNAL_ID_.*hosted-only/i,
   );
 
   const unconfiguredCustomerIssuer = validCustomerManagedEnvironment();

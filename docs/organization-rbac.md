@@ -22,7 +22,7 @@ The API temporarily projects legacy `administrator`/`employee` role names alongs
 ## Admission profiles
 
 - `customer-managed` uses explicit directory JIT admission into the single configured organization. JIT creates only a `member` unless the immutable Entra object ID matches the one-time bootstrap-owner configuration.
-- `hosted` uses `existing-membership-only`. Authentication cannot create an active membership; the invitation/member lifecycle in #11 must admit the account first.
+- `hosted` uses invitation-bound admission. Only a valid pending invitation may create the first active membership, and it supplies the exact organization and role. A provider account or provider claim alone grants no product access.
 - `worktree` uses the customer-managed JIT behavior only as an explicit development mode.
 
 Email and display-name changes update contact/display data only. They never link identities, choose an organization, or elevate a role.

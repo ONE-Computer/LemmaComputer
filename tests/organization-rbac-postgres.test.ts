@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
 import {
@@ -419,6 +419,375 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
       ),
       /organization must retain at least one active owner/,
     );
+  } finally {
+    await store.close();
+  }
+});
+
+test("hosted invitation acceptance is tenant-bound, one-time, and commits membership, session, and audit together", {
+  skip: !connectionString,
+}, async () => {
+  const pool = new pg.Pool({ connectionString, max: 5 });
+  const store = new PostgresIdentityPolicyStore(pool);
+  const suffix = randomUUID().slice(0, 8);
+  const alphaOrganization = `invite-alpha-${suffix}`;
+  const betaOrganization = `invite-beta-${suffix}`;
+  const alphaOwner = `invite-alpha-owner-${suffix}`;
+  const betaOwner = `invite-beta-owner-${suffix}`;
+  const issuer = `https://external-${suffix}.ciamlogin.com/external-directory-${suffix}/v2.0`;
+  const externalTenantId = `external-directory-${suffix}`;
+  const now = new Date();
+  const future = new Date(now.getTime() + 60 * 60_000);
+  const past = new Date(now.getTime() - 60 * 60_000);
+  const hash = (value: string) => createHash("sha256").update(`${suffix}:${value}`).digest("hex");
+
+  const createOrganizationOwner = async (
+    organizationId: string,
+    ownerId: string,
+    externalDirectoryId: string,
+    displayName: string,
+  ) => {
+    const account = await pool.query("INSERT INTO account_users (status) VALUES ('active') RETURNING id");
+    const accountUserId = String(account.rows[0].id);
+    await pool.query(
+      "INSERT INTO tenants (id,external_tenant_id,display_name,administrator_bootstrapped_at) VALUES ($1,$2,$3,now())",
+      [organizationId, externalDirectoryId, displayName],
+    );
+    await pool.query(
+      "INSERT INTO organizations (id,display_name) VALUES ($1,$2)",
+      [organizationId, displayName],
+    );
+    await pool.query(
+      `INSERT INTO users (id,tenant_id,account_user_id,email,display_name)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [ownerId, organizationId, accountUserId, `${ownerId}@example.test`, `${displayName} Owner`],
+    );
+    await pool.query(
+      `INSERT INTO organization_memberships (
+         organization_id,account_user_id,subject_user_id,status,role,created_by,updated_by
+       ) VALUES ($1,$2,$3,'active','owner',$3,$3)`,
+      [organizationId, accountUserId, ownerId],
+    );
+    await pool.query(
+      `INSERT INTO user_roles (user_id,role,assigned_by) VALUES
+       ($1,'employee',$1),($1,'administrator',$1)`,
+      [ownerId],
+    );
+  };
+
+  const createInvitation = async (input: {
+    organizationId?: string;
+    ownerId?: string;
+    email: string;
+    role?: "owner" | "admin" | "member";
+    rawToken: string;
+    expiresAt?: Date;
+  }) => store.createOrganizationInvitation({
+    organizationId: input.organizationId ?? alphaOrganization,
+    email: input.email,
+    role: input.role ?? "member",
+    tokenHash: hash(input.rawToken),
+    idempotencyKeyHash: hash(`idempotency:${input.rawToken}`),
+    expiresAt: input.expiresAt ?? future,
+    createdBy: input.ownerId ?? alphaOwner,
+    now,
+  });
+
+  const invitedIdentity = (input: {
+    email: string;
+    rawToken: string;
+    subject: string;
+    organizationId?: string;
+    provider?: string;
+    sessionTokenHash?: string;
+  }) => ({
+    provider: input.provider ?? "entra-external-id",
+    issuer,
+    subject: input.subject,
+    providerObjectId: `object-${input.subject}`,
+    externalTenantId,
+    email: input.email,
+    displayName: input.email.split("@")[0]!,
+    organizationId: input.organizationId ?? alphaOrganization,
+    organizationDisplayName: input.organizationId === betaOrganization ? "Invitation Beta" : "Invitation Alpha",
+    userId: `user-${input.subject}`,
+    bootstrapOwner: false,
+    membershipAdmissionMode: "existing-membership-only" as const,
+    gatewayUserId: `gateway-${input.subject}`,
+    invitationTokenHash: hash(input.rawToken),
+    browserSession: {
+      tokenHash: input.sessionTokenHash ?? hash(`session:${input.subject}`),
+      expiresAt: future,
+    },
+  });
+
+  const assertGenericInvitationFailure = async (operation: () => Promise<unknown>) => {
+    await assert.rejects(operation, (error: unknown) => {
+      assert.equal((error as { code?: unknown }).code, "INVITATION_SIGNIN_FAILED");
+      assert.equal((error as { message?: unknown }).message, "This invitation cannot be used to sign in");
+      return true;
+    });
+  };
+
+  try {
+    await createOrganizationOwner(alphaOrganization, alphaOwner, `product-alpha-${suffix}`, "Invitation Alpha");
+    await createOrganizationOwner(betaOrganization, betaOwner, `product-beta-${suffix}`, "Invitation Beta");
+
+    const acceptedEmail = `accepted-${suffix}@example.test`;
+    const acceptedRawToken = `oci_${randomUUID()}_accepted`;
+    const accepted = await createInvitation({
+      email: acceptedEmail,
+      role: "admin",
+      rawToken: acceptedRawToken,
+    });
+    const acceptedSubject = `accepted-subject-${suffix}`;
+    const acceptedSessionHash = hash("accepted-session");
+
+    // Force the final access-audit insert to violate its provider constraint.
+    // Every earlier invitation, membership, identity, and session write must roll
+    // back with that failure so the exact same invitation remains retryable.
+    await assert.rejects(
+      () => store.resolveAuthenticatedIdentity(invitedIdentity({
+        email: acceptedEmail,
+        rawToken: acceptedRawToken,
+        subject: acceptedSubject,
+        provider: "unsupported-provider",
+        sessionTokenHash: hash("rolled-back-session"),
+      })),
+      /organization_access_audit_events_provider_check/,
+    );
+    const rolledBackInvitation = await pool.query(
+      "SELECT status,accepted_membership_id FROM organization_invitations WHERE id=$1",
+      [accepted.invitation.invitationId],
+    );
+    assert.deepEqual(rolledBackInvitation.rows[0], { status: "pending", accepted_membership_id: null });
+    assert.equal((await pool.query(
+      "SELECT 1 FROM external_identities WHERE issuer=$1 AND external_subject=$2",
+      [issuer, acceptedSubject],
+    )).rowCount, 0);
+    assert.equal((await pool.query(
+      "SELECT 1 FROM browser_sessions WHERE token_hash=$1",
+      [hash("rolled-back-session")],
+    )).rowCount, 0);
+    assert.equal((await pool.query(
+      "SELECT 1 FROM organization_access_audit_events WHERE invitation_id=$1",
+      [accepted.invitation.invitationId],
+    )).rowCount, 0);
+
+    const principal = await store.resolveAuthenticatedIdentity(invitedIdentity({
+      email: acceptedEmail,
+      rawToken: acceptedRawToken,
+      subject: acceptedSubject,
+      sessionTokenHash: acceptedSessionHash,
+    }));
+    assert.equal(principal.organizationId, alphaOrganization);
+    assert.equal(principal.role, "admin", "the invitation, not provider claims or defaults, selects the role");
+    assert.equal(principal.roles.includes("administrator"), true);
+
+    const committed = await pool.query(
+      `SELECT invitation.status,invitation.accepted_membership_id,
+         membership.role,membership.subject_user_id,
+         session.token_hash,access.event_type,access.provider
+       FROM organization_invitations invitation
+       JOIN organization_memberships membership
+         ON membership.organization_id=invitation.organization_id
+        AND membership.id=invitation.accepted_membership_id
+       JOIN browser_sessions session ON session.membership_id=membership.id
+       JOIN organization_access_audit_events access
+         ON access.organization_id=invitation.organization_id
+        AND access.membership_id=membership.id
+        AND access.invitation_id=invitation.id
+       WHERE invitation.id=$1 AND session.token_hash=$2`,
+      [accepted.invitation.invitationId, acceptedSessionHash],
+    );
+    assert.equal(committed.rowCount, 1);
+    assert.deepEqual(committed.rows[0], {
+      status: "accepted",
+      accepted_membership_id: principal.membershipId,
+      role: "admin",
+      subject_user_id: principal.userId,
+      token_hash: acceptedSessionHash,
+      event_type: "authentication.login_succeeded",
+      provider: "entra-external-id",
+    });
+
+    const rejectionCases: ReadonlyArray<{
+      name: string;
+      email: string;
+      authenticatedEmail: string;
+      rawToken: string;
+      subject: string;
+      expiresAt?: Date;
+      revoke?: boolean;
+      organizationId?: string;
+      expectedStatus: "pending" | "revoked";
+    }> = [
+      {
+        name: "wrong email",
+        email: `wrong-email-invite-${suffix}@example.test`,
+        authenticatedEmail: `different-authenticated-${suffix}@example.test`,
+        rawToken: `oci_${randomUUID()}_wrong_email`,
+        subject: `wrong-email-${suffix}`,
+        expectedStatus: "pending",
+      },
+      {
+        name: "expired",
+        email: `expired-${suffix}@example.test`,
+        authenticatedEmail: `expired-${suffix}@example.test`,
+        rawToken: `oci_${randomUUID()}_expired`,
+        subject: `expired-${suffix}`,
+        expiresAt: past,
+        expectedStatus: "pending",
+      },
+      {
+        name: "revoked",
+        email: `revoked-${suffix}@example.test`,
+        authenticatedEmail: `revoked-${suffix}@example.test`,
+        rawToken: `oci_${randomUUID()}_revoked`,
+        subject: `revoked-${suffix}`,
+        revoke: true,
+        expectedStatus: "revoked",
+      },
+      {
+        name: "cross organization",
+        email: `cross-org-${suffix}@example.test`,
+        authenticatedEmail: `cross-org-${suffix}@example.test`,
+        rawToken: `oci_${randomUUID()}_cross_org`,
+        subject: `cross-org-${suffix}`,
+        organizationId: betaOrganization,
+        expectedStatus: "pending",
+      },
+    ];
+
+    for (const rejection of rejectionCases) {
+      const invitation = await createInvitation({
+        email: rejection.email,
+        rawToken: rejection.rawToken,
+        ...(rejection.expiresAt ? { expiresAt: rejection.expiresAt } : {}),
+      });
+      if (rejection.revoke) {
+        await store.revokeOrganizationInvitation({
+          organizationId: alphaOrganization,
+          invitationId: invitation.invitation.invitationId,
+          revokedBy: alphaOwner,
+          now,
+        });
+      }
+      await assertGenericInvitationFailure(() => store.resolveAuthenticatedIdentity(invitedIdentity({
+        email: rejection.authenticatedEmail,
+        rawToken: rejection.rawToken,
+        subject: rejection.subject,
+        ...(rejection.organizationId ? { organizationId: rejection.organizationId } : {}),
+      })));
+      const unchanged = await pool.query(
+        "SELECT status,accepted_membership_id FROM organization_invitations WHERE id=$1",
+        [invitation.invitation.invitationId],
+      );
+      assert.deepEqual(
+        unchanged.rows[0],
+        { status: rejection.expectedStatus, accepted_membership_id: null },
+        `${rejection.name} must not mutate invitation acceptance`,
+      );
+      assert.equal((await pool.query(
+        "SELECT 1 FROM external_identities WHERE issuer=$1 AND external_subject=$2",
+        [issuer, rejection.subject],
+      )).rowCount, 0, `${rejection.name} must not persist an external identity`);
+    }
+
+    const concurrentEmail = `concurrent-${suffix}@example.test`;
+    const concurrentRawToken = `oci_${randomUUID()}_concurrent`;
+    const concurrentInvitation = await createInvitation({
+      email: concurrentEmail,
+      rawToken: concurrentRawToken,
+    });
+    const concurrentSubjects = [`concurrent-a-${suffix}`, `concurrent-b-${suffix}`];
+    const concurrentSessionHashes = [hash("concurrent-session-a"), hash("concurrent-session-b")];
+    const concurrentResults = await Promise.allSettled(concurrentSubjects.map((subject, index) => (
+      store.resolveAuthenticatedIdentity(invitedIdentity({
+        email: concurrentEmail,
+        rawToken: concurrentRawToken,
+        subject,
+        sessionTokenHash: concurrentSessionHashes[index]!,
+      }))
+    )));
+    const concurrentSuccesses = concurrentResults.filter((result) => result.status === "fulfilled");
+    const concurrentFailures = concurrentResults.filter((result) => result.status === "rejected");
+    assert.equal(concurrentSuccesses.length, 1, "one immutable identity wins concurrent invitation acceptance");
+    assert.equal(concurrentFailures.length, 1, "the other concurrent identity is denied");
+    assert.equal((concurrentFailures[0] as PromiseRejectedResult).reason?.code, "INVITATION_SIGNIN_FAILED");
+    assert.equal(
+      (concurrentFailures[0] as PromiseRejectedResult).reason?.message,
+      "This invitation cannot be used to sign in",
+    );
+    const concurrentCommitted = await pool.query(
+      `SELECT invitation.status,invitation.accepted_membership_id,
+         count(DISTINCT session.id)::integer AS sessions,
+         count(DISTINCT access.id)::integer AS login_events
+       FROM organization_invitations invitation
+       LEFT JOIN browser_sessions session
+         ON session.membership_id=invitation.accepted_membership_id
+       LEFT JOIN organization_access_audit_events access
+         ON access.invitation_id=invitation.id
+        AND access.event_type='authentication.login_succeeded'
+       WHERE invitation.id=$1
+       GROUP BY invitation.status,invitation.accepted_membership_id`,
+      [concurrentInvitation.invitation.invitationId],
+    );
+    assert.deepEqual(concurrentCommitted.rows[0], {
+      status: "accepted",
+      accepted_membership_id: (concurrentSuccesses[0] as PromiseFulfilledResult<{ membershipId?: string }>).value.membershipId,
+      sessions: 1,
+      login_events: 1,
+    });
+    assert.equal((await pool.query(
+      `SELECT count(*)::integer AS count FROM external_identities
+       WHERE issuer=$1 AND external_subject=ANY($2::text[])`,
+      [issuer, concurrentSubjects],
+    )).rows[0].count, 1, "the losing concurrent identity leaves no mapping");
+
+    const replaySessionHash = hash("replay-session");
+    await assertGenericInvitationFailure(() => store.resolveAuthenticatedIdentity(invitedIdentity({
+      email: acceptedEmail,
+      rawToken: acceptedRawToken,
+      subject: acceptedSubject,
+      sessionTokenHash: replaySessionHash,
+    })));
+    assert.equal((await pool.query(
+      "SELECT 1 FROM browser_sessions WHERE token_hash=$1",
+      [replaySessionHash],
+    )).rowCount, 0, "an accepted invitation cannot mint another session");
+    assert.equal((await pool.query(
+      `SELECT count(*)::integer AS count FROM organization_access_audit_events
+       WHERE invitation_id=$1 AND event_type='authentication.login_succeeded'`,
+      [accepted.invitation.invitationId],
+    )).rows[0].count, 1, "invitation replay cannot append another successful login event");
+
+    const accessAuditColumns = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema=current_schema() AND table_name='organization_access_audit_events'
+       ORDER BY column_name`,
+    );
+    assert.deepEqual(accessAuditColumns.rows.map((row) => row.column_name), [
+      "actor_user_id",
+      "event_type",
+      "id",
+      "invitation_id",
+      "membership_id",
+      "occurred_at",
+      "organization_id",
+      "provider",
+      "reason_code",
+    ]);
+    const accessAuditPayload = await pool.query(
+      "SELECT row_to_json(event)::text AS payload FROM organization_access_audit_events event WHERE invitation_id=$1",
+      [accepted.invitation.invitationId],
+    );
+    const serializedAudit = accessAuditPayload.rows.map((row) => row.payload).join("\n");
+    for (const secret of [
+      acceptedRawToken,
+      "provider-authorization-code-must-not-be-stored",
+      "provider-access-or-id-token-must-not-be-stored",
+    ]) assert.doesNotMatch(serializedAudit, new RegExp(secret));
   } finally {
     await store.close();
   }

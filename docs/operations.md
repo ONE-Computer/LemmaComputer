@@ -104,6 +104,10 @@ GitHub OAuth-app redirect URI.
 | `LEMMACOMPUTER_ENTRA_TENANT_ID` | Yes | Single Entra directory accepted for Web sign-in |
 | `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Yes | Web OIDC application |
 | `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Web OIDC confidential-client secret |
+| `LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID` | Hosted only | External tenant directory ID |
+| `LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN` | Hosted only | Label before `.ciamlogin.com` |
+| `LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID` | Hosted only | External tenant Web OIDC application |
+| `LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET` | Hosted only | External tenant confidential-client secret |
 | `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` | Yes | Comma-separated immutable Entra object IDs allowed to perform the one-time organization-owner bootstrap |
 | `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | No | Deprecated compatibility input; email never grants a LemmaComputer role |
 | `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID` | No | Owned tenant identifier |
@@ -116,10 +120,13 @@ does not migrate existing rows.
 
 In `customer-managed`, every user in the configured Entra directory may sign
 in; Control creates a member account and organization-local subject just in
-time. In `hosted`, sign-in is existing-membership-only, so authentication cannot
-create an organization membership. An organization administrator can later
-suspend or reactivate a membership, revoke its active sessions, change its
-policy assignment, and manage sandbox and egress security-group configuration.
+time. In `hosted`, a valid invitation binds an External ID identity to its
+predetermined organization and role. Provider claims cannot select or elevate
+the product membership. Public provider sign-up must be disabled separately;
+see the [hosted External ID runbook](hosted-external-id.md). An organization
+administrator can later suspend or reactivate a membership, revoke its active
+sessions, change its policy assignment, and manage sandbox and egress
+security-group configuration.
 A returning user does not automatically regain a policy that an administrator
 revoked.
 

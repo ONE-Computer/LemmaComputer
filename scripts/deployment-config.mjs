@@ -111,6 +111,10 @@ const sections = [
     variable("LEMMACOMPUTER_ENTRA_TENANT_ID", "replace-with-entra-directory-tenant-id", "Microsoft Entra directory tenant ID."),
     variable("LEMMACOMPUTER_ENTRA_CLIENT_ID", "replace-with-entra-application-client-id", "Microsoft Entra Web application client ID."),
     variable("LEMMACOMPUTER_ENTRA_CLIENT_SECRET", "replace-with-entra-application-client-secret", "Microsoft Entra Web application client secret.", { secret: true }),
+    variable("LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID", "", "Hosted Microsoft Entra External ID directory tenant ID.", { optional: true }),
+    variable("LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN", "", "Hosted External ID ciamlogin.com tenant subdomain.", { optional: true }),
+    variable("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID", "", "Hosted External ID Web application client ID.", { optional: true }),
+    variable("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET", "", "Hosted External ID Web application client secret.", { optional: true, secret: true }),
     variable("LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS", "replace-with-entra-object-id", "Comma-separated immutable Entra object IDs allowed to perform the one-time owner bootstrap."),
     variable("LEMMACOMPUTER_ADMINISTRATOR_EMAILS", "", "Deprecated compatibility input. Email addresses never grant organization roles."),
     variable("LEMMACOMPUTER_MS365_TENANT_ID", "", "Dedicated Microsoft 365 MCP Entra tenant ID, or blank to reuse the Web sign-in app."),
@@ -208,6 +212,7 @@ export const environmentAliases = new Map([
 ]);
 
 export const coupledEnvironmentGroups = Object.freeze([
+  ["LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID", "LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN", "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID", "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET"],
   ["LEMMACOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY", "LEMMACOMPUTER_WEB_PUSH_VAPID_PRIVATE_KEY", "LEMMACOMPUTER_WEB_PUSH_SUBSCRIPTION_SECRET"],
   ["LEMMACOMPUTER_POLICY_SIGNING_KEY_ID", "LEMMACOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64", "LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64"],
   ["LEMMACOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64", "LEMMACOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64"],
@@ -349,6 +354,16 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
   }
 
   if (selectedProfile === "hosted") {
+    for (const key of [
+      "LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID",
+      "LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN",
+      "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID",
+      "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET",
+    ]) if (!hasValue(values[key])) errors.push(`${key} is required for hosted External ID sign-in`);
+    if (hasValue(values.LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN)
+      && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(values.LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN)) {
+      errors.push("LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN must be a ciamlogin.com tenant label");
+    }
     if (!values.LEMMACOMPUTER_PUBLIC_WEB_URL.startsWith("https:")) {
       errors.push("LEMMACOMPUTER_PUBLIC_WEB_URL must use https in hosted deployments");
     }
@@ -383,6 +398,12 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
     if (hasValue(values.LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS)) {
       errors.push("LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS is hosted-only and must be empty in customer-managed deployments");
     }
+    for (const key of [
+      "LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID",
+      "LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN",
+      "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID",
+      "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET",
+    ]) if (hasValue(values[key])) errors.push(`${key} is hosted-only and must be empty in customer-managed deployments`);
   }
 
   if (errors.length) throw new Error(`Deployment environment validation failed:\n${errors.map((error) => `- ${error}`).join("\n")}`);
@@ -602,6 +623,10 @@ export function projectServiceEnvironment(input = {}) {
       ENTRA_TENANT_ID: v("LEMMACOMPUTER_ENTRA_TENANT_ID"),
       ENTRA_CLIENT_ID: v("LEMMACOMPUTER_ENTRA_CLIENT_ID"),
       ENTRA_CLIENT_SECRET: v("LEMMACOMPUTER_ENTRA_CLIENT_SECRET"),
+      EXTERNAL_ID_TENANT_ID: v("LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID"),
+      EXTERNAL_ID_TENANT_SUBDOMAIN: v("LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN"),
+      EXTERNAL_ID_CLIENT_ID: v("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID"),
+      EXTERNAL_ID_CLIENT_SECRET: v("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET"),
       SESSION_SECRET: v("LEMMACOMPUTER_SESSION_SECRET"),
       WORKSPACE_INGRESS_PUBLIC_URL: v("LEMMACOMPUTER_PUBLIC_WEB_URL"),
       WORKSPACE_INGRESS_SECRET: v("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET"),
