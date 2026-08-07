@@ -183,6 +183,19 @@ test("runtime identity comes only from the authenticated server session", async 
       payload: { status: "disabled" },
     });
     assert.equal(employeeSuspend.statusCode, 403);
+    const employeeMemberships = await app.inject({
+      method: "GET",
+      url: "/v1/admin/memberships",
+      headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid" },
+    });
+    assert.equal(employeeMemberships.statusCode, 403);
+    const employeeRoleChange = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/memberships/another-user",
+      headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid", "content-type": "application/json" },
+      payload: { role: "admin" },
+    });
+    assert.equal(employeeRoleChange.statusCode, 403);
   } finally {
     await app.close();
   }
@@ -205,6 +218,9 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   let assigned = true;
   let revoked = false;
   let betaStatus: "active" | "disabled" = "active";
+  let betaMembershipRole: "owner" | "admin" | "member" = "member";
+  let betaMembershipStatus: "active" | "suspended" | "revoked" = "active";
+  let membershipChange: Record<string, unknown> | null = null;
   let revokedSessionCount = 0;
   let assignedWorkspaceSubject = "";
   let savedToolPolicy: Record<string, McpToolPolicyDecision> | null = null;
@@ -283,6 +299,44 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       { userId: "beta", email: "beta@metech.dev", displayName: "Beta User", status: betaStatus, roles: ["employee"] as const, effectivePolicy },
     ] : [],
     getPrincipal: async (userId: string) => userId === "alpha" ? administrator : null,
+    listOrganizationMemberships: async (organizationId: string) => organizationId === "acme" ? [{
+      membershipId: "membership-beta",
+      organizationId,
+      accountUserId: "account-beta",
+      userId: "beta",
+      email: "beta@metech.dev",
+      displayName: "Beta User",
+      status: betaMembershipStatus,
+      role: betaMembershipRole,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    }] : [],
+    changeOrganizationMembership: async (input: {
+      organizationId: string;
+      targetUserId: string;
+      role?: "owner" | "admin" | "member";
+      status?: "active" | "suspended" | "revoked";
+      updatedBy: string;
+    }) => {
+      membershipChange = input;
+      betaMembershipRole = input.role ?? betaMembershipRole;
+      betaMembershipStatus = input.status ?? betaMembershipStatus;
+      return {
+        membership: {
+          membershipId: "membership-beta",
+          organizationId: input.organizationId,
+          accountUserId: "account-beta",
+          userId: input.targetUserId,
+          email: "beta@metech.dev",
+          displayName: "Beta User",
+          status: betaMembershipStatus,
+          role: betaMembershipRole,
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-07T00:00:00.000Z",
+        },
+        revokedSessions: input.status === "suspended" || input.status === "revoked" ? 2 : 0,
+      };
+    },
     setUserStatus: async ({ status }: { status: "active" | "disabled" }) => {
       betaStatus = status;
       return { status, revokedSessions: status === "disabled" ? 2 : 0 };
@@ -361,6 +415,48 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     assert.equal(openFirewall.executionMode, "disposable-open");
     assert.equal(openFirewall.egress.mode, "full-web");
     assert.equal(openFirewall.egress.defaultAction, "allow-public-http-https");
+
+    const memberships = await app.inject({ method: "GET", url: "/v1/admin/memberships", headers });
+    assert.equal(memberships.statusCode, 200);
+    assert.equal(memberships.json().memberships[0].organizationId, "acme");
+    const roleChanged = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/memberships/beta",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { role: "admin" },
+    });
+    assert.equal(roleChanged.statusCode, 200);
+    assert.equal(roleChanged.json().membership.role, "admin");
+    assert.deepEqual(membershipChange, {
+      organizationId: "acme",
+      targetUserId: "beta",
+      role: "admin",
+      status: undefined,
+      updatedBy: "alpha",
+    });
+    const ownershipDenied = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/memberships/beta",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { role: "owner" },
+    });
+    assert.equal(ownershipDenied.statusCode, 403);
+    const selfMembershipSuspend = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/memberships/alpha",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { status: "suspended" },
+    });
+    assert.equal(selfMembershipSuspend.statusCode, 409);
+    const membershipSuspended = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/memberships/beta",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { status: "suspended" },
+    });
+    assert.equal(membershipSuspended.statusCode, 200);
+    assert.equal(membershipSuspended.json().membership.status, "suspended");
+    assert.equal(membershipSuspended.json().revokedSessions, 2);
 
     const connectorCatalog = await app.inject({ method: "GET", url: "/v1/connections", headers });
     assert.equal(connectorCatalog.statusCode, 200);

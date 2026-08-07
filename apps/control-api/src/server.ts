@@ -1599,6 +1599,73 @@ export function createControlServer(
       })),
     };
   });
+  app.get("/v1/admin/memberships", async (request) => {
+    const actor = requirePermission(request, "organization.manage_members");
+    const membershipStore = security.identityPolicyStore;
+    if (!membershipStore?.listOrganizationMemberships) {
+      throw new LemmaComputerError("MEMBERSHIP_ADMIN_NOT_CONFIGURED", "Organization access administration is unavailable", 503, true);
+    }
+    return { memberships: await membershipStore.listOrganizationMemberships(actor.tenantId) };
+  });
+  app.patch<{ Params: { userId: string } }>("/v1/admin/memberships/:userId", async (request) => {
+    const input = z.strictObject({
+      role: z.enum(["owner", "admin", "member"]).optional(),
+      status: z.enum(["active", "suspended", "revoked"]).optional(),
+    }).refine((value) => value.role !== undefined || value.status !== undefined).parse(request.body ?? {});
+    const actor = input.role
+      ? requirePermission(request, "organization.manage_roles")
+      : requirePermission(request, "organization.manage_members");
+    if (input.status) requirePermission(request, "organization.manage_members");
+    if (input.role === "owner") requirePermission(request, "organization.transfer_ownership");
+    if (request.params.userId === actor.userId && (input.status === "suspended" || input.status === "revoked")) {
+      throw new LemmaComputerError("ADMIN_SELF_DISABLE_FORBIDDEN", "You cannot suspend your own administrator account", 409);
+    }
+    const membershipStore = security.identityPolicyStore;
+    if (!membershipStore?.changeOrganizationMembership) {
+      throw new LemmaComputerError("MEMBERSHIP_ADMIN_NOT_CONFIGURED", "Organization access administration is unavailable", 503, true);
+    }
+    const target = (await membershipStore.listUsers(actor.tenantId)).find((item) => item.userId === request.params.userId);
+    if (!target) throw new LemmaComputerError("MEMBERSHIP_NOT_FOUND", "Membership not found", 404);
+    const targetIdentity = identityContextSchema.parse({
+      tenantId: actor.tenantId,
+      subjectId: target.userId,
+      audience: "lemmacomputer-control",
+    });
+    const targetPrincipal: SessionPrincipal = {
+      userId: target.userId,
+      tenantId: actor.tenantId,
+      email: target.email,
+      displayName: target.displayName,
+      tenantDisplayName: actor.tenantDisplayName,
+      roles: target.roles,
+      identity: targetIdentity,
+    };
+    const shouldRevoke = input.status === "suspended" || input.status === "revoked";
+    const workspaces = shouldRevoke ? await store.listCurrent(targetIdentity) : [];
+    const policies = shouldRevoke && target.effectivePolicy
+      ? await Promise.all(workspaces.map(async (workspace) => ({
+          workspace,
+          policy: (await policyForGrant(targetPrincipal, target.effectivePolicy, workspace.grantId)).policy,
+        })))
+      : [];
+    const updated = await membershipStore.changeOrganizationMembership({
+      organizationId: actor.tenantId,
+      targetUserId: target.userId,
+      role: input.role,
+      status: input.status,
+      updatedBy: actor.userId,
+    });
+    const revokedWorkspaceGrants = shouldRevoke
+      ? await Promise.allSettled(policies.map(({ workspace, policy }) => service.revokePolicyGrant(workspace.id, policy)))
+      : [];
+    return {
+      ...updated,
+      revokedWorkspaceGrants: {
+        revoked: revokedWorkspaceGrants.filter((result) => result.status === "fulfilled").length,
+        failed: revokedWorkspaceGrants.filter((result) => result.status === "rejected").length,
+      },
+    };
+  });
   app.patch<{ Params: { userId: string } }>("/v1/admin/users/:userId/status", async (request) => {
     const actor = requirePermission(request, "organization.manage_members");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);

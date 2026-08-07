@@ -181,6 +181,8 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
     assert.equal(changed.revokedSessions, 1);
     assert.ok(await store.getSession(`session-alpha-${suffix}`, new Date()), "another organization session remains active");
     assert.equal(await store.getSession(`session-alpha-beta-${suffix}`, new Date()), null);
+    const suspendedLegacyUser = await pool.query("SELECT status FROM users WHERE id=$1", [alphaInBeta.userId]);
+    assert.equal(suspendedLegacyUser.rows[0].status, "disabled");
 
     await store.changeOrganizationMembership({
       organizationId: betaOrganization,
@@ -189,6 +191,40 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
       status: "active",
       updatedBy: betaOwner,
     });
+    const reactivatedLegacyUser = await pool.query("SELECT status FROM users WHERE id=$1", [alphaInBeta.userId]);
+    assert.equal(reactivatedLegacyUser.rows[0].status, "active");
+    const administratorProjection = await pool.query(
+      "SELECT 1 FROM user_roles WHERE user_id=$1 AND role='administrator'",
+      [alphaInBeta.userId],
+    );
+    assert.equal(administratorProjection.rowCount, 1);
+    await store.changeOrganizationMembership({
+      organizationId: betaOrganization,
+      targetUserId: alphaInBeta.userId,
+      role: "member",
+      updatedBy: betaOwner,
+    });
+    const removedAdministratorProjection = await pool.query(
+      "SELECT 1 FROM user_roles WHERE user_id=$1 AND role='administrator'",
+      [alphaInBeta.userId],
+    );
+    assert.equal(removedAdministratorProjection.rowCount, 0);
+    await store.changeOrganizationMembership({
+      organizationId: betaOrganization,
+      targetUserId: alphaInBeta.userId,
+      role: "admin",
+      updatedBy: betaOwner,
+    });
+    const membershipAudit = await pool.query(
+      `SELECT old_status,new_status,old_role,new_role
+       FROM organization_membership_audit_events
+       WHERE organization_id=$1 AND membership_id=$2 AND event_type='membership.changed'
+       ORDER BY occurred_at`,
+      [betaOrganization, alphaInBeta.membershipId],
+    );
+    assert.ok(membershipAudit.rowCount && membershipAudit.rowCount >= 4);
+    assert.ok(membershipAudit.rows.some((row) => row.old_status === "active" && row.new_status === "suspended"));
+    assert.ok(membershipAudit.rows.some((row) => row.old_role === "admin" && row.new_role === "member"));
     await store.createSession({
       tokenHash: `session-alpha-beta-compat-${suffix}`,
       userId: alphaInBeta.userId,
@@ -220,7 +256,7 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
         status: "suspended",
         updatedBy: betaOwner,
       }),
-      /organization must retain at least one active owner/,
+      { code: "LAST_OWNER_REQUIRED" },
     );
     await assert.rejects(
       () => pool.query(

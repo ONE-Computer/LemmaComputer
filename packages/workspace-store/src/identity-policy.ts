@@ -13,6 +13,13 @@ export const shouldAssignDefaultPolicyOnAuthentication = (
   shouldBootstrapAdministrator: boolean,
 ) => !hasExistingIdentityMapping || shouldBootstrapAdministrator;
 
+const isLastActiveOwnerViolation = (error: unknown) => (
+  error instanceof Error
+  && "code" in error
+  && (error as Error & { code?: string }).code === "23514"
+  && error.message.includes("organization must retain at least one active owner")
+);
+
 export type SessionPrincipal = {
   userId: string;
   accountUserId?: string;
@@ -896,7 +903,9 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot manage organization access", 403);
       }
       const targetBefore = await client.query(
-        "SELECT role FROM organization_memberships WHERE organization_id=$1 AND subject_user_id=$2",
+        `SELECT role,status FROM organization_memberships
+         WHERE organization_id=$1 AND subject_user_id=$2
+         FOR UPDATE`,
         [input.organizationId, input.targetUserId],
       );
       if (!targetBefore.rowCount) throw new LemmaComputerError("MEMBERSHIP_NOT_FOUND", "Membership not found", 404);
@@ -917,6 +926,33 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         [input.organizationId, input.targetUserId, input.role ?? null, input.status ?? null, input.updatedBy],
       );
       if (!changed.rowCount) throw new LemmaComputerError("MEMBERSHIP_NOT_FOUND", "Membership not found", 404);
+      await client.query(
+        `INSERT INTO user_roles (user_id,role,assigned_by)
+         VALUES ($1,'employee',$2)
+         ON CONFLICT (user_id,role) DO NOTHING`,
+        [input.targetUserId, input.updatedBy],
+      );
+      if (changed.rows[0].role === "owner" || changed.rows[0].role === "admin") {
+        await client.query(
+          `INSERT INTO user_roles (user_id,role,assigned_by)
+           VALUES ($1,'administrator',$2)
+           ON CONFLICT (user_id,role) DO NOTHING`,
+          [input.targetUserId, input.updatedBy],
+        );
+      } else {
+        await client.query(
+          "DELETE FROM user_roles WHERE user_id=$1 AND role='administrator'",
+          [input.targetUserId],
+        );
+      }
+      const activeMemberships = await client.query(
+        "SELECT 1 FROM organization_memberships WHERE subject_user_id=$1 AND status='active' LIMIT 1",
+        [input.targetUserId],
+      );
+      await client.query(
+        "UPDATE users SET status=$2,updated_at=now() WHERE id=$1",
+        [input.targetUserId, activeMemberships.rowCount ? "active" : "disabled"],
+      );
       let revokedSessions = 0;
       if (input.status === "suspended" || input.status === "revoked") {
         const revoked = await client.query(
@@ -930,6 +966,13 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       return { membership: this.mapMembership(changed.rows[0]), revokedSessions };
     } catch (error) {
       await client.query("ROLLBACK");
+      if (isLastActiveOwnerViolation(error)) {
+        throw new LemmaComputerError(
+          "LAST_OWNER_REQUIRED",
+          "Assign another active owner before changing this owner's access",
+          409,
+        );
+      }
       throw error;
     } finally {
       client.release();
