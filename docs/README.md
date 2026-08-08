@@ -36,6 +36,10 @@
 - [Demo release runbook](demo-release.md) keeps the demo environment pinned, backed up, and separate from development.
 - [ADR 0001](adr/0001-local-release-gates.md) records why enforcement is local
   and hosted/customer-managed profiles share one codebase.
+- [Customer authentication architecture](authentication-architecture.md)
+  defines the accepted Better Auth boundary, authentication database,
+  hosted/customer-managed topology, enterprise SSO integration, product
+  authorization handoff, security baseline, and migration sequence.
 - [Local deployment and Entra setup](local-deployment.md) is the agent-oriented
   runbook for preparing `.env`, configuring Microsoft Entra, building the
   workspace image, starting Compose, and verifying the stack.
