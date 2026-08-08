@@ -208,7 +208,7 @@ test("runtime identity comes only from the authenticated server session", async 
   }
 });
 
-test("External ID routes are hosted-only and expose one generic public failure", async () => {
+test("External ID routes allow hosted and explicit worktree qualification while preserving one generic public failure", async () => {
   const calls: Array<{ method: "begin" | "complete"; input?: unknown }> = [];
   const externalIdAuthentication = {
     begin: async (returnPath?: string, invitation?: string) => {
@@ -237,6 +237,13 @@ test("External ID routes are hosted-only and expose one generic public failure",
     authentication: workforceAuthentication,
     externalIdAuthentication,
     agentBridgeSecret: "customer-auth-agent-bridge-secret-at-least-32-characters",
+  });
+  const worktree = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {
+    installationKind: "worktree",
+  }, {
+    authentication: workforceAuthentication,
+    externalIdAuthentication,
+    agentBridgeSecret: "worktree-auth-agent-bridge-secret-at-least-32-characters",
   });
   const headers = { "x-lemmacomputer-proxy-token": proxyToken };
   try {
@@ -277,9 +284,16 @@ test("External ID routes are hosted-only and expose one generic public failure",
     assert.equal(externalIdCustomerManaged.statusCode, 404);
     const customerBody = externalIdCustomerManaged.json();
     assert.equal(customerBody.error.code, "AUTH_PROVIDER_NOT_AVAILABLE");
-    assert.equal(calls.filter((call) => call.method === "begin").length, 3);
+    const externalIdWorktree = await worktree.inject({
+      method: "POST",
+      url: "/v1/auth/external-id/invitation",
+      headers,
+      payload: { invitation: "accepted-invitation-token-value", return: "/?view=people" },
+    });
+    assert.equal(externalIdWorktree.statusCode, 200);
+    assert.equal(calls.filter((call) => call.method === "begin").length, 4);
   } finally {
-    await Promise.all([hosted.close(), customerManaged.close()]);
+    await Promise.all([hosted.close(), customerManaged.close(), worktree.close()]);
   }
 });
 

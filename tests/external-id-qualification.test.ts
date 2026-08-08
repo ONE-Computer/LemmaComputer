@@ -19,6 +19,11 @@ const hostedEnvironment = Object.freeze({
   LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET: clientSecret,
   LEMMACOMPUTER_PUBLIC_WEB_URL: publicWebUrl,
 });
+const worktreeEnvironment = Object.freeze({
+  ...hostedEnvironment,
+  LEMMACOMPUTER_INSTALLATION_KIND: "worktree",
+  LEMMACOMPUTER_PUBLIC_WEB_URL: "http://localhost:4174",
+});
 
 type FakeFetchOptions = {
   issuer?: string;
@@ -137,4 +142,34 @@ test("External ID qualification fails customer-managed, issuer, callback, and st
   ]);
   assert.doesNotMatch(networkEvidence, new RegExp(clientSecret));
   assert.doesNotMatch(networkEvidence, /client_secret/i);
+});
+
+test("External ID qualification permits only explicit loopback worktree development", async () => {
+  await assertSafeFailure(
+    () => qualifyExternalId(worktreeEnvironment),
+    "HOSTED_PROFILE_REQUIRED",
+  );
+
+  const fake = fakeExternalId();
+  const result = await qualifyExternalId(worktreeEnvironment, {
+    fetchImpl: fake.fetchImpl,
+    timeoutMs: 1_000,
+    allowDevelopment: true,
+  });
+  assert.equal(result.callback, "http://localhost:4174/api/v1/auth/external-id/callback");
+
+  await assertSafeFailure(
+    () => qualifyExternalId({
+      ...worktreeEnvironment,
+      LEMMACOMPUTER_PUBLIC_WEB_URL: "http://worktree.example.test",
+    }, { fetchImpl: fake.fetchImpl, allowDevelopment: true }),
+    "HOSTED_HTTPS_REQUIRED",
+  );
+  await assertSafeFailure(
+    () => qualifyExternalId({
+      ...worktreeEnvironment,
+      LEMMACOMPUTER_INSTALLATION_KIND: "customer-managed",
+    }, { fetchImpl: fake.fetchImpl, allowDevelopment: true }),
+    "HOSTED_PROFILE_REQUIRED",
+  );
 });

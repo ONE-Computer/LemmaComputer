@@ -1306,7 +1306,7 @@ export function createControlServer(
     return reply.code(302).header("set-cookie", started.cookie).header("location", started.location).send();
   });
   app.post<{ Body: { invitation?: string; return?: string } }>("/v1/auth/external-id/invitation", async (request, reply) => {
-    if (connectionOptions.installationKind !== "hosted" || !security.externalIdAuthentication) {
+    if (connectionOptions.installationKind === "customer-managed" || !security.externalIdAuthentication) {
       throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "This sign-in method is unavailable", 404);
     }
     try {
@@ -1318,7 +1318,7 @@ export function createControlServer(
     }
   });
   app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/auth/external-id/callback", async (request, reply) => {
-    if (connectionOptions.installationKind !== "hosted" || !security.externalIdAuthentication) {
+    if (connectionOptions.installationKind === "customer-managed" || !security.externalIdAuthentication) {
       throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "This sign-in method is unavailable", 404);
     }
     try {
@@ -3095,7 +3095,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       ? "existing-membership-only"
       : "directory-jit",
   });
-  const externalIdAuthentication = env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+  const externalIdAuthentication = env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed"
     && env.EXTERNAL_ID_TENANT_ID && env.EXTERNAL_ID_TENANT_SUBDOMAIN
     && env.EXTERNAL_ID_CLIENT_ID && env.EXTERNAL_ID_CLIENT_SECRET
     ? new ExternalIdAuthenticationService(identityPolicyStore, {

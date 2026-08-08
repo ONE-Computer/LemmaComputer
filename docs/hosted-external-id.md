@@ -137,6 +137,19 @@ and signing keys and recognizes the configured callback for a silent OIDC
 attempt. It does not prove the client secret, invitation binding, or interactive
 MFA journey. Complete this manual smoke in a private browser session:
 
+For local development only, the same real-tenant preflight and invitation
+acceptance path may be exercised from the `worktree` profile with a loopback
+HTTP origin:
+
+```bash
+npm run qualify:external-id -- --file=/absolute/path/to/worktree.env --development
+```
+
+The `--development` exception accepts only the `worktree` profile and only
+`http://localhost` or `http://127.0.0.1`. It does not relax hosted deployment
+validation, enable External ID in `customer-managed`, or make a local worktree
+a production-ready hosted deployment.
+
 1. Confirm the target user flow has `isSignUpAllowed=false` and is associated
    with the configured application.
 2. Administratively create a disposable external-tenant email-and-password

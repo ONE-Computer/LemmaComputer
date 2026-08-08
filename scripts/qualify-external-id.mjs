@@ -74,8 +74,13 @@ const assertMicrosoftHttpsEndpoint = (value, allowedHosts, code) => {
 export async function qualifyExternalId(values, {
   fetchImpl = fetch,
   timeoutMs = 15_000,
+  allowDevelopment = false,
 } = {}) {
-  if (values.LEMMACOMPUTER_INSTALLATION_KIND !== "hosted") fail("HOSTED_PROFILE_REQUIRED");
+  const developmentQualification = allowDevelopment
+    && values.LEMMACOMPUTER_INSTALLATION_KIND === "worktree";
+  if (values.LEMMACOMPUTER_INSTALLATION_KIND !== "hosted" && !developmentQualification) {
+    fail("HOSTED_PROFILE_REQUIRED");
+  }
 
   const tenantId = required(values, EXTERNAL_ID_KEYS.tenantId);
   const tenantSubdomain = required(values, EXTERNAL_ID_KEYS.tenantSubdomain).toLowerCase();
@@ -98,7 +103,10 @@ export async function qualifyExternalId(values, {
   let callback;
   try {
     const publicOrigin = new URL(publicWebUrl);
-    if (publicOrigin.protocol !== "https:") fail("HOSTED_HTTPS_REQUIRED");
+    const developmentLoopback = developmentQualification
+      && publicOrigin.protocol === "http:"
+      && ["localhost", "127.0.0.1"].includes(publicOrigin.hostname);
+    if (publicOrigin.protocol !== "https:" && !developmentLoopback) fail("HOSTED_HTTPS_REQUIRED");
     callback = new URL("/api/v1/auth/external-id/callback", publicOrigin);
   } catch (error) {
     if (error instanceof ExternalIdQualificationError) throw error;
@@ -179,11 +187,12 @@ export async function qualifyExternalId(values, {
 
 export async function runExternalIdQualificationCli(argv = process.argv.slice(2)) {
   const source = argv.find((argument) => argument.startsWith("--file="))?.slice("--file=".length) ?? ".env";
-  if (argv.some((argument) => !argument.startsWith("--file="))) fail("UNKNOWN_ARGUMENT");
+  const allowDevelopment = argv.includes("--development");
+  if (argv.some((argument) => argument !== "--development" && !argument.startsWith("--file="))) fail("UNKNOWN_ARGUMENT");
   const parsed = parseEnvironment(await readFile(source, "utf8"));
   if (parsed.duplicates.length) fail("DUPLICATE_ENVIRONMENT_VARIABLE");
-  await qualifyExternalId(Object.fromEntries(parsed.values));
-  process.stdout.write("Hosted Microsoft Entra External ID real-tenant preflight passed without printing or exchanging credentials.\n");
+  await qualifyExternalId(Object.fromEntries(parsed.values), { allowDevelopment });
+  process.stdout.write("Microsoft Entra External ID real-tenant preflight passed without printing or exchanging credentials.\n");
 }
 
 const entrypoint = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : "";
