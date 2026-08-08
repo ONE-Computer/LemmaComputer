@@ -327,11 +327,12 @@ export class ExternalIdAuthenticationService extends EntraAuthenticationService 
     "provider" | "authority" | "issuer" | "callbackPath" | "stateCookieName" | "membershipAdmissionMode"
   > & { tenantSubdomain: string }) {
     const authority = `https://${config.tenantSubdomain}.ciamlogin.com/${config.tenantId}`;
+    const issuer = `https://${config.tenantId}.ciamlogin.com/${config.tenantId}/v2.0`;
     super(store, {
       ...config,
       provider: "entra-external-id",
       authority,
-      issuer: `${authority}/v2.0`,
+      issuer,
       callbackPath: "/api/v1/auth/external-id/callback",
       stateCookieName: "oc_external_id_state",
       membershipAdmissionMode: "existing-membership-only",

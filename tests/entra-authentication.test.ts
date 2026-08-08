@@ -164,7 +164,7 @@ test("External ID binds one-time invitations to CIAM state and cannot elevate fr
     idTokenVerifier: async (token, expected) => {
       assert.equal(token, "fake-valid-external-id-token");
       assert.deepEqual(expected, {
-        issuer: "https://external-tenant.ciamlogin.com/external-tenant-id/v2.0",
+        issuer: "https://external-tenant-id.ciamlogin.com/external-tenant-id/v2.0",
         audience: "external-client-id",
       });
       return {
@@ -252,7 +252,7 @@ test("External ID rejects a token from the wrong issuer before identity resoluti
       headers: { "content-type": "application/json" },
     }),
     idTokenVerifier: async (_token, expected) => {
-      assert.equal(expected.issuer, "https://external-tenant.ciamlogin.com/external-tenant-id/v2.0");
+      assert.equal(expected.issuer, "https://external-tenant-id.ciamlogin.com/external-tenant-id/v2.0");
       throw new Error("JWT issuer is not allowed");
     },
   });

@@ -9,6 +9,7 @@ const clientSecret = "qualification-client-secret-must-never-leave-process";
 const publicWebUrl = "https://hosted.example.test";
 const authorityHost = `${tenantSubdomain}.ciamlogin.com`;
 const authority = `https://${authorityHost}/${tenantId}/v2.0`;
+const issuer = `https://${tenantId}.ciamlogin.com/${tenantId}/v2.0`;
 const callback = `${publicWebUrl}/api/v1/auth/external-id/callback`;
 
 const hostedEnvironment = Object.freeze({
@@ -32,8 +33,8 @@ type FakeFetchOptions = {
 };
 
 const fakeExternalId = ({
-  issuer = authority,
-  authorizationEndpoint = `${authority}/oauth2/v2.0/authorize`,
+  issuer: publishedIssuer = issuer,
+  authorizationEndpoint = `https://${authorityHost}/${tenantId}/oauth2/v2.0/authorize`,
   callbackMode = "exact",
 }: FakeFetchOptions = {}) => {
   const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
@@ -42,10 +43,10 @@ const fakeExternalId = ({
     requests.push({ url: url.toString(), init });
     if (url.pathname.endsWith("/.well-known/openid-configuration")) {
       return Response.json({
-        issuer,
+        issuer: publishedIssuer,
         authorization_endpoint: authorizationEndpoint,
-        token_endpoint: `${authority}/oauth2/v2.0/token`,
-        jwks_uri: `${authority}/discovery/v2.0/keys`,
+        token_endpoint: `https://${authorityHost}/${tenantId}/oauth2/v2.0/token`,
+        jwks_uri: `https://${authorityHost}/${tenantId}/discovery/v2.0/keys`,
       });
     }
     if (url.pathname.endsWith("/discovery/v2.0/keys")) {
@@ -87,13 +88,13 @@ test("External ID qualification verifies exact hosted CIAM metadata and returns 
   });
   assert.equal(fake.requests.length, 3);
   assert.equal(fake.requests[0]!.url, `${authority}/.well-known/openid-configuration`);
-  assert.equal(fake.requests[1]!.url, `${authority}/discovery/v2.0/keys`);
+  assert.equal(fake.requests[1]!.url, `https://${authorityHost}/${tenantId}/discovery/v2.0/keys`);
   assert.equal(fake.requests[0]!.init?.redirect, "error");
   assert.equal(fake.requests[1]!.init?.redirect, "error");
 
   const authorization = new URL(fake.requests[2]!.url);
   assert.equal(authorization.origin, `https://${authorityHost}`);
-  assert.equal(authorization.pathname, `/${tenantId}/v2.0/oauth2/v2.0/authorize`);
+  assert.equal(authorization.pathname, `/${tenantId}/oauth2/v2.0/authorize`);
   assert.equal(authorization.searchParams.get("client_id"), clientId);
   assert.equal(authorization.searchParams.get("redirect_uri"), callback);
   assert.equal(authorization.searchParams.get("response_type"), "code");

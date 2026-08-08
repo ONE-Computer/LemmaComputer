@@ -114,7 +114,9 @@ export async function qualifyExternalId(values, {
   }
 
   const authorityHost = `${tenantSubdomain}.ciamlogin.com`;
+  const issuerHost = `${tenantId}.ciamlogin.com`;
   const authority = `https://${authorityHost}/${tenantId}/v2.0`;
+  const expectedIssuer = `https://${issuerHost}/${tenantId}/v2.0`;
   const metadataResponse = await fetchWithTimeout(
     fetchImpl,
     `${authority}/.well-known/openid-configuration`,
@@ -122,9 +124,9 @@ export async function qualifyExternalId(values, {
     timeoutMs,
   );
   const metadata = await readJson(metadataResponse, "DISCOVERY_FAILED");
-  if (normalizeUrl(String(metadata.issuer ?? "")) !== authority) fail("ISSUER_MISMATCH");
+  if (normalizeUrl(String(metadata.issuer ?? "")) !== expectedIssuer) fail("ISSUER_MISMATCH");
 
-  const allowedHosts = new Set([authorityHost, "login.microsoftonline.com"]);
+  const allowedHosts = new Set([authorityHost, issuerHost, "login.microsoftonline.com"]);
   const authorizationEndpoint = assertMicrosoftHttpsEndpoint(
     metadata.authorization_endpoint,
     allowedHosts,
