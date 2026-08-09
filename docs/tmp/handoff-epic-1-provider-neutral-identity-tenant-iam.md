@@ -5,7 +5,7 @@
 This document is the clean-start handoff for the next agent working in:
 
 - Repository: `ONE-Computer/LemmaComputer`
-- Local checkout: `/home/mike/Documents/onecomputer`
+- Local checkout: `<repository-root>`
 - Epic: [#1 — Provider-neutral identity, tenant IAM, and hosted SaaS readiness](https://github.com/ONE-Computer/LemmaComputer/issues/1)
 
 Read this document, the linked GitHub issue, the root `AGENTS.md`, and any subsystem `AGENTS.md` before changing code. Treat GitHub issue bodies and native GitHub dependencies as the execution contract.
@@ -73,7 +73,7 @@ qualified.
 ### GitHub
 
 - Canonical repository: `ONE-Computer/LemmaComputer`.
-- GitHub CLI authentication was verified for `mightnent` on 2026-08-09.
+- GitHub CLI access to the canonical repository was verified on 2026-08-09.
 - Epic #1 and issues #12, #13, #23, #24, #26, and #51-#56 were rewritten to
   match the accepted Better Auth architecture.
 - #11 was closed as the completed invitation-intent and membership-lifecycle
@@ -82,24 +82,19 @@ qualified.
 - Native GitHub dependency edges were read back after the rewrite and match the
   `Blocked by` graph below.
 
-### Recovery stash
+### Machine-local operational state
 
-`stash@{0}` is the original untracked handoff draft created before the Better
-Auth architecture merge. The committed handoff is newer. Do not pop the stash
-over this file; it would reintroduce the older draft. It may be dropped only as
-an explicit cleanup action after the user confirms it is no longer wanted.
+Absolute checkout paths, current container and loopback state, identity-provider
+tenant/application identifiers, recovery stashes, and local security follow-ups
+are intentionally excluded from this public handoff. In the original local
+checkout, read `docs/private/handoff-epic-1-local-environment.md` when present.
+The entire `docs/private/` directory is gitignored and must never be used as a
+source of portable product configuration.
 
-### Local runtime
-
-- Compose project: `lemmacomputer`
-- Installation kind remains `worktree`; it is not a production `hosted` deployment.
-- The running services reported healthy through `docker compose ps -a`.
-- The browser ingress is exposed on `127.0.0.1:4174`.
-- `GET http://127.0.0.1:4174/__lemmacomputer/healthz` returned `{"status":"ok"}`.
-- The one-shot `db-migrate` container exited successfully.
-- The migration log reported: `Database schema is current; no migrations applied.`
-
-The real External ID qualification path has a narrow development exception for the `worktree` profile and loopback HTTP. Do not switch the local installation to `hosted` merely to test identity. The production hosted contract requires HTTPS, remote-isolated workspaces, managed infrastructure, external secrets, and other controls that localhost does not provide.
+Do not switch a local development installation to `hosted` merely to exercise
+identity. The production hosted contract requires HTTPS, remote-isolated
+workspaces, managed infrastructure, external secrets, and other controls that
+localhost development does not provide.
 
 ### Database and migration state
 
@@ -260,20 +255,16 @@ Do not rename/remove the existing External ID adapter first. Introduce the neutr
 
 ## Human testing already performed and what it proved
 
-A real Microsoft Entra External ID external tenant and app were configured for local qualification.
-
-Non-secret identifiers:
-
-- External tenant: `ME TECH Customers`
-- Tenant domain: `metechcustomers.onmicrosoft.com`
-- Tenant ID: `492402d1-45e6-4b71-99f3-574cce83b598`
-- App display name: `LemmaComputer`
-- Client ID: `087cbef9-baeb-4094-8815-51d09408c9cd`
-- Local callback: `http://localhost:4174/api/v1/auth/external-id/callback`
+A real Microsoft Entra External ID tenant and application were configured for
+local qualification. Their environment-specific names and identifiers are kept
+only in the ignored private handoff.
 
 The real-provider preflight reached the correct discovery/signing infrastructure after fixing the External ID token issuer host.
 
-The invitation acceptance browser test then reached `ME TECH Customers`, but a new personal email received the Microsoft error that the account did not exist in the organization. The sign-up user flow was missing, disabled, or not attached in the required way. This exposed the product mismatch:
+The invitation acceptance browser test reached the configured external tenant,
+but a new personal email received the Microsoft error that the account did not
+exist in the organization. The sign-up user flow was missing, disabled, or not
+attached in the required way. This exposed the product mismatch:
 
 - LemmaComputer generated a one-time link but did not send an email.
 - The invitation created product membership intent but not a CIAM identity.
@@ -290,16 +281,13 @@ The following evidence was reported during #11 integration and was not rerun mer
 - targeted Playwright invitation test: 1 passed;
 - `npm run verify:quick`: 487 passed, 0 failed, with 18 PostgreSQL-dependent skips in that quick run;
 - real External ID non-interactive preflight: passed;
-- current Compose services: healthy;
-- current migration job: schema current.
 
 The real interactive signup/invitation journey is **not complete** and must not be described as passing.
 
 ## Security-sensitive operational notes
 
-- The real External ID client secret exists in the local `.env`. Never print, copy, commit, screenshot, or place it in an issue/handoff.
-- A workforce Entra secret was exposed in earlier tool output. Treat it as compromised until rotation is independently confirmed. Never repeat its value.
-- Invitation URLs were shown in screenshots. Revoke any exposed pending invitation before further testing and create a fresh one. Never paste a raw invitation token into GitHub, chat, logs, or screenshots.
+- Machine-specific credential-rotation and invitation-revocation follow-ups are
+  recorded only in the ignored private handoff; no secret values belong there.
 - Do not expose provider access tokens, refresh tokens, ID tokens, authorization codes, passwords, OTPs, passkey material, client secrets, session cookies, or MFA QR codes.
 - Do not infer that a `#EXT#` representation changes or replaces the person's home identity; it is a directory representation.
 

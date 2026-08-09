@@ -17,3 +17,6 @@ test-results/
 .artifacts/
 *.log
 .DS_Store
+
+# Machine-local handoffs, environment identifiers, and operator notes.
+docs/private/
