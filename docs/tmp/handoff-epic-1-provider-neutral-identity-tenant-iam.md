@@ -40,15 +40,17 @@ The central correction is:
 
 ## Verified snapshot
 
-Snapshot date: **2026-08-08, Asia/Singapore**.
+Snapshot refreshed: **2026-08-09, Asia/Singapore**.
 
 ### Git
 
-- Current branch: `main`
-- Current HEAD: `157b4cc`
-- Working tree was clean before this handoff file was added.
-- Local `main` is **five commits ahead** of `origin/main` and has no remote-only commits.
-- The five commits are local and have **not been pushed**:
+- The accepted Better Auth architecture and #11 integration baseline is
+  `5b39b11` (`merge: adopt Better Auth authentication architecture`).
+- Immediately before this handoff-only refresh, local `main` and freshly
+  fetched `origin/main` both resolved to the full SHA
+  `5b39b11a0fd84b41ceab47547299085dbc10b5cd` with zero divergence and a clean
+  working tree.
+- The #11 implementation commits are all contained in that baseline:
 
 ```text
 157b4cc fix:match-external-id-token-issuer
@@ -58,9 +60,34 @@ c8bd0a3 fix:allow-external-id-qualification-in-worktrees
 9b8b548 feat: add organization membership admin API
 ```
 
-Do not create new work from `origin/main`; that would omit the #11 foundation. Create issue worktrees from the current local `main` unless the user separately authorizes and completes a push first.
+Future work must start from a freshly fetched latest `origin/main`. Do not infer
+remote parity from an old checkout; verify the full local/remote SHA and working
+tree at the start of the session.
 
-Do not roll back local `main`. The useful authorization and membership foundation should be evolved additively. If Microsoft-specific behavior is later removed, do it through a dedicated compatibility/contraction issue after the provider-neutral replacement is qualified.
+Do not roll back the #11 or Better Auth architecture baseline. Evolve the useful
+authorization and membership foundation additively. Remove Microsoft-specific
+customer behavior only through the expand/migrate/contract sequence in the
+normative architecture after Better Auth replacement and rollback paths are
+qualified.
+
+### GitHub
+
+- Canonical repository: `ONE-Computer/LemmaComputer`.
+- GitHub CLI authentication was verified for `mightnent` on 2026-08-09.
+- Epic #1 and issues #12, #13, #23, #24, #26, and #51-#56 were rewritten to
+  match the accepted Better Auth architecture.
+- #11 was closed as the completed invitation-intent and membership-lifecycle
+  foundation. #52 and #56 own universal Better Auth customer authentication
+  and invitation delivery/activation.
+- Native GitHub dependency edges were read back after the rewrite and match the
+  `Blocked by` graph below.
+
+### Recovery stash
+
+`stash@{0}` is the original untracked handoff draft created before the Better
+Auth architecture merge. The committed handoff is newer. Do not pop the stash
+over this file; it would reintroduce the older draft. It may be dropped only as
+an explicit cleanup action after the user confirms it is no longer wanted.
 
 ### Local runtime
 
@@ -188,11 +215,12 @@ Important existing domain properties include:
 - tenant-local session revocation and audit.
 - fail-closed server-side permission checks.
 
-### Current #11 implementation on local main
+### Completed #11 foundation on main
 
-[#11](https://github.com/ONE-Computer/LemmaComputer/issues/11) is open and has been reframed as **organization invitations and membership lifecycle foundation**.
+[#11](https://github.com/ONE-Computer/LemmaComputer/issues/11) is closed as the
+completed **organization invitations and membership lifecycle foundation**.
 
-The five local commits add:
+The integrated commits add:
 
 - organization membership administration APIs;
 - People and Access administration UI;
@@ -283,30 +311,30 @@ All listed issues are children of epic #1 where applicable. Their bodies use the
 
 | Issue | State | Purpose | Native blocked by | Can run in parallel with |
 |---|---|---|---|---|
-| [#51](https://github.com/ONE-Computer/LemmaComputer/issues/51) | Open | Provider-neutral identity ADR and threat model | None | #4, #5, #11, #14, #15, #21 |
-| [#52](https://github.com/ONE-Computer/LemmaComputer/issues/52) | Open | Customer email/passkey/optional federated authentication | #51 | #54 and, after #11, #55 |
+| [#51](https://github.com/ONE-Computer/LemmaComputer/issues/51) | Open | Better Auth adoption, threat model, contracts, and qualification | None | #4, #5, #14, #15, #21 |
+| [#52](https://github.com/ONE-Computer/LemmaComputer/issues/52) | Open | Embedded Better Auth and universal customer authentication | #51 | #54, #55 |
 | [#53](https://github.com/ONE-Computer/LemmaComputer/issues/53) | Open | Self-service organization signup and protected owner | #52 | #12, #56 |
-| [#54](https://github.com/ONE-Computer/LemmaComputer/issues/54) | Open | Separate platform-operator plane | #51 | #52 and, after #11, #55 |
+| [#54](https://github.com/ONE-Computer/LemmaComputer/issues/54) | Open | Separate workforce platform-operator plane | #51 | #52, #55 |
 | [#55](https://github.com/ONE-Computer/LemmaComputer/issues/55) | Open | Tenant-defined roles and scoped permissions | #11, #51 | #52, #54 |
-| [#56](https://github.com/ONE-Computer/LemmaComputer/issues/56) | Open | Invitation email delivery and provider-neutral activation | #11, #52 | #12, #53 |
-| [#12](https://github.com/ONE-Computer/LemmaComputer/issues/12) | Open | Tenant-configured enterprise SSO and verified domains | #51, #52 | #53, #54, #55, #56 |
-| [#13](https://github.com/ONE-Computer/LemmaComputer/issues/13) | Open | Adversarial tenant isolation | #12, #53, #54, #55, #56 | #21, #22 |
+| [#56](https://github.com/ONE-Computer/LemmaComputer/issues/56) | Open | Invitation delivery and Better Auth membership activation | #11, #52 | #12, #53 |
+| [#12](https://github.com/ONE-Computer/LemmaComputer/issues/12) | Open | Tenant SAML/OIDC through Better Auth SSO | #51, #52 | #53, #54, #55, #56 |
+| [#13](https://github.com/ONE-Computer/LemmaComputer/issues/13) | Open | Adversarial tenant and authentication isolation | #12, #53, #54, #55, #56 | #21, #22 |
 
 ### Supporting platform and release graph
 
 | Issue | State | Purpose | Native blocked by | Can run in parallel with |
 |---|---|---|---|---|
-| [#4](https://github.com/ONE-Computer/LemmaComputer/issues/4) | Open | Pluggable external secret storage | None | #5, #11, #21, #51 |
-| [#5](https://github.com/ONE-Computer/LemmaComputer/issues/5) | Open | Remote Kasm security/lifecycle parity | None | #4, #11, #14, #15, #21, #51 |
-| [#11](https://github.com/ONE-Computer/LemmaComputer/issues/11) | Open | Invitations and member lifecycle foundation | #2, #3 are closed prerequisites | #4, #5, #14, #15, #21, #51 |
+| [#4](https://github.com/ONE-Computer/LemmaComputer/issues/4) | Open | Pluggable external secret storage | None | #5, #21, #51 |
+| [#5](https://github.com/ONE-Computer/LemmaComputer/issues/5) | Open | Remote Kasm security/lifecycle parity | None | #4, #14, #15, #21, #51 |
+| [#11](https://github.com/ONE-Computer/LemmaComputer/issues/11) | Closed | Invitations and member lifecycle foundation | #2, #3 are closed prerequisites | Complete |
 | [#14](https://github.com/ONE-Computer/LemmaComputer/issues/14) | Open | Separate product login from Microsoft 365 connector consent | #4 | #5, #15, #52, #54, #55 |
 | [#15](https://github.com/ONE-Computer/LemmaComputer/issues/15) | Open | Tenant-scoped provider connections | #4 | #5, #14, #52, #54, #55 |
-| [#21](https://github.com/ONE-Computer/LemmaComputer/issues/21) | Open, P1 | Usage accounting, quotas, idle suspension | None active | #4, #5, #11, #51, #52, #54 |
+| [#21](https://github.com/ONE-Computer/LemmaComputer/issues/21) | Open, P1 | Usage accounting, quotas, idle suspension | None active | #4, #5, #51, #52, #54 |
 | [#22](https://github.com/ONE-Computer/LemmaComputer/issues/22) | Open | Audit, retention, export, deletion | #4 | Later identity/isolation work where worktrees do not overlap |
-| [#23](https://github.com/ONE-Computer/LemmaComputer/issues/23) | Open | Customer-managed package | #4, #13 | #22 and later #24 |
-| [#24](https://github.com/ONE-Computer/LemmaComputer/issues/24) | Open | Hosted production runtime | #4, #5, #13, #22 | #21, #23 |
+| [#23](https://github.com/ONE-Computer/LemmaComputer/issues/23) | Open | Customer-managed Better Auth package | #4, #13 | #22 and later #24 |
+| [#24](https://github.com/ONE-Computer/LemmaComputer/issues/24) | Open | Hosted Better Auth production runtime | #4, #5, #13, #22 | #21, #23 |
 | [#25](https://github.com/ONE-Computer/LemmaComputer/issues/25) | Open, P1 | Subscription entitlements and billing adapter | #21, #24 | #26 |
-| [#26](https://github.com/ONE-Computer/LemmaComputer/issues/26) | Open | Final hosted/customer-managed release gates | #12, #13, #14, #15, #22, #23, #24 | #25 |
+| [#26](https://github.com/ONE-Computer/LemmaComputer/issues/26) | Open | Final hosted/customer-managed Better Auth release gates | #12, #13, #14, #15, #22, #23, #24 | #25 |
 
 ## Recommended execution sequence
 
@@ -314,16 +342,20 @@ All listed issues are children of epic #1 where applicable. Their bodies use the
 
 Start [#51](https://github.com/ONE-Computer/LemmaComputer/issues/51) first.
 
-Recommended worktree:
+The existing issue worktree and branch are:
 
 ```bash
-git worktree add .worktrees/issue-51 -b codex/51-provider-neutral-identity main
-cd .worktrees/issue-51
-npm run worktree:init
+cd .worktrees/issue-51-better-auth-design
 npm run dev:doctor
 ```
 
-Before editing, read the full #51 body. Its job is to remove unresolved architecture choices for downstream implementation, not to build every login and IAM screen.
+If that worktree has intentionally been retired, create a new #51 worktree from
+freshly fetched `origin/main` rather than reusing its branch name blindly.
+
+Before editing, read the full #51 body and the complete normative authentication
+architecture. The provider decision is settled. #51 completes the threat model,
+provider/session/database contracts, migration and recovery boundaries, and
+qualification gates; it does not build every login and IAM screen.
 
 ### Work that can proceed independently
 
@@ -331,7 +363,6 @@ If the user explicitly requests parallel implementation, these may run in separa
 
 - #4 — external SecretStore
 - #5 — remote Kasm qualification
-- #11 — final integration/closeout of the existing membership foundation
 - #21 — P1 usage/quota work if separately prioritized
 
 Do not start #14 or #15 until #4 closes.
@@ -478,11 +509,13 @@ The identity and IAM phase is successful when:
 
 Do not roll back #11 and do not continue patching the current Microsoft screen as the final product experience.
 
-Start with #51 in a new worktree based on the current local `main`. Before any
+Continue with #51 in its isolated issue worktree (or a replacement based on the
+latest fetched `origin/main` if the existing worktree is retired). Before any
 implementation, read the complete mandatory
 [Customer authentication architecture](../authentication-architecture.md),
-adopt it in the #51 ADR and threat model, and reconcile any conflicting issue
-text. Preserve the membership/invitation foundation, embed Better Auth behind
-the provider-neutral customer authentication contract, retain a separate
-platform-operator realm, and use that decision to drive #52, #54, #55, #53,
-#56, and #12 in the dependency order recorded above.
+complete its #51 threat model, contracts, migration/operability boundaries, and
+qualification gates, and reconcile any conflicting implementation before code
+changes. Preserve the membership/invitation foundation, embed Better Auth
+behind the provider-neutral customer authentication contract, retain a separate
+platform-operator realm, and use the accepted decision to drive #52, #54, #55,
+#53, #56, and #12 in the dependency order recorded above.
