@@ -77,8 +77,13 @@ qualified.
 - Epic #1 and issues #12, #13, #23, #24, #26, and #51-#56 were rewritten to
   match the accepted Better Auth architecture.
 - #11 was closed as the completed invitation-intent and membership-lifecycle
-  foundation. #52 and #56 own universal Better Auth customer authentication
-  and invitation delivery/activation.
+  foundation. #52 owns universal Better Auth customer authentication plus one
+  small transactional-email boundary with an in-memory test adapter and
+  Postmark as the initial real transport. #56 reuses it for invitation
+  activation.
+- Do not reopen provider selection during the core epic. #57 was closed as a
+  premature qualification split; replace or expand Postmark only when a
+  demonstrated requirement justifies focused follow-up work.
 - Native GitHub dependency edges were read back after the rewrite and match the
   `Blocked by` graph below.
 
@@ -300,11 +305,11 @@ All listed issues are children of epic #1 where applicable. Their bodies use the
 | Issue | State | Purpose | Native blocked by | Can run in parallel with |
 |---|---|---|---|---|
 | [#51](https://github.com/ONE-Computer/LemmaComputer/issues/51) | Open | Better Auth adoption, threat model, contracts, and qualification | None | #4, #5, #14, #15, #21 |
-| [#52](https://github.com/ONE-Computer/LemmaComputer/issues/52) | Open | Embedded Better Auth and universal customer authentication | #51 | #54, #55 |
+| [#52](https://github.com/ONE-Computer/LemmaComputer/issues/52) | Open | Embedded Better Auth, universal customer authentication, and in-memory/Postmark email transport | #51 | #54, #55 |
 | [#53](https://github.com/ONE-Computer/LemmaComputer/issues/53) | Open | Self-service organization signup and protected owner | #52 | #12, #56 |
 | [#54](https://github.com/ONE-Computer/LemmaComputer/issues/54) | Open | Separate workforce platform-operator plane | #51 | #52, #55 |
 | [#55](https://github.com/ONE-Computer/LemmaComputer/issues/55) | Open | Tenant-defined roles and scoped permissions | #11, #51 | #52, #54 |
-| [#56](https://github.com/ONE-Computer/LemmaComputer/issues/56) | Open | Invitation delivery and Better Auth membership activation | #11, #52 | #12, #53 |
+| [#56](https://github.com/ONE-Computer/LemmaComputer/issues/56) | Open | Invitation activation through Better Auth using #52's shared email transport | #11, #52 | #12, #53 |
 | [#12](https://github.com/ONE-Computer/LemmaComputer/issues/12) | Open | Tenant SAML/OIDC through Better Auth SSO | #51, #52 | #53, #54, #55, #56 |
 | [#13](https://github.com/ONE-Computer/LemmaComputer/issues/13) | Open | Adversarial tenant and authentication isolation | #12, #53, #54, #55, #56 | #21, #22 |
 
@@ -359,7 +364,8 @@ Do not start #14 or #15 until #4 closes.
 
 The following may run in parallel:
 
-- #52 — provider-neutral customer authentication
+- #52 — provider-neutral customer authentication with an in-memory test adapter
+  and Postmark as the initial real email transport
 - #54 — platform-operator administration plane
 - #55 — tenant IAM, only after #11 also closes
 
@@ -369,7 +375,8 @@ The following may run in parallel:
 
 - #53 — self-service organization and protected owner
 - #12 — tenant-configured enterprise SSO
-- #56 — invitation delivery/activation, only after #11 also closes
+- #56 — invitation activation using #52's shared email transport, only after
+  #11 also closes
 
 ### Hardening and packaging
 
