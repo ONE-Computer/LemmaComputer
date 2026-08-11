@@ -53,6 +53,7 @@ import { ConfirmDialog, ModalDialog, SelectMenu, TextPromptDialog, useDismissOnO
 import { ActivityPanel, ActivityToggle } from "./ActivityPanel.jsx";
 import { providerModelCapabilityLabels } from "./provider-inventory.js";
 import { customerPasskeyApi } from "./customer-auth-client.js";
+import { reconcileWorkspaceInventory, replaceWorkspaceInInventory } from "./workspace-inventory.js";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
 const providerTitle = (provider) => ({
@@ -4654,7 +4655,7 @@ export function App() {
 
   const updateWorkspaceInventory = (next) => {
     if (!next) return;
-    setHomeWorkspaces((current) => [next, ...current.filter((item) => item.id !== next.id)]);
+    setHomeWorkspaces((current) => replaceWorkspaceInInventory(current, next));
     if (next.id === workspace?.id) applyWorkspace(next);
   };
 
@@ -4684,7 +4685,7 @@ export function App() {
           ?? current
           ?? workspaces[0]
           ?? null;
-        setHomeWorkspaces(workspaces);
+        setHomeWorkspaces((current) => reconcileWorkspaceInventory(current, workspaces));
         applyWorkspace(selected);
         setActiveWorkspaceId(selected?.id ?? "");
         writePreference(workspacePreferenceKey, selected?.id ?? "");
@@ -4755,23 +4756,6 @@ export function App() {
       .finally(() => { if (active) setProviderSettingsLoading(false); });
     return () => { active = false; };
   }, [activeNav, aiControlPlaneView, settingsView, session?.user.id, canManageAnyProvider]);
-
-  useEffect(() => {
-    if (!session || activeNav !== "Workspace") return undefined;
-    let active = true;
-    const refresh = () => workspaceApi.list()
-      .then((value) => {
-        if (!active) return;
-        setHomeWorkspaces(value.workspaces);
-        const refreshed = value.workspaces.find((item) => item.id === workspace?.id);
-        if (refreshed) applyWorkspace(refreshed);
-        setHomeWorkspacesLoading(false);
-      })
-      .catch((error) => { if (active) showApiError(error); });
-    refresh();
-    const interval = window.setInterval(refresh, 10_000);
-    return () => { active = false; window.clearInterval(interval); };
-  }, [activeNav, session?.user.id, workspace?.id]);
 
   useEffect(() => {
     if (!session || activeNav !== "Sites") return undefined;
@@ -4927,21 +4911,33 @@ export function App() {
   }, [activeNav, session?.user.id, selectedSandboxGrantId, homeWorkspaces.map((item) => `${item.id}:${item.grantId}`).join(",")]);
 
   useEffect(() => {
+    if (!session || !workspace?.id) return undefined;
     const delay = ["provisioning", "restarting", "stopping"].includes(workspaceState)
       ? 2000
       : ["ready", "open"].includes(workspaceState)
         ? 10000
         : null;
     if (!delay) return undefined;
-    const interval = window.setInterval(() => workspaceApi.list()
-      .then((value) => {
-        setHomeWorkspaces(value.workspaces);
-        const refreshed = value.workspaces.find((item) => item.id === workspace?.id);
+    let active = true;
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const value = await workspaceApi.list();
+        if (!active) return;
+        setHomeWorkspaces((current) => reconcileWorkspaceInventory(current, value.workspaces));
+        const refreshed = value.workspaces.find((item) => item.id === workspace.id);
         if (refreshed) applyWorkspace(refreshed);
-      })
-      .catch(showApiError), delay);
-    return () => window.clearInterval(interval);
-  }, [workspace?.id, workspaceState]);
+      } catch (error) {
+        if (active) showApiError(error);
+      } finally {
+        refreshing = false;
+      }
+    };
+    const interval = window.setInterval(() => { void refresh(); }, delay);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [session?.user.id, workspace?.id, workspaceState]);
 
   useEffect(() => {
     if (!operation || !["approved", "executing"].includes(operation.state)) return undefined;
@@ -5479,7 +5475,7 @@ export function App() {
         setSandboxSettings(null);
         setTelegramConnection(null);
         setTelegramError("");
-        workspaceApi.list().then((value) => setHomeWorkspaces(value.workspaces)).catch(() => undefined);
+        workspaceApi.list().then((value) => setHomeWorkspaces((current) => reconcileWorkspaceInventory(current, value.workspaces))).catch(() => undefined);
         setToast("Workspace configuration saved. Restart the workspace to apply changes.");
         window.requestAnimationFrame(() => mainContentRef.current?.focus());
       }

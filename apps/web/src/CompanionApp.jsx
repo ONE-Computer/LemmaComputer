@@ -22,6 +22,7 @@ import {
   removeCompanionPush,
 } from "./companion-push.js";
 import { ConfirmDialog } from "./ui.jsx";
+import { reconcileWorkspaceInventory, replaceWorkspaceInInventory } from "./workspace-inventory.js";
 import "./companion.css";
 
 const PROTOCOL_VERSION = "lemmacomputer-companion-push-0.1";
@@ -395,7 +396,7 @@ export function CompanionApp() {
           ?? current
           ?? nextWorkspaces[0]
           ?? null;
-        setWorkspaces(nextWorkspaces);
+        setWorkspaces((current) => reconcileWorkspaceInventory(current, nextWorkspaces));
         setWorkspace(selected);
         setWorkspaceState(selected?.state ?? "not_created");
         writePreference(workspacePreferenceKey, selected?.id ?? "");
@@ -671,7 +672,7 @@ export function CompanionApp() {
     if (!next) return;
     setWorkspace(next);
     setWorkspaceState(next.state);
-    setWorkspaces((current) => [next, ...current.filter((item) => item.id !== next.id)]);
+    setWorkspaces((current) => replaceWorkspaceInInventory(current, next));
   };
 
   const selectWorkspace = (workspaceId) => {
