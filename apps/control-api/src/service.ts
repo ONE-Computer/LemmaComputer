@@ -354,11 +354,16 @@ export class WorkspaceService {
       const sandbox = await this.controller.status(record.providerId);
       projectedIntegrity = sandbox.policyIntegrity;
       projectedEgressPolicy = sandbox.egressPolicyProjection;
-      record = await this.store.update(record.id, {
-        state: sandbox.state === "ready" && record.state === "open" ? "open" : sandbox.state === "ready" ? "ready" : sandbox.state,
-        ...(sandbox.state === "stopped" ? { providerId: null } : {}),
-        failureCode: sandbox.failureCode,
-      });
+      const state = sandbox.state === "ready" && record.state === "open" ? "open" : sandbox.state === "ready" ? "ready" : sandbox.state;
+      const failureCode = sandbox.failureCode ?? null;
+      const providerStopped = sandbox.state === "stopped" && record.providerId !== null;
+      if (record.state !== state || record.failureCode !== failureCode || providerStopped) {
+        record = await this.store.update(record.id, {
+          state,
+          ...(providerStopped ? { providerId: null } : {}),
+          failureCode,
+        });
+      }
     }
     const projectedPolicy = projectedIntegrity?.projected;
     if (

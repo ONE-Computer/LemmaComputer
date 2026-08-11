@@ -800,7 +800,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async listCurrent(identity: IdentityContext) {
     const result = await this.pool.query(
-      "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 ORDER BY updated_at DESC, created_at DESC",
+      "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 ORDER BY created_at DESC,id ASC",
       [identity.tenantId, identity.subjectId],
     );
     return result.rows.map(mapRow);
@@ -2085,7 +2085,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async listCurrent(identity: IdentityContext) {
     return [...this.records.values()]
       .filter((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId)
-      .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
   }
   async getOwned(identity: IdentityContext, workspaceId: string) {
     const item = this.records.get(workspaceId);

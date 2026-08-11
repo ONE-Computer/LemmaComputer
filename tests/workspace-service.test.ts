@@ -182,6 +182,21 @@ test("sandbox inventory projects each sandbox using its own configuration policy
   assert.equal(inventory.find((workspace) => workspace.grantId === "personal")?.profile?.modelAlias, "lemmacomputer-assistant");
 });
 
+test("workspace inventory retains its creation order while polling multiple running workspaces", async () => {
+  const service = new WorkspaceService(new MemoryWorkspaceStore(), new FakeController());
+  await service.create(alex, policy, "personal", "stable-order-personal", "correlation-1");
+  await service.create(alex, policy, "research", "stable-order-research", "correlation-2");
+
+  const firstPoll = await service.list(alex, async () => policy);
+  const secondPoll = await service.list(alex, async () => policy);
+
+  assert.deepEqual(secondPoll.map((workspace) => workspace.id), firstPoll.map((workspace) => workspace.id));
+  assert.deepEqual(
+    secondPoll.map((workspace) => ({ id: workspace.id, updatedAt: workspace.updatedAt })),
+    firstPoll.map((workspace) => ({ id: workspace.id, updatedAt: workspace.updatedAt })),
+  );
+});
+
 test("workspace lifetime remains UI-managed while its gateway grant can renew", async () => {
   const controller = new FakeController();
   const store = new MemoryWorkspaceStore();

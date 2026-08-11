@@ -1,5 +1,31 @@
 import { expect, test } from "@playwright/test";
 
+test("workspace cards retain their positions across reordered status refreshes", async ({ page }) => {
+  let listRequests = 0;
+  await page.route("**/api/v1/workspaces", async (route) => {
+    listRequests += 1;
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        workspaces: listRequests === 1 ? payload.workspaces : [...payload.workspaces].reverse(),
+      },
+    });
+  });
+
+  await page.clock.install();
+  await page.goto("/");
+  const cards = page.locator(".workspace-overview-card");
+  await expect(cards).toHaveCount(3);
+  await expect(cards.locator("h2")).toHaveText(["Acme Workspace", "Research", "Product"]);
+
+  await page.clock.fastForward(10_000);
+  await expect.poll(() => listRequests).toBeGreaterThanOrEqual(2);
+  await expect(cards.locator("h2")).toHaveText(["Acme Workspace", "Research", "Product"]);
+});
+
 test("workspace creation is shown only when the organization grants workspace.create", async ({ page }) => {
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({
     json: {
