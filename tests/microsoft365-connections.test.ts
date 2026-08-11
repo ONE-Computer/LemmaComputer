@@ -921,7 +921,9 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
   gateway.onTools = () => {
     throw new Error("fixture refresh denied");
   };
-  await service.list(alpha);
+  // A workspace projection may be requested before the Connections screen is
+  // revisited, so an expired connector must not survive on a stale projection
+  // cache entry until list() happens to invalidate it.
   const after = await service.projectConnectedConnectors(alpha, policy);
   assert.deepEqual(after.mcpServers, ["lemmacomputer_ms365"]);
   assert.equal(after.mcpToolPermissions?.lemmacomputer_linear, undefined);
