@@ -1,6 +1,6 @@
 # Customer authentication architecture
 
-Status: **Accepted architecture for Epic #1 / issue #51**
+Status: **Accepted and implemented core architecture for Epic #1 / issue #51**
 
 Decision date: **2026-08-09**
 
@@ -49,9 +49,12 @@ identity-silo deployment.
 
 ## Context
 
-The current Control API implements Microsoft Entra OIDC directly in
-`apps/control-api/src/auth.ts`. After Microsoft authenticates a person, Control
-maps the immutable provider identity into the existing product domain:
+The Control API previously implemented Microsoft Entra OIDC directly in
+`apps/control-api/src/auth.ts`. The embedded Better Auth runtime now owns the
+primary customer authentication paths under `/api/v1/auth/customer/*`, while
+transitional Microsoft adapters remain behind the provider-neutral boundary.
+After any configured method authenticates a person, Control maps the stable
+authentication account into the existing product domain:
 
 - `account_users` is the stable product account;
 - `external_identities` records immutable provider identity links;
@@ -395,15 +398,28 @@ LemmaComputer invitations continue to bind the intended organization and role.
 They do not create a Better Auth credential and do not choose a password.
 
 1. An authorized tenant administrator creates an invitation.
-2. LemmaComputer sends a single-use, expiring activation link.
-3. The recipient authenticates or creates a Better Auth account using any
+2. LemmaComputer sends one single-use, expiring activation link through the
+   shared transactional email adapter. Explicit copy-link delivery is limited
+   to local and customer-managed operation; hosted rejects it.
+3. Control exchanges the raw link token once for a short-lived opaque context
+   in an `HttpOnly`, `SameSite=Lax` cookie. Only hashes and the invitation
+   delivery generation are persisted, and provider redirects contain no raw
+   invitation capability.
+4. The recipient authenticates or creates a Better Auth account using any
    enabled method.
-4. Control validates the Better Auth identity and invitation token.
-5. LemmaComputer atomically activates the predetermined membership.
-6. The role comes only from the invitation and product transaction.
+5. Control validates a database-backed, verified-email Better Auth session
+   whose `createdAt` is within the invitation reauthentication window, then
+   checks the exact normalized email and current invitation generation.
+6. LemmaComputer atomically activates the predetermined membership, binds the
+   product context to the Better Auth session, consumes the activation context,
+   and records invitation and login audit events.
+7. The role comes only from the invitation and product transaction.
 
 An identity-provider email or role claim cannot redirect the invitation into a
-different organization or increase its authority.
+different organization or increase its authority. Expired, revoked,
+superseded, replayed, wrong-email, stale-session, and cross-organization
+attempts fail with the same public invitation error. Creation and resend are
+idempotent; delivery and activation attempts are durably rate limited.
 
 ## Platform-operator realm
 
@@ -481,7 +497,12 @@ and apply the following deployment controls:
   provider-token, MFA-secret, and session compromise, with forced revocation and
   recovery.
 
-## Migration from the current state
+## Implementation status and remaining contraction
+
+Phases 1 through 5 below are implemented in the current product core. Phase 6
+is a deliberate compatibility contraction and must not be inferred merely from
+the availability of Better Auth. Transitional routes are retired only through a
+separately reviewed change with recovery and rollback evidence.
 
 ### Phase 1: provider-neutral boundary
 
@@ -562,10 +583,11 @@ Costs and risks:
 - compliance evidence must cover the complete LemmaComputer operation, not just
   Better Auth's implementation.
 
-## Required qualification gates
+## Release and qualification gates
 
-The Better Auth decision is implementation-ready only after automated and human
-qualification proves:
+The following are ongoing release gates for the implemented Better Auth
+customer identity plane. A deployment must not claim support for a method until
+its applicable automated and human qualification proves:
 
 - email signup, verification, password reset, and non-enumerating responses;
 - TOTP enrollment, challenge, trusted-device policy, backup-code consumption,

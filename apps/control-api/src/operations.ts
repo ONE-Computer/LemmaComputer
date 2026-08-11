@@ -412,6 +412,15 @@ export class GovernedOperationService {
     private readonly openVtc?: OpenVtcApprovalCoordinator,
   ) {}
 
+  private async activeAccessGeneration(identity: IdentityContext, workspaceId: string) {
+    const workspace = await this.store.getOwned(identity, workspaceId);
+    if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    if (!["ready", "open"].includes(workspace.state)) {
+      throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not ready for governed actions", 409, true);
+    }
+    return workspace.accessGeneration;
+  }
+
   async createDeleteFile(identity: IdentityContext, workspaceId: string, rawPath: string, idempotencyKey: string, correlationId: string) {
     const workspace = await this.store.getOwned(identity, workspaceId);
     if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
@@ -808,10 +817,12 @@ export class GovernedOperationService {
       throw new LemmaComputerError("UPLOAD_ALREADY_STARTED", "The resumable upload has already started", 409);
     }
     try {
+      const accessGeneration = await this.activeAccessGeneration(identity, claimed.workspaceId);
       const result = await this.executor.executeGovernedTool({
         tenantId: identity.tenantId,
         subjectId: identity.subjectId,
         workspaceId: claimed.workspaceId,
+        accessGeneration,
         operationId: claimed.id,
         operationDigest: claimed.operationDigest,
         leaseId,
@@ -900,10 +911,12 @@ export class GovernedOperationService {
     if (!claimed) throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     if (claimed.leaseId !== leaseId) return this.waitForConcurrentExecution(identity, operationId);
     try {
+      const accessGeneration = await this.activeAccessGeneration(identity, claimed.workspaceId);
       const result = await this.executor.executeGovernedTool({
         tenantId: identity.tenantId,
         subjectId: identity.subjectId,
         workspaceId: claimed.workspaceId,
+        accessGeneration,
         operationId: claimed.id,
         operationDigest: claimed.operationDigest,
         leaseId,

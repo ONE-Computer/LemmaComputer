@@ -217,6 +217,7 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
     }
     const sandbox = await adapter.create({
       workspaceId: input.workspaceId,
+      accessGeneration: input.accessGeneration,
       policy: verified.payload.policy,
       policyBundle: input.policyBundle,
       policyVerificationKeys: keys,
@@ -265,8 +266,19 @@ export function createControllerServer(adapter: SandboxAdapter, internalToken: s
     await adapter.destroy(request.params.providerId);
     return reply.code(204).send();
   });
-  app.delete<{ Params: { workspaceId: string } }>("/internal/v1/workspaces/:workspaceId/storage", async (request, reply) => {
-    await adapter.purgeWorkspace(request.params.workspaceId);
+  app.delete<{ Params: { workspaceId: string; providerId: string } }>("/internal/v1/workspaces/:workspaceId/sandboxes/:providerId", async (request, reply) => {
+    const sandbox = await adapter.status(request.params.providerId);
+    if (sandbox.workspaceId !== request.params.workspaceId) {
+      throw new LemmaComputerError("WORKSPACE_SANDBOX_BINDING_MISMATCH", "Sandbox is not bound to this workspace", 409);
+    }
+    await adapter.destroy(request.params.providerId);
+    return reply.code(204).send();
+  });
+  app.delete<{ Params: { workspaceId: string }; Querystring: { accessGeneration?: string } }>("/internal/v1/workspaces/:workspaceId/storage", async (request, reply) => {
+    const accessGeneration = request.query.accessGeneration === undefined
+      ? undefined
+      : z.coerce.number().int().positive().parse(request.query.accessGeneration);
+    await adapter.purgeWorkspace(request.params.workspaceId, accessGeneration);
     return reply.code(204).send();
   });
 

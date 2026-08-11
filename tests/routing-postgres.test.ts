@@ -234,7 +234,12 @@ test(
         identity: scope,
         team: null,
         createdBy: admin,
+        initializeFixedRollout: true,
       });
+      const initial = await routing.adminReadModel(tenant, team.id);
+      assert.equal(initial.rollout?.mode, "disabled");
+      assert.equal(initial.rollout?.fixedDeploymentId, deployment);
+      assert.equal(initial.rollout?.policyVersionId, policy);
       await assert.rejects(
         routing.createRollout({
           tenantId: tenant,

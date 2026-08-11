@@ -52,6 +52,9 @@ test("Workspace configuration is reached from its overview card instead of a dup
   assert.doesNotMatch(app, /function SandboxScreen/);
   assert.match(app, /onManage=\{selectWorkspaceConfiguration\}/);
   assert.match(app, /title="Create workspace"/);
+  assert.match(app, /canCreateWorkspace=\{hasCapability\("workspace\.create"\)\}/);
+  assert.match(app, /canManageWorkspace=\{\(workspaceId\) => hasScopedCapability\("workspace\.manage", "workspace", workspaceId\) \|\| hasScopedCapability\("workspace\.manage_own", "workspace", workspaceId\)\}/);
+  assert.match(app, /\{canCreateWorkspace && <button className="primary-button create-workspace-button"/);
   assert.doesNotMatch(app, /title="Create a managed sandbox"/);
 });
 
@@ -336,7 +339,9 @@ test("the account menu gateways administrators to the AI control plane without a
   assert.doesNotMatch(primaryNav, /label="Admin"|label="Gateway"/);
   assert.doesNotMatch(primaryNav, /AI control plane/);
   assert.match(accountMenu, /sidebar-menu-section-label">Organization/);
-  assert.match(accountMenu, /session\.roles\.includes\("administrator"\)/);
+  assert.match(app, /const canOpenAiControlPlane = canReadUsage \|\| canManageUsage \|\| canManageAnyProvider \|\| canManagePolicy/);
+  assert.match(accountMenu, /canOpenAiControlPlane/);
+  assert.doesNotMatch(accountMenu, /session\.roles\.includes\("administrator"\)/);
   assert.match(accountMenu, /selectAiControlPlaneView\("overview"\)/);
   assert.match(accountMenu, /selectNav\("Settings"\)/);
   assert.match(accountMenu, /Log out/);
@@ -381,6 +386,67 @@ test("administration exposes member lifecycle, workspace management, and organiz
   assert.match(api, /admin\/memberships/);
   assert.match(api, /admin\/users\/.*\/sandbox-settings/);
   assert.match(api, /connectors\/.*\/access-policy/);
+});
+
+test("People and access uses consistent section and row action sizing", async () => {
+  const [app, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/styles.css"),
+  ]);
+
+  assert.equal(app.match(/className="[^"]*admin-section-action[^"]*"/g)?.length, 4);
+  for (const label of ["Invite person", "Add connection", "Create custom role", "Initiate organization closure"]) assert.match(app, new RegExp(`>${label}<`));
+  assert.match(app, /className="secondary-button admin-row-action"/);
+  assert.match(app, />Sign out sessions</);
+  assert.match(styles, /\.admin-section-action\s*\{[^}]*width:\s*260px;[^}]*min-height:\s*56px;/s);
+  assert.match(styles, /\.admin-user-actions \.admin-row-action\s*\{[^}]*min-width:\s*180px;[^}]*min-height:\s*40px;/s);
+  assert.match(styles, /\.admin-user-list article\s*\{[^}]*padding:\s*16px 0;/s);
+  assert.match(styles, /@media \(max-width:\s*700px\)[\s\S]*\.admin-section-action\s*\{[^}]*width:\s*100%;/);
+});
+
+test("settings subpages are URL-backed and passkey copy distinguishes sign-in from owner verification", async () => {
+  const app = await source("apps/web/src/App.jsx");
+
+  assert.match(app, /people:\s*"admin"/);
+  assert.match(app, /credentials:\s*"credentials"/);
+  assert.match(app, /security:\s*"security"/);
+  assert.match(app, /selectSettingsView/);
+  assert.match(app, /Passkeys can sign you in, but protected owner actions/);
+  assert.match(app, />Sign in with a passkey</);
+  assert.doesNotMatch(app, />Add a passkey to this account</);
+});
+
+test("authentication actions do not trail explanatory or shield copy", async () => {
+  const [app, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/styles.css"),
+  ]);
+
+  assert.doesNotMatch(app, /className="signin-method-note"/);
+  assert.doesNotMatch(app, /This link does not choose your permissions/);
+  assert.doesNotMatch(app, /LemmaComputer uses secure, HTTP-only server sessions/);
+  assert.doesNotMatch(app, /The identity provider proves who you are/);
+  assert.doesNotMatch(styles, /\.signin-card > \.signin-method-note/);
+});
+
+test("company SSO configuration gives copy feedback and separates setup from row actions", async () => {
+  const [app, styles] = await Promise.all([
+    source("apps/web/src/App.jsx"),
+    source("apps/web/src/styles.css"),
+  ]);
+  const ssoSection = app.slice(app.indexOf("function isMicrosoftTenantIdAsClientId"), app.indexOf("function AdminScreen"));
+
+  assert.match(ssoSection, /function CopyConfigurationField/);
+  assert.match(ssoSection, /function isMicrosoftTenantIdAsClientId/);
+  assert.match(ssoSection, /This is the Directory \(tenant\) ID\. Paste the Application \(client\) ID instead\./);
+  assert.match(ssoSection, /copied \? "Copied" : "Copy"/);
+  assert.match(ssoSection, /aria-live="polite"/);
+  assert.match(ssoSection, /className="admin-user-list sso-connection-list"/);
+  assert.ok((ssoSection.match(/className="secondary-button admin-row-action"/g)?.length ?? 0) >= 6);
+  assert.match(ssoSection, />Show DNS proof</);
+  assert.match(ssoSection, />Test provider</);
+  assert.match(styles, /\.sso-configuration-details\s*\{[^}]*margin:\s*22px 28px 24px;/s);
+  assert.match(styles, /\.sso-connection-list\s+article\s*\{[^}]*padding:\s*16px 0;/s);
 });
 
 test("Help is retired from navigation and routing", async () => {

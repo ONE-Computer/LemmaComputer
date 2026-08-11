@@ -170,23 +170,28 @@ flows, state custody, budget defense in depth, and failure matrix.
 ### Authentication and policy assignment
 
 1. The Web server proxies `/api` to Control and adds an internal proxy token.
-2. Control starts an Entra authorization-code flow with PKCE, state, and nonce.
-3. Control verifies issuer, audience, tenant, nonce, and callback state.
-4. The immutable external identity resolves to an account user, organization
-   membership, and organization-local subject; email is display/contact data.
-5. Customer-managed directory JIT creates a member. Hosted first admission
-   requires a pending invitation whose email matches the verified External ID
-   identity; the invitation alone supplies its organization and role. Only an
-   explicitly configured immutable Entra object ID can perform the one-time
-   customer-managed organization-owner bootstrap.
-6. A random session token is stored as a hash, bound to the selected active
-   membership, and returned in an HttpOnly, SameSite cookie.
-7. Control loads the membership role and fixed permission mapping for every
+2. Embedded Better Auth authenticates through verified email/password,
+   passkey, configured social OAuth, or tenant OIDC/SAML and creates a
+   server-side authentication session. Protocol flows retain CSRF, state,
+   nonce, PKCE, issuer, and audience checks as applicable.
+3. Control maps the stable Better Auth account to a LemmaComputer account.
+   Provider links are authentication evidence; email is mutable contact data
+   and provider claims never create product authority.
+4. A new organization owner may create an organization through the protected
+   bootstrap transaction. Other first admission requires a pending invitation
+   whose exact verified email matches; the invitation alone fixes its
+   organization and role.
+5. Control creates a server-side product authorization context keyed to the
+   validated Better Auth session and selected active membership. Raw provider
+   and authentication tokens are not copied into product sessions.
+6. Control loads the membership role and permission union for every
    protected route. Provider claims never grant product authority. Runtime
    policy assignment remains separate from organization RBAC.
 
 The Web proxy token is not a user identity. It only identifies the trusted Web
-process; the session cookie establishes the employee principal.
+process; the validated authentication session plus active product membership
+establish the employee principal. Workforce Entra and hosted External ID routes
+remain bounded transitional adapters and are not this core flow.
 
 ### Workspace provisioning
 

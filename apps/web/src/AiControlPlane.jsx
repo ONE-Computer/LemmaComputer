@@ -9,7 +9,7 @@ export const aiControlPlaneTabs = [
   { id: "data-health", label: "Data health" },
 ];
 
-export function AiControlPlane({ activeView, onViewChange, children }) {
+export function AiControlPlane({ activeView, onViewChange, tabs = aiControlPlaneTabs, children }) {
   const activeTab = activeView === "spend" ? "overview" : activeView;
 
   return (
@@ -22,7 +22,7 @@ export function AiControlPlane({ activeView, onViewChange, children }) {
         </div>
       </header>
       <nav className="ai-control-plane-tabs" aria-label="AI control plane">
-        {aiControlPlaneTabs.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"

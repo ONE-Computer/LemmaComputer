@@ -7,9 +7,9 @@ import type { IdentityPolicyStore, OidcLoginAttempt, SessionPrincipal } from "@l
 const principal: SessionPrincipal = {
   userId: "alex-morgan",
   tenantId: "acme",
-  email: "mike@metech.dev",
-  displayName: "Mike",
-  tenantDisplayName: "ME TECH",
+  email: "user@example.test",
+  displayName: "Example User",
+  tenantDisplayName: "Example Organization",
   roles: ["employee", "administrator"],
   identity: { tenantId: "acme", subjectId: "alex-morgan", audience: "lemmacomputer-control" },
 };
@@ -40,7 +40,7 @@ test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaq
     sessionSecret: "test-session-secret-at-least-32-characters",
     bootstrapOwnedTenantId: "acme",
     bootstrapOwnedUserId: "alex-morgan",
-    tenantDisplayName: "ME TECH",
+    tenantDisplayName: "Example Organization",
     bootstrapOwnerObjectIds: ["entra-object-005"],
     membershipAdmissionMode: "directory-jit",
     fetch: async (_url, init) => {
@@ -50,7 +50,7 @@ test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaq
     idTokenVerifier: async (token, expected) => {
       assert.equal(token, "signed-id-token");
       assert.deepEqual(expected, { issuer: "https://login.microsoftonline.com/tenant-005/v2.0", audience: "client-005" });
-      return { sub: "external-subject", oid: "entra-object-005", tid: "tenant-005", preferred_username: "mike@metech.dev", name: "Mike", nonce: expectedNonce };
+      return { sub: "external-subject", oid: "entra-object-005", tid: "tenant-005", preferred_username: "user@example.test", name: "Example User", nonce: expectedNonce };
     },
   });
 
@@ -62,7 +62,7 @@ test("Entra sign-in binds state, PKCE, nonce, tenant, durable identity, and opaq
   assert.equal(location.searchParams.get("prompt"), "select_account");
 
   const completed = await auth.complete({ state, code: "one-time-code", cookie: stateCookie });
-  assert.equal(completed.principal.email, "mike@metech.dev");
+  assert.equal(completed.principal.email, "user@example.test");
   assert.equal(completed.returnPath, "/?view=connections");
   assert.match(completed.cookie, /^lemmacomputer_session=/);
   assert.doesNotMatch(completed.cookie, /one-time-code|signed-id-token|test-client-secret/);
@@ -82,7 +82,7 @@ test("Entra callback rejects a caller without the initiating browser state", asy
   const auth = new EntraAuthenticationService(store, {
     tenantId: "tenant-005", clientId: "client-005", clientSecret: "secret",
     publicWebUrl: "http://localhost:4174", sessionSecret: "test-session-secret-at-least-32-characters",
-    bootstrapOwnedTenantId: "acme", bootstrapOwnedUserId: "alex-morgan", tenantDisplayName: "ME TECH",
+    bootstrapOwnedTenantId: "acme", bootstrapOwnedUserId: "alex-morgan", tenantDisplayName: "Example Organization",
     bootstrapOwnerObjectIds: [], membershipAdmissionMode: "existing-membership-only",
   });
   const started = await auth.begin();

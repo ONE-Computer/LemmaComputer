@@ -1019,8 +1019,8 @@ test("workspace grant expiry renews independently of workspace lifetime", async 
     workspaceGrantRenewalMs: 30_000,
   });
   try {
-    const first = await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
-    const reused = await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
+    const first = await liveAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity });
+    const reused = await liveAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity });
     assert.equal(reused.credential, first.credential);
     assert.equal(reused.expiresAt, first.expiresAt);
     assert.equal(grantRequests, 1);
@@ -1060,9 +1060,10 @@ test("a policy projection change bypasses the grant cache immediately", async ()
     allowedTools: ["list-mail-folders"],
   };
   try {
-    await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy: basePolicy });
+    await liveAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity, policy: basePolicy });
     await liveAdapter.ensureGrant({
       workspaceId: "workspace-a",
+      accessGeneration: 1,
       identity,
       policy: { ...basePolicy, policyVersionId: "policy-version-2", policyVersion: 2, policyHash: "2".repeat(64), allowedTools: ["list-calendars"] },
     });
@@ -1134,9 +1135,10 @@ test("a managed model change replaces and verifies the existing workspace grant"
     allowedTools: ["list-mail-folders"],
   };
   try {
-    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy: basePolicy });
+    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity, policy: basePolicy });
     const switched = await routedAdapter.ensureGrant({
       workspaceId: "workspace-a",
+      accessGeneration: 1,
       identity,
       policy: { ...basePolicy, modelAlias: "lemmacomputer-glm" },
     });
@@ -1161,7 +1163,7 @@ test("a model grant replacement fails closed when LiteLLM keeps the stale allowl
     masterKey: "sk-master-test-not-used-00001",
     credentialSecret: "credential-secret-for-tests-00000001",
   });
-  const credential = routedAdapter.credentialFor("workspace-a", "persisted-agent-id");
+  const credential = routedAdapter.credentialFor("workspace-a", "persisted-agent-id", 1);
   const gatewayUserId = routedAdapter.userIdFor(identity);
   const gatewayAgentId = routedAdapter.agentIdFor("workspace-a", "persisted-agent-id");
   const claudeAccessGroup = tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-claude");
@@ -1174,6 +1176,7 @@ test("a model grant replacement fails closed when LiteLLM keeps the stale allowl
       lemmacomputer_tenant_id: identity.tenantId,
       lemmacomputer_subject_id: identity.subjectId,
       lemmacomputer_workspace_id: "workspace-a",
+      lemmacomputer_access_generation: 1,
       lemmacomputer_agent_id: "persisted-agent-id",
       lemmacomputer_policy_version_id: "policy-version-1",
       lemmacomputer_policy_hash: "1".repeat(64),
@@ -1230,7 +1233,7 @@ test("a model grant replacement fails closed when LiteLLM keeps the stale allowl
   };
   try {
     await assert.rejects(
-      liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy: glmPolicy }),
+      liveAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity, policy: glmPolicy }),
       (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "GATEWAY_GRANT_FAILED"),
     );
     assert.equal(deleteRequests, 2);
@@ -1257,7 +1260,7 @@ test("workspace grants bind LiteLLM user and agent identities without making eit
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, agentId: "research" });
+    await liveAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity, agentId: "research" });
     assert.equal(grantBody.user_id, liveAdapter.userIdFor(identity));
     assert.equal(grantBody.agent_id, liveAdapter.agentIdFor("workspace-a", "research"));
     assert.equal((grantBody.metadata as Record<string, unknown>).lemmacomputer_agent_id, "research");
@@ -1304,7 +1307,7 @@ test("workspace grant preserves assignments but grants only currently active MCP
     allowedTools: ["list-mail-folders", "list-calendars", "list-drives", "search", "fetch"],
   };
   try {
-    await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity, policy });
+    await liveAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity, policy });
     assert.deepEqual(grantBody.models, [tenantManagedModelAccessGroup(identity.tenantId, "lemmacomputer-assistant")]);
     assert.equal("max_budget" in grantBody, false);
     assert.equal("budget_duration" in grantBody, false);
@@ -1366,6 +1369,7 @@ test("managed Claude Desktop and CLI Bedrock policies receive only their scoped 
       const workspaceId = `workspace-bedrock-${agentProfile}`;
       const grant = await liveAdapter.ensureGrant({
         workspaceId,
+        accessGeneration: 1,
         identity,
         policy: { ...policy, agentProfile },
       });
@@ -1407,7 +1411,7 @@ test("a pre-existing key with mismatched identity is deleted by alias and replac
         workspaceUrl: "http://unused",
         masterKey: "sk-master-test-not-used-00001",
         credentialSecret: "credential-secret-for-tests-00000001",
-      }).credentialFor("workspace-a");
+      }).credentialFor("workspace-a", undefined, 1);
       response.end(JSON.stringify({
         keys: [{
           token: createHash("sha256").update(credential).digest("hex"),
@@ -1438,13 +1442,109 @@ test("a pre-existing key with mismatched identity is deleted by alias and replac
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    await liveAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
+    await liveAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity });
     assert.equal(requests.filter(({ url }) => url === "/key/generate").length, 1);
     assert.ok(requests.some(({ url }) => url.startsWith("/key/list?")));
     assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
-      key_aliases: [`lemmacomputer-agent-${liveAdapter.agentIdFor("workspace-a")}`],
+      key_aliases: [`lemmacomputer-agent-${liveAdapter.agentIdFor("workspace-a")}-g1`],
     });
     assert.ok(!requests.some(({ url }) => url === "/key/update"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("generation-scoped workspace revocation preserves replacement runtime keys", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    requests.push({ url: request.url ?? "", body });
+    response.setHeader("content-type", "application/json");
+    if (request.url?.startsWith("/key/list?")) {
+      response.end(JSON.stringify({ keys: [
+        { key_alias: "old-generation", metadata: { lemmacomputer_workspace_id: "workspace-a", lemmacomputer_access_generation: 1 } },
+        { key_alias: "cleanup-generation", metadata: { lemmacomputer_workspace_id: "workspace-a", lemmacomputer_access_generation: 2 } },
+        { key_alias: "replacement-generation", metadata: { lemmacomputer_workspace_id: "workspace-a", lemmacomputer_access_generation: 3 } },
+        { key_alias: "other-workspace", metadata: { lemmacomputer_workspace_id: "workspace-b", lemmacomputer_access_generation: 1 } },
+      ] }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const adapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await adapter.revokeWorkspace("workspace-a", 2);
+    assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
+      key_aliases: ["old-generation", "cleanup-generation"],
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("LiteLLM token-hash upsert keeps replacement credentials isolated from paused stale cleanup", async () => {
+  const generated: Array<Record<string, unknown>> = [];
+  const providerRows = new Map<string, Record<string, unknown>>();
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    response.setHeader("content-type", "application/json");
+    if (request.url?.startsWith("/key/list?")) {
+      const alias = new URL(request.url, "http://litellm.test").searchParams.get("key_alias");
+      const keys = [...providerRows.values()].filter((row) => !alias || row.key_alias === alias);
+      response.end(JSON.stringify({ keys }));
+      return;
+    }
+    if (request.url === "/key/generate") {
+      generated.push(body);
+      const tokenHash = createHash("sha256").update(String(body.key)).digest("hex");
+      // Pinned LiteLLM v1.93 treats the token hash as the row identity. A
+      // repeated token returns the existing row without applying alias or
+      // metadata changes from this generation request.
+      if (!providerRows.has(tokenHash)) providerRows.set(tokenHash, { ...body, token: tokenHash });
+    }
+    if (request.url === "/key/delete") {
+      const aliases = Array.isArray(body.key_aliases) ? body.key_aliases : [];
+      for (const [tokenHash, row] of providerRows) if (aliases.includes(row.key_alias)) providerRows.delete(tokenHash);
+    }
+    if (request.url === "/model/info") {
+      response.end(JSON.stringify({ data: [{ model_name: "lemmacomputer-assistant", model_info: { supports_vision: true } }] }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const adapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    await adapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity });
+    await adapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 2, identity });
+    await adapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 2, identity });
+    assert.equal(generated.length, 2);
+    assert.equal(providerRows.size, 2, "each access generation must have a distinct provider token row");
+    assert.deepEqual([...providerRows.values()].map((row) => row.key_alias).sort(), [
+      `lemmacomputer-agent-${adapter.agentIdFor("workspace-a")}-g1`,
+      `lemmacomputer-agent-${adapter.agentIdFor("workspace-a")}-g2`,
+    ]);
+    await adapter.revokeWorkspace("workspace-a", 1);
+    assert.deepEqual([...providerRows.values()].map((row) => row.key_alias), [
+      `lemmacomputer-agent-${adapter.agentIdFor("workspace-a")}-g2`,
+    ]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -1458,7 +1558,7 @@ test("a matching existing workspace key is updated without a duplicate generatio
     masterKey: "sk-master-test-not-used-00001",
     credentialSecret: "credential-secret-for-tests-00000001",
   });
-  const credential = liveAdapter.credentialFor("workspace-a");
+  const credential = liveAdapter.credentialFor("workspace-a", undefined, 1);
   const gatewayUserId = liveAdapter.userIdFor(identity);
   const gatewayAgentId = liveAdapter.agentIdFor("workspace-a");
   const server = createServer((request, response) => {
@@ -1475,6 +1575,7 @@ test("a matching existing workspace key is updated without a duplicate generatio
             lemmacomputer_tenant_id: identity.tenantId,
             lemmacomputer_subject_id: identity.subjectId,
             lemmacomputer_workspace_id: "workspace-a",
+            lemmacomputer_access_generation: 1,
             lemmacomputer_agent_id: "workspace-default:workspace-a",
             lemmacomputer_policy_model_alias: "lemmacomputer-assistant",
             lemmacomputer_client_model_alias: "lemmacomputer-assistant",
@@ -1495,7 +1596,7 @@ test("a matching existing workspace key is updated without a duplicate generatio
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
+    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity });
     assert.ok(requests.includes("/key/update"));
     assert.ok(!requests.includes("/key/generate"));
     assert.ok(!requests.includes("/key/delete"));
@@ -1512,7 +1613,7 @@ test("a legacy token-capped workspace key is replaced so the allowance cannot su
     masterKey: "sk-master-test-not-used-00001",
     credentialSecret: "credential-secret-for-tests-00000001",
   });
-  const credential = liveAdapter.credentialFor("workspace-a");
+  const credential = liveAdapter.credentialFor("workspace-a", undefined, 1);
   const gatewayUserId = liveAdapter.userIdFor(identity);
   const gatewayAgentId = liveAdapter.agentIdFor("workspace-a");
   const server = createServer(async (request, response) => {
@@ -1551,9 +1652,9 @@ test("a legacy token-capped workspace key is replaced so the allowance cannot su
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
+    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity });
     assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
-      key_aliases: [`lemmacomputer-agent-${routedAdapter.agentIdFor("workspace-a")}`],
+      key_aliases: [`lemmacomputer-agent-${routedAdapter.agentIdFor("workspace-a")}-g1`],
     });
     const generated = requests.find(({ url }) => url === "/key/generate")?.body ?? {};
     assert.equal("tpm_limit" in generated, false);
@@ -1571,7 +1672,7 @@ test("a legacy budgeted workspace key is replaced so the cap cannot survive reco
     masterKey: "sk-master-test-not-used-00001",
     credentialSecret: "credential-secret-for-tests-00000001",
   });
-  const credential = liveAdapter.credentialFor("workspace-a");
+  const credential = liveAdapter.credentialFor("workspace-a", undefined, 1);
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -1609,9 +1710,9 @@ test("a legacy budgeted workspace key is replaced so the cap cannot survive reco
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", identity });
+    await routedAdapter.ensureGrant({ workspaceId: "workspace-a", accessGeneration: 1, identity });
     assert.deepEqual(requests.find(({ url }) => url === "/key/delete")?.body, {
-      key_aliases: [`lemmacomputer-agent-${routedAdapter.agentIdFor("workspace-a")}`],
+      key_aliases: [`lemmacomputer-agent-${routedAdapter.agentIdFor("workspace-a")}-g1`],
     });
     const generated = requests.find(({ url }) => url === "/key/generate")?.body ?? {};
     assert.equal("max_budget" in generated, false);
@@ -1632,7 +1733,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
     masterKey: "sk-master-test-not-used-00001",
     credentialSecret: "credential-secret-for-tests-00000001",
   });
-  const credential = liveAdapter.credentialFor("workspace-a");
+  const credential = liveAdapter.credentialFor("workspace-a", undefined, 1);
   const server = createServer((request, response) => {
     requests.push(request.url ?? "");
     response.setHeader("content-type", "application/json");
@@ -1684,7 +1785,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
     credentialSecret: "credential-secret-for-tests-00000001",
   });
   try {
-    const result = await routedAdapter.test("workspace-a");
+    const result = await routedAdapter.test("workspace-a", undefined, undefined, 1);
     assert.equal(result.availability, "ready");
     assert.equal(result.model, "lemmacomputer-assistant");
     assert.equal(result.modelRoute.fallback, "none");
@@ -1692,7 +1793,7 @@ test("availability check exposes safe route usage without sending a prompt", asy
     assert.equal(result.modelRoute.limits.tokensPerMinute, null);
     assert.equal(result.tools.length, 2);
     connectorAvailable = false;
-    const modelOnlyResult = await routedAdapter.test("workspace-a");
+    const modelOnlyResult = await routedAdapter.test("workspace-a", undefined, undefined, 1);
     assert.equal(modelOnlyResult.availability, "ready");
     assert.deepEqual(modelOnlyResult.tools, []);
     assert.ok(!requests.includes("/v1/chat/completions"));
@@ -1731,6 +1832,7 @@ test("governed execution uses one exact-tool key, resolved server id, and revoca
       tenantId: "acme",
       subjectId: "alex-morgan",
       workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+      accessGeneration: 7,
       operationId: "15eaf54f-5f29-4b2d-9e21-890e8711720d",
       operationDigest: "0".repeat(64),
       leaseId: "73bc3cc4-34da-42ea-a933-0d6bf2bfd968",
@@ -1743,6 +1845,7 @@ test("governed execution uses one exact-tool key, resolved server id, and revoca
     assert.deepEqual((grant.body.object_permission as Record<string, unknown>).mcp_tool_permissions, { lemmacomputer_fixture: ["delete_file"] });
     assert.equal(grant.body.user_id, liveAdapter.userIdFor(identity));
     assert.equal(grant.body.agent_id, liveAdapter.agentIdFor("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508"));
+    assert.equal((grant.body.metadata as Record<string, unknown>).lemmacomputer_access_generation, 7);
     assert.notEqual(call.authorization, "Bearer sk-master-test-not-used-00001");
     assert.match(call.authorization, /^Bearer sk-oce-/);
     assert.deepEqual(call.body, { server_id: "fixture-server-id", name: "delete_file", arguments: { path: "/Finance/2026/Q3-draft.docx" } });
@@ -1784,6 +1887,7 @@ test("governed execution preserves the connector's safe failure summary", async 
         tenantId: "acme",
         subjectId: "alex-morgan",
         workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+        accessGeneration: 1,
         operationId: "15eaf54f-5f29-4b2d-9e21-890e8711720d",
         operationDigest: "0".repeat(64),
         leaseId: "73bc3cc4-34da-42ea-a933-0d6bf2bfd968",

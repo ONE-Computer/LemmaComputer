@@ -11,6 +11,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "tsx --test tests/**/*.test.ts",
     "test:e2e": "playwright test",
+    "test:customer-auth:e2e": "playwright test --config playwright.customer-auth.config.ts",
     "test:activity:e2e": "playwright test tests/e2e/activity-panel.spec.ts",
     "test:activity:e2e:update": "playwright test tests/e2e/activity-panel.spec.ts --update-snapshots",
     "qualify:mcp-egress": "node scripts/qualify-mcp-egress.mjs",
@@ -19,6 +20,7 @@
     "qualify:workspace-startup": "tsx scripts/qualify-workspace-startup.mts",
     "qualify:deployment-profiles": "node scripts/qualify-deployment-profiles.mjs",
     "qualify:external-id": "node scripts/qualify-external-id.mjs",
+    "qualify:better-auth": "npm run qualify:better-auth -w @lemmacomputer/control-api",
     "qualify:auto-routing": "docker run --rm --entrypoint python --mount type=bind,src=./scripts/qualify-litellm-auto-routing.py,dst=/qualification.py,readonly ghcr.io/berriai/litellm:v1.94.0@sha256:65d84a2282137b4dc73bbe184650a7c807177c533e4223b3bfbc87963fe3fabe /qualification.py",
     "qualify:governed-routing": "docker run --rm --entrypoint python --mount type=bind,src=./scripts/qualify-litellm-governed-routing.py,dst=/qualification.py,readonly --mount type=bind,src=./integrations/litellm/lemmacomputer_policy_callback.py,dst=/callback.py,readonly ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e /qualification.py",
     "env:init": "node scripts/initialize-env.mjs",
@@ -35,6 +37,8 @@
     "dev:controller": "npm run dev -w @lemmacomputer/workspace-controller",
     "dev:web": "npm run dev -w web",
     "db:migrate": "tsx apps/control-api/src/migrate.ts",
+    "auth:db:migrate": "tsx apps/control-api/src/migrate-auth.ts",
+    "auth:db:check": "tsx apps/control-api/src/check-auth-schema.ts",
     "key:openvtc": "node scripts/generate-openvtc-executor-key.mjs",
     "key:web-push": "node scripts/generate-web-push-keys.mjs",
     "key:policy": "node scripts/generate-policy-signing-key.mjs",
@@ -59,5 +63,8 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "react-qr-code": "^2.2.0"
   }
 }

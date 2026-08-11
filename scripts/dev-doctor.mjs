@@ -1,6 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { worktreeIsolationEnvironmentVariableNames } from "./deployment-config.mjs";
+import { inspectReadablePaths, litellmMountedFilePaths } from "./dev-doctor-lib.mjs";
 
 const run = (command, args) => spawnSync(command, args, { encoding: "utf8" });
 const failures = [];
@@ -20,6 +21,13 @@ if (!integrationCheckout) {
 const context = run("docker", ["context", "show"]);
 if (context.status === 0 && context.stdout.trim() === (process.env.LEMMACOMPUTER_DEMO_DOCKER_CONTEXT ?? "lemmacomputer-demo")) {
   failures.push("the active Docker context is reserved for the demo deployment");
+}
+for (const diagnostic of await inspectReadablePaths(litellmMountedFilePaths)) {
+  failures.push(
+    diagnostic.reason === "missing"
+      ? `${diagnostic.path} is missing; restore the LiteLLM bind-mounted file`
+      : `${diagnostic.path} is unreadable; grant the current user read access before starting Compose`,
+  );
 }
 if (failures.length) {
   process.stderr.write(["Development safety check failed:", ...failures.map((item) => `- ${item}`), ""].join("\n"));

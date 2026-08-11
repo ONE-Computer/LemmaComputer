@@ -101,14 +101,20 @@ GitHub OAuth-app redirect URI.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `LEMMACOMPUTER_ENTRA_TENANT_ID` | Yes | Single Entra directory accepted for Web sign-in |
-| `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Yes | Web OIDC application |
-| `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Web OIDC confidential-client secret |
-| `LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID` | Hosted only | External tenant directory ID |
-| `LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN` | Hosted only | Label before `.ciamlogin.com` |
-| `LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID` | Hosted only | External tenant Web OIDC application |
-| `LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET` | Hosted only | External tenant confidential-client secret |
-| `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` | Yes | Comma-separated immutable Entra object IDs allowed to perform the one-time organization-owner bootstrap |
+| `LEMMACOMPUTER_BETTER_AUTH_SECRET` | Yes | Versioned Better Auth signing and encryption secret; generated locally and stored in a production secret manager |
+| `LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT` | Yes | `capture` for non-production tests or `postmark` for real transactional delivery |
+| `LEMMACOMPUTER_INVITATION_DELIVERY_MODE` | Yes | `email`, or explicit `copy-link` only where the profile permits it |
+| `LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID` and secret | Optional pair | Google customer social login |
+| `LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID` and secret | Optional pair | Microsoft customer social login |
+| `LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS` | Tenant OIDC only | Comma-separated exact HTTPS IdP origins permitted for server-side discovery; never use wildcards |
+| `LEMMACOMPUTER_ENTRA_TENANT_ID` | Current customer-managed preflight | Transitional workforce directory; not the product role authority |
+| `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Current customer-managed preflight | Transitional workforce Web OIDC application |
+| `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Current customer-managed preflight | Transitional workforce confidential-client secret |
+| `LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID` | Current hosted preflight | Transitional external tenant directory ID |
+| `LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN` | Current hosted preflight | Label before `.ciamlogin.com` |
+| `LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID` | Current hosted preflight | Transitional external tenant Web OIDC application |
+| `LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET` | Current hosted preflight | Transitional external tenant confidential-client secret |
+| `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` | Transitional Entra bootstrap | Comma-separated immutable Entra object IDs allowed to perform the compatibility owner bootstrap |
 | `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | No | Deprecated compatibility input; email never grants a LemmaComputer role |
 | `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID` | No | Owned tenant identifier |
 | `LEMMACOMPUTER_BOOTSTRAP_USER_ID` | No | Owned ID for a bootstrap administrator |
@@ -118,17 +124,63 @@ Object-ID matching is case-insensitive. Keep the one-time bootstrap allowlist sm
 After identity records and memberships exist, changing bootstrap identifiers
 does not migrate existing rows.
 
-In `customer-managed`, every user in the configured Entra directory may sign
-in; Control creates a member account and organization-local subject just in
-time. In `hosted`, a valid invitation binds an External ID identity to its
-predetermined organization and role. Provider claims cannot select or elevate
-the product membership. Public provider sign-up must be disabled separately;
-see the [hosted External ID runbook](hosted-external-id.md). An organization
-administrator can later suspend or reactivate a membership, revoke its active
-sessions, change its policy assignment, and manage sandbox and egress
-security-group configuration.
+In both profiles, Better Auth proves customer authentication and LemmaComputer
+resolves the active organization membership and permissions. Self-service
+organization creation establishes protected ownership; invitations activate
+only their predetermined organization and role. Social-login, company-SSO,
+workforce-Entra, and External-ID claims cannot select or elevate a product
+membership. The latter two remain transitional adapters subject to their own
+profile preflight. An organization administrator can later suspend or
+reactivate a membership, revoke its active sessions, change its policy
+assignment, and manage sandbox and egress security-group configuration.
 A returning user does not automatically regain a policy that an administrator
 revoked.
+
+#### Company SSO lifecycle
+
+Company SSO uses `@better-auth/sso` in the local authentication database for
+both deployment profiles. LemmaComputer remains the only organization,
+membership, and role authority. Provider groups, administrator claims, and
+email domains never create product access.
+
+Before configuring OIDC, add every exact HTTPS origin used by its discovery,
+authorization, token, user-info, and JWKS endpoints to
+`LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS`, then restart Control. Do not
+use wildcards. SAML configuration does not require this discovery allowlist.
+
+1. The protected organization owner opens **Settings → People and access →
+   Company SSO**, adds OIDC client credentials or a SAML sign-in URL and
+   signing certificate, and records the generated callback URL.
+2. Add the displayed DNS TXT proof and use **Verify DNS**. An invitation for
+   the verified email domain may then use the pending provider, but ordinary
+   domain sign-in remains disabled.
+3. Invite a standards-provider account as Administrator. The invitee chooses
+   **Continue with company SSO**, completes any Better Auth email-verification
+   step, accepts the predetermined membership, and uses **Test provider**.
+4. The owner proves a non-SSO recovery method with recent MFA, chooses
+   **Confirm recovery**, then **Enforce SSO**. Only now may public company login
+   route the verified domain. Existing memberships still decide access.
+
+Credential rotation and metadata refresh fence routing first: the connection
+becomes `pending`, its configuration version increments, and prior test,
+recovery, and enforcement timestamps are cleared before Better Auth is
+changed. OIDC refresh re-fetches discovery; SAML refresh requires bounded IdP
+metadata XML. Retest, reconfirm owner recovery, and enforce again. If refresh
+or rotation fails, leave the connection pending and use another sign-in method
+while correcting it; never force the old route active.
+
+**Suspend** immediately disables company routing without deleting provider
+configuration. **Roll back** returns a suspended connection to active but does
+not enforce it. **Disconnect** first removes product routing and then deletes
+the Better Auth provider. Disconnect before transferring organization
+ownership so Better Auth provider administration cannot remain bound to the
+former owner.
+
+Release evidence must include Microsoft Entra and one non-Microsoft SAML/OIDC
+provider. For each, capture setup, DNS verification, invitation admission,
+successful provider test, enforcement, failed unknown/uninvited admission,
+metadata refresh or credential rotation, suspension/recovery, rollback, and
+disconnect without recording credentials, codes, assertions, or tokens.
 
 ### Microsoft 365
 

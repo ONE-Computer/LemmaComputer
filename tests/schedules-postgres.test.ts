@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import pg from "pg";
 import {
   PostgresScheduleStore,
   PostgresWorkspaceStore,
@@ -12,6 +13,7 @@ test("PostgreSQL schedule claims are exclusive and workspace deletion cascades",
   skip: !connectionString,
 }, async () => {
   const workspaceStore = PostgresWorkspaceStore.fromConnectionString(connectionString!);
+  const pool = new pg.Pool({ connectionString });
   const first = PostgresScheduleStore.fromConnectionString(connectionString!);
   const second = PostgresScheduleStore.fromConnectionString(connectionString!);
   const identity: IdentityContext = {
@@ -21,6 +23,11 @@ test("PostgreSQL schedule claims are exclusive and workspace deletion cascades",
   };
   try {
     await workspaceStore.migrate();
+    await pool.query(
+      `INSERT INTO tenants(id,external_tenant_id,display_name) VALUES($1,$2,'Schedule tenant')`,
+      [identity.tenantId, `external-${identity.tenantId}`],
+    );
+    await pool.query("INSERT INTO organizations(id,display_name) VALUES($1,'Schedule tenant')", [identity.tenantId]);
     const workspace = await workspaceStore.createOrGet(identity, "schedule-test", crypto.randomUUID());
     const scheduleId = crypto.randomUUID();
     const created = await first.createSchedule(identity, {
@@ -57,6 +64,7 @@ test("PostgreSQL schedule claims are exclusive and workspace deletion cascades",
     assert.equal(await workspaceStore.remove(identity, workspace.id), true);
     assert.equal(await first.getSchedule(identity, scheduleId), null);
   } finally {
+    await pool.end();
     await Promise.all([workspaceStore.close(), first.close(), second.close()]);
   }
 });

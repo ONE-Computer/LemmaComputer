@@ -216,6 +216,7 @@ test("administrator can set up a published mapping for a Team and start first sh
   await page.route(/\/api\/v1\/admin\/teams\/[^/]+\/routing\/policy$/, async (route) => {
     const savedPolicy = route.request().postDataJSON();
     policy = { id: policyId, ...savedPolicy, createdAt: "2026-07-31T00:00:00.000Z" };
+    rollout ??= { id: "77777777-7777-4777-8777-777777777777", tenantId: "acme", teamId: "11111111-1111-4111-8111-111111111111", policyVersionId: policyId, mappingVersionId: mappingId, mode: "disabled", fixedDeploymentId: deployments[1].id, evidenceReviewId: null, previousRolloutVersionId: null, reason: "Initial fixed route for immediate governed use", createdBy: "admin", createdAt: "2026-07-31T00:00:00.000Z" };
     await route.fulfill({ json: { id: policyId } });
   });
   await page.route(/\/api\/v1\/admin\/teams\/[^/]+\/routing\/shadow-report$/, async (route) => {
@@ -237,13 +238,14 @@ test("administrator can set up a published mapping for a Team and start first sh
   const policyRequest = page.waitForRequest((request) => request.method() === "PUT" && /\/api\/v1\/admin\/teams\/[^/]+\/routing\/policy$/.test(request.url()));
   await page.getByRole("button", { name: "Set up Team rollout" }).click();
 
-  await expect(page.getByText("Finance is ready for shadow evaluation.")).toBeVisible();
+  await expect(page.getByText("Finance can use Auto now through its fixed Balanced route. Shadow evaluation is optional.")).toBeVisible();
   const savedPolicy = (await policyRequest).postDataJSON();
   expect(savedPolicy.mappingVersionId).toBe(mappingId);
   expect(savedPolicy.billingCurrency).toBe("USD");
   expect(savedPolicy.identity.allowedDeploymentIds).toEqual(deployments.map((deployment) => deployment.id));
   expect(savedPolicy.serviceClassPolicies.balanced.safeDefault).toBe(true);
-  await expect(page.locator(".route-readonly-badge")).toHaveText("Ready for shadow");
+  await expect(page.locator(".route-readonly-badge")).toHaveText("Fixed route active");
+  await expect(page.locator(".route-health.healthy")).toContainText("Fixed route active");
   await expect(page.getByRole("button", { name: "Start shadow mode" })).toBeEnabled();
 
   const rolloutRequest = page.waitForRequest((request) => request.method() === "POST" && /\/api\/v1\/admin\/teams\/[^/]+\/routing\/rollout$/.test(request.url()));

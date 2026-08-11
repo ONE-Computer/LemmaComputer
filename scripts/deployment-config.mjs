@@ -53,6 +53,8 @@ const sections = [
     variable("LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS", "", "Comma-separated exact HTTPS origins for hosted custom MCP and OAuth flows, including endpoint, metadata, authorization, token, and dynamic-client-registration origins. Customer-managed installations can leave this empty."),
   ]),
   section("Runtime limits and security switches", "These are deployment controls, not Compose defaults. Keep the secure hosted Telegram setting explicit.", [
+    variable("LEMMACOMPUTER_RUNTIME_ENVIRONMENT", "development", "Runtime safety mode: development or production.", { kind: "enum", values: ["development", "production"] }),
+    variable("LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS", "", "Comma-separated reverse-proxy IP addresses or CIDRs trusted by customer authentication. Hosted deployments must set this explicitly."),
     variable("LEMMACOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS", "300", "Signed workspace-launch token lifetime in seconds.", { kind: "integer" }),
     variable("LEMMACOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS", "28800", "Workspace ingress session lifetime in seconds.", { kind: "integer" }),
     variable("LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS", "false", "Whether workspace ingress verifies TLS for its configured internal upstreams.", { kind: "boolean" }),
@@ -78,6 +80,11 @@ const sections = [
     variable("LEMMACOMPUTER_LITELLM_POSTGRES_PASSWORD", generated, "LiteLLM PostgreSQL password.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_FIXTURE_APPROVAL_SECRET", generated, "Fixture-only approval secret for local qualification flows.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_SESSION_SECRET", generated, "Web session signing secret.", { secret: true, generated: "random" }),
+    variable("LEMMACOMPUTER_BETTER_AUTH_SECRET_VERSION", "1", "Current Better Auth encryption and signing key version.", { kind: "integer" }),
+    variable("LEMMACOMPUTER_BETTER_AUTH_SECRET", generated, "Current Better Auth encryption and signing secret.", { secret: true, generated: "random" }),
+    variable("LEMMACOMPUTER_BETTER_AUTH_PREVIOUS_SECRETS", "", "Older version:secret Better Auth keys, newest first, retained only for bounded rotation decryption.", { secret: true }),
+    variable("LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD", generated, "Least-privilege Better Auth runtime database password.", { secret: true, generated: "random" }),
+    variable("LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD", generated, "Better Auth schema migration database password.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET", generated, "Workspace ingress signing secret.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_EGRESS_GRANT_SECRET", generated, "Egress grant derivation secret.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_GATEWAY_EGRESS_PROXY_TOKEN", generated, "LiteLLM credential for the static model-provider egress proxy.", { secret: true, generated: "random" }),
@@ -107,6 +114,19 @@ const sections = [
     variable("LEMMACOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64", generated, "Base64 DER broker-only Telegram token-envelope private key.", { secret: true, generated: "telegram-envelope-private" }),
     variable("LEMMACOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64", generated, "Base64 DER Telegram token-envelope public key.", { generated: "telegram-envelope-public" }),
   ]),
+  section("Customer authentication and transactional email", "Email/password is universal. Social providers are optional pairs; production email uses Postmark.", [
+    variable("LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT", "capture", "Authentication email transport: capture for non-production tests or postmark for real delivery.", { kind: "enum", values: ["capture", "postmark"] }),
+    variable("LEMMACOMPUTER_INVITATION_DELIVERY_MODE", "copy-link", "Organization invitation delivery: email, or explicit copy-link for local/customer-managed operation.", { kind: "enum", values: ["email", "copy-link"] }),
+    variable("LEMMACOMPUTER_POSTMARK_SERVER_TOKEN", "", "Postmark server token for authentication and invitation email.", { secret: true }),
+    variable("LEMMACOMPUTER_POSTMARK_FROM", "", "Verified Postmark sender address."),
+    variable("LEMMACOMPUTER_POSTMARK_MESSAGE_STREAM", "outbound", "Postmark transactional message stream ID."),
+    variable("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID", "", "Optional Google OAuth client ID."),
+    variable("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET", "", "Optional Google OAuth client secret.", { secret: true }),
+    variable("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID", "", "Optional Microsoft OAuth client ID."),
+    variable("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET", "", "Optional Microsoft OAuth client secret.", { secret: true }),
+    variable("LEMMACOMPUTER_MICROSOFT_AUTH_TENANT_ID", "common", "Microsoft customer-login tenant selector; common permits personal and organizational accounts."),
+    variable("LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS", "", "Comma-separated exact HTTPS IdP origins allowed for tenant OIDC discovery; wildcards are rejected."),
+  ]),
   section("Identity, Microsoft 365, and bootstrap", "Replace the Entra placeholders before enabling sign-in. Leave the dedicated Microsoft 365 app values empty to reuse the Web sign-in app.", [
     variable("LEMMACOMPUTER_ENTRA_TENANT_ID", "replace-with-entra-directory-tenant-id", "Microsoft Entra directory tenant ID."),
     variable("LEMMACOMPUTER_ENTRA_CLIENT_ID", "replace-with-entra-application-client-id", "Microsoft Entra Web application client ID."),
@@ -115,6 +135,14 @@ const sections = [
     variable("LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN", "", "Hosted External ID ciamlogin.com tenant subdomain.", { optional: true }),
     variable("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID", "", "Hosted External ID Web application client ID.", { optional: true }),
     variable("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET", "", "Hosted External ID Web application client secret.", { optional: true, secret: true }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID", "", "Hosted workforce Entra tenant for the separate platform-operator application.", { optional: true }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID", "", "Hosted workforce Entra client ID dedicated to platform operators.", { optional: true }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET", "", "Hosted workforce Entra client secret dedicated to platform operators.", { optional: true, secret: true }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET", "", "Hosted platform-operator cookie and OIDC-state encryption secret, distinct from customer sessions.", { optional: true, secret: true }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT", "", "Hosted workforce Entra authentication context required for platform-operator step-up.", { optional: true }),
+    variable("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL", "", "Hosted HTTPS destination for signed break-glass security alerts.", { optional: true }),
+    variable("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET", "", "Shared HMAC secret for signed break-glass security alerts.", { optional: true, secret: true }),
+    variable("LEMMACOMPUTER_PLATFORM_SUPPORT_APPROVAL_REQUIRED", "true", "Require approval for every tenant-support elevation in addition to always-sensitive scopes.", { kind: "boolean" }),
     variable("LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS", "replace-with-entra-object-id", "Comma-separated immutable Entra object IDs allowed to perform the one-time owner bootstrap."),
     variable("LEMMACOMPUTER_ADMINISTRATOR_EMAILS", "", "Deprecated compatibility input. Email addresses never grant organization roles."),
     variable("LEMMACOMPUTER_MS365_TENANT_ID", "", "Dedicated Microsoft 365 MCP Entra tenant ID, or blank to reuse the Web sign-in app."),
@@ -213,6 +241,8 @@ export const environmentAliases = new Map([
 
 export const coupledEnvironmentGroups = Object.freeze([
   ["LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID", "LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN", "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID", "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET"],
+  ["LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID", "LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID", "LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET", "LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET", "LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT"],
+  ["LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL", "LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET"],
   ["LEMMACOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY", "LEMMACOMPUTER_WEB_PUSH_VAPID_PRIVATE_KEY", "LEMMACOMPUTER_WEB_PUSH_SUBSCRIPTION_SECRET"],
   ["LEMMACOMPUTER_POLICY_SIGNING_KEY_ID", "LEMMACOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64", "LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64"],
   ["LEMMACOMPUTER_TELEGRAM_INTAKE_GRANT_PRIVATE_KEY_B64", "LEMMACOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64"],
@@ -339,6 +369,25 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
     errors.push(`${ms365DedicatedApp.join(", ")} must be configured together or all left empty`);
   }
 
+  for (const [name, keys] of Object.entries({
+    Google: ["LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID", "LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET"],
+    Microsoft: ["LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID", "LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET"],
+  })) {
+    const present = keys.filter((key) => hasValue(values[key]));
+    if (present.length === 1) errors.push(`${name} customer authentication client ID and secret must be configured together`);
+  }
+  if (values.LEMMACOMPUTER_RUNTIME_ENVIRONMENT === "production" && values.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT === "capture") {
+    errors.push("Production customer authentication requires a real transactional email transport");
+  }
+  if (values.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && values.LEMMACOMPUTER_INVITATION_DELIVERY_MODE === "copy-link") {
+    errors.push("Hosted organization invitations require transactional email delivery");
+  }
+  if (values.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT === "postmark") {
+    for (const key of ["LEMMACOMPUTER_POSTMARK_SERVER_TOKEN", "LEMMACOMPUTER_POSTMARK_FROM"]) {
+      if (!hasValue(values[key])) errors.push(`${key} is required when Postmark authentication email is selected`);
+    }
+  }
+
   if (values.LEMMACOMPUTER_SANDBOX_DRIVER === "kasm") {
     const remoteKasm = ["LEMMACOMPUTER_KASM_BASE_URL", "LEMMACOMPUTER_KASM_API_KEY", "LEMMACOMPUTER_KASM_API_SECRET", "LEMMACOMPUTER_KASM_USER_ID", "LEMMACOMPUTER_KASM_IMAGE_ID"];
     for (const key of remoteKasm) if (!hasValue(values[key])) errors.push(`${key} is required when LEMMACOMPUTER_SANDBOX_DRIVER=kasm`);
@@ -354,18 +403,37 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
   }
 
   if (selectedProfile === "hosted") {
+    if (values.LEMMACOMPUTER_RUNTIME_ENVIRONMENT !== "production") {
+      errors.push("LEMMACOMPUTER_RUNTIME_ENVIRONMENT must be production in hosted deployments");
+    }
+    if (!hasValue(values.LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS)) {
+      errors.push("LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS is required in hosted deployments");
+    }
     for (const key of [
       "LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID",
       "LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN",
       "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID",
       "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET",
     ]) if (!hasValue(values[key])) errors.push(`${key} is required for hosted External ID sign-in`);
+    for (const key of [
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT",
+      "LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL",
+      "LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET",
+    ]) if (!hasValue(values[key])) errors.push(`${key} is required for the hosted platform-operator realm`);
     if (hasValue(values.LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN)
       && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(values.LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN)) {
       errors.push("LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN must be a ciamlogin.com tenant label");
     }
     if (!values.LEMMACOMPUTER_PUBLIC_WEB_URL.startsWith("https:")) {
       errors.push("LEMMACOMPUTER_PUBLIC_WEB_URL must use https in hosted deployments");
+    }
+    if (hasValue(values.LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL)
+      && !values.LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL.startsWith("https:")) {
+      errors.push("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL must use https in hosted deployments");
     }
     if (values.LEMMACOMPUTER_LITELLM_ADMIN_URL.startsWith("http:") || !values.LEMMACOMPUTER_LITELLM_ADMIN_URL.startsWith("https:")) {
       errors.push("LEMMACOMPUTER_LITELLM_ADMIN_URL must use https in hosted deployments");
@@ -386,6 +454,12 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
     if (new Set(credentialSecrets.map((key) => values[key])).size !== credentialSecrets.length) {
       errors.push("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET, LEMMACOMPUTER_SESSION_SECRET, and LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET must be distinct in hosted deployments");
     }
+    if (values.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID === values.LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID) {
+      errors.push("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID must use a separate application from customer authentication");
+    }
+    if (credentialSecrets.some((key) => values[key] === values.LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET)) {
+      errors.push("LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET must be distinct from customer and infrastructure session secrets");
+    }
     if (values.LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE !== "reject") {
       errors.push("LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE must be reject in hosted deployments");
     }
@@ -403,6 +477,13 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
       "LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN",
       "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID",
       "LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET",
+      "LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT",
+      "LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL",
+      "LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET",
     ]) if (hasValue(values[key])) errors.push(`${key} is hosted-only and must be empty in customer-managed deployments`);
   }
 
@@ -426,6 +507,7 @@ export function worktreeEnvironmentOverrides({ slug, id, portOffset }) {
     ["LEMMACOMPUTER_WEB_PORT", String(4174 + portOffset)],
     ["LEMMACOMPUTER_PUBLIC_WEB_URL", `http://localhost:${4174 + portOffset}`],
     ["LEMMACOMPUTER_INSTALLATION_KIND", "worktree"],
+    ["LEMMACOMPUTER_RUNTIME_ENVIRONMENT", "development"],
   ]);
 }
 
@@ -451,6 +533,12 @@ const runtimeDefaults = Object.freeze({
 });
 
 const controlDatabaseUrl = (v) => `postgres://lemmacomputer:${v("LEMMACOMPUTER_POSTGRES_PASSWORD")}@${runtimeDefaults.postgresHost}:5432/lemmacomputer`;
+const authenticationDatabaseUrl = (v, role) => {
+  const runtime = role === "runtime";
+  const username = runtime ? "lemmacomputer_auth_runtime" : "lemmacomputer_auth_migrator";
+  const password = v(runtime ? "LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD" : "LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD");
+  return `postgres://${username}:${password}@${runtimeDefaults.postgresHost}:5432/lemmacomputer_auth`;
+};
 const litellmDatabaseUrl = (v) => `postgres://litellm:${v("LEMMACOMPUTER_LITELLM_POSTGRES_PASSWORD")}@${runtimeDefaults.litellmPostgresHost}:5432/litellm`;
 const gatewayProviderEgressPolicy = '{"schemaVersion":2,"mode":"restricted","id":"egv_gateway_provider_egress_v1","securityGroupId":"esg_gateway_provider_egress","version":1,"name":"Gateway provider egress","description":"Exact outbound model provider destinations.","defaultAction":"deny","rules":[{"id":"openai-api","action":"allow","protocol":"https","host":"api.openai.com","includeSubdomains":false,"port":443,"purpose":"OpenAI model API"},{"id":"anthropic-api","action":"allow","protocol":"https","host":"api.anthropic.com","includeSubdomains":false,"port":443,"purpose":"Anthropic model API"},{"id":"zai-api","action":"allow","protocol":"https","host":"api.z.ai","includeSubdomains":false,"port":443,"purpose":"Z.ai model API"},{"id":"bedrock-use1","action":"allow","protocol":"https","host":"bedrock-runtime.us-east-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock us-east-1"},{"id":"bedrock-usw2","action":"allow","protocol":"https","host":"bedrock-runtime.us-west-2.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock us-west-2"},{"id":"bedrock-euw1","action":"allow","protocol":"https","host":"bedrock-runtime.eu-west-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock eu-west-1"},{"id":"bedrock-apse1","action":"allow","protocol":"https","host":"bedrock-runtime.ap-southeast-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock ap-southeast-1"}],"documentHash":"0f7d144fd2ecfe6704dbf8c02c9cdb1a949674bba3930560cad36c367465a52f"}';
 const remoteMcpEgressPolicy = '{"schemaVersion":2,"mode":"restricted","id":"egv_remote_mcp_egress_v1","securityGroupId":"esg_remote_mcp_egress","version":1,"name":"Remote MCP egress","description":"Control-approved public MCP and OAuth destinations.","defaultAction":"deny","rules":[],"documentHash":"1d9c9a090b1bd52ad16c6a4d47c6c2958a0bb7634f6efdfc7ffb1f8fe7e7a45f"}';
@@ -482,6 +570,8 @@ export function projectServiceEnvironment(input = {}) {
       POSTGRES_DB: "lemmacomputer",
       POSTGRES_USER: "lemmacomputer",
       POSTGRES_PASSWORD: v("LEMMACOMPUTER_POSTGRES_PASSWORD"),
+      LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD: v("LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD"),
+      LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD: v("LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD"),
     },
     "litellm-postgres": {
       POSTGRES_DB: "litellm",
@@ -514,6 +604,8 @@ export function projectServiceEnvironment(input = {}) {
       GITHUB_MCP_CLIENT_SECRET: v("LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET"),
       LEMMACOMPUTER_MCP_POLICY_URL: `${controlUrl}/internal/v1/mcp/authorize`,
       LEMMACOMPUTER_MCP_POLICY_TOKEN: v("LEMMACOMPUTER_CONTROLLER_TOKEN"),
+      LEMMACOMPUTER_WORKSPACE_ACCESS_URL: `${controlUrl}/internal/v1/workspace-access/authorize`,
+      LEMMACOMPUTER_WORKSPACE_ACCESS_TOKEN: v("LEMMACOMPUTER_CONTROLLER_TOKEN"),
       LEMMACOMPUTER_AI_USAGE_URL: `${controlUrl}/internal/v1/ai-usage`,
       LEMMACOMPUTER_AI_USAGE_TOKEN: v("LEMMACOMPUTER_AI_USAGE_TOKEN"),
       // Model traffic uses the static allowlist proxy. The pinned strict
@@ -590,6 +682,11 @@ export function projectServiceEnvironment(input = {}) {
       LEMMACOMPUTER_APP_VERSION: v("LEMMACOMPUTER_APP_VERSION"),
       LEMMACOMPUTER_INSTALLATION_KIND: v("LEMMACOMPUTER_INSTALLATION_KIND"),
     },
+    "auth-db-migrate": {
+      AUTH_DATABASE_URL: authenticationDatabaseUrl(v, "migrator"),
+      LEMMACOMPUTER_APP_VERSION: v("LEMMACOMPUTER_APP_VERSION"),
+      LEMMACOMPUTER_INSTALLATION_KIND: v("LEMMACOMPUTER_INSTALLATION_KIND"),
+    },
     "control-api": {
       CONTROL_HOST: runtimeDefaults.controlHost,
       CONTROL_PORT: runtimeDefaults.controlPort,
@@ -599,6 +696,21 @@ export function projectServiceEnvironment(input = {}) {
       MCP_EGRESS_PROXY_TOKEN: v("LEMMACOMPUTER_MCP_EGRESS_PROXY_TOKEN"),
       HOSTED_MCP_EGRESS_ORIGINS: v("LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS"),
       DATABASE_URL: controlDatabaseUrl(v),
+      AUTH_DATABASE_URL: authenticationDatabaseUrl(v, "runtime"),
+      BETTER_AUTH_SECRETS: `${v("LEMMACOMPUTER_BETTER_AUTH_SECRET_VERSION")}:${v("LEMMACOMPUTER_BETTER_AUTH_SECRET")}${v("LEMMACOMPUTER_BETTER_AUTH_PREVIOUS_SECRETS") ? `,${v("LEMMACOMPUTER_BETTER_AUTH_PREVIOUS_SECRETS")}` : ""}`,
+      BETTER_AUTH_TRUSTED_PROXY_CIDRS: v("LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS"),
+      CUSTOMER_SSO_TRUSTED_IDP_ORIGINS: v("LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS"),
+      AUTH_EMAIL_TRANSPORT: v("LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT"),
+      INVITATION_DELIVERY_MODE: v("LEMMACOMPUTER_INVITATION_DELIVERY_MODE"),
+      RUNTIME_ENVIRONMENT: v("LEMMACOMPUTER_RUNTIME_ENVIRONMENT"),
+      POSTMARK_SERVER_TOKEN: v("LEMMACOMPUTER_POSTMARK_SERVER_TOKEN"),
+      POSTMARK_FROM: v("LEMMACOMPUTER_POSTMARK_FROM"),
+      POSTMARK_MESSAGE_STREAM: v("LEMMACOMPUTER_POSTMARK_MESSAGE_STREAM"),
+      GOOGLE_AUTH_CLIENT_ID: v("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID"),
+      GOOGLE_AUTH_CLIENT_SECRET: v("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET"),
+      MICROSOFT_AUTH_CLIENT_ID: v("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID"),
+      MICROSOFT_AUTH_CLIENT_SECRET: v("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET"),
+      MICROSOFT_AUTH_TENANT_ID: v("LEMMACOMPUTER_MICROSOFT_AUTH_TENANT_ID"),
       LITELLM_ADMIN_URL: v("LEMMACOMPUTER_LITELLM_ADMIN_URL"),
       LITELLM_ADMIN_TLS_CA_B64: v("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64"),
       LITELLM_ADMIN_TLS_CLIENT_CERT_B64: v("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64"),
@@ -627,6 +739,16 @@ export function projectServiceEnvironment(input = {}) {
       EXTERNAL_ID_TENANT_SUBDOMAIN: v("LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN"),
       EXTERNAL_ID_CLIENT_ID: v("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID"),
       EXTERNAL_ID_CLIENT_SECRET: v("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET"),
+      ...(v("LEMMACOMPUTER_INSTALLATION_KIND") === "hosted" ? {
+        PLATFORM_OPERATOR_ENTRA_TENANT_ID: v("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID"),
+        PLATFORM_OPERATOR_ENTRA_CLIENT_ID: v("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID"),
+        PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET: v("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET"),
+        PLATFORM_OPERATOR_SESSION_SECRET: v("LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET"),
+        PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: v("LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT"),
+        PLATFORM_SECURITY_ALERT_WEBHOOK_URL: v("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL"),
+        PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: v("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET"),
+        PLATFORM_SUPPORT_APPROVAL_REQUIRED: v("LEMMACOMPUTER_PLATFORM_SUPPORT_APPROVAL_REQUIRED"),
+      } : {}),
       SESSION_SECRET: v("LEMMACOMPUTER_SESSION_SECRET"),
       WORKSPACE_INGRESS_PUBLIC_URL: v("LEMMACOMPUTER_PUBLIC_WEB_URL"),
       WORKSPACE_INGRESS_SECRET: v("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET"),
@@ -693,6 +815,8 @@ export function projectServiceEnvironment(input = {}) {
       WORKSPACE_INGRESS_PUBLIC_URL: v("LEMMACOMPUTER_PUBLIC_WEB_URL"),
       WORKSPACE_INGRESS_LITELLM_PUBLIC_URL: litellmPublicUrl,
       WORKSPACE_INGRESS_WEB_UPSTREAM: `http://web:${runtimeDefaults.webPort}`,
+      WORKSPACE_INGRESS_CONTROL_URL: controlUrl,
+      WORKSPACE_INGRESS_CONTROL_TOKEN: v("LEMMACOMPUTER_CONTROLLER_TOKEN"),
       WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM: ms365Url,
       WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM: litellmUrl,
       WORKSPACE_INGRESS_SECRET: v("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET"),

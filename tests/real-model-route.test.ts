@@ -43,6 +43,14 @@ test("OpenAI, Anthropic, GLM, and Bedrock routes are database-managed", async ()
   assert.match(bootstrapPolicy, /modelAliases: \[\.\.\.modelAliases\]/);
 });
 
+test("managed Claude Desktop accepts the organization auto route", async () => {
+  const entrypoint = await source("docker/workspace/lemmacomputer-workspace-entrypoint.sh");
+  assert.match(
+    entrypoint,
+    /lemmacomputer-auto\|lemmacomputer-assistant\) model_label="Standard organization route"/,
+  );
+});
+
 test("historic demo defaults gain GLM and Bedrock while customer policy remains unchanged", async () => {
   const historic = mvpPolicyDocument("Initial MVP policy", ["lemmacomputer-claude", "lemmacomputer-openai"]);
   const upgraded = upgradeHistoricMvpPolicyDocument(historic);

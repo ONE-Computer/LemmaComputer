@@ -14,6 +14,15 @@ export const deploymentProfileIds = Object.freeze([
   "worktree",
 ]);
 
+export const customerAuthenticationMethods = Object.freeze([
+  "email-password",
+  "passkey",
+  "google-oauth",
+  "microsoft-oauth",
+  "saml",
+  "oidc",
+]);
+
 export const workspaceDriverTopologies = Object.freeze({
   "kasm-local": Object.freeze({
     id: "kasm-local",
@@ -34,6 +43,11 @@ const workspaceProviderPolicy = (value) => Object.freeze({
 const profile = (value) => Object.freeze({
   ...value,
   allowedSignInProviders: Object.freeze([...value.allowedSignInProviders]),
+  transitionalCustomerAdapters: Object.freeze([...value.transitionalCustomerAdapters]),
+  customerAuthentication: Object.freeze({
+    ...value.customerAuthentication,
+    allowedMethods: Object.freeze([...value.customerAuthentication.allowedMethods]),
+  }),
   workspaceProviderPolicy: workspaceProviderPolicy(value.workspaceProviderPolicy),
 });
 
@@ -43,7 +57,7 @@ const profile = (value) => Object.freeze({
  * but do not redefine its security properties.
  */
 export const deploymentProfileCapabilityMatrix = Object.freeze({
-  schemaVersion: 2,
+  schemaVersion: 3,
   profiles: Object.freeze({
     "customer-managed": profile({
       id: "customer-managed",
@@ -51,7 +65,15 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       operator: "customer",
       organizationCardinality: "exactly-one",
       maximumOrganizations: 1,
-      allowedSignInProviders: ["workforce-entra"],
+      allowedSignInProviders: ["better-auth-customer", "workforce-entra"],
+      transitionalCustomerAdapters: ["workforce-entra"],
+      customerAuthentication: {
+        framework: "better-auth",
+        databaseScope: "installation-local",
+        requiredLemmaHostedDependency: false,
+        allowedMethods: customerAuthenticationMethods,
+      },
+      platformOperatorRealm: "absent",
       identityConfigurationCustody: "customer",
       secretCustody: "customer",
       workspaceProviderPolicy: {
@@ -72,7 +94,15 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       operator: "lemmacomputer",
       organizationCardinality: "multiple",
       maximumOrganizations: null,
-      allowedSignInProviders: ["external-id", "enterprise-entra"],
+      allowedSignInProviders: ["better-auth-customer", "external-id", "enterprise-entra"],
+      transitionalCustomerAdapters: ["external-id", "enterprise-entra"],
+      customerAuthentication: {
+        framework: "better-auth",
+        databaseScope: "pooled-control-plane",
+        requiredLemmaHostedDependency: false,
+        allowedMethods: customerAuthenticationMethods,
+      },
+      platformOperatorRealm: "separate-workforce",
       identityConfigurationCustody: "lemmacomputer",
       secretCustody: "lemmacomputer",
       workspaceProviderPolicy: {
@@ -93,7 +123,15 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       operator: "developer",
       organizationCardinality: "development",
       maximumOrganizations: null,
-      allowedSignInProviders: ["development-fixture", "workforce-entra", "external-id", "enterprise-entra"],
+      allowedSignInProviders: ["development-fixture", "better-auth-customer", "workforce-entra", "external-id", "enterprise-entra"],
+      transitionalCustomerAdapters: ["workforce-entra", "external-id", "enterprise-entra"],
+      customerAuthentication: {
+        framework: "better-auth",
+        databaseScope: "development-isolated",
+        requiredLemmaHostedDependency: false,
+        allowedMethods: customerAuthenticationMethods,
+      },
+      platformOperatorRealm: "development-fixture",
       identityConfigurationCustody: "developer",
       secretCustody: "developer",
       workspaceProviderPolicy: {
@@ -134,6 +172,14 @@ export function assertSignInProviderAllowed(profileId, providerId) {
   return resolved;
 }
 
+export function assertCustomerAuthenticationMethodAllowed(profileId, method) {
+  const resolved = resolveDeploymentProfile(profileId);
+  if (!resolved.customerAuthentication.allowedMethods.includes(method)) {
+    throw new Error(`${method} customer authentication is not allowed in the ${profileId} deployment profile`);
+  }
+  return resolved;
+}
+
 export function assertWorkspaceProviderBoundaryAllowed(profileId, executionBoundary) {
   const resolved = resolveDeploymentProfile(profileId);
   if (!resolved.workspaceProviderPolicy.allowedExecutionBoundaries.includes(executionBoundary)) {
@@ -169,7 +215,7 @@ export function assertOrganizationCountAllowed(profileId, organizationCount) {
 export function assertHostedCapability(profileId, capability) {
   const resolved = resolveDeploymentProfile(profileId);
   const allowed = {
-    externalIdentity: resolved.allowedSignInProviders.includes("external-id"),
+    externalIdentity: resolved.customerAuthentication.framework === "better-auth",
     telemetry: resolved.hostedTelemetry,
     billing: resolved.hostedBilling,
     backgroundJobs: resolved.hostedBackgroundJobs,

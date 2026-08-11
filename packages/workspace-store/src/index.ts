@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { activityEventSchema } from "@lemmacomputer/contracts";
+import { activityEventSchema, LemmaComputerError } from "@lemmacomputer/contracts";
 import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceRequestedServiceClass, WorkspaceState } from "@lemmacomputer/contracts";
 import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migrations.js";
 export * from "./identity-policy.js";
@@ -17,6 +17,7 @@ export * from "./teams.js";
 export * from "./usage-ledger.js";
 export * from "./budgets.js";
 export * from "./routing.js";
+export * from "./platform-operator.js";
 
 export type WorkspaceRecord = {
   id: string;
@@ -27,7 +28,7 @@ export type WorkspaceRecord = {
   providerId: string | null;
   failureCode: string | null;
   operationToken: string | null;
-  bridgeGrantGeneration: number;
+  accessGeneration: number;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -414,11 +415,12 @@ export interface WorkspaceStore {
   getCurrent(identity: IdentityContext, grantId: string): Promise<WorkspaceRecord | null>;
   listCurrent(identity: IdentityContext): Promise<WorkspaceRecord[]>;
   getOwned(identity: IdentityContext, workspaceId: string): Promise<WorkspaceRecord | null>;
+  authorizeWorkspaceAccess(input: IdentityContext & { workspaceId: string; accessGeneration: number }, allowedStates?: WorkspaceState[]): Promise<boolean>;
   createOrGet(identity: IdentityContext, grantId: string, idempotencyKey: string): Promise<WorkspaceRecord>;
   claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState): Promise<WorkspaceRecord | null>;
   finish(workspaceId: string, operationToken: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
-  revokeBridgeGrants(workspaceId: string): Promise<WorkspaceRecord>;
+  revokeAccessGrants(workspaceId: string): Promise<WorkspaceRecord>;
   remove(identity: IdentityContext, workspaceId: string): Promise<boolean>;
   getSandboxSettings?(identity: IdentityContext, grantId: string): Promise<SandboxSettingsRecord | null>;
   saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
@@ -434,7 +436,7 @@ const mapRow = (row: Record<string, unknown>): WorkspaceRecord => ({
   providerId: row.provider_id ? String(row.provider_id) : null,
   failureCode: row.failure_code ? String(row.failure_code) : null,
   operationToken: row.operation_token ? String(row.operation_token) : null,
-  bridgeGrantGeneration: Number(row.bridge_grant_generation ?? 1),
+  accessGeneration: Number(row.access_generation ?? 1),
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
 });
@@ -812,11 +814,39 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return result.rowCount ? mapRow(result.rows[0]) : null;
   }
 
+  async authorizeWorkspaceAccess(input: IdentityContext & { workspaceId: string; accessGeneration: number }, allowedStates: WorkspaceState[] = ["ready", "open"]) {
+    const result = await this.pool.query(
+      `SELECT 1 FROM workspaces workspace
+       JOIN organizations organization ON organization.id=workspace.tenant_id
+       LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=workspace.tenant_id
+       WHERE workspace.id=$1 AND workspace.tenant_id=$2 AND workspace.subject_id=$3
+         AND workspace.access_generation=$4 AND workspace.state=ANY($5::text[])
+         AND organization.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active'
+         AND NOT EXISTS (
+           SELECT 1 FROM platform_tenant_cleanup_jobs cleanup
+           WHERE cleanup.workspace_id=workspace.id AND cleanup.status<>'completed'
+         )`,
+      [input.workspaceId, input.tenantId, input.subjectId, input.accessGeneration, allowedStates],
+    );
+    return Boolean(result.rowCount);
+  }
+
   async createOrGet(identity: IdentityContext, grantId: string, idempotencyKey: string) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`${identity.tenantId}:${identity.subjectId}:${grantId}`]);
+      const tenant = await client.query(
+        `SELECT tenant.id,organization.status,COALESCE(lifecycle.lifecycle_state,'active') AS lifecycle_state
+         FROM tenants tenant
+         JOIN organizations organization ON organization.id=tenant.id
+         LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=tenant.id
+         WHERE tenant.id=$1 FOR SHARE OF tenant,organization`,
+        [identity.tenantId],
+      );
+      if (!tenant.rowCount || tenant.rows[0].status !== "active" || tenant.rows[0].lifecycle_state !== "active") {
+        throw new LemmaComputerError("TENANT_WORKSPACE_ACCESS_REVOKED", "Tenant workspace access is not active", 403);
+      }
       const existing = await client.query(
         "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 AND grant_id=$3 FOR UPDATE",
         [identity.tenantId, identity.subjectId, grantId],
@@ -874,9 +904,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return mapRow(result.rows[0]);
   }
 
-  async revokeBridgeGrants(workspaceId: string) {
+  async revokeAccessGrants(workspaceId: string) {
     const result = await this.pool.query(
-      "UPDATE workspaces SET bridge_grant_generation=bridge_grant_generation+1, updated_at=now() WHERE id=$1 RETURNING *",
+      "UPDATE workspaces SET access_generation=access_generation+1, updated_at=now() WHERE id=$1 RETURNING *",
       [workspaceId],
     );
     if (!result.rowCount) throw new Error("Workspace not found");
@@ -2061,11 +2091,19 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     const item = this.records.get(workspaceId);
     return item?.tenantId === identity.tenantId && item.subjectId === identity.subjectId ? item : null;
   }
+  async authorizeWorkspaceAccess(input: IdentityContext & { workspaceId: string; accessGeneration: number }, allowedStates: WorkspaceState[] = ["ready", "open"]) {
+    const item = this.records.get(input.workspaceId);
+    return Boolean(item
+      && item.tenantId === input.tenantId
+      && item.subjectId === input.subjectId
+      && item.accessGeneration === input.accessGeneration
+      && allowedStates.includes(item.state));
+  }
   async createOrGet(identity: IdentityContext, grantId: string, _key: string) {
     const existing = [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId);
     if (existing) return existing;
     const now = new Date();
-    const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", providerId: null, failureCode: null, operationToken: null, bridgeGrantGeneration: 1, createdAt: now, updatedAt: now };
+    const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", providerId: null, failureCode: null, operationToken: null, accessGeneration: 1, createdAt: now, updatedAt: now };
     this.records.set(record.id, record);
     return record;
   }
@@ -2086,10 +2124,10 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     if (!record) throw new Error("Workspace not found");
     return this.save(record, patch);
   }
-  async revokeBridgeGrants(workspaceId: string) {
+  async revokeAccessGrants(workspaceId: string) {
     const record = this.records.get(workspaceId);
     if (!record) throw new Error("Workspace not found");
-    return this.save(record, { bridgeGrantGeneration: record.bridgeGrantGeneration + 1 });
+    return this.save(record, { accessGeneration: record.accessGeneration + 1 });
   }
   async remove(identity: IdentityContext, workspaceId: string) {
     if (!await this.getOwned(identity, workspaceId)) return false;

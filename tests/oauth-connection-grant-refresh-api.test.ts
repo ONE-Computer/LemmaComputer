@@ -136,7 +136,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     const workspaceId = created.json().id as string;
     const createdRecord = await workspaceStore.getOwned(identity, workspaceId);
     assert.ok(createdRecord);
-    const originalGeneration = createdRecord.bridgeGrantGeneration;
+    const originalGeneration = createdRecord.accessGeneration;
     const bridgeToken = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspaceId, issuedPolicies[0]!, {
       workspaceGeneration: originalGeneration,
     });
@@ -261,7 +261,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
     assert.ok(statusServers.every((serverName) => serverName === "lemmacomputer_linear"));
     assert.deepEqual(toolServers, []);
     const afterFailedRefresh = await workspaceStore.getOwned(identity, workspaceId);
-    assert.equal(afterFailedRefresh?.bridgeGrantGeneration, originalGeneration, "connector gateway failure must not revoke the workspace-to-Control bridge");
+    assert.equal(afterFailedRefresh?.accessGeneration, originalGeneration, "connector gateway failure must not revoke the workspace-to-Control bridge");
     assert.ok(revokedGatewayGrants >= 1, "the failed gateway projection is still removed fail closed");
     const renewedBridge = await app.inject({
       method: "POST",

@@ -314,6 +314,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
   let workspaceNetworkExists = false;
   let gatewayConnected = false;
   let controlConnected = false;
+  let workspaceVolumeRecord: { Name: string; Labels: Record<string, unknown> } | undefined;
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -323,6 +324,10 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     response.setHeader("content-type", "application/json");
     if (path === "/containers/json?all=1") {
       response.end("[]");
+      return;
+    }
+    if (request.method === "GET" && path.startsWith("/volumes?filters=")) {
+      response.end(JSON.stringify({ Volumes: workspaceVolumeRecord ? [workspaceVolumeRecord] : [] }));
       return;
     }
     if (path === "/containers/sandbox-id/json") {
@@ -371,6 +376,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     }
     if (request.method === "POST" && path === "/networks/lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508/connect" && body.Container === "lemmacomputer-control-api") {
       controlConnected = true;
+    }
+    if (request.method === "POST" && path === "/volumes/create") {
+      workspaceVolumeRecord = { Name: String(body.Name), Labels: body.Labels as Record<string, unknown> };
     }
     response.end(JSON.stringify({ ok: true }));
   });
@@ -437,6 +445,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     });
     const createInput: Parameters<KasmLocalAdapter["create"]>[0] = {
       workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+      accessGeneration: 1,
       policy,
       policyBundle: signedPolicy.bundle,
       policyVerificationKeys: signedPolicy.keys,
@@ -459,6 +468,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
           tenantId: "acme",
           subjectId: "alex",
           workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+          accessGeneration: 1,
           agentId: "agent-alex",
           securityGroupVersionId: "egv_acme_updates_v1",
           egressMode: "restricted",
@@ -513,7 +523,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       PathInContainer: "/dev/vhost-vsock",
       CgroupPermissions: "rwm",
     }]);
-    const workspaceVolume = "lemmacomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+    const workspaceVolume = "lemmacomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-g1";
     assert.deepEqual(host.Mounts, [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }]);
     const volumeCreate = requests.find((item) => item.path === "/volumes/create")!;
     assert.equal(volumeCreate.body.Name, workspaceVolume);
@@ -592,6 +602,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
           tenantId: "acme",
           subjectId: "alex",
           workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+          accessGeneration: 1,
           agentId: "agent-alex",
           securityGroupVersionId: "egv_acme_updates_v2",
           egressMode: "restricted",
@@ -650,6 +661,50 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
   }
 });
 
+
+test("a paused stale purge can delete only its generation-specific volume", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const deleted: string[] = [];
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* drain */ }
+    const path = request.url?.slice("/v1.47".length) ?? "";
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path.startsWith("/volumes?filters=")) {
+      response.end(JSON.stringify({ Volumes: [{
+        Name: "lemmacomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-g2",
+        Labels: {
+          "com.lemmacomputer.workspace-id": "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+          "com.lemmacomputer.storage-generation": "2",
+        },
+      }] }));
+      return;
+    }
+    if (request.method === "DELETE") deleted.push(path);
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new KasmLocalAdapter({
+      socketPath,
+      image: "sha256:pinned-workspace",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "hosted",
+    });
+    await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", 2);
+    assert.deepEqual(deleted, [
+      "/volumes/lemmacomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-g2?force=true",
+    ]);
+    assert.equal(deleted.some((path) => path.includes("-g3")), false, "a replacement volume created while the stale handler was paused has a different address");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("local Kasm retries container creation when Docker drops the workspace network", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "decisionDate": "2026-08-09",
+  "packages": {
+    "better-auth": "1.6.26",
+    "@better-auth/passkey": "1.6.26",
+    "@better-auth/sso": "1.6.26"
+  },
+  "mount": {
+    "component": "control-api",
+    "routeNamespace": "/api/v1/auth/customer",
+    "applicationStartupRunsMigrations": false
+  },
+  "databases": {
+    "authentication": {
+      "name": "lemmacomputer_auth",
+      "runtimeRole": "lemmacomputer_auth_runtime",
+      "migrationRole": "lemmacomputer_auth_migrator",
+      "migrationStream": "authentication"
+    },
+    "productControl": {
+      "name": "lemmacomputer_control",
+      "runtimeRole": "lemmacomputer_control_runtime",
+      "migrationRole": "lemmacomputer_control_migrator",
+      "migrationStream": "product-control"
+    },
+    "crossDatabaseForeignKeys": false
+  },
+  "authorization": {
+    "providerClaims": "non-authoritative",
+    "activeOrganizationSource": "server-resolved-product-membership",
+    "implicitEmailLinking": false
+  },
+  "requiredGates": [
+    "email-verification-and-reset",
+    "totp-backup-codes-and-recovery",
+    "passkeys",
+    "social-login-and-dual-proof-linking",
+    "session-and-product-context-revocation",
+    "invitation-admission",
+    "multi-organization-selection",
+    "enterprise-sso-and-lockout-recovery",
+    "customer-managed-offline-independence",
+    "proxy-origin-csrf-and-rate-limits",
+    "audit-and-secret-redaction",
+    "auth-database-backup-restore",
+    "encryption-key-rotation",
+    "dependency-upgrade-and-rollback",
+    "cross-tenant-adversarial-isolation"
+  ],
+  "releasePolicy": {
+    "upgrade": "review-generated-schema-and-run-all-gates",
+    "rollback": "code-only-when-schema-compatible-otherwise-forward-fix"
+  }
+}

@@ -6,6 +6,7 @@ import type {
   IdentityContext,
   ScheduleRunState,
 } from "@lemmacomputer/contracts";
+import { LemmaComputerError } from "@lemmacomputer/contracts";
 import {
   nextScheduleAt,
   type ClaimedScheduleRun,
@@ -265,6 +266,45 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
   assert.equal(completed.sessionId, "session-scheduled-1");
   assert.equal(validations, 2);
   assert.equal(bindingIssued, true);
+});
+
+test("a claimed run with revoked authority is skipped before contacting the agent", async () => {
+  const store = new MemoryScheduleStore();
+  let agentCalls = 0;
+  const agent: AgentChatClient = {
+    ...successfulAgent,
+    health: async () => { agentCalls += 1; },
+    createSession: async (...args) => {
+      agentCalls += 1;
+      return successfulAgent.createSession(...args);
+    },
+  };
+  const service = new ScheduleService(
+    store,
+    new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
+    agent,
+    async () => {},
+    async () => {
+      throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+    },
+  );
+  const schedule = await service.create(identity, {
+    title: "Revoked schedule",
+    workspaceId,
+    agentCatalogId: "codex-cli",
+    prompt: "Must not execute.",
+    cronExpression: "0 9 * * *",
+    timeZone: "UTC",
+    state: "enabled",
+  });
+  await store.queueScheduleRun(identity, schedule.id, new Date());
+  const [claimed] = await store.claimDueScheduleRuns(new Date(), 1, 120_000);
+  assert.ok(claimed?.run.leaseToken);
+
+  const completed = await service.executeClaimed(claimed.run.id, claimed.run.leaseToken!);
+  assert.equal(completed.state, "skipped");
+  assert.equal(completed.failureCode, "POLICY_NOT_ASSIGNED");
+  assert.equal(agentCalls, 0);
 });
 
 test("the worker sends only leased run identifiers to Control", async () => {

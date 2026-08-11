@@ -1,7 +1,14 @@
 # Hosted Microsoft Entra External ID
 
-The `hosted` deployment profile uses browser-delegated OpenID Connect against a
-Microsoft Entra External ID external tenant. Microsoft hosts the password and
+> **Transitional adapter.** The embedded Better Auth runtime is the current
+> customer-authentication path for both deployment profiles. This runbook is
+> retained only for deployments that explicitly enable the legacy hosted
+> External ID adapter. It is not a prerequisite for hosted operation and does
+> not describe company SSO or Microsoft social login.
+
+When explicitly enabled, the `hosted` deployment profile may use
+browser-delegated OpenID Connect against a Microsoft Entra External ID external
+tenant. Microsoft hosts the password and
 multifactor-authentication screens. LemmaComputer receives verified identity
 claims and never receives or stores the person's password or email one-time
 passcode (OTP).

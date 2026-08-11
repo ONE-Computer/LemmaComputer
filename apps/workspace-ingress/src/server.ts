@@ -21,6 +21,8 @@ export type WorkspaceIngressConfig = {
   requestTimeoutMs?: number;
   agentChatRequestTimeoutMs?: number;
   verifyWorkspaceTls?: boolean;
+  authorizeWorkspaceAccess: (claims: WorkspaceIngressClaims) => Promise<boolean>;
+  accessHeartbeatMs?: number;
   audit?: (event: Record<string, unknown>) => void;
 };
 
@@ -162,6 +164,9 @@ const proxyUpgrade = (
   workspace: boolean,
   verifyWorkspaceTls: boolean,
   audit: (event: Record<string, unknown>) => void,
+  claims?: WorkspaceIngressClaims,
+  authorizeWorkspaceAccess?: (claims: WorkspaceIngressClaims) => Promise<boolean>,
+  heartbeatMs = 1_000,
 ) => {
   const transport = target.protocol === "https:" ? https : http;
   const upstreamRequest = transport.request(requestOptions(request, target, path, { workspace, websocket: true, verifyWorkspaceTls }));
@@ -175,6 +180,24 @@ const proxyUpgrade = (
     if (upstreamHead.length) socket.write(upstreamHead);
     if (head.length) upstreamSocket.write(head);
     upstreamSocket.pipe(socket).pipe(upstreamSocket);
+    if (claims && authorizeWorkspaceAccess) {
+      const heartbeat = setInterval(() => {
+        void authorizeWorkspaceAccess(claims).then((allowed) => {
+          if (!allowed) {
+            audit({ event: "workspace_ingress_access_revoked", transport: "websocket", workspaceId: claims.workspaceId });
+            socket.destroy();
+            upstreamSocket.destroy();
+          }
+        }).catch(() => {
+          socket.destroy();
+          upstreamSocket.destroy();
+        });
+      }, heartbeatMs);
+      heartbeat.unref();
+      const clear = () => clearInterval(heartbeat);
+      socket.once("close", clear);
+      upstreamSocket.once("close", clear);
+    }
   });
   upstreamRequest.on("response", (upstreamResponse) => {
     writeSocketResponse(socket, upstreamResponse.statusCode ?? 502, upstreamResponse.statusMessage ?? "Bad Gateway");
@@ -236,6 +259,40 @@ const sessionCookie = (token: string, workspaceId: string, maxAge: number, secur
   ...(secure ? ["Secure"] : []),
 ].join("; ");
 
+export const createHttpWorkspaceAccessAuthorizer = (
+  controlUrl: string,
+  token: string,
+  request: typeof fetch = globalThis.fetch,
+) => {
+  const endpoint = new URL("/internal/v1/workspace-access/authorize", controlUrl);
+  if (!/^https?:$/.test(endpoint.protocol) || endpoint.username || endpoint.password || token.length < 24) {
+    throw new Error("Workspace access authorizer configuration is invalid");
+  }
+  return async (claims: WorkspaceIngressClaims) => {
+    const response = await request(endpoint, {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        "content-type": "application/json",
+        "x-lemmacomputer-mcp-policy-token": token,
+      },
+      body: JSON.stringify({
+        tenantId: claims.tenantId,
+        subjectId: claims.subjectId,
+        workspaceId: claims.workspaceId,
+        accessGeneration: claims.accessGeneration,
+      }),
+      signal: AbortSignal.timeout(900),
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      return false;
+    }
+    const body = await response.json() as { allowed?: unknown };
+    return body.allowed === true;
+  };
+};
+
 export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
   const publicUrl = new URL(config.publicUrl);
   const litellmPublicUrl = config.litellmPublicUrl ? new URL(config.litellmPublicUrl) : null;
@@ -253,8 +310,17 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
   const agentChatTimeoutMs = config.agentChatRequestTimeoutMs ?? defaultAgentChatRequestTimeoutMs;
   const verifyWorkspaceTls = config.verifyWorkspaceTls ?? true;
   const audit = config.audit ?? ((event) => process.stdout.write(`${JSON.stringify(event)}\n`));
+  const accessHeartbeatMs = config.accessHeartbeatMs ?? 1_000;
+  const authorizeWorkspaceAccess = async (claims: WorkspaceIngressClaims) => {
+    try {
+      return await config.authorizeWorkspaceAccess(claims);
+    } catch {
+      audit({ event: "workspace_ingress_access_authorizer_unavailable", workspaceId: claims.workspaceId });
+      return false;
+    }
+  };
 
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(async (request, response) => {
     if (request.url === "/__lemmacomputer/healthz") {
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify({ status: "ok" }));
@@ -317,6 +383,11 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
         response.end(JSON.stringify({ error: { code: "WORKSPACE_LAUNCH_INVALID", message: "The workspace launch link is invalid or expired" } }));
         return;
       }
+      if (!await authorizeWorkspaceAccess(exchanged.claims)) {
+        response.writeHead(403, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ error: { code: "WORKSPACE_ACCESS_REVOKED", message: "Workspace access is no longer active" } }));
+        return;
+      }
       route.url.searchParams.delete(workspaceIngressAccessParameter);
       const maxAge = Math.max(1, exchanged.claims.expiresAt - Math.floor(Date.now() / 1000));
       response.writeHead(303, {
@@ -336,10 +407,16 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
       response.end(JSON.stringify({ error: { code: "WORKSPACE_SESSION_REQUIRED", message: "Open the workspace again to start a session" } }));
       return;
     }
+    if (!await authorizeWorkspaceAccess(claims)) {
+      response.writeHead(403, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify({ error: { code: "WORKSPACE_ACCESS_REVOKED", message: "Workspace access is no longer active" } }));
+      return;
+    }
     proxyRequest(request, response, upstreamFor(claims), route.upstreamPath, timeoutMs, true, verifyWorkspaceTls, audit);
   });
 
   server.on("upgrade", (request, socket, head) => {
+    void (async () => {
     const route = workspaceRoute(request);
     if (!route) {
       proxyUpgrade(request, socket, head, webUpstream, request.url ?? "/", timeoutMs, false, true, audit);
@@ -351,7 +428,12 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
       writeSocketResponse(socket, 401, "Unauthorized");
       return;
     }
-    proxyUpgrade(request, socket, head, upstreamFor(claims), route.upstreamPath, timeoutMs, true, verifyWorkspaceTls, audit);
+    if (!await authorizeWorkspaceAccess(claims)) {
+      writeSocketResponse(socket, 403, "Forbidden");
+      return;
+    }
+    proxyUpgrade(request, socket, head, upstreamFor(claims), route.upstreamPath, timeoutMs, true, verifyWorkspaceTls, audit, claims, authorizeWorkspaceAccess, accessHeartbeatMs);
+    })().catch(() => writeSocketResponse(socket, 403, "Forbidden"));
   });
 
   return server;
@@ -363,6 +445,8 @@ const envSchema = z.object({
   WORKSPACE_INGRESS_PUBLIC_URL: z.string().url().default("http://localhost:4174"),
   WORKSPACE_INGRESS_LITELLM_PUBLIC_URL: z.string().url().optional(),
   WORKSPACE_INGRESS_WEB_UPSTREAM: z.string().url().default("http://127.0.0.1:4173"),
+  WORKSPACE_INGRESS_CONTROL_URL: z.string().url(),
+  WORKSPACE_INGRESS_CONTROL_TOKEN: z.string().min(24),
   WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM: z.string().url().optional(),
   WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM: z.string().url().optional(),
   WORKSPACE_INGRESS_SECRET: z.string().min(32),
@@ -385,6 +469,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     microsoft365AuthorizationUpstream: env.WORKSPACE_INGRESS_MICROSOFT365_AUTHORIZATION_UPSTREAM,
     litellmOAuthUpstream: env.WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM,
     verifyWorkspaceTls: env.WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS,
+    authorizeWorkspaceAccess: createHttpWorkspaceAccessAuthorizer(
+      env.WORKSPACE_INGRESS_CONTROL_URL,
+      env.WORKSPACE_INGRESS_CONTROL_TOKEN,
+    ),
   });
   server.listen(env.WORKSPACE_INGRESS_PORT, env.WORKSPACE_INGRESS_HOST);
 }

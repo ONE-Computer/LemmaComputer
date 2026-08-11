@@ -65,6 +65,24 @@ test("the workspace broker binds Claude background model names to the assigned p
   assert.deepEqual(normalized.body.messages, [{ role: "user", content: "title" }]);
 });
 
+test("the workspace broker makes Claude Desktop's one-token gateway health probe portable across governed routes", () => {
+  const normalized = normalize("lemmacomputer-auto", {
+    model: "claude-sonnet-4-6",
+    max_tokens: 1,
+    messages: [{ role: "user", content: "." }],
+  });
+
+  assert.equal(normalized.body.model, "lemmacomputer-auto");
+  assert.equal(normalized.body.max_tokens, 16);
+
+  const ordinaryRequest = normalize("lemmacomputer-auto", {
+    model: "claude-sonnet-4-6",
+    max_tokens: 1,
+    messages: [{ role: "user", content: "Reply with one character." }],
+  });
+  assert.equal(ordinaryRequest.body.max_tokens, 1);
+});
+
 test("the same client request can be rebound to a non-Anthropic organization route", () => {
   assert.equal(
     normalize("claude-sonnet-4-5", { model: "claude-opus-4-8", messages: [] }).body.model,

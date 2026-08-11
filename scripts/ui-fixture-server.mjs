@@ -9,11 +9,25 @@ const bundleDigest = "b".repeat(64);
 const session = {
   user: {
     id: "alex-morgan",
-    displayName: "Mike Sun",
-    email: "mike@metech.dev",
+    displayName: "Example User",
+    email: "user@example.test",
   },
-  tenant: { id: "acme", displayName: "ME TECH" },
+  tenant: { id: "acme", displayName: "Example Organization" },
   roles: ["employee", "administrator"],
+  capabilities: [
+    "organization.read",
+    "organization.manage_members",
+    "organization.manage_roles",
+    "organization.manage_settings",
+    "workspace.use",
+    "workspace.create",
+    "workspace.manage",
+    "policy.manage",
+    "provider.manage",
+    "audit.read",
+    "usage.read",
+    "usage.manage",
+  ],
 };
 
 const workspace = {
@@ -223,7 +237,7 @@ const operation = {
   resourceLocation: "OneDrive · Finance",
   requestedAt: now,
   updatedAt: now,
-  requestedBy: "Mike Sun",
+  requestedBy: "Example User",
   operationDigest: "c".repeat(64),
   toolName: "delete-drive-item",
   agentId: "agent-alex:claude",
@@ -433,6 +447,7 @@ const firewallWorkspaces = (group) => [
 let adminUsers = [
   {
     userId: session.user.id,
+    membershipId: "b1111111-1111-4111-8111-111111111111",
     email: session.user.email,
     displayName: session.user.displayName,
     status: "active",
@@ -443,9 +458,10 @@ let adminUsers = [
     workspaces: firewallWorkspaces(egressSecurityGroups[0]),
   },
   {
-    userId: "hello-metech",
-    email: "hello@metech.dev",
-    displayName: "METECH",
+    userId: "example-admin",
+    membershipId: "b2222222-2222-4222-8222-222222222222",
+    email: "admin@example.test",
+    displayName: "Example Admin",
     status: "active",
     membershipStatus: "active",
     role: "member",
@@ -453,10 +469,27 @@ let adminUsers = [
     effectivePolicy: { version: 7, documentHash: digest, egressSecurityGroup: egressSecurityGroups[0] },
     workspaces: [{
       ...firewallWorkspaces(egressSecurityGroups[0])[0],
-      id: "fixture-metech-workspace",
+      id: "fixture-example-workspace",
     }],
   },
 ];
+const fixtureRoleCatalog = {
+  version: 2,
+  permissions: [
+    { key: "organization.read", description: "Read organization settings", scopeTypes: ["organization"] },
+    { key: "organization.manage_members", description: "Manage organization members", scopeTypes: ["organization"] },
+    { key: "organization.manage_roles", description: "Manage organization roles", scopeTypes: ["organization"] },
+    { key: "organization.manage_settings", description: "Manage organization settings", scopeTypes: ["organization"] },
+    { key: "workspace.use", description: "Use organization workspaces", scopeTypes: ["organization", "workspace"] },
+    { key: "workspace.manage", description: "Manage organization workspaces", scopeTypes: ["organization", "workspace"] },
+    { key: "policy.manage", description: "Manage organization policies", scopeTypes: ["organization", "workspace"] },
+    { key: "provider.manage", description: "Manage organization providers", scopeTypes: ["organization", "provider"] },
+    { key: "audit.read", description: "Read organization audit records", scopeTypes: ["organization"] },
+    { key: "usage.read", description: "Read organization usage and spend records", scopeTypes: ["organization", "workspace", "provider"] },
+    { key: "usage.manage", description: "Manage quotas, budgets, and usage configuration", scopeTypes: ["organization", "workspace", "provider"] },
+  ],
+};
+let fixtureOrganizationRoles = [];
 const fixtureInvitationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 let fixtureInvitations = [];
 const fixtureSpendTeamId = "11111111-1111-4111-8111-111111111111";
@@ -533,7 +566,7 @@ let fixtureMcpConnections = [
     state: "connected",
     connectedAt: now,
     expiresAt: null,
-    account: { displayName: "Mike Sun", email: "mike@metech.dev", userPrincipalName: "mike@metech.dev" },
+    account: { displayName: "Example User", email: "user@example.test", userPrincipalName: "user@example.test" },
   },
   {
     id: "notion",
@@ -618,7 +651,7 @@ const fixtureSpendTasks = Array.from({ length: 201 }, (_, index) => {
     teamId: fixtureSpendTeamId,
     teamDisplayName: "Finance",
     userId: fixtureSpendUserId,
-    userDisplayName: "Mike Sun",
+    userDisplayName: "Example User",
     workspaceId,
     agentId: "agent-alex:hermes",
     requestedRoute: number === 1 ? "pro" : "balanced",
@@ -670,7 +703,7 @@ const fixtureSpendReport = (tasks = fixtureSpendTasks, empty = false) => ({
     retryCount: 1, fallbackCount: 0, failedAttemptCount: 0, unknownCostEventCount: 1, incompleteCostEventCount: 0, correctedEventCount: 1,
   }],
   users: empty ? [] : [{
-    teamId: fixtureSpendTeamId, userId: fixtureSpendUserId, userDisplayName: "Mike Sun",
+    teamId: fixtureSpendTeamId, userId: fixtureSpendUserId, userDisplayName: "Example User",
     costs: [{ currency: "USD", amount: "173.75" }], providerConfirmedCosts: [], usage: {}, attemptCount: 202, eventCount: 203,
     retryCount: 1, fallbackCount: 0, failedAttemptCount: 0, unknownCostEventCount: 1, incompleteCostEventCount: 0, correctedEventCount: 1,
   }],
@@ -1033,7 +1066,11 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (key === "GET /v1/connections") {
-    response.end(JSON.stringify({ connections: fixtureMcpConnections }));
+    response.end(JSON.stringify({ connections: fixtureMcpConnections.map((connector) => ({
+      ...connector,
+      canAdministerConnector: true,
+      canManageConnection: true,
+    })) }));
     return;
   }
   if (key === "GET /v1/admin/connectors") {
@@ -1096,6 +1133,8 @@ const server = http.createServer((request, response) => {
         connectedAt: null,
         expiresAt: null,
         account: null,
+        canAdministerConnector: true,
+        canManageConnection: true,
       };
       fixtureMcpConnections = [...fixtureMcpConnections, connector];
       response.statusCode = 201;
@@ -1527,8 +1566,80 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ team: fixtureTeamDetail(teamId) }));
     return;
   }
+  if (key === "GET /v1/admin/roles") {
+    response.end(JSON.stringify({ catalog: fixtureRoleCatalog, builtInRoles: ["owner", "admin", "member"], delegableBuiltInRoles: ["owner", "admin", "member"], roles: fixtureOrganizationRoles }));
+    return;
+  }
+  if (key === "POST /v1/admin/roles") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const timestamp = new Date().toISOString();
+      const role = {
+        id: crypto.randomUUID(), organizationId: session.tenant.id,
+        name: input.name, description: input.description, status: "active",
+        version: 1, catalogVersion: fixtureRoleCatalog.version, grants: input.grants,
+        assignedMembershipCount: 0, assignedMembershipIds: [], createdAt: timestamp, updatedAt: timestamp,
+      };
+      fixtureOrganizationRoles.push(role);
+      response.statusCode = 201;
+      response.end(JSON.stringify({ role }));
+    });
+    return;
+  }
+  if (request.method === "PATCH" && /^\/v1\/admin\/roles\/[0-9a-f-]+$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const roleId = url.pathname.split("/").at(-1);
+      const input = JSON.parse(body);
+      let updated;
+      fixtureOrganizationRoles = fixtureOrganizationRoles.map((role) => {
+        if (role.id !== roleId) return role;
+        updated = { ...role, name: input.name, description: input.description, grants: input.grants, version: role.version + 1, updatedAt: new Date().toISOString() };
+        return updated;
+      });
+      response.end(JSON.stringify({ role: { ...updated, revokedSessions: updated.assignedMembershipCount } }));
+    });
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/admin\/roles\/[0-9a-f-]+$/.test(url.pathname)) {
+    const roleId = url.pathname.split("/").at(-1);
+    let archived;
+    fixtureOrganizationRoles = fixtureOrganizationRoles.map((role) => {
+      if (role.id !== roleId) return role;
+      archived = { ...role, status: "archived", assignedMembershipCount: 0, assignedMembershipIds: [], updatedAt: new Date().toISOString() };
+      return archived;
+    });
+    response.end(JSON.stringify({ role: archived, revokedSessions: archived?.assignedMembershipCount ?? 0 }));
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/memberships\/[0-9a-f-]+\/roles$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const membershipId = url.pathname.split("/").at(-2);
+      const { roleId } = JSON.parse(body);
+      fixtureOrganizationRoles = fixtureOrganizationRoles.map((role) => role.id === roleId && !role.assignedMembershipIds.includes(membershipId)
+        ? { ...role, assignedMembershipIds: [...role.assignedMembershipIds, membershipId], assignedMembershipCount: role.assignedMembershipCount + 1 }
+        : role);
+      response.end(JSON.stringify({ revokedSessions: 1 }));
+    });
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/admin\/memberships\/[0-9a-f-]+\/roles\/[0-9a-f-]+$/.test(url.pathname)) {
+    const parts = url.pathname.split("/");
+    const membershipId = parts.at(-3);
+    const roleId = parts.at(-1);
+    fixtureOrganizationRoles = fixtureOrganizationRoles.map((role) => role.id === roleId
+      ? { ...role, assignedMembershipIds: role.assignedMembershipIds.filter((id) => id !== membershipId), assignedMembershipCount: Math.max(0, role.assignedMembershipCount - 1) }
+      : role);
+    response.end(JSON.stringify({ revokedSessions: 1 }));
+    return;
+  }
   if (key === "GET /v1/admin/users") {
-    response.end(JSON.stringify({ users: adminUsers }));
+    response.end(JSON.stringify({ delegableBuiltInRoles: ["owner", "admin", "member"], users: adminUsers }));
     return;
   }
   if (key === "GET /v1/admin/invitations") {

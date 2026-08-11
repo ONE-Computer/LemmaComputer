@@ -11,6 +11,8 @@ import {
 } from "node:crypto";
 import { z } from "zod";
 
+export * from "./authentication.js";
+
 export const workspaceStates = [
   "not_created",
   "provisioning",
@@ -900,6 +902,7 @@ export type PolicyIntegrityView = z.infer<typeof policyIntegrityViewSchema>;
 
 export const controllerCreateSchema = z.object({
   workspaceId: z.uuid(),
+  accessGeneration: z.number().int().positive(),
   correlationId: z.string().min(1).max(128),
   policy: runtimePolicySchema,
   policyBundle: signedPolicyBundleSchema,
@@ -941,11 +944,16 @@ export const controllerCreateSchema = z.object({
       tenantId: z.string().min(1).max(128),
       subjectId: z.string().min(1).max(128),
       workspaceId: z.uuid(),
+      accessGeneration: z.number().int().positive(),
       agentId: z.string().min(1),
       securityGroupVersionId: z.string().regex(/^egv_[a-z0-9_]{3,96}$/),
       egressMode: egressModeSchema.default("restricted"),
       policyHash: z.string().regex(/^[a-f0-9]{64}$/),
     }).strict(),
+    accessAuthorization: z.object({
+      url: z.url(),
+      token: z.string().min(24),
+    }).strict().optional(),
   }).optional(),
 });
 

@@ -16,6 +16,7 @@ export type WorkspaceIngressClaims = WorkspaceIngressTarget & {
   tenantId: string;
   subjectId: string;
   workspaceId: string;
+  accessGeneration: number;
   issuedAt: number;
   expiresAt: number;
   tokenId: string;
@@ -24,6 +25,7 @@ export type WorkspaceIngressClaims = WorkspaceIngressTarget & {
 type LaunchInput = {
   identity: IdentityContext;
   workspaceId: string;
+  accessGeneration: number;
   target: WorkspaceIngressTarget;
 };
 
@@ -58,6 +60,9 @@ const parseClaims = (value: unknown): WorkspaceIngressClaims | null => {
     || !claims.subjectId
     || typeof claims.workspaceId !== "string"
     || !workspaceIdPattern.test(claims.workspaceId)
+    || typeof claims.accessGeneration !== "number"
+    || !Number.isInteger(claims.accessGeneration)
+    || claims.accessGeneration < 1
     || typeof claims.issuedAt !== "number"
     || !Number.isInteger(claims.issuedAt)
     || typeof claims.expiresAt !== "number"
@@ -105,6 +110,7 @@ export class WorkspaceIngressAuthority {
         audience: "lemmacomputer-control",
       },
       workspaceId: launch.workspaceId,
+      accessGeneration: launch.accessGeneration,
       target: {
         protocol: launch.protocol,
         host: launch.host,
@@ -130,6 +136,7 @@ export class WorkspaceIngressAuthority {
       tenantId: input.identity.tenantId,
       subjectId: input.identity.subjectId,
       workspaceId: input.workspaceId,
+      accessGeneration: input.accessGeneration,
       protocol: input.target.protocol,
       host: input.target.host,
       port: input.target.port,

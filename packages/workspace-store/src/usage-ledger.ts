@@ -139,7 +139,7 @@ export type EffectiveRateCard = {
 };
 export type UsageEventQuery = {
   tenantId:string; from:Date; to:Date; limit?:number; cursor?:{ occurredAt:Date; id:string };
-  teamId?:string; subjectId?:string; taskId?:string;
+  teamId?:string; subjectId?:string; taskId?:string; workspaceId?:string; provider?:string;
 };
 export type UsageEventView = {
   id:string; occurredAt:string; eventType:"usage"|"correction"; correctsEventId:string|null;
@@ -389,6 +389,8 @@ export class PostgresUsageLedgerStore {
     if(input.teamId)add("admission.team_id=?::uuid",input.teamId);
     if(input.subjectId)add("admission.subject_id=?",input.subjectId);
     if(input.taskId)add("admission.task_id=?",input.taskId);
+    if(input.workspaceId)add("admission.workspace_id=?",input.workspaceId);
+    if(input.provider)add("admission.resolved_provider=?",input.provider);
     const result=await this.pool.query(`SELECT event.*,admission.subject_id,admission.team_id,admission.team_display_name,admission.cost_center_code,admission.workspace_id,admission.agent_id,admission.session_id,admission.task_id,admission.turn_id,admission.task_binding_provenance,admission.context_kind,admission.requested_alias,admission.requested_service_class,admission.selected_service_class,admission.attempt_kind,admission.resolved_provider,admission.resolved_model,admission.resolved_deployment_id,COALESCE(jsonb_agg(jsonb_build_object('unit',unit.unit,'quantity',unit.quantity::text,'bucketCost',unit.bucket_cost::text,'diagnostic',unit.is_provider_diagnostic) ORDER BY unit.unit) FILTER (WHERE unit.unit IS NOT NULL),'[]'::jsonb) AS units FROM ai_usage_events event JOIN ai_usage_attempt_admissions admission ON admission.tenant_id=event.tenant_id AND admission.id=event.admission_id LEFT JOIN ai_usage_event_units unit ON unit.tenant_id=event.tenant_id AND unit.event_id=event.id WHERE ${filters.join(" AND ")} GROUP BY event.id,admission.id ORDER BY event.occurred_at DESC,event.id DESC LIMIT $4`,values);
     const rows=result.rows.slice(0,limit);
     const events:UsageEventView[]=rows.map((row)=>({ id:String(row.id),occurredAt:new Date(row.occurred_at).toISOString(),eventType:row.event_type,correctsEventId:row.corrects_event_id,sourceSystem:String(row.source_system),sourceEventId:String(row.source_event_id),outcome:String(row.outcome),errorClass:row.error_class,latencyMs:row.latency_ms,subjectId:String(row.subject_id),teamId:String(row.team_id),teamDisplayName:String(row.team_display_name),costCenterCode:row.cost_center_code,workspaceId:row.workspace_id,agentId:row.agent_id,sessionId:row.session_id,taskId:String(row.task_id),turnId:row.turn_id,taskBindingProvenance:String(row.task_binding_provenance),contextKind:String(row.context_kind),requestedAlias:String(row.requested_alias),requestedServiceClass:row.requested_service_class,selectedServiceClass:row.selected_service_class,attemptKind:String(row.attempt_kind),resolvedProvider:String(row.resolved_provider),resolvedModel:String(row.resolved_model),resolvedDeploymentId:String(row.resolved_deployment_id),currency:row.currency,providerCost:row.provider_cost,providerConfirmedCost:row.provider_confirmed_cost,priceStatus:String(row.price_status),costStatus:String(row.cost_status),rateCardId:row.rate_card_id,rateCardSourceVersion:row.rate_card_source_version,units:row.units }));
@@ -404,6 +406,8 @@ export class PostgresUsageLedgerStore {
     if(input.teamId)add("admission.team_id=?::uuid",input.teamId);
     if(input.subjectId)add("admission.subject_id=?",input.subjectId);
     if(input.taskId)add("admission.task_id=?",input.taskId);
+    if(input.workspaceId)add("admission.workspace_id=?",input.workspaceId);
+    if(input.provider)add("admission.resolved_provider=?",input.provider);
     const result=await this.pool.query(`SELECT event.currency,sum(event.provider_cost)::text AS provider_cost FROM ai_usage_events event JOIN ai_usage_attempt_admissions admission ON admission.tenant_id=event.tenant_id AND admission.id=event.admission_id WHERE ${filters.join(" AND ")} GROUP BY event.currency ORDER BY event.currency`,values);
     return result.rows.map((row)=>({currency:String(row.currency),providerCost:String(row.provider_cost)}));
   }

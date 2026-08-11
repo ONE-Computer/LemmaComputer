@@ -304,6 +304,7 @@ class FakeController implements ControllerClient {
   async status(providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
   async open(_providerId: string): Promise<Launch> { return { launchUrl: "https://kasm.example", expiresAt: new Date().toISOString() }; }
   async destroy() {}
+  async destroyWorkspace() {}
   async purgeWorkspace() {}
 }
 

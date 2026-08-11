@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import QRCode from "react-qr-code";
 import { Home24Filled, Home24Regular } from "@fluentui/react-icons/svg/home";
 import { Apps24Filled, Apps24Regular, Apps48Regular } from "@fluentui/react-icons/svg/apps";
 import { WindowApps24Regular } from "@fluentui/react-icons/svg/window-apps";
@@ -26,6 +27,8 @@ import { Document24Regular } from "@fluentui/react-icons/svg/document";
 import { Navigation24Regular } from "@fluentui/react-icons/svg/navigation";
 import { ShieldCheckmark24Regular } from "@fluentui/react-icons/svg/shield-checkmark";
 import { Info24Regular } from "@fluentui/react-icons/svg/info";
+import { Eye24Regular } from "@fluentui/react-icons/svg/eye";
+import { EyeOff24Regular } from "@fluentui/react-icons/svg/eye-off";
 import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { PlugConnected24Regular } from "@fluentui/react-icons/svg/plug-connected";
 import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
@@ -49,6 +52,7 @@ import {
 import { ConfirmDialog, ModalDialog, SelectMenu, TextPromptDialog, useDismissOnOutside } from "./ui.jsx";
 import { ActivityPanel, ActivityToggle } from "./ActivityPanel.jsx";
 import { providerModelCapabilityLabels } from "./provider-inventory.js";
+import { customerPasskeyApi } from "./customer-auth-client.js";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
 const providerTitle = (provider) => ({
@@ -169,9 +173,73 @@ const signInErrorByReason = {
   OIDC_NONCE_MISMATCH: "Microsoft returned an identity token for a different sign-in attempt.",
   OIDC_IDENTITY_INVALID: "This Microsoft identity is not allowed for the configured tenant.",
   OIDC_STATE_INVALID: "The saved sign-in state could not be decrypted.",
+  SOCIAL_SIGNIN_FAILED: "The provider authenticated this account, but LemmaComputer could not finish sign-in. If your email still needs verification, try the provider again and resend the verification email.",
   INVITATION_SIGNIN_FAILED: "This invitation cannot be used. Ask your organization administrator for a new invitation.",
   EXTERNAL_ID_SIGNIN_FAILED: "Microsoft could not complete this sign-in. Check the account or ask your organization administrator for a new invitation.",
   OIDC_FAILED: "LemmaComputer could not finish the sign-in bootstrap.",
+};
+const socialProviderNameById = {
+  google: "Google",
+  microsoft: "Microsoft",
+};
+const socialSignInErrorMessage = (error, provider) => {
+  if (error !== "account_not_linked") return null;
+  const providerName = socialProviderNameById[provider] ?? "that provider";
+  return `An account already exists for this email. Sign in using its existing method, then open Manage account security and link ${providerName}.`;
+};
+const socialLinkErrorMessage = (provider) => {
+  const providerName = socialProviderNameById[provider] ?? "The provider";
+  return `${providerName} could not be linked to this account. Try again from Manage account security.`;
+};
+const safeSsoProviderErrorDetail = (description) => {
+  let normalized = String(description ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  try {
+    normalized = decodeURIComponent(normalized);
+  } catch {
+    // URLSearchParams normally decodes this already. Keep the bounded original
+    // when a provider returns a malformed percent-encoded description.
+  }
+  return normalized.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 320);
+};
+const ssoTestProviderErrorMessage = (error, description) => {
+  const safeDescription = safeSsoProviderErrorDetail(description);
+  const microsoftReference = safeDescription.match(/\bAADSTS\d+\b/i)?.[0]?.toUpperCase() ?? "";
+  const referenceSuffix = microsoftReference ? ` Microsoft reference: ${microsoftReference}` : "";
+  if (error === "access_denied") return `The provider sign-in was cancelled. No Company SSO settings were changed.${referenceSuffix}`;
+  if (error === "discovery_failed") return `LemmaComputer could not load the provider metadata. Confirm the issuer URL, refresh metadata, and test again.${referenceSuffix}`;
+  if (error === "invalid_provider" && safeDescription === "provider not found") {
+    return "The saved authentication provider could not be found. Disconnect this connection and configure it again.";
+  }
+  if (error === "invalid_provider" && ["token_response_not_found", "token_not_verified"].includes(safeDescription)) {
+    return "Microsoft did not return a usable sign-in token. Confirm the Application (client) ID, client secret value, and exact OIDC redirect URI, then test again.";
+  }
+  if (error === "invalid_provider" && safeDescription === "token_endpoint_not_found") {
+    return "The provider metadata does not include a token endpoint. Confirm the issuer URL, refresh metadata, and test again.";
+  }
+  if (error === "invalid_provider" && microsoftReference === "AADSTS7000215") {
+    return `Microsoft rejected the client secret. Paste the secret value, not its Secret ID, then test again.${referenceSuffix}`;
+  }
+  if (error === "invalid_provider" && microsoftReference === "AADSTS7000222") {
+    return `The Microsoft client secret has expired. Create a new secret value, rotate the saved credentials, and test again.${referenceSuffix}`;
+  }
+  if (error === "invalid_provider" && microsoftReference === "AADSTS700016") {
+    return `Microsoft could not find this application in the configured directory. Confirm the Directory (tenant) ID and Application (client) ID are different values from the same app registration.${referenceSuffix}`;
+  }
+  if (error === "invalid_provider") {
+    const detailSuffix = safeDescription ? ` Provider response: ${safeDescription}` : "";
+    return `The provider rejected the saved Company SSO configuration.${detailSuffix}${referenceSuffix}`;
+  }
+  const detailSuffix = safeDescription ? ` Provider response: ${safeDescription}` : "";
+  return `Company SSO provider sign-in was not completed. No saved connection settings were changed.${detailSuffix}${referenceSuffix}`;
+};
+const ssoTestConnectionIdFromLocation = () => {
+  const match = window.location.pathname.match(/^\/sso-test\/([^/]+)\/?$/);
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return "";
+  }
 };
 const attachmentMediaType = (file) => {
   if (chatAttachmentTypes.has(file.type)) return file.type;
@@ -188,9 +256,29 @@ const attachmentSize = (bytes) => bytes < 1024 * 1024
   ? `${Math.max(1, Math.round(bytes / 1024))} KB`
   : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 const navFromLocation = () => {
+  if (ssoTestConnectionIdFromLocation()) return "Settings";
   const view = new URLSearchParams(window.location.search).get("view") ?? "home";
   return navByView[view] ?? "Workspace";
 };
+const settingsSectionByView = Object.freeze({
+  admin: "people",
+  credentials: "credentials",
+  security: "security",
+});
+const settingsViewBySection = Object.freeze({
+  people: "admin",
+  credentials: "credentials",
+  security: "security",
+});
+const settingsSectionFromLocation = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("view") === "settings" ? params.get("section") ?? "" : "";
+};
+const settingsViewFromLocation = () => {
+  if (ssoTestConnectionIdFromLocation()) return "admin";
+  return settingsViewBySection[settingsSectionFromLocation()] ?? "overview";
+};
+const accountSecurityOpenFromLocation = () => settingsSectionFromLocation() === "security";
 const aiControlPlaneViews = new Set([...aiControlPlaneTabs.map((tab) => tab.id), "spend"]);
 const aiControlPlaneViewFromLocation = () => {
   const params = new URLSearchParams(window.location.search);
@@ -314,7 +402,7 @@ function WorkspaceAssignment({ label, icon: Icon, children, detail }) {
   );
 }
 
-function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorkspaceId, onOpen, onRestart, onStop, onDelete, onCreate, onManage }) {
+function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, onOpen, onRestart, onStop, onDelete, onCreate, onManage }) {
   return (
     <div className="home-screen workspace-overview">
       <header className="page-heading workspace-overview-heading">
@@ -323,9 +411,9 @@ function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorksp
           <h1>Your workspaces</h1>
           <span>See what is running and the apps, agents, model, and policy assigned to each workspace.</span>
         </div>
-        <button className="primary-button create-workspace-button" type="button" onClick={onCreate}>
+        {canCreateWorkspace && <button className="primary-button create-workspace-button" type="button" onClick={onCreate}>
           <Add24Regular aria-hidden="true" />Create workspace
-        </button>
+        </button>}
       </header>
 
       {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong>{apiError}</span></div>}
@@ -375,15 +463,17 @@ function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorksp
                   <button className="primary-button" type="button" onClick={() => onOpen(workspace)} disabled={busy}>
                     <Open24Regular aria-hidden="true" />{primaryLabel}
                   </button>
-                  <button className="workspace-manage-button" type="button" onClick={() => onManage(workspace.grantId)}>Manage configuration <ChevronRight16Regular aria-hidden="true" /></button>
-                  {workspace.state === "stopped" ? (
-                    <button className="secondary-button danger-button" type="button" onClick={() => onDelete(workspace)} disabled={busy}><Delete24Regular aria-hidden="true" />Delete</button>
-                  ) : (
-                    <div className="workspace-secondary-actions">
-                      <button className="secondary-button" type="button" onClick={() => onRestart(workspace)} disabled={busy}><ArrowClockwise24Regular aria-hidden="true" />Restart</button>
-                      <button className="secondary-button" type="button" onClick={() => onStop(workspace)} disabled={busy}><Dismiss24Regular aria-hidden="true" />Stop</button>
-                    </div>
-                  )}
+                  {canManageWorkspace(workspace.id) && <>
+                    <button className="workspace-manage-button" type="button" onClick={() => onManage(workspace.grantId)}>Manage configuration <ChevronRight16Regular aria-hidden="true" /></button>
+                    {workspace.state === "stopped" ? (
+                      <button className="secondary-button danger-button" type="button" onClick={() => onDelete(workspace)} disabled={busy}><Delete24Regular aria-hidden="true" />Delete</button>
+                    ) : (
+                      <div className="workspace-secondary-actions">
+                        <button className="secondary-button" type="button" onClick={() => onRestart(workspace)} disabled={busy}><ArrowClockwise24Regular aria-hidden="true" />Restart</button>
+                        <button className="secondary-button" type="button" onClick={() => onStop(workspace)} disabled={busy}><Dismiss24Regular aria-hidden="true" />Stop</button>
+                      </div>
+                    )}
+                  </>}
                 </footer>
               </article>
             );
@@ -591,40 +681,487 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
   </div>;
 }
 
-function SignInScreen({ error, invitationToken = "" }) {
-  const invited = Boolean(invitationToken);
-  const [invitationBusy, setInvitationBusy] = useState(false);
-  const [invitationError, setInvitationError] = useState("");
-  const continueInvitation = async () => {
-    setInvitationBusy(true);
-    setInvitationError("");
+function SignInScreen({ error, invitationActive = false, invitationBusy = false, invitationError = "", invitationContext = null, invitationVerified = false, onSignedIn }) {
+  const invited = invitationActive;
+  const [capabilities, setCapabilities] = useState(null);
+  const [mode, setMode] = useState(() => window.location.pathname === "/reset-password"
+    ? "reset"
+    : invited && !invitationVerified ? "signup" : "signin");
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [status, setStatus] = useState(() => invitationVerified
+    ? "Your email is verified. Sign in below to finish joining the organization."
+    : "");
+  const [verificationRecipient, setVerificationRecipient] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [useBackupCode, setUseBackupCode] = useState(false);
+  useEffect(() => {
+    if (invited && invitationContext?.email) setEmail(invitationContext.email);
+  }, [invited, invitationContext?.email]);
+  useEffect(() => {
+    authApi.customerCapabilities()
+      .then(setCapabilities)
+      .catch((capabilityError) => setFormError(capabilityError.message));
+  }, []);
+  const changeMode = (nextMode) => {
+    setMode(nextMode);
+    setFormError("");
+    setStatus("");
+    setVerificationRecipient("");
+    setPassword("");
+    setVerificationCode("");
+    setUseBackupCode(false);
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setFormError("");
+    setStatus("");
     try {
-      const started = await authApi.beginExternalIdInvitation(invitationToken);
-      window.location.assign(started.location);
-    } catch {
-      setInvitationError(signInErrorByReason.EXTERNAL_ID_SIGNIN_FAILED);
-      setInvitationBusy(false);
+      if (mode === "signup") {
+        const callbackURL = new URL(invited ? "/invite?verified=1" : "/", window.location.origin).toString();
+        await authApi.signUpWithEmail({
+          name,
+          email,
+          password,
+          ...(invited ? { callbackURL } : {}),
+        });
+        setVerificationRecipient(email);
+        setStatus(invited ? "" : "Check your email to verify your account, then return here to sign in.");
+      } else if (mode === "recovery") {
+        await authApi.requestPasswordReset(email, `${window.location.origin}/reset-password`);
+        setStatus("If an account exists for that email, a reset link is on its way.");
+      } else if (mode === "reset") {
+        const token = new URLSearchParams(window.location.search).get("token") ?? "";
+        if (!token) throw new Error("This password reset link is incomplete or expired.");
+        await authApi.resetPassword(token, password);
+        window.history.replaceState(window.history.state, "", "/");
+        changeMode("signin");
+        setStatus("Your password has been reset. Sign in with the new password.");
+      } else if (mode === "two-factor") {
+        if (useBackupCode) await authApi.verifyBackupCode(verificationCode);
+        else await authApi.verifyTotp(verificationCode);
+        await onSignedIn();
+      } else {
+        const result = await authApi.signInWithEmail(email, password);
+        if (result?.twoFactorRedirect) changeMode("two-factor");
+        else await onSignedIn();
+      }
+    } catch (submitError) {
+      setFormError(submitError.message ?? "Sign-in could not be completed.");
+    } finally {
+      setBusy(false);
     }
   };
+  const resendVerification = async () => {
+    setBusy(true);
+    setFormError("");
+    setStatus("");
+    try {
+      await authApi.sendVerificationEmail(verificationRecipient, invited ? "/invite?verified=1" : "/");
+      setStatus("Verification email sent. Check your inbox and junk folder, then open the link to continue.");
+    } catch (sendError) {
+      setFormError(sendError.message ?? "The verification email could not be sent.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const startSocialSignIn = async (provider) => {
+    setBusy(true);
+    setFormError("");
+    try {
+      const started = await authApi.signInWithSocialProvider(provider, invited ? "/invite" : "/");
+      if (!started?.url) throw new Error("This sign-in method could not be started.");
+      window.location.assign(started.url);
+    } catch (socialError) {
+      setFormError(socialError.message ?? "This sign-in method could not be started.");
+      setBusy(false);
+    }
+  };
+  const startCompanySso = async (requestedEmail = email) => {
+    if (!requestedEmail.trim()) {
+      setFormError("Enter your work email before continuing with company SSO.");
+      return;
+    }
+    setBusy(true);
+    setFormError("");
+    try {
+      const started = await authApi.signInWithCompanySso(requestedEmail, invited ? "/invite" : "/");
+      if (!started?.location) throw new Error("Company SSO could not be started.");
+      window.location.assign(started.location);
+    } catch (companyError) {
+      setFormError(companyError.message ?? "Company SSO could not be started.");
+      setBusy(false);
+    }
+  };
+  const signInWithPasskey = async () => {
+    setBusy(true);
+    setFormError("");
+    try {
+      await customerPasskeyApi.signIn();
+      await onSignedIn();
+    } catch (passkeyError) {
+      setFormError(passkeyError.message ?? "Passkey verification was not completed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!capabilities && !formError) {
+    return <main className="signin-screen"><div className="signin-loading">Loading secure sign-in…</div></main>;
+  }
+  if (invited && verificationRecipient) {
+    return (
+      <main className="signin-screen">
+        <section className="signin-card">
+          <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
+          <p>Organization invitation</p>
+          <h1>Check your email</h1>
+          <span>We sent a verification link to <strong>{verificationRecipient}</strong>. Open it in this browser to verify your email and finish joining {invitationContext?.organizationDisplayName ?? "the organization"} automatically.</span>
+          {status && <div className="signin-status" role="status">{status}</div>}
+          {formError && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Email could not be sent</strong>{formError}</span></div>}
+          <button className="primary-button signin-button" type="button" disabled={busy} onClick={resendVerification}>{busy ? "Sending…" : "Resend verification email"}</button>
+          <button className="secondary-button signin-button" type="button" disabled={busy} onClick={onSignedIn}>I’ve verified my email</button>
+          <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Use an existing account instead</button>
+          <small><ShieldCheckmark24Regular aria-hidden="true" />The invitation stays reserved in this browser and still enforces the exact invited email and role.</small>
+        </section>
+      </main>
+    );
+  }
+  if (invited && invitationContext?.companySsoAvailable) {
+    return <main className="signin-screen">
+      <section className="signin-card invitation-sso-card">
+        <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
+        <p>Organization invitation</p>
+        <h1>Join {invitationContext.organizationDisplayName}</h1>
+        <span>Use the company sign-in configured by your organization. This invitation already fixes your email and organization role.</span>
+        {(error || invitationError || formError) && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sign-in was not completed</strong>{error || invitationError || formError}</span></div>}
+        <label className="signin-locked-identity">Invited work email<input aria-label="Invited work email" type="email" readOnly value={invitationContext.email} /></label>
+        <button className="primary-button signin-button" type="button" disabled={busy || invitationBusy} onClick={() => startCompanySso(invitationContext.email)}>{busy || invitationBusy ? "Please wait…" : "Continue with company SSO"}</button>
+      </section>
+    </main>;
+  }
+  const title = {
+    signin: "Sign in to LemmaComputer",
+    signup: "Create your account",
+    recovery: "Reset your password",
+    reset: "Choose a new password",
+    "two-factor": "Verify it’s you",
+    "company-sso": "Sign in with company SSO",
+  }[mode];
+  const description = {
+    signin: "Use a secure method configured for your organization.",
+    signup: "Create your identity first. Organization access is assigned separately.",
+    recovery: "Enter your email and we’ll send a secure, time-limited reset link.",
+    reset: "Use at least 12 characters for your new password.",
+    "two-factor": useBackupCode ? "Enter one unused backup code." : "Enter the current code from your authenticator app.",
+    "company-sso": "Enter your work email so LemmaComputer can find your organization’s sign-in page.",
+  }[mode];
   return (
     <main className="signin-screen">
       <section className="signin-card">
         <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
-        <p>Your managed work computer</p>
-        <h1>{invited ? "Accept your invitation" : "Sign in to continue"}</h1>
+        <p>{invited ? "Organization invitation" : "Your managed work computer"}</p>
+        <h1>{invited ? `Join ${invitationContext?.organizationDisplayName ?? "your organization"}` : title}</h1>
         <span>{invited
-          ? "Continue to your organization’s Microsoft sign-in. Microsoft manages your password and authenticator verification; LemmaComputer applies only the organization and role chosen in this invitation."
-          : "Use your ME TECH Microsoft account. Your organization’s workspace and agent policy will be applied after sign-in."}</span>
-        {(error || invitationError) && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sign-in was not completed</strong>{error || invitationError}</span></div>}
-        {invited
-          ? <button className="primary-button signin-button" type="button" disabled={invitationBusy} onClick={continueInvitation}><Person24Regular aria-hidden="true" />{invitationBusy ? "Starting secure sign-in…" : "Continue securely"}</button>
-          : <a className="primary-button signin-button" href={authApi.loginUrl}><Person24Regular aria-hidden="true" />Sign in with Microsoft</a>}
-        <small><ShieldCheckmark24Regular aria-hidden="true" />{invited
-          ? "This link does not choose your permissions. It can activate only its preassigned organization role."
-          : "LemmaComputer uses a secure server session. Microsoft tokens are not stored in your browser."}</small>
+          ? `Create a LemmaComputer account or use an existing account. The organization and role fixed by this invitation cannot be changed by a sign-in provider.`
+          : description}</span>
+        {(error || invitationError || formError) && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sign-in was not completed</strong>{error || invitationError || formError}</span></div>}
+        <>
+            {status && <div className="signin-status" role="status">{status}</div>}
+            <form className="signin-form" onSubmit={submit}>
+              {mode === "signup" && <label>Full name<input autoComplete="name" required value={name} onChange={(event) => setName(event.target.value)} /></label>}
+              {["signin", "signup", "recovery"].includes(mode) && <label>{invited ? "Invited work email" : "Work email"}<input type="email" autoComplete="email" required readOnly={invited} value={email} onChange={(event) => setEmail(event.target.value)} /></label>}
+              {mode === "company-sso" && <label>Company work email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>}
+              {["signin", "signup", "reset"].includes(mode) && <label>Password<input type="password" minLength={12} maxLength={128} autoComplete={mode === "signin" ? "current-password" : "new-password"} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>}
+              {mode === "two-factor" && <label>{useBackupCode ? "Backup code" : "Authenticator code"}<input inputMode={useBackupCode ? "text" : "numeric"} autoComplete="one-time-code" required value={verificationCode} onChange={(event) => setVerificationCode(event.target.value)} /></label>}
+              <button className="primary-button signin-button" type="submit" onClick={mode === "company-sso" ? (event) => { event.preventDefault(); startCompanySso(); } : undefined} disabled={busy || invitationBusy}>{busy || invitationBusy ? "Please wait…" : ({ signin: "Sign in", signup: "Create account", recovery: "Send reset link", reset: "Reset password", "two-factor": "Verify", "company-sso": "Continue to company sign-in" }[mode])}</button>
+            </form>
+            {!invited && mode === "signup" && verificationRecipient && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={resendVerification}>Resend verification email</button>}
+            {mode === "signin" && <div className="signin-secondary-actions"><button type="button" onClick={() => changeMode("recovery")}>Forgot password?</button>{!invited && <button type="button" onClick={() => changeMode("signup")}>Create account</button>}</div>}
+            {invited && mode === "signin" && <button className="signin-back-button" type="button" onClick={() => changeMode("signup")}>Create a new account</button>}
+            {invited && mode === "signup" && <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>I already have an account</button>}
+            {!invited && ["signup", "recovery", "reset"].includes(mode) && <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Back to sign in</button>}
+            {mode === "company-sso" && <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Back to all sign-in options</button>}
+            {mode === "two-factor" && <button className="signin-back-button" type="button" onClick={() => setUseBackupCode((current) => !current)}>{useBackupCode ? "Use authenticator code" : "Use a backup code"}</button>}
+            {(mode === "signin" || (invited && mode === "signup")) && ((capabilities?.passkey && !invited) || capabilities?.socialProviders?.length || capabilities?.companySso) && <div className="signin-method-divider"><span>or</span></div>}
+            {mode === "signin" && capabilities?.companySso && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => changeMode("company-sso")}>Continue with company SSO</button>}
+            {mode === "signin" && capabilities?.passkey && !invited && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={signInWithPasskey}>Sign in with a passkey</button>}
+            {(mode === "signin" || invited) && capabilities?.socialProviders?.includes("google") && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => startSocialSignIn("google")}>Continue with Google</button>}
+            {(mode === "signin" || invited) && capabilities?.socialProviders?.includes("microsoft") && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => startSocialSignIn("microsoft")}>Continue with Microsoft</button>}
+          </>
       </section>
     </main>
   );
+}
+
+function InvitationAccountSwitchScreen({ account, organizationDisplayName, onSignOut }) {
+  const identity = account?.email || account?.displayName || account?.name || "the current account";
+  return (
+    <main className="signin-screen">
+      <section className="signin-card">
+        <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
+        <p>Organization invitation</p>
+        <h1>Continue with the invited account</h1>
+        <span>{organizationDisplayName
+          ? `This invitation grants access to ${organizationDisplayName}, but the account currently signed in cannot accept it.`
+          : "The account currently signed in cannot accept this invitation."}</span>
+        <div className="signin-status" role="status"><strong>Signed in as {identity}</strong><br />Your current account and organization remain unchanged.</div>
+        <button className="primary-button signin-button" type="button" onClick={onSignOut}>Sign out and continue</button>
+        <button className="signin-back-button" type="button" onClick={() => window.location.assign("/")}>Keep current account</button>
+        <small><ShieldCheckmark24Regular aria-hidden="true" />Only the exact invited identity can activate the preassigned organization role.</small>
+      </section>
+    </main>
+  );
+}
+
+function AccountSecurityPanel({ onSessionChanged, onSignOutAll }) {
+  const [capabilities, setCapabilities] = useState(null);
+  const [identitySession, setIdentitySession] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [busyAction, setBusyAction] = useState("");
+  const [securityError, setSecurityError] = useState("");
+  const [securityStatus, setSecurityStatus] = useState("");
+  const [totpStep, setTotpStep] = useState("idle");
+  const [passwordProof, setPasswordProof] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [totpSetupKey, setTotpSetupKey] = useState("");
+  const [totpUri, setTotpUri] = useState("");
+  const [backupCodes, setBackupCodes] = useState([]);
+  const load = useCallback(async () => {
+    const [configured, current, linked] = await Promise.all([
+      authApi.customerCapabilities(),
+      authApi.customerIdentitySession(),
+      authApi.linkedAccounts(),
+    ]);
+    setCapabilities(configured);
+    setIdentitySession(current);
+    setAccounts(linked);
+  }, []);
+  useEffect(() => {
+    load().catch((loadError) => setSecurityError(loadError.message));
+  }, [load]);
+  const run = async (action, operation, success) => {
+    setBusyAction(action);
+    setSecurityError("");
+    setSecurityStatus("");
+    try {
+      await operation();
+      if (success) setSecurityStatus(success);
+    } catch (operationError) {
+      setSecurityError(operationError.message ?? "Account security could not be updated.");
+    } finally {
+      setBusyAction("");
+    }
+  };
+  const linkProvider = (provider) => run(`link-${provider}`, async () => {
+    const started = await authApi.linkSocialProvider(provider);
+    if (!started?.url) throw new Error("Provider verification could not be started.");
+    window.location.assign(started.url);
+  });
+  const unlinkProvider = (account) => run(`unlink-${account.id}`, async () => {
+    await authApi.unlinkAccount(account.providerId, account.accountId);
+    await load();
+  }, `${account.providerId === "google" ? "Google" : "Microsoft"} was unlinked.`);
+  const addPasskey = () => run("passkey", () => customerPasskeyApi.add(), "Passkey added. You can use it the next time you sign in.");
+  const beginTotp = (event) => {
+    event.preventDefault();
+    run("totp-enable", async () => {
+      const enrollment = await authApi.enableTotp(passwordProof);
+      const setupKey = new URL(enrollment.totpURI).searchParams.get("secret");
+      if (!setupKey || !Array.isArray(enrollment.backupCodes)) throw new Error("Authenticator enrollment could not be started.");
+      setTotpSetupKey(setupKey);
+      setTotpUri(enrollment.totpURI);
+      setBackupCodes(enrollment.backupCodes);
+      setPasswordProof("");
+      setTotpStep("verify");
+    });
+  };
+  const verifyTotpEnrollment = (event) => {
+    event.preventDefault();
+    run("totp-verify", async () => {
+      await authApi.verifyTotp(totpCode);
+      setTotpCode("");
+      setTotpSetupKey("");
+      setTotpUri("");
+      setBackupCodes([]);
+      setTotpStep("idle");
+      await onSessionChanged?.();
+    }, "Authenticator verification is active.");
+  };
+  const disableTotp = (event) => {
+    event.preventDefault();
+    run("totp-disable", async () => {
+      await authApi.disableTotp(passwordProof);
+      setPasswordProof("");
+      await load();
+    }, "Authenticator verification was disabled.");
+  };
+  const providers = ["google", "microsoft"];
+  const providerName = (provider) => provider === "google" ? "Google" : "Microsoft";
+  return <div className="account-security-panel">
+    {(securityError) && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Security change was not completed</strong>{securityError}</span></div>}
+    {securityStatus && <div className="signin-status" role="status">{securityStatus}</div>}
+    <section>
+      <h3>Sign-in methods</h3>
+      <div className="account-security-methods">
+        {accounts.map((account) => <div key={account.id}>
+          <span><strong>{account.providerId === "credential" ? "Email and password" : providerName(account.providerId)}</strong><small>Linked to this account</small></span>
+          {account.providerId !== "credential" && accounts.length > 1 && <button type="button" disabled={Boolean(busyAction)} onClick={() => unlinkProvider(account)}>Unlink</button>}
+        </div>)}
+        {providers.filter((provider) => capabilities?.socialProviders?.includes(provider) && !accounts.some((account) => account.providerId === provider)).map((provider) => <div key={provider}>
+          <span><strong>{providerName(provider)}</strong><small>Requires proof from both signed-in accounts</small></span>
+          <button type="button" disabled={Boolean(busyAction)} onClick={() => linkProvider(provider)}>{busyAction === `link-${provider}` ? "Starting…" : `Link ${providerName(provider)}`}</button>
+        </div>)}
+      </div>
+      {capabilities?.passkey && <button className="secondary-button" type="button" disabled={Boolean(busyAction)} onClick={addPasskey}>{busyAction === "passkey" ? "Adding passkey…" : "Add a passkey"}</button>}
+      {capabilities?.passkey && <p className="account-security-method-note">Passkeys can sign you in, but protected owner actions—including Company SSO changes—require an authenticator code.</p>}
+    </section>
+    <section>
+      <h3>Authenticator app</h3>
+      {totpStep === "idle" && !identitySession?.user?.twoFactorEnabled && <button className="secondary-button" type="button" onClick={() => setTotpStep("proof")}>Set up authenticator</button>}
+      {totpStep === "proof" && <form className="account-security-form" onSubmit={beginTotp}><label>Current password<input type="password" autoComplete="current-password" required value={passwordProof} onChange={(event) => setPasswordProof(event.target.value)} /></label><button className="primary-button" type="submit" disabled={Boolean(busyAction)}>Continue</button></form>}
+      {totpStep === "verify" && <form className="account-security-form" onSubmit={verifyTotpEnrollment}>
+        <div className="totp-enrollment">
+          <div className="totp-qr-code"><QRCode role="img" aria-label="Scan this QR code with your authenticator app" value={totpUri} size={176} /></div>
+          <div><strong>Scan with your authenticator app</strong><p>Then enter the six-digit code it shows.</p></div>
+        </div>
+        <details className="totp-manual-setup"><summary>Can’t scan the QR code?</summary><p>Enter this setup key manually:</p><code className="totp-setup-key">{totpSetupKey}</code></details>
+        <label>Authenticator code<input inputMode="numeric" autoComplete="one-time-code" required value={totpCode} onChange={(event) => setTotpCode(event.target.value)} /></label>
+        <button className="primary-button" type="submit" disabled={Boolean(busyAction)}>Verify authenticator</button>
+        <div className="backup-code-list"><strong>Save these one-time backup codes now</strong>{backupCodes.map((code) => <code key={code}>{code}</code>)}</div>
+      </form>}
+      {identitySession?.user?.twoFactorEnabled && <form className="account-security-form" onSubmit={disableTotp}><label>Current password<input type="password" autoComplete="current-password" required value={passwordProof} onChange={(event) => setPasswordProof(event.target.value)} /></label><button className="secondary-button danger-button" type="submit" disabled={Boolean(busyAction)}>Disable authenticator</button></form>}
+    </section>
+    <section>
+      <h3>Device sessions</h3>
+      <div className="account-security-actions">
+        <button className="secondary-button" type="button" disabled={Boolean(busyAction)} onClick={() => run("revoke-others", () => authApi.revokeOtherSessions(), "Other device sessions were signed out.")}>Sign out other devices</button>
+        <button className="secondary-button danger-button" type="button" disabled={Boolean(busyAction)} onClick={() => run("revoke-all", async () => { await authApi.revokeAllSessions(); await onSignOutAll?.(); })}>Sign out all devices</button>
+      </div>
+    </section>
+  </div>;
+}
+
+function VerificationRequiredScreen({ customerSession, invitationActive = false, invitationContext = null, onSignOut }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const resend = async () => {
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      await authApi.sendVerificationEmail(
+        customerSession.user.email,
+        invitationActive ? "/invite?verified=1" : "/",
+      );
+      setStatus("Verification email sent. Check your inbox and junk folder, then open the link to continue.");
+    } catch (sendError) {
+      setError(sendError.message ?? "The verification email could not be sent.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <main className="signin-screen">
+    <section className="signin-card organization-selection-card">
+      <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
+      <p>Signed in as {customerSession.user.email}</p>
+      <h1>Verify your email</h1>
+      <span>Your identity provider did not supply a verified email claim. Verify this address before LemmaComputer can check organization access.</span>
+      {invitationActive && <span>After verification, return here to finish joining {invitationContext?.organizationDisplayName ?? "the organization"} automatically.</span>}
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Email was not sent</strong>{error}</span></div>}
+      {status && <div className="signin-status" role="status">{status}</div>}
+      <button className="primary-button signin-button" type="button" disabled={busy} onClick={resend}>{busy ? "Sending…" : "Resend verification email"}</button>
+      <button className="signin-back-button" type="button" onClick={onSignOut}>Sign out</button>
+      <small><ShieldCheckmark24Regular aria-hidden="true" />Provider authentication and email ownership are verified separately.</small>
+    </section>
+  </main>;
+}
+
+function OrganizationSelectionScreen({ customerSession, error, onSelected, onSignOut }) {
+  const [busyMembershipId, setBusyMembershipId] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
+  const [selectionError, setSelectionError] = useState("");
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const organizationIdempotencyKey = useRef(crypto.randomUUID());
+  const memberships = customerSession?.memberships ?? [];
+  const selectMembership = async (membershipId) => {
+    setBusyMembershipId(membershipId);
+    setSelectionError("");
+    try {
+      await authApi.selectProductMembership(membershipId);
+      await onSelected();
+    } catch (error) {
+      setSelectionError(error.message ?? "Organization access could not be selected.");
+      setBusyMembershipId("");
+    }
+  };
+  const createOrganization = async (event) => {
+    event.preventDefault();
+    setBusyMembershipId("organization");
+    setSelectionError("");
+    try {
+      await authApi.createOrganization(organizationName, organizationIdempotencyKey.current);
+      await onSelected();
+    } catch (error) {
+      setSelectionError(error.message ?? "Organization creation was not completed.");
+      setBusyMembershipId("");
+    }
+  };
+  return <><main className="signin-screen">
+    <section className="signin-card organization-selection-card">
+      <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
+      <p>Signed in as {customerSession.user.email}</p>
+      <h1>{memberships.length ? "Choose an organization" : "Create your organization"}</h1>
+      <span>{memberships.length
+        ? "Your identity does not grant tenant access by itself. Choose one active membership for this session."
+        : "Set up your organization. You will become its protected owner, and access can be assigned to other people separately."}</span>
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Account security was not updated</strong>{error}</span></div>}
+      {selectionError && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Organization was not selected</strong>{selectionError}</span></div>}
+      {memberships.length
+        ? <div className="organization-selection-list">
+          {memberships.map((membership) => <button
+            key={membership.membershipId}
+            type="button"
+            disabled={membership.status !== "active" || Boolean(busyMembershipId)}
+            onClick={() => selectMembership(membership.membershipId)}
+          >
+            <span><strong>{membership.organizationDisplayName}</strong><small>{membership.role}</small></span>
+            <span>{busyMembershipId === membership.membershipId ? "Opening…" : membership.status}</span>
+          </button>)}
+        </div>
+        : <form className="signin-form organization-creation-form" onSubmit={createOrganization}>
+          <label htmlFor="organization-name">Organization name</label>
+          <input
+            id="organization-name"
+            name="organizationName"
+            value={organizationName}
+            minLength={2}
+            maxLength={100}
+            autoComplete="organization"
+            required
+            disabled={Boolean(busyMembershipId)}
+            onChange={(event) => setOrganizationName(event.target.value)}
+          />
+          <button className="primary-button signin-button" type="submit" disabled={Boolean(busyMembershipId)}>
+            {busyMembershipId === "organization" ? "Creating organization…" : "Create organization"}
+          </button>
+        </form>}
+      <button className="secondary-button signin-button" type="button" onClick={() => setSecurityOpen(true)}>Manage account security</button>
+      <button className="signin-back-button" type="button" onClick={onSignOut}>Sign out</button>
+      <small><ShieldCheckmark24Regular aria-hidden="true" />Only an active, server-verified membership can open organization data.</small>
+    </section>
+  </main>{securityOpen && <ModalDialog
+    className="account-security-modal"
+    title="Account security"
+    description="Manage authentication methods and device sessions for your LemmaComputer identity. Organization access remains separate."
+    eyebrow="Your identity"
+    labelledBy="account-security-title"
+    onClose={() => setSecurityOpen(false)}
+  ><AccountSecurityPanel onSessionChanged={onSelected} onSignOutAll={onSignOut} /></ModalDialog>}</>;
 }
 
 function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, onPolicySave }) {
@@ -921,16 +1458,446 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
   );
 }
 
-function AdminScreen({ users, invitations, currentUserId, loading, invitationBusy, busyUserId, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
-  const roleOptions = [
+function OrganizationRoleEditor({ users }) {
+  const [catalog, setCatalog] = useState(null);
+  const [roles, setRoles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [editor, setEditor] = useState(null);
+  const [assignmentTargets, setAssignmentTargets] = useState({});
+  const [roleMembers, setRoleMembers] = useState([]);
+  const refresh = () => adminApi.roles()
+    .then((result) => {
+      setCatalog(result.catalog);
+      setRoles(result.roles);
+      if (result.memberships) setRoleMembers(result.memberships.map((membership) => ({
+        ...membership,
+        membershipStatus: membership.status,
+      })));
+      setError("");
+    })
+    .catch((requestError) => setError(requestError.message))
+    .finally(() => setLoading(false));
+  useEffect(() => { void refresh(); }, []);
+  const assignableUsers = roleMembers.length ? roleMembers : users;
+  const beginCreate = () => setEditor({ name: "", description: "", grants: [] });
+  const beginEdit = (role) => setEditor({ ...role, grants: role.grants.map((grant) => ({ ...grant, scope: { ...grant.scope } })) });
+  const selectedGrant = (permission) => editor?.grants.find((grant) => grant.permission === permission);
+  const togglePermission = (permission, selected) => {
+    if (!editor) return;
+    if (!selected) {
+      setEditor({ ...editor, grants: editor.grants.filter((grant) => grant.permission !== permission.key) });
+      return;
+    }
+    const type = permission.scopeTypes[0];
+    const resourceId = type === "organization" ? undefined : permission.resourceIds?.[type]?.[0] ?? "";
+    setEditor({ ...editor, grants: [...editor.grants, {
+      permission: permission.key,
+      scope: type === "organization" ? { type } : { type, resourceId },
+    }] });
+  };
+  const changeScope = (permission, type) => setEditor((current) => ({
+    ...current,
+    grants: current.grants.map((grant) => grant.permission === permission
+      ? { ...grant, scope: type === "organization" ? { type } : { type, resourceId: "" } }
+      : grant),
+  }));
+  const changeResource = (permission, resourceId) => setEditor((current) => ({
+    ...current,
+    grants: current.grants.map((grant) => grant.permission === permission
+      ? { ...grant, scope: { ...grant.scope, resourceId } }
+      : grant),
+  }));
+  const save = async () => {
+    if (!editor) return;
+    setBusy(true);
+    setError("");
+    try {
+      const document = { name: editor.name.trim(), description: editor.description.trim(), grants: editor.grants };
+      if (editor.id) await adminApi.updateRole(editor.id, { ...document, expectedVersion: editor.version });
+      else await adminApi.createRole(document);
+      setEditor(null);
+      await refresh();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const archive = async (role) => {
+    setBusy(true);
+    setError("");
+    try { await adminApi.archiveRole(role.id, role.version); await refresh(); }
+    catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+  const assign = async (role) => {
+    const membershipId = assignmentTargets[role.id];
+    if (!membershipId) return;
+    setBusy(true);
+    try {
+      await adminApi.assignRole(membershipId, role.id);
+      setAssignmentTargets((current) => ({ ...current, [role.id]: "" }));
+      await refresh();
+    } catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+  const unassign = async (role, membershipId) => {
+    setBusy(true);
+    try { await adminApi.unassignRole(membershipId, role.id); await refresh(); }
+    catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+  const userName = (membershipId) => assignableUsers.find((user) => user.membershipId === membershipId)?.displayName ?? "Unknown member";
+  return <section className="admin-role-section" aria-labelledby="custom-roles-heading">
+    <div className="admin-section-heading admin-action-heading">
+      <div><p>Authorization</p><h2 id="custom-roles-heading">Custom roles</h2></div>
+      <button className="primary-button admin-section-action" type="button" onClick={beginCreate}>Create custom role</button>
+    </div>
+    <p className="admin-role-intro">Owner, Administrator, and Member remain protected. Custom roles add an explicit, server-enforced permission union. New catalog permissions are never added automatically.</p>
+    {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Role change failed</strong>{error}</span></div>}
+    {loading ? <p className="admin-empty-state">Loading organization roles…</p> : !roles.filter((role) => role.status === "active").length
+      ? <p className="admin-empty-state">No custom roles have been created.</p>
+      : <div className="admin-custom-role-list">{roles.filter((role) => role.status === "active").map((role) => {
+        const availableUsers = assignableUsers.filter((user) => user.membershipId && user.membershipStatus === "active" && !role.assignedMembershipIds.includes(user.membershipId));
+        return <article className="admin-custom-role-card" key={role.id}>
+          <div className="admin-custom-role-heading"><div><h3>{role.name}</h3><p>{role.description || "No description"}</p></div><span>Version {role.version}</span></div>
+          <div className="admin-custom-role-grants">{role.grants.map((grant) => <span key={`${grant.permission}-${grant.scope.type}-${grant.scope.resourceId ?? ""}`}><strong>{grant.permission}</strong><small>{grant.scope.type === "organization" ? "All organization resources" : `${grant.scope.type}: ${grant.scope.resourceId}`}</small></span>)}</div>
+          <div className="admin-custom-role-assignments">
+            {role.assignedMembershipIds.length ? role.assignedMembershipIds.map((membershipId) => <span key={membershipId}>Assigned to {userName(membershipId)}<button type="button" aria-label={`Remove ${role.name} from ${userName(membershipId)}`} disabled={busy} onClick={() => unassign(role, membershipId)}>Remove</button></span>) : <small>Not assigned</small>}
+          </div>
+          <div className="admin-custom-role-actions">
+            <SelectMenu value={assignmentTargets[role.id] ?? ""} disabled={busy || !availableUsers.length} onValueChange={(membershipId) => setAssignmentTargets((current) => ({ ...current, [role.id]: membershipId }))} ariaLabel={`Assign ${role.name} to member`} options={availableUsers.map((user) => ({ value: user.membershipId, label: user.displayName }))} placeholder="Choose member" />
+            <button className="secondary-button compact-button" type="button" disabled={busy || !assignmentTargets[role.id]} onClick={() => assign(role)}>Assign role</button>
+            <button className="secondary-button compact-button" type="button" disabled={busy} aria-label={`Edit ${role.name}`} onClick={() => beginEdit(role)}>Edit</button>
+            <button className="connection-quiet-button danger-button" type="button" disabled={busy} onClick={() => archive(role)}>Archive</button>
+          </div>
+        </article>;
+      })}</div>}
+    {editor && <ModalDialog title={editor.id ? `Edit ${editor.name}` : "Create custom role"} description="Select only the product permissions and resource scopes this role requires. Saving an edit creates a new immutable version and signs out affected product sessions." eyebrow={`Permission catalog version ${catalog?.version ?? 1}`} labelledBy="custom-role-editor-title" onClose={busy ? () => undefined : () => setEditor(null)}>
+      <label className="modal-field"><span>Role name</span><input aria-label="Role name" value={editor.name} maxLength={80} disabled={busy} onChange={(event) => setEditor({ ...editor, name: event.target.value })} /></label>
+      <label className="modal-field"><span>Role description</span><textarea aria-label="Role description" value={editor.description} maxLength={500} disabled={busy} onChange={(event) => setEditor({ ...editor, description: event.target.value })} /></label>
+      <fieldset className="admin-role-permission-editor"><legend>Permissions</legend>{catalog?.permissions.filter((permission) => permission.key !== "organization.transfer_ownership").map((permission) => {
+        const grant = selectedGrant(permission.key);
+        return <div key={permission.key} className={grant ? "selected" : ""}>
+          <label><input type="checkbox" checked={Boolean(grant)} disabled={busy} onChange={(event) => togglePermission(permission, event.target.checked)} /><span><strong>{permission.description}</strong><small>{permission.key}</small></span></label>
+          {grant && <div className="admin-role-scope-editor"><SelectMenu value={grant.scope.type} disabled={busy} onValueChange={(type) => {
+            changeScope(permission.key, type);
+            const resourceId = permission.resourceIds?.[type]?.[0];
+            if (type !== "organization" && resourceId) changeResource(permission.key, resourceId);
+          }} ariaLabel={`Scope for ${permission.description}`} options={permission.scopeTypes.map((type) => ({ value: type, label: type === "organization" ? "All organization resources" : `Selected ${type}` }))} />{grant.scope.type !== "organization" && (permission.resourceIds?.[grant.scope.type]
+            ? <SelectMenu ariaLabel={`${permission.description} resource ID`} value={grant.scope.resourceId ?? ""} disabled={busy} onValueChange={(resourceId) => changeResource(permission.key, resourceId)} options={permission.resourceIds[grant.scope.type].map((resourceId) => ({ value: resourceId, label: resourceId }))} />
+            : <input aria-label={`${permission.description} resource ID`} value={grant.scope.resourceId ?? ""} placeholder={`${grant.scope.type} ID`} onChange={(event) => changeResource(permission.key, event.target.value)} />)}</div>}
+        </div>;
+      })}</fieldset>
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setEditor(null)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !editor.name.trim() || !editor.grants.length || editor.grants.some((grant) => grant.scope.type !== "organization" && !grant.scope.resourceId?.trim())} onClick={save}>{busy ? "Saving" : editor.id ? "Save new version" : "Create role"}</button></div>
+    </ModalDialog>}
+  </section>;
+}
+
+function SecretInputField({ id, value, onChange, helperText }) {
+  const [revealed, setRevealed] = useState(false);
+  return <div className="modal-field">
+    <label htmlFor={id}>Client secret</label>
+    <div className="secret-input-control">
+      <input id={id} type={revealed ? "text" : "password"} autoComplete="new-password" value={value} onChange={onChange} />
+      <button type="button" aria-label={`${revealed ? "Hide" : "Show"} client secret`} aria-pressed={revealed} onClick={() => setRevealed((current) => !current)}>
+        {revealed ? <EyeOff24Regular aria-hidden="true" /> : <Eye24Regular aria-hidden="true" />}
+      </button>
+    </div>
+    {helperText && <small>{helperText}</small>}
+  </div>;
+}
+
+function isMicrosoftTenantIdAsClientId(issuer, clientId) {
+  if (!issuer?.trim() || !clientId?.trim()) return false;
+  try {
+    const url = new URL(issuer);
+    if (url.hostname.toLowerCase() !== "login.microsoftonline.com") return false;
+    const tenantId = url.pathname.split("/").filter(Boolean)[0];
+    return tenantId?.toLowerCase() === clientId.trim().toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function OidcClientIdField({ id, issuer, value, onChange }) {
+  const tenantIdWasUsed = isMicrosoftTenantIdAsClientId(issuer, value);
+  const helpId = `${id}-help`;
+  return <label className="modal-field">
+    <span>Client ID</span>
+    <input id={id} aria-describedby={helpId} autoComplete="off" value={value} onChange={onChange} />
+    <small id={helpId} className={`sso-client-id-help${tenantIdWasUsed ? " warning" : ""}`}>{tenantIdWasUsed
+      ? "This is the Directory (tenant) ID. Paste the Application (client) ID instead."
+      : "In Microsoft Entra, use the Application (client) ID—not the Directory (tenant) ID."}</small>
+  </label>;
+}
+
+function CopyConfigurationField({ label, value, copyLabel }) {
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef(null);
+  useEffect(() => {
+    setCopied(false);
+    return () => {
+      if (resetTimer.current) window.clearTimeout(resetTimer.current);
+    };
+  }, [value]);
+  const copy = async () => {
+    if (!navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      if (resetTimer.current) window.clearTimeout(resetTimer.current);
+      resetTimer.current = window.setTimeout(() => setCopied(false), 2_000);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return <div className="sso-configuration-field">
+    <label><span>{label}</span><input aria-label={label} readOnly value={value} /></label>
+    <button className="sso-copy-button" type="button" aria-label={copied ? `${label} copied` : copyLabel} aria-live="polite" title={copied ? `${label} copied` : copyLabel} onClick={copy}>{copied ? "Copied" : "Copy"}</button>
+  </div>;
+}
+
+function OrganizationSsoSection({ isOwner }) {
+  const emptyDraft = { protocol: "oidc", domain: "", issuer: "", clientId: "", clientSecret: "", entryPoint: "", certificate: "" };
+  const [connections, setConnections] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const [draft, setDraft] = useState(null);
+  const [registrationProof, setRegistrationProof] = useState(null);
+  const [protectedAction, setProtectedAction] = useState(null);
+  const [stepUpCode, setStepUpCode] = useState("");
+  const load = async () => {
+    const result = await adminApi.ssoConnections();
+    setConnections(result.connections ?? []);
+  };
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const params = new URLSearchParams(window.location.search);
+      const legacyTestValue = params.get("sso_test") ?? "";
+      const legacySeparator = legacyTestValue.indexOf("?");
+      const legacyErrorParams = legacySeparator >= 0
+        ? new URLSearchParams(legacyTestValue.slice(legacySeparator + 1))
+        : null;
+      const testConnectionId = ssoTestConnectionIdFromLocation()
+        || (legacySeparator >= 0 ? legacyTestValue.slice(0, legacySeparator) : legacyTestValue);
+      const providerError = params.get("error") ?? legacyErrorParams?.get("error") ?? "";
+      const providerErrorDescription = params.get("error_description")
+        ?? legacyErrorParams?.get("error_description")
+        ?? "";
+      if (testConnectionId) {
+        try {
+          if (providerError) {
+            if (active) setError(ssoTestProviderErrorMessage(providerError, providerErrorDescription));
+          } else {
+            await adminApi.completeSsoTest(testConnectionId);
+            if (active) setStatus("Company SSO test completed successfully.");
+          }
+        } catch {
+          if (active) setError("Company SSO test could not be completed. The saved connection is unchanged.");
+        } finally {
+          params.delete("sso_test");
+          params.delete("error");
+          params.delete("error_description");
+          params.set("view", "settings");
+          params.set("section", "people");
+          window.history.replaceState({}, "", `/?${params.toString()}`);
+        }
+      }
+      try {
+        if (active) await load();
+      } catch (loadError) {
+        if (active) setError(loadError.message ?? "Company SSO settings could not be loaded.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+  const register = async () => {
+    if (!draft) return;
+    setBusy("register");
+    setError("");
+    try {
+      const input = draft.protocol === "oidc"
+        ? { protocol: "oidc", domain: draft.domain, issuer: draft.issuer, clientId: draft.clientId, clientSecret: draft.clientSecret }
+        : { protocol: "saml", domain: draft.domain, issuer: draft.issuer, entryPoint: draft.entryPoint, certificate: draft.certificate };
+      const created = await adminApi.registerSso(input);
+      setRegistrationProof({
+        connectionId: created.connection.id,
+        providerId: created.connection.authenticationProviderId,
+        domain: created.connection.domain,
+        token: created.domainVerification.token,
+        redirectURI: created.domainVerification.redirectURI,
+      });
+      setDraft(null);
+      setStatus("Company SSO was saved in pending state. Add the DNS proof before testing it.");
+      await load();
+    } catch (registerError) {
+      setError(registerError.message ?? "Company SSO could not be registered.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const run = async (connection, action) => {
+    setBusy(`${connection.id}:${action}`);
+    setError("");
+    setStatus("");
+    try {
+      if (action === "proof") setRegistrationProof(await adminApi.requestSsoDomainProof(connection.id));
+      if (action === "verify") await adminApi.verifySsoDomain(connection.id);
+      if (action === "test") {
+        const started = await adminApi.startSsoTest(connection.id);
+        window.location.assign(started.location);
+        return;
+      }
+      if (action === "suspend") await adminApi.suspendSso(connection.id);
+      setStatus({ proof: "DNS proof is ready to copy.", verify: "Domain ownership verified.", suspend: "Company SSO is suspended. Other sign-in methods remain available." }[action] ?? "Company SSO updated.");
+      await load();
+    } catch (actionError) {
+      setError(actionError.message ?? "Company SSO could not be updated.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const confirmProtected = async () => {
+    if (!protectedAction) return;
+    setBusy(`${protectedAction.connection.id}:${protectedAction.action}`);
+    setError("");
+    try {
+      await authApi.completeOwnerStepUp(stepUpCode);
+      const action = protectedAction.action;
+      if (action === "recovery") await adminApi.confirmSsoRecovery(protectedAction.connection.id);
+      if (action === "enforce") await adminApi.enforceSso(protectedAction.connection.id);
+      if (action === "rotation") {
+        await adminApi.rotateSsoCredentials(protectedAction.connection.id, {
+          protocol: protectedAction.connection.protocol,
+          ...protectedAction.credentials,
+        });
+      }
+      if (action === "metadata") {
+        await adminApi.refreshSsoMetadata(protectedAction.connection.id, {
+          protocol: protectedAction.connection.protocol,
+          ...(protectedAction.connection.protocol === "saml" ? { metadata: protectedAction.metadata } : {}),
+        });
+      }
+      if (action === "rollback") await adminApi.rollbackSso(protectedAction.connection.id);
+      if (action === "disconnect") await adminApi.disconnectSso(protectedAction.connection.id);
+      setProtectedAction(null);
+      setStepUpCode("");
+      setStatus({
+        recovery: "Protected owner recovery confirmed.",
+        enforce: "Company SSO is now enforced for this email domain.",
+        rotation: "Credentials rotated. Company SSO is pending until the provider is tested again and owner recovery is reconfirmed.",
+        metadata: "Provider metadata refreshed. Company SSO is pending until the provider is tested again and owner recovery is reconfirmed.",
+        rollback: "Company SSO returned to active state.",
+        disconnect: "Company SSO was disconnected.",
+      }[action]);
+      await load();
+    } catch (actionError) {
+      setError(actionError.message ?? "The protected SSO action could not be completed.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const actionLabel = { recovery: "Confirm recovery", enforce: "Enforce SSO", rotation: "Rotate credentials", metadata: "Refresh metadata", rollback: "Roll back", disconnect: "Disconnect" };
+  const protectedActionReady = protectedAction?.action === "rotation"
+    ? (protectedAction.connection.protocol === "oidc"
+      ? Boolean(protectedAction.credentials?.clientId.trim()
+        && protectedAction.credentials?.clientSecret
+        && !isMicrosoftTenantIdAsClientId(protectedAction.connection.issuer, protectedAction.credentials.clientId))
+      : Boolean(protectedAction.credentials?.certificate.trim().length >= 64))
+    : protectedAction?.action === "metadata" && protectedAction.connection.protocol === "saml"
+      ? Boolean(protectedAction.metadata?.trim().length >= 64)
+      : true;
+  const draftClientIdIsTenantId = draft?.protocol === "oidc" && isMicrosoftTenantIdAsClientId(draft.issuer, draft.clientId);
+  return <section className="admin-member-section" aria-labelledby="organization-sso-heading">
+    <div className="admin-section-heading admin-action-heading"><div><p>Authentication</p><h2 id="organization-sso-heading">Company SSO</h2><small>Configure OIDC or SAML without letting identity-provider claims assign product access.</small></div>{isOwner && <button className="primary-button admin-section-action" type="button" onClick={() => { setDraft({ ...emptyDraft }); setRegistrationProof(null); }}>Add connection</button>}</div>
+    {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Company SSO needs attention</strong>{error}</span></div>}
+    {status && <div className="signin-status" role="status">{status}</div>}
+    {registrationProof && <div className="sso-configuration-details" aria-live="polite">
+      <div className="sso-configuration-heading"><strong>Configuration details</strong><small>Copy each value into the matching field at your DNS host or identity provider.</small></div>
+      <section><h3>DNS TXT record</h3>
+        <CopyConfigurationField label="DNS TXT host" value={`_lemmacomputer-sso-${registrationProof.providerId}`} copyLabel="Copy DNS TXT host" />
+        <CopyConfigurationField label="DNS TXT value" value={registrationProof.token} copyLabel="Copy DNS TXT value" />
+        <small>Publish this record for {registrationProof.domain}.</small>
+      </section>
+      <section><h3>Identity provider callback</h3>
+        <CopyConfigurationField label="OIDC redirect URI" value={registrationProof.redirectURI} copyLabel="Copy OIDC redirect URI" />
+      </section>
+    </div>}
+    {loading ? <p className="admin-empty-state">Loading company SSO…</p> : !connections.length ? <p className="admin-empty-state">No company SSO connection is configured.</p> : <div className="admin-user-list sso-connection-list" aria-label="Company SSO connections">{connections.map((connection) => {
+      const actionBusy = busy.startsWith(`${connection.id}:`);
+      return <article key={connection.id}>
+        <div className="admin-user-copy"><strong>{connection.domain}</strong><small>{connection.protocol.toUpperCase()} · {connection.issuer}</small><div className="admin-user-badges"><span>{connection.state}</span><span>Version {connection.configVersion}</span></div></div>
+        <div className="admin-policy-copy"><small>{connection.domainVerifiedAt ? "Domain verified" : "DNS proof required"}</small><small>{connection.lastTestedAt ? "Provider login tested" : "Provider test required"}</small><small>{connection.recoveryConfirmedAt ? "Owner recovery confirmed" : "Owner recovery not confirmed"}</small></div>
+        <div className="admin-user-actions">
+          {isOwner && !connection.domainVerifiedAt && connection.state !== "disconnected" && <button className="secondary-button admin-row-action" type="button" disabled={actionBusy} onClick={() => run(connection, "proof")}>Show DNS proof</button>}
+          {isOwner && !connection.domainVerifiedAt && connection.state !== "disconnected" && <button className="secondary-button admin-row-action" type="button" disabled={actionBusy} onClick={() => run(connection, "verify")}>Verify DNS</button>}
+          {connection.domainVerifiedAt && !connection.lastTestedAt && connection.state !== "disconnected" && <button className="secondary-button admin-row-action" type="button" disabled={actionBusy} onClick={() => run(connection, "test")}>Test provider</button>}
+          {isOwner && connection.state === "active" && !connection.recoveryConfirmedAt && <button className="secondary-button admin-row-action" type="button" disabled={actionBusy} onClick={() => { setStepUpCode(""); setProtectedAction({ connection, action: "recovery" }); }}>Confirm recovery</button>}
+          {isOwner && connection.state === "active" && connection.recoveryConfirmedAt && <button className="primary-button admin-row-action" type="button" disabled={actionBusy} onClick={() => { setStepUpCode(""); setProtectedAction({ connection, action: "enforce" }); }}>Enforce SSO</button>}
+          {isOwner && connection.state !== "disconnected" && <button className="secondary-button admin-row-action" type="button" disabled={actionBusy} onClick={() => { setStepUpCode(""); setProtectedAction({ connection, action: "metadata", metadata: "" }); }}>Refresh metadata</button>}
+          {isOwner && connection.state !== "disconnected" && <button className="secondary-button admin-row-action" type="button" disabled={actionBusy} onClick={() => { setStepUpCode(""); setProtectedAction({ connection, action: "rotation", credentials: connection.protocol === "oidc" ? { clientId: "", clientSecret: "" } : { certificate: "" } }); }}>Rotate credentials</button>}
+          {connection.state === "enforced" && <button className="secondary-button danger-button admin-row-action" type="button" disabled={actionBusy} onClick={() => run(connection, "suspend")}>Suspend</button>}
+          {isOwner && connection.state === "suspended" && <button className="secondary-button admin-row-action" type="button" disabled={actionBusy} onClick={() => { setStepUpCode(""); setProtectedAction({ connection, action: "rollback" }); }}>Roll back</button>}
+          {isOwner && connection.state !== "disconnected" && <button className="connection-quiet-button danger-button admin-row-action" type="button" disabled={actionBusy} onClick={() => { setStepUpCode(""); setProtectedAction({ connection, action: "disconnect" }); }}>Disconnect</button>}
+        </div>
+      </article>;
+    })}</div>}
+    {draft && <ModalDialog title="Add company SSO" description="Credentials are sent directly to the authentication store. LemmaComputer keeps only the organization association and lifecycle status." eyebrow="Organization authentication" labelledBy="company-sso-editor-title" onClose={busy ? () => undefined : () => setDraft(null)}>
+      <label className="modal-field"><span>Protocol</span><SelectMenu value={draft.protocol} options={[{ value: "oidc", label: "OpenID Connect (OIDC)" }, { value: "saml", label: "SAML 2.0" }]} ariaLabel="Company SSO protocol" disabled={Boolean(busy)} onValueChange={(protocol) => setDraft({ ...emptyDraft, protocol })} /></label>
+      <label className="modal-field"><span>Verified email domain</span><input type="text" autoComplete="off" placeholder="example.com" value={draft.domain} onChange={(event) => setDraft({ ...draft, domain: event.target.value })} /></label>
+      <label className="modal-field"><span>Issuer URL</span><input type="url" autoComplete="off" placeholder="https://idp.example.com" value={draft.issuer} onChange={(event) => setDraft({ ...draft, issuer: event.target.value })} /></label>
+      {draft.protocol === "oidc" ? <>
+        <OidcClientIdField id="company-sso-client-id" issuer={draft.issuer} value={draft.clientId} onChange={(event) => setDraft({ ...draft, clientId: event.target.value })} />
+        <SecretInputField id="company-sso-client-secret" value={draft.clientSecret} onChange={(event) => setDraft({ ...draft, clientSecret: event.target.value })} helperText="Paste the secret Value from the identity provider, not its Secret ID." />
+      </> : <>
+        <label className="modal-field"><span>Sign-in URL</span><input type="url" autoComplete="off" value={draft.entryPoint} onChange={(event) => setDraft({ ...draft, entryPoint: event.target.value })} /></label>
+        <label className="modal-field"><span>Signing certificate</span><textarea rows={6} autoComplete="off" value={draft.certificate} onChange={(event) => setDraft({ ...draft, certificate: event.target.value })} /></label>
+      </>}
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => setDraft(null)}>Cancel</button><button className="primary-button" type="button" disabled={Boolean(busy) || !draft.domain.trim() || !draft.issuer.trim() || (draft.protocol === "oidc" ? !draft.clientId.trim() || !draft.clientSecret || draftClientIdIsTenantId : !draft.entryPoint.trim() || draft.certificate.trim().length < 64)} onClick={register}>{busy ? "Saving" : "Save connection"}</button></div>
+    </ModalDialog>}
+    {protectedAction && <ModalDialog title={actionLabel[protectedAction.action]} description={`${actionLabel[protectedAction.action]} for ${protectedAction.connection.domain}. Enter the six-digit authenticator code for this protected owner action; a passkey only signs you in.`} eyebrow="Protected owner action" labelledBy="company-sso-protected-action-title" onClose={busy ? () => undefined : () => setProtectedAction(null)}>
+      {protectedAction.action === "rotation" && protectedAction.connection.protocol === "oidc" && <>
+        <OidcClientIdField id="company-sso-rotated-client-id" issuer={protectedAction.connection.issuer} value={protectedAction.credentials.clientId} onChange={(event) => setProtectedAction({ ...protectedAction, credentials: { ...protectedAction.credentials, clientId: event.target.value } })} />
+        <SecretInputField id="company-sso-rotated-client-secret" value={protectedAction.credentials.clientSecret} onChange={(event) => setProtectedAction({ ...protectedAction, credentials: { ...protectedAction.credentials, clientSecret: event.target.value } })} helperText="Paste the secret Value from the identity provider, not its Secret ID." />
+      </>}
+      {protectedAction.action === "rotation" && protectedAction.connection.protocol === "saml" && <label className="modal-field"><span>Signing certificate</span><textarea rows={6} autoComplete="off" value={protectedAction.credentials.certificate} onChange={(event) => setProtectedAction({ ...protectedAction, credentials: { certificate: event.target.value } })} /></label>}
+      {protectedAction.action === "metadata" && protectedAction.connection.protocol === "oidc" && <p className="admin-role-intro">LemmaComputer will fetch the issuer discovery document again and replace the stored authorization, token, user-info, and JWKS endpoints. Routing remains disabled until you retest it.</p>}
+      {protectedAction.action === "metadata" && protectedAction.connection.protocol === "saml" && <label className="modal-field"><span>Identity-provider metadata XML</span><textarea rows={8} autoComplete="off" value={protectedAction.metadata} onChange={(event) => setProtectedAction({ ...protectedAction, metadata: event.target.value })} /></label>}
+      <label className="modal-field"><span>Authenticator code</span><input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" value={stepUpCode} onChange={(event) => setStepUpCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /><small>Enter the current six-digit code from the LemmaComputer entry in your authenticator app.</small></label>
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => setProtectedAction(null)}>Cancel</button><button className="primary-button" type="button" disabled={Boolean(busy) || !protectedActionReady || !/^\d{6}$/.test(stepUpCode)} onClick={confirmProtected}>{busy ? "Verifying" : actionLabel[protectedAction.action]}</button></div>
+    </ModalDialog>}
+  </section>;
+}
+
+function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId, loading, invitationBusy, busyUserId, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageWorkspace, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
+  const allRoleOptions = [
     { value: "member", label: "Member" },
     { value: "admin", label: "Administrator" },
     { value: "owner", label: "Owner" },
   ];
+  const roleOptions = allRoleOptions.filter((option) => option.value !== "owner" && delegableBuiltInRoles.includes(option.value));
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteDraft, setInviteDraft] = useState({ email: "", role: "member" });
   const [acceptancePath, setAcceptancePath] = useState("");
+  const [deliveryWarning, setDeliveryWarning] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
+  const [transferTarget, setTransferTarget] = useState(null);
+  const [transferCode, setTransferCode] = useState("");
+  const [closureOpen, setClosureOpen] = useState(false);
+  const [closureReason, setClosureReason] = useState("");
+  const [closureCode, setClosureCode] = useState("");
+  const [closureStatus, setClosureStatus] = useState("");
+  const closureIdempotencyKey = useRef(crypto.randomUUID());
+  const currentMembership = users.find((user) => user.userId === currentUserId);
+  const isOwner = currentMembership?.role === "owner" && currentMembership?.membershipStatus === "active";
   const invite = async () => {
     const result = await onInvite(inviteDraft);
     if (!result) return;
@@ -938,6 +1905,7 @@ function AdminScreen({ users, invitations, currentUserId, loading, invitationBus
     setInviteOpen(false);
     if (result.acceptancePath) {
       setAcceptancePath(result.acceptancePath);
+      setDeliveryWarning(result.delivery?.warning ?? "Share this single-use link through a trusted channel. Resending rotates it.");
       setLinkCopied(false);
     }
   };
@@ -945,10 +1913,25 @@ function AdminScreen({ users, invitations, currentUserId, loading, invitationBus
     const result = await onResendInvitation(invitation);
     if (result?.acceptancePath) {
       setAcceptancePath(result.acceptancePath);
+      setDeliveryWarning(result.delivery?.warning ?? "Share this single-use link through a trusted channel. Resending rotates it.");
       setLinkCopied(false);
     }
   };
   const acceptanceUrl = acceptancePath ? new URL(acceptancePath, window.location.origin).toString() : "";
+  const transferOwnership = async () => {
+    if (!transferTarget) return;
+    if (await onTransferOwnership(transferTarget, transferCode)) {
+      setTransferCode("");
+      setTransferTarget(null);
+    }
+  };
+  const initiateClosure = async () => {
+    const result = await onInitiateClosure(closureReason, closureIdempotencyKey.current, closureCode);
+    if (!result) return;
+    setClosureOpen(false);
+    setClosureCode("");
+    setClosureStatus(`Organization closure is pending until ${new Date(result.request.executeAfter).toLocaleDateString()}.`);
+  };
   return (
     <div className="secondary-screen admin-screen">
       <button className="settings-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />Back to Settings</button>
@@ -957,23 +1940,23 @@ function AdminScreen({ users, invitations, currentUserId, loading, invitationBus
         <h1>People and access</h1>
         <span>Invite people, assign organization roles, and remove access. Identity-provider credentials remain outside LemmaComputer.</span>
       </header>
-      <section className="admin-access-summary" aria-labelledby="organization-access-heading">
+      {canManageMembers && <><section className="admin-access-summary" aria-labelledby="organization-access-heading">
         <div><p>Organization access</p><h2 id="organization-access-heading">Members and invitations</h2><span>Invitations expire after seven days. The selected organization and role cannot be changed by identity-provider claims.</span></div>
-        <button className="primary-button" type="button" onClick={() => setInviteOpen(true)}>Invite person</button>
+        <button className="primary-button admin-section-action" type="button" disabled={!roleOptions.length} onClick={() => setInviteOpen(true)}>Invite person</button>
       </section>
       {acceptanceUrl && <section className="admin-invitation-link" aria-live="polite">
-        <div><strong>Invitation link created</strong><small>Share this single-use link with the invited person through a trusted channel. Resending rotates it.</small></div>
+        <div><strong>Invitation link created</strong><small>{deliveryWarning}</small></div>
         <input aria-label="Invitation link" readOnly value={acceptanceUrl} />
         <button className="secondary-button" type="button" onClick={async () => {
           await navigator.clipboard?.writeText(acceptanceUrl);
           setLinkCopied(true);
         }}>{linkCopied ? "Copied" : "Copy link"}</button>
-        <button className="connection-quiet-button" type="button" onClick={() => setAcceptancePath("")}>Dismiss</button>
+        <button className="connection-quiet-button" type="button" onClick={() => { setAcceptancePath(""); setDeliveryWarning(""); }}>Dismiss</button>
       </section>}
       <section className="admin-invitation-list" aria-labelledby="organization-invitations-heading">
         <div className="admin-section-heading"><div><p>Invitations</p><h2 id="organization-invitations-heading">Organization invitations</h2></div><span>{invitations.length}</span></div>
         {!invitations.length ? <p className="admin-empty-state">No invitations have been created.</p> : invitations.map((item) => <article key={item.invitationId}>
-          <div><strong>{item.email}</strong><small>{roleOptions.find((option) => option.value === item.role)?.label ?? item.role} · expires {new Date(item.expiresAt).toLocaleDateString()}</small></div>
+          <div><strong>{item.email}</strong><small>{allRoleOptions.find((option) => option.value === item.role)?.label ?? item.role} · expires {new Date(item.expiresAt).toLocaleDateString()}</small></div>
           <span className={`admin-access-status ${item.status}`}>{item.status}</span>
           <div className="admin-invitation-actions">
             {(item.status === "pending" || item.status === "expired") && <button className="secondary-button" type="button" disabled={invitationBusy} onClick={() => resend(item)}>Resend</button>}
@@ -990,27 +1973,36 @@ function AdminScreen({ users, invitations, currentUserId, loading, invitationBus
               <div className="admin-user-copy">
                 <strong>{item.displayName}</strong><small>{item.email}</small>
                 <div className="admin-user-badges">
-                  <span>{roleOptions.find((option) => option.value === item.role)?.label ?? (item.roles.includes("administrator") ? "Administrator" : "Member")}</span>
+                  <span>{allRoleOptions.find((option) => option.value === item.role)?.label ?? (item.roles.includes("administrator") ? "Administrator" : "Member")}</span>
                   {membershipStatus !== "active" && <span className="disabled">{membershipStatus}</span>}
                 </div>
               </div>
               <div className="admin-policy-copy">
-                <label><span>Organization role</span><SelectMenu value={item.role ?? (item.roles.includes("administrator") ? "admin" : "member")} options={roleOptions} ariaLabel={`Organization role for ${item.displayName}`} disabled={busyUserId === item.userId || membershipStatus !== "active"} onValueChange={(role) => onRoleChange(item, role)} /></label>
+                {canManageRoles && roleOptions.some((option) => option.value === (item.role ?? (item.roles.includes("administrator") ? "admin" : "member"))) && <label><span>Organization role</span><SelectMenu value={item.role ?? (item.roles.includes("administrator") ? "admin" : "member")} options={roleOptions} ariaLabel={`Organization role for ${item.displayName}`} disabled={busyUserId === item.userId || membershipStatus !== "active"} onValueChange={(role) => onRoleChange(item, role)} /></label>}
                 {item.effectivePolicy ? <small>Workspace policy version {item.effectivePolicy.version} assigned</small> : <small>No active workspace policy assigned.</small>}
                 {item.workspaces?.length ? <div className="admin-user-workspaces">
-                  {item.workspaces.map((workspace) => <button className="connection-quiet-button" type="button" key={workspace.id} disabled={busyUserId === item.userId} onClick={() => onManageWorkspace(item, workspace)}>Manage {workspaceName(workspace)}</button>)}
+                  {item.workspaces.filter((workspace) => canManageWorkspace(workspace.id)).map((workspace) => <button className="connection-quiet-button" type="button" key={workspace.id} disabled={busyUserId === item.userId} onClick={() => onManageWorkspace(item, workspace)}>Manage {workspaceName(workspace)}</button>)}
                 </div> : <small>No workspace has been created yet.</small>}
               </div>
               <div className="admin-user-actions">
-                <button className="secondary-button" type="button" disabled={busyUserId === item.userId} onClick={() => onRevokeSessions(item.userId)}>Sign out sessions</button>
-                {item.userId !== currentUserId && membershipStatus !== "revoked" && <button className={`secondary-button${membershipStatus === "active" ? " danger-button" : ""}`} type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, membershipStatus === "active" ? "suspended" : "active")}>{membershipStatus === "active" ? "Suspend" : "Reactivate"}</button>}
-                {item.userId !== currentUserId && membershipStatus !== "revoked" && <button className="connection-quiet-button danger-button" type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, "revoked")}>Remove access</button>}
+                {isOwner && item.userId !== currentUserId && membershipStatus === "active" && <button className="secondary-button admin-row-action" type="button" disabled={busyUserId === item.userId} onClick={() => { setTransferCode(""); setTransferTarget(item); }}>Transfer ownership</button>}
+                <button className="secondary-button admin-row-action" type="button" disabled={busyUserId === item.userId} onClick={() => onRevokeSessions(item.userId)}>Sign out sessions</button>
+                {item.userId !== currentUserId && membershipStatus !== "revoked" && <button className={`secondary-button admin-row-action${membershipStatus === "active" ? " danger-button" : ""}`} type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, membershipStatus === "active" ? "suspended" : "active")}>{membershipStatus === "active" ? "Suspend" : "Reactivate"}</button>}
+                {item.userId !== currentUserId && membershipStatus !== "revoked" && <button className="secondary-button admin-row-action danger-button" type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, "revoked")}>Remove access</button>}
               </div>
             </article>;
           })}
         </div>
       </section>
-      <section className="admin-policy-section" aria-labelledby="workspace-policy-heading">
+      {isOwner && <section className="admin-access-summary admin-lifecycle-summary" aria-labelledby="organization-lifecycle-heading">
+        <div><p>Protected owner action</p><h2 id="organization-lifecycle-heading">Organization lifecycle</h2><span>Closure starts a seven-day pending period. Recent MFA verification is required, and no data is deleted by this initiation step.</span></div>
+        <button className="secondary-button danger-button admin-section-action" type="button" onClick={() => { setClosureCode(""); setClosureOpen(true); }}>Initiate organization closure</button>
+      </section>}
+      {closureStatus && <div className="signin-status" role="status">{closureStatus}</div>}
+      </>}
+      {canManageSettings && <OrganizationSsoSection isOwner={isOwner} />}
+      {canManageRoles && <OrganizationRoleEditor users={users} />}
+      {canManagePolicy && <section className="admin-policy-section" aria-labelledby="workspace-policy-heading">
         <div className="admin-toolbar">
           <div><strong id="workspace-policy-heading">MVP standard workspace</strong><small>Workspace, agent, model, network, connector, and protected-operation rules</small></div>
           <button className="secondary-button" type="button" onClick={onVersion}>Create new version</button>
@@ -1024,11 +2016,22 @@ function AdminScreen({ users, invitations, currentUserId, loading, invitationBus
           </div>
           <button className="secondary-button" type="button" onClick={onConfigureConnector}>Open connector settings<ChevronRight16Regular aria-hidden="true" /></button>
         </section>
-      </section>
-      {inviteOpen && <ModalDialog title="Invite a person" description="Create pending product access. The person will choose their password and complete supported MFA with the configured identity provider." eyebrow="Organization access" labelledBy="organization-invite-title" onClose={invitationBusy ? () => undefined : () => setInviteOpen(false)}>
+      </section>}
+      {canManageMembers && inviteOpen && <ModalDialog title="Invite a person" description="Create pending product access. The person will choose their password and complete supported MFA with the configured identity provider." eyebrow="Organization access" labelledBy="organization-invite-title" onClose={invitationBusy ? () => undefined : () => setInviteOpen(false)}>
         <label className="modal-field"><span>Email address</span><input name="organization-invite-email" type="email" autoComplete="off" value={inviteDraft.email} onChange={(event) => setInviteDraft({ ...inviteDraft, email: event.target.value })} placeholder="person@example.com" disabled={invitationBusy} /></label>
-        <label className="modal-field"><span>Organization role</span><SelectMenu value={inviteDraft.role} options={roleOptions} ariaLabel="Invited organization role" disabled={invitationBusy} onValueChange={(role) => setInviteDraft({ ...inviteDraft, role })} /><small>Owner invitations require owner authority and do not remove the current owner.</small></label>
+        <label className="modal-field"><span>Organization role</span><SelectMenu value={roleOptions.some((option) => option.value === inviteDraft.role) ? inviteDraft.role : roleOptions[0]?.value ?? ""} options={roleOptions} ariaLabel="Invited organization role" disabled={invitationBusy || !roleOptions.length} onValueChange={(role) => setInviteDraft({ ...inviteDraft, role })} /><small>Only roles within your server-verified delegation authority are available.</small></label>
         <div className="modal-actions"><button className="secondary-button" type="button" disabled={invitationBusy} onClick={() => setInviteOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={invitationBusy || !inviteDraft.email.trim()} onClick={invite}>{invitationBusy ? "Creating invitation" : "Create invitation"}</button></div>
+      </ModalDialog>}
+      {transferTarget && <ModalDialog title="Transfer organization ownership" description={`Make ${transferTarget.displayName} the protected owner and change your membership to Administrator.`} eyebrow="Protected owner action" labelledBy="organization-ownership-transfer-title" onClose={busyUserId ? () => undefined : () => setTransferTarget(null)}>
+        <label className="modal-field"><span>Authenticator code</span><input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" value={transferCode} onChange={(event) => setTransferCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label>
+        <div className="signin-status" role="status">Verify this action with the six-digit code from your authenticator. Both memberships will be signed out after transfer.</div>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={Boolean(busyUserId)} onClick={() => setTransferTarget(null)}>Cancel</button><button className="primary-button danger-button" type="button" disabled={Boolean(busyUserId) || !/^\d{6}$/.test(transferCode)} onClick={transferOwnership}>{busyUserId ? "Transferring ownership" : "Transfer ownership"}</button></div>
+      </ModalDialog>}
+      {closureOpen && <ModalDialog title="Initiate organization closure" description="Start a seven-day pending period. This does not immediately delete data or close the organization." eyebrow="Protected owner action" labelledBy="organization-closure-title" onClose={invitationBusy ? () => undefined : () => setClosureOpen(false)}>
+        <label className="modal-field"><span>Reason for closure</span><textarea value={closureReason} minLength={12} maxLength={1000} rows={4} onChange={(event) => setClosureReason(event.target.value)} /></label>
+        <label className="modal-field"><span>Authenticator code</span><input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" value={closureCode} onChange={(event) => setClosureCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label>
+        <div className="signin-status" role="status">Verify this protected owner action with the six-digit code from your authenticator.</div>
+        <div className="modal-actions"><button className="secondary-button" type="button" disabled={invitationBusy} onClick={() => setClosureOpen(false)}>Cancel</button><button className="primary-button danger-button" type="button" disabled={invitationBusy || closureReason.trim().length < 12 || !/^\d{6}$/.test(closureCode)} onClick={initiateClosure}>Initiate closure</button></div>
       </ModalDialog>}
     </div>
   );
@@ -1185,7 +2188,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
   );
 }
 
-function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCredentials, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, invitations, loading, invitationBusy, busyUserId, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
+function SettingsScreen({ view, isAdmin, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageWorkspace, delegableBuiltInRoles, currentUserId, onOpenAdmin, onOpenCredentials, onOpenAccountSecurity, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, invitations, loading, invitationBusy, busyUserId, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
   if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
     return <WorkspaceConfigurationScreen
       settings={adminSandboxSettings}
@@ -1211,19 +2214,27 @@ function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCrede
       backLabel="Back to organization users"
     />;
   }
-  if (view === "admin" && isAdmin) {
+  if (view === "admin" && (canManageMembers || canManageRoles || canManageSettings)) {
     return <AdminScreen
       users={users}
       invitations={invitations}
+      delegableBuiltInRoles={delegableBuiltInRoles}
       currentUserId={currentUserId}
       loading={loading}
       invitationBusy={invitationBusy}
       busyUserId={busyUserId}
+      canManageMembers={canManageMembers}
+      canManageRoles={canManageRoles}
+      canManageSettings={canManageSettings}
+      canManagePolicy={canManagePolicy}
+      canManageWorkspace={canManageWorkspace}
       onInvite={onInvite}
       onResendInvitation={onResendInvitation}
       onRevokeInvitation={onRevokeInvitation}
       onRoleChange={onRoleChange}
       onStatusChange={onStatusChange}
+      onTransferOwnership={onTransferOwnership}
+      onInitiateClosure={onInitiateClosure}
       onRevokeSessions={onRevokeSessions}
       onManageWorkspace={onManageWorkspace}
       onVersion={onVersion}
@@ -1244,12 +2255,17 @@ function SettingsScreen({ view, isAdmin, currentUserId, onOpenAdmin, onOpenCrede
         <span>Manage your credentials and current workspace controls.</span>
       </header>
       <section className="settings-list" aria-label="Settings">
+        <button className="settings-item" type="button" onClick={onOpenAccountSecurity}>
+          <span className="settings-item-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span>
+          <span className="settings-item-copy"><strong>Account security</strong><small>Manage sign-in methods, authenticator verification, and device sessions.</small></span>
+          <ChevronRight16Regular aria-hidden="true" />
+        </button>
         <button className="settings-item" type="button" onClick={onOpenCredentials}>
           <span className="settings-item-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span>
           <span className="settings-item-copy"><strong>Credentials</strong><small>Manage write-only credentials for official workspace channels.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
         </button>
-        {isAdmin && <button className="settings-item" type="button" onClick={onOpenAdmin}>
+        {(canManageMembers || canManageRoles || canManageSettings) && <button className="settings-item" type="button" onClick={onOpenAdmin}>
           <span className="settings-item-icon"><Settings24Regular aria-hidden="true" /></span>
           <span className="settings-item-copy"><strong>People and access</strong><small>Invite people, assign organization roles, and manage workspace access.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
@@ -1761,7 +2777,7 @@ function ConnectorAccessPolicyCard({ connector, busy, onSave }) {
       <div>
         <p>Organization access</p>
         <h2 id={`connector-access-${connector.id}`}>Member connection policy</h2>
-        <span>These controls apply to every ME TECH member and are enforced by Control.</span>
+        <span>These controls apply to every organization member and are enforced by Control.</span>
       </div>
       <label><input type="checkbox" checked={enabled} disabled={busy} onChange={(event) => setEnabled(event.target.checked)} /><span><strong>Connector enabled</strong><small>Assigned workspaces may use approved tools from this service.</small></span></label>
       <label><input type="checkbox" checked={membersCanManage} disabled={busy || !enabled} onChange={(event) => setMembersCanManage(event.target.checked)} /><span><strong>Members can manage connections</strong><small>Members may connect and disconnect their own work account.</small></span></label>
@@ -1770,7 +2786,7 @@ function ConnectorAccessPolicyCard({ connector, busy, onSave }) {
   );
 }
 
-function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect, onAccessPolicySave, displayName, isAdmin, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect, onAccessPolicySave, displayName, canManageConnector, canManagePolicy, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connection?.state === "connected";
   const expired = connection?.state === "expired";
   const organizationDisabled = connection?.enabled === false;
@@ -1795,10 +2811,10 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
 
       <nav className="connector-tabs" aria-label="Microsoft 365 settings">
         <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
-        {isAdmin && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
+        {canManagePolicy && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
       </nav>
 
-      {activeTab === "tools" && isAdmin ? (
+      {activeTab === "tools" && canManagePolicy ? (
         <ToolPolicyEditor mcpPolicy={mcpPolicy} loading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />
       ) : (
         <div className="connector-overview">
@@ -1819,7 +2835,7 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
               )}
             </div>
           </section>
-          {isAdmin && <ConnectorAccessPolicyCard connector={connection} busy={busy} onSave={onAccessPolicySave} />}
+          {canManageConnector && <ConnectorAccessPolicyCard connector={connection} busy={busy} onSave={onAccessPolicySave} />}
         </div>
       )}
     </div>
@@ -1878,7 +2894,7 @@ function ConnectorRemovalCard({ connector, busy, onRemove }) {
   );
 }
 
-function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemove, onBack, isAdmin, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemove, onBack, canManageConnector, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
   const activation = activationFor(connector);
@@ -1918,10 +2934,10 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
 
       <nav className="connector-tabs" aria-label={`${connector.name} settings`}>
         <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
-        {isAdmin && connected && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
+        {canManageConnector && connected && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
       </nav>
 
-      {activeTab === "tools" && isAdmin && connected ? (
+      {activeTab === "tools" && canManageConnector && connected ? (
         <ToolPolicyEditor mcpPolicy={mcpPolicy} loading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />
       ) : <div className="connector-overview">
         <section className="connector-overview-card">
@@ -1960,15 +2976,15 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
             )}
           </div>
         </section>
-        {isAdmin && <ConnectorAccessPolicyCard connector={connector} busy={busy} onSave={onAccessPolicySave} />}
+        {canManageConnector && <ConnectorAccessPolicyCard connector={connector} busy={busy} onSave={onAccessPolicySave} />}
         <div className="connector-policy-note">
           <Info24Regular aria-hidden="true" />
           <p><strong>{connector.policySupport === "governed" ? "Approved tools available" : "Available to your workspace agents"}</strong>{connector.policySupport === "governed"
             ? "Your organization decides which tools each workspace can use."
             : "Once connected, this service and its available tools are added to your workspace agents automatically."}</p>
         </div>
-        {isAdmin && connector.source === "custom" && <ConnectorIconEditor connector={connector} busy={busy} onSave={onIconChange} />}
-        {isAdmin && connector.source === "custom" && <ConnectorRemovalCard connector={connector} busy={busy} onRemove={onRemove} />}
+        {canManageConnector && connector.source === "custom" && <ConnectorIconEditor connector={connector} busy={busy} onSave={onIconChange} />}
+        {canManageConnector && connector.source === "custom" && <ConnectorRemovalCard connector={connector} busy={busy} onRemove={onRemove} />}
       </div>}
     </div>
   );
@@ -2232,15 +3248,15 @@ function AddConnectorDialog({ onCreated, onClose }) {
   );
 }
 
-function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, isAdmin, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, canAddConnector, canManagePolicy, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
-      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAccessPolicySave={onAccessPolicySave} displayName={displayName} isAdmin={isAdmin} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
-      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} isAdmin={isAdmin} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} canManageConnector={Boolean(selected.canAdministerConnector)} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
     }
   }
   return (
@@ -2251,7 +3267,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
           <h1>Connections</h1>
           <span>Connect the work services you want to use. Connected services become available to your workspace agents automatically.</span>
         </header>
-        {isAdmin && <button className="primary-button connections-add-button" type="button" onClick={onAddConnector}><Add24Regular aria-hidden="true" />Add connector</button>}
+        {canAddConnector && <button className="primary-button connections-add-button" type="button" onClick={onAddConnector}><Add24Regular aria-hidden="true" />Add connector</button>}
       </div>
 
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connection was not updated</strong>{error}</span></div>}
@@ -2288,7 +3304,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                       <small>{connector.policySupport === "governed" ? "Approved tools ready" : "Added to workspace agents after connection"}</small>
                     </div>
                     <div className="connector-catalog-action">
-                      {isAdmin && connector.source === "custom" && !connected && <button className="connector-manage-link" type="button" onClick={() => onViewChange(`connector-${connector.id}`)}>Manage</button>}
+                      {connector.canAdministerConnector && connector.source === "custom" && !connected && <button className="connector-manage-link" type="button" onClick={() => onViewChange(`connector-${connector.id}`)}>Manage</button>}
                       {connected ? (
                         <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
                       ) : canConnect ? (
@@ -3298,10 +4314,18 @@ export function ChatScreen({
 }
 
 export function App() {
+  const invitationActive = window.location.pathname === "/invite";
+  const [invitationVerified] = useState(() => window.location.pathname === "/invite"
+    && new URLSearchParams(window.location.search).get("verified") === "1");
   const [invitationToken] = useState(() => window.location.pathname === "/invite"
     ? new URLSearchParams(window.location.search).get("token") ?? ""
     : "");
+  const [invitationContext, setInvitationContext] = useState(null);
+  const [invitationPreparing, setInvitationPreparing] = useState(invitationActive);
+  const [invitationAcceptable, setInvitationAcceptable] = useState(false);
+  const [invitationError, setInvitationError] = useState("");
   const [session, setSession] = useState(null);
+  const [customerSession, setCustomerSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [activeNav, setActiveNav] = useState(navFromLocation);
@@ -3323,6 +4347,7 @@ export function App() {
   const [scheduleError, setScheduleError] = useState("");
   const [drawer, setDrawer] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [accountSecurityOpen, setAccountSecurityOpen] = useState(accountSecurityOpenFromLocation);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [operation, setOperation] = useState(null);
@@ -3352,7 +4377,7 @@ export function App() {
   const [providerSettingsBusy, setProviderSettingsBusy] = useState(false);
   const [providerSettingsError, setProviderSettingsError] = useState("");
   const [connectionsView, setConnectionsView] = useState("list");
-  const [settingsView, setSettingsView] = useState("overview");
+  const [settingsView, setSettingsView] = useState(settingsViewFromLocation);
   const [chatSessions, setChatSessions] = useState([]);
   const [aiControlPlaneView, setAiControlPlaneView] = useState(aiControlPlaneViewFromLocation);
   const [activeChatSessionId, setActiveChatSessionId] = useState(chatSessionFromLocation);
@@ -3363,6 +4388,7 @@ export function App() {
   const [newChatRequest, setNewChatRequest] = useState(0);
   const [runningChatSessionIds, setRunningChatSessionIds] = useState([]);
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminDelegableBuiltInRoles, setAdminDelegableBuiltInRoles] = useState([]);
   const [adminInvitations, setAdminInvitations] = useState([]);
   const [adminInvitationBusy, setAdminInvitationBusy] = useState(false);
   const [adminTeams, setAdminTeams] = useState([]);
@@ -3390,10 +4416,34 @@ export function App() {
   const [revisionPromptOpen, setRevisionPromptOpen] = useState(false);
   const [revisionSaving, setRevisionSaving] = useState(false);
   const surfacedApprovalIds = useRef(new Set());
+  const invitationInitializationStarted = useRef(false);
   const mainContentRef = useRef(null);
   const sidebarRef = useRef(null);
   const profileRef = useRef(null);
   const profilePopoverRefs = useMemo(() => [profileRef], []);
+  const hasCapability = (permission) => Boolean(session?.capabilities?.includes(permission));
+  const hasScopedCapability = (permission, type, resourceId) => hasCapability(permission)
+    || Boolean(session?.resourceCapabilities?.some((grant) => grant.permission === permission
+      && grant.scope?.type === type && grant.scope?.resourceId === resourceId));
+  const hasAnyCapability = (permission) => hasCapability(permission)
+    || Boolean(session?.resourceCapabilities?.some((grant) => grant.permission === permission));
+  const canManageMembers = hasCapability("organization.manage_members");
+  const canManageRoles = hasCapability("organization.manage_roles");
+  const canManageSettings = hasCapability("organization.manage_settings");
+  const canManagePolicy = hasCapability("policy.manage");
+  const canManageAnyWorkspace = hasAnyCapability("workspace.manage");
+  const canManageAnyProvider = hasAnyCapability("provider.manage");
+  const canReadUsage = hasCapability("usage.read");
+  const canManageUsage = hasCapability("usage.manage");
+  const canOpenAiControlPlane = canReadUsage || canManageUsage || canManageAnyProvider || canManagePolicy;
+  const availableAiControlPlaneTabs = aiControlPlaneTabs.filter((tab) => ({
+    overview: canReadUsage,
+    "models-providers": canManageAnyProvider,
+    "model-routes": canManagePolicy || hasCapability("provider.manage"),
+    pricing: canReadUsage || canManageUsage,
+    "teams-budgets": canManageUsage,
+    "data-health": canReadUsage || canManageUsage,
+  }[tab.id]));
 
   useDismissOnOutside(profileOpen, () => setProfileOpen(false), profilePopoverRefs);
 
@@ -3407,18 +4457,108 @@ export function App() {
     pending?.resolve(accepted);
   };
 
+  const refreshAuthentication = useCallback(async (acceptPendingInvitation = false) => {
+    setAuthLoading(true);
+    let pendingInvitationError = "";
+    try {
+      if (acceptPendingInvitation) {
+        try {
+          const accepted = await authApi.acceptInvitation();
+          setInvitationError("");
+          setToast(invitationVerified
+            ? `Email verified. You joined ${accepted.organization.displayName}.`
+            : `You joined ${accepted.organization.displayName}.`);
+        } catch (acceptError) {
+          if (acceptError.code !== "UNAUTHENTICATED") {
+            pendingInvitationError = acceptError.message ?? "This invitation could not be accepted.";
+            setInvitationError(pendingInvitationError);
+          }
+        }
+      }
+      const value = await authApi.session();
+      setSession(value);
+      setCustomerSession(null);
+      setAuthError(pendingInvitationError);
+    } catch (sessionError) {
+      setSession(null);
+      if (!["UNAUTHENTICATED", "ACTIVE_MEMBERSHIP_REQUIRED"].includes(sessionError.code)) {
+        setAuthError(sessionError.message);
+        setCustomerSession(null);
+        return;
+      }
+      try {
+        const product = await authApi.productSession();
+        setCustomerSession(product);
+        setAuthError(pendingInvitationError);
+      } catch (productError) {
+        setCustomerSession(null);
+        if (!["UNAUTHENTICATED", "AUTH_PROVIDER_NOT_AVAILABLE"].includes(productError.code)) {
+          setAuthError(productError.message);
+          return;
+        }
+        if (productError.code === "UNAUTHENTICATED") {
+          const identity = await authApi.customerIdentitySession().catch(() => null);
+          if (identity?.user?.emailVerified === false) {
+            setCustomerSession({ status: "verification-required", user: identity.user });
+            setAuthError("");
+          }
+        }
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [invitationVerified]);
+
   useEffect(() => {
-    if (invitationToken) window.history.replaceState(window.history.state, "", "/invite");
+    if (invitationInitializationStarted.current) return;
+    invitationInitializationStarted.current = true;
     const params = new URLSearchParams(window.location.search);
+    let callbackError = "";
     if (params.get("signin") === "error") {
       const reason = params.get("reason") ?? "OIDC_FAILED";
-      setAuthError(signInErrorByReason[reason] ?? "Microsoft could not verify this sign-in. Please try again.");
+      const socialError = reason === "SOCIAL_LINK_FAILED"
+        ? socialLinkErrorMessage(params.get("provider"))
+        : socialSignInErrorMessage(params.get("error"), params.get("provider"));
+      callbackError = socialError ?? signInErrorByReason[reason] ?? "Microsoft could not verify this sign-in. Please try again.";
+    } else if (window.location.pathname === "/invite" && params.has("error")) {
+      callbackError = "Your organization’s identity provider could not complete sign-in. Ask an administrator to test the Company SSO connection, then try this invitation again.";
     }
-    authApi.session()
-      .then((value) => { setSession(value); setAuthError(""); })
-      .catch((error) => { if (error.code !== "UNAUTHENTICATED") setAuthError(error.message); })
-      .finally(() => setAuthLoading(false));
-  }, [invitationToken]);
+    const initializeAuthentication = async () => {
+      let shouldAcceptInvitation = false;
+      if (invitationToken) {
+        window.history.replaceState(window.history.state, "", "/invite");
+        try {
+          const prepared = await authApi.prepareInvitation(invitationToken);
+          setInvitationContext(prepared);
+          setInvitationError("");
+          shouldAcceptInvitation = true;
+          setInvitationAcceptable(true);
+        } catch (prepareError) {
+          setInvitationError(prepareError.message ?? "This invitation cannot be used to sign in.");
+          setInvitationAcceptable(false);
+        } finally {
+          setInvitationPreparing(false);
+        }
+      } else if (invitationActive) {
+        try {
+          const restored = await authApi.invitationContext();
+          setInvitationContext(restored);
+          setInvitationError("");
+          shouldAcceptInvitation = true;
+          setInvitationAcceptable(true);
+        } catch (contextError) {
+          setInvitationError(contextError.message ?? "This invitation cannot be used to sign in.");
+          setInvitationAcceptable(false);
+        } finally {
+          window.history.replaceState(window.history.state, "", "/invite");
+          setInvitationPreparing(false);
+        }
+      }
+      await refreshAuthentication(shouldAcceptInvitation);
+      if (callbackError) setAuthError(callbackError);
+    };
+    void initializeAuthentication();
+  }, [invitationToken, refreshAuthentication]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -3436,7 +4576,13 @@ export function App() {
         setConnectionsView("list");
         setConnectionCatalogRefresh((current) => current + 1);
       }
-      if (name === "Settings") setSettingsView("overview");
+      if (name === "Settings") {
+        const nextSettingsView = settingsViewFromLocation();
+        setSettingsView(nextSettingsView);
+        setAccountSecurityOpen(nextSettingsView === "security");
+      } else {
+        setAccountSecurityOpen(false);
+      }
       if (name === "Sites") { setActiveSite(null); setSitePreview(null); setSitesError(""); }
       if (name === "Workspace") {
         setSelectedSandboxGrantId(null);
@@ -3600,7 +4746,7 @@ export function App() {
 
   useEffect(() => {
     const providerPageOpen = activeNav === "AI control plane" && aiControlPlaneView === "models-providers";
-    if (!session || !providerPageOpen || !session.roles.includes("administrator")) return undefined;
+    if (!session || !providerPageOpen || !canManageAnyProvider) return undefined;
     let active = true;
     setProviderSettingsLoading(true);
     adminApi.providerSettings()
@@ -3608,7 +4754,7 @@ export function App() {
       .catch((error) => { if (active) setProviderSettingsError(error.message); })
       .finally(() => { if (active) setProviderSettingsLoading(false); });
     return () => { active = false; };
-  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id]);
+  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id, canManageAnyProvider]);
 
   useEffect(() => {
     if (!session || activeNav !== "Workspace") return undefined;
@@ -3684,28 +4830,42 @@ export function App() {
   }, [session?.user.id]);
 
   useEffect(() => {
-    if (!session || session.roles.includes("administrator") || !["Firewall", "AI control plane"].includes(activeNav)) return;
+    const allowed = activeNav === "Firewall" ? canManagePolicy : activeNav === "AI control plane" ? canOpenAiControlPlane : true;
+    if (!session || allowed || !["Firewall", "AI control plane"].includes(activeNav)) return;
     setActiveNav("Workspace");
     const url = new URL(window.location.href);
     url.searchParams.delete("view");
     url.searchParams.delete("section");
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
-  }, [activeNav, session?.user.id]);
+  }, [activeNav, session?.user.id, canManagePolicy, canOpenAiControlPlane]);
+
+  useEffect(() => {
+    if (activeNav !== "AI control plane" || !canOpenAiControlPlane) return;
+    const allowed = aiControlPlaneView === "spend"
+      ? canReadUsage
+      : availableAiControlPlaneTabs.some((tab) => tab.id === aiControlPlaneView);
+    if (allowed) return;
+    const fallback = availableAiControlPlaneTabs[0]?.id;
+    if (fallback) setAiControlPlaneView(fallback);
+  }, [activeNav, aiControlPlaneView, canOpenAiControlPlane, canReadUsage, availableAiControlPlaneTabs]);
 
   useEffect(() => {
     const workspaceAdminOpen = activeNav === "Settings" && settingsView === "admin";
     const teamsOpen = activeNav === "AI control plane" && aiControlPlaneView === "teams-budgets";
-    if ((!workspaceAdminOpen && !teamsOpen) || !session?.roles.includes("administrator")) return;
+    if ((!workspaceAdminOpen && !teamsOpen)
+      || workspaceAdminOpen && !canManageMembers && !canManageRoles
+      || teamsOpen && !canManageUsage) return;
     if (workspaceAdminOpen) setAdminLoading(true);
     if (teamsOpen) setAdminTeamsLoading(true);
     Promise.all([
-      adminApi.users(),
-      workspaceAdminOpen ? adminApi.invitations() : Promise.resolve(null),
-      workspaceAdminOpen ? adminApi.mcpPolicy() : Promise.resolve(null),
+      canManageMembers ? adminApi.users() : Promise.resolve({ users: [] }),
+      workspaceAdminOpen && canManageMembers ? adminApi.invitations() : Promise.resolve(null),
+      workspaceAdminOpen && canManagePolicy ? adminApi.mcpPolicy() : Promise.resolve(null),
       teamsOpen ? adminApi.teams(true) : Promise.resolve(null),
     ])
       .then(([users, invitations, policy, teams]) => {
         setAdminUsers(users.users);
+        setAdminDelegableBuiltInRoles(users.delegableBuiltInRoles ?? []);
         if (invitations) setAdminInvitations(invitations.invitations);
         if (policy) setMcpPolicy(policy);
         if (teams) setAdminTeams(teams.teams);
@@ -3715,20 +4875,21 @@ export function App() {
         if (workspaceAdminOpen) setAdminLoading(false);
         if (teamsOpen) setAdminTeamsLoading(false);
       });
-  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id]);
+  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id, canManageMembers, canManageRoles, canManagePolicy, canManageUsage]);
 
   useEffect(() => {
-    if (activeNav !== "Firewall" || !session?.roles.includes("administrator")) return;
+    if (activeNav !== "Firewall" || !canManagePolicy) return;
     setAdminLoading(true);
     adminApi.egressSecurityGroups()
       .then((egress) => setEgressVersions(egress.securityGroups))
       .catch(showApiError)
       .finally(() => setAdminLoading(false));
-  }, [activeNav, session?.user.id]);
+  }, [activeNav, session?.user.id, canManagePolicy]);
 
   useEffect(() => {
-    if (activeNav !== "Connections" || !session?.roles.includes("administrator") || !connectionsView.endsWith("-tools")) return;
+    if (activeNav !== "Connections" || !connectionsView.endsWith("-tools")) return;
     const hosted = mcpConnections.find((connector) => connectionsView === `connector-${connector.id}-tools`);
+    if (connectionsView === "microsoft365-tools" ? !canManagePolicy : !hosted?.canAdministerConnector) return;
     setMcpPolicyLoading(true);
     (connectionsView === "microsoft365-tools"
       ? adminApi.mcpPolicy()
@@ -3738,7 +4899,7 @@ export function App() {
       .then(setMcpPolicy)
       .catch(showApiError)
       .finally(() => setMcpPolicyLoading(false));
-  }, [activeNav, connectionsView, session?.user.id, mcpConnections]);
+  }, [activeNav, connectionsView, session?.user.id, mcpConnections, canManagePolicy]);
 
   useEffect(() => {
     if (activeNav !== "Workspace" || !session || !selectedSandboxGrantId) return;
@@ -4361,7 +5522,10 @@ export function App() {
       setConnectionsView("list");
       setConnectionCatalogRefresh((current) => current + 1);
     }
-    if (name === "Settings") setSettingsView("overview");
+    if (name === "Settings") {
+      setSettingsView("overview");
+      setAccountSecurityOpen(false);
+    }
     if (name === "Sites") setSitesError("");
     if (name === "Workspace") { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }
     setProfileOpen(false);
@@ -4369,9 +5533,35 @@ export function App() {
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
   };
 
+  const selectSettingsView = (view = "overview", historyMode = "push") => {
+    const nextView = settingsSectionByView[view] ? view : "overview";
+    setActiveNav("Settings");
+    setSettingsView(nextView);
+    setAccountSecurityOpen(nextView === "security");
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "settings");
+    const section = settingsSectionByView[nextView];
+    if (section) url.searchParams.set("section", section);
+    else url.searchParams.delete("section");
+    url.searchParams.delete("chat");
+    const nextLocation = `${url.pathname}${url.search}`;
+    if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
+    else if (nextLocation !== `${window.location.pathname}${window.location.search}`) {
+      window.history.pushState({}, "", nextLocation);
+    }
+    setProfileOpen(false);
+    setMobileNavOpen(false);
+    window.requestAnimationFrame(() => mainContentRef.current?.focus());
+  };
+
 
   const selectAiControlPlaneView = (view = "overview", historyMode = "push") => {
-    const nextView = aiControlPlaneViews.has(view) ? view : "overview";
+    const requestedView = aiControlPlaneViews.has(view) ? view : "overview";
+    const nextView = requestedView === "spend" && canReadUsage
+      ? requestedView
+      : availableAiControlPlaneTabs.some((tab) => tab.id === requestedView)
+        ? requestedView
+        : availableAiControlPlaneTabs[0]?.id ?? "overview";
     setActiveNav("AI control plane");
     setAiControlPlaneView(nextView);
     const url = new URL(window.location.href);
@@ -4506,9 +5696,13 @@ export function App() {
     setConnectionsView("microsoft365-tools");
   };
 
-  const refreshAdminUsers = () => adminApi.users().then((value) => setAdminUsers(value.users));
+  const refreshAdminUsers = () => adminApi.users().then((value) => {
+    setAdminUsers(value.users);
+    setAdminDelegableBuiltInRoles(value.delegableBuiltInRoles ?? []);
+  });
   const refreshAdminAccess = () => Promise.all([adminApi.users(), adminApi.invitations()]).then(([users, invitations]) => {
     setAdminUsers(users.users);
+    setAdminDelegableBuiltInRoles(users.delegableBuiltInRoles ?? []);
     setAdminInvitations(invitations.invitations);
   });
   const refreshAdminTeams = () => adminApi.teams(true).then((value) => setAdminTeams(value.teams));
@@ -4635,7 +5829,9 @@ export function App() {
     try {
       const result = await adminApi.createInvitation(input);
       await refreshAdminAccess();
-      setToast(`Invitation created for ${input.email.trim().toLowerCase()}.`);
+      setToast(result.delivery?.mode === "email"
+        ? `Invitation emailed to ${input.email.trim().toLowerCase()}.`
+        : `Invitation created for ${input.email.trim().toLowerCase()}.`);
       return result;
     } catch (error) {
       showApiError(error);
@@ -4649,7 +5845,9 @@ export function App() {
     try {
       const result = await adminApi.resendInvitation(invitation.invitationId);
       await refreshAdminAccess();
-      setToast(`A new invitation link was created for ${invitation.email}.`);
+      setToast(result.delivery?.mode === "email"
+        ? `A new invitation email was sent to ${invitation.email}.`
+        : `A new invitation link was created for ${invitation.email}.`);
       return result;
     } catch (error) {
       showApiError(error);
@@ -4697,6 +5895,32 @@ export function App() {
       showApiError(error);
     } finally {
       setAdminBusyUserId("");
+    }
+  };
+  const transferOrganizationOwnership = async (user, authenticatorCode) => {
+    setAdminBusyUserId(user.userId);
+    try {
+      await authApi.completeOwnerStepUp(authenticatorCode);
+      await adminApi.transferOwnership(user.membershipId);
+      setToast(`Organization ownership was transferred to ${user.displayName}. This device has been signed out of the organization.`);
+      return true;
+    } catch (error) {
+      showApiError(error);
+      return false;
+    } finally {
+      setAdminBusyUserId("");
+    }
+  };
+  const initiateOrganizationClosure = async (reason, idempotencyKey, authenticatorCode) => {
+    setAdminInvitationBusy(true);
+    try {
+      await authApi.completeOwnerStepUp(authenticatorCode);
+      return await adminApi.initiateOrganizationClosure(reason, idempotencyKey);
+    } catch (error) {
+      showApiError(error);
+      return null;
+    } finally {
+      setAdminInvitationBusy(false);
     }
   };
   const changeUserStatus = async (user, status) => {
@@ -4855,13 +6079,54 @@ export function App() {
   const logout = async () => {
     try { await authApi.logout(); } finally { window.location.assign("/"); }
   };
+  const switchInvitationAccount = async () => {
+    setAuthLoading(true);
+    try {
+      await authApi.logout();
+      setSession(null);
+      setCustomerSession(null);
+      setAuthError("");
+      setInvitationError("");
+      await refreshAuthentication(false);
+    } catch (error) {
+      setAuthError(error.message ?? "The current account could not be signed out.");
+      setAuthLoading(false);
+    }
+  };
 
   if (authLoading) return <main className="signin-screen"><div className="signin-loading">Checking your work account…</div></main>;
+  const invitationAccount = session?.user ?? customerSession?.user ?? customerSession?.account ?? null;
+  if (invitationActive && invitationError && invitationAccount) {
+    return <InvitationAccountSwitchScreen
+      account={invitationAccount}
+      organizationDisplayName={invitationContext?.organizationDisplayName}
+      onSignOut={switchInvitationAccount}
+    />;
+  }
+  if (customerSession?.status === "verification-required") {
+    return <VerificationRequiredScreen
+      customerSession={customerSession}
+      invitationActive={invitationActive}
+      invitationContext={invitationContext}
+      onSignOut={logout}
+    />;
+  }
+  if (customerSession) {
+    return <OrganizationSelectionScreen customerSession={customerSession} error={authError} onSelected={refreshAuthentication} onSignOut={logout} />;
+  }
   if (!session) {
-    return <SignInScreen error={authError} invitationToken={invitationToken} />;
+    return <SignInScreen
+      error={authError}
+      invitationActive={invitationActive}
+      invitationBusy={invitationPreparing}
+      invitationError={invitationError}
+      invitationContext={invitationContext}
+      invitationVerified={invitationVerified}
+      onSignedIn={() => refreshAuthentication(invitationAcceptable)}
+    />;
   }
   const firstName = session.user.displayName.split(" ")[0] || session.user.displayName;
-  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen);
+  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen || accountSecurityOpen);
 
   return (
     <div className="app-shell">
@@ -4875,7 +6140,7 @@ export function App() {
           <NavButton active={activeNav === "Schedules"} icon={Calendar24Regular} label="Schedules" onClick={() => selectNav("Schedules")} />
           <NavButton active={activeNav === "Sites"} icon={activeNav === "Sites" ? Apps24Filled : Apps24Regular} label="Sites" onClick={() => selectNav("Sites")} />
           <NavButton active={activeNav === "Trail"} icon={Clock24Regular} label="Trail" onClick={() => selectNav("Trail")} />
-          {session.roles.includes("administrator") && <NavButton active={activeNav === "Firewall"} icon={ShieldCheckmark24Regular} label="Firewall" onClick={() => selectNav("Firewall")} />}
+          {canManagePolicy && <NavButton active={activeNav === "Firewall"} icon={ShieldCheckmark24Regular} label="Firewall" onClick={() => selectNav("Firewall")} />}
           <NavButton active={activeNav === "Connections"} icon={PlugConnected24Regular} label="Connections" onClick={() => selectNav("Connections")} />
           <NavButton active={activeNav === "Chat"} icon={Bot24Regular} label="Chat" onClick={() => selectNav("Chat")} />
           {activeNav === "Chat" && <div className="sidebar-chat-history" aria-label="Recent chat threads">
@@ -4908,7 +6173,7 @@ export function App() {
                 <span><strong>{session.user.displayName}</strong><small>{session.user.email}</small></span>
               </div>
               <div className="sidebar-account-menu-actions">
-                {session.roles.includes("administrator") && <>
+                {canOpenAiControlPlane && <>
                   <span className="sidebar-menu-section-label">Organization</span>
                   <button className="sidebar-control-plane-link" type="button" onClick={() => selectAiControlPlaneView("overview")}><Bot24Regular aria-hidden="true" /><span>AI control plane</span><ChevronRight16Regular aria-hidden="true" /></button>
                   <span className="sidebar-menu-divider" aria-hidden="true" />
@@ -4936,6 +6201,8 @@ export function App() {
             loading={homeWorkspacesLoading}
             apiError={apiError}
             actionWorkspaceId={workspaceActionId}
+            canCreateWorkspace={hasCapability("workspace.create")}
+            canManageWorkspace={(workspaceId) => hasScopedCapability("workspace.manage", "workspace", workspaceId) || hasScopedCapability("workspace.manage_own", "workspace", workspaceId)}
             onOpen={openWorkspace}
             onRestart={restartWorkspace}
             onStop={stopWorkspace}
@@ -5001,7 +6268,8 @@ export function App() {
           onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); setTelegramConnection(null); setTelegramError(""); }}
           onSave={saveWorkspaceSettings}
           onAssignSecurityGroup={assignWorkspaceSecurityGroup}
-          canManageFirewall={session.roles.includes("administrator")}
+          canManageFirewall={Boolean(homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId)?.id
+            && hasScopedCapability("policy.manage", "workspace", homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId)?.id))}
           telegram={telegramConnection}
           credentials={credentials}
           channelLoading={telegramLoading}
@@ -5024,7 +6292,8 @@ export function App() {
             onRemoveConnector={removeMcpConnector}
             onAddConnector={() => setConnectorDialogOpen(true)}
             displayName={session.user.displayName}
-            isAdmin={session.roles.includes("administrator")}
+            canAddConnector={hasCapability("provider.manage")}
+            canManagePolicy={canManagePolicy}
             view={connectionsView}
             onViewChange={setConnectionsView}
             mcpPolicy={mcpPolicy}
@@ -5034,17 +6303,17 @@ export function App() {
             onPolicySave={saveMcpPolicy}
           />
         )}
-        {activeNav === "Firewall" && session.roles.includes("administrator") && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
-        {activeNav === "AI control plane" && session.roles.includes("administrator") && (
-          <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView}>
-            {aiControlPlaneView === "overview" && <AiControlPlaneOverview
+        {activeNav === "Firewall" && canManagePolicy && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
+        {activeNav === "AI control plane" && canOpenAiControlPlane && (
+          <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView} tabs={availableAiControlPlaneTabs}>
+            {aiControlPlaneView === "overview" && canReadUsage && <AiControlPlaneOverview
               onOpenSpend={() => selectAiControlPlaneView("spend")}
               onOpenRouting={() => selectAiControlPlaneView("model-routes")}
               onOpenPricing={() => selectAiControlPlaneView("pricing")}
             />}
-            {aiControlPlaneView === "spend" && <SpendDashboard onBack={() => selectAiControlPlaneView("overview")} />}
-            {aiControlPlaneView === "data-health" && <UsageDataHealth onOpenPricing={() => selectAiControlPlaneView("pricing")} />}
-            {aiControlPlaneView === "models-providers" && <ProviderSettingsScreen
+            {aiControlPlaneView === "spend" && canReadUsage && <SpendDashboard onBack={() => selectAiControlPlaneView("overview")} />}
+            {aiControlPlaneView === "data-health" && (canReadUsage || canManageUsage) && <UsageDataHealth onOpenPricing={() => selectAiControlPlaneView("pricing")} />}
+            {aiControlPlaneView === "models-providers" && canManageAnyProvider && <ProviderSettingsScreen
               providers={providerSettings}
               loading={providerSettingsLoading}
               busy={providerSettingsBusy}
@@ -5054,9 +6323,9 @@ export function App() {
               onDisable={disableProviderSetting}
               onDelete={deleteProviderSetting}
             />}
-            {aiControlPlaneView === "model-routes" && <RoutingAdmin draftScope={{ tenantId: session.tenant.id, userId: session.user.id }} />}
-            {aiControlPlaneView === "pricing" && <RoutingAdmin section="pricing" />}
-            {aiControlPlaneView === "teams-budgets" && <TeamsAdminSection
+            {aiControlPlaneView === "model-routes" && (canManagePolicy || hasCapability("provider.manage")) && <RoutingAdmin draftScope={{ tenantId: session.tenant.id, userId: session.user.id }} />}
+            {aiControlPlaneView === "pricing" && (canReadUsage || canManageUsage) && <RoutingAdmin section="pricing" />}
+            {aiControlPlaneView === "teams-budgets" && canManageUsage && <TeamsAdminSection
               teams={adminTeams}
               users={adminUsers}
               loading={adminTeamsLoading}
@@ -5073,11 +6342,18 @@ export function App() {
         )}
         {activeNav === "Settings" && <SettingsScreen
           view={settingsView}
-          isAdmin={session.roles.includes("administrator")}
+          isAdmin={canManageAnyWorkspace}
+          canManageMembers={canManageMembers}
+          canManageRoles={canManageRoles}
+          canManageSettings={canManageSettings}
+          canManagePolicy={canManagePolicy}
+          canManageWorkspace={(workspaceId) => hasScopedCapability("workspace.manage", "workspace", workspaceId)}
+          delegableBuiltInRoles={adminDelegableBuiltInRoles}
           currentUserId={session.user.id}
-          onOpenAdmin={() => setSettingsView("admin")}
-          onOpenCredentials={() => setSettingsView("credentials")}
-          onBack={() => setSettingsView("overview")}
+          onOpenAdmin={() => selectSettingsView("admin")}
+          onOpenCredentials={() => selectSettingsView("credentials")}
+          onOpenAccountSecurity={() => selectSettingsView("security")}
+          onBack={() => selectSettingsView("overview")}
           credentials={credentials}
           workspaces={homeWorkspaces}
           credentialsLoading={credentialsLoading}
@@ -5096,6 +6372,8 @@ export function App() {
           onRevokeInvitation={revokeOrganizationInvitation}
           onRoleChange={changeMembershipRole}
           onStatusChange={changeUserStatus}
+          onTransferOwnership={transferOrganizationOwnership}
+          onInitiateClosure={initiateOrganizationClosure}
           onRevokeSessions={revokeUserSessions}
           onManageWorkspace={manageAdminWorkspace}
           adminWorkspaceTarget={adminWorkspaceTarget}
@@ -5149,6 +6427,17 @@ export function App() {
           onCancel={() => setSandboxCreateOpen(false)}
         />
       )}
+
+      {accountSecurityOpen && <ModalDialog
+        className="account-security-modal"
+        title="Account security"
+        description="Manage authentication methods and device sessions for your LemmaComputer identity. Organization access remains separate."
+        eyebrow="Your identity"
+        labelledBy="account-security-title"
+        onClose={() => selectSettingsView("overview")}
+      >
+        <AccountSecurityPanel onSessionChanged={refreshAuthentication} onSignOutAll={logout} />
+      </ModalDialog>}
 
 
       {drawer === "request" && operation && (

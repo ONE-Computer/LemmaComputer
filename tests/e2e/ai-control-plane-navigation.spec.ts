@@ -118,7 +118,7 @@ test("employee cannot discover or deep-link the administrator control plane", as
     const body = await response.json();
     await route.fulfill({
       response,
-      json: { ...body, roles: ["employee"] },
+      json: { ...body, roles: ["employee"], capabilities: [], resourceCapabilities: [] },
     });
   });
   await page.goto("/?view=ai-control-plane");

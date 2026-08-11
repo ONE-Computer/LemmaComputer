@@ -70,6 +70,14 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
     const secondBackfill = await backfillOrganizationRbac(pool, 1);
     assert.equal(secondBackfill.usersBackfilled, 0, "the explicit backfill is idempotent");
 
+    const unattachedBetterAuthUserId = randomUUID();
+    assert.deepEqual(await store.ensureCustomerAccount({ accountUserId: unattachedBetterAuthUserId }), {
+      accountUserId: unattachedBetterAuthUserId,
+      status: "active",
+    });
+    assert.deepEqual(await store.listCustomerMemberships(unattachedBetterAuthUserId), [],
+      "authentication alone grants no organization membership");
+
     const sameEmailAccounts = await pool.query(
       `SELECT count(DISTINCT identity.account_user_id)::integer AS count
        FROM external_identities identity
@@ -161,18 +169,38 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
 
     const alphaPrincipal = await store.getPrincipal(alphaOwner);
     assert.ok(alphaPrincipal?.membershipId);
+    assert.ok(alphaPrincipal.accountUserId);
+    assert.deepEqual(
+      (await store.listCustomerMemberships(alphaPrincipal.accountUserId)).map((membership) => membership.organizationId).sort(),
+      [alphaOrganization, betaOrganization].sort(),
+    );
     await store.createSession({
       tokenHash: `session-alpha-${suffix}`,
       userId: alphaOwner,
       membershipId: alphaPrincipal.membershipId,
       expiresAt: new Date(Date.now() + 60_000),
     });
-    await store.createSession({
-      tokenHash: `session-alpha-beta-${suffix}`,
-      userId: alphaInBeta.userId,
+    const betterAuthSessionId = randomUUID();
+    const selectedBeta = await store.selectCustomerProductSession({
+      authenticationSessionId: betterAuthSessionId,
+      accountUserId: alphaPrincipal.accountUserId,
       membershipId: alphaInBeta.membershipId,
       expiresAt: new Date(Date.now() + 60_000),
+      now: new Date(),
     });
+    assert.equal(selectedBeta.tenantId, betaOrganization);
+    assert.equal((await store.getCustomerProductSession({
+      authenticationSessionId: betterAuthSessionId,
+      accountUserId: alphaPrincipal.accountUserId,
+      now: new Date(),
+    }))?.membershipId, alphaInBeta.membershipId);
+    await assert.rejects(() => store.selectCustomerProductSession({
+      authenticationSessionId: randomUUID(),
+      accountUserId: unattachedBetterAuthUserId,
+      membershipId: alphaInBeta.membershipId,
+      expiresAt: new Date(Date.now() + 60_000),
+      now: new Date(),
+    }), { code: "MEMBERSHIP_NOT_ACTIVE" });
     const changed = await store.changeOrganizationMembership({
       organizationId: betaOrganization,
       targetUserId: alphaInBeta.userId,
@@ -181,7 +209,11 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
     });
     assert.equal(changed.revokedSessions, 1);
     assert.ok(await store.getSession(`session-alpha-${suffix}`, new Date()), "another organization session remains active");
-    assert.equal(await store.getSession(`session-alpha-beta-${suffix}`, new Date()), null);
+    assert.equal(await store.getCustomerProductSession({
+      authenticationSessionId: betterAuthSessionId,
+      accountUserId: alphaPrincipal.accountUserId,
+      now: new Date(),
+    }), null);
     const suspendedLegacyUser = await pool.query("SELECT status FROM users WHERE id=$1", [alphaInBeta.userId]);
     assert.equal(suspendedLegacyUser.rows[0].status, "disabled");
 

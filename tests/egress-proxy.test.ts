@@ -25,6 +25,7 @@ const expectedGrant = {
   tenantId: "acme",
   subjectId: "alex",
   workspaceId: "11111111-1111-4111-8111-111111111111",
+  accessGeneration: 1,
   agentId: "agent-alex",
   securityGroupVersionId: policy.id,
   egressMode: "restricted" as const,
@@ -87,11 +88,14 @@ test("authenticated CONNECT reaches only an exact approved destination", async (
   const secret = deriveEgressProxySecret("root-secret-with-at-least-thirty-two-characters", expectedGrant.workspaceId);
   const token = issueEgressProxyGrant(secret, expectedGrant, new Date(), 60);
   let upstreamConnections = 0;
+  let workspaceAccess = true;
   const events: Record<string, unknown>[] = [];
   const proxy = createEgressProxy({
     policy: compileEgressSecurityGroup(policy),
     verificationSecret: secret,
     expectedGrant,
+    workspaceAccessAuthorizer: async () => workspaceAccess,
+    accessHeartbeatMs: 25,
     resolveHost: async () => [{ address: "104.18.0.1", family: 4 }],
     connect: () => {
       upstreamConnections += 1;
@@ -108,7 +112,10 @@ test("authenticated CONNECT reaches only an exact approved destination", async (
     const hello = clientHello("downloads.claude.ai");
     allowed.socket!.write(hello);
     assert.equal(await echoed, hello.toString("hex"));
-    allowed.socket!.destroy();
+    const revoked = new Promise<void>((resolve) => allowed.socket!.once("close", resolve));
+    workspaceAccess = false;
+    await revoked;
+    workspaceAccess = true;
     assert.equal(upstreamConnections, 1);
 
     const mismatchedSni = await connect(proxyPort, "downloads.claude.ai:443", token);

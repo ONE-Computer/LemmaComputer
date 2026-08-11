@@ -108,6 +108,7 @@ export type EgressProxyGrantClaims = {
   tenantId: string;
   subjectId: string;
   workspaceId: string;
+  accessGeneration: number;
   agentId: string;
   securityGroupVersionId: string;
   egressMode: EgressMode;
@@ -119,7 +120,7 @@ export type EgressProxyGrantClaims = {
 
 export type EgressProxyGrantExpectation = Pick<
   EgressProxyGrantClaims,
-  "tenantId" | "subjectId" | "workspaceId" | "agentId"
+  "tenantId" | "subjectId" | "workspaceId" | "accessGeneration" | "agentId"
 > & Partial<Pick<
   EgressProxyGrantClaims,
   "securityGroupVersionId" | "egressMode" | "policyHash"

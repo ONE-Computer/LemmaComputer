@@ -40,7 +40,9 @@ export type DynamicDestinationAuthorizer = (
 
 export type WorkspaceProxyConfig = ProxySharedConfig & {
   verificationSecret: string;
-  expectedGrant: Pick<EgressProxyGrantClaims, "tenantId" | "subjectId" | "workspaceId" | "agentId" | "securityGroupVersionId" | "egressMode" | "policyHash">;
+  expectedGrant: Pick<EgressProxyGrantClaims, "tenantId" | "subjectId" | "workspaceId" | "accessGeneration" | "agentId" | "securityGroupVersionId" | "egressMode" | "policyHash">;
+  workspaceAccessAuthorizer: (claims: Pick<EgressProxyGrantClaims, "tenantId" | "subjectId" | "workspaceId" | "accessGeneration">) => Promise<boolean>;
+  accessHeartbeatMs?: number;
 };
 
 /**
@@ -102,13 +104,29 @@ const authorize = (header: string | undefined, config: ProxyConfig) => {
       ? { service: gatewayServiceId }
       : null;
   }
-  const { tenantId, subjectId, workspaceId, agentId } = config.expectedGrant;
+  const { tenantId, subjectId, workspaceId, accessGeneration, agentId } = config.expectedGrant;
   return verifyEgressProxyGrant(credentials.password, config.verificationSecret, {
     tenantId,
     subjectId,
     workspaceId,
+    accessGeneration,
     agentId,
   });
+};
+
+const workspaceAccessAllowed = async (config: ProxyConfig, grant: ReturnType<typeof authorize>) => {
+  if (isGatewayServiceProxy(config)) return true;
+  if (!grant || !("accessGeneration" in grant)) return false;
+  try {
+    return await config.workspaceAccessAuthorizer({
+      tenantId: grant.tenantId,
+      subjectId: grant.subjectId,
+      workspaceId: grant.workspaceId,
+      accessGeneration: grant.accessGeneration,
+    });
+  } catch {
+    return false;
+  }
 };
 
 const dynamicallyAuthorizeDestination = async (
@@ -333,6 +351,32 @@ export function createHttpDynamicDestinationAuthorizer(
   };
 }
 
+export function createHttpWorkspaceAccessAuthorizer(
+  controlUrl: string,
+  token: string,
+  fetcher: DynamicAuthorizationFetcher = (url, init) => fetch(url, init),
+): WorkspaceProxyConfig["workspaceAccessAuthorizer"] {
+  const endpoint = new URL("/internal/v1/workspace-access/authorize", controlUrl);
+  if (!/^https?:$/.test(endpoint.protocol) || endpoint.username || endpoint.password || token.length < 24) {
+    throw new Error("Workspace access authorization configuration is invalid");
+  }
+  return async (claims) => {
+    try {
+      const response = await fetcher(endpoint.toString(), {
+        method: "POST",
+        redirect: "error",
+        headers: { "content-type": "application/json", "x-lemmacomputer-mcp-policy-token": token },
+        body: JSON.stringify(claims),
+        signal: AbortSignal.timeout(900),
+      });
+      if (!response.ok) return false;
+      return isExactlyAllowedResponse(await response.json());
+    } catch {
+      return false;
+    }
+  };
+}
+
 export function createEgressProxy(config: ProxyConfig) {
   if (isGatewayServiceProxy(config) && config.servicePassword.length < 32) {
     throw new Error("EGRESS_PROXY_SERVICE_PASSWORD must be at least 32 characters");
@@ -350,9 +394,15 @@ export function createEgressProxy(config: ProxyConfig) {
     throw new Error("Gateway tunnel limits must be whole milliseconds of at least one second");
   }
   const server = http.createServer(async (request, response) => {
-    if (!authorize(request.headers["proxy-authorization"], config)) {
+    const grant = authorize(request.headers["proxy-authorization"], config);
+    if (!grant) {
       audit(config, "EGRESS_PROXY_UNAUTHORIZED");
       denyResponse(response, 407, "EGRESS_PROXY_UNAUTHORIZED");
+      return;
+    }
+    if (!await workspaceAccessAllowed(config, grant)) {
+      audit(config, "EGRESS_WORKSPACE_ACCESS_REVOKED");
+      denyResponse(response, 403, "EGRESS_WORKSPACE_ACCESS_REVOKED");
       return;
     }
     let target: URL;
@@ -405,9 +455,15 @@ export function createEgressProxy(config: ProxyConfig) {
     // though the server supplies a net.Socket. Keep the socket type here for
     // the gateway-only idle timeout without broadening the proxy interface.
     const clientSocket = client as net.Socket;
-    if (!authorize(request.headers["proxy-authorization"], config)) {
+    const grant = authorize(request.headers["proxy-authorization"], config);
+    if (!grant) {
       audit(config, "EGRESS_PROXY_UNAUTHORIZED");
       client.end("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    if (!await workspaceAccessAllowed(config, grant)) {
+      audit(config, "EGRESS_WORKSPACE_ACCESS_REVOKED");
+      client.end("HTTP/1.1 403 Forbidden\r\nX-LemmaComputer-Reason: EGRESS_WORKSPACE_ACCESS_REVOKED\r\nConnection: close\r\n\r\n");
       return;
     }
     let target: URL;
@@ -481,6 +537,20 @@ export function createEgressProxy(config: ProxyConfig) {
         client.destroy();
         upstream.destroy();
       };
+      let accessHeartbeat: NodeJS.Timeout | undefined;
+      if (!isGatewayServiceProxy(config)) {
+        accessHeartbeat = setInterval(() => {
+          void workspaceAccessAllowed(config, grant).then((allowed) => {
+            if (!allowed) close();
+          });
+        }, config.accessHeartbeatMs ?? 1_000);
+        accessHeartbeat.unref();
+      }
+      const clearAccessHeartbeat = () => {
+        if (accessHeartbeat) clearInterval(accessHeartbeat);
+      };
+      client.once("close", clearAccessHeartbeat);
+      upstream.once("close", clearAccessHeartbeat);
       if (isGatewayServiceProxy(config)) {
         maxLifetime = setTimeout(close, config.maxTunnelLifetimeMs ?? defaultGatewayTunnelLifetimeMs);
       }
@@ -525,11 +595,15 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       throw new Error("Dynamic destination authorization is available only with EGRESS_PROXY_SERVICE_PASSWORD");
     }
     const verificationSecret = process.env.EGRESS_GRANT_SECRET;
+    const workspaceAccessUrl = process.env.EGRESS_WORKSPACE_ACCESS_URL;
+    const workspaceAccessToken = process.env.EGRESS_WORKSPACE_ACCESS_TOKEN;
     if (!verificationSecret || verificationSecret.length < 32) throw new Error("EGRESS_GRANT_SECRET is required");
+    if (!workspaceAccessUrl || !workspaceAccessToken) throw new Error("Workspace access authorization is required");
     config = {
       policy: compileRuntimeEgressPolicy(policy),
       verificationSecret,
       expectedGrant: JSON.parse(process.env.EGRESS_EXPECTED_GRANT_JSON ?? "") as WorkspaceProxyConfig["expectedGrant"],
+      workspaceAccessAuthorizer: createHttpWorkspaceAccessAuthorizer(workspaceAccessUrl, workspaceAccessToken),
     };
   }
   createEgressProxy(config)

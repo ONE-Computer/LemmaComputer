@@ -24,7 +24,7 @@ const signedPolicy = policyFixture(runtimePolicy, workspaceId);
 let lastGatewayCredential: string | undefined;
 let lastAgentBridge: { baseUrl: string; token: string } | undefined;
 let lastEgressUpdate: { providerId: string; versionId: string } | undefined;
-let purgedWorkspaceId: string | undefined;
+let purgedWorkspace: { workspaceId: string; accessGeneration?: number } | undefined;
 const adapter: SandboxAdapter = {
   async create({ workspaceId, gateway, agentBridge }) {
     lastGatewayCredential = gateway?.credential;
@@ -34,10 +34,10 @@ const adapter: SandboxAdapter = {
   async updateEgressPolicy(providerId, input) {
     lastEgressUpdate = { providerId, versionId: input.policy.egress!.id };
   },
-  async status(providerId) { return { providerId, state: "ready", failureCode: null }; },
+  async status(providerId) { return { providerId, workspaceId, state: "ready", failureCode: null }; },
   async open() { return { launchUrl: "https://127.0.0.1:16920/", expiresAt: new Date(Date.now() + 60_000).toISOString() }; },
   async destroy() {},
-  async purgeWorkspace(workspaceId) { purgedWorkspaceId = workspaceId; },
+  async purgeWorkspace(workspaceId, accessGeneration) { purgedWorkspace = { workspaceId, accessGeneration }; },
 };
 
 test("controller applies a newly signed egress revision without replacing the sandbox", async () => {
@@ -84,6 +84,7 @@ test("controller applies a newly signed egress revision without replacing the sa
           tenantId: "acme",
           subjectId: "alex",
           workspaceId,
+          accessGeneration: 1,
           agentId: egressPolicy.agentId,
           securityGroupVersionId: egressPolicy.egress.id,
           egressMode: egressPolicy.egressMode,
@@ -111,9 +112,9 @@ test("bodyless open and destroy commands work with internal authentication", asy
   assert.equal(open.json().launchUrl, "https://127.0.0.1:16920/");
   const destroy = await app.inject({ method: "DELETE", url: "/internal/v1/sandboxes/provider-1", headers: { "x-controller-token": token } });
   assert.equal(destroy.statusCode, 204);
-  const purge = await app.inject({ method: "DELETE", url: "/internal/v1/workspaces/workspace-1/storage", headers: { "x-controller-token": token } });
+  const purge = await app.inject({ method: "DELETE", url: "/internal/v1/workspaces/workspace-1/storage?accessGeneration=7", headers: { "x-controller-token": token } });
   assert.equal(purge.statusCode, 204);
-  assert.equal(purgedWorkspaceId, "workspace-1");
+  assert.deepEqual(purgedWorkspace, { workspaceId: "workspace-1", accessGeneration: 7 });
   await app.close();
 });
 
@@ -125,6 +126,7 @@ test("controller passes a validated scoped gateway grant to the sandbox adapter"
     headers: { "x-controller-token": token },
     payload: {
       workspaceId,
+      accessGeneration: 1,
       correlationId: "correlation-002",
       policy: runtimePolicy,
       policyBundle: signedPolicy.bundle,
@@ -154,6 +156,7 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
   const app = createControllerServer(adapter, token, signedPolicy.keys);
   const base = {
     workspaceId,
+    accessGeneration: 1,
     correlationId: "correlation-policy-negative",
     policy: runtimePolicy,
     gateway: {
@@ -204,5 +207,23 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
   });
   assert.equal(substituted.statusCode, 403);
   assert.equal(substituted.json().error.code, "POLICY_BINDING_MISMATCH");
+  await app.close();
+});
+
+test("controller destroys a sandbox only through its exact workspace binding", async () => {
+  const app = createControllerServer(adapter, token, signedPolicy.keys);
+  const denied = await app.inject({
+    method: "DELETE",
+    url: `/internal/v1/workspaces/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/sandboxes/provider-existing`,
+    headers: { "x-controller-token": token },
+  });
+  assert.equal(denied.statusCode, 409);
+  assert.equal(denied.json().error.code, "WORKSPACE_SANDBOX_BINDING_MISMATCH");
+  const allowed = await app.inject({
+    method: "DELETE",
+    url: `/internal/v1/workspaces/${workspaceId}/sandboxes/provider-existing`,
+    headers: { "x-controller-token": token },
+  });
+  assert.equal(allowed.statusCode, 204);
   await app.close();
 });

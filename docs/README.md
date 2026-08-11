@@ -40,12 +40,17 @@
   defines the accepted Better Auth boundary, authentication database,
   hosted/customer-managed topology, enterprise SSO integration, product
   authorization handoff, security baseline, and migration sequence.
-- [Local deployment and Entra setup](local-deployment.md) is the agent-oriented
-  runbook for preparing `.env`, configuring Microsoft Entra, building the
-  workspace image, starting Compose, and verifying the stack.
-- [Hosted Microsoft Entra External ID](hosted-external-id.md) separates
-  provider accounts and MFA from invitation-bound product access and Microsoft
-  365 consent, and defines the real-tenant qualification evidence.
+- [ADR 0004](adr/0004-better-auth-adoption-and-qualification.md) fixes the
+  provider-neutral principal/session contracts, threat model, database and
+  recovery operations, exact Better Auth pins, and downstream qualification
+  evidence required by issue #51.
+- [Local deployment and Microsoft integration setup](local-deployment.md) is
+  the agent-oriented runbook for preparing `.env`, configuring customer
+  authentication and optional Microsoft integrations, building the workspace
+  image, starting Compose, and verifying the stack.
+- [Transitional hosted Microsoft Entra External ID adapter](hosted-external-id.md)
+  documents the legacy hosted adapter and its real-tenant qualification. It is
+  not the current universal customer-authentication architecture.
 - [Extending LemmaComputer](extending.md) is the implementation guide for adding
   model routes, MCP connectors, tools, agents, applications, sandbox drivers,
   channels, and schema migrations.

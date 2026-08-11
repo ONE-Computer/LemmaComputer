@@ -176,6 +176,7 @@ export interface RoutingStore extends RoutingAffinityStore {
     team: RoutingPolicyScope | null;
     requiredResidency?: string;
     createdBy: string;
+    initializeFixedRollout?: boolean;
   }): Promise<string>;
   createReview(input: {
     tenantId: string;
@@ -537,6 +538,27 @@ export class PostgresRoutingStore implements RoutingStore {
           input.createdBy,
         ],
       );
+      if (input.initializeFixedRollout) {
+        const existingRollout = await client.query(
+          "SELECT 1 FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$2 LIMIT 1",
+          [input.tenantId, input.teamId],
+        );
+        if (!existingRollout.rowCount) {
+          const initialClass = input.identity.safeDefault;
+          const fixedDeploymentId = input.serviceClassPolicies[initialClass]?.eligibleDeploymentIds[0];
+          if (!fixedDeploymentId || !input.identity.allowedDeploymentIds.includes(fixedDeploymentId)) {
+            throw new Error("The initial fixed route requires an eligible safe-default deployment");
+          }
+          await client.query(
+            `INSERT INTO ai_routing_rollout_versions(
+               id,tenant_id,team_id,policy_version_id,mapping_version_id,mode,
+               fixed_deployment_id,evidence_review_id,previous_rollout_version_id,reason,created_by
+             ) VALUES($1,$2,$3,$4,$5,'disabled',$6,NULL,NULL,$7,$8)`,
+            [randomUUID(), input.tenantId, input.teamId, id, input.mappingVersionId,
+              fixedDeploymentId, "Initial fixed route for immediate governed use", input.createdBy],
+          );
+        }
+      }
       await client.query("COMMIT");
       return id;
     } catch (error) {

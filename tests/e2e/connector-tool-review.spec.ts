@@ -20,6 +20,7 @@ const connector = {
   enabled: true,
   membersCanManage: true,
   canManageConnection: true,
+  canAdministerConnector: true,
   accessPolicyVersion: 1,
   accessPolicyUpdatedAt: "2026-08-02T00:00:00.000Z",
 };

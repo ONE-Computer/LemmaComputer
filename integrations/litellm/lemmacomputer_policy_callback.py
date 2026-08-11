@@ -28,6 +28,11 @@ POLICY_URL = os.environ.get(
     "http://control-api:4100/internal/v1/mcp/authorize",
 )
 POLICY_TOKEN = os.environ.get("LEMMACOMPUTER_MCP_POLICY_TOKEN", "")
+WORKSPACE_ACCESS_URL = os.environ.get(
+    "LEMMACOMPUTER_WORKSPACE_ACCESS_URL",
+    "http://control-api:4100/internal/v1/workspace-access/authorize",
+)
+WORKSPACE_ACCESS_TOKEN = os.environ.get("LEMMACOMPUTER_WORKSPACE_ACCESS_TOKEN", "")
 POLICY_TIMEOUT_SECONDS = 15
 POLICY_ATTEMPTS = 2
 USAGE_URL = os.environ.get(
@@ -205,6 +210,40 @@ def _request_decision(payload):
     if result.get("decision") not in ("allow", "deny", "approval_required"):
         raise RuntimeError("MCP policy authority returned an unknown decision")
     return result
+
+
+def _authorize_workspace_access(metadata):
+    workspace_id = metadata.get("lemmacomputer_workspace_id")
+    if not isinstance(workspace_id, str) or not workspace_id:
+        return
+    generation = metadata.get("lemmacomputer_access_generation")
+    payload = {
+        "tenantId": metadata.get("lemmacomputer_tenant_id"),
+        "subjectId": metadata.get("lemmacomputer_subject_id"),
+        "workspaceId": workspace_id,
+        "accessGeneration": generation,
+    }
+    if (
+        len(WORKSPACE_ACCESS_TOKEN) < 24
+        or not isinstance(payload["tenantId"], str)
+        or not isinstance(payload["subjectId"], str)
+        or not isinstance(generation, int)
+        or generation < 1
+    ):
+        raise RuntimeError("Workspace access metadata is incomplete")
+    request = urllib.request.Request(
+        WORKSPACE_ACCESS_URL,
+        data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+        method="POST",
+        headers={
+            "content-type": "application/json",
+            "x-lemmacomputer-mcp-policy-token": WORKSPACE_ACCESS_TOKEN,
+        },
+    )
+    with urllib.request.urlopen(request, timeout=0.9) as response:
+        result = json.load(response)
+    if response.status != 200 or result != {"allowed": True}:
+        raise RuntimeError("Workspace access is no longer active")
 
 
 def _as_dict(value):
@@ -1302,13 +1341,20 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
             _INTERNAL_ADMISSION_CONTEXT.set(None)
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+        metadata = _metadata(user_api_key_dict)
+        try:
+            await asyncio.to_thread(_authorize_workspace_access, metadata)
+        except urllib.error.HTTPError as error:
+            status = 403 if error.code in (401, 403) else 503
+            raise HTTPException(status_code=status, detail={"error": "WORKSPACE_ACCESS_REVOKED"}) from None
+        except (OSError, ValueError, RuntimeError, urllib.error.URLError):
+            raise HTTPException(status_code=503, detail={"error": "WORKSPACE_ACCESS_UNAVAILABLE"}) from None
         if call_type != "call_mcp_tool":
             # v1.93 invokes this owned callback after key authorization for the
             # sole synthetic alias and before Router model-group lookup.
             data["user_api_key_dict"] = user_api_key_dict
             return await self.async_pre_routing_hook(data, call_type)
 
-        metadata = _metadata(user_api_key_dict)
         permission = getattr(user_api_key_dict, "object_permission", None)
         permitted_servers = getattr(permission, "mcp_servers", None)
         if permitted_servers is None and isinstance(permission, dict):

@@ -53,11 +53,25 @@ const validHostedEnvironment = () => {
 
   Object.assign(values, {
     LEMMACOMPUTER_INSTALLATION_KIND: "hosted",
+    LEMMACOMPUTER_RUNTIME_ENVIRONMENT: "production",
+    LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS: "192.0.2.10/32",
+    LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT: "postmark",
+    LEMMACOMPUTER_POSTMARK_SERVER_TOKEN: "postmark-test-token",
+    LEMMACOMPUTER_POSTMARK_FROM: "login@example.test",
+    LEMMACOMPUTER_POSTMARK_MESSAGE_STREAM: "auth",
+    LEMMACOMPUTER_INVITATION_DELIVERY_MODE: "email",
     LEMMACOMPUTER_PUBLIC_WEB_URL: "https://hosted.example.test",
     LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID: "hosted-external-directory",
     LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN: "hosted-test",
     LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID: "hosted-external-client",
     LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET: "hosted-external-secret",
+    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID: "hosted-workforce-directory",
+    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID: "hosted-platform-client",
+    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET: "hosted-platform-secret",
+    LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET: "platform-session-secret-that-is-long-enough-0001",
+    LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: "c1",
+    LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL: "https://security-alerts.example.test/lemma",
+    LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: "security-alert-webhook-secret-at-least-32-characters",
     LEMMACOMPUTER_SANDBOX_DRIVER: "kasm",
     LEMMACOMPUTER_KASM_BASE_URL: "https://workspace.example.test",
     LEMMACOMPUTER_KASM_API_KEY: "test-kasm-api-key",
@@ -202,6 +216,14 @@ test("the public ingress owns the browser-facing LiteLLM OAuth callback", () => 
   assert.equal(services.litellm.LEMMACOMPUTER_M365_AUTHORIZATION_URL, `${publicOrigin}/m365/authorize`);
 });
 
+test("the configured Postmark message stream reaches only Control's email adapter", () => {
+  const services = projectServiceEnvironment(validHostedEnvironment());
+  assert.equal(services["control-api"].POSTMARK_MESSAGE_STREAM, "auth");
+  for (const [service, environment] of Object.entries(services)) {
+    if (service !== "control-api") assert.ok(!("POSTMARK_MESSAGE_STREAM" in environment));
+  }
+});
+
 test("env:update normalizes a historical blank LiteLLM admin URL to the catalog default", () => {
   const template = renderEnvironmentTemplate();
   const initialized = initializeEnvironment(template, "Etc/UTC");
@@ -254,6 +276,13 @@ test("hosted validation fails closed for missing or non-HTTPS LiteLLM mutual TLS
     () => validateDeploymentEnvironment(insecureTransport, { profile: "hosted", strict: true }),
     /HTTPS|LEMMACOMPUTER_LITELLM_ADMIN_URL/i,
   );
+
+  const insecureAlertDestination = validHostedEnvironment();
+  insecureAlertDestination.LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL = "http://security-alerts.example.test/lemma";
+  assert.throws(
+    () => validateDeploymentEnvironment(insecureAlertDestination, { profile: "hosted", strict: true }),
+    /HTTPS|PLATFORM_SECURITY_ALERT_WEBHOOK_URL/i,
+  );
 });
 
 test("hosted validation rejects secret reuse and raw Telegram token compatibility mode", () => {
@@ -276,6 +305,29 @@ test("hosted validation rejects secret reuse and raw Telegram token compatibilit
   assert.throws(
     () => validateDeploymentEnvironment(legacyTelegram, { profile: "hosted", strict: true }),
     /TELEGRAM_RAW_TOKEN_INPUT_MODE.*reject|broker-only/i,
+  );
+});
+
+test("hosted validation requires an isolated platform-operator workforce realm", () => {
+  const missingWorkforceRealm = validHostedEnvironment();
+  missingWorkforceRealm.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID = "";
+  assert.throws(
+    () => validateDeploymentEnvironment(missingWorkforceRealm, { profile: "hosted", strict: true }),
+    /PLATFORM_OPERATOR_ENTRA_TENANT_ID.*required/i,
+  );
+
+  const sharedApplication = validHostedEnvironment();
+  sharedApplication.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID = sharedApplication.LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID;
+  assert.throws(
+    () => validateDeploymentEnvironment(sharedApplication, { profile: "hosted", strict: true }),
+    /PLATFORM_OPERATOR_ENTRA_CLIENT_ID.*separate application/i,
+  );
+
+  const sharedSessionSecret = validHostedEnvironment();
+  sharedSessionSecret.LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET = sharedSessionSecret.LEMMACOMPUTER_SESSION_SECRET;
+  assert.throws(
+    () => validateDeploymentEnvironment(sharedSessionSecret, { profile: "hosted", strict: true }),
+    /PLATFORM_OPERATOR_SESSION_SECRET.*distinct/i,
   );
 });
 
@@ -302,6 +354,19 @@ test("profile validation rejects workspace and hosted-control contradictions", (
   assert.throws(
     () => validateDeploymentEnvironment(externalIdInCustomerDeployment, { profile: "customer-managed", strict: true }),
     /EXTERNAL_ID_.*hosted-only/i,
+  );
+
+  const platformOperatorInCustomerDeployment = validCustomerManagedEnvironment();
+  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID = "workforce-directory";
+  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID = "platform-client";
+  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET = "platform-secret";
+  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET = "platform-session-secret-that-is-long-enough-0001";
+  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT = "c1";
+  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL = "https://security-alerts.example.test/lemma";
+  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET = "security-alert-webhook-secret-at-least-32-characters";
+  assert.throws(
+    () => validateDeploymentEnvironment(platformOperatorInCustomerDeployment, { profile: "customer-managed", strict: true }),
+    /PLATFORM_OPERATOR_.*hosted-only/i,
   );
 
   const unconfiguredCustomerIssuer = validCustomerManagedEnvironment();

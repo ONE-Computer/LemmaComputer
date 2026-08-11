@@ -1,6 +1,8 @@
 export type ProductionDeploymentProfileId = "customer-managed" | "hosted";
 export type DeploymentProfileId = ProductionDeploymentProfileId | "worktree";
-export type SignInProviderId = "development-fixture" | "workforce-entra" | "external-id" | "enterprise-entra";
+export type SignInProviderId = "development-fixture" | "better-auth-customer" | "workforce-entra" | "external-id" | "enterprise-entra";
+export type TransitionalCustomerAdapterId = "workforce-entra" | "external-id" | "enterprise-entra";
+export type CustomerAuthenticationMethod = "email-password" | "passkey" | "google-oauth" | "microsoft-oauth" | "saml" | "oidc";
 export type WorkspaceDriverId = "kasm-local" | "kasm";
 export type WorkspaceExecutionBoundary = "local-operator-controlled" | "remote-isolated";
 export type WorkspaceProviderQualification = "development-only" | "operator-approved" | "platform-qualified";
@@ -18,6 +20,13 @@ export interface WorkspaceProviderPolicy {
   readonly requiredControls: readonly WorkspaceProviderRequiredControl[];
 }
 
+export interface CustomerAuthenticationPolicy {
+  readonly framework: "better-auth";
+  readonly databaseScope: "installation-local" | "pooled-control-plane" | "development-isolated";
+  readonly requiredLemmaHostedDependency: false;
+  readonly allowedMethods: readonly CustomerAuthenticationMethod[];
+}
+
 export interface DeploymentProfileCapabilities {
   readonly id: DeploymentProfileId;
   readonly production: boolean;
@@ -25,6 +34,9 @@ export interface DeploymentProfileCapabilities {
   readonly organizationCardinality: "exactly-one" | "multiple" | "development";
   readonly maximumOrganizations: number | null;
   readonly allowedSignInProviders: readonly SignInProviderId[];
+  readonly transitionalCustomerAdapters: readonly TransitionalCustomerAdapterId[];
+  readonly customerAuthentication: CustomerAuthenticationPolicy;
+  readonly platformOperatorRealm: "absent" | "separate-workforce" | "development-fixture";
   readonly identityConfigurationCustody: "customer" | "lemmacomputer" | "developer";
   readonly secretCustody: "customer" | "lemmacomputer" | "developer";
   readonly workspaceProviderPolicy: WorkspaceProviderPolicy;
@@ -38,15 +50,17 @@ export interface DeploymentProfileCapabilities {
 
 export const productionDeploymentProfileIds: readonly ProductionDeploymentProfileId[];
 export const deploymentProfileIds: readonly DeploymentProfileId[];
+export const customerAuthenticationMethods: readonly CustomerAuthenticationMethod[];
 export const workspaceDriverTopologies: Readonly<Record<WorkspaceDriverId, WorkspaceDriverTopology>>;
 export const deploymentProfileCapabilityMatrix: Readonly<{
-  schemaVersion: 2;
+  schemaVersion: 3;
   profiles: Readonly<Record<DeploymentProfileId, DeploymentProfileCapabilities>>;
 }>;
 
 export function isDeploymentProfileId(value: unknown): value is DeploymentProfileId;
 export function resolveDeploymentProfile(value: unknown, options?: { readonly allowDevelopment?: boolean }): DeploymentProfileCapabilities;
 export function assertSignInProviderAllowed(profileId: DeploymentProfileId, providerId: SignInProviderId): DeploymentProfileCapabilities;
+export function assertCustomerAuthenticationMethodAllowed(profileId: DeploymentProfileId, method: CustomerAuthenticationMethod): DeploymentProfileCapabilities;
 export function assertWorkspaceProviderBoundaryAllowed(profileId: DeploymentProfileId, executionBoundary: WorkspaceExecutionBoundary): DeploymentProfileCapabilities;
 export function assertWorkspaceDriverTopologyAllowed(profileId: DeploymentProfileId, driverId: WorkspaceDriverId): DeploymentProfileCapabilities;
 export function assertOrganizationCountAllowed(profileId: DeploymentProfileId, organizationCount: number): DeploymentProfileCapabilities;

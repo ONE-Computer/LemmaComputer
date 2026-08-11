@@ -40,7 +40,7 @@ const enroll = (store: MemoryWorkspaceStore, did: string, token: string, at = NO
   identity,
   approverDid: did,
   verificationMethod: `${did}#${did.slice("did:key:".length)}`,
-  displayName: "Mike's browser",
+  displayName: "Example browser",
   transportTokenHash: sha256(token),
   enrolledAt: at,
 });

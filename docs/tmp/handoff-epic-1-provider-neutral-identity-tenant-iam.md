@@ -38,6 +38,42 @@ The central correction is:
 
 > Microsoft Entra External ID remains only a transitional customer adapter. Better Auth is the selected open-source customer authentication framework. Better Auth implements credential, authentication, MFA, passkey, social OAuth, SAML/OIDC, and session mechanics inside the LemmaComputer deployment; LemmaComputer operates that authentication store while remaining authoritative for accounts, organizations, memberships, invitations, roles, permissions, tenant placement, and product authorization.
 
+## Official Better Auth development resources
+
+Before implementing or reviewing Better Auth behavior, consult the current
+official resources instead of inferring behavior from generated types or
+reimplementing a framework feature:
+
+- Documentation MCP: `https://mcp.better-auth.com/mcp`
+- MCP setup: [Better Auth MCP](https://better-auth.com/docs/ai-resources/mcp)
+- Official skill pack: [Better Auth skills](https://better-auth.com/docs/ai-resources/skills)
+- LLM documentation index: [Better Auth llms.txt](https://better-auth.com/llms.txt)
+- Skill source: [better-auth/skills](https://github.com/better-auth/skills)
+
+Recommended local setup:
+
+```text
+npx skills add better-auth/skills --global --agent codex --skill '*' --yes --full-depth
+codex mcp add better-auth --url https://mcp.better-auth.com/mcp
+```
+
+The official pack currently provides framework, scaffold, security,
+email/password, organization, and two-factor skills. Reload Codex after
+installation so the skills and MCP server become available.
+
+The repository currently pins Better Auth `1.6.26`. Current documentation must
+be checked for supported framework features and security behavior, but a newer
+package must not be adopted implicitly: version upgrades still require pinned
+dependencies, generated authentication migrations, compatibility checks, and
+the issue qualification gates.
+
+Better Auth's organization plugin is an implementation option to evaluate, not
+permission to collapse the accepted authority boundary. LemmaComputer remains
+authoritative for product accounts, organizations, memberships, roles,
+resource-scoped permissions, tenant placement, and product sessions unless the
+architecture is explicitly revised with equivalent fail-closed tenant and
+deployment-profile evidence.
+
 ## Verified snapshot
 
 Snapshot refreshed: **2026-08-09, Asia/Singapore**.
@@ -63,6 +99,37 @@ c8bd0a3 fix:allow-external-id-qualification-in-worktrees
 Future work must start from a freshly fetched latest `origin/main`. Do not infer
 remote parity from an old checkout; verify the full local/remote SHA and working
 tree at the start of the session.
+
+### Local core implementation update (not yet pushed)
+
+As of the 2026-08-10 local implementation session, the integration
+checkout has advanced beyond the remote snapshot described above:
+
+- local `main` is `a9a09ac` and contains the reviewed #51 Better Auth
+  foundation, #52 universal customer authentication, #53 self-service
+  organization owner flow, #54 platform-operator separation, and #55 tenant
+  IAM;
+- the #54 full-suite isolation correction is `3cf0610`;
+- #56 is implemented on `codex/56-better-auth-invitations`: the raw invitation
+  is exchanged once for a hash-only activation context, every enabled Better
+  Auth method can activate the exact preassigned membership, hosted delivery is
+  email-only through #52's shared adapter, and copy-link mode is explicit for
+  local/customer-managed operation;
+- a real Postmark invitation delivery and exact-email acceptance completed in
+  an isolated runtime. The invitation page is now one guided organization-join
+  flow, explicitly explains social-account email matching, restores its opaque
+  context after email verification, and uses Better Auth's verified-session
+  handoff to finish acceptance without another login;
+- #56 automated gates pass: database verification, quick verification (594
+  tests, 0 failures), the focused 8-test invitation suite, and the complete
+  67-test Playwright suite. Human review also accepted the revised same-browser
+  invitation, verification, and organization-join UX on 2026-08-10;
+- after #56, the remaining core order is #12 (tenant SAML/OIDC through Better
+  Auth SSO) and #13 (adversarial tenant/authentication isolation). Supporting
+  lanes remain deferred until the core is complete.
+
+These are local integration facts only. They do not claim that `origin/main` or
+GitHub issue state has advanced; verify both before any remote action.
 
 Do not roll back the #11 or Better Auth architecture baseline. Evolve the useful
 authorization and membership foundation additively. Remove Microsoft-specific

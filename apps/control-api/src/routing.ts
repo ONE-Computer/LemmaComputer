@@ -282,6 +282,7 @@ export class RoutingAdministrationService {
         ? { requiredResidency: input.requiredResidency }
         : {}),
       createdBy: actor.userId,
+      initializeFixedRollout: true,
     });
     return { id };
   }

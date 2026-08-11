@@ -37,6 +37,7 @@ MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 TERMINAL_AGENT_BRIDGE_CODES = {"AGENT_BRIDGE_GRANT_REVOKED", "AGENT_BRIDGE_GRANT_EXPIRED"}
 MCP_DISCOVERY_TIMEOUT_SECONDS = 5
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
+CLAUDE_GATEWAY_HEALTH_PROBE_MIN_TOKENS = 16
 LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
 UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
 UPLOAD_JOBS: dict[str, dict] = {}
@@ -214,6 +215,17 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
         metadata["lemmacomputer_requested_service_class"] = task_service_class(task_binding)
     request["metadata"] = metadata
     request["model"] = MODEL_ALIAS
+    # Claude Desktop probes a configured gateway model with a one-token "."
+    # request. Governed Auto may select an OpenAI Responses deployment whose
+    # minimum output-token allowance is 16, so make only that exact health
+    # probe portable without changing ordinary one-token user requests.
+    if (
+        MODEL_ALIAS == "lemmacomputer-auto"
+        and request.get("max_tokens") == 1
+        and request.get("messages") == [{"role": "user", "content": "."}]
+        and request.get("stream") in (None, False)
+    ):
+        request["max_tokens"] = CLAUDE_GATEWAY_HEALTH_PROBE_MIN_TOKENS
     return json.dumps(request, separators=(",", ":")).encode(), requested_model
 
 

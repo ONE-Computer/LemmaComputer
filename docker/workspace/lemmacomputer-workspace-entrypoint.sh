@@ -227,7 +227,7 @@ if agent_enabled claude-desktop; then
     lemmacomputer-claude|claude-sonnet-4-6) model_label="Claude — organization route" ;;
     lemmacomputer-openai|claude-opus-4-6) model_label="OpenAI — organization route" ;;
     lemmacomputer-glm|claude-sonnet-4-5) model_label="GLM — organization route" ;;
-    lemmacomputer-assistant) model_label="Standard organization route" ;;
+    lemmacomputer-auto|lemmacomputer-assistant) model_label="Standard organization route" ;;
     *) echo "unrecognized Claude model assignment" >&2; exit 78 ;;
   esac
 fi

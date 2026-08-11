@@ -4,6 +4,7 @@ import test from "node:test";
 import { m365ToolCatalog, type EgressSecurityGroupVersion, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@lemmacomputer/contracts";
 import type { GatewayClient } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore, MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@lemmacomputer/workspace-store";
+import type { CustomerProductAuthentication } from "../apps/control-api/src/customer-product-authentication.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -13,9 +14,9 @@ const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "
 const principal: SessionPrincipal = {
   userId: "alpha",
   tenantId: "acme",
-  email: "alpha@metech.dev",
+  email: "alpha@example.test",
   displayName: "Alpha User",
-  tenantDisplayName: "ME TECH",
+  tenantDisplayName: "Example Organization",
   roles: ["employee"],
   identity: alpha,
 };
@@ -304,6 +305,120 @@ test("test identities require an explicit test-only server mode", async () => {
   );
 });
 
+test("invitation routes exchange the raw link once for an HTTP-only context before Better Auth acceptance", async () => {
+  const rawInvitation = `oci_${"a".repeat(43)}`;
+  const contextToken = `oic_${"b".repeat(43)}`;
+  let preparedRaw = "";
+  let acceptedContext = "";
+  const acceptedPrincipal: SessionPrincipal = {
+    ...principal,
+    organizationId: "acme",
+    membershipId: "membership-invited",
+    membershipStatus: "active",
+    role: "admin",
+    roles: ["employee", "administrator"],
+  };
+  const customerProductAuthentication = {
+    prepareInvitation: async (received: string) => {
+      preparedRaw = received;
+      return {
+        contextToken,
+        organizationId: "acme",
+        organizationDisplayName: "Acme Research",
+        email: "invitee@example.test",
+        role: "admin" as const,
+        expiresAt: "2026-08-09T16:20:00.000Z",
+      };
+    },
+    getInvitationContext: async (received: string) => {
+      assert.equal(received, contextToken);
+      return {
+        organizationId: "acme",
+        organizationDisplayName: "Acme Research",
+        email: "invitee@example.test",
+        role: "admin" as const,
+        expiresAt: "2026-08-09T16:20:00.000Z",
+      };
+    },
+    acceptInvitation: async (_headers: Headers, received: string) => {
+      acceptedContext = received;
+      return acceptedPrincipal;
+    },
+  } as unknown as CustomerProductAuthentication;
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    proxyToken,
+    undefined,
+    undefined,
+    { publicWebUrl: "https://customer.example.test", installationKind: "customer-managed" },
+    {
+      customerProductAuthentication,
+      invitationDelivery: { mode: "copy-link" },
+      agentBridgeSecret: "invitation-route-agent-bridge-secret-at-least-32-characters",
+    },
+  );
+  const headers = { "x-lemmacomputer-proxy-token": proxyToken, "content-type": "application/json" };
+  try {
+    const prepared = await app.inject({
+      method: "POST",
+      url: "/v1/auth/invitations/context",
+      headers,
+      payload: { token: rawInvitation },
+    });
+    assert.equal(prepared.statusCode, 200);
+    assert.equal(preparedRaw, rawInvitation);
+    assert.deepEqual(prepared.json(), {
+      organizationDisplayName: "Acme Research",
+      email: "invitee@example.test",
+      role: "admin",
+      companySsoAvailable: false,
+      expiresAt: "2026-08-09T16:20:00.000Z",
+    });
+    assert.match(String(prepared.headers["set-cookie"]), /^lemmacomputer_invitation_context=oic_/);
+    assert.match(String(prepared.headers["set-cookie"]), /HttpOnly; SameSite=Lax/);
+    assert.match(String(prepared.headers["set-cookie"]), /Max-Age=604800/);
+    assert.match(String(prepared.headers["set-cookie"]), /Secure/);
+    assert.doesNotMatch(String(prepared.headers["set-cookie"]), new RegExp(rawInvitation));
+    assert.doesNotMatch(prepared.body, /oci_/);
+
+    const restored = await app.inject({
+      method: "GET",
+      url: "/v1/auth/invitations/context",
+      headers: {
+        "x-lemmacomputer-proxy-token": proxyToken,
+        cookie: `lemmacomputer_invitation_context=${contextToken}`,
+      },
+    });
+    assert.equal(restored.statusCode, 200);
+    assert.deepEqual(restored.json(), {
+      organizationDisplayName: "Acme Research",
+      email: "invitee@example.test",
+      role: "admin",
+      companySsoAvailable: false,
+      expiresAt: "2026-08-09T16:20:00.000Z",
+    });
+
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/v1/auth/invitations/accept",
+      headers: {
+        "x-lemmacomputer-proxy-token": proxyToken,
+        cookie: `lemmacomputer_invitation_context=${contextToken}`,
+      },
+    });
+    assert.equal(accepted.statusCode, 200);
+    assert.equal(acceptedContext, contextToken);
+    assert.deepEqual(accepted.json(), {
+      organization: { id: "acme", displayName: "Example Organization" },
+      membership: { id: "membership-invited", role: "admin", status: "active" },
+    });
+    assert.match(String(accepted.headers["set-cookie"]), /Max-Age=0/);
+  } finally {
+    await app.close();
+  }
+});
+
 test("only an administrator can assign and revoke the tenant policy through Control", async () => {
   const administrator = { ...principal, roles: ["employee", "administrator"] as const } as SessionPrincipal;
   const effectivePolicy: EffectivePolicy = {
@@ -408,7 +523,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   const identityPolicyStore = {
     listUsers: async (tenantId) => tenantId === "acme" ? [
       { userId: "alpha", email: principal.email, displayName: principal.displayName, status: "active" as const, roles: principal.roles, effectivePolicy: revoked ? null : effectivePolicy },
-      { userId: "beta", email: "beta@metech.dev", displayName: "Beta User", status: betaStatus, roles: ["employee"] as const, effectivePolicy },
+      { userId: "beta", email: "beta@example.test", displayName: "Beta User", status: betaStatus, roles: ["employee"] as const, effectivePolicy },
     ] : [],
     getPrincipal: async (userId: string) => userId === "alpha" ? administrator : null,
     listOrganizationMemberships: async (organizationId: string) => organizationId === "acme" ? [{
@@ -416,7 +531,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       organizationId,
       accountUserId: "account-beta",
       userId: "beta",
-      email: "beta@metech.dev",
+      email: "beta@example.test",
       displayName: "Beta User",
       status: betaMembershipStatus,
       role: betaMembershipRole,
@@ -439,7 +554,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
           organizationId: input.organizationId,
           accountUserId: "account-beta",
           userId: input.targetUserId,
-          email: "beta@metech.dev",
+          email: "beta@example.test",
           displayName: "Beta User",
           status: betaMembershipStatus,
           role: betaMembershipRole,
@@ -544,6 +659,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   const connectorRegistry = new MemoryConnectorRegistryStore();
   const app = createControlServer(workspaceStore, {} as ControllerClient, proxyToken, gateway, undefined, {}, {
     authentication: authentication(administrator), identityPolicyStore, connectorRegistryStore: connectorRegistry,
+    invitationDelivery: { mode: "copy-link" },
     agentBridgeSecret: "control-auth-policy-agent-bridge-secret-at-least-32-characters",
   });
   const headers = { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid" };
@@ -579,7 +695,8 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       headers: { ...headers, "content-type": "application/json" },
       payload: { role: "owner" },
     });
-    assert.equal(ownershipDenied.statusCode, 403);
+    assert.equal(ownershipDenied.statusCode, 409);
+    assert.equal(ownershipDenied.json().error.code, "OWNER_TRANSFER_REQUIRED");
     const selfMembershipSuspend = await app.inject({
       method: "PATCH",
       url: "/v1/admin/memberships/alpha",
@@ -624,6 +741,8 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     assert.equal(invited.statusCode, 201);
     assert.equal(invited.json().invitation.email, "new.user@example.test");
     assert.match(invited.json().acceptancePath, /^\/invite\?token=oci_/);
+    assert.equal(invited.json().delivery.mode, "copy-link");
+    assert.match(invited.json().delivery.warning, /trusted channel/i);
     assert.equal(invitationInput?.organizationId, "acme");
     assert.equal(invitationInput?.createdBy, "alpha");
     assert.match(String(invitationInput?.tokenHash), /^[a-f0-9]{64}$/);
@@ -634,7 +753,8 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       headers: { ...headers, "content-type": "application/json", "idempotency-key": "invite-owner-user-0001" },
       payload: { email: "owner@example.test", role: "owner" },
     });
-    assert.equal(ownerInviteDenied.statusCode, 403);
+    assert.equal(ownerInviteDenied.statusCode, 409);
+    assert.equal(ownerInviteDenied.json().error.code, "OWNER_TRANSFER_REQUIRED");
     const resentInvitation = await app.inject({
       method: "POST",
       url: `/v1/admin/invitations/${invitationId}/resend`,

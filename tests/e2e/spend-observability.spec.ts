@@ -18,7 +18,7 @@ test("administrator filters spend, drills Team to user to 201 tasks, explains co
 
   await page.getByRole("button", { name: /Finance/ }).click();
   await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
-  await page.locator("section").filter({ has: page.getByRole("heading", { name: "Users" }) }).getByRole("button", { name: /Mike Sun/ }).click();
+  await page.locator("section").filter({ has: page.getByRole("heading", { name: "Users" }) }).getByRole("button", { name: /Example User/ }).click();
   await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
   await expect(page.getByText("200 of 201")).toBeVisible();
   await page.getByRole("button", { name: "Load more tasks" }).click();

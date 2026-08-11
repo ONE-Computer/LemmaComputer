@@ -27,6 +27,7 @@ services:
       - control-private
     volumes:
       - control-data:/var/lib/postgresql
+      - ./infra/postgres/init-auth-database.sh:/docker-entrypoint-initdb.d/20-auth-database.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lemmacomputer -d lemmacomputer"]
       interval: 3s
@@ -286,6 +287,20 @@ services:
       postgres:
         condition: service_healthy
 
+  auth-db-migrate:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["npm", "run", "auth:db:migrate"]
+    restart: "no"
+    env_file:
+      - path: .runtime-env/auth-db-migrate.env
+        format: raw
+    networks:
+      - control-private
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   control-api:
     <<: [*control-runtime, *hardened]
     container_name: ${LEMMACOMPUTER_CONTROL_CONTAINER:?set LEMMACOMPUTER_CONTROL_CONTAINER in .env}
@@ -304,6 +319,8 @@ services:
       - identity-egress
     depends_on:
       db-migrate:
+        condition: service_completed_successfully
+      auth-db-migrate:
         condition: service_completed_successfully
       litellm:
         condition: service_healthy

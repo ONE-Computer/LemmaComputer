@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
+import pg from "pg";
 import type { IdentityContext } from "@lemmacomputer/contracts";
 import { PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { OpenVtcApprovalCoordinator } from "../apps/control-api/src/openvtc.js";
@@ -13,6 +14,7 @@ test("PostgreSQL Companion push enqueue is immediate, claimable, and deduplicate
   skip: !connectionString,
 }, async () => {
   const store = PostgresWorkspaceStore.fromConnectionString(connectionString!);
+  const pool = new pg.Pool({ connectionString });
   const identity: IdentityContext = {
     tenantId: `companion-push-test-${randomUUID()}`,
     subjectId: "owner",
@@ -36,6 +38,11 @@ test("PostgreSQL Companion push enqueue is immediate, claimable, and deduplicate
   let workspaceId: string | undefined;
   try {
     await store.migrate();
+    await pool.query(
+      `INSERT INTO tenants(id,external_tenant_id,display_name) VALUES($1,$2,'Companion push')`,
+      [identity.tenantId, `external-${identity.tenantId}`],
+    );
+    await pool.query("INSERT INTO organizations(id,display_name) VALUES($1,'Companion push')", [identity.tenantId]);
     const approverDid = "did:key:zPostgresCompanion";
     await store.enrollOpenVtcApprover({
       id: randomUUID(),
@@ -98,6 +105,7 @@ test("PostgreSQL Companion push enqueue is immediate, claimable, and deduplicate
     assert.equal(sent.length, 1);
   } finally {
     if (workspaceId) await store.remove(identity, workspaceId);
+    await pool.end();
     await store.close();
   }
 });

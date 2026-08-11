@@ -19,9 +19,9 @@ const setup = async (hostedToolPolicy?: (identity: IdentityContext, serverName: 
   const principal: SessionPrincipal = {
     userId: identity.subjectId,
     tenantId: identity.tenantId,
-    email: "alex@metech.dev",
+    email: "alex@example.test",
     displayName: "Alex",
-    tenantDisplayName: "ME TECH",
+    tenantDisplayName: "Example Organization",
     roles: ["employee"],
     identity,
   };

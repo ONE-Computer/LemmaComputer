@@ -1,0 +1,671 @@
+{
+  "schemaVersion": 1,
+  "requiredOperations": [
+    "read",
+    "create",
+    "update",
+    "delete",
+    "list",
+    "search",
+    "export",
+    "stream",
+    "privileged"
+  ],
+  "operationProfiles": {
+    "private-authentication": {
+      "read": "covered",
+      "create": "covered",
+      "update": "covered",
+      "delete": "covered",
+      "list": "covered",
+      "search": "not-applicable",
+      "export": "not-applicable",
+      "stream": "not-applicable",
+      "privileged": "covered"
+    },
+    "ephemeral-authentication": {
+      "read": "covered",
+      "create": "covered",
+      "update": "covered",
+      "delete": "covered",
+      "list": "not-applicable",
+      "search": "not-applicable",
+      "export": "not-applicable",
+      "stream": "not-applicable",
+      "privileged": "covered"
+    },
+    "organization-control": {
+      "read": "covered",
+      "create": "covered",
+      "update": "covered",
+      "delete": "covered",
+      "list": "covered",
+      "search": "not-applicable",
+      "export": "not-applicable",
+      "stream": "not-applicable",
+      "privileged": "covered"
+    },
+    "append-only-audit": {
+      "read": "covered",
+      "create": "covered",
+      "update": "not-applicable",
+      "delete": "not-applicable",
+      "list": "covered",
+      "search": "not-applicable",
+      "export": "covered",
+      "stream": "not-applicable",
+      "privileged": "covered"
+    },
+    "append-only-stream": {
+      "read": "covered",
+      "create": "covered",
+      "update": "not-applicable",
+      "delete": "not-applicable",
+      "list": "covered",
+      "search": "not-applicable",
+      "export": "not-applicable",
+      "stream": "covered",
+      "privileged": "covered"
+    },
+    "global-catalog": {
+      "read": "covered",
+      "create": "not-applicable",
+      "update": "not-applicable",
+      "delete": "not-applicable",
+      "list": "covered",
+      "search": "not-applicable",
+      "export": "not-applicable",
+      "stream": "not-applicable",
+      "privileged": "not-applicable"
+    },
+    "platform-operator-control": {
+      "read": "covered",
+      "create": "covered",
+      "update": "covered",
+      "delete": "covered",
+      "list": "covered",
+      "search": "not-applicable",
+      "export": "not-applicable",
+      "stream": "not-applicable",
+      "privileged": "covered"
+    },
+    "background-job": {
+      "read": "covered",
+      "create": "covered",
+      "update": "covered",
+      "delete": "covered",
+      "list": "covered",
+      "search": "not-applicable",
+      "export": "not-applicable",
+      "stream": "not-applicable",
+      "privileged": "covered"
+    }
+  },
+  "resources": [
+    {
+      "store": "authentication",
+      "resource": "user",
+      "authority": "better-auth",
+      "scope": "account",
+      "scopeKey": "user.id",
+      "operationProfile": "private-authentication",
+      "evidence": ["tests/customer-authentication.test.ts", "tests/auth-database-contract.test.ts"]
+    },
+    {
+      "store": "authentication",
+      "resource": "session",
+      "authority": "better-auth",
+      "scope": "account",
+      "scopeKey": "session.userId",
+      "operationProfile": "private-authentication",
+      "evidence": ["tests/customer-authentication.test.ts"]
+    },
+    {
+      "store": "authentication",
+      "resource": "account",
+      "authority": "better-auth",
+      "scope": "account",
+      "scopeKey": "account.userId",
+      "operationProfile": "private-authentication",
+      "evidence": ["tests/customer-authentication.test.ts"]
+    },
+    {
+      "store": "authentication",
+      "resource": "verification",
+      "authority": "better-auth",
+      "scope": "account",
+      "scopeKey": "verification.identifier",
+      "operationProfile": "ephemeral-authentication",
+      "evidence": ["tests/customer-authentication.test.ts"]
+    },
+    {
+      "store": "authentication",
+      "resource": "twoFactor",
+      "authority": "better-auth",
+      "scope": "account",
+      "scopeKey": "twoFactor.userId",
+      "operationProfile": "private-authentication",
+      "evidence": ["tests/customer-authentication.test.ts"]
+    },
+    {
+      "store": "authentication",
+      "resource": "passkey",
+      "authority": "better-auth",
+      "scope": "account",
+      "scopeKey": "passkey.userId",
+      "operationProfile": "private-authentication",
+      "evidence": ["tests/customer-authentication.test.ts"]
+    },
+    {
+      "store": "authentication",
+      "resource": "rateLimit",
+      "authority": "better-auth",
+      "scope": "global",
+      "scopeKey": "rateLimit.key",
+      "operationProfile": "ephemeral-authentication",
+      "evidence": ["tests/auth-database-contract.test.ts", "tests/customer-authentication.test.ts"]
+    },
+    {
+      "store": "authentication",
+      "resource": "ssoProvider",
+      "authority": "better-auth",
+      "scope": "organization",
+      "scopeKey": "ssoProvider.organizationId",
+      "operationProfile": "private-authentication",
+      "evidence": ["tests/tenant-sso-administration.test.ts", "tests/tenant-sso-postgres.test.ts"]
+    },
+
+    {
+      "store": "control",
+      "resource": "tenants",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "tenants.id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/organization-rbac-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "users",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "users.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/authentication-contracts.test.ts", "tests/organization-rbac-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "external_identities",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "external_identities.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/authentication-contracts.test.ts", "tests/entra-authentication.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "user_roles",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "user_roles.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/organization-rbac-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "browser_sessions",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "browser_sessions.membership_id -> organization_memberships.organization_id",
+      "operationProfile": "private-authentication",
+      "evidence": ["tests/customer-product-authentication.test.ts", "tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "oidc_login_attempts",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "oidc_login_attempts.tenant_id",
+      "operationProfile": "ephemeral-authentication",
+      "evidence": ["tests/entra-authentication.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "agent_identities",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "agent_identities.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/authentication-contracts.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "vendor_identity_mappings",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "vendor_identity_mappings.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/authentication-contracts.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "capabilities",
+      "authority": "lemmacomputer",
+      "scope": "global",
+      "scopeKey": "capabilities.id",
+      "operationProfile": "global-catalog",
+      "evidence": ["tests/policy-integrity.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "policy_bundles",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "policy_bundles.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/user-policy-schema.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "policy_versions",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "policy_versions.policy_id -> policy_bundles.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/user-policy-schema.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "policy_assignments",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "policy_assignments.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/user-policy-schema.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "capability_assignments",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "capability_assignments.policy_version_id -> policy_bundles.tenant_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/user-policy-schema.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organizations",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organizations.id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/organization-onboarding-postgres.test.ts", "tests/organization-rbac-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "account_users",
+      "authority": "lemmacomputer",
+      "scope": "account",
+      "scopeKey": "account_users.id = Better Auth user.id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/customer-product-authentication.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_permission_catalog_versions",
+      "authority": "lemmacomputer",
+      "scope": "global",
+      "scopeKey": "organization_permission_catalog_versions.version",
+      "operationProfile": "global-catalog",
+      "evidence": ["tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_permissions",
+      "authority": "lemmacomputer",
+      "scope": "global",
+      "scopeKey": "organization_permissions.catalog_version",
+      "operationProfile": "global-catalog",
+      "evidence": ["tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_role_permissions",
+      "authority": "lemmacomputer",
+      "scope": "global",
+      "scopeKey": "organization_role_permissions.catalog_version",
+      "operationProfile": "global-catalog",
+      "evidence": ["tests/organization-rbac-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_memberships",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_memberships.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/tenant-iam-postgres.test.ts", "tests/better-auth-invitation-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_membership_audit_events",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_membership_audit_events.organization_id",
+      "operationProfile": "append-only-audit",
+      "evidence": ["tests/organization-rbac-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_invitations",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_invitations.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/better-auth-invitation-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_invitation_audit_events",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_invitation_audit_events.organization_id",
+      "operationProfile": "append-only-audit",
+      "evidence": ["tests/better-auth-invitation-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_access_audit_events",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_access_audit_events.organization_id",
+      "operationProfile": "append-only-audit",
+      "evidence": ["tests/better-auth-invitation-postgres.test.ts", "tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_custom_roles",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_custom_roles.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_custom_role_versions",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_custom_role_versions.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_custom_role_grants",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_custom_role_grants.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_membership_role_assignments",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_membership_role_assignments.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_role_audit_events",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_role_audit_events.organization_id",
+      "operationProfile": "append-only-audit",
+      "evidence": ["tests/tenant-iam-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_operators",
+      "authority": "lemmacomputer",
+      "scope": "platform-operator",
+      "scopeKey": "platform_operators.id",
+      "operationProfile": "platform-operator-control",
+      "evidence": ["tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_operator_role_assignments",
+      "authority": "lemmacomputer",
+      "scope": "platform-operator",
+      "scopeKey": "platform_operator_role_assignments.operator_id",
+      "operationProfile": "platform-operator-control",
+      "evidence": ["tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_operator_sessions",
+      "authority": "lemmacomputer",
+      "scope": "platform-operator",
+      "scopeKey": "platform_operator_sessions.operator_id",
+      "operationProfile": "private-authentication",
+      "evidence": ["tests/platform-operator-authentication.test.ts", "tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_support_elevations",
+      "authority": "lemmacomputer",
+      "scope": "platform-operator",
+      "scopeKey": "platform_support_elevations.target_organization_id + operator_id",
+      "operationProfile": "platform-operator-control",
+      "evidence": ["tests/platform-operator-postgres.test.ts", "tests/platform-operator-api.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_operator_audit_events",
+      "authority": "lemmacomputer",
+      "scope": "platform-operator",
+      "scopeKey": "platform_operator_audit_events.target_organization_id + operator_id",
+      "operationProfile": "append-only-audit",
+      "evidence": ["tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_operator_oidc_attempts",
+      "authority": "lemmacomputer",
+      "scope": "platform-operator",
+      "scopeKey": "platform_operator_oidc_attempts.state_hash",
+      "operationProfile": "ephemeral-authentication",
+      "evidence": ["tests/platform-operator-authentication.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_tenant_lifecycle",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "platform_tenant_lifecycle.tenant_id",
+      "operationProfile": "platform-operator-control",
+      "evidence": ["tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_incidents",
+      "authority": "lemmacomputer",
+      "scope": "platform-operator",
+      "scopeKey": "platform_incidents.id",
+      "operationProfile": "platform-operator-control",
+      "evidence": ["tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_configuration",
+      "authority": "lemmacomputer",
+      "scope": "global",
+      "scopeKey": "platform_configuration.key",
+      "operationProfile": "platform-operator-control",
+      "evidence": ["tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_security_alert_outbox",
+      "authority": "lemmacomputer",
+      "scope": "platform-operator",
+      "scopeKey": "platform_security_alert_outbox.elevation_id -> target organization",
+      "operationProfile": "background-job",
+      "evidence": ["tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "platform_tenant_cleanup_jobs",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "platform_tenant_cleanup_jobs.tenant_id",
+      "operationProfile": "background-job",
+      "evidence": ["tests/platform-tenant-cleanup-dispatcher.test.ts", "tests/platform-operator-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_settings",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_settings.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/organization-onboarding-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_onboarding_requests",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_onboarding_requests.organization_id + account_user_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/organization-onboarding-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "customer_owner_step_up_proofs",
+      "authority": "lemmacomputer",
+      "scope": "account",
+      "scopeKey": "customer_owner_step_up_proofs.account_user_id",
+      "operationProfile": "ephemeral-authentication",
+      "evidence": ["tests/organization-onboarding-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_lifecycle_audit_events",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_lifecycle_audit_events.organization_id",
+      "operationProfile": "append-only-audit",
+      "evidence": ["tests/organization-onboarding-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_closure_requests",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_closure_requests.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/organization-onboarding-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_invitation_activation_contexts",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_invitation_activation_contexts.organization_id",
+      "operationProfile": "ephemeral-authentication",
+      "evidence": ["tests/better-auth-invitation-postgres.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_sso_connections",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_sso_connections.organization_id",
+      "operationProfile": "organization-control",
+      "evidence": ["tests/tenant-sso-postgres.test.ts", "tests/tenant-sso-api.test.ts"]
+    },
+    {
+      "store": "control",
+      "resource": "organization_sso_audit_events",
+      "authority": "lemmacomputer",
+      "scope": "organization",
+      "scopeKey": "organization_sso_audit_events.organization_id",
+      "operationProfile": "append-only-audit",
+      "evidence": ["tests/tenant-sso-postgres.test.ts"]
+    },
+    { "store": "control", "resource": "workspaces", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "workspaces.tenant_id + subject_id", "operationProfile": "organization-control", "evidence": ["tests/workspace-service.test.ts", "tests/member-workspace-ownership-api.test.ts", "tests/control-auth-boundary.test.ts"] },
+    { "store": "control", "resource": "workspace_idempotency", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "workspace_idempotency.tenant_id + subject_id + workspace_id", "operationProfile": "organization-control", "evidence": ["tests/workspace-service.test.ts"] },
+    { "store": "control", "resource": "governed_operations", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "governed_operations.tenant_id + subject_id + workspace_id", "operationProfile": "organization-control", "evidence": ["tests/governed-operation-service.test.ts", "tests/governed-operation-api.test.ts"] },
+    { "store": "control", "resource": "governed_approvals", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "governed_approvals.operation_id -> governed_operations.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/governed-operation-service.test.ts"] },
+    { "store": "control", "resource": "governed_receipts", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "governed_receipts.operation_id -> governed_operations.tenant_id", "operationProfile": "append-only-audit", "evidence": ["tests/governed-operation-service.test.ts"] },
+    { "store": "control", "resource": "governed_operation_events", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "governed_operation_events.operation_id -> governed_operations.tenant_id", "operationProfile": "append-only-audit", "evidence": ["tests/governed-operation-service.test.ts"] },
+    { "store": "control", "resource": "openvtc_approvers", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "openvtc_approvers.tenant_id + subject_id", "operationProfile": "organization-control", "evidence": ["tests/openvtc-approval-store.test.ts", "tests/openvtc-control.test.ts"] },
+    { "store": "control", "resource": "openvtc_consent_tasks", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "openvtc_consent_tasks.tenant_id + subject_id", "operationProfile": "organization-control", "evidence": ["tests/openvtc-approval-store.test.ts"] },
+    { "store": "control", "resource": "openvtc_delivery_outbox", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "openvtc_delivery_outbox.task_id -> openvtc_consent_tasks.tenant_id", "operationProfile": "background-job", "evidence": ["tests/openvtc-approval-store.test.ts"] },
+    { "store": "control", "resource": "openvtc_delivery_attempts", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "openvtc_delivery_attempts.outbox_id -> openvtc_delivery_outbox.task_id", "operationProfile": "append-only-audit", "evidence": ["tests/openvtc-approval-store.test.ts"] },
+    { "store": "control", "resource": "openvtc_enrollment_challenges", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "openvtc_enrollment_challenges.tenant_id + subject_id", "operationProfile": "ephemeral-authentication", "evidence": ["tests/openvtc-control.test.ts"] },
+    { "store": "control", "resource": "sandbox_settings", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "sandbox_settings.tenant_id + subject_id", "operationProfile": "organization-control", "evidence": ["tests/workspace-settings-postgres.test.ts"] },
+    { "store": "control", "resource": "egress_security_groups", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "egress_security_groups.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/egress-policy.test.ts"] },
+    { "store": "control", "resource": "egress_security_group_versions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "egress_security_group_versions.security_group_id -> egress_security_groups.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/egress-policy.test.ts"] },
+    { "store": "control", "resource": "openvtc_companion_subscriptions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "openvtc_companion_subscriptions.tenant_id + subject_id", "operationProfile": "organization-control", "evidence": ["tests/openvtc-companion-push-postgres.test.ts"] },
+    { "store": "control", "resource": "openvtc_companion_push_deliveries", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "openvtc_companion_push_deliveries.tenant_id + subject_id", "operationProfile": "background-job", "evidence": ["tests/openvtc-companion-push-postgres.test.ts"] },
+    { "store": "control", "resource": "policy_signing_keys", "authority": "lemmacomputer", "scope": "global", "scopeKey": "policy_signing_keys.key_id (global verification catalog)", "operationProfile": "global-catalog", "evidence": ["tests/policy-integrity.test.ts"] },
+    { "store": "control", "resource": "channel_credentials", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "channel_credentials.tenant_id + subject_id", "operationProfile": "organization-control", "evidence": ["tests/channel-boundary.test.ts", "tests/channel-broker.test.ts"] },
+    { "store": "control", "resource": "channel_connections", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "channel_connections.tenant_id + subject_id + workspace_id", "operationProfile": "organization-control", "evidence": ["tests/channel-boundary.test.ts", "tests/channel-control-api.test.ts"] },
+    { "store": "control", "resource": "channel_sender_routes", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "channel_sender_routes.connection_id -> channel_connections.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/channel-broker.test.ts"] },
+    { "store": "control", "resource": "channel_sessions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "channel_sessions.connection_id -> channel_connections.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/channel-broker.test.ts"] },
+    { "store": "control", "resource": "channel_updates", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "channel_updates.connection_id -> channel_connections.tenant_id", "operationProfile": "background-job", "evidence": ["tests/channel-broker.test.ts"] },
+    { "store": "control", "resource": "provider_settings", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "provider_settings.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/provider-settings-postgres.test.ts", "tests/provider-settings-api.test.ts"] },
+    { "store": "control", "resource": "connector_connection_state", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "connector_connection_state.tenant_id + subject_id", "operationProfile": "organization-control", "evidence": ["tests/connector-registry-security.test.ts"] },
+    { "store": "control", "resource": "activity_events", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "activity_events.tenant_id + subject_id + workspace_id", "operationProfile": "append-only-stream", "evidence": ["tests/activity-events-postgres.test.ts", "tests/activity-events.test.ts"] },
+    { "store": "control", "resource": "sites", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "sites.tenant_id + subject_id", "operationProfile": "organization-control", "evidence": ["tests/sites.test.ts", "tests/sites-api.test.ts"] },
+    { "store": "control", "resource": "site_revisions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "site_revisions.tenant_id + subject_id + site_id", "operationProfile": "organization-control", "evidence": ["tests/sites.test.ts", "tests/sites-runtime.test.ts"] },
+    { "store": "control", "resource": "allocation_units", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "allocation_units.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/teams-postgres.test.ts", "tests/teams-api.test.ts"] },
+    { "store": "control", "resource": "allocation_memberships", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "allocation_memberships.tenant_id + allocation_unit_id + user_id", "operationProfile": "organization-control", "evidence": ["tests/teams-postgres.test.ts"] },
+    { "store": "control", "resource": "default_spending_team_assignments", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "default_spending_team_assignments.tenant_id + user_id", "operationProfile": "organization-control", "evidence": ["tests/teams-postgres.test.ts"] },
+    { "store": "control", "resource": "team_administrator_audit_events", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_administrator_audit_events.tenant_id", "operationProfile": "append-only-audit", "evidence": ["tests/teams-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_deployment_rate_cards", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_deployment_rate_cards.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_deployment_rate_card_rates", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_deployment_rate_card_rates.tenant_id + rate_card_id", "operationProfile": "organization-control", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_usage_attempt_admissions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_usage_attempt_admissions.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_usage_ingestion_conflicts", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_usage_ingestion_conflicts.tenant_id", "operationProfile": "append-only-audit", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_usage_events", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_usage_events.tenant_id", "operationProfile": "append-only-audit", "evidence": ["tests/usage-ledger-postgres.test.ts", "tests/usage-ledger-service.test.ts"] },
+    { "store": "control", "resource": "ai_usage_event_units", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_usage_event_units.tenant_id + usage_event_id", "operationProfile": "append-only-audit", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_usage_reconciliation_runs", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_usage_reconciliation_runs.tenant_id", "operationProfile": "background-job", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_usage_reconciliation_findings", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_usage_reconciliation_findings.tenant_id + reconciliation_run_id", "operationProfile": "append-only-audit", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "team_budget_versions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_versions.tenant_id + team_id", "operationProfile": "organization-control", "evidence": ["tests/team-budgets-postgres.test.ts", "tests/team-budgets-api.test.ts"] },
+    { "store": "control", "resource": "team_budget_warning_thresholds", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_warning_thresholds.tenant_id + budget_version_id", "operationProfile": "organization-control", "evidence": ["tests/team-budgets-postgres.test.ts"] },
+    { "store": "control", "resource": "team_budget_reservations", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_reservations.tenant_id + team_id", "operationProfile": "organization-control", "evidence": ["tests/team-budgets-postgres.test.ts"] },
+    { "store": "control", "resource": "team_budget_reservation_settlements", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_reservation_settlements.tenant_id + reservation_id", "operationProfile": "append-only-audit", "evidence": ["tests/team-budgets-postgres.test.ts"] },
+    { "store": "control", "resource": "team_budget_reservation_releases", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_reservation_releases.tenant_id + reservation_id", "operationProfile": "append-only-audit", "evidence": ["tests/team-budgets-postgres.test.ts"] },
+    { "store": "control", "resource": "team_budget_overrides", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_overrides.tenant_id + budget_version_id", "operationProfile": "organization-control", "evidence": ["tests/team-budgets-postgres.test.ts"] },
+    { "store": "control", "resource": "team_budget_alerts", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_alerts.tenant_id + budget_version_id", "operationProfile": "append-only-audit", "evidence": ["tests/team-budgets-postgres.test.ts"] },
+    { "store": "control", "resource": "team_budget_gateway_projections", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_gateway_projections.tenant_id + budget_version_id", "operationProfile": "background-job", "evidence": ["tests/team-budget-projection.test.ts"] },
+    { "store": "control", "resource": "team_budget_reconciliation_runs", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "team_budget_reconciliation_runs.tenant_id", "operationProfile": "background-job", "evidence": ["tests/team-budgets-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_usage_pending_corrections", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_usage_pending_corrections.tenant_id", "operationProfile": "background-job", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_mapping_versions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_mapping_versions.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/routing-postgres.test.ts", "tests/routing-admin.test.ts"] },
+    { "store": "control", "resource": "ai_routing_deployments", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_deployments.tenant_id + mapping_version_id", "operationProfile": "organization-control", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_policy_versions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_policy_versions.tenant_id + team_id", "operationProfile": "organization-control", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_evidence_reviews", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_evidence_reviews.tenant_id + team_id", "operationProfile": "organization-control", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_rollout_versions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_rollout_versions.tenant_id + team_id", "operationProfile": "organization-control", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_decisions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_decisions.tenant_id + team_id", "operationProfile": "append-only-audit", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_decision_candidates", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_decision_candidates.tenant_id + decision_id", "operationProfile": "append-only-audit", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_decision_observations", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_decision_observations.tenant_id + decision_id", "operationProfile": "append-only-audit", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_session_affinity_versions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_session_affinity_versions.tenant_id + affinity_hash", "operationProfile": "organization-control", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_evidence_review_decisions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_evidence_review_decisions.tenant_id + review_id", "operationProfile": "append-only-audit", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_routing_deployment_health_observations", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_routing_deployment_health_observations.tenant_id + deployment_id", "operationProfile": "append-only-audit", "evidence": ["tests/routing-postgres.test.ts"] },
+    { "store": "control", "resource": "ai_cost_coverage_acknowledgements", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "ai_cost_coverage_acknowledgements.tenant_id", "operationProfile": "append-only-audit", "evidence": ["tests/usage-ledger-postgres.test.ts"] },
+    { "store": "control", "resource": "provider_lifecycle_fences", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "provider_lifecycle_fences.tenant_id + provider", "operationProfile": "organization-control", "evidence": ["tests/provider-settings-postgres.test.ts"] },
+    { "store": "control", "resource": "provider_lifecycle_events", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "provider_lifecycle_events.tenant_id + provider", "operationProfile": "append-only-audit", "evidence": ["tests/provider-settings-postgres.test.ts"] },
+    { "store": "control", "resource": "telegram_token_intake_grants", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "telegram_token_intake_grants.tenant_id + subject_id", "operationProfile": "ephemeral-authentication", "evidence": ["tests/channel-boundary.test.ts"] },
+    { "store": "control", "resource": "connector_discovery_egress_permits", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "connector_discovery_egress_permits.tenant_id + connector_id", "operationProfile": "ephemeral-authentication", "evidence": ["tests/connector-registry-security.test.ts"] },
+    { "store": "control", "resource": "workspace_egress_security_group_assignments", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "workspace_egress_security_group_assignments.tenant_id + subject_id + workspace_id", "operationProfile": "organization-control", "evidence": ["tests/egress-policy.test.ts"] },
+    { "store": "control", "resource": "connector_registry", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "connector_registry.tenant_id", "operationProfile": "organization-control", "evidence": ["tests/connector-registry-security.test.ts"] },
+    { "store": "control", "resource": "schedules", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "schedules.tenant_id + subject_id + workspace_id", "operationProfile": "organization-control", "evidence": ["tests/schedules.test.ts", "tests/schedules-postgres.test.ts"] },
+    { "store": "control", "resource": "schedule_runs", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "schedule_runs.schedule_id -> schedules.tenant_id + subject_id", "operationProfile": "background-job", "evidence": ["tests/schedules.test.ts", "tests/schedules-postgres.test.ts"] }
+  ]
+}

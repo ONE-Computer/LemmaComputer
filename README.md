@@ -77,6 +77,28 @@ outside workspaces. The managed sandbox process receives local broker
 credentials rather than provider, gateway-administrator, Microsoft, Control, or
 Docker credentials.
 
+## Customer identity and organization access
+
+Customer authentication is implemented with an embedded, exactly pinned
+[Better Auth](https://better-auth.com/) runtime in the Control API. Depending on
+deployment configuration, a customer may sign in with verified email and
+password, a passkey, Google, Microsoft, or organization-managed OIDC company
+SSO. TOTP provides authenticator step-up for protected owner actions. Provider
+credentials and authentication sessions stay in the server-side authentication
+store and are never exposed to a workspace.
+
+Authentication does not grant product access. LemmaComputer separately owns
+accounts, organizations, invitations, memberships, roles, permissions, active
+organization selection, and workspace policy. Company SSO proves identity for
+a verified email domain; it cannot choose an organization or derive a product
+role from provider claims. An invitation fixes the organization and role before
+the recipient authenticates. Microsoft 365 connector consent is a later,
+independent grant and does not affect sign-in or membership.
+
+See [Customer authentication architecture](docs/authentication-architecture.md)
+for the normative trust boundary and [Deployment profiles](docs/deployment-profiles.md)
+for profile-specific custody and supported methods.
+
 See [Architecture](docs/architecture.md) for trust boundaries, runtime flows,
 network isolation, policy integrity, and the approval protocol. The dedicated
 [LiteLLM gateway architecture](docs/litellm-gateway-architecture.md) separates
@@ -107,15 +129,21 @@ interface, state owner, health contract, and extension seam.
 
 ## Run locally
 
-The reference deployment requires Linux on `amd64`, Docker Engine with Docker Compose v2.30.0 or later,
-Node.js 22 or later, a Microsoft Entra tenant, and a model-provider API key. It
-binds browser-facing ports to loopback and is intended for development or
+The reference deployment requires Linux on `amd64`, Docker Engine with Docker
+Compose v2.30.0 or later, and Node.js 22 or later. Its current strict
+customer-managed preflight still requires a Microsoft Entra application for the
+transitional workforce adapter, even when customers primarily use Better Auth;
+that compatibility requirement is not product authorization. Microsoft social
+login, organization-managed company SSO, and Microsoft 365 connector consent
+remain separate configurations. Model-provider credentials are added after
+startup through the write-only administrator UI, not `.env`. The reference
+stack binds browser-facing ports to loopback and is intended for development or
 evaluation.
 
 ```bash
 npm ci
 npm run env:init
-# Edit the generated .env with the Entra and administrator values.
+# Edit the generated .env with required deployment and authentication values.
 npm run env:check
 npm run image:workspace
 npm run compose:config
@@ -128,11 +156,13 @@ key. Then configure Pricing, publish a Model routes mapping, and set up a Team
 rollout before expecting governed Auto, Lite, Balanced, or Pro requests to run.
 Do not put provider keys in `.env`.
 
-Before editing `.env`, configure the two exact Web redirect URIs and delegated
-Graph permissions in Entra. The
-[local deployment runbook](docs/local-deployment.md) lists every prerequisite,
-environment value, Entra setting, command, and readiness check in setup order.
-Open [http://localhost:4174](http://localhost:4174) after the stack is healthy.
+When enabling a Microsoft integration, register only the exact redirect URI
+shown by the corresponding setup flow. Company SSO, Microsoft social login, and
+Microsoft 365 connector consent are separate registrations and grants. The
+[local deployment runbook](docs/local-deployment.md) lists the required
+environment values, optional provider settings, commands, and readiness checks
+in setup order. Open [http://localhost:4174](http://localhost:4174) after the
+stack is healthy.
 
 ## Development
 
@@ -157,12 +187,14 @@ configuration lives in `config/` and `integrations/`.
 ## Documentation
 
 - [Architecture and trust model](docs/architecture.md)
+- [Customer authentication architecture](docs/authentication-architecture.md)
+- [Deployment profiles](docs/deployment-profiles.md)
 - [LiteLLM gateway architecture](docs/litellm-gateway-architecture.md)
 - [AI control plane](docs/ai-control-plane.md)
 - [Service reference](docs/services.md)
 - [Governed model routing](docs/model-routing.md)
-- [Local deployment and Entra setup](docs/local-deployment.md)
-- [Hosted Microsoft Entra External ID](docs/hosted-external-id.md)
+- [Local deployment and optional Microsoft setup](docs/local-deployment.md)
+- [Transitional hosted Microsoft Entra External ID adapter](docs/hosted-external-id.md)
 - [Extending LemmaComputer](docs/extending.md)
 - [Configuration and operations](docs/operations.md)
 - [Contributing](CONTRIBUTING.md)

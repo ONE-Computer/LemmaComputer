@@ -38,7 +38,8 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(qualifier, /chatRuntimes: \[\{/);
   assert.match(qualifier, /AgentBridgeAuthority\(agentBridgeSecret\)/);
   assert.match(qualifier, /new LiteLLMGatewayAdapter\(\{/);
-  assert.match(qualifier, /gateway\.ensureGrant\(\{ workspaceId, identity, agentId, policy \}\)/);
+  assert.match(qualifier, /gateway\.ensureGrant\(\{ workspaceId, accessGeneration: 1, identity, agentId, policy \}\)/);
+  assert.match(qualifier, /workspaceId,\s+accessGeneration: 1,\s+correlationId/);
   assert.match(qualifier, /http:\/\/lemmacomputer-sandbox-\$\{workspaceId\}:8642\/health/);
   assert.match(qualifier, /hermesHealth\?\.connectors !== "ready"/);
   assert.match(qualifier, /gateway\.revoke\(workspaceId, agentId\)/);
@@ -51,6 +52,7 @@ test("OAuth release qualification explicitly reviews discovered connector tools"
   const qualifier = await readFile("scripts/qualify-oauth-renewal.mts", "utf8");
   assert.match(qualifier, /connectorToolPolicy\(alpha, "oauth-qualification"\)/);
   assert.match(qualifier, /saveConnectorToolPolicy\([\s\S]+fixtureReview\.documentHash/);
+  assert.match(qualifier, /executeGovernedTool\(\{[\s\S]+accessGeneration: 1,/);
 });
 
 test("release verification executes the pinned remote MCP egress qualification", async () => {

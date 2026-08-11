@@ -82,6 +82,76 @@ assert http_calls == [15]
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("the LiteLLM policy callback authorizes the exact workspace generation and fails closed", () => {
+  const callback = path.resolve(import.meta.dirname, "../integrations/litellm/lemmacomputer_policy_callback.py");
+  const script = String.raw`
+import json
+import runpy
+import sys
+import types
+
+fastapi = types.ModuleType("fastapi")
+fastapi.HTTPException = Exception
+litellm = types.ModuleType("litellm")
+integrations = types.ModuleType("litellm.integrations")
+custom_logger = types.ModuleType("litellm.integrations.custom_logger")
+custom_logger.CustomLogger = type("CustomLogger", (), {
+    "__init__": lambda self, *args, **kwargs: None,
+})
+sys.modules["fastapi"] = fastapi
+sys.modules["litellm"] = litellm
+sys.modules["litellm.integrations"] = integrations
+sys.modules["litellm.integrations.custom_logger"] = custom_logger
+
+module = runpy.run_path(sys.argv[1])
+authorize = module["_authorize_workspace_access"]
+authorize.__globals__["WORKSPACE_ACCESS_TOKEN"] = "t" * 32
+calls = []
+class Response:
+    status = 200
+    def __init__(self, allowed): self.allowed = allowed
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+    def read(self): return json.dumps({"allowed": self.allowed}).encode("utf-8")
+def allow(request, timeout):
+    calls.append((json.loads(request.data), timeout, request.headers))
+    return Response(True)
+authorize.__globals__["urllib"].request.urlopen = allow
+metadata = {
+    "lemmacomputer_tenant_id": "tenant-real",
+    "lemmacomputer_subject_id": "subject-real",
+    "lemmacomputer_workspace_id": "11111111-1111-4111-8111-111111111111",
+    "lemmacomputer_access_generation": 7,
+}
+authorize(metadata)
+assert calls[0][0] == {
+    "tenantId": "tenant-real",
+    "subjectId": "subject-real",
+    "workspaceId": "11111111-1111-4111-8111-111111111111",
+    "accessGeneration": 7,
+}
+assert calls[0][1] == 0.9
+
+authorize.__globals__["urllib"].request.urlopen = lambda request, timeout: Response(False)
+try:
+    authorize(metadata)
+except RuntimeError as error:
+    assert "no longer active" in str(error)
+else:
+    raise AssertionError("denied access must fail closed")
+
+for invalid in ({**metadata, "lemmacomputer_access_generation": 6.5}, {**metadata, "lemmacomputer_subject_id": None}):
+    try:
+        authorize(invalid)
+    except RuntimeError as error:
+        assert "metadata is incomplete" in str(error)
+    else:
+        raise AssertionError("invalid access metadata must fail closed")
+`;
+  const result = spawnSync("python3", ["-c", script, callback], { encoding: "utf8", timeout: 10_000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
 test("the pinned LiteLLM callback normalizes provider units and preserves governed attempt lineage", () => {
   const callback = path.resolve(import.meta.dirname, "../integrations/litellm/lemmacomputer_policy_callback.py");
   const script = String.raw`
@@ -91,6 +161,7 @@ import os
 import runpy
 import sys
 import types
+
 
 os.environ["LEMMACOMPUTER_AI_USAGE_TOKEN"] = "u" * 32
 
@@ -123,6 +194,7 @@ completion_payload = module["_completion_payload"]
 routing_payload = module["_routing_payload"]
 callback_type = module["LemmaComputerMcpPolicyCallback"]
 set_routing_state = module["_set_routing_state"]
+
 
 # These are the supported callback names in the pinned LiteLLM v1.93 image.
 assert hasattr(callback_type, "async_pre_call_deployment_hook")
@@ -214,6 +286,7 @@ class Auth:
         "lemmacomputer_tenant_id": "tenant-real",
         "lemmacomputer_subject_id": "subject-real",
         "lemmacomputer_workspace_id": "workspace-real",
+        "lemmacomputer_access_generation": 7,
         "lemmacomputer_agent_id": "agent-real",
         "lemmacomputer_policy_model_alias": "balanced",
         "lemmacomputer_policy_version_id": "policy-real",
@@ -482,6 +555,14 @@ def usage_authority(path, payload):
     raise AssertionError(f"unexpected usage authority call: {path}")
 
 callback_type.async_pre_call_deployment_hook.__globals__["_usage_request"] = usage_authority
+callback_type.async_pre_routing_hook.__globals__["_usage_request"] = usage_authority
+assert callback_type.async_pre_routing_hook.__globals__["_usage_request"] is usage_authority
+workspace_access_calls = []
+def workspace_access_authority(metadata):
+    if metadata.get("lemmacomputer_workspace_id") is not None:
+        assert metadata["lemmacomputer_access_generation"] == 7
+        workspace_access_calls.append(dict(metadata))
+callback_type.async_pre_call_hook.__globals__["_authorize_workspace_access"] = workspace_access_authority
 callback = callback_type()
 
 

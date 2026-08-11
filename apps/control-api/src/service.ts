@@ -34,6 +34,7 @@ export type ControllerLaunch = Launch & {
 export interface ControllerClient {
   create(input: {
     workspaceId: string;
+    accessGeneration: number;
     correlationId: string;
     policy: RuntimePolicy;
     policyBundle?: SignedPolicyBundle;
@@ -52,7 +53,8 @@ export interface ControllerClient {
   status(providerId: string): Promise<Sandbox>;
   open(providerId: string): Promise<ControllerLaunch>;
   destroy(providerId: string): Promise<void>;
-  purgeWorkspace(workspaceId: string): Promise<void>;
+  destroyWorkspace(workspaceId: string, providerId: string): Promise<void>;
+  purgeWorkspace(workspaceId: string, accessGeneration?: number): Promise<void>;
 }
 
 export type EgressProxyGrant = {
@@ -63,23 +65,30 @@ export type EgressProxyGrant = {
     tenantId: string;
     subjectId: string;
     workspaceId: string;
+    accessGeneration: number;
     agentId: string;
     securityGroupVersionId: string;
     egressMode: RuntimePolicy["egressMode"];
     policyHash: string;
   };
+  accessAuthorization?: { url: string; token: string };
 };
 
 export class EgressProxyGrantAuthority {
-  constructor(private readonly rootSecret: string) {}
+  constructor(
+    private readonly rootSecret: string,
+    private readonly accessAuthorization?: { url: string; token: string },
+  ) {}
 
-  issue(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy): EgressProxyGrant | undefined {
+  issue(identity: IdentityContext, workspace: Pick<WorkspaceRecord, "id" | "accessGeneration">, policy: RuntimePolicy): EgressProxyGrant | undefined {
     if (!policy.egress) return undefined;
+    const workspaceId = workspace.id;
     const verificationSecret = deriveEgressProxySecret(this.rootSecret, workspaceId);
     const expectedGrant = {
       tenantId: identity.tenantId,
       subjectId: identity.subjectId,
       workspaceId,
+      accessGeneration: workspace.accessGeneration,
       agentId: policy.agentId,
       securityGroupVersionId: policy.egress.id,
       egressMode: policy.egressMode,
@@ -91,6 +100,7 @@ export class EgressProxyGrantAuthority {
       verificationSecret,
       expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
       expectedGrant,
+      accessAuthorization: this.accessAuthorization,
     };
   }
 }
@@ -154,7 +164,13 @@ export class HttpControllerClient implements ControllerClient {
   async status(providerId: string) { return await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`) as Sandbox; }
   async open(providerId: string) { return await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}/open`, { method: "POST" }) as Launch; }
   async destroy(providerId: string) { await this.call(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`, { method: "DELETE" }); }
-  async purgeWorkspace(workspaceId: string) { await this.call(`/internal/v1/workspaces/${encodeURIComponent(workspaceId)}/storage`, { method: "DELETE" }); }
+  async destroyWorkspace(workspaceId: string, providerId: string) {
+    await this.call(`/internal/v1/workspaces/${encodeURIComponent(workspaceId)}/sandboxes/${encodeURIComponent(providerId)}`, { method: "DELETE" });
+  }
+  async purgeWorkspace(workspaceId: string, accessGeneration?: number) {
+    const query = accessGeneration === undefined ? "" : `?accessGeneration=${encodeURIComponent(String(accessGeneration))}`;
+    await this.call(`/internal/v1/workspaces/${encodeURIComponent(workspaceId)}/storage${query}`, { method: "DELETE" });
+  }
 }
 
 const profileClient = (profileId: RuntimePolicy["workspaceProfile"]) => profileId === "claude-desktop-standard-v1"
@@ -283,6 +299,7 @@ export class WorkspaceService {
       policy: agentPolicy,
       gateway: await this.gateway?.ensureGrant({
         workspaceId,
+        accessGeneration: workspace.accessGeneration,
         identity,
         agentId: agentPolicy.agentId,
         policy: agentPolicy,
@@ -324,7 +341,7 @@ export class WorkspaceService {
   private async view(record: WorkspaceRecord, policy: RuntimePolicy, enforced?: VerifiedPolicyBundle, projected?: PolicyIntegrityView) {
     const integrity = this.integrityFor(policy, enforced, projected);
     if (!this.gateway || !["ready", "open"].includes(record.state)) return toView(record, undefined, policy, integrity);
-    const gateway = await this.gateway.readiness(record.id, policy.agentId, policy).catch(() => undefined);
+    const gateway = await this.gateway.readiness(record.id, policy.agentId, policy, record.accessGeneration).catch(() => undefined);
     return toView(record, gateway, policy, integrity);
   }
 
@@ -383,6 +400,7 @@ export class WorkspaceService {
     const verifiedPolicy = authorized?.payload.policy ?? policy;
     await Promise.all(this.agentPolicies(verifiedPolicy).map((agentPolicy) => this.gateway!.ensureGrant({
       workspaceId: record.id,
+      accessGeneration: record.accessGeneration,
       identity,
       agentId: agentPolicy.agentId,
       policy: agentPolicy,
@@ -400,7 +418,7 @@ export class WorkspaceService {
     const authorized = this.authorizePolicy(identity, record.id, policy);
     if (!authorized || !this.egressProxyAuthority || !policy.egress) return false;
     const verifiedPolicy = authorized.payload.policy;
-    const egressProxy = this.egressProxyAuthority.issue(identity, record.id, verifiedPolicy);
+    const egressProxy = this.egressProxyAuthority.issue(identity, record, verifiedPolicy);
     if (!egressProxy) return false;
     await this.controller.updateEgressPolicy(record.providerId, {
       workspaceId: record.id,
@@ -412,7 +430,7 @@ export class WorkspaceService {
   }
 
   async revokePolicyGrant(workspaceId: string, policy: RuntimePolicy) {
-    await this.store.revokeBridgeGrants(workspaceId);
+    await this.store.revokeAccessGrants(workspaceId);
     await this.revokeGatewayGrants(workspaceId, policy);
   }
 
@@ -425,12 +443,13 @@ export class WorkspaceService {
       const authorized = this.authorizePolicy(identity, claimed.id, policy);
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, claimed, verifiedPolicy);
-      const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
+      const egressProxy = this.egressProxyAuthority?.issue(identity, claimed, verifiedPolicy);
       const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
       if (verifiedPolicy.egress && !egressProxy) throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
         workspaceId: claimed.id,
+        accessGeneration: claimed.accessGeneration,
         correlationId,
         policy: verifiedPolicy,
         ...(authorized ? { policyBundle: authorized.bundle } : {}),
@@ -453,17 +472,19 @@ export class WorkspaceService {
     const authorized = this.authorizePolicy(identity, record.id, policy);
     await this.ensureAgentGrants(identity, record, authorized?.payload.policy ?? policy);
     const controllerLaunch = await this.controller.open(record.providerId);
-    const launch = this.publicLaunch(identity, record.id, controllerLaunch);
+    const launch = this.publicLaunch(identity, record, controllerLaunch);
     const updated = await this.store.update(record.id, { state: "open", failureCode: null });
     return { workspace: await this.view(updated, policy, authorized), launch };
   }
 
-  private publicLaunch(identity: IdentityContext, workspaceId: string, launch: ControllerLaunch): Launch {
+  private publicLaunch(identity: IdentityContext, record: WorkspaceRecord, launch: ControllerLaunch): Launch {
+    const workspaceId = record.id;
     const { ingressTarget, ...publicLaunch } = launch;
     if (!ingressTarget || !this.workspaceIngress) return publicLaunch;
     const issued = this.workspaceIngress.authority.issueLaunch({
       identity,
       workspaceId,
+      accessGeneration: record.accessGeneration,
       target: ingressTarget,
     });
     const controllerUrl = new URL(launch.launchUrl);
@@ -485,17 +506,18 @@ export class WorkspaceService {
     const claimed = await this.store.claim(record.id, ["ready", "open", "stopped", "failed"], "restarting");
     if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
     try {
-      const bridgeGeneration = await this.store.revokeBridgeGrants(claimed.id);
+      const accessRecord = await this.store.revokeAccessGrants(claimed.id);
       if (claimed.providerId) await this.controller.destroy(claimed.providerId);
       const authorized = this.authorizePolicy(identity, claimed.id, policy);
       const verifiedPolicy = authorized?.payload.policy ?? policy;
-      const grants = await this.ensureAgentGrants(identity, bridgeGeneration, verifiedPolicy);
-      const egressProxy = this.egressProxyAuthority?.issue(identity, claimed.id, verifiedPolicy);
+      const grants = await this.ensureAgentGrants(identity, accessRecord, verifiedPolicy);
+      const egressProxy = this.egressProxyAuthority?.issue(identity, accessRecord, verifiedPolicy);
       const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
       if (verifiedPolicy.egress && !egressProxy) throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
         workspaceId: claimed.id,
+        accessGeneration: accessRecord.accessGeneration,
         correlationId,
         policy: verifiedPolicy,
         ...(authorized ? { policyBundle: authorized.bundle } : {}),
@@ -525,7 +547,7 @@ export class WorkspaceService {
       : ["ready" as const, "open" as const, "provisioning" as const, "restarting" as const, "failed" as const];
     const claimed = await this.store.claim(record.id, allowed, "stopping");
     if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
-    await this.store.revokeBridgeGrants(claimed.id);
+    await this.store.revokeAccessGrants(claimed.id);
     try {
       if (claimed.providerId) await this.controller.destroy(claimed.providerId);
     } catch (error) {
@@ -559,7 +581,7 @@ export class WorkspaceService {
 
   async delete(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
-    await this.store.revokeBridgeGrants(record.id);
+    await this.store.revokeAccessGrants(record.id);
     if (record.providerId) await this.controller.destroy(record.providerId);
     await this.controller.purgeWorkspace(record.id);
     await this.revokeAgentGrants(record.id, policy);
@@ -573,7 +595,7 @@ export class WorkspaceService {
     const authorized = this.authorizePolicy(identity, record.id, policy);
     const verifiedPolicy = authorized?.payload.policy ?? policy;
     await this.ensureAgentGrants(identity, record, verifiedPolicy);
-    return this.gateway.test(record.id, verifiedPolicy.agentId, verifiedPolicy);
+    return this.gateway.test(record.id, verifiedPolicy.agentId, verifiedPolicy, record.accessGeneration);
   }
 
   async agentChatAgents(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {

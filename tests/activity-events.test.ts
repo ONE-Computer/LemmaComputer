@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import {
   activityEventSchema,
+  LemmaComputerError,
   type ActivityEventDraft,
   type AgentChatEvent,
   type IdentityContext,
@@ -266,6 +267,36 @@ test("a live subscriber receives events appended after connection and closes on 
   const terminal = await stream.next();
   assert.equal(terminal.value?.kind, "terminal");
   assert.equal((await stream.next()).done, true);
+});
+
+test("a live subscriber rechecks authority before disclosing a later event", async () => {
+  const store = new MemoryWorkspaceStore();
+  const workspace = await store.createOrGet(owner, "revoked-live", randomUUID());
+  const service = new ActivityEventService(store, 1, 50);
+  const common = {
+    identity: owner,
+    workspaceId: workspace.id,
+    agentCatalogId: "codex-cli" as const,
+    sessionId,
+    displayName: "Codex CLI",
+    receivedAt: new Date(timestamp),
+  };
+  await service.recordAgentEvent({
+    ...common,
+    event: { version: 1, sequence: 0, sessionId, turnId, type: "turn-start", messageId: "message-revoked", createdAt: timestamp },
+  });
+  const scope = { workspaceId: workspace.id, agentCatalogId: "codex-cli" as const, sessionId, turnId };
+  let active = true;
+  const stream = service.subscribe(owner, scope, 0, undefined, async () => {
+    if (!active) throw new LemmaComputerError("ACTIVITY_STREAM_REVOKED", "Activity stream access is no longer active", 403);
+  });
+  const next = stream.next();
+  active = false;
+  await service.recordAgentEvent({
+    ...common,
+    event: { version: 1, sequence: 1, sessionId, turnId, type: "progress", activityId: "progress-revoked", label: "Secret progress", state: "running" },
+  });
+  await assert.rejects(next, { code: "ACTIVITY_STREAM_REVOKED" });
 });
 
 test("replay and live-stream requests reconnect after a sequence without cross-tenant leakage", async () => {

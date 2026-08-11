@@ -40,6 +40,7 @@ class Controller implements ControllerClient {
   async status(providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
   async open(): Promise<Launch> { return { launchUrl: "https://kasm.example.test", expiresAt: new Date(Date.now() + 60_000).toISOString() }; }
   async destroy() {}
+  async destroyWorkspace() {}
   async purgeWorkspace() {}
 }
 
@@ -65,11 +66,11 @@ test("bridge grants fail closed for foreign signing secrets, lifecycle revocatio
 
   try {
     const signedWithProxyToken = new AgentBridgeAuthority(proxyToken).issue(identity, workspace.id, policy, {
-      workspaceGeneration: initialRecord.bridgeGrantGeneration,
+      workspaceGeneration: initialRecord.accessGeneration,
     });
     assert.equal((await app.inject(protectedOperation(signedWithProxyToken))).statusCode, 401);
 
-    const initial = grantFor(initialRecord.bridgeGrantGeneration);
+    const initial = grantFor(initialRecord.accessGeneration);
     assert.equal((await app.inject(protectedOperation(initial))).statusCode, 404, "a valid grant reaches the protected route");
 
     const renewed = await app.inject({
@@ -91,7 +92,7 @@ test("bridge grants fail closed for foreign signing secrets, lifecycle revocatio
 
     const restartedRecord = await store.getOwned(identity, workspace.id);
     assert.ok(restartedRecord);
-    const afterRestart = grantFor(restartedRecord.bridgeGrantGeneration);
+    const afterRestart = grantFor(restartedRecord.accessGeneration);
     assert.equal((await app.inject(protectedOperation(afterRestart))).statusCode, 404);
 
     await service.stop(identity, policy, workspace.id);
@@ -100,7 +101,7 @@ test("bridge grants fail closed for foreign signing secrets, lifecycle revocatio
     const restartedAgain = await service.create(identity, policy, "personal", "agent-bridge-start-again", "correlation-3");
     const current = await store.getOwned(identity, workspace.id);
     assert.ok(current);
-    const afterStart = grantFor(current.bridgeGrantGeneration);
+    const afterStart = grantFor(current.accessGeneration);
     assert.equal(restartedAgain.state, "ready");
     assert.equal((await app.inject(protectedOperation(afterStart))).statusCode, 404);
 
@@ -126,7 +127,7 @@ test("agent bridge server rejects endpoint scopes and refuses shared signing sec
   });
   try {
     const renewalOnly = authority.issue(identity, workspace.id, policy, {
-      workspaceGeneration: workspace.bridgeGrantGeneration,
+      workspaceGeneration: workspace.accessGeneration,
       scopes: ["agent:renew"],
     });
     const denied = await app.inject(protectedOperation(renewalOnly));

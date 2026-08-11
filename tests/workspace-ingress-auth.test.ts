@@ -13,6 +13,7 @@ test("workspace launch tokens exchange into scoped, longer-lived sessions", () =
   const launch = authority.issueLaunch({
     identity: { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" },
     workspaceId,
+    accessGeneration: 1,
     target: {
       protocol: "https",
       host: relayHost,
@@ -26,6 +27,7 @@ test("workspace launch tokens exchange into scoped, longer-lived sessions", () =
   assert.equal(exchanged.claims.tenantId, "acme");
   assert.equal(exchanged.claims.subjectId, "alex");
   assert.equal(exchanged.claims.workspaceId, workspaceId);
+  assert.equal(exchanged.claims.accessGeneration, 1);
   assert.equal(exchanged.claims.host, relayHost);
   assert.ok(exchanged.claims.host.length <= 63);
   assert.equal(exchanged.claims.port, 16_920);
@@ -38,6 +40,7 @@ test("workspace ingress rejects tampered and expired bearer tokens", () => {
   const launch = authority.issueLaunch({
     identity: { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" },
     workspaceId,
+    accessGeneration: 1,
     target: { protocol: "https", host: "workspace.internal", port: 6901 },
   }, now);
 

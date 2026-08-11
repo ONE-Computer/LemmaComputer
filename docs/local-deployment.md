@@ -1,9 +1,12 @@
-# Local deployment and Microsoft Entra setup
+# Local deployment and Microsoft integration setup
 
 This runbook is ordered for an operator or coding agent starting from a fresh
 clone. It produces a loopback-only LemmaComputer deployment with the local Docker
-sandbox driver, Microsoft Entra sign-in, the Microsoft 365 connector, and at
-least one model route.
+sandbox driver, embedded Better Auth customer sign-in, optional Microsoft
+integrations, and at least one model route. The current strict
+customer-managed preflight still requires the transitional workforce-Entra
+application values described below; customer roles and workspace access remain
+LemmaComputer organization decisions.
 
 The root `compose.yaml` is for development and evaluation. It is not a
 production security perimeter. Read
@@ -16,7 +19,8 @@ A setup is complete when:
 
 - `docker compose ps` reports every long-running service healthy;
 - `lemmacomputer/workspace:dev`, or the configured workspace image, exists;
-- `http://localhost:4174` accepts Microsoft sign-in;
+- `http://localhost:4174` accepts an enabled Better Auth customer sign-in
+  method and, when configured, Microsoft sign-in;
 - the configured administrator has the administrator role;
 - **Connections → Microsoft 365** completes consent and reports connected;
 - a workspace can be created and opened; and
@@ -55,7 +59,13 @@ docker info >/dev/null
 Expected architecture output is `x86_64`. Resolve Docker daemon or socket
 access errors before continuing.
 
-## Configure Microsoft Entra
+## Configure the transitional workforce Entra and Microsoft 365 app
+
+This registration currently satisfies the strict customer-managed preflight
+and may also be reused for the Microsoft 365 connector. It is separate from
+Better Auth Microsoft social login and from organization-managed company SSO.
+Do not infer a LemmaComputer organization, role, or workspace policy from this
+directory or its claims.
 
 LemmaComputer is a confidential, single-tenant Web application. The shortest
 local setup uses one Entra app registration for both product sign-in and

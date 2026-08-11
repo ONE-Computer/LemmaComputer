@@ -56,11 +56,12 @@ export type GatewayTestResult = {
 };
 
 export interface GatewayClient {
-  ensureGrant(input: { workspaceId: string; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant>;
+  ensureGrant(input: { workspaceId: string; accessGeneration: number; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant>;
   modelCapabilities(modelAlias: string): Promise<GatewayModelCapabilities>;
-  readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayReadiness>;
-  test(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayTestResult>;
+  readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy, accessGeneration?: number): Promise<GatewayReadiness>;
+  test(workspaceId: string, agentId?: string, policy?: RuntimePolicy, accessGeneration?: number): Promise<GatewayTestResult>;
   revoke(workspaceId: string, agentId?: string): Promise<void>;
+  revokeWorkspace(workspaceId: string, accessGeneration?: number): Promise<void>;
 }
 
 export type OAuthConnectionStatus = {
@@ -169,6 +170,7 @@ export type GovernedToolExecutionInput = {
   tenantId: string;
   subjectId: string;
   workspaceId: string;
+  accessGeneration: number;
   operationId: string;
   operationDigest: string;
   leaseId: string;
@@ -342,7 +344,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   private readonly workspaceGrantRenewalMs: number;
   private readonly connectionGrantTtlMs: number;
   private readonly adminFetch: FetchLike;
-  private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string; modelAlias: string; transportModelAlias: string }>();
+  private readonly workspaceGrantStates = new Map<string, { expiresAt: number; projection: string; modelAlias: string; transportModelAlias: string; accessGeneration: number }>();
   private readonly modelCapabilityStates = new Map<string, { expiresAt: number; capabilities: GatewayModelCapabilities }>();
   private readonly oauthClientRegistrationStates = new Map<string, Promise<string | null>>();
 
@@ -373,11 +375,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return `oc-agent-${digest}`;
   }
 
-  credentialFor(workspaceId: string, agentId?: string) {
+  credentialFor(workspaceId: string, agentId?: string, accessGeneration?: number) {
     const digest = createHmac("sha256", this.config.credentialSecret)
-      .update(agentId
+      .update((agentId
         ? `lemmacomputer:litellm:workspace:${workspaceId}:agent:${agentId}`
-        : `lemmacomputer:litellm:workspace:${workspaceId}`)
+        : `lemmacomputer:litellm:workspace:${workspaceId}`) + (accessGeneration === undefined ? "" : `:generation:${accessGeneration}`))
       .digest("base64url");
     return `sk-ocw-${digest}`;
   }
@@ -872,7 +874,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return `sk-oce-${digest}`;
   }
 
-  async ensureGrant(input: { workspaceId: string; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant> {
+  async ensureGrant(input: { workspaceId: string; accessGeneration: number; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant> {
     const agentId = input.policy?.agentId ?? input.agentId;
     const modelAlias = input.policy?.modelAlias ?? this.modelAlias;
     const { clientModelAlias, transportModelAlias, providerAccessGroup, grantModels } = workspaceModelGrantProjection(
@@ -910,8 +912,9 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       connectionProjectionHash: input.policy?.connectionProjectionHash ?? null,
       policyVersionId: input.policy?.policyVersionId ?? null,
       policyHash: input.policy?.policyHash ?? null,
+      accessGeneration: input.accessGeneration,
     });
-    const credential = this.credentialFor(input.workspaceId, agentId);
+    const credential = this.credentialFor(input.workspaceId, agentId, input.accessGeneration);
     const gatewayUserId = this.userIdFor(input.identity);
     const gatewayAgentId = this.agentIdFor(input.workspaceId, agentId);
     const cached = this.workspaceGrantStates.get(credential);
@@ -922,7 +925,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const durationSeconds = Math.max(60, Math.ceil(this.workspaceGrantTtlMs / 1_000));
     const grant = {
       key: credential,
-      key_alias: `lemmacomputer-agent-${gatewayAgentId}`,
+      key_alias: this.workspaceKeyAlias(gatewayAgentId, input.accessGeneration),
       key_type: "llm_api",
       user_id: gatewayUserId,
       agent_id: gatewayAgentId,
@@ -932,6 +935,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       max_parallel_requests: WORKSPACE_MAX_PARALLEL_REQUESTS,
       metadata: {
         lemmacomputer_workspace_id: input.workspaceId,
+        lemmacomputer_access_generation: input.accessGeneration,
         lemmacomputer_tenant_id: input.identity.tenantId,
         lemmacomputer_subject_id: input.identity.subjectId,
         lemmacomputer_agent_id: agentId ?? `workspace-default:${input.workspaceId}`,
@@ -969,6 +973,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         && metadata.lemmacomputer_tenant_id === input.identity.tenantId
         && metadata.lemmacomputer_subject_id === input.identity.subjectId
         && metadata.lemmacomputer_workspace_id === input.workspaceId
+        && metadata.lemmacomputer_access_generation === input.accessGeneration
         && metadata.lemmacomputer_agent_id === (agentId ?? `workspace-default:${input.workspaceId}`)
         && (!input.policy || (metadata.lemmacomputer_policy_version_id === input.policy.policyVersionId
           && metadata.lemmacomputer_policy_hash === input.policy.policyHash));
@@ -1033,11 +1038,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         );
       }
     }
-    this.workspaceGrantStates.set(credential, { expiresAt: expiresAt.getTime(), projection, modelAlias: clientModelAlias, transportModelAlias });
+    this.workspaceGrantStates.set(credential, { expiresAt: expiresAt.getTime(), projection, modelAlias: clientModelAlias, transportModelAlias, accessGeneration: input.accessGeneration });
     return { baseUrl: this.workspaceUrl, credential, modelAlias: clientModelAlias, transportModelAlias, expiresAt: expiresAt.toISOString() };
   }
 
-  async readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayReadiness> {
+  async readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy, accessGeneration?: number): Promise<GatewayReadiness> {
     const effectiveAgentId = policy?.agentId ?? agentId;
     const modelAlias = policy?.modelAlias ?? this.modelAlias;
     const activeMcpServers = policy?.activeMcpServers ?? policy?.mcpServers ?? [policy?.mcpServer ?? this.mcpServer];
@@ -1047,12 +1052,12 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const allowedTools = [...new Set(activeMcpServers.flatMap((serverName) => (
       projectedToolPermissions[serverName] ?? []
     )))];
-    const credential = this.credentialFor(workspaceId, effectiveAgentId);
+    const credential = this.credentialFor(workspaceId, effectiveAgentId, accessGeneration);
     const gatewayModelAlias = this.workspaceGrantStates.get(credential)?.transportModelAlias ?? (modelAlias === "lemmacomputer-auto" ? "lemmacomputer-auto" : desktopModelAlias(modelAlias, policy));
     const [models, discovery, modelRoute] = await Promise.all([
       this.dataCall("/v1/models", credential),
       this.discoverToolsForServers(credential, activeMcpServers),
-      this.modelRoute(credential, workspaceId, effectiveAgentId, modelAlias),
+      this.modelRoute(credential, workspaceId, effectiveAgentId, modelAlias, accessGeneration ?? this.workspaceGrantStates.get(credential)?.accessGeneration),
     ]);
     if (!models.ok) this.workspaceGrantStates.delete(credential);
     const modelIds = Array.isArray(asObject(models.payload).data)
@@ -1334,8 +1339,11 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return new LemmaComputerError("BEDROCK_ROUTE_REJECTED", "Bedrock rejected the route configuration or test request", status || 502);
   }
 
-  private async modelRoute(credential: string, workspaceId: string, agentId: string | undefined, modelAlias: string): Promise<GatewayModelRoute> {
-    const keyAlias = `lemmacomputer-agent-${this.agentIdFor(workspaceId, agentId)}`;
+  private async modelRoute(credential: string, workspaceId: string, agentId: string | undefined, modelAlias: string, accessGeneration?: number): Promise<GatewayModelRoute> {
+    const gatewayAgentId = this.agentIdFor(workspaceId, agentId);
+    const keyAlias = accessGeneration === undefined
+      ? `lemmacomputer-agent-${gatewayAgentId}`
+      : this.workspaceKeyAlias(gatewayAgentId, accessGeneration);
     const [result, capabilities] = await Promise.all([
       this.adminCall(`/key/list?return_full_object=true&key_alias=${encodeURIComponent(keyAlias)}`, { method: "GET" }),
       this.modelCapabilities(modelAlias),
@@ -1359,13 +1367,13 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     };
   }
 
-  async test(workspaceId: string, agentId?: string, policy?: RuntimePolicy): Promise<GatewayTestResult> {
+  async test(workspaceId: string, agentId?: string, policy?: RuntimePolicy, accessGeneration?: number): Promise<GatewayTestResult> {
     const effectiveAgentId = policy?.agentId ?? agentId;
     const modelAlias = policy?.modelAlias ?? this.modelAlias;
-    const credential = this.credentialFor(workspaceId, effectiveAgentId);
+    const credential = this.credentialFor(workspaceId, effectiveAgentId, accessGeneration);
     const activeMcpServers = policy?.activeMcpServers ?? policy?.mcpServers ?? [policy?.mcpServer ?? this.mcpServer];
     const [readiness, discovery] = await Promise.all([
-      this.readiness(workspaceId, effectiveAgentId, policy),
+      this.readiness(workspaceId, effectiveAgentId, policy, accessGeneration),
       this.discoverToolsForServers(credential, activeMcpServers),
     ]);
     if (readiness.models !== "ready" || !readiness.modelRoute) throw new LemmaComputerError("MODEL_ROUTE_FAILED", "The assigned model route is unavailable", 502, true);
@@ -1406,6 +1414,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           lemmacomputer_tenant_id: input.tenantId,
           lemmacomputer_subject_id: input.subjectId,
           lemmacomputer_workspace_id: input.workspaceId,
+          lemmacomputer_access_generation: input.accessGeneration,
           lemmacomputer_agent_id: input.agentId ?? `workspace-default:${input.workspaceId}`,
           lemmacomputer_gateway_user_id: gatewayUserId,
           lemmacomputer_gateway_agent_id: gatewayAgentId,
@@ -1459,14 +1468,48 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
   }
 
   async revoke(workspaceId: string, agentId?: string) {
-    const credential = this.credentialFor(workspaceId, agentId);
-    const keyAlias = `lemmacomputer-agent-${this.agentIdFor(workspaceId, agentId)}`;
-    const result = await this.adminCall("/key/delete", {
-      method: "POST",
-      body: { key_aliases: [keyAlias] },
-    }, true);
-    this.workspaceGrantStates.delete(credential);
+    const gatewayAgentId = this.agentIdFor(workspaceId, agentId);
+    const listed = await this.adminCall("/key/list?return_full_object=true", { method: "GET" }, true);
+    if (!listed.ok) throw this.upstreamError("GATEWAY_REVOKE_FAILED", listed.status, listed.payload);
+    const keys = Array.isArray(asObject(listed.payload).keys) ? asObject(listed.payload).keys as unknown[] : [];
+    const aliases = keys.map(asObject)
+      .filter((key) => {
+        const metadata = asObject(key.metadata);
+        return metadata.lemmacomputer_workspace_id === workspaceId
+          && metadata.lemmacomputer_gateway_agent_id === gatewayAgentId;
+      })
+      .map((key) => key.key_alias)
+      .filter((alias): alias is string => typeof alias === "string" && alias.length > 0);
+    const result = aliases.length
+      ? await this.adminCall("/key/delete", { method: "POST", body: { key_aliases: aliases } }, true)
+      : { ok: true, status: 204, payload: {} };
+    this.workspaceGrantStates.clear();
     if (!result.ok && result.status !== 404) throw this.upstreamError("GATEWAY_REVOKE_FAILED", result.status, result.payload);
+  }
+
+  async revokeWorkspace(workspaceId: string, accessGeneration?: number) {
+    const listed = await this.adminCall("/key/list?return_full_object=true", { method: "GET" }, true);
+    if (!listed.ok) throw this.upstreamError("GATEWAY_REVOKE_FAILED", listed.status, listed.payload);
+    const keys = Array.isArray(asObject(listed.payload).keys) ? asObject(listed.payload).keys as unknown[] : [];
+    const aliases = keys.map(asObject)
+      .filter((key) => {
+        const metadata = asObject(key.metadata);
+        if (metadata.lemmacomputer_workspace_id !== workspaceId) return false;
+        if (accessGeneration === undefined) return true;
+        const keyGeneration = Number(metadata.lemmacomputer_access_generation);
+        return !Number.isInteger(keyGeneration) || keyGeneration <= accessGeneration;
+      })
+      .map((key) => key.key_alias)
+      .filter((alias): alias is string => typeof alias === "string" && alias.length > 0);
+    if (aliases.length) {
+      const deleted = await this.adminCall("/key/delete", { method: "POST", body: { key_aliases: aliases } }, true);
+      if (!deleted.ok && deleted.status !== 404) throw this.upstreamError("GATEWAY_REVOKE_FAILED", deleted.status, deleted.payload);
+    }
+    this.workspaceGrantStates.clear();
+  }
+
+  private workspaceKeyAlias(gatewayAgentId: string, accessGeneration: number) {
+    return `lemmacomputer-agent-${gatewayAgentId}-g${accessGeneration}`;
   }
 
   private async discoverToolsForServers(credential: string, serverNames: string[]) {

@@ -7,8 +7,8 @@ async function request(path, options = {}) {
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload?.error?.message ?? "LemmaComputer could not complete the request.");
-    error.code = payload?.error?.code ?? "REQUEST_FAILED";
+    const error = new Error(payload?.error?.message ?? payload?.message ?? "LemmaComputer could not complete the request.");
+    error.code = payload?.error?.code ?? payload?.code ?? "REQUEST_FAILED";
     error.retryable = payload?.error?.retryable ?? false;
     error.status = response.status;
     throw error;
@@ -191,9 +191,60 @@ export const approvalApi = {
 
 export const authApi = {
   session: () => request("/api/v1/auth/session"),
+  customerCapabilities: () => request("/api/v1/auth/customer-capabilities", { cache: "no-store" }),
+  productSession: () => request("/api/v1/auth/product-session", { cache: "no-store" }),
+  selectProductMembership: (membershipId) => request("/api/v1/auth/product-session", mutation("PUT", { membershipId })),
+  createOrganization: (displayName, idempotencyKey) => request("/api/v1/auth/organizations", {
+    method: "POST",
+    headers: { ...jsonHeaders, "idempotency-key": idempotencyKey },
+    body: JSON.stringify({ displayName }),
+  }),
+  prepareInvitation: (token) => request("/api/v1/auth/invitations/context", mutation("POST", { token })),
+  invitationContext: () => request("/api/v1/auth/invitations/context", { cache: "no-store" }),
+  acceptInvitation: () => request("/api/v1/auth/invitations/accept", mutation()),
+  completeOwnerStepUp: (code) => request("/api/v1/auth/owner-step-up", mutation("POST", { code })),
+  revokeProductSession: () => request("/api/v1/auth/product-session", mutation("DELETE")),
+  signUpWithEmail: (input) => request("/api/v1/auth/customer/sign-up/email", mutation("POST", input)),
+  signInWithEmail: (email, password) => request("/api/v1/auth/customer/sign-in/email", mutation("POST", { email, password })),
+  signInWithCompanySso: (email, returnPath = "/") => request("/api/v1/auth/customer-sso", mutation("POST", { email, returnPath })),
+  customerIdentitySession: () => request("/api/v1/auth/customer/get-session", { cache: "no-store" }),
+  linkedAccounts: () => request("/api/v1/auth/customer/list-accounts", { cache: "no-store" }),
+  linkSocialProvider: (provider, callbackURL = "/") => request("/api/v1/auth/customer/link-social", mutation("POST", {
+    provider,
+    callbackURL: new URL(callbackURL, window.location.origin).toString(),
+    errorCallbackURL: new URL(`/?signin=error&reason=SOCIAL_LINK_FAILED&provider=${encodeURIComponent(provider)}`, window.location.origin).toString(),
+    disableRedirect: true,
+  })),
+  unlinkAccount: (providerId, accountId) => request("/api/v1/auth/customer/unlink-account", mutation("POST", { providerId, accountId })),
+  enableTotp: (password) => request("/api/v1/auth/customer/two-factor/enable", mutation("POST", { password })),
+  disableTotp: (password) => request("/api/v1/auth/customer/two-factor/disable", mutation("POST", { password })),
+  verifyTotp: (code) => request("/api/v1/auth/customer/two-factor/verify-totp", mutation("POST", { code })),
+  verifyBackupCode: (code) => request("/api/v1/auth/customer/two-factor/verify-backup-code", mutation("POST", { code })),
+  revokeOtherSessions: () => request("/api/v1/auth/customer/revoke-other-sessions", mutation()),
+  revokeAllSessions: () => request("/api/v1/auth/customer/revoke-sessions", mutation()),
+  requestPasswordReset: (email, redirectTo) => request("/api/v1/auth/customer/request-password-reset", mutation("POST", { email, redirectTo })),
+  sendVerificationEmail: (email, callbackURL = "/") => request("/api/v1/auth/customer/send-verification-email", mutation("POST", {
+    email,
+    callbackURL: new URL(callbackURL, window.location.origin).toString(),
+  })),
+  resetPassword: (token, newPassword) => request("/api/v1/auth/customer/reset-password", mutation("POST", { token, newPassword })),
+  signInWithSocialProvider: (provider, callbackURL = "/") => {
+    const errorPath = callbackURL === "/invite" ? "/invite" : "/";
+    return request("/api/v1/auth/customer/sign-in/social", mutation("POST", {
+      provider,
+      callbackURL: new URL(callbackURL, window.location.origin).toString(),
+      errorCallbackURL: new URL(`${errorPath}?signin=error&reason=SOCIAL_SIGNIN_FAILED&provider=${encodeURIComponent(provider)}`, window.location.origin).toString(),
+      disableRedirect: true,
+    }));
+  },
+  customerSignOut: () => request("/api/v1/auth/customer/sign-out", mutation()),
   loginUrl: "/api/v1/auth/login",
   beginExternalIdInvitation: (invitation, returnPath = "/") => request("/api/v1/auth/external-id/invitation", mutation("POST", { invitation, return: returnPath })),
-  logout: () => request("/api/v1/auth/logout", mutation()),
+  logout: async () => {
+    await request("/api/v1/auth/logout", mutation()).catch(() => null);
+    await request("/api/v1/auth/product-session", mutation("DELETE")).catch(() => null);
+    await request("/api/v1/auth/customer/sign-out", mutation()).catch(() => null);
+  },
 };
 
 export const adminApi = {
@@ -202,7 +253,32 @@ export const adminApi = {
   createInvitation: (input) => request("/api/v1/admin/invitations", mutation("POST", input)),
   resendInvitation: (invitationId) => request(`/api/v1/admin/invitations/${encodeURIComponent(invitationId)}/resend`, mutation()),
   revokeInvitation: (invitationId) => request(`/api/v1/admin/invitations/${encodeURIComponent(invitationId)}`, mutation("DELETE")),
+  ssoConnections: () => request("/api/v1/admin/sso", { cache: "no-store" }),
+  registerSso: (input) => request("/api/v1/admin/sso", mutation("POST", input)),
+  requestSsoDomainProof: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/domain-verification/request`, mutation()),
+  verifySsoDomain: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/domain-verification`, mutation()),
+  startSsoTest: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/test`, mutation()),
+  completeSsoTest: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/test/complete`, mutation()),
+  confirmSsoRecovery: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/recovery`, mutation()),
+  enforceSso: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/enforce`, mutation()),
+  rotateSsoCredentials: (connectionId, input) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/credentials/rotation`, mutation("POST", input)),
+  refreshSsoMetadata: (connectionId, input) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/metadata/refresh`, mutation("POST", input)),
+  suspendSso: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/suspend`, mutation()),
+  rollbackSso: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/rollback`, mutation()),
+  disconnectSso: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}`, mutation("DELETE")),
   changeMembership: (userId, input) => request(`/api/v1/admin/memberships/${encodeURIComponent(userId)}`, mutation("PATCH", input)),
+  transferOwnership: (targetMembershipId) => request("/api/v1/admin/organization/ownership-transfer", mutation("POST", { targetMembershipId })),
+  initiateOrganizationClosure: (reason, idempotencyKey) => request("/api/v1/admin/organization/closure", {
+    method: "POST",
+    headers: { ...jsonHeaders, "idempotency-key": idempotencyKey },
+    body: JSON.stringify({ reason }),
+  }),
+  roles: () => request("/api/v1/admin/roles", { cache: "no-store" }),
+  createRole: (input) => request("/api/v1/admin/roles", mutation("POST", input)),
+  updateRole: (roleId, input) => request(`/api/v1/admin/roles/${encodeURIComponent(roleId)}`, mutation("PATCH", input)),
+  archiveRole: (roleId, expectedVersion) => request(`/api/v1/admin/roles/${encodeURIComponent(roleId)}`, mutation("DELETE", { expectedVersion })),
+  assignRole: (membershipId, roleId) => request(`/api/v1/admin/memberships/${encodeURIComponent(membershipId)}/roles`, mutation("POST", { roleId })),
+  unassignRole: (membershipId, roleId) => request(`/api/v1/admin/memberships/${encodeURIComponent(membershipId)}/roles/${encodeURIComponent(roleId)}`, mutation("DELETE")),
   teams: (includeArchived = true) => request(`/api/v1/admin/teams?${new URLSearchParams({ includeArchived: String(includeArchived) })}`, { cache: "no-store" }),
   team: (teamId) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}`, { cache: "no-store" }),
   spend: (filters = {}) => request(`/api/v1/admin/spend?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))}`, { cache: "no-store" }),

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import http, { type Server } from "node:http";
 import net from "node:net";
+import type { Duplex } from "node:stream";
 import test from "node:test";
 import {
   WorkspaceIngressAuthority,
@@ -67,6 +68,7 @@ test("workspace ingress forwards the web app and exchanges a launch for an isola
     authority,
     publicUrl: "http://localhost:4174",
     webUpstream: `http://127.0.0.1:${webPort}`,
+    authorizeWorkspaceAccess: async () => true,
     audit: () => undefined,
   });
   const ingressPort = await listen(ingress);
@@ -79,6 +81,7 @@ test("workspace ingress forwards the web app and exchanges a launch for an isola
     const launch = authority.issueLaunch({
       identity: { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" },
       workspaceId,
+      accessGeneration: 1,
       target: { protocol: "http", host: "127.0.0.1", port: workspacePort },
     });
     const launchUrl = new URL(`http://127.0.0.1:${ingressPort}/workspaces/${workspaceId}/`);
@@ -180,6 +183,7 @@ test("workspace ingress exposes only the browser-facing Microsoft 365 OAuth rout
     webUpstream: `http://127.0.0.1:${webPort}`,
     microsoft365AuthorizationUpstream: `http://127.0.0.1:${microsoft365Port}`,
     litellmOAuthUpstream: `http://127.0.0.1:${litellmPort}`,
+    authorizeWorkspaceAccess: async () => true,
     audit: () => undefined,
   });
   const ingressPort = await listen(ingress);
@@ -247,6 +251,7 @@ test("workspace ingress gives agent chat turns a longer timeout than ordinary we
     webUpstream: `http://127.0.0.1:${webPort}`,
     requestTimeoutMs: 25,
     agentChatRequestTimeoutMs: 250,
+    authorizeWorkspaceAccess: async () => true,
     audit: () => undefined,
   });
   const ingressPort = await listen(ingress);
@@ -263,5 +268,72 @@ test("workspace ingress gives agent chat turns a longer timeout than ordinary we
     assert.equal(await chat.text(), "finished");
   } finally {
     await Promise.all([close(ingress), close(web)]);
+  }
+});
+
+test("workspace ingress fails closed and heartbeat-closes an existing websocket when Control is unavailable", async () => {
+  const web = http.createServer((_request, response) => response.end("web"));
+  const workspace = http.createServer((_request, response) => response.end("workspace"));
+  let upstreamSocket: Duplex | undefined;
+  workspace.on("upgrade", (_request, socket) => {
+    upstreamSocket = socket;
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+  });
+  const [webPort, workspacePort] = await Promise.all([listen(web), listen(workspace)]);
+  const authority = new WorkspaceIngressAuthority(secret);
+  let authorization: "allow" | "deny" | "outage" = "deny";
+  const ingress = createWorkspaceIngress({
+    authority,
+    publicUrl: "http://localhost:4174",
+    webUpstream: `http://127.0.0.1:${webPort}`,
+    accessHeartbeatMs: 25,
+    authorizeWorkspaceAccess: async () => {
+      if (authorization === "outage") throw new Error("Control unavailable");
+      return authorization === "allow";
+    },
+    audit: () => undefined,
+  });
+  const ingressPort = await listen(ingress);
+  const launch = authority.issueLaunch({
+    identity: { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" },
+    workspaceId,
+    accessGeneration: 7,
+    target: { protocol: "http", host: "127.0.0.1", port: workspacePort },
+  });
+  const launchUrl = `http://127.0.0.1:${ingressPort}/workspaces/${workspaceId}/?${workspaceIngressAccessParameter}=${encodeURIComponent(launch.token)}`;
+  let socket: net.Socket | undefined;
+  try {
+    assert.equal((await fetch(launchUrl, { redirect: "manual", signal: AbortSignal.timeout(500) })).status, 403, "launch exchange is denied by live access state");
+    authorization = "allow";
+    const exchange = await fetch(launchUrl, { redirect: "manual", signal: AbortSignal.timeout(500) });
+    const cookie = exchange.headers.get("set-cookie")!.split(";", 1)[0]!;
+    authorization = "outage";
+    assert.equal((await fetch(`http://127.0.0.1:${ingressPort}/workspaces/${workspaceId}/`, { headers: { cookie }, signal: AbortSignal.timeout(500) })).status, 403, "HTTP fails closed on authorizer outage");
+    authorization = "allow";
+    socket = net.connect(ingressPort, "127.0.0.1");
+    const upgraded = new Promise<void>((resolve, reject) => {
+      socket.once("connect", () => socket.write(
+        `GET /workspaces/${workspaceId}/websockify HTTP/1.1\r\nHost: localhost\r\nCookie: ${cookie}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGVzdC13b3Jrc3BhY2U=\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+      ));
+      socket.once("data", () => resolve());
+      socket.once("error", reject);
+    });
+    await Promise.race([
+      upgraded,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("websocket upgrade exceeded 500ms")), 500)),
+    ]);
+    const closed = new Promise<void>((resolve) => socket.once("close", resolve));
+    authorization = "outage";
+    await Promise.race([
+      closed,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("websocket containment exceeded 500ms")), 500)),
+    ]);
+  } finally {
+    socket?.destroy();
+    upstreamSocket?.destroy();
+    ingress.closeAllConnections();
+    workspace.closeAllConnections();
+    web.closeAllConnections();
+    await Promise.all([close(ingress), close(workspace), close(web)]);
   }
 });

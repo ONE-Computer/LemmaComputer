@@ -27,9 +27,9 @@ const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience:
 const principal: SessionPrincipal = {
   userId: "alpha",
   tenantId: "acme",
-  email: "alpha@metech.dev",
+  email: "alpha@example.test",
   displayName: "Alpha User",
-  tenantDisplayName: "ME TECH",
+  tenantDisplayName: "Example Organization",
   roles: ["employee"],
   identity: alpha,
 };

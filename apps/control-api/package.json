@@ -6,17 +6,22 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "build": "tsc -p tsconfig.json --noEmit"
+    "build": "tsc -p tsconfig.json --noEmit",
+    "qualify:better-auth": "node scripts/qualify-better-auth.mjs"
   },
   "dependencies": {
+    "@better-auth/passkey": "1.6.26",
+    "@better-auth/sso": "1.6.26",
+    "@lemmacomputer/auth-store": "*",
     "@lemmacomputer/contracts": "*",
     "@lemmacomputer/egress-policy": "*",
-    "@lemmacomputer/model-router": "*",
     "@lemmacomputer/litellm-adapter": "*",
+    "@lemmacomputer/model-router": "*",
     "@lemmacomputer/policy-integrity": "*",
     "@lemmacomputer/workspace-ingress-auth": "*",
     "@lemmacomputer/workspace-store": "*",
     "ai": "7.0.37",
+    "better-auth": "1.6.26",
     "fastify": "5.10.0",
     "jose": "6.1.3",
     "pg": "8.22.0",

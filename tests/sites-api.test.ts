@@ -81,7 +81,7 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
   await workspaceStore.update(workspace.id, { state: "provisioning" });
   const policy = runtimePolicyFor(effectivePolicy);
   const token = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, policy, {
-    workspaceGeneration: workspace.bridgeGrantGeneration,
+    workspaceGeneration: workspace.accessGeneration,
   });
   const app = createControlServer(workspaceStore, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
@@ -106,7 +106,7 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
       payload,
     });
     assert.equal(blockedWhileProvisioning.statusCode, 403);
-    assert.equal(blockedWhileProvisioning.json().error.code, "WORKSPACE_NOT_READY");
+    assert.equal(blockedWhileProvisioning.json().error.code, "AGENT_BRIDGE_GRANT_REVOKED");
 
     await workspaceStore.update(workspace.id, { state: "ready" });
 
@@ -140,7 +140,7 @@ test("scoped agent publishing appears in the owner Sites API", async () => {
     assert.equal(content.body, html.toString());
 
     const earlierPolicyToken = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, { ...policy, policyHash: "b".repeat(64) }, {
-      workspaceGeneration: workspace.bridgeGrantGeneration,
+      workspaceGeneration: workspace.accessGeneration,
     });
     const afterPolicyProjectionChange = await app.inject({
       method: "POST",

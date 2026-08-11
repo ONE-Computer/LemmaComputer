@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext } from "@lemmacomputer/contracts";
+import { LemmaComputerError, type IdentityContext } from "@lemmacomputer/contracts";
 import { MemorySiteStore } from "@lemmacomputer/workspace-store";
 import { SitesService } from "../apps/control-api/src/sites.js";
 
@@ -49,6 +49,20 @@ test("publishes immutable revisions and scopes sites to their owner", async () =
   assert.equal(preview.revision, 2);
   await assert.rejects(() => service.preview(otherOwner, first.id), { code: "SITE_NOT_FOUND" });
   await assert.rejects(() => service.preview(otherTenant, first.id), { code: "SITE_NOT_FOUND" });
+  const denial = async (siteId: string) => {
+    try {
+      await service.preview(otherTenant, siteId);
+      assert.fail("site access should be denied");
+    } catch (error) {
+      assert.ok(error instanceof LemmaComputerError);
+      return { code: error.code, message: error.message, statusCode: error.statusCode, retryable: error.retryable };
+    }
+  };
+  assert.deepEqual(
+    await denial(first.id),
+    await denial("00000000-0000-4000-8000-000000000000"),
+    "a foreign site must be indistinguishable from a nonexistent site",
+  );
 
   await service.delete(owner, first.id);
   assert.deepEqual((await service.list(owner)).sites, []);

@@ -1,8 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
-import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId } from "@lemmacomputer/contracts";
+import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, recentAuthenticationStepUpWindowMs, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId } from "@lemmacomputer/contracts";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
-import { permissionsForOrganizationRoles, type LemmaComputerRole, type OrganizationMembershipStatus, type OrganizationPermission, type OrganizationRole } from "./rbac.js";
+import {
+  canDelegateOrganizationGrants,
+  organizationPermissionCatalog,
+  organizationPermissionCatalogVersion,
+  permissionsByOrganizationRole,
+  permissionsForOrganizationRoles,
+  resolveEffectiveOrganizationPermissions,
+  type EffectiveOrganizationPermissions,
+  type LemmaComputerRole,
+  type OrganizationMembershipStatus,
+  type OrganizationPermission,
+  type OrganizationPermissionGrant,
+  type OrganizationRole,
+} from "./rbac.js";
 
 export type LemmaComputerUserStatus = "active" | "disabled";
 export type MembershipAdmissionMode = "directory-jit" | "existing-membership-only";
@@ -29,6 +42,7 @@ export type SessionPrincipal = {
   membershipStatus?: OrganizationMembershipStatus;
   role?: OrganizationRole;
   permissions?: OrganizationPermission[];
+  effectiveAuthorization?: EffectiveOrganizationPermissions;
   email: string;
   displayName: string;
   tenantDisplayName: string;
@@ -265,6 +279,118 @@ export type OrganizationMembershipSummary = {
   updatedAt: string;
 };
 
+export type CustomerProductMembership = {
+  membershipId: string;
+  organizationId: string;
+  organizationDisplayName: string;
+  userId: string;
+  status: OrganizationMembershipStatus;
+  role: OrganizationRole;
+};
+
+export type CustomerOrganizationCreation = {
+  replayed: boolean;
+  organization: {
+    id: string;
+    slug: string;
+    displayName: string;
+  };
+  membership: {
+    id: string;
+    status: "active";
+    role: "owner";
+  };
+};
+
+export interface CustomerProductSessionStore {
+  ensureCustomerAccount(input: { accountUserId: string }): Promise<{
+    accountUserId: string;
+    status: LemmaComputerUserStatus;
+  }>;
+  listCustomerMemberships(accountUserId: string): Promise<CustomerProductMembership[]>;
+  getCustomerProductSession(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+    now: Date;
+  }): Promise<SessionPrincipal | null>;
+  selectCustomerProductSession(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+    membershipId: string;
+    expiresAt: Date;
+    now: Date;
+  }): Promise<SessionPrincipal>;
+  createCustomerOrganization?(input: {
+    accountUserId: string;
+    authenticationSessionId: string;
+    email: string;
+    userDisplayName: string;
+    organizationDisplayName: string;
+    idempotencyKey: string;
+    installationKind: "customer-managed" | "hosted" | "worktree";
+    expiresAt: Date;
+    now: Date;
+  }): Promise<CustomerOrganizationCreation>;
+  createCustomerInvitationContext?(input: {
+    invitationTokenHash: string;
+    contextTokenHash: string;
+    expiresAt: Date;
+    now: Date;
+  }): Promise<{
+    organizationId: string;
+    organizationDisplayName: string;
+    email: string;
+    role: OrganizationRole;
+    expiresAt: Date;
+  }>;
+  getCustomerInvitationContext?(input: {
+    contextTokenHash: string;
+    now: Date;
+  }): Promise<{
+    organizationId: string;
+    organizationDisplayName: string;
+    email: string;
+    role: OrganizationRole;
+    expiresAt: Date;
+  }>;
+  acceptCustomerInvitation?(input: {
+    accountUserId: string;
+    authenticationSessionId: string;
+    contextTokenHash: string;
+    email: string;
+    userDisplayName: string;
+    expiresAt: Date;
+    now: Date;
+  }): Promise<SessionPrincipal>;
+  recordCustomerOwnerStepUp?(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+    authenticatedAt: Date;
+  }): Promise<void>;
+  getCustomerOwnerStepUp?(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+  }): Promise<Date | null>;
+  revokeCustomerProductSession(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+    now: Date;
+  }): Promise<void>;
+}
+export type OrganizationCustomRoleSummary = {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  status: "active" | "archived";
+  version: number;
+  catalogVersion: number;
+  grants: OrganizationPermissionGrant[];
+  assignedMembershipCount: number;
+  assignedMembershipIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
 export type OrganizationInvitationStatus = "pending" | "accepted" | "expired" | "revoked";
 
 export type OrganizationInvitationSummary = {
@@ -278,6 +404,36 @@ export type OrganizationInvitationSummary = {
   acceptedMembershipId: string | null;
   createdBy: string;
   updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OrganizationSsoState = "pending" | "active" | "enforced" | "suspended" | "disconnected";
+export type OrganizationSsoTransition =
+  | "domain_verified"
+  | "test_succeeded"
+  | "recovery_confirmed"
+  | "enforce"
+  | "suspend"
+  | "rollback"
+  | "disconnect";
+export type OrganizationSsoConfigurationChange = "credentials_rotated" | "metadata_refreshed";
+
+export type OrganizationSsoConnectionSummary = {
+  id: string;
+  organizationId: string;
+  authenticationProviderId: string;
+  protocol: "oidc" | "saml";
+  domain: string;
+  issuer: string;
+  state: OrganizationSsoState;
+  configVersion: number;
+  domainVerifiedAt: string | null;
+  lastTestedAt: string | null;
+  recoveryConfirmedAt: string | null;
+  enforcedAt: string | null;
+  suspendedAt: string | null;
+  disconnectedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -346,6 +502,89 @@ export interface IdentityPolicyStore {
     status?: OrganizationMembershipStatus;
     updatedBy: string;
   }): Promise<{ membership: OrganizationMembershipSummary; revokedSessions: number }>;
+  transferOrganizationOwnership?(input: {
+    organizationId: string;
+    currentOwnerUserId: string;
+    targetMembershipId: string;
+    recentStepUpAt: Date;
+    now: Date;
+  }): Promise<{
+    previousOwner: { membershipId: string; role: "admin" };
+    owner: { membershipId: string; userId: string; role: "owner" };
+    revokedSessions: number;
+  }>;
+  initiateOrganizationClosure?(input: {
+    organizationId: string;
+    requestedBy: string;
+    reason: string;
+    idempotencyKey: string;
+    recentStepUpAt: Date;
+    now: Date;
+  }): Promise<{
+    replayed: boolean;
+    request: { id: string; status: "pending"; requestedAt: string; executeAfter: string };
+  }>;
+  listOrganizationRoles?(organizationId: string): Promise<OrganizationCustomRoleSummary[]>;
+  listOrganizationSsoConnections?(organizationId: string): Promise<OrganizationSsoConnectionSummary[]>;
+  findEnforcedOrganizationSsoConnectionByDomain?(domain: string): Promise<OrganizationSsoConnectionSummary | null>;
+  createOrganizationSsoConnection?(input: {
+    organizationId: string;
+    authenticationProviderId: string;
+    protocol: "oidc" | "saml";
+    domain: string;
+    issuer: string;
+    createdBy: string;
+  }): Promise<OrganizationSsoConnectionSummary>;
+  transitionOrganizationSsoConnection?(input: {
+    organizationId: string;
+    connectionId: string;
+    action: OrganizationSsoTransition;
+    actorUserId: string;
+  }): Promise<OrganizationSsoConnectionSummary>;
+  prepareOrganizationSsoConfigurationChange?(input: {
+    organizationId: string;
+    connectionId: string;
+    change: OrganizationSsoConfigurationChange;
+    actorUserId: string;
+  }): Promise<OrganizationSsoConnectionSummary>;
+  createOrganizationRole?(input: {
+    organizationId: string;
+    name: string;
+    description: string;
+    grants: OrganizationPermissionGrant[];
+    createdBy: string;
+  }): Promise<OrganizationCustomRoleSummary>;
+  updateOrganizationRole?(input: {
+    organizationId: string;
+    roleId: string;
+    expectedVersion: number;
+    name: string;
+    description: string;
+    grants: OrganizationPermissionGrant[];
+    updatedBy: string;
+  }): Promise<OrganizationCustomRoleSummary & { revokedSessions: number }>;
+  archiveOrganizationRole?(input: {
+    organizationId: string;
+    roleId: string;
+    expectedVersion: number;
+    archivedBy: string;
+  }): Promise<{ role: OrganizationCustomRoleSummary; revokedSessions: number }>;
+  assignOrganizationRole?(input: {
+    organizationId: string;
+    membershipId: string;
+    roleId: string;
+    assignedBy: string;
+  }): Promise<{ revokedSessions: number }>;
+  unassignOrganizationRole?(input: {
+    organizationId: string;
+    membershipId: string;
+    roleId: string;
+    unassignedBy: string;
+  }): Promise<{ revokedSessions: number }>;
+  resolveOrganizationAuthorization?(input: {
+    organizationId: string;
+    membershipId: string;
+  }): Promise<EffectiveOrganizationPermissions>;
   setUserStatus(input: { tenantId: string; targetUserId: string; status: LemmaComputerUserStatus; updatedBy: string }): Promise<{ status: LemmaComputerUserStatus; revokedSessions: number }>;
   revokeUserSessions(input: { tenantId: string; targetUserId: string; revokedBy: string }): Promise<number>;
   assignMvpPolicy(input: { tenantId: string; targetUserId: string; assignedBy: string }): Promise<EffectivePolicy>;
@@ -450,6 +689,13 @@ export const upgradeHistoricMvpPolicyDocument = (document: OwnedJson): OwnedJson
 const mvpPolicyBundleId = (tenantId: string) => `mvp-standard:${tenantId}`;
 const defaultEgressSecurityGroupId = (tenantId: string) => `esg_${createHash("sha256").update(`egress:${tenantId}`).digest("hex").slice(0, 24)}`;
 const defaultEgressSecurityGroupVersionId = (tenantId: string) => `egv_${createHash("sha256").update(`egress:${tenantId}`).digest("hex").slice(0, 24)}_v1`;
+const organizationSlugBase = (displayName: string) => displayName
+  .normalize("NFKD")
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, "-")
+  .replace(/^-+|-+$/g, "")
+  .slice(0, 40)
+  .replace(/-+$/g, "") || "organization";
 const defaultEgressDocument = () => ({
   schemaVersion: 1,
   name: "Default security group",
@@ -487,7 +733,8 @@ const homePrincipalSelect = `${principalColumns}
   JOIN organization_memberships m ON m.subject_user_id=u.id AND m.organization_id=u.tenant_id
   JOIN account_users account_user ON account_user.id=m.account_user_id
   JOIN organizations organization ON organization.id=m.organization_id
-  JOIN tenants t ON t.id=m.organization_id`;
+  JOIN tenants t ON t.id=m.organization_id
+  LEFT JOIN platform_tenant_lifecycle platform_lifecycle ON platform_lifecycle.tenant_id=m.organization_id`;
 
 const effectivePolicySelect = `
   SELECT pa.id AS assignment_id, pb.id AS policy_bundle_id, pv.id AS policy_version_id, pv.version,
@@ -541,7 +788,7 @@ const mapPolicy = (row: Record<string, unknown>): EffectivePolicy => {
   };
 };
 
-export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
+export class PostgresIdentityPolicyStore implements IdentityPolicyStore, CustomerProductSessionStore {
   constructor(private readonly pool: pg.Pool) {}
 
   static fromConnectionString(connectionString: string) {
@@ -728,9 +975,11 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
           ? String(mapped.rows[0].mapped_organization_id)
           : input.organizationId;
       let organization = await client.query(
-        `SELECT tenant.administrator_bootstrapped_at
+        `SELECT tenant.administrator_bootstrapped_at,organization.status,
+           COALESCE(platform_lifecycle.lifecycle_state,'active') AS platform_lifecycle_state
          FROM tenants tenant
          JOIN organizations organization ON organization.id=tenant.id
+         LEFT JOIN platform_tenant_lifecycle platform_lifecycle ON platform_lifecycle.tenant_id=tenant.id
          WHERE tenant.id=$1
          FOR UPDATE OF tenant,organization`,
         [tenantId],
@@ -755,6 +1004,9 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
           "SELECT administrator_bootstrapped_at FROM tenants WHERE id=$1 FOR UPDATE",
           [tenantId],
         );
+      } else if (organization.rows[0].status !== "active"
+        || ["suspended", "closed"].includes(String(organization.rows[0].platform_lifecycle_state))) {
+        throw new LemmaComputerError("ORGANIZATION_NOT_ADMITTED", "The organization is not available for this sign-in", 403);
       }
       let accountUserId = mapped.rowCount && mapped.rows[0].account_user_id
         ? String(mapped.rows[0].account_user_id)
@@ -860,6 +1112,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
          ON CONFLICT (user_id,vendor,mapping_kind) DO UPDATE SET vendor_user_id=EXCLUDED.vendor_user_id,verified_at=now()`,
         [randomUUID(), tenantId, userId, `oc-user-${createHash("sha256").update(`lemmacomputer:litellm:user:${tenantId}:${userId}`).digest("base64url")}`],
       );
+      await this.ensureDefaultSpendingTeamFoundation(client, tenantId, userId, userId);
       if (shouldAssignDefaultPolicyOnAuthentication(!membershipCreated, shouldBootstrapOwner)) {
         await this.ensurePolicyFoundation(client, tenantId, userId);
         await this.assignMvpPolicyWithClient(client, tenantId, userId, userId);
@@ -896,11 +1149,709 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
        JOIN account_users account_user ON account_user.id=m.account_user_id
        JOIN organizations organization ON organization.id=m.organization_id
        JOIN tenants t ON t.id=m.organization_id
+       LEFT JOIN platform_tenant_lifecycle platform_lifecycle ON platform_lifecycle.tenant_id=m.organization_id
        WHERE u.id=$1 AND u.status='active' AND m.status='active'
-         AND account_user.status='active' AND organization.status='active'`,
+         AND account_user.status='active' AND organization.status='active'
+         AND COALESCE(platform_lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')`,
       [userId, organizationId],
     );
-    return result.rowCount ? mapPrincipal(result.rows[0]) : null;
+    return result.rowCount ? this.mapAuthorizedPrincipal(result.rows[0], queryable) : null;
+  }
+
+  private async mapAuthorizedPrincipal(row: Record<string, unknown>, queryable: pg.Pool | pg.PoolClient = this.pool) {
+    const principal = mapPrincipal(row);
+    const effectiveAuthorization = await this.resolveOrganizationAuthorizationWith(queryable, {
+      organizationId: principal.organizationId!,
+      membershipId: principal.membershipId!,
+    });
+    return {
+      ...principal,
+      permissions: effectiveAuthorization.valid
+        ? [...new Set(effectiveAuthorization.grants.map((grant) => grant.permission))]
+        : [],
+      effectiveAuthorization,
+    };
+  }
+
+  async ensureCustomerAccount(input: { accountUserId: string }) {
+    await this.pool.query(
+      `INSERT INTO account_users (id,status) VALUES ($1,'active')
+       ON CONFLICT (id) DO NOTHING`,
+      [input.accountUserId],
+    );
+    const account = await this.pool.query(
+      "SELECT id,status FROM account_users WHERE id=$1",
+      [input.accountUserId],
+    );
+    if (!account.rowCount) throw new LemmaComputerError("ACCOUNT_MAPPING_FAILED", "The customer account could not be mapped", 500);
+    return {
+      accountUserId: String(account.rows[0].id),
+      status: String(account.rows[0].status) as LemmaComputerUserStatus,
+    };
+  }
+
+  async listCustomerMemberships(accountUserId: string) {
+    const result = await this.pool.query(
+      `SELECT membership.id AS membership_id,membership.organization_id,
+         organization.display_name AS organization_display_name,
+         membership.subject_user_id AS user_id,membership.status,membership.role
+       FROM organization_memberships membership
+       JOIN organizations organization ON organization.id=membership.organization_id
+       WHERE membership.account_user_id=$1
+       ORDER BY organization.display_name,membership.organization_id`,
+      [accountUserId],
+    );
+    return result.rows.map((row) => ({
+      membershipId: String(row.membership_id),
+      organizationId: String(row.organization_id),
+      organizationDisplayName: String(row.organization_display_name),
+      userId: String(row.user_id),
+      status: String(row.status) as OrganizationMembershipStatus,
+      role: String(row.role) as OrganizationRole,
+    }));
+  }
+
+  async getCustomerProductSession(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+    now: Date;
+  }) {
+    const result = await this.pool.query(
+      `${principalColumns}
+       FROM browser_sessions session
+       JOIN organization_memberships m ON m.id=session.membership_id
+         AND m.subject_user_id=session.user_id AND m.account_user_id=$2
+       JOIN users u ON u.id=m.subject_user_id
+       JOIN account_users account_user ON account_user.id=m.account_user_id
+       JOIN organizations organization ON organization.id=m.organization_id
+       JOIN tenants t ON t.id=m.organization_id
+       WHERE session.authentication_session_id=$1 AND session.revoked_at IS NULL
+         AND session.expires_at>$3 AND u.status='active' AND m.status='active'
+         AND account_user.status='active' AND organization.status='active'`,
+      [input.authenticationSessionId, input.accountUserId, input.now],
+    );
+    if (!result.rowCount) return null;
+    await this.pool.query(
+      "UPDATE browser_sessions SET last_seen_at=$2 WHERE authentication_session_id=$1 AND revoked_at IS NULL",
+      [input.authenticationSessionId, input.now],
+    );
+    return mapPrincipal(result.rows[0]);
+  }
+
+  async selectCustomerProductSession(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+    membershipId: string;
+    expiresAt: Date;
+    now: Date;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const membership = await client.query(
+        `${principalColumns}
+         FROM organization_memberships m
+         JOIN users u ON u.id=m.subject_user_id
+         JOIN account_users account_user ON account_user.id=m.account_user_id
+         JOIN organizations organization ON organization.id=m.organization_id
+         JOIN tenants t ON t.id=m.organization_id
+         WHERE m.id=$1 AND m.account_user_id=$2 AND u.status='active'
+           AND m.status='active' AND account_user.status='active' AND organization.status='active'
+         FOR UPDATE OF m,account_user,organization,u`,
+        [input.membershipId, input.accountUserId],
+      );
+      if (!membership.rowCount) {
+        throw new LemmaComputerError("MEMBERSHIP_NOT_ACTIVE", "The organization membership is not active", 403);
+      }
+      const tokenHash = createHash("sha256")
+        .update(`better-auth-product-session\0${input.authenticationSessionId}`)
+        .digest("hex");
+      const context = await client.query(
+        `INSERT INTO browser_sessions (
+           id,token_hash,user_id,membership_id,authentication_session_id,expires_at,last_seen_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (authentication_session_id) WHERE authentication_session_id IS NOT NULL
+         DO UPDATE SET token_hash=EXCLUDED.token_hash,user_id=EXCLUDED.user_id,
+           membership_id=EXCLUDED.membership_id,expires_at=EXCLUDED.expires_at,
+           last_seen_at=EXCLUDED.last_seen_at
+         WHERE browser_sessions.revoked_at IS NULL
+         RETURNING id`,
+        [randomUUID(), tokenHash, membership.rows[0].user_id, input.membershipId,
+          input.authenticationSessionId, input.expiresAt, input.now],
+      );
+      if (!context.rowCount) {
+        throw new LemmaComputerError("PRODUCT_SESSION_REVOKED", "The product authorization session is revoked", 403);
+      }
+      await client.query(
+        `INSERT INTO organization_access_audit_events (
+           organization_id,membership_id,actor_user_id,event_type,provider,occurred_at
+         ) VALUES ($1,$2,$3,'authentication.login_succeeded','product',$4)`,
+        [membership.rows[0].organization_id, input.membershipId, membership.rows[0].user_id, input.now],
+      );
+      await client.query("COMMIT");
+      return mapPrincipal(membership.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async recordCustomerOwnerStepUp(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+    authenticatedAt: Date;
+  }) {
+    const result = await this.pool.query(
+      `INSERT INTO customer_owner_step_up_proofs (
+         authentication_session_id,account_user_id,authenticated_at,created_at,updated_at
+       )
+       SELECT $1,$2,$3,$3,$3
+       FROM account_users WHERE id=$2 AND status='active'
+       ON CONFLICT (authentication_session_id) DO UPDATE
+       SET account_user_id=EXCLUDED.account_user_id,
+         authenticated_at=EXCLUDED.authenticated_at,
+         updated_at=EXCLUDED.updated_at
+       WHERE customer_owner_step_up_proofs.account_user_id=EXCLUDED.account_user_id
+       RETURNING authentication_session_id`,
+      [input.authenticationSessionId, input.accountUserId, input.authenticatedAt],
+    );
+    if (!result.rowCount) {
+      throw new LemmaComputerError("OWNER_STEP_UP_RECORD_REJECTED", "The MFA proof could not be bound to this account and session", 403);
+    }
+  }
+
+  async getCustomerOwnerStepUp(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+  }) {
+    const result = await this.pool.query(
+      `SELECT authenticated_at FROM customer_owner_step_up_proofs
+       WHERE authentication_session_id=$1 AND account_user_id=$2`,
+      [input.authenticationSessionId, input.accountUserId],
+    );
+    return result.rowCount ? new Date(String(result.rows[0].authenticated_at)) : null;
+  }
+
+  async createCustomerOrganization(input: {
+    accountUserId: string;
+    authenticationSessionId: string;
+    email: string;
+    userDisplayName: string;
+    organizationDisplayName: string;
+    idempotencyKey: string;
+    installationKind: "customer-managed" | "hosted" | "worktree";
+    expiresAt: Date;
+    now: Date;
+  }): Promise<CustomerOrganizationCreation> {
+    const client = await this.pool.connect();
+    const idempotencyKeyHash = createHash("sha256")
+      .update(`organization-onboarding-idempotency\0${input.idempotencyKey}`)
+      .digest("hex");
+    const requestFingerprint = createHash("sha256")
+      .update(JSON.stringify({
+        organizationDisplayName: input.organizationDisplayName,
+        installationKind: input.installationKind,
+      }))
+      .digest("hex");
+    const establishProductContext = async (subjectUserId: string, membershipId: string, organizationId: string) => {
+      const tokenHash = createHash("sha256")
+        .update(`better-auth-product-session\0${input.authenticationSessionId}`)
+        .digest("hex");
+      const context = await client.query(
+        `INSERT INTO browser_sessions (
+           id,token_hash,user_id,membership_id,authentication_session_id,expires_at,last_seen_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (authentication_session_id) WHERE authentication_session_id IS NOT NULL
+         DO UPDATE SET token_hash=EXCLUDED.token_hash,user_id=EXCLUDED.user_id,
+           membership_id=EXCLUDED.membership_id,expires_at=EXCLUDED.expires_at,
+           last_seen_at=EXCLUDED.last_seen_at
+         WHERE browser_sessions.revoked_at IS NULL
+         RETURNING id`,
+        [randomUUID(), tokenHash, subjectUserId, membershipId,
+          input.authenticationSessionId, input.expiresAt, input.now],
+      );
+      if (!context.rowCount) {
+        throw new LemmaComputerError("PRODUCT_SESSION_REVOKED", "The product authorization session is revoked", 403);
+      }
+      await client.query(
+        `INSERT INTO organization_access_audit_events (
+           organization_id,membership_id,actor_user_id,event_type,provider,occurred_at
+         ) VALUES ($1,$2,$3,'authentication.login_succeeded','product',$4)`,
+        [organizationId, membershipId, subjectUserId, input.now],
+      );
+    };
+    const ensureOwnerWorkspaceFoundation = async (subjectUserId: string, organizationId: string) => {
+      await client.query(
+        `INSERT INTO agent_identities (id,tenant_id,owner_user_id,name)
+         VALUES ($1,$2,$3,'Default agent')
+         ON CONFLICT (owner_user_id,name) DO NOTHING`,
+        [randomUUID(), organizationId, subjectUserId],
+      );
+      await client.query(
+        `INSERT INTO vendor_identity_mappings (
+           id,tenant_id,user_id,vendor,vendor_user_id,mapping_kind,verified_at
+         ) VALUES ($1,$2,$3,'litellm',$4,'user',$5)
+         ON CONFLICT (user_id,vendor,mapping_kind)
+         DO UPDATE SET vendor_user_id=EXCLUDED.vendor_user_id,verified_at=EXCLUDED.verified_at`,
+        [randomUUID(), organizationId, subjectUserId,
+          `oc-user-${createHash("sha256").update(`lemmacomputer:litellm:user:${organizationId}:${subjectUserId}`).digest("base64url")}`,
+          input.now],
+      );
+      await this.ensureDefaultSpendingTeamFoundation(
+        client,
+        organizationId,
+        subjectUserId,
+        subjectUserId,
+        input.now,
+      );
+      await this.ensurePolicyFoundation(client, organizationId, subjectUserId);
+      await this.assignMvpPolicyWithClient(client, organizationId, subjectUserId, subjectUserId);
+    };
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`organization-onboarding:${input.accountUserId}`],
+      );
+      if (input.installationKind === "customer-managed") {
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          ["organization-onboarding:customer-managed-installation"],
+        );
+      }
+      const account = await client.query(
+        "SELECT status FROM account_users WHERE id=$1 FOR UPDATE",
+        [input.accountUserId],
+      );
+      if (!account.rowCount) {
+        throw new LemmaComputerError("ACCOUNT_MAPPING_FAILED", "The customer account could not be mapped", 500);
+      }
+      if (account.rows[0].status !== "active") {
+        throw new LemmaComputerError("ACCOUNT_DISABLED", "This account is disabled", 403);
+      }
+      const replay = await client.query(
+        `SELECT request.request_fingerprint,organization.id AS organization_id,
+           organization.slug,organization.display_name,membership.id AS membership_id,
+           membership.subject_user_id,membership.status,membership.role
+         FROM organization_onboarding_requests request
+         JOIN organizations organization ON organization.id=request.organization_id
+         JOIN organization_memberships membership ON membership.id=request.membership_id
+         WHERE request.account_user_id=$1 AND request.idempotency_key_hash=$2`,
+        [input.accountUserId, idempotencyKeyHash],
+      );
+      if (replay.rowCount) {
+        const row = replay.rows[0];
+        if (row.request_fingerprint !== requestFingerprint) {
+          throw new LemmaComputerError("IDEMPOTENCY_CONFLICT", "The idempotency key was already used for a different organization request", 409);
+        }
+        if (row.status !== "active" || row.role !== "owner") {
+          throw new LemmaComputerError("ORGANIZATION_OWNER_NOT_ACTIVE", "The organization owner is not active", 403);
+        }
+        await ensureOwnerWorkspaceFoundation(String(row.subject_user_id), String(row.organization_id));
+        await establishProductContext(String(row.subject_user_id), String(row.membership_id), String(row.organization_id));
+        await client.query("COMMIT");
+        return {
+          replayed: true,
+          organization: {
+            id: String(row.organization_id),
+            slug: String(row.slug),
+            displayName: String(row.display_name),
+          },
+          membership: { id: String(row.membership_id), status: "active", role: "owner" },
+        };
+      }
+      if (input.installationKind === "customer-managed") {
+        const organizations = await client.query("SELECT count(*)::integer AS count FROM organizations");
+        if (Number(organizations.rows[0].count) >= 1) {
+          throw new LemmaComputerError(
+            "ORGANIZATION_LIMIT_REACHED",
+            "This customer-managed installation already has its organization",
+            409,
+          );
+        }
+      }
+      const recent = await client.query(
+        `SELECT count(*)::integer AS count FROM organization_onboarding_requests
+         WHERE account_user_id=$1 AND created_at>$2::timestamptz-interval '1 hour'`,
+        [input.accountUserId, input.now],
+      );
+      if (Number(recent.rows[0].count) >= 5) {
+        throw new LemmaComputerError(
+          "ORGANIZATION_SIGNUP_RATE_LIMITED",
+          "Too many organizations were created by this account; try again later",
+          429,
+          true,
+        );
+      }
+
+      const organizationId = randomUUID();
+      const organizationSlug = `${organizationSlugBase(input.organizationDisplayName)}-${organizationId.replaceAll("-", "")}`;
+      const subjectUserId = `user_${randomUUID().replaceAll("-", "")}`;
+      const membershipId = randomUUID();
+      await client.query(
+        `INSERT INTO tenants (id,external_tenant_id,display_name,administrator_bootstrapped_at,created_at)
+         VALUES ($1,$2,$3,$4,$4)`,
+        [organizationId, `self-service:${organizationId}`, input.organizationDisplayName, input.now],
+      );
+      await client.query(
+        `INSERT INTO organizations (id,display_name,slug,status,created_at,updated_at)
+         VALUES ($1,$2,$3,'active',$4,$4)`,
+        [organizationId, input.organizationDisplayName, organizationSlug, input.now],
+      );
+      await client.query(
+        `INSERT INTO users (id,tenant_id,email,display_name,status,account_user_id,created_at,updated_at)
+         VALUES ($1,$2,$3,$4,'active',$5,$6,$6)`,
+        [subjectUserId, organizationId, input.email, input.userDisplayName, input.accountUserId, input.now],
+      );
+      await client.query(
+        `INSERT INTO user_roles (user_id,role,assigned_by,assigned_at) VALUES
+         ($1,'employee',$1,$2),($1,'administrator',$1,$2)`,
+        [subjectUserId, input.now],
+      );
+      await client.query(
+        `INSERT INTO organization_memberships (
+           id,organization_id,account_user_id,subject_user_id,status,role,
+           created_by,updated_by,created_at,updated_at
+         ) VALUES ($1,$2,$3,$4,'active','owner',$4,$4,$5,$5)`,
+        [membershipId, organizationId, input.accountUserId, subjectUserId, input.now],
+      );
+      await client.query(
+        `INSERT INTO organization_settings (organization_id,onboarding_state,settings,created_at,updated_at)
+         VALUES ($1,'ready','{}'::jsonb,$2,$2)`,
+        [organizationId, input.now],
+      );
+      await client.query(
+        `INSERT INTO organization_lifecycle_audit_events (
+           organization_id,actor_user_id,event_type,detail,occurred_at
+         ) VALUES ($1,$2,'organization.created',$3::jsonb,$4)`,
+        [organizationId, subjectUserId, JSON.stringify({ source: "self-service" }), input.now],
+      );
+      await client.query(
+        `INSERT INTO organization_onboarding_requests (
+           account_user_id,idempotency_key_hash,request_fingerprint,
+           organization_id,membership_id,created_at
+         ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [input.accountUserId, idempotencyKeyHash, requestFingerprint, organizationId, membershipId, input.now],
+      );
+      await ensureOwnerWorkspaceFoundation(subjectUserId, organizationId);
+      await establishProductContext(subjectUserId, membershipId, organizationId);
+      await client.query("COMMIT");
+      return {
+        replayed: false,
+        organization: { id: organizationId, slug: organizationSlug, displayName: input.organizationDisplayName },
+        membership: { id: membershipId, status: "active", role: "owner" },
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async createCustomerInvitationContext(input: {
+    invitationTokenHash: string;
+    contextTokenHash: string;
+    expiresAt: Date;
+    now: Date;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const invitation = await client.query(
+        `SELECT invitation.id,invitation.organization_id,invitation.email,invitation.role,
+           invitation.delivery_generation,invitation.expires_at,
+           organization.display_name
+         FROM organization_invitations invitation
+         JOIN organizations organization ON organization.id=invitation.organization_id
+         LEFT JOIN platform_tenant_lifecycle lifecycle
+           ON lifecycle.tenant_id=invitation.organization_id
+         WHERE invitation.token_hash=$1 AND invitation.status='pending'
+           AND invitation.expires_at>$2 AND organization.status='active'
+           AND COALESCE(lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')
+         FOR UPDATE OF invitation,organization`,
+        [input.invitationTokenHash, input.now],
+      );
+      if (!invitation.rowCount) {
+        throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+      }
+      const recentContexts = await client.query(
+        `SELECT count(*)::integer AS count
+         FROM organization_invitation_activation_contexts
+         WHERE invitation_id=$1 AND created_at>$2::timestamptz-interval '1 hour'`,
+        [invitation.rows[0].id, input.now],
+      );
+      if (Number(recentContexts.rows[0].count) >= 20) {
+        throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 429, true);
+      }
+      const expiresAt = new Date(Math.min(
+        input.expiresAt.getTime(),
+        new Date(String(invitation.rows[0].expires_at)).getTime(),
+      ));
+      await client.query(
+        `INSERT INTO organization_invitation_activation_contexts (
+           organization_id,invitation_id,delivery_generation,context_token_hash,
+           expires_at,created_at
+         ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [invitation.rows[0].organization_id, invitation.rows[0].id,
+          invitation.rows[0].delivery_generation, input.contextTokenHash, expiresAt, input.now],
+      );
+      await client.query("COMMIT");
+      return {
+        organizationId: String(invitation.rows[0].organization_id),
+        organizationDisplayName: String(invitation.rows[0].display_name),
+        email: String(invitation.rows[0].email),
+        role: String(invitation.rows[0].role) as OrganizationRole,
+        expiresAt,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getCustomerInvitationContext(input: { contextTokenHash: string; now: Date }) {
+    const context = await this.pool.query(
+      `SELECT context.organization_id,organization.display_name,invitation.email,invitation.role,
+         LEAST(context.expires_at,invitation.expires_at) AS expires_at
+       FROM organization_invitation_activation_contexts context
+       JOIN organization_invitations invitation ON invitation.id=context.invitation_id
+       JOIN organizations organization ON organization.id=context.organization_id
+       LEFT JOIN platform_tenant_lifecycle lifecycle
+         ON lifecycle.tenant_id=context.organization_id
+       WHERE context.context_token_hash=$1 AND context.consumed_at IS NULL
+         AND context.expires_at>$2 AND context.attempt_count<10
+         AND invitation.status='pending' AND invitation.expires_at>$2
+         AND invitation.delivery_generation=context.delivery_generation
+         AND organization.status='active'
+         AND COALESCE(lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')`,
+      [input.contextTokenHash, input.now],
+    );
+    if (!context.rowCount) {
+      throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+    }
+    return {
+      organizationId: String(context.rows[0].organization_id),
+      organizationDisplayName: String(context.rows[0].display_name),
+      email: String(context.rows[0].email),
+      role: String(context.rows[0].role) as OrganizationRole,
+      expiresAt: new Date(String(context.rows[0].expires_at)),
+    };
+  }
+
+  async acceptCustomerInvitation(input: {
+    accountUserId: string;
+    authenticationSessionId: string;
+    contextTokenHash: string;
+    email: string;
+    userDisplayName: string;
+    expiresAt: Date;
+    now: Date;
+  }) {
+    const counted = await this.pool.query(
+      `UPDATE organization_invitation_activation_contexts
+       SET attempt_count=attempt_count+1
+       WHERE context_token_hash=$1 AND consumed_at IS NULL AND expires_at>$2
+         AND attempt_count<10
+       RETURNING id`,
+      [input.contextTokenHash, input.now],
+    );
+    if (!counted.rowCount) {
+      throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+    }
+    const email = input.email.trim().toLowerCase();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const context = await client.query(
+        `SELECT context.id AS context_id,context.delivery_generation AS context_generation,
+           invitation.*,organization.display_name AS organization_display_name,
+           organization.status AS organization_status,
+           COALESCE(lifecycle.lifecycle_state,'active') AS lifecycle_state
+         FROM organization_invitation_activation_contexts context
+         JOIN organization_invitations invitation
+           ON invitation.organization_id=context.organization_id
+          AND invitation.id=context.invitation_id
+         JOIN organizations organization ON organization.id=invitation.organization_id
+         LEFT JOIN platform_tenant_lifecycle lifecycle
+           ON lifecycle.tenant_id=invitation.organization_id
+         WHERE context.context_token_hash=$1 AND context.consumed_at IS NULL
+           AND context.expires_at>$2
+         FOR UPDATE OF context,invitation,organization`,
+        [input.contextTokenHash, input.now],
+      );
+      const row = context.rows[0];
+      const usable = context.rowCount
+        && row.status === "pending"
+        && new Date(String(row.expires_at)) > input.now
+        && Number(row.context_generation) === Number(row.delivery_generation)
+        && String(row.email) === email
+        && row.organization_status === "active"
+        && !["suspended", "closed"].includes(String(row.lifecycle_state));
+      if (!usable) {
+        throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+      }
+      await client.query(
+        `INSERT INTO account_users (id,status) VALUES ($1,'active')
+         ON CONFLICT (id) DO NOTHING`,
+        [input.accountUserId],
+      );
+      const account = await client.query(
+        "SELECT status FROM account_users WHERE id=$1 FOR UPDATE",
+        [input.accountUserId],
+      );
+      if (!account.rowCount || account.rows[0].status !== "active") {
+        throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+      }
+      const existingMembership = await client.query(
+        `SELECT 1 FROM organization_memberships
+         WHERE organization_id=$1 AND account_user_id=$2 FOR UPDATE`,
+        [row.organization_id, input.accountUserId],
+      );
+      if (existingMembership.rowCount) {
+        throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+      }
+      const userId = `user-${createHash("sha256")
+        .update(`${row.organization_id}:${input.accountUserId}`)
+        .digest("hex").slice(0, 24)}`;
+      const membershipId = randomUUID();
+      await client.query(
+        `INSERT INTO users (
+           id,tenant_id,account_user_id,email,display_name,status,created_at,updated_at
+         ) VALUES ($1,$2,$3,$4,$5,'active',$6,$6)`,
+        [userId, row.organization_id, input.accountUserId, email, input.userDisplayName, input.now],
+      );
+      await client.query(
+        `INSERT INTO organization_memberships (
+           id,organization_id,account_user_id,subject_user_id,status,role,
+           created_by,updated_by,created_at,updated_at
+         ) VALUES ($1,$2,$3,$4,'active',$5,$6,$4,$7,$7)`,
+        [membershipId, row.organization_id, input.accountUserId, userId,
+          row.role, row.created_by, input.now],
+      );
+      await client.query(
+        "INSERT INTO user_roles (user_id,role,assigned_by,assigned_at) VALUES ($1,'employee',$1,$2)",
+        [userId, input.now],
+      );
+      if (row.role === "admin" || row.role === "owner") {
+        await client.query(
+          "INSERT INTO user_roles (user_id,role,assigned_by,assigned_at) VALUES ($1,'administrator',$1,$2)",
+          [userId, input.now],
+        );
+      }
+      await client.query(
+        `INSERT INTO agent_identities (id,tenant_id,owner_user_id,name)
+         VALUES ($1,$2,$3,'Default agent')`,
+        [randomUUID(), row.organization_id, userId],
+      );
+      await client.query(
+        `INSERT INTO vendor_identity_mappings (
+           id,tenant_id,user_id,vendor,vendor_user_id,mapping_kind,verified_at
+         ) VALUES ($1,$2,$3,'litellm',$4,'user',$5)`,
+        [randomUUID(), row.organization_id, userId,
+          `oc-user-${createHash("sha256").update(`lemmacomputer:litellm:user:${row.organization_id}:${userId}`).digest("base64url")}`,
+          input.now],
+      );
+      await this.ensureDefaultSpendingTeamFoundation(
+        client,
+        String(row.organization_id),
+        userId,
+        userId,
+        input.now,
+      );
+      await this.ensurePolicyFoundation(client, String(row.organization_id), userId);
+      await this.assignMvpPolicyWithClient(client, String(row.organization_id), userId, userId);
+      const tokenHash = createHash("sha256")
+        .update(`better-auth-product-session\0${input.authenticationSessionId}`)
+        .digest("hex");
+      const productSession = await client.query(
+        `INSERT INTO browser_sessions (
+           id,token_hash,user_id,membership_id,authentication_session_id,
+           expires_at,last_seen_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (authentication_session_id) WHERE authentication_session_id IS NOT NULL
+         DO UPDATE SET token_hash=EXCLUDED.token_hash,user_id=EXCLUDED.user_id,
+           membership_id=EXCLUDED.membership_id,expires_at=EXCLUDED.expires_at,
+           last_seen_at=EXCLUDED.last_seen_at
+         WHERE browser_sessions.revoked_at IS NULL
+         RETURNING id`,
+        [randomUUID(), tokenHash, userId, membershipId, input.authenticationSessionId,
+          input.expiresAt, input.now],
+      );
+      if (!productSession.rowCount) {
+        throw new LemmaComputerError("PRODUCT_SESSION_REVOKED", "The product authorization session is revoked", 403);
+      }
+      const accepted = await client.query(
+        `UPDATE organization_invitations
+         SET status='accepted',accepted_membership_id=$3,accepted_at=$4,
+           updated_by=$5,updated_at=$4
+         WHERE organization_id=$1 AND id=$2 AND status='pending'
+           AND delivery_generation=$6 AND expires_at>$4
+         RETURNING id`,
+        [row.organization_id, row.id, membershipId, input.now, userId, row.context_generation],
+      );
+      if (!accepted.rowCount) {
+        throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+      }
+      await client.query(
+        `UPDATE organization_invitation_activation_contexts
+         SET consumed_at=$2 WHERE id=$1 AND consumed_at IS NULL`,
+        [row.context_id, input.now],
+      );
+      await this.recordInvitationEvent(client, {
+        organizationId: String(row.organization_id),
+        invitationId: String(row.id),
+        actorUserId: userId,
+        eventType: "invitation.accepted",
+        oldStatus: "pending",
+        newStatus: "accepted",
+        role: String(row.role) as OrganizationRole,
+        deliveryGeneration: Number(row.delivery_generation),
+        occurredAt: input.now,
+      });
+      await client.query(
+        `INSERT INTO organization_access_audit_events (
+           organization_id,membership_id,invitation_id,actor_user_id,
+           event_type,provider,occurred_at
+         ) VALUES ($1,$2,$3,$4,'authentication.login_succeeded','product',$5)`,
+        [row.organization_id, membershipId, row.id, userId, input.now],
+      );
+      const principal = await this.getPrincipalForOrganization(userId, String(row.organization_id), client);
+      if (!principal) throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+      await client.query("COMMIT");
+      return principal;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeCustomerProductSession(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+    now: Date;
+  }) {
+    await this.pool.query(
+      `WITH revoked AS (
+         UPDATE browser_sessions session SET revoked_at=$3
+         FROM organization_memberships membership
+         WHERE session.authentication_session_id=$1 AND session.membership_id=membership.id
+           AND membership.account_user_id=$2 AND session.revoked_at IS NULL
+         RETURNING session.user_id,session.membership_id,membership.organization_id
+       )
+       INSERT INTO organization_access_audit_events (
+         organization_id,membership_id,actor_user_id,event_type,provider,occurred_at
+       )
+       SELECT organization_id,membership_id,user_id,'authentication.logout','product',$3
+       FROM revoked`,
+      [input.authenticationSessionId, input.accountUserId, input.now],
+    );
   }
 
   async createSession(input: { tokenHash: string; userId: string; membershipId?: string; expiresAt: Date }) {
@@ -911,8 +1862,10 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
        JOIN users u ON u.id=m.subject_user_id
        JOIN account_users account_user ON account_user.id=m.account_user_id
        JOIN organizations organization ON organization.id=m.organization_id
+       LEFT JOIN platform_tenant_lifecycle platform_lifecycle ON platform_lifecycle.tenant_id=m.organization_id
        WHERE m.subject_user_id=$1 AND m.status='active' AND u.status='active'
          AND account_user.status='active' AND organization.status='active'
+         AND COALESCE(platform_lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')
          AND (($2::uuid IS NOT NULL AND m.id=$2::uuid)
            OR ($2::uuid IS NULL AND m.organization_id=u.tenant_id))`,
       [input.userId, input.membershipId ?? null],
@@ -934,14 +1887,16 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
        JOIN account_users account_user ON account_user.id=m.account_user_id
        JOIN organizations organization ON organization.id=m.organization_id
        JOIN tenants t ON t.id=m.organization_id
+       LEFT JOIN platform_tenant_lifecycle platform_lifecycle ON platform_lifecycle.tenant_id=m.organization_id
        WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>$2
          AND u.status='active' AND m.status='active'
-         AND account_user.status='active' AND organization.status='active'`,
+         AND account_user.status='active' AND organization.status='active'
+         AND COALESCE(platform_lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')`,
       [tokenHash, now],
     );
     if (!result.rowCount) return null;
     await this.pool.query("UPDATE browser_sessions SET last_seen_at=$2 WHERE token_hash=$1", [tokenHash, now]);
-    return mapPrincipal(result.rows[0]);
+    return this.mapAuthorizedPrincipal(result.rows[0]);
   }
 
   async revokeSession(tokenHash: string) {
@@ -969,10 +1924,11 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
   async getPrincipal(userId: string) {
     const result = await this.pool.query(
       `${homePrincipalSelect} WHERE u.id=$1 AND u.status='active' AND m.status='active'
-        AND account_user.status='active' AND organization.status='active'`,
+        AND account_user.status='active' AND organization.status='active'
+        AND COALESCE(platform_lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')`,
       [userId],
     );
-    return result.rowCount ? mapPrincipal(result.rows[0]) : null;
+    return result.rowCount ? this.mapAuthorizedPrincipal(result.rows[0]) : null;
   }
 
   async getEffectivePolicy(userId: string) {
@@ -1019,6 +1975,814 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       [organizationId],
     );
     return result.rows.map((row) => this.mapMembership(row));
+  }
+
+  private async resolveOrganizationAuthorizationWith(
+    queryable: pg.Pool | pg.PoolClient,
+    input: { organizationId: string; membershipId: string },
+  ): Promise<EffectiveOrganizationPermissions> {
+    const result = await queryable.query(
+      `SELECT membership.role AS membership_role,
+         membership.permission_catalog_version AS membership_catalog_version,
+         assignment.role_version AS assigned_role_version,
+         custom_role.id AS custom_role_id,custom_role.status AS custom_role_status,
+         custom_role.current_version,custom_role.catalog_version AS custom_role_catalog_version,
+         grant_record.permission_key,grant_record.scope_type,grant_record.resource_id,
+         grant_record.catalog_version AS grant_catalog_version
+       FROM organization_memberships membership
+       LEFT JOIN organization_membership_role_assignments assignment
+         ON assignment.organization_id=membership.organization_id
+        AND assignment.membership_id=membership.id
+       LEFT JOIN organization_custom_roles custom_role
+         ON custom_role.organization_id=assignment.organization_id
+        AND custom_role.id=assignment.role_id
+       LEFT JOIN organization_custom_role_grants grant_record
+         ON grant_record.organization_id=assignment.organization_id
+        AND grant_record.role_id=assignment.role_id
+        AND grant_record.role_version=assignment.role_version
+       WHERE membership.organization_id=$1 AND membership.id=$2
+         AND membership.status='active'
+       ORDER BY custom_role.id,grant_record.permission_key,grant_record.scope_type,grant_record.resource_id`,
+      [input.organizationId, input.membershipId],
+    );
+    if (!result.rowCount) {
+      return resolveEffectiveOrganizationPermissions({ catalogVersion: 0, builtInRoles: [], customRoleVersions: [] });
+    }
+    const catalogVersion = Number(result.rows[0].membership_catalog_version);
+    const customRoles = new Map<string, {
+      roleId: string;
+      version: number;
+      catalogVersion: number;
+      status: "active" | "archived";
+      grants: OrganizationPermissionGrant[];
+    }>();
+    for (const row of result.rows) {
+      if (!row.custom_role_id) continue;
+      const roleId = String(row.custom_role_id);
+      const assignedVersion = Number(row.assigned_role_version);
+      const currentVersion = Number(row.current_version);
+      const role = customRoles.get(roleId) ?? {
+        roleId,
+        version: assignedVersion === currentVersion ? assignedVersion : 0,
+        catalogVersion: Number(row.custom_role_catalog_version),
+        status: String(row.custom_role_status) as "active" | "archived",
+        grants: [],
+      };
+      if (row.permission_key) {
+        if (Number(row.grant_catalog_version) !== role.catalogVersion) role.catalogVersion = 0;
+        role.grants.push({
+          permission: String(row.permission_key) as OrganizationPermission,
+          scope: String(row.scope_type) === "organization"
+            ? { type: "organization" }
+            : {
+                type: String(row.scope_type) as "workspace" | "provider",
+                resourceId: String(row.resource_id),
+              },
+        });
+      }
+      customRoles.set(roleId, role);
+    }
+    return resolveEffectiveOrganizationPermissions({
+      catalogVersion,
+      builtInRoles: [String(result.rows[0].membership_role) as OrganizationRole],
+      customRoleVersions: [...customRoles.values()],
+    });
+  }
+
+  async resolveOrganizationAuthorization(input: { organizationId: string; membershipId: string }) {
+    return this.resolveOrganizationAuthorizationWith(this.pool, input);
+  }
+
+  private async actorOrganizationAuthorization(
+    client: pg.PoolClient,
+    organizationId: string,
+    actorUserId: string,
+  ) {
+    const membership = await client.query(
+      `SELECT id FROM organization_memberships
+       WHERE organization_id=$1 AND subject_user_id=$2 AND status='active'`,
+      [organizationId, actorUserId],
+    );
+    if (!membership.rowCount) {
+      throw new LemmaComputerError("ROLE_ACTOR_INVALID", "The role actor does not have active organization access", 403);
+    }
+    return this.resolveOrganizationAuthorizationWith(client, {
+      organizationId,
+      membershipId: String(membership.rows[0].id),
+    });
+  }
+
+  private async organizationMembershipActor(
+    client: pg.PoolClient,
+    organizationId: string,
+    actorUserId: string,
+  ) {
+    const membership = await client.query(
+      `SELECT id,role FROM organization_memberships
+       WHERE organization_id=$1 AND subject_user_id=$2 AND status='active'`,
+      [organizationId, actorUserId],
+    );
+    if (!membership.rowCount) {
+      throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot manage organization access", 403);
+    }
+    return {
+      role: String(membership.rows[0].role) as OrganizationRole,
+      authorization: await this.resolveOrganizationAuthorizationWith(client, {
+        organizationId,
+        membershipId: String(membership.rows[0].id),
+      }),
+    };
+  }
+
+  private canDelegateBuiltInRole(
+    actor: { role: OrganizationRole; authorization: EffectiveOrganizationPermissions },
+    role: OrganizationRole,
+  ) {
+    if (role === "owner") return actor.role === "owner";
+    return canDelegateOrganizationGrants(actor.authorization, permissionsByOrganizationRole[role].map((permission) => ({
+      permission,
+      scope: { type: "organization" as const },
+    })));
+  }
+
+  private normalizeOrganizationRoleInput(input: {
+    name: string;
+    description: string;
+    grants: OrganizationPermissionGrant[];
+  }) {
+    const name = input.name.trim();
+    const description = input.description.trim();
+    if (!name || name.length > 80 || description.length > 500) {
+      throw new LemmaComputerError("ROLE_INVALID", "Role name or description is invalid", 400);
+    }
+    if (["owner", "administrator", "admin", "member"].includes(name.toLowerCase())) {
+      throw new LemmaComputerError("ROLE_NAME_RESERVED", "Protected organization role names cannot be reused", 400);
+    }
+    if (!input.grants.length) throw new LemmaComputerError("ROLE_GRANTS_REQUIRED", "Select at least one permission", 400);
+    const grants = [...new Map(input.grants.map((grant) => [
+      `${grant.permission}\0${grant.scope.type}\0${grant.scope.resourceId ?? ""}`,
+      grant,
+    ])).values()];
+    for (const grant of grants) {
+      const entry = organizationPermissionCatalog[grant.permission];
+      const resourceId = grant.scope.resourceId?.trim();
+      if (!entry) throw new LemmaComputerError("ROLE_PERMISSION_INVALID", "The role includes an unknown permission", 400);
+      if (!entry.scopeTypes.includes(grant.scope.type as never)
+        || grant.scope.type === "organization" && resourceId
+        || grant.scope.type !== "organization" && !resourceId) {
+        throw new LemmaComputerError("ROLE_SCOPE_INVALID", "The role includes an unsupported resource scope", 400);
+      }
+    }
+    return { name, description, grants };
+  }
+
+  private async validateOrganizationRoleResources(
+    client: pg.PoolClient,
+    organizationId: string,
+    grants: readonly OrganizationPermissionGrant[],
+  ) {
+    for (const grant of grants) {
+      if (grant.scope.type === "organization") continue;
+      const resourceId = grant.scope.resourceId!;
+      const result = grant.scope.type === "workspace"
+        ? await client.query("SELECT 1 FROM workspaces WHERE tenant_id=$1 AND id::text=$2", [organizationId, resourceId])
+        : await client.query(
+            `SELECT 1 FROM connector_registry WHERE tenant_id=$1 AND id=$2
+             UNION ALL SELECT 1 FROM provider_settings WHERE tenant_id=$1 AND provider=$2
+             LIMIT 1`,
+            [organizationId, resourceId],
+          );
+      if (!result.rowCount) throw new LemmaComputerError("ROLE_SCOPE_INVALID", "The selected resource is outside this organization", 400);
+    }
+  }
+
+  private async insertOrganizationRoleVersion(
+    client: pg.PoolClient,
+    input: {
+      organizationId: string;
+      roleId: string;
+      version: number;
+      name: string;
+      description: string;
+      grants: readonly OrganizationPermissionGrant[];
+      actorUserId: string;
+    },
+  ) {
+    await client.query(
+      `INSERT INTO organization_custom_role_versions (
+         organization_id,role_id,version,catalog_version,name,description,created_by
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [input.organizationId, input.roleId, input.version, organizationPermissionCatalogVersion,
+        input.name, input.description, input.actorUserId],
+    );
+    for (const grant of input.grants) {
+      await client.query(
+        `INSERT INTO organization_custom_role_grants (
+           organization_id,role_id,role_version,catalog_version,permission_key,scope_type,resource_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [input.organizationId, input.roleId, input.version, organizationPermissionCatalogVersion,
+          grant.permission, grant.scope.type, grant.scope.resourceId ?? ""],
+      );
+    }
+  }
+
+  private async revokeMembershipRoleSessions(
+    client: pg.PoolClient,
+    organizationId: string,
+    membershipIds: readonly string[],
+    actorUserId: string,
+  ) {
+    if (!membershipIds.length) return 0;
+    const revoked = await client.query(
+      `UPDATE browser_sessions SET revoked_at=now()
+       WHERE membership_id=ANY($1::uuid[]) AND revoked_at IS NULL
+       RETURNING membership_id`,
+      [membershipIds],
+    );
+    const affected = [...new Set(revoked.rows.map((row) => String(row.membership_id)))];
+    for (const membershipId of affected) {
+      await client.query(
+        `INSERT INTO organization_access_audit_events (
+           organization_id,membership_id,actor_user_id,event_type,provider,reason_code
+         ) VALUES ($1,$2,$3,'session.revoked','product','ROLE_AUTHORITY_CHANGED')`,
+        [organizationId, membershipId, actorUserId],
+      );
+    }
+    return revoked.rowCount ?? 0;
+  }
+
+  private mapOrganizationRoles(rows: Record<string, unknown>[]): OrganizationCustomRoleSummary[] {
+    const roles = new Map<string, OrganizationCustomRoleSummary>();
+    for (const row of rows) {
+      const id = String(row.id);
+      const role = roles.get(id) ?? {
+        id,
+        organizationId: String(row.organization_id),
+        name: String(row.name),
+        description: String(row.description),
+        status: String(row.status) as "active" | "archived",
+        version: Number(row.current_version),
+        catalogVersion: Number(row.catalog_version),
+        grants: [],
+        assignedMembershipCount: Number(row.assigned_membership_count),
+        assignedMembershipIds: Array.isArray(row.assigned_membership_ids)
+          ? row.assigned_membership_ids.map(String)
+          : [],
+        createdAt: new Date(String(row.created_at)).toISOString(),
+        updatedAt: new Date(String(row.updated_at)).toISOString(),
+      };
+      if (row.permission_key) role.grants.push({
+        permission: String(row.permission_key) as OrganizationPermission,
+        scope: String(row.scope_type) === "organization"
+          ? { type: "organization" }
+          : { type: String(row.scope_type) as "workspace" | "provider", resourceId: String(row.resource_id) },
+      });
+      roles.set(id, role);
+    }
+    return [...roles.values()];
+  }
+
+  private mapOrganizationSsoConnection(row: Record<string, unknown>): OrganizationSsoConnectionSummary {
+    const timestamp = (value: unknown) => value ? new Date(String(value)).toISOString() : null;
+    return {
+      id: String(row.id),
+      organizationId: String(row.organization_id),
+      authenticationProviderId: String(row.authentication_provider_id),
+      protocol: String(row.protocol) as "oidc" | "saml",
+      domain: String(row.domain),
+      issuer: String(row.issuer),
+      state: String(row.state) as OrganizationSsoState,
+      configVersion: Number(row.config_version),
+      domainVerifiedAt: timestamp(row.domain_verified_at),
+      lastTestedAt: timestamp(row.last_tested_at),
+      recoveryConfirmedAt: timestamp(row.recovery_confirmed_at),
+      enforcedAt: timestamp(row.enforced_at),
+      suspendedAt: timestamp(row.suspended_at),
+      disconnectedAt: timestamp(row.disconnected_at),
+      createdAt: new Date(String(row.created_at)).toISOString(),
+      updatedAt: new Date(String(row.updated_at)).toISOString(),
+    };
+  }
+
+  async listOrganizationSsoConnections(organizationId: string) {
+    const result = await this.pool.query(
+      `SELECT * FROM organization_sso_connections
+       WHERE organization_id=$1 ORDER BY created_at,id`,
+      [organizationId],
+    );
+    return result.rows.map((row) => this.mapOrganizationSsoConnection(row));
+  }
+
+  async findEnforcedOrganizationSsoConnectionByDomain(domain: string) {
+    const normalized = domain.trim().toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(normalized) || !normalized.includes(".")) return null;
+    const result = await this.pool.query(
+      `SELECT * FROM organization_sso_connections
+       WHERE domain=$1 AND state='enforced' AND domain_verified_at IS NOT NULL
+         AND last_tested_at IS NOT NULL AND recovery_confirmed_at IS NOT NULL
+       LIMIT 1`,
+      [normalized],
+    );
+    return result.rowCount ? this.mapOrganizationSsoConnection(result.rows[0]) : null;
+  }
+
+  async createOrganizationSsoConnection(input: {
+    organizationId: string;
+    authenticationProviderId: string;
+    protocol: "oidc" | "saml";
+    domain: string;
+    issuer: string;
+    createdBy: string;
+  }) {
+    const domain = input.domain.trim().toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(domain) || !domain.includes(".")) {
+      throw new LemmaComputerError("SSO_DOMAIN_INVALID", "The SSO domain is invalid", 400);
+    }
+    let issuer: URL;
+    try { issuer = new URL(input.issuer); } catch {
+      throw new LemmaComputerError("SSO_ISSUER_INVALID", "The SSO issuer is invalid", 400);
+    }
+    if (issuer.protocol !== "https:" || issuer.username || issuer.password || issuer.search || issuer.hash) {
+      throw new LemmaComputerError("SSO_ISSUER_INVALID", "The SSO issuer must be an HTTPS URL without credentials, query, or fragment", 400);
+    }
+    if (!/^sso_[A-Za-z0-9_-]{4,120}$/.test(input.authenticationProviderId)) {
+      throw new LemmaComputerError("SSO_PROVIDER_INVALID", "The SSO provider identifier is invalid", 400);
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.createdBy)
+        .catch((error) => {
+          if (error instanceof LemmaComputerError) {
+            throw new LemmaComputerError("SSO_ACTOR_INVALID", "The SSO actor cannot manage organization settings", 403);
+          }
+          throw error;
+        });
+      if (!actor.allows("organization.manage_settings", { type: "organization" })) {
+        throw new LemmaComputerError("SSO_ACTOR_INVALID", "The SSO actor cannot manage organization settings", 403);
+      }
+      const created = await client.query(
+        `INSERT INTO organization_sso_connections (
+           organization_id,authentication_provider_id,protocol,domain,issuer,created_by,updated_by
+         ) VALUES ($1,$2,$3,$4,$5,$6,$6) RETURNING *`,
+        [input.organizationId, input.authenticationProviderId, input.protocol, domain, issuer.toString(), input.createdBy],
+      );
+      await client.query(
+        `INSERT INTO organization_sso_audit_events (
+           organization_id,connection_id,actor_user_id,event_type,new_state,config_version,details
+         ) VALUES ($1,$2,$3,'sso.created','pending',1,$4)`,
+        [input.organizationId, created.rows[0].id, input.createdBy,
+          JSON.stringify({ protocol: input.protocol, domain, issuer: issuer.toString() })],
+      );
+      await client.query("COMMIT");
+      return this.mapOrganizationSsoConnection(created.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+        throw new LemmaComputerError("SSO_DOMAIN_CONFLICT", "The SSO domain or provider is already registered", 409);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async transitionOrganizationSsoConnection(input: {
+    organizationId: string;
+    connectionId: string;
+    action: OrganizationSsoTransition;
+    actorUserId: string;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const actor = await this.organizationMembershipActor(client, input.organizationId, input.actorUserId)
+        .catch((error) => {
+          if (error instanceof LemmaComputerError) {
+            throw new LemmaComputerError("SSO_ACTOR_INVALID", "The SSO actor cannot manage organization settings", 403);
+          }
+          throw error;
+        });
+      if (!actor.authorization.allows("organization.manage_settings", { type: "organization" })) {
+        throw new LemmaComputerError("SSO_ACTOR_INVALID", "The SSO actor cannot manage organization settings", 403);
+      }
+      const current = await client.query(
+        "SELECT * FROM organization_sso_connections WHERE organization_id=$1 AND id=$2 FOR UPDATE",
+        [input.organizationId, input.connectionId],
+      );
+      if (!current.rowCount) throw new LemmaComputerError("SSO_CONNECTION_NOT_FOUND", "SSO connection not found", 404);
+      const row = current.rows[0];
+      const state = String(row.state) as OrganizationSsoState;
+      if (state === "disconnected") throw new LemmaComputerError("SSO_CONNECTION_INACTIVE", "The SSO connection is disconnected", 409);
+      const ownerRequired = ["recovery_confirmed", "enforce", "rollback", "disconnect"].includes(input.action);
+      if (ownerRequired && actor.role !== "owner") {
+        throw new LemmaComputerError("SSO_OWNER_REQUIRED", "A protected organization owner must complete this SSO action", 403);
+      }
+      if (input.action === "test_succeeded" && !row.domain_verified_at) {
+        throw new LemmaComputerError("SSO_DOMAIN_NOT_VERIFIED", "Verify the SSO domain before testing the provider", 409);
+      }
+      if (input.action === "enforce") {
+        if (state !== "active" || !row.last_tested_at) {
+          throw new LemmaComputerError("SSO_TEST_REQUIRED", "Test the SSO provider successfully before enforcement", 409);
+        }
+        if (!row.recovery_confirmed_at) {
+          throw new LemmaComputerError("SSO_RECOVERY_NOT_CONFIRMED", "Confirm the protected owner recovery path before enforcement", 409);
+        }
+      }
+      if (input.action === "suspend" && !["active", "enforced"].includes(state)) {
+        throw new LemmaComputerError("SSO_TRANSITION_INVALID", "Only an active SSO connection can be suspended", 409);
+      }
+      if (input.action === "rollback" && state !== "suspended") {
+        throw new LemmaComputerError("SSO_TRANSITION_INVALID", "Only a suspended SSO connection can be rolled back", 409);
+      }
+      const eventType = {
+        domain_verified: "sso.domain_verified",
+        test_succeeded: "sso.test_succeeded",
+        recovery_confirmed: "sso.recovery_confirmed",
+        enforce: "sso.enforced",
+        suspend: "sso.suspended",
+        rollback: "sso.rolled_back",
+        disconnect: "sso.disconnected",
+      }[input.action];
+      const nextState: OrganizationSsoState = input.action === "test_succeeded" || input.action === "rollback"
+        ? "active"
+        : input.action === "enforce" ? "enforced"
+          : input.action === "suspend" ? "suspended"
+            : input.action === "disconnect" ? "disconnected"
+              : state;
+      const updated = await client.query(
+        `UPDATE organization_sso_connections SET
+           state=$3,
+           domain_verified_at=CASE WHEN $4='domain_verified' THEN now() ELSE domain_verified_at END,
+           last_tested_at=CASE WHEN $4='test_succeeded' THEN now() ELSE last_tested_at END,
+           recovery_confirmed_at=CASE WHEN $4='recovery_confirmed' THEN now() ELSE recovery_confirmed_at END,
+           enforced_at=CASE WHEN $4='enforce' THEN now() WHEN $4='rollback' THEN NULL ELSE enforced_at END,
+           suspended_at=CASE WHEN $4='suspend' THEN now() WHEN $4='rollback' THEN NULL ELSE suspended_at END,
+           disconnected_at=CASE WHEN $4='disconnect' THEN now() ELSE disconnected_at END,
+           updated_by=$5,updated_at=now()
+         WHERE organization_id=$1 AND id=$2 RETURNING *`,
+        [input.organizationId, input.connectionId, nextState, input.action, input.actorUserId],
+      );
+      await client.query(
+        `INSERT INTO organization_sso_audit_events (
+           organization_id,connection_id,actor_user_id,event_type,old_state,new_state,config_version
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [input.organizationId, input.connectionId, input.actorUserId, eventType, state, nextState, Number(row.config_version)],
+      );
+      await client.query("COMMIT");
+      return this.mapOrganizationSsoConnection(updated.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async prepareOrganizationSsoConfigurationChange(input: {
+    organizationId: string;
+    connectionId: string;
+    change: OrganizationSsoConfigurationChange;
+    actorUserId: string;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.actorUserId)
+        .catch((error) => {
+          if (error instanceof LemmaComputerError) {
+            throw new LemmaComputerError("SSO_ACTOR_INVALID", "The SSO actor cannot manage organization settings", 403);
+          }
+          throw error;
+        });
+      if (!actor.allows("organization.manage_settings", { type: "organization" })) {
+        throw new LemmaComputerError("SSO_ACTOR_INVALID", "The SSO actor cannot manage organization settings", 403);
+      }
+      const current = await client.query(
+        "SELECT * FROM organization_sso_connections WHERE organization_id=$1 AND id=$2 FOR UPDATE",
+        [input.organizationId, input.connectionId],
+      );
+      if (!current.rowCount) throw new LemmaComputerError("SSO_CONNECTION_NOT_FOUND", "SSO connection not found", 404);
+      const row = current.rows[0];
+      const state = String(row.state) as OrganizationSsoState;
+      if (state === "disconnected") {
+        throw new LemmaComputerError("SSO_CONNECTION_INACTIVE", "The SSO connection is disconnected", 409);
+      }
+      const updated = await client.query(
+        `UPDATE organization_sso_connections SET
+           state='pending',config_version=config_version+1,
+           last_tested_at=NULL,recovery_confirmed_at=NULL,enforced_at=NULL,suspended_at=NULL,
+           updated_by=$3,updated_at=now()
+         WHERE organization_id=$1 AND id=$2 RETURNING *`,
+        [input.organizationId, input.connectionId, input.actorUserId],
+      );
+      await client.query(
+        `INSERT INTO organization_sso_audit_events (
+           organization_id,connection_id,actor_user_id,event_type,old_state,new_state,config_version
+         ) VALUES ($1,$2,$3,$4,$5,'pending',$6)`,
+        [
+          input.organizationId,
+          input.connectionId,
+          input.actorUserId,
+          input.change === "credentials_rotated" ? "sso.rotated" : "sso.metadata_refreshed",
+          state,
+          Number(updated.rows[0].config_version),
+        ],
+      );
+      await client.query("COMMIT");
+      return this.mapOrganizationSsoConnection(updated.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listOrganizationRoles(organizationId: string) {
+    const result = await this.pool.query(
+      `SELECT role_record.*,
+         grant_record.permission_key,grant_record.scope_type,grant_record.resource_id,
+         (SELECT count(*)::integer FROM organization_membership_role_assignments assignment
+          WHERE assignment.organization_id=role_record.organization_id AND assignment.role_id=role_record.id)
+           AS assigned_membership_count,
+         (SELECT coalesce(array_agg(assignment.membership_id ORDER BY assignment.membership_id),'{}'::uuid[])
+          FROM organization_membership_role_assignments assignment
+          WHERE assignment.organization_id=role_record.organization_id AND assignment.role_id=role_record.id)
+           AS assigned_membership_ids
+       FROM organization_custom_roles role_record
+       LEFT JOIN organization_custom_role_grants grant_record
+         ON grant_record.organization_id=role_record.organization_id
+        AND grant_record.role_id=role_record.id
+        AND grant_record.role_version=role_record.current_version
+       WHERE role_record.organization_id=$1
+       ORDER BY role_record.status,lower(role_record.name),grant_record.permission_key,grant_record.scope_type,grant_record.resource_id`,
+      [organizationId],
+    );
+    return this.mapOrganizationRoles(result.rows);
+  }
+
+  async createOrganizationRole(input: {
+    organizationId: string;
+    name: string;
+    description: string;
+    grants: OrganizationPermissionGrant[];
+    createdBy: string;
+  }) {
+    const normalized = this.normalizeOrganizationRoleInput(input);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.createdBy);
+      if (!actor.allows("organization.manage_roles", { type: "organization" })
+        || !canDelegateOrganizationGrants(actor, normalized.grants)) {
+        throw new LemmaComputerError("ROLE_DELEGATION_EXCEEDED", "The role exceeds the actor's delegated authority", 403);
+      }
+      await this.validateOrganizationRoleResources(client, input.organizationId, normalized.grants);
+      const roleId = randomUUID();
+      await client.query(
+        `INSERT INTO organization_custom_roles (
+           id,organization_id,name,description,status,current_version,catalog_version,created_by,updated_by
+         ) VALUES ($1,$2,$3,$4,'active',1,$5,$6,$6)`,
+        [roleId, input.organizationId, normalized.name, normalized.description,
+          organizationPermissionCatalogVersion, input.createdBy],
+      );
+      await this.insertOrganizationRoleVersion(client, {
+        organizationId: input.organizationId, roleId, version: 1, ...normalized, actorUserId: input.createdBy,
+      });
+      await client.query(
+        `INSERT INTO organization_role_audit_events (
+           organization_id,role_id,role_version,actor_user_id,event_type,details
+         ) VALUES ($1,$2,1,$3,'role.created',$4)`,
+        [input.organizationId, roleId, input.createdBy, JSON.stringify({ permissionCount: normalized.grants.length })],
+      );
+      await client.query("COMMIT");
+      return (await this.listOrganizationRoles(input.organizationId)).find((role) => role.id === roleId)!;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (error instanceof Error && "code" in error && (error as Error & { code?: string }).code === "23505") {
+        throw new LemmaComputerError("ROLE_NAME_CONFLICT", "An active role already uses this name", 409);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateOrganizationRole(input: {
+    organizationId: string;
+    roleId: string;
+    expectedVersion: number;
+    name: string;
+    description: string;
+    grants: OrganizationPermissionGrant[];
+    updatedBy: string;
+  }) {
+    const normalized = this.normalizeOrganizationRoleInput(input);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.updatedBy);
+      if (!actor.allows("organization.manage_roles", { type: "organization" })
+        || !canDelegateOrganizationGrants(actor, normalized.grants)) {
+        throw new LemmaComputerError("ROLE_DELEGATION_EXCEEDED", "The role exceeds the actor's delegated authority", 403);
+      }
+      await this.validateOrganizationRoleResources(client, input.organizationId, normalized.grants);
+      const current = await client.query(
+        `SELECT current_version FROM organization_custom_roles
+         WHERE organization_id=$1 AND id=$2 AND status='active' FOR UPDATE`,
+        [input.organizationId, input.roleId],
+      );
+      if (!current.rowCount) throw new LemmaComputerError("ROLE_NOT_FOUND", "Role not found", 404);
+      if (Number(current.rows[0].current_version) !== input.expectedVersion) {
+        throw new LemmaComputerError("ROLE_VERSION_CONFLICT", "The role changed; reload before saving", 409);
+      }
+      const nextVersion = input.expectedVersion + 1;
+      await this.insertOrganizationRoleVersion(client, {
+        organizationId: input.organizationId, roleId: input.roleId, version: nextVersion,
+        ...normalized, actorUserId: input.updatedBy,
+      });
+      await client.query(
+        `UPDATE organization_custom_roles
+         SET name=$3,description=$4,current_version=$5,catalog_version=$6,updated_by=$7,updated_at=now()
+         WHERE organization_id=$1 AND id=$2`,
+        [input.organizationId, input.roleId, normalized.name, normalized.description,
+          nextVersion, organizationPermissionCatalogVersion, input.updatedBy],
+      );
+      const assignments = await client.query(
+        `UPDATE organization_membership_role_assignments
+         SET role_version=$3
+         WHERE organization_id=$1 AND role_id=$2
+         RETURNING membership_id`,
+        [input.organizationId, input.roleId, nextVersion],
+      );
+      const membershipIds = [...new Set(assignments.rows.map((row) => String(row.membership_id)))];
+      const revokedSessions = await this.revokeMembershipRoleSessions(client, input.organizationId, membershipIds, input.updatedBy);
+      await client.query(
+        `INSERT INTO organization_role_audit_events (
+           organization_id,role_id,role_version,actor_user_id,event_type,details
+         ) VALUES ($1,$2,$3,$4,'role.updated',$5)`,
+        [input.organizationId, input.roleId, nextVersion, input.updatedBy,
+          JSON.stringify({ previousVersion: input.expectedVersion, permissionCount: normalized.grants.length, affectedMemberships: membershipIds.length })],
+      );
+      await client.query("COMMIT");
+      const role = (await this.listOrganizationRoles(input.organizationId)).find((candidate) => candidate.id === input.roleId)!;
+      return { ...role, revokedSessions };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async assignOrganizationRole(input: {
+    organizationId: string;
+    membershipId: string;
+    roleId: string;
+    assignedBy: string;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.assignedBy);
+      const role = (await client.query(
+        `SELECT current_version FROM organization_custom_roles
+         WHERE organization_id=$1 AND id=$2 AND status='active'`,
+        [input.organizationId, input.roleId],
+      )).rows[0];
+      const target = await client.query(
+        `SELECT 1 FROM organization_memberships WHERE organization_id=$1 AND id=$2 AND status='active'`,
+        [input.organizationId, input.membershipId],
+      );
+      if (!role || !target.rowCount) throw new LemmaComputerError("ROLE_ASSIGNMENT_INVALID", "The role or membership is not active in this organization", 404);
+      const candidate = await this.roleVersionGrants(client, input.organizationId, input.roleId, Number(role.current_version));
+      if (!actor.allows("organization.manage_roles", { type: "organization" })
+        || !canDelegateOrganizationGrants(actor, candidate)) {
+        throw new LemmaComputerError("ROLE_DELEGATION_EXCEEDED", "The assignment exceeds the actor's delegated authority", 403);
+      }
+      const assigned = await client.query(
+        `INSERT INTO organization_membership_role_assignments (
+           organization_id,membership_id,role_id,role_version,assigned_by
+         ) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (organization_id,membership_id,role_id) DO NOTHING
+         RETURNING role_version`,
+        [input.organizationId, input.membershipId, input.roleId, role.current_version, input.assignedBy],
+      );
+      const revokedSessions = assigned.rowCount
+        ? await this.revokeMembershipRoleSessions(client, input.organizationId, [input.membershipId], input.assignedBy)
+        : 0;
+      if (assigned.rowCount) await client.query(
+        `INSERT INTO organization_role_audit_events (
+           organization_id,role_id,role_version,membership_id,actor_user_id,event_type
+         ) VALUES ($1,$2,$3,$4,$5,'role.assigned')`,
+        [input.organizationId, input.roleId, role.current_version, input.membershipId, input.assignedBy],
+      );
+      await client.query("COMMIT");
+      return { revokedSessions };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async roleVersionGrants(client: pg.PoolClient, organizationId: string, roleId: string, version: number) {
+    const result = await client.query(
+      `SELECT permission_key,scope_type,resource_id
+       FROM organization_custom_role_grants
+       WHERE organization_id=$1 AND role_id=$2 AND role_version=$3`,
+      [organizationId, roleId, version],
+    );
+    return result.rows.map((row): OrganizationPermissionGrant => ({
+      permission: String(row.permission_key) as OrganizationPermission,
+      scope: String(row.scope_type) === "organization"
+        ? { type: "organization" }
+        : { type: String(row.scope_type) as "workspace" | "provider", resourceId: String(row.resource_id) },
+    }));
+  }
+
+  async unassignOrganizationRole(input: {
+    organizationId: string;
+    membershipId: string;
+    roleId: string;
+    unassignedBy: string;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.unassignedBy);
+      if (!actor.allows("organization.manage_roles", { type: "organization" })) {
+        throw new LemmaComputerError("ROLE_ACTOR_INVALID", "The role actor cannot manage organization roles", 403);
+      }
+      const removed = await client.query(
+        `DELETE FROM organization_membership_role_assignments
+         WHERE organization_id=$1 AND membership_id=$2 AND role_id=$3
+         RETURNING role_version`,
+        [input.organizationId, input.membershipId, input.roleId],
+      );
+      if (!removed.rowCount) throw new LemmaComputerError("ROLE_ASSIGNMENT_INVALID", "Role assignment not found", 404);
+      const revokedSessions = await this.revokeMembershipRoleSessions(client, input.organizationId, [input.membershipId], input.unassignedBy);
+      await client.query(
+        `INSERT INTO organization_role_audit_events (
+           organization_id,role_id,role_version,membership_id,actor_user_id,event_type
+         ) VALUES ($1,$2,$3,$4,$5,'role.unassigned')`,
+        [input.organizationId, input.roleId, removed.rows[0].role_version, input.membershipId, input.unassignedBy],
+      );
+      await client.query("COMMIT");
+      return { revokedSessions };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async archiveOrganizationRole(input: {
+    organizationId: string;
+    roleId: string;
+    expectedVersion: number;
+    archivedBy: string;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.archivedBy);
+      if (!actor.allows("organization.manage_roles", { type: "organization" })) {
+        throw new LemmaComputerError("ROLE_ACTOR_INVALID", "The role actor cannot manage organization roles", 403);
+      }
+      const role = await client.query(
+        `UPDATE organization_custom_roles SET status='archived',updated_by=$4,updated_at=now()
+         WHERE organization_id=$1 AND id=$2 AND status='active' AND current_version=$3
+         RETURNING current_version`,
+        [input.organizationId, input.roleId, input.expectedVersion, input.archivedBy],
+      );
+      if (!role.rowCount) throw new LemmaComputerError("ROLE_VERSION_CONFLICT", "The role changed or is no longer active", 409);
+      const removed = await client.query(
+        `DELETE FROM organization_membership_role_assignments
+         WHERE organization_id=$1 AND role_id=$2 RETURNING membership_id`,
+        [input.organizationId, input.roleId],
+      );
+      const membershipIds = [...new Set(removed.rows.map((row) => String(row.membership_id)))];
+      const revokedSessions = await this.revokeMembershipRoleSessions(client, input.organizationId, membershipIds, input.archivedBy);
+      await client.query(
+        `INSERT INTO organization_role_audit_events (
+           organization_id,role_id,role_version,actor_user_id,event_type,details
+         ) VALUES ($1,$2,$3,$4,'role.archived',$5)`,
+        [input.organizationId, input.roleId, input.expectedVersion, input.archivedBy,
+          JSON.stringify({ affectedMemberships: membershipIds.length })],
+      );
+      await client.query("COMMIT");
+      const summary = (await this.listOrganizationRoles(input.organizationId)).find((candidate) => candidate.id === input.roleId)!;
+      return { role: summary, revokedSessions };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async listOrganizationInvitations(organizationId: string, now: Date) {
@@ -1128,18 +2892,21 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     actorUserId: string,
     targetRole?: OrganizationRole,
   ) {
-    const actor = await client.query(
-      `SELECT role FROM organization_memberships
-       WHERE organization_id=$1 AND subject_user_id=$2 AND status='active'`,
-      [organizationId, actorUserId],
-    );
-    if (!actor.rowCount || actor.rows[0].role === "member") {
+    const actor = await this.organizationMembershipActor(client, organizationId, actorUserId);
+    if (!actor.authorization.allows("organization.manage_members", { type: "organization" })) {
       throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot manage organization access", 403);
     }
-    if (targetRole === "owner" && actor.rows[0].role !== "owner") {
+    if (targetRole && targetRole !== "member"
+      && !actor.authorization.allows("organization.manage_roles", { type: "organization" })) {
+      throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot assign organization roles", 403);
+    }
+    if (targetRole && !this.canDelegateBuiltInRole(actor, targetRole)) {
+      if (targetRole !== "owner") {
+        throw new LemmaComputerError("ROLE_DELEGATION_EXCEEDED", "The invitation role exceeds the actor's delegated authority", 403);
+      }
       throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an organization owner can invite another owner", 403);
     }
-    return String(actor.rows[0].role) as OrganizationRole;
+    return actor.role;
   }
 
   private async recordInvitationEvent(client: pg.PoolClient, input: {
@@ -1170,6 +2937,34 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         input.occurredAt,
       ],
     );
+  }
+
+  private async enforceInvitationDeliveryRate(
+    client: pg.PoolClient,
+    organizationId: string,
+    actorUserId: string,
+    now: Date,
+  ) {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 1))",
+      [`organization-invitation-rate:${organizationId}:${actorUserId}`],
+    );
+    const recent = await client.query(
+      `SELECT count(*)::integer AS count
+       FROM organization_invitation_audit_events
+       WHERE organization_id=$1 AND actor_user_id=$2
+         AND event_type IN ('invitation.created','invitation.resent')
+         AND occurred_at>$3::timestamptz-interval '1 hour'`,
+      [organizationId, actorUserId, now],
+    );
+    if (Number(recent.rows[0].count) >= 20) {
+      throw new LemmaComputerError(
+        "INVITATION_RATE_LIMITED",
+        "Too many organization invitations were sent. Try again later",
+        429,
+        true,
+      );
+    }
   }
 
   async createOrganizationInvitation(input: {
@@ -1237,6 +3032,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       if (existingMembership.rowCount) {
         throw new LemmaComputerError("MEMBERSHIP_ALREADY_EXISTS", "This email already has organization access", 409);
       }
+      await this.enforceInvitationDeliveryRate(client, input.organizationId, input.createdBy, input.now);
       const created = await client.query(
         `INSERT INTO organization_invitations (
            organization_id,email,role,token_hash,create_idempotency_key_hash,
@@ -1303,6 +3099,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
       if (row.status === "accepted" || row.status === "revoked") {
         throw new LemmaComputerError("INVITATION_NOT_ACTIVE", "Only pending or expired invitations can be resent", 409);
       }
+      await this.enforceInvitationDeliveryRate(client, input.organizationId, input.updatedBy, input.now);
       const oldStatus = row.status === "pending" && new Date(String(row.expires_at)) <= input.now
         ? "expired"
         : String(row.status) as OrganizationInvitationStatus;
@@ -1419,13 +3216,12 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`organization-membership:${input.organizationId}`]);
-      const actor = await client.query(
-        `SELECT role FROM organization_memberships
-         WHERE organization_id=$1 AND subject_user_id=$2 AND status='active'`,
-        [input.organizationId, input.updatedBy],
-      );
-      if (!actor.rowCount || actor.rows[0].role === "member") {
+      const actor = await this.organizationMembershipActor(client, input.organizationId, input.updatedBy);
+      if (input.status && !actor.authorization.allows("organization.manage_members", { type: "organization" })) {
         throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot manage organization access", 403);
+      }
+      if (input.role && !actor.authorization.allows("organization.manage_roles", { type: "organization" })) {
+        throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot assign organization roles", 403);
       }
       const targetBefore = await client.query(
         `SELECT role,status FROM organization_memberships
@@ -1434,8 +3230,12 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         [input.organizationId, input.targetUserId],
       );
       if (!targetBefore.rowCount) throw new LemmaComputerError("MEMBERSHIP_NOT_FOUND", "Membership not found", 404);
-      if (actor.rows[0].role !== "owner" && (input.role === "owner" || targetBefore.rows[0].role === "owner")) {
+      const roleChanged = input.role !== undefined && input.role !== targetBefore.rows[0].role;
+      if (actor.role !== "owner" && (input.role === "owner" || targetBefore.rows[0].role === "owner")) {
         throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an organization owner can change ownership", 403);
+      }
+      if (input.role && !this.canDelegateBuiltInRole(actor, input.role)) {
+        throw new LemmaComputerError("ROLE_DELEGATION_EXCEEDED", "The membership role exceeds the actor's delegated authority", 403);
       }
       const changed = await client.query(
         `UPDATE organization_memberships membership
@@ -1479,7 +3279,14 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         [input.targetUserId, activeMemberships.rowCount ? "active" : "disabled"],
       );
       let revokedSessions = 0;
-      if (input.status === "suspended" || input.status === "revoked") {
+      if (roleChanged) {
+        revokedSessions = await this.revokeMembershipRoleSessions(
+          client,
+          input.organizationId,
+          [String(changed.rows[0].membership_id)],
+          input.updatedBy,
+        );
+      } else if (input.status === "suspended" || input.status === "revoked") {
         const revoked = await client.query(
           `UPDATE browser_sessions SET revoked_at=now()
            WHERE membership_id=$1 AND revoked_at IS NULL RETURNING id`,
@@ -1513,6 +3320,189 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
     }
   }
 
+  private assertRecentOwnerStepUp(recentStepUpAt: Date, now: Date) {
+    const ageMs = now.getTime() - recentStepUpAt.getTime();
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > recentAuthenticationStepUpWindowMs) {
+      throw new LemmaComputerError("OWNER_STEP_UP_REQUIRED", "Recent MFA verification is required", 403);
+    }
+  }
+
+  async transferOrganizationOwnership(input: {
+    organizationId: string;
+    currentOwnerUserId: string;
+    targetMembershipId: string;
+    recentStepUpAt: Date;
+    now: Date;
+  }) {
+    this.assertRecentOwnerStepUp(input.recentStepUpAt, input.now);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`organization-membership:${input.organizationId}`]);
+      const owner = await client.query(
+        `SELECT id,subject_user_id FROM organization_memberships
+         WHERE organization_id=$1 AND subject_user_id=$2 AND role='owner' AND status='active'
+         FOR UPDATE`,
+        [input.organizationId, input.currentOwnerUserId],
+      );
+      if (!owner.rowCount) {
+        throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an active organization owner can transfer ownership", 403);
+      }
+      const connectedSso = await client.query(
+        `SELECT id FROM organization_sso_connections
+         WHERE organization_id=$1 AND state<>'disconnected'
+         LIMIT 1
+         FOR UPDATE`,
+        [input.organizationId],
+      );
+      if (connectedSso.rowCount) {
+        throw new LemmaComputerError(
+          "OWNER_TRANSFER_REQUIRES_SSO_DISCONNECT",
+          "Disconnect Company SSO before transferring ownership so provider administration is not stranded with the former owner",
+          409,
+        );
+      }
+      const target = await client.query(
+        `SELECT id,subject_user_id FROM organization_memberships
+         WHERE organization_id=$1 AND id=$2 AND status='active'
+         FOR UPDATE`,
+        [input.organizationId, input.targetMembershipId],
+      );
+      if (!target.rowCount) throw new LemmaComputerError("MEMBERSHIP_NOT_ACTIVE", "The new owner membership is not active", 403);
+      if (target.rows[0].subject_user_id === input.currentOwnerUserId) {
+        throw new LemmaComputerError("OWNER_TRANSFER_TARGET_INVALID", "Choose a different active member as the new owner", 409);
+      }
+      await client.query(
+        `UPDATE organization_memberships SET role='owner',updated_by=$3,updated_at=$4
+         WHERE organization_id=$1 AND id=$2`,
+        [input.organizationId, input.targetMembershipId, input.currentOwnerUserId, input.now],
+      );
+      await client.query(
+        `UPDATE organization_memberships SET role='admin',updated_by=$3,updated_at=$4
+         WHERE organization_id=$1 AND id=$2`,
+        [input.organizationId, owner.rows[0].id, input.currentOwnerUserId, input.now],
+      );
+      await client.query(
+        `INSERT INTO user_roles (user_id,role,assigned_by,assigned_at)
+         VALUES ($1,'administrator',$2,$3)
+         ON CONFLICT (user_id,role) DO NOTHING`,
+        [target.rows[0].subject_user_id, input.currentOwnerUserId, input.now],
+      );
+      const revoked = await client.query(
+        `UPDATE browser_sessions SET revoked_at=$3
+         WHERE membership_id=ANY($1::uuid[]) AND revoked_at IS NULL AND expires_at>$2
+         RETURNING id`,
+        [[owner.rows[0].id, input.targetMembershipId], input.now, input.now],
+      );
+      await client.query(
+        `INSERT INTO organization_lifecycle_audit_events (
+           organization_id,actor_user_id,event_type,detail,occurred_at
+         ) VALUES ($1,$2,'organization.ownership_transferred',$3::jsonb,$4)`,
+        [input.organizationId, input.currentOwnerUserId, JSON.stringify({
+          previousOwnerMembershipId: String(owner.rows[0].id),
+          newOwnerMembershipId: input.targetMembershipId,
+        }), input.now],
+      );
+      await client.query("COMMIT");
+      return {
+        previousOwner: { membershipId: String(owner.rows[0].id), role: "admin" as const },
+        owner: { membershipId: input.targetMembershipId, userId: String(target.rows[0].subject_user_id), role: "owner" as const },
+        revokedSessions: revoked.rowCount ?? 0,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async initiateOrganizationClosure(input: {
+    organizationId: string;
+    requestedBy: string;
+    reason: string;
+    idempotencyKey: string;
+    recentStepUpAt: Date;
+    now: Date;
+  }) {
+    this.assertRecentOwnerStepUp(input.recentStepUpAt, input.now);
+    const idempotencyKeyHash = createHash("sha256")
+      .update(`organization-closure-idempotency\0${input.idempotencyKey}`)
+      .digest("hex");
+    const requestFingerprint = createHash("sha256").update(input.reason).digest("hex");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`organization-lifecycle:${input.organizationId}`]);
+      const owner = await client.query(
+        `SELECT id FROM organization_memberships
+         WHERE organization_id=$1 AND subject_user_id=$2 AND role='owner' AND status='active'
+         FOR UPDATE`,
+        [input.organizationId, input.requestedBy],
+      );
+      if (!owner.rowCount) {
+        throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an active organization owner can initiate closure", 403);
+      }
+      const replay = await client.query(
+        `SELECT id,status,request_fingerprint,requested_at,execute_after
+         FROM organization_closure_requests
+         WHERE organization_id=$1 AND idempotency_key_hash=$2`,
+        [input.organizationId, idempotencyKeyHash],
+      );
+      if (replay.rowCount) {
+        const row = replay.rows[0];
+        if (row.request_fingerprint !== requestFingerprint) {
+          throw new LemmaComputerError("IDEMPOTENCY_CONFLICT", "The idempotency key was already used for another closure request", 409);
+        }
+        if (row.status !== "pending") {
+          throw new LemmaComputerError("ORGANIZATION_CLOSURE_NOT_PENDING", "The closure request is no longer pending", 409);
+        }
+        await client.query("COMMIT");
+        return {
+          replayed: true,
+          request: {
+            id: String(row.id), status: "pending" as const,
+            requestedAt: new Date(String(row.requested_at)).toISOString(),
+            executeAfter: new Date(String(row.execute_after)).toISOString(),
+          },
+        };
+      }
+      const pending = await client.query(
+        "SELECT id FROM organization_closure_requests WHERE organization_id=$1 AND status='pending' FOR UPDATE",
+        [input.organizationId],
+      );
+      if (pending.rowCount) {
+        throw new LemmaComputerError("ORGANIZATION_CLOSURE_ALREADY_PENDING", "This organization already has a pending closure request", 409);
+      }
+      const requestId = randomUUID();
+      const executeAfter = new Date(input.now.getTime() + 7 * 24 * 60 * 60_000);
+      await client.query(
+        `INSERT INTO organization_closure_requests (
+           id,organization_id,requested_by,idempotency_key_hash,request_fingerprint,
+           reason,status,recent_step_up_at,requested_at,execute_after
+         ) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9)`,
+        [requestId, input.organizationId, input.requestedBy, idempotencyKeyHash,
+          requestFingerprint, input.reason, input.recentStepUpAt, input.now, executeAfter],
+      );
+      await client.query(
+        `INSERT INTO organization_lifecycle_audit_events (
+           organization_id,actor_user_id,event_type,detail,occurred_at
+         ) VALUES ($1,$2,'organization.closure_requested',$3::jsonb,$4)`,
+        [input.organizationId, input.requestedBy, JSON.stringify({ closureRequestId: requestId }), input.now],
+      );
+      await client.query("COMMIT");
+      return {
+        replayed: false,
+        request: { id: requestId, status: "pending" as const, requestedAt: input.now.toISOString(), executeAfter: executeAfter.toISOString() },
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async setUserStatus(input: { tenantId: string; targetUserId: string; status: LemmaComputerUserStatus; updatedBy: string }) {
     const client = await this.pool.connect();
     try {
@@ -1527,15 +3517,11 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
         [input.targetUserId, input.tenantId],
       );
       if (!target.rowCount) throw new LemmaComputerError("USER_NOT_FOUND", "User not found", 404);
-      const actor = await client.query(
-        `SELECT role FROM organization_memberships
-         WHERE organization_id=$1 AND subject_user_id=$2 AND status='active'`,
-        [input.tenantId, input.updatedBy],
-      );
-      if (!actor.rowCount || actor.rows[0].role === "member") {
+      const actor = await this.organizationMembershipActor(client, input.tenantId, input.updatedBy);
+      if (!actor.authorization.allows("organization.manage_members", { type: "organization" })) {
         throw new LemmaComputerError("MEMBERSHIP_ACTOR_INVALID", "The membership actor cannot manage organization access", 403);
       }
-      if (actor.rows[0].role !== "owner" && target.rows[0].role === "owner") {
+      if (actor.role !== "owner" && target.rows[0].role === "owner") {
         throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an organization owner can change ownership", 403);
       }
       const membershipStatus = input.status === "active" ? "active" : "suspended";
@@ -2016,6 +4002,59 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore {
        WHERE pa.tenant_id=$1
        AND pa.revoked_at IS NULL AND pa.egress_security_group_version_id IS NULL`,
       [tenantId, securityGroupVersionId],
+    );
+  }
+
+  private async ensureDefaultSpendingTeamFoundation(
+    client: pg.PoolClient,
+    tenantId: string,
+    userId: string,
+    assignedBy: string,
+    effectiveFrom = new Date(),
+  ) {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`default-spending-team-foundation:${tenantId}`],
+    );
+    let team = await client.query(
+      `SELECT id FROM allocation_units
+       WHERE tenant_id=$1 AND allocation_type='team' AND status='active'
+         AND is_rollout_fallback=false
+       ORDER BY created_at,id LIMIT 1`,
+      [tenantId],
+    );
+    if (!team.rowCount) {
+      const teamId = randomUUID();
+      team = await client.query(
+        `INSERT INTO allocation_units(
+           id,tenant_id,allocation_type,display_name,description,owner_user_id,
+           cost_center_code,status,is_rollout_fallback,created_by,updated_by
+         ) VALUES($1,$2,'team','Everyone','Default organization-wide spending and routing team',$3,
+           NULL,'active',false,$4,$4)
+         RETURNING id`,
+        [teamId, tenantId, userId, assignedBy],
+      );
+    }
+    const teamId = String(team.rows[0].id);
+    await client.query(
+      `INSERT INTO allocation_memberships(
+         id,tenant_id,allocation_unit_id,user_id,effective_from,assigned_by
+       ) SELECT $1,$2,$3,$4,$5,$6
+       WHERE NOT EXISTS(
+         SELECT 1 FROM allocation_memberships
+         WHERE tenant_id=$2 AND allocation_unit_id=$3 AND user_id=$4 AND effective_to IS NULL
+       )`,
+      [randomUUID(), tenantId, teamId, userId, effectiveFrom, assignedBy],
+    );
+    await client.query(
+      `INSERT INTO default_spending_team_assignments(
+         id,tenant_id,allocation_unit_id,user_id,effective_from,assigned_by
+       ) SELECT $1,$2,$3,$4,$5,$6
+       WHERE NOT EXISTS(
+         SELECT 1 FROM default_spending_team_assignments
+         WHERE tenant_id=$2 AND user_id=$4 AND effective_to IS NULL
+       )`,
+      [randomUUID(), tenantId, teamId, userId, effectiveFrom, assignedBy],
     );
   }
 

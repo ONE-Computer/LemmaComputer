@@ -88,12 +88,13 @@ let gatewayGranted = false;
 let qualificationError: unknown;
 const startedAt = Date.now();
 try {
-  const gatewayGrant = await gateway.ensureGrant({ workspaceId, identity, agentId, policy });
+  const gatewayGrant = await gateway.ensureGrant({ workspaceId, accessGeneration: 1, identity, agentId, policy });
   gatewayGranted = true;
   const created = await controller("/internal/v1/sandboxes", {
     method: "POST",
     body: JSON.stringify({
       workspaceId,
+      accessGeneration: 1,
       correlationId: `release-workspace-smoke-${workspaceId}`,
       policy,
       policyBundle,

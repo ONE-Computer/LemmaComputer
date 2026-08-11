@@ -112,8 +112,9 @@ test("approval binding rejects issuer, key, identity, audience, digest, nonce, e
 });
 
 test("concurrent approvals execute one exact operation once", async () => {
-  const { workspace, executor, service } = await setup();
+  const { store, workspace, executor, service } = await setup();
   const operation = await service.createDeleteFile(identity, workspace.id, "/Finance/2026/Q3-draft.docx", "delete-request-003", "request-3");
+  await store.revokeAccessGrants(workspace.id);
   const [first, second] = await Promise.all([
     service.decideWithFixture(identity, operation.id, "approve", "approval-1"),
     service.decideWithFixture(identity, operation.id, "approve", "approval-2"),
@@ -121,6 +122,7 @@ test("concurrent approvals execute one exact operation once", async () => {
   assert.equal(first.state, "succeeded");
   assert.equal(second.state, "succeeded");
   assert.equal(executor.calls.length, 1);
+  assert.equal(executor.calls[0].accessGeneration, 2, "execution uses the current post-restart access generation");
   assert.deepEqual(executor.calls[0].arguments, { path: "/Finance/2026/Q3-draft.docx" });
   assert.equal(first.receipt?.resultSummary, "Deleted fixture Q3-draft.docx");
 });
@@ -257,6 +259,7 @@ test("approved multi-gigabyte OneDrive uploads use one exact resumable session a
   );
   assert.equal(started.uploadUrl, "https://example.up.1drv.com/up/session-secret");
   assert.equal(executor.calls.length, 1);
+  assert.equal(executor.calls[0]!.accessGeneration, 1);
   assert.equal((executor.calls[0]!.arguments as Record<string, unknown>).lemmacomputerFile instanceof Uint8Array, false);
   assert.deepEqual((executor.calls[0]!.arguments as Record<string, unknown>).lemmacomputerFile, {
     name: "huge.iso",

@@ -3,7 +3,7 @@ import test from "node:test";
 import { LemmaComputerError, type IdentityContext, type Launch, type RuntimePolicy, type Sandbox, type SignedPolicyBundle } from "@lemmacomputer/contracts";
 import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import type { GatewayClient, GatewayGrant } from "@lemmacomputer/litellm-adapter";
-import { PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "../apps/control-api/src/service.js";
+import { EgressProxyGrantAuthority, PolicyBundleAuthority, WorkspaceService, type ControllerClient, type EgressProxyGrant } from "../apps/control-api/src/service.js";
 import { WorkspaceIngressAuthority, workspaceIngressAccessParameter } from "@lemmacomputer/workspace-ingress-auth";
 import { policyFixture } from "./policy-fixture.js";
 
@@ -15,23 +15,22 @@ class FakeController implements ControllerClient {
   lastAgentBridge: { baseUrl: string; token: string } | undefined;
   lastPolicy: RuntimePolicy | undefined;
   lastPolicyBundle: SignedPolicyBundle | undefined;
-  async create(input: {
-    workspaceId: string;
-    policy: RuntimePolicy;
-    policyBundle?: SignedPolicyBundle;
-    gateway?: GatewayGrant;
-    agentBridge?: { baseUrl: string; token: string };
-  }): Promise<Sandbox> {
+  lastAccessGeneration: number | undefined;
+  lastEgressProxy: EgressProxyGrant | undefined;
+  async create(input: Parameters<ControllerClient["create"]>[0]): Promise<Sandbox> {
     this.creates += 1;
     this.lastGateway = input.gateway;
     this.lastAgentBridge = input.agentBridge;
     this.lastPolicy = input.policy;
     this.lastPolicyBundle = input.policyBundle;
+    this.lastAccessGeneration = input.accessGeneration;
+    this.lastEgressProxy = input.egressProxy;
     return { providerId: `sandbox-${input.workspaceId}`, state: "ready", failureCode: null };
   }
   async status(providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
   async open(_providerId: string): Promise<Launch> { return { launchUrl: "https://kasm.example/session", expiresAt: new Date(Date.now() + 60_000).toISOString() }; }
   async destroy(_providerId: string) { this.destroys += 1; }
+  async destroyWorkspace(_workspaceId: string, _providerId: string) { this.destroys += 1; }
   async purgeWorkspace(_workspaceId: string) { this.purges += 1; }
 }
 
@@ -39,9 +38,11 @@ class FakeGateway implements GatewayClient {
   grants = 0;
   revocations = 0;
   lastPolicy: RuntimePolicy | undefined;
-  async ensureGrant(input: { workspaceId: string; policy?: RuntimePolicy }): Promise<GatewayGrant> {
+  lastAccessGeneration: number | undefined;
+  async ensureGrant(input: Parameters<GatewayClient["ensureGrant"]>[0]): Promise<GatewayGrant> {
     this.grants += 1;
     this.lastPolicy = input.policy;
+    this.lastAccessGeneration = input.accessGeneration;
     return { baseUrl: "http://litellm:4000", credential: `sk-${input.workspaceId}`, modelAlias: "lemmacomputer-assistant", expiresAt: new Date(Date.now() + 60_000).toISOString() };
   }
   async modelCapabilities() { return { vision: true }; }
@@ -57,6 +58,7 @@ class FakeGateway implements GatewayClient {
     };
   }
   async revoke() { this.revocations += 1; }
+  async revokeWorkspace() { this.revocations += 1; }
 }
 
 const fakeModelRoute = {
@@ -99,9 +101,21 @@ test("workspace identifiers do not confer cross-tenant access", async () => {
   const controller = new FakeController();
   const service = new WorkspaceService(new MemoryWorkspaceStore(), controller);
   const workspace = await service.create(alex, policy, "personal", "tenant-key-0001", "correlation-1");
-  await assert.rejects(
-    service.open({ tenantId: "other", subjectId: "alex", audience: "lemmacomputer-control" }, policy, workspace.id),
-    (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "WORKSPACE_NOT_FOUND"),
+  const outsider = { tenantId: "other", subjectId: "alex", audience: "lemmacomputer-control" } as const;
+  const denial = async (workspaceId: string) => {
+    try {
+      await service.open(outsider, policy, workspaceId);
+      assert.fail("workspace access should be denied");
+    } catch (error) {
+      assert.ok(error instanceof LemmaComputerError);
+      return { code: error.code, message: error.message, statusCode: error.statusCode, retryable: error.retryable };
+    }
+  };
+
+  assert.deepEqual(
+    await denial(workspace.id),
+    await denial("00000000-0000-4000-8000-000000000000"),
+    "a foreign workspace must be indistinguishable from a nonexistent workspace",
   );
 });
 
@@ -220,29 +234,51 @@ test("workspace restart rotates the persisted bridge generation before projectin
   const controller = new FakeController();
   const store = new MemoryWorkspaceStore();
   const issuedGenerations: number[] = [];
+  const gateway = new FakeGateway();
+  const egressPolicy: RuntimePolicy = {
+    ...policy,
+    egressMode: "restricted",
+    egress: {
+      id: "egv_acme_restart_v1",
+      securityGroupId: "esg_acme_restart",
+      version: 1,
+      name: "Restart access",
+      description: "Restart generation regression fixture",
+      defaultAction: "deny",
+      documentHash: "e".repeat(64),
+      rules: [],
+    },
+  };
   const service = new WorkspaceService(
     store,
     controller,
-    undefined,
+    gateway,
     {
       baseUrl: "http://lemmacomputer-control:4100",
       issue: (_identity, workspace) => {
-        issuedGenerations.push(workspace.bridgeGrantGeneration);
-        return `v2-bridge-generation-${workspace.bridgeGrantGeneration}`;
+        issuedGenerations.push(workspace.accessGeneration);
+        return `v2-bridge-generation-${workspace.accessGeneration}`;
       },
     },
+    new EgressProxyGrantAuthority("restart-egress-root-secret-at-least-32-characters"),
   );
 
-  const workspace = await service.create(alex, policy, "personal", "bridge-generation-create", "correlation-1");
+  const workspace = await service.create(alex, egressPolicy, "personal", "bridge-generation-create", "correlation-1");
   assert.deepEqual(issuedGenerations, [1]);
   assert.equal(controller.lastAgentBridge?.token, "v2-bridge-generation-1");
+  assert.equal(controller.lastAccessGeneration, 1);
+  assert.equal(controller.lastEgressProxy?.expectedGrant.accessGeneration, 1);
+  assert.equal(gateway.lastAccessGeneration, 1);
 
-  await service.restart(alex, policy, workspace.id, "correlation-2");
+  await service.restart(alex, egressPolicy, workspace.id, "correlation-2");
   assert.deepEqual(issuedGenerations, [1, 2]);
   assert.equal(controller.lastAgentBridge?.token, "v2-bridge-generation-2");
+  assert.equal(controller.lastAccessGeneration, 2);
+  assert.equal(controller.lastEgressProxy?.expectedGrant.accessGeneration, 2);
+  assert.equal(gateway.lastAccessGeneration, 2);
 
-  await service.stop(alex, policy, workspace.id);
-  assert.equal((await store.getOwned(alex, workspace.id))?.bridgeGrantGeneration, 3);
+  await service.stop(alex, egressPolicy, workspace.id);
+  assert.equal((await store.getOwned(alex, workspace.id))?.accessGeneration, 3);
 });
 
 test("stop removes provider authority while retaining an owned stopped record", async () => {

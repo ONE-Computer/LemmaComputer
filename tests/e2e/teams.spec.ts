@@ -17,19 +17,19 @@ test("administrator creates a Team, assigns membership, selects the default, and
 
   const manageDialog = page.getByRole("dialog", { name: "Manage Customer Success" });
   await manageDialog.getByRole("combobox", { name: "Team member" }).click();
-  await page.getByRole("option", { name: "METECH · hello@metech.dev" }).click();
+  await page.getByRole("option", { name: "Example Admin · admin@example.test" }).click();
   await manageDialog.getByRole("button", { name: "Assign member" }).click();
   await expect(teamRow).toContainText("1 active member");
-  await expect(manageDialog.getByRole("region", { name: "Team membership history" })).toContainText("METECH");
+  await expect(manageDialog.getByRole("region", { name: "Team membership history" })).toContainText("Example Admin");
 
   await manageDialog.getByRole("button", { name: "Make default" }).click();
   await expect(page.getByText("The default spending Team was updated.")).toBeVisible();
   await expect(manageDialog.getByText("Current default")).toBeVisible();
 
   await manageDialog.getByRole("combobox", { name: "Team member" }).click();
-  await page.getByRole("option", { name: "Mike Sun · mike@metech.dev" }).click();
+  await page.getByRole("option", { name: "Example User · user@example.test" }).click();
   await manageDialog.getByRole("button", { name: "Assign member" }).click();
-  const mikeMembership = manageDialog.locator(".team-membership-list article").filter({ hasText: "Mike Sun" });
+  const mikeMembership = manageDialog.locator(".team-membership-list article").filter({ hasText: "Example User" });
   await expect(mikeMembership).toContainText("Active since");
   await mikeMembership.getByRole("button", { name: "Remove" }).click();
   await expect(mikeMembership).toContainText("Ended");

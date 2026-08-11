@@ -75,6 +75,7 @@ export type InternalUsageCompletion = z.infer<typeof internalUsageCompletionSche
 export const adminUsageQuerySchema=z.object({
   from:z.iso.datetime(),to:z.iso.datetime(),limit:z.coerce.number().int().min(1).max(500).default(100),
   cursor:z.string().max(500).optional(),teamId:z.uuid().optional(),subjectId:boundedId.optional(),taskId:boundedId.optional(),
+  workspaceId:boundedId.optional(),provider:boundedId.optional(),
 }).strict();
 export const adminRateCardSchema=z.object({
   provider:boundedId,providerAccountId:boundedId,baseModel:z.string().trim().min(1).max(300),deploymentId:boundedId,

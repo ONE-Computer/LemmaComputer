@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import pg from "pg";
 import type { AgentChatEvent, IdentityContext } from "@lemmacomputer/contracts";
 import { PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { ActivityEventService } from "../apps/control-api/src/activity.js";
@@ -10,6 +11,7 @@ test("PostgreSQL Activity events are append-only, deduplicated, tenant-scoped, a
   skip: !connectionString,
 }, async () => {
   const store = PostgresWorkspaceStore.fromConnectionString(connectionString!);
+  const pool = new pg.Pool({ connectionString });
   const owner: IdentityContext = {
     tenantId: `activity-owner-${crypto.randomUUID()}`,
     subjectId: "owner",
@@ -24,6 +26,14 @@ test("PostgreSQL Activity events are append-only, deduplicated, tenant-scoped, a
   const turnId = "turn-postgres-1";
   try {
     await store.migrate();
+    await pool.query(
+      `INSERT INTO tenants(id,external_tenant_id,display_name) VALUES($1,$2,'Activity owner'),($3,$4,'Activity outsider')`,
+      [owner.tenantId, `external-${owner.tenantId}`, outsider.tenantId, `external-${outsider.tenantId}`],
+    );
+    await pool.query(
+      `INSERT INTO organizations(id,display_name) VALUES($1,'Activity owner'),($2,'Activity outsider')`,
+      [owner.tenantId, outsider.tenantId],
+    );
     const workspace = await store.createOrGet(owner, "activity-postgres", crypto.randomUUID());
     const outsiderWorkspace = await store.createOrGet(outsider, "activity-postgres", crypto.randomUUID());
     const service = new ActivityEventService(store);
@@ -113,6 +123,7 @@ test("PostgreSQL Activity events are append-only, deduplicated, tenant-scoped, a
     assert.equal(await store.remove(owner, workspace.id), true);
     assert.equal((await store.replayActivityEvents(owner, scope, -1, 100)).found, false);
   } finally {
+    await pool.end();
     await store.close();
   }
 });

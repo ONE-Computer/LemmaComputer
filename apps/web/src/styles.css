@@ -5672,6 +5672,54 @@ textarea:focus-visible,
 .signin-card h1 { margin: 0; color: #0d1a2b; font-size: clamp(34px, 6vw, 48px); letter-spacing: -0.04em; }
 .signin-card > span { display: block; margin: 18px 0 30px; color: #5d6670; line-height: 1.55; }
 .signin-button { width: 100%; text-decoration: none; }
+.signin-form { display: grid; gap: 16px; }
+.signin-form label { display: grid; gap: 7px; color: #273545; font-size: 14px; font-weight: 650; }
+.signin-form input { min-height: 44px; padding: 10px 12px; border: 1px solid #b8c0ca; border-radius: 7px; color: #102033; background: #fff; font: inherit; font-weight: 450; }
+.signin-form input:focus { border-color: #0b4a8f; outline: 3px solid rgba(11, 74, 143, 0.14); }
+.signin-secondary-actions { display: flex; justify-content: space-between; gap: 16px; margin-top: 14px; }
+.signin-secondary-actions button,
+.signin-back-button { padding: 4px 0; border: 0; color: #0b4a8f; background: transparent; cursor: pointer; font: inherit; font-size: 14px; font-weight: 650; }
+.signin-back-button { width: 100%; margin-top: 14px; }
+.signin-method-divider { display: flex; align-items: center; gap: 12px; margin: 22px 0 14px; color: #737b85; font-size: 13px; }
+.signin-method-divider::before,
+.signin-method-divider::after { height: 1px; background: #e0e3e6; content: ""; flex: 1; }
+.signin-card .secondary-button.signin-button { min-height: 42px; margin-top: 10px; justify-content: center; }
+.signin-locked-identity { display: grid; gap: 7px; margin-bottom: 18px; color: #273545; font-size: 14px; font-weight: 650; }
+.signin-locked-identity input { min-height: 44px; padding: 10px 12px; border: 1px solid #cbd2da; border-radius: 7px; background: #f5f7f9; color: #344255; font: inherit; }
+.invitation-sso-card > span { margin-bottom: 24px; }
+.signin-status { margin: 0 0 18px; padding: 12px 14px; border-radius: 7px; color: #174a31; background: #edf8f1; line-height: 1.45; }
+.organization-selection-list { display: grid; gap: 10px; }
+.organization-selection-list button { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 62px; padding: 12px 14px; border: 1px solid #cbd2da; border-radius: 8px; color: #142235; background: #fff; cursor: pointer; text-align: left; }
+.organization-selection-list button:not(:disabled):hover { border-color: #0b4a8f; background: #f4f8fc; }
+.organization-selection-list button:disabled { cursor: not-allowed; opacity: 0.58; }
+.organization-selection-list button > span { display: grid; gap: 3px; margin: 0; }
+.organization-selection-list button > span:last-child { color: #586575; font-size: 12px; text-transform: capitalize; }
+.organization-selection-list small { color: #667281; text-transform: capitalize; }
+.organization-creation-form { margin-bottom: 18px; }
+.modal-card.account-security-modal { width: min(100%, 720px); max-height: min(860px, calc(100vh - 48px)); overflow: auto; }
+.account-security-panel { display: grid; gap: 24px; }
+.account-security-panel > section { display: grid; gap: 12px; padding: 18px; border: 1px solid #dde2e7; border-radius: 9px; }
+.account-security-panel h3 { margin: 0; color: #172538; font-size: 16px; }
+.account-security-methods { display: grid; gap: 8px; }
+.account-security-methods > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; }
+.account-security-methods span { display: grid; gap: 3px; }
+.account-security-methods small { color: #647080; }
+.account-security-methods button { padding: 5px 0; border: 0; color: #0b4a8f; background: transparent; cursor: pointer; font: inherit; font-size: 14px; font-weight: 650; }
+.account-security-method-note { margin: -2px 0 0; color: #647080; font-size: 13px; line-height: 1.5; }
+.account-security-form { display: grid; gap: 12px; }
+.account-security-form label { display: grid; gap: 6px; color: #283749; font-size: 14px; font-weight: 650; }
+.account-security-form input { min-height: 42px; padding: 9px 11px; border: 1px solid #aeb7c1; border-radius: 6px; font: inherit; }
+.totp-enrollment { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 18px; padding: 16px; border: 1px solid #d9e1e8; border-radius: 9px; background: #f8fafc; }
+.totp-enrollment strong { color: #172538; }
+.totp-enrollment p { margin: 6px 0 0; color: #647080; line-height: 1.45; }
+.totp-qr-code { display: grid; place-items: center; padding: 10px; border: 1px solid #e0e4e8; border-radius: 8px; background: #fff; }
+.totp-manual-setup { padding: 10px 12px; border-radius: 7px; background: #f5f7f9; color: #53606e; }
+.totp-manual-setup summary { cursor: pointer; color: #0b4a8f; font-weight: 650; }
+.totp-manual-setup p { margin: 10px 0 8px; }
+.totp-setup-key { overflow-wrap: anywhere; padding: 10px; border-radius: 6px; background: #f3f5f7; }
+.backup-code-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 12px; border-radius: 7px; background: #f7f8f9; }
+.backup-code-list strong { grid-column: 1 / -1; }
+.account-security-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .signin-card > small { display: flex; gap: 9px; align-items: flex-start; margin-top: 24px; color: #606975; line-height: 1.45; }
 .signin-card > small svg { flex: 0 0 auto; color: #0b4a8f; }
 .signin-loading { color: #3f4a57; font-size: 15px; }
@@ -5782,6 +5830,24 @@ textarea:focus-visible,
 .admin-access-summary span { max-width: 760px; color: #5f6b79; font-size: 13px; line-height: 1.5; }
 .admin-access-summary button { flex: 0 0 auto; }
 
+.admin-section-action {
+  width: 260px;
+  min-width: 260px;
+  min-height: 56px;
+  flex: 0 0 260px;
+  padding: 0 22px;
+  white-space: nowrap;
+}
+
+.admin-screen { display: grid; max-width: 1240px; gap: 24px; }
+.admin-screen > .settings-back-button { justify-self: start; margin-bottom: 0; }
+.admin-screen > .page-heading { margin-bottom: 4px; }
+.admin-screen > .admin-access-summary,
+.admin-screen > .admin-invitation-link,
+.admin-screen > .admin-invitation-list,
+.admin-screen > .admin-member-section,
+.admin-screen > .admin-role-section { margin-top: 0; }
+
 .admin-invitation-link {
   display: grid;
   grid-template-columns: minmax(220px, .8fr) minmax(280px, 1fr) auto auto;
@@ -5797,6 +5863,21 @@ textarea:focus-visible,
 .admin-invitation-link strong { color: #1f5732; }
 .admin-invitation-link small { color: #53705d; font-size: 12px; line-height: 1.4; }
 .admin-invitation-link input { min-width: 0; height: 38px; padding: 0 10px; border: 1px solid #b9c9bd; border-radius: 6px; background: #fff; color: #34483a; }
+
+.sso-configuration-details { display: grid; gap: 18px; margin: 22px 28px 24px; padding: 22px; border: 1px solid #bad7c2; border-radius: 10px; background: #f5fbf6; }
+.sso-configuration-heading { display: grid; gap: 4px; }
+.sso-configuration-heading strong { color: #1f5732; font-size: 16px; }
+.sso-configuration-heading small,
+.sso-configuration-details section > small { color: #587064; line-height: 1.45; }
+.sso-configuration-details section { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid #d7e8dc; }
+.sso-configuration-details h3 { margin: 0; color: #263e31; font-size: 14px; }
+.sso-configuration-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; }
+.sso-configuration-field label { display: grid; gap: 6px; min-width: 0; color: #405749; font-size: 12px; font-weight: 700; }
+.sso-configuration-field input { width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid #b9c9bd; border-radius: 7px; background: #fff; color: #263b2d; font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sso-copy-button { min-height: 40px; padding: 0 13px; border: 1px solid #9fb7a6; border-radius: 7px; background: #fff; color: #245238; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
+.sso-copy-button:hover { border-color: #658c70; background: #edf7f0; }
+.sso-client-id-help { color: #68727d; font-size: 12px; font-weight: 400; line-height: 1.45; }
+.sso-client-id-help.warning { color: #9b302a; font-weight: 700; }
 
 .admin-invitation-list,
 .admin-member-section { margin-top: 20px; overflow: hidden; border: 1px solid #dededb; border-radius: 8px; background: #fff; }
@@ -5818,9 +5899,36 @@ textarea:focus-visible,
 .admin-access-status.accepted { background: #eaf4ed; color: #25633a; }
 .admin-access-status.expired,
 .admin-access-status.revoked { background: #f0f1f2; color: #68727d; }
-.admin-member-section .admin-user-list { margin-top: 0; padding: 0 24px; border-top: 0; }
+.admin-member-section .admin-user-list { margin-top: 0; padding: 0 28px; border-top: 0; }
 .admin-policy-copy label { display: grid; gap: 5px; color: #4f5965; font-size: 12px; }
 .admin-policy-section { margin-top: 28px; padding-top: 28px; border-top: 1px solid #dededb; }
+.admin-role-section { margin-top: 28px; border: 1px solid #dededb; border-radius: 18px; background: #fff; overflow: hidden; }
+.admin-role-section .admin-section-heading { align-items: center; }
+.admin-role-intro { margin: 0; padding: 16px 24px; border-bottom: 1px solid #ecece8; color: #56616d; line-height: 1.55; }
+.admin-custom-role-list { display: grid; gap: 14px; padding: 20px 24px 24px; }
+.admin-custom-role-card { display: grid; gap: 16px; padding: 18px; border: 1px solid #dededb; border-radius: 14px; background: #fafaf8; }
+.admin-custom-role-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
+.admin-custom-role-heading h3,
+.admin-custom-role-heading p { margin: 0; }
+.admin-custom-role-heading p { margin-top: 4px; color: #68727d; }
+.admin-custom-role-heading > span { flex: none; color: #244a73; font-size: 12px; font-weight: 700; }
+.admin-custom-role-grants { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-custom-role-grants > span { display: grid; gap: 2px; padding: 7px 10px; border-radius: 9px; background: #edf3f8; color: #24384e; font-size: 12px; }
+.admin-custom-role-grants small { color: #5e6b77; }
+.admin-custom-role-assignments { display: flex; flex-wrap: wrap; gap: 8px; color: #66717c; }
+.admin-custom-role-assignments > span { display: inline-flex; align-items: center; gap: 8px; padding: 6px 9px; border: 1px solid #d9ddd9; border-radius: 999px; background: #fff; font-size: 12px; }
+.admin-custom-role-assignments button { border: 0; background: transparent; color: #8f2f2f; font: inherit; font-weight: 700; cursor: pointer; }
+.admin-custom-role-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.admin-custom-role-actions .select-menu { min-width: 190px; }
+.admin-role-permission-editor { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.admin-role-permission-editor legend { margin-bottom: 8px; color: #26384c; font-weight: 700; }
+.admin-role-permission-editor > div { display: grid; gap: 10px; padding: 12px; border: 1px solid #dededb; border-radius: 12px; }
+.admin-role-permission-editor > div.selected { border-color: #9db4ca; background: #f4f8fb; }
+.admin-role-permission-editor label { display: flex; align-items: start; gap: 10px; }
+.admin-role-permission-editor label span { display: grid; gap: 3px; }
+.admin-role-permission-editor label small { color: #68727d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.admin-role-scope-editor { display: grid; grid-template-columns: minmax(190px, .7fr) minmax(180px, 1fr); gap: 10px; padding-left: 24px; }
+.admin-role-scope-editor input { min-height: 42px; padding: 0 12px; border: 1px solid #c9ced2; border-radius: 9px; }
 
 .admin-toolbar {
   display: flex;
@@ -5939,8 +6047,11 @@ textarea:focus-visible,
   align-items: center;
   gap: 24px;
   min-height: 104px;
+  padding: 16px 0;
   border-bottom: 1px solid #dededb;
 }
+.sso-connection-list article { padding: 16px 0; }
+.sso-connection-list .admin-user-actions { align-self: start; }
 .admin-user-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .admin-user-copy span { width: fit-content; padding: 3px 8px; border-radius: 999px; background: #eef3f8; color: #244a73; font-size: 12px; }
 .admin-user-copy span.disabled { background: #fff0ee; color: #9b302a; }
@@ -5950,6 +6061,13 @@ textarea:focus-visible,
 .admin-user-workspaces button { padding: 0; font-size: 12px; text-align: left; }
 .admin-user-actions { display: grid; min-width: 170px; gap: 8px; }
 .admin-user-actions button { min-height: 36px; padding: 0 12px; white-space: nowrap; }
+.admin-user-actions .admin-row-action {
+  width: 180px;
+  min-width: 180px;
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 14px;
+}
 .compact-button { min-width: 150px; min-height: 44px; }
 
 .firewall-page-heading { display: flex; align-items: end; justify-content: space-between; gap: 32px; }
@@ -6178,8 +6296,17 @@ textarea:focus-visible,
   .admin-toolbar { align-items: stretch; flex-direction: column; }
   .admin-access-summary { align-items: stretch; flex-direction: column; }
   .admin-access-summary button { width: 100%; }
+  .admin-action-heading { align-items: stretch; flex-direction: column; }
+  .admin-section-action { width: 100%; min-width: 0; flex-basis: auto; }
+  .admin-user-actions { min-width: 0; }
+  .admin-row-action { width: 100%; min-width: 0; }
   .admin-invitation-link,
   .admin-invitation-list > article { grid-template-columns: 1fr; }
+  .totp-enrollment { grid-template-columns: 1fr; }
+  .totp-qr-code { justify-self: center; }
+  .sso-configuration-details { margin-inline: 18px; padding: 18px; }
+  .sso-configuration-field { grid-template-columns: 1fr; }
+  .sso-copy-button { justify-self: start; }
   .admin-invitation-actions { align-items: stretch; flex-direction: column; }
   .admin-invitation-actions button { width: 100%; }
   .admin-connector-summary { grid-template-columns: 52px minmax(0, 1fr); }

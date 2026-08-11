@@ -144,6 +144,41 @@
   outline-offset: 2px;
 }
 
+.secret-input-control {
+  position: relative;
+}
+
+.modal-field .secret-input-control input {
+  padding-right: 48px;
+}
+
+.secret-input-control button {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.secret-input-control button:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+}
+
+.secret-input-control button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus) 55%, transparent);
+  outline-offset: 1px;
+}
+
 .select-menu {
   display: inline-block;
   min-width: 0;

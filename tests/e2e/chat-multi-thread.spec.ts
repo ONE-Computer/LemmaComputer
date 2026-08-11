@@ -17,14 +17,14 @@ test("uses the Recent sidebar to switch between independently streaming chat thr
     if (match) postedSessions.push(decodeURIComponent(match[1]));
   });
 
-  const firstComposer = page.locator("textarea:visible");
+  const firstComposer = page.getByRole("textbox", { name: "Message Hermes Agent CLI" });
   await firstComposer.fill("Keep working on the dashboard layout in the first thread.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator(".sidebar-chat-history > button").filter({ hasText: "Quarterly planning" }).locator(".sidebar-chat-running")).toBeVisible();
 
   await page.getByRole("button", { name: "Start a new chat" }).click();
   await expect(page.locator(".chat-thread-tabs")).toHaveCount(0);
-  await page.locator("textarea:visible").fill("Keep working on the dashboard layout in the second thread.");
+  await page.getByRole("textbox", { name: "Message Hermes Agent CLI" }).fill("Keep working on the dashboard layout in the second thread.");
   await page.getByRole("button", { name: "Send message" }).click();
 
   await expect.poll(() => postedSessions.length).toBe(2);

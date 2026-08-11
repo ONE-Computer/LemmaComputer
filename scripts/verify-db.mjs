@@ -19,6 +19,13 @@ const migrate = (database, expectedSuccess = true) => {
   if ((result.status === 0) !== expectedSuccess) throw new Error(result.stderr || result.stdout || "unexpected migration result");
   return `${result.stdout}${result.stderr}`;
 };
+const migrateAuth = (database, expectedSuccess = true) => {
+  const result = exec("npm", ["run", "auth:db:migrate"], {
+    env: { ...process.env, AUTH_DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/${database}`, LEMMACOMPUTER_INSTALLATION_KIND: "auth-migration-test" },
+  });
+  if ((result.status === 0) !== expectedSuccess) throw new Error(result.stderr || result.stdout || "unexpected authentication migration result");
+  return `${result.stdout}${result.stderr}`;
+};
 const sql = (database, statement, options = {}) => must(
   "docker", ["exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", database, "-Atqc", statement], options,
 );
@@ -33,6 +40,7 @@ if (legacyMigrationFiles.length !== legacyMigrationIds.size) {
   throw new Error("the immutable 001-028 legacy migration chain is incomplete");
 }
 const expectedMigrationCount = migrationFiles.length;
+const expectedAuthMigrationCount = (await readdir("packages/auth-store/migrations")).filter((name) => name.endsWith(".sql")).length;
 let hostPort;
 try {
   must("docker", ["run", "--rm", "-d", "--name", container, "-e", `POSTGRES_PASSWORD=${password}`, "-p", "127.0.0.1::5432", image]);
@@ -42,6 +50,77 @@ try {
     if (attempt === 59) throw new Error("PostgreSQL test container did not become ready");
   }
   hostPort = JSON.parse(must("docker", ["inspect", container, "--format", "{{json (index (index .NetworkSettings.Ports \"5432/tcp\") 0).HostPort}}"]));
+
+  sql("postgres", "CREATE DATABASE authentication");
+  const firstAuth = migrateAuth("authentication");
+  if (!firstAuth.includes("Applied authentication migrations")) throw new Error("fresh authentication database did not report applied migrations");
+  if (sql("authentication", "SELECT count(*) FROM lemmacomputer_auth_schema_migrations") !== String(expectedAuthMigrationCount)) {
+    throw new Error("fresh authentication migration ledger does not contain every discovered migration");
+  }
+  if (sql("authentication", "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('user','account','session','verification','twoFactor','passkey')") !== "6") {
+    throw new Error("fresh authentication schema is incomplete");
+  }
+  const authSchemaCheck = exec("npm", ["run", "auth:db:check"], {
+    env: { ...process.env, AUTH_DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/authentication` },
+  });
+  if (authSchemaCheck.status !== 0 || !authSchemaCheck.stdout.includes("schema is compatible")) {
+    throw new Error(authSchemaCheck.stderr || "authentication schema compatibility check failed");
+  }
+  if (!migrateAuth("authentication").includes("no migrations applied")) throw new Error("second authentication migration run was not a no-op");
+
+  sql("authentication", `
+    INSERT INTO "user" (id,name,email,"emailVerified")
+    VALUES ('11111111-1111-4111-8111-111111111111','Restore Test','restore@example.test',true);
+    INSERT INTO "account" (id,"accountId","providerId","userId",password,"updatedAt")
+    VALUES ('22222222-2222-4222-8222-222222222222','restore@example.test','credential','11111111-1111-4111-8111-111111111111','test-hash-not-a-secret',now())
+  `);
+  const authenticationBackup = must("docker", [
+    "exec", "-i", container, "pg_dump", "-U", "postgres", "-d", "authentication",
+    "--format=plain", "--no-owner", "--no-privileges",
+  ]);
+  sql("postgres", "CREATE DATABASE auth_restore");
+  must("docker", ["exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "auth_restore"], {
+    input: authenticationBackup,
+  });
+  if (sql("auth_restore", `SELECT count(*) FROM "user" u JOIN "account" a ON a."userId"=u.id WHERE u.email='restore@example.test'`) !== "1") {
+    throw new Error("authentication backup/restore did not preserve the account relationship");
+  }
+  const restoredAuthSchemaCheck = exec("npm", ["run", "auth:db:check"], {
+    env: { ...process.env, AUTH_DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/auth_restore` },
+  });
+  if (restoredAuthSchemaCheck.status !== 0 || !restoredAuthSchemaCheck.stdout.includes("schema is compatible")) {
+    throw new Error(restoredAuthSchemaCheck.stderr || "restored authentication schema compatibility check failed");
+  }
+  sql("postgres", "CREATE DATABASE auth_future TEMPLATE auth_restore");
+  sql("auth_future", `INSERT INTO lemmacomputer_auth_schema_migrations
+    (id,name,checksum_sha256,depends_on,duration_ms,app_version,installation_kind)
+    VALUES ('999','future_upgrade',repeat('f',64),ARRAY['002'],0,'future-test','dependency-upgrade-test')`);
+  const incompatibleRollbackCheck = exec("npm", ["run", "auth:db:check"], {
+    env: { ...process.env, AUTH_DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/auth_future` },
+  });
+  if (incompatibleRollbackCheck.status === 0 || !`${incompatibleRollbackCheck.stdout}${incompatibleRollbackCheck.stderr}`.includes("unknown migration 999")) {
+    throw new Error("authentication dependency rollback did not fail closed against a future schema ledger");
+  }
+
+  sql("postgres", "CREATE DATABASE auth_concurrent");
+  const authConcurrentUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/auth_concurrent`;
+  const authChildren = [0, 1].map(() => spawn("npm", ["run", "auth:db:migrate"], {
+    env: { ...process.env, AUTH_DATABASE_URL: authConcurrentUrl, LEMMACOMPUTER_INSTALLATION_KIND: "auth-concurrency-test" },
+    stdio: ["ignore", "pipe", "pipe"],
+  }));
+  await Promise.all(authChildren.map(waitFor));
+  if (sql("auth_concurrent", "SELECT count(*) FROM lemmacomputer_auth_schema_migrations") !== String(expectedAuthMigrationCount)) {
+    throw new Error("concurrent authentication migration ledger does not contain every discovered migration");
+  }
+
+  sql("postgres", "CREATE DATABASE auth_incompatible");
+  sql("auth_incompatible", "CREATE TABLE unknown_auth_data(id uuid PRIMARY KEY)");
+  if (!migrateAuth("auth_incompatible", false).includes("refusing to baseline unknown schema")) {
+    throw new Error("unknown authentication schema did not fail closed");
+  }
+  if (sql("auth_incompatible", "SELECT to_regclass('public.lemmacomputer_auth_schema_migrations') IS NULL") !== "t") {
+    throw new Error("failed authentication schema verification mutated the database");
+  }
 
   const first = migrate("postgres");
   if (!first.includes("Applied migrations")) throw new Error("fresh database did not report applied migrations");
@@ -62,6 +141,12 @@ try {
   sql("postgres", "CREATE DATABASE organization_rbac");
   migrate("organization_rbac");
   const organizationRbacUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/organization_rbac`;
+  sql("postgres", "CREATE DATABASE organization_onboarding");
+  migrate("organization_onboarding");
+  const organizationOnboardingUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/organization_onboarding`;
+  sql("postgres", "CREATE DATABASE better_auth_invitation");
+  migrate("better_auth_invitation");
+  const betterAuthInvitationUrl = `postgres://postgres:${password}@127.0.0.1:${hostPort}/better_auth_invitation`;
   const featureTests = exec(process.execPath, [
     "--import", "tsx", "--test",
     "tests/activity-events-postgres.test.ts",
@@ -75,6 +160,11 @@ try {
     "tests/spend-cost-coverage-postgres.test.ts",
     "tests/workspace-settings-postgres.test.ts",
     "tests/organization-rbac-postgres.test.ts",
+    "tests/organization-onboarding-postgres.test.ts",
+    "tests/better-auth-invitation-postgres.test.ts",
+    "tests/tenant-iam-postgres.test.ts",
+    "tests/tenant-sso-postgres.test.ts",
+    "tests/platform-operator-postgres.test.ts",
     "tests/telegram-token-intake-postgres.test.ts",
     "tests/migration-ledger-baseline-postgres.test.ts",
   ], {
@@ -91,6 +181,9 @@ try {
       SPEND_COVERAGE_TEST_DATABASE_URL: postgresUrl,
       WORKSPACE_SETTINGS_TEST_DATABASE_URL: postgresUrl,
       ORGANIZATION_RBAC_TEST_DATABASE_URL: organizationRbacUrl,
+      ORGANIZATION_ONBOARDING_TEST_DATABASE_URL: organizationOnboardingUrl,
+      BETTER_AUTH_INVITATION_TEST_DATABASE_URL: betterAuthInvitationUrl,
+      PLATFORM_OPERATOR_TEST_DATABASE_URL: postgresUrl,
       TELEGRAM_INTAKE_TEST_DATABASE_URL: postgresUrl,
       MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL: migrationLedgerLegacyUrl,
       MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL: migrationLedgerFreshUrl,
@@ -130,7 +223,9 @@ try {
 
   sql("postgres", "UPDATE lemmacomputer_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='028'");
   if (!migrate("postgres", false).includes("historical migrations are immutable")) throw new Error("checksum drift did not fail closed");
-  process.stdout.write("Database gate passed: fresh, no-op, concurrent, legacy baseline, mismatch, checksum, organization RBAC, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
+  sql("authentication", "UPDATE lemmacomputer_auth_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='001'");
+  if (!migrateAuth("authentication", false).includes("historical migrations are immutable")) throw new Error("authentication checksum drift did not fail closed");
+  process.stdout.write("Database gate passed: product and authentication fresh, no-op, concurrent, mismatch, checksum, backup/restore, and dependency-rollback cases; product legacy baseline, organization RBAC, platform operator authority, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
 } finally {
   exec("docker", ["rm", "-f", container]);
 }

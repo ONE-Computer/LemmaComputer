@@ -75,7 +75,7 @@ test("agent deletion endpoint preserves a human-facing filename without forwardi
   await store.update(workspace.id, { state: "ready" });
   const policy = runtimePolicyFor(effectivePolicy);
   const token = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, policy, {
-    workspaceGeneration: workspace.bridgeGrantGeneration,
+    workspaceGeneration: workspace.accessGeneration,
   });
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,

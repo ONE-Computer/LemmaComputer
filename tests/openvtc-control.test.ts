@@ -10,7 +10,7 @@ import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 import { TestOpenVtcConsentClient, type TestDidSigner } from "./helpers/openvtc-consent.js";
 
-const identity: IdentityContext = { tenantId: "tenant-browser", subjectId: "mike", audience: "lemmacomputer-control" };
+const identity: IdentityContext = { tenantId: "tenant-browser", subjectId: "example-user", audience: "lemmacomputer-control" };
 
 test("OpenVTC enrollment timestamps retain the verifier's whole-second RFC 3339 form", () => {
   assert.equal(openVtcTimestamp(new Date("2026-07-25T12:35:45.000Z")), "2026-07-25T12:35:45Z");
@@ -34,7 +34,7 @@ const setup = async () => {
   const coordinator = new OpenVtcApprovalCoordinator(store, consent);
   const browser = consent.createApprover();
   const challenge = await coordinator.createEnrollmentChallenge(identity);
-  const enrollment = consent.enrollmentDocument(browser, challenge, identity.tenantId, identity.subjectId, "Mike's browser");
+  const enrollment = consent.enrollmentDocument(browser, challenge, identity.tenantId, identity.subjectId, "Example browser");
   const enrolled = await coordinator.enroll(identity, challenge.id, enrollment);
   const service = new GovernedOperationService(
     store,
@@ -181,7 +181,7 @@ test("multiple browsers receive recipient-bound requests but converge on one leg
     challenge,
     identity.tenantId,
     identity.subjectId,
-    "Mike's replacement browser",
+    "Replacement example browser",
   );
   const replacement = await coordinator.enroll(identity, challenge.id, enrollment);
 

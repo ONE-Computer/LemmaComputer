@@ -294,18 +294,21 @@ export class ActivityEventService {
     scope: ActivityEventScope,
     afterSequence: number,
     signal?: AbortSignal,
+    authorize?: () => Promise<void>,
   ): AsyncGenerator<ActivityEventV1 | null> {
     let cursor = afterSequence;
     let lastHeartbeat = Date.now();
     while (!signal?.aborted) {
       const page = await this.replay(identity, scope, cursor, 200);
       for (const event of page.events) {
+        await authorize?.();
         cursor = event.sequence;
         lastHeartbeat = Date.now();
         yield event;
       }
       if (page.terminal) return;
       if (Date.now() - lastHeartbeat >= this.heartbeatMilliseconds) {
+        await authorize?.();
         lastHeartbeat = Date.now();
         yield null;
       }

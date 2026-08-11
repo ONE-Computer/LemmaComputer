@@ -9,7 +9,7 @@ import {
 
 const identity: IdentityContext = {
   tenantId: "acme",
-  subjectId: "mike",
+  subjectId: "example-user",
   audience: "lemmacomputer-control",
 };
 

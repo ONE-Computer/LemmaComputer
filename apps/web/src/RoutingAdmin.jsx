@@ -320,7 +320,7 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
         : currentMappingRollout?.mode === "shadow"
           ? "Shadow evaluation"
           : currentMappingRollout?.mode === "disabled"
-            ? "Rollout disabled"
+            ? "Fixed route active"
             : settings?.policy?.mappingVersionId === mapping.id
               ? "Ready for shadow"
               : "Published · not active";
@@ -329,7 +329,7 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
     : settings?.rollout?.mode === "shadow"
       ? { label: "Shadow evaluation", className: "unknown", icon: Info20Regular }
       : settings?.rollout?.mode === "disabled"
-        ? { label: "Routing disabled", className: "unknown", icon: Info20Regular }
+        ? { label: "Fixed route active", className: "healthy", icon: CheckmarkCircle20Regular }
         : settings?.policy
           ? { label: "Ready for shadow", className: "unknown", icon: Info20Regular }
           : { label: "Policy not configured", className: "unknown", icon: Info20Regular };
@@ -393,7 +393,7 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
   }), "Team route eligibility saved.");
   const setupTeamRollout = () => run(
     () => adminApi.saveRoutingPolicy(teamId, createInitialTeamPolicy(mapping, cardById)),
-    `${selectedTeam?.displayName ?? "Team"} is ready for shadow evaluation.`,
+    `${selectedTeam?.displayName ?? "Team"} can use Auto now through its fixed Balanced route. Shadow evaluation is optional.`,
   );
   const rollout = (mode, confirmation) => run(() => {
     const fixedDeploymentId = settings.rollout?.fixedDeploymentId
@@ -619,7 +619,7 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
         {!settings?.review?.evaluationPassed && <p className="route-helper">{settings?.rollout?.mode === "shadow" ? "Collect representative requests, then review the shadow evidence before enabling production." : "Start shadow mode to collect evidence before enabling production routing."}</p>}
       </> : <div className="route-team-setup">
         <Info20Regular aria-hidden="true" />
-        <div><strong>Set up routing for {selectedTeam?.displayName ?? "this Team"}</strong><span>Pin the latest published mapping to this Team using recommended policy defaults. Production remains unchanged until shadow evidence is reviewed.</span>{publishedPricingGapCount > 0 && <small>Complete pricing for all published routes before setup.</small>}</div>
+        <div><strong>Set up routing for {selectedTeam?.displayName ?? "this Team"}</strong><span>Start with a safe fixed Balanced route so Auto works immediately. Shadow evaluation is optional and only needed before dynamic model selection.</span>{publishedPricingGapCount > 0 && <small>Complete pricing for all published routes before setup.</small>}</div>
         <button className="primary-button" type="button" disabled={busy || !mapping?.id || (mapping.deployments?.length ?? 0) < 3 || publishedPricingGapCount > 0} onClick={setupTeamRollout}>{busy ? "Setting up…" : "Set up Team rollout"}</button>
       </div>}
     </section>

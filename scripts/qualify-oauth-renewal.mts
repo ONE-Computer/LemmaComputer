@@ -204,6 +204,7 @@ const main = async () => {
       tenantId: identity.tenantId,
       subjectId: identity.subjectId,
       workspaceId: randomUUID(),
+      accessGeneration: 1,
       operationId: randomUUID(),
       operationDigest: "0".repeat(64),
       leaseId: randomUUID(),

@@ -1,20 +1,22 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest } from "@lemmacomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
+import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { hasOrganizationPermission, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
+import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
-import { EntraAuthenticationService, ExternalIdAuthenticationService, isAdministrator, testPrincipalFromHeaders } from "./auth.js";
+import { EntraAuthenticationService, ExternalIdAuthenticationService, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
 import { HttpOpenVtcConsentClient } from "./openvtc-consent-client.js";
@@ -38,9 +40,43 @@ import { SitesService } from "./sites.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
 import { assertHostedLiteLlmAdminSecurity } from "./litellm-admin-security.js";
 import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
+import { createCustomerAuthentication, createCustomerSsoAuthentication, customerAuthenticationBasePath, customerAuthenticationControlPath, parseVersionedBetterAuthSecrets, registerCustomerAuthenticationRoutes, type CustomerAuthentication } from "./customer-authentication.js";
+import { createTransactionalEmailAdapter, deliverOrganizationInvitationEmail, type TransactionalEmailAdapter } from "./transactional-email.js";
+import {
+  customerInvitationContextMaxAgeSeconds,
+  createBetterAuthSessionReader,
+  CustomerProductAuthenticationService,
+  type CustomerProductAuthenticationResolution,
+} from "./customer-product-authentication.js";
+import { fromNodeHeaders } from "better-auth/node";
+import { registerPlatformOperatorRoutes, type PlatformOperatorAuthenticationBoundary, type PlatformOperatorStoreBoundary } from "./platform-operator-routes.js";
+import { PlatformOperatorAuthenticationService } from "./platform-operator-auth.js";
+import { PlatformSecurityAlertDispatcher, SignedWebhookPlatformSecurityAlertAdapter, type PlatformSecurityAlertDispatcherStatus } from "./platform-security-alert-dispatcher.js";
+import { ControlPlaneTenantCleanupAdapter, PlatformTenantCleanupDispatcher, type PlatformTenantCleanupDispatcherStatus } from "./platform-tenant-cleanup-dispatcher.js";
+import { createBetterAuthTenantSsoAuthenticationAdministration, TenantSsoAdministrationService } from "./tenant-sso.js";
 
 import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
+type CustomerProductAuthenticationBoundary = Pick<
+  CustomerProductAuthenticationService,
+  "resolve" | "selectMembership" | "createOrganization" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
+  | "recordRecentStepUp" | "requireRecentStepUp" | "revokeCurrentSession"
+>;
+type TenantSsoAdministrationBoundary = Pick<
+  TenantSsoAdministrationService,
+  "list" | "register" | "requestDomainVerification" | "verifyDomain" | "startTest" | "completeTest" | "startEnforcedSignIn" | "startInvitationSignIn" | "transition"
+  | "rotateCredentials" | "refreshMetadata" | "disconnect"
+> & Partial<Pick<TenantSsoAdministrationService, "isInvitationSignInAvailable">>;
+
+const invitationContextCookieName = "lemmacomputer_invitation_context";
+const invitationContextFromCookie = (header: string | undefined) => {
+  for (const part of header?.split(";") ?? []) {
+    const separator = part.indexOf("=");
+    if (separator < 0 || part.slice(0, separator).trim() !== invitationContextCookieName) continue;
+    try { return decodeURIComponent(part.slice(separator + 1).trim()); } catch { return ""; }
+  }
+  return "";
+};
 
 const workspaceMemoryGiB = 4;
 
@@ -217,6 +253,21 @@ const envSchema = z.object({
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
   DATABASE_URL: z.string().min(1),
+  AUTH_DATABASE_URL: z.string().min(1),
+  BETTER_AUTH_SECRETS: z.string().min(1),
+  BETTER_AUTH_TRUSTED_PROXY_CIDRS: z.string().default(""),
+  CUSTOMER_SSO_TRUSTED_IDP_ORIGINS: z.string().default(""),
+  AUTH_EMAIL_TRANSPORT: z.enum(["capture", "postmark"]),
+  INVITATION_DELIVERY_MODE: z.enum(["email", "copy-link"]),
+  RUNTIME_ENVIRONMENT: z.enum(["development", "production"]),
+  POSTMARK_SERVER_TOKEN: optionalEnvString(),
+  POSTMARK_FROM: optionalEnvString(),
+  POSTMARK_MESSAGE_STREAM: z.string().min(1).default("outbound"),
+  GOOGLE_AUTH_CLIENT_ID: optionalEnvString(),
+  GOOGLE_AUTH_CLIENT_SECRET: optionalEnvString(),
+  MICROSOFT_AUTH_CLIENT_ID: optionalEnvString(),
+  MICROSOFT_AUTH_CLIENT_SECRET: optionalEnvString(),
+  MICROSOFT_AUTH_TENANT_ID: z.string().min(1).default("common"),
   LEMMACOMPUTER_INSTALLATION_KIND: z.enum(["customer-managed", "hosted", "worktree"]).default("customer-managed"),
   LITELLM_ADMIN_URL: z.string().url().optional(),
   LITELLM_ADMIN_TLS_CA_B64: optionalEnvString(),
@@ -248,6 +299,14 @@ const envSchema = z.object({
   EXTERNAL_ID_TENANT_SUBDOMAIN: optionalEnvString(),
   EXTERNAL_ID_CLIENT_ID: optionalEnvString(),
   EXTERNAL_ID_CLIENT_SECRET: optionalEnvString(),
+  PLATFORM_OPERATOR_ENTRA_TENANT_ID: optionalEnvString(),
+  PLATFORM_OPERATOR_ENTRA_CLIENT_ID: optionalEnvString(),
+  PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET: optionalEnvString(),
+  PLATFORM_OPERATOR_SESSION_SECRET: optionalEnvString(32),
+  PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: optionalEnvString(),
+  PLATFORM_SECURITY_ALERT_WEBHOOK_URL: optionalEnvString(),
+  PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: optionalEnvString(32),
+  PLATFORM_SUPPORT_APPROVAL_REQUIRED: z.enum(["true", "false"]).default("true"),
   SESSION_SECRET: z.string().min(32),
   AI_USAGE_INTERNAL_TOKEN: z.string().min(32),
   AI_USAGE_TASK_BINDING_SECRET: z.string().min(32),
@@ -276,7 +335,7 @@ const envSchema = z.object({
   GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   BOOTSTRAP_TENANT_ID: z.string().min(1).default("acme"),
   BOOTSTRAP_USER_ID: z.string().min(1).default("alex-morgan"),
-  TENANT_DISPLAY_NAME: z.string().min(1).default("ME TECH"),
+  TENANT_DISPLAY_NAME: z.string().min(1).default("Example Organization"),
   BOOTSTRAP_OWNER_OBJECT_IDS: z.string().min(1),
 });
 
@@ -319,6 +378,20 @@ export function createControlServer(
   security: {
     authentication?: AuthenticationBoundary;
     externalIdAuthentication?: AuthenticationBoundary;
+    customerAuthentication?: CustomerAuthentication;
+    customerSsoAuthentication?: CustomerAuthentication;
+    customerProductAuthentication?: CustomerProductAuthenticationBoundary;
+    tenantSsoAdministration?: TenantSsoAdministrationBoundary;
+    invitationDelivery?: {
+      mode: "email" | "copy-link";
+      email?: TransactionalEmailAdapter;
+    };
+    closeCustomerAuthentication?: () => Promise<void>;
+    platformOperatorAuthentication?: PlatformOperatorAuthenticationBoundary;
+    platformOperatorStore?: PlatformOperatorStoreBoundary;
+    platformSecurityAlertDispatcher?: { status(): PlatformSecurityAlertDispatcherStatus };
+    platformTenantCleanupDispatcher?: { status(): PlatformTenantCleanupDispatcherStatus };
+    platformOperatorApprovalConfigured?: boolean;
     identityPolicyStore?: IdentityPolicyStore;
     mcpPolicyToken?: string;
     mcpEgressProxyToken?: string;
@@ -327,6 +400,7 @@ export function createControlServer(
     testIdentityMode?: boolean;
     openVtc?: OpenVtcApprovalCoordinator;
     egressGrantSecret?: string;
+    workspaceAccessAuthorization?: { url: string; token: string };
     policyBundleAuthority?: PolicyBundleAuthority;
     agentChatSecret?: string;
     agentChatClient?: AgentChatClient;
@@ -384,17 +458,32 @@ export function createControlServer(
     toolPolicies: { search_files: "allow" },
   };
   const app = Fastify({
-    logger: { redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.body", "*.arguments", "*.launchUrl"] },
+    logger: { redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.headers.cookie", "res.headers.set-cookie", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
       disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url)
-        || request.url.startsWith("/v1/auth/"),
+        || request.url.startsWith("/v1/auth/")
+        || request.url.startsWith("/v1/platform/auth/"),
     }),
     bodyLimit: 32 * 1024,
     routerOptions: { maxParamLength: 2048 },
   });
-  if (!security.authentication && !security.testIdentityMode) {
-    throw new Error("Control requires Entra authentication; test identity mode must be enabled explicitly in tests");
+  if (!security.authentication && !security.customerProductAuthentication && !security.testIdentityMode) {
+    throw new Error("Control requires a customer or compatibility authentication boundary; test identity mode must be enabled explicitly in tests");
   }
+  const invitationDelivery = security.invitationDelivery
+    ?? (security.testIdentityMode ? { mode: "copy-link" as const } : undefined);
+  if (invitationDelivery?.mode === "copy-link" && connectionOptions.installationKind === "hosted") {
+    throw new Error("Hosted invitation activation requires transactional email delivery");
+  }
+  if (invitationDelivery?.mode === "email" && !invitationDelivery.email) {
+    throw new Error("Invitation email delivery requires the transactional email adapter");
+  }
+  if (security.customerAuthentication) registerCustomerAuthenticationRoutes(
+    app,
+    security.customerAuthentication,
+    security.customerSsoAuthentication,
+  );
+  if (security.closeCustomerAuthentication) app.addHook("onClose", security.closeCustomerAuthentication);
   // The fallback exists only for the explicit in-memory test identity mode. Runtime
   // boot requires AGENT_BRIDGE_SECRET and never derives this key from another trust boundary.
   const agentBridgeSecret = security.agentBridgeSecret ?? (
@@ -468,7 +557,7 @@ export function createControlServer(
   const telegramRawTokenInputMode = security.telegramRawTokenInputMode ?? "legacy";
   const requireSpendObservability = (request: object) => {
     const actor = principal(request);
-    if (!hasOrganizationPermission(actor, "usage.read")) {
+    if (!allowsPermission(actor, "usage.read")) {
       throw new LemmaComputerError("SPEND_VIEW_NOT_FOUND", "Spend view not found", 404);
     }
     if (!security.spendObservabilityStore) {
@@ -490,9 +579,9 @@ export function createControlServer(
   const service = new WorkspaceService(store, controller, gateway, {
     baseUrl: connectionOptions.agentBridgeUrl ?? "http://lemmacomputer-control:4100",
     issue: (identity, workspace, policy) => agentBridgeAuthority.issue(identity, workspace.id, policy, {
-      workspaceGeneration: workspace.bridgeGrantGeneration,
+      workspaceGeneration: workspace.accessGeneration,
     }),
-  }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret) : undefined, security.policyBundleAuthority, agentChatAuthority, security.workspaceIngress);
+  }, security.egressGrantSecret ? new EgressProxyGrantAuthority(security.egressGrantSecret, security.workspaceAccessAuthorization) : undefined, security.policyBundleAuthority, agentChatAuthority, security.workspaceIngress);
   const executor: GovernedToolExecutor = gateway?.executeGovernedTool
     ? { executeGovernedTool: (input) => gateway.executeGovernedTool!(input) }
     : { executeGovernedTool: async () => { throw new LemmaComputerError("GATEWAY_NOT_CONFIGURED", "The governed tool gateway is not configured", 503, true); } };
@@ -582,6 +671,7 @@ export function createControlServer(
       : [],
   });
   const principals = new WeakMap<object, SessionPrincipal>();
+  const platformOperatorPrincipals = new WeakMap<object, PlatformOperatorSession>();
   const agentPrincipals = new WeakMap<object, AgentBridgeIdentity>();
 
   app.addHook("onRequest", async (request, reply) => {
@@ -618,6 +708,12 @@ export function createControlServer(
       }
       return;
     }
+    if (requestPath === "/internal/v1/workspace-access/authorize") {
+      if (!sameSecret(request.headers["x-lemmacomputer-mcp-policy-token"] as string | undefined, security.mcpPolicyToken ?? proxyToken)) {
+        return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Workspace access authorization is required", correlationId: request.id, retryable: false } });
+      }
+      return;
+    }
     if (requestPath === "/internal/v1/mcp-egress/authorize") {
       const authorization = request.headers.authorization;
       const value = Array.isArray(authorization) ? authorization[0] : authorization;
@@ -637,24 +733,25 @@ export function createControlServer(
         audience: agentBridgeAudience,
         scope: agentBridgeScope,
       });
-      const workspace = await store.getOwned({
+      const accessIdentity = {
         tenantId: actor.tenantId,
         subjectId: actor.subjectId,
         audience: "lemmacomputer-control",
-      }, actor.workspaceId);
-      if (!workspace || workspace.bridgeGrantGeneration !== actor.workspaceGeneration) {
-        throw new LemmaComputerError("AGENT_BRIDGE_GRANT_REVOKED", "Agent bridge authentication is no longer active", 403);
-      }
+      } as const;
       // Connector discovery is part of workspace bootstrap: Hermes resolves
       // its MCP tool catalogue before the controller can mark the sandbox
       // ready. Keep every mutating/operational bridge scope ready-only, while
       // allowing this read-only, generation-bound projection during the two
       // states that actively create a replacement runtime.
-      const activeStates = agentBridgeScope === "agent:mcp-discovery"
+      const activeStates: WorkspaceState[] = agentBridgeScope === "agent:mcp-discovery"
         ? ["provisioning", "restarting", "ready", "open"]
         : ["ready", "open"];
-      if (!activeStates.includes(workspace.state)) {
-        throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not active for agent bridge access", 403);
+      if (!await store.authorizeWorkspaceAccess({
+        ...accessIdentity,
+        workspaceId: actor.workspaceId,
+        accessGeneration: actor.workspaceGeneration,
+      }, activeStates)) {
+        throw new LemmaComputerError("AGENT_BRIDGE_GRANT_REVOKED", "Agent bridge authentication is no longer active", 403);
       }
       agentPrincipals.set(request, actor);
       return;
@@ -668,11 +765,49 @@ export function createControlServer(
     if (!sameSecret(request.headers["x-lemmacomputer-proxy-token"] as string | undefined, proxyToken)) {
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Authentication is required", correlationId: request.id, retryable: false } });
     }
+    if (security.customerAuthentication && requestPath.startsWith(`${customerAuthenticationControlPath}/`)) return;
+    if (requestPath.startsWith("/v1/platform/")) {
+      if (connectionOptions.installationKind === "customer-managed") {
+        return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Route not found", correlationId: request.id, retryable: false } });
+      }
+      if (requestPath === "/v1/platform/auth/login" || requestPath === "/v1/platform/auth/callback") return;
+      if (!security.platformOperatorAuthentication) {
+        return reply.code(503).send({ error: { code: "PLATFORM_AUTH_NOT_CONFIGURED", message: "Platform authentication is unavailable", correlationId: request.id, retryable: true } });
+      }
+      const operator = await security.platformOperatorAuthentication.authenticate(request.headers.cookie);
+      if (!operator) {
+        return reply.code(401).send({ error: { code: "PLATFORM_UNAUTHENTICATED", message: "Sign in with your workforce account", correlationId: request.id, retryable: false } });
+      }
+      platformOperatorPrincipals.set(request, operator);
+      return;
+    }
     if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")
       || requestPath.startsWith("/v1/auth/external-id/")) return;
+    if (requestPath === "/v1/auth/product-session" || requestPath === "/v1/auth/customer-capabilities"
+      || requestPath === "/v1/auth/customer-sso"
+      || requestPath === "/v1/auth/organizations" || requestPath === "/v1/auth/owner-step-up"
+      || requestPath === "/v1/auth/invitations/context" || requestPath === "/v1/auth/invitations/accept") return;
+    let customerResolution: CustomerProductAuthenticationResolution | undefined;
+    if (security.customerProductAuthentication && !security.testIdentityMode) {
+      customerResolution = await security.customerProductAuthentication.resolve(fromNodeHeaders(request.raw.headers));
+      if (customerResolution.status === "membership-required") {
+        return reply.code(403).send({
+          error: {
+            code: "ACTIVE_MEMBERSHIP_REQUIRED",
+            message: "Select an active organization to continue",
+            correlationId: request.id,
+            retryable: false,
+          },
+        });
+      }
+    }
     const principal = security.testIdentityMode
       ? testPrincipalFromHeaders(request.headers)
-      : await security.authentication!.authenticate(request.headers.cookie);
+      : customerResolution?.status === "authorized"
+        ? customerResolution.principal
+        : security.authentication
+          ? await security.authentication.authenticate(request.headers.cookie)
+          : null;
     if (!principal) {
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Sign in with your work account", correlationId: request.id, retryable: false } });
     }
@@ -702,15 +837,76 @@ export function createControlServer(
     if (!value) throw new LemmaComputerError("UNAUTHENTICATED", "Sign in with your work account", 401);
     return value;
   };
+  const platformOperatorPrincipal = (request: object) => {
+    const value = platformOperatorPrincipals.get(request);
+    if (!value) throw new LemmaComputerError("PLATFORM_UNAUTHENTICATED", "Sign in with your workforce account", 401);
+    return value;
+  };
+  if (
+    connectionOptions.installationKind !== "customer-managed"
+    && security.platformOperatorAuthentication
+    && security.platformOperatorStore
+  ) registerPlatformOperatorRoutes(app, {
+    authentication: security.platformOperatorAuthentication,
+    store: security.platformOperatorStore,
+    securityAlertDelivery: security.platformSecurityAlertDispatcher,
+    tenantCleanupDelivery: security.platformTenantCleanupDispatcher,
+    approvalConfigured: security.platformOperatorApprovalConfigured ?? false,
+    sessionFor: platformOperatorPrincipal,
+  });
   const identity = (request: object) => identityContextSchema.parse(principal(request).identity);
-  const requirePermission = (request: object, permission: OrganizationPermission) => {
+  const allowsPermission = (
+    value: SessionPrincipal,
+    permission: OrganizationPermission,
+    scope: OrganizationResourceScope = { type: "organization" },
+  ) => value.effectiveAuthorization
+    ? value.effectiveAuthorization.allows(permission, scope)
+    : hasOrganizationPermission(value, permission);
+  const hasAnyPermissionGrant = (value: SessionPrincipal, permission: OrganizationPermission) => (
+    value.effectiveAuthorization
+      ? value.effectiveAuthorization.valid
+        && value.effectiveAuthorization.grants.some((grant) => grant.permission === permission)
+      : hasOrganizationPermission(value, permission)
+  );
+  const requirePermission = (
+    request: object,
+    permission: OrganizationPermission,
+    scope: OrganizationResourceScope = { type: "organization" },
+  ) => {
     const value = principal(request);
-    if (!hasOrganizationPermission(value, permission)) {
+    if (!allowsPermission(value, permission, scope)) {
       throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
     }
     return value;
   };
-  const requireAdministrator = (request: object) => requirePermission(request, "organization.manage_settings");
+  const requireOwnedWorkspaceManagement = (request: object, workspaceId: string) => {
+    const actor = principal(request);
+    const scope = { type: "workspace" as const, resourceId: workspaceId };
+    if (allowsPermission(actor, "workspace.manage", scope) || allowsPermission(actor, "workspace.manage_own", scope)) {
+      return actor;
+    }
+    throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
+  };
+  const allowsWorkspaceGrantPermission = async (
+    actor: SessionPrincipal,
+    permission: "workspace.manage" | "policy.manage",
+    owner: IdentityContext,
+    grantId: string,
+  ) => {
+    if (allowsPermission(actor, permission)) return true;
+    const workspace = await store.getCurrent(owner, grantId);
+    return Boolean(workspace && allowsPermission(actor, permission, { type: "workspace", resourceId: workspace.id }));
+  };
+  const requireWorkspaceGrantPermission = async (
+    request: object,
+    permission: "workspace.manage" | "policy.manage",
+    owner: IdentityContext,
+    grantId: string,
+  ) => {
+    const actor = principal(request);
+    if (await allowsWorkspaceGrantPermission(actor, permission, owner, grantId)) return actor;
+    throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
+  };
   const assignedPolicy = async (request: object) => {
     const value = principal(request);
     const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;
@@ -830,6 +1026,7 @@ export function createControlServer(
     return policyForGrant(value, effective);
   };
   const requireWorkspacePolicy = async (request: object, workspaceId: string) => {
+    requirePermission(request, "workspace.use", { type: "workspace", resourceId: workspaceId });
     const { principal: value, effective } = await assignedPolicy(request);
     const workspace = await store.getOwned(value.identity, workspaceId);
     if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
@@ -957,6 +1154,15 @@ export function createControlServer(
   app.post("/internal/v1/mcp/authorize", { bodyLimit: 6 * 1024 * 1024 }, async (request) => {
     if (!mcpPolicy) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "MCP policy storage is unavailable", 503, true);
     return mcpPolicy.authorize(mcpPolicyRequestSchema.parse(request.body ?? {}), request.id);
+  });
+  app.post("/internal/v1/workspace-access/authorize", async (request) => {
+    const input = z.strictObject({
+      tenantId: z.string().min(1).max(200),
+      subjectId: z.string().min(1).max(200),
+      workspaceId: z.uuid(),
+      accessGeneration: z.number().int().positive(),
+    }).parse(request.body ?? {});
+    return { allowed: await store.authorizeWorkspaceAccess({ ...input, audience: "lemmacomputer-control" }) };
   });
   app.post("/internal/v1/mcp-egress/authorize", async (request) => {
     const destination = z.strictObject({
@@ -1351,7 +1557,219 @@ export function createControlServer(
   app.get("/v1/auth/session", async (request) => {
     const current = principal(request);
     const effectivePolicy = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(current.userId) : null;
-    return { user: { id: current.userId, email: current.email, displayName: current.displayName }, tenant: { id: current.tenantId, displayName: current.tenantDisplayName }, roles: current.roles, effectivePolicy };
+    const capabilities = organizationPermissions.filter((permission) => allowsPermission(current, permission));
+    const resourceCapabilities = current.effectiveAuthorization?.valid
+      ? current.effectiveAuthorization.grants.filter((grant) => grant.scope.type !== "organization")
+      : [];
+    return { user: { id: current.userId, email: current.email, displayName: current.displayName }, tenant: { id: current.tenantId, displayName: current.tenantDisplayName }, roles: current.roles, capabilities, resourceCapabilities, effectivePolicy };
+  });
+  app.get("/v1/auth/customer-capabilities", async (_request, reply) => {
+    if (!security.customerAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const options = security.customerAuthentication.options;
+    return reply.header("cache-control", "no-store").send({
+      emailPassword: options.emailAndPassword?.enabled === true,
+      passkey: options.plugins?.some((plugin) => plugin.id === "passkey") === true,
+      socialProviders: Object.keys(options.socialProviders ?? {}).sort(),
+      companySso: Boolean(security.tenantSsoAdministration),
+    });
+  });
+  app.post("/v1/auth/customer-sso", async (request, reply) => {
+    const tenantSsoAdministration = security.tenantSsoAdministration;
+    if (!tenantSsoAdministration) {
+      throw new LemmaComputerError("COMPANY_SSO_UNAVAILABLE", "Company SSO is unavailable", 404);
+    }
+    const input = z.strictObject({
+      email: z.email().max(320).transform((value) => value.toLowerCase()),
+      returnPath: z.enum(["/", "/invite"]).default("/"),
+    }).parse(request.body ?? {});
+    const requestHeaders = fromNodeHeaders(request.raw.headers);
+    const started = input.returnPath === "/invite"
+      ? await (async () => {
+          if (!security.customerProductAuthentication) {
+            throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+          }
+          const contextToken = invitationContextFromCookie(request.headers.cookie);
+          if (!contextToken) {
+            throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+          }
+          const invitation = await security.customerProductAuthentication.getInvitationSsoContext(contextToken, input.email);
+          return tenantSsoAdministration.startInvitationSignIn(
+            requestHeaders,
+            invitation.organizationId,
+            invitation.email,
+          );
+        })()
+      : await tenantSsoAdministration.startEnforcedSignIn(requestHeaders, input.email, "/");
+    if (started.cookies.length) reply.header("set-cookie", started.cookies);
+    return reply.header("cache-control", "no-store").send({ location: started.location });
+  });
+  app.get("/v1/auth/product-session", async (request, reply) => {
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const resolution = await security.customerProductAuthentication.resolve(fromNodeHeaders(request.raw.headers));
+    if (resolution.status === "anonymous") {
+      throw new LemmaComputerError("UNAUTHENTICATED", "Authentication is required", 401);
+    }
+    return reply.header("cache-control", "no-store").send({
+      status: resolution.status,
+      account: { id: resolution.accountUserId },
+      user: resolution.user,
+      memberships: resolution.memberships,
+      ...(resolution.status === "authorized" ? {
+        activeMembership: {
+          id: resolution.principal.membershipId,
+          organizationId: resolution.principal.organizationId,
+        },
+      } : {}),
+    });
+  });
+  app.put<{ Body: { membershipId: string } }>("/v1/auth/product-session", async (request, reply) => {
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const input = z.strictObject({ membershipId: z.uuid() }).parse(request.body ?? {});
+    const selected = await security.customerProductAuthentication.selectMembership(
+      fromNodeHeaders(request.raw.headers),
+      input.membershipId,
+    );
+    return reply.header("cache-control", "no-store").send({
+      membership: {
+        id: selected.membershipId,
+        organizationId: selected.organizationId,
+        status: selected.membershipStatus,
+        role: selected.role,
+      },
+    });
+  });
+  app.post<{ Body: { displayName: string }; Headers: { "idempotency-key"?: string } }>(
+    "/v1/auth/organizations",
+    async (request, reply) => {
+      if (!security.customerProductAuthentication) {
+        throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+      }
+      const input = z.strictObject({
+        displayName: z.string().min(1).max(200),
+      }).parse(request.body ?? {});
+      const idempotencyKey = z.uuid().parse(request.headers["idempotency-key"]);
+      const created = await security.customerProductAuthentication.createOrganization(
+        fromNodeHeaders(request.raw.headers),
+        { ...input, idempotencyKey },
+      );
+      return reply
+        .header("cache-control", "no-store")
+        .code(created.replayed ? 200 : 201)
+      .send(created);
+    },
+  );
+  app.post<{ Body: { token: string } }>("/v1/auth/invitations/context", async (request, reply) => {
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const input = z.strictObject({ token: z.string().min(36).max(260) }).parse(request.body ?? {});
+    const prepared = await security.customerProductAuthentication.prepareInvitation(input.token);
+    const secure = new URL(connectionOptions.publicWebUrl ?? "http://localhost:4174").protocol === "https:";
+    const attributes = [
+      `${invitationContextCookieName}=${encodeURIComponent(prepared.contextToken)}`,
+      "Path=/",
+      "HttpOnly",
+      "SameSite=Lax",
+      `Max-Age=${customerInvitationContextMaxAgeSeconds}`,
+      ...(secure ? ["Secure"] : []),
+    ];
+    return reply.header("cache-control", "no-store").header("set-cookie", attributes.join("; ")).send({
+      organizationDisplayName: prepared.organizationDisplayName,
+      email: prepared.email,
+      role: prepared.role,
+      companySsoAvailable: security.tenantSsoAdministration?.isInvitationSignInAvailable
+        ? await security.tenantSsoAdministration.isInvitationSignInAvailable(prepared.organizationId, prepared.email)
+        : false,
+      expiresAt: prepared.expiresAt,
+    });
+  });
+  app.get("/v1/auth/invitations/context", async (request, reply) => {
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const contextToken = invitationContextFromCookie(request.headers.cookie);
+    if (!contextToken) {
+      throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+    }
+    const context = await security.customerProductAuthentication.getInvitationContext(contextToken);
+    return reply.header("cache-control", "no-store").send({
+      organizationDisplayName: context.organizationDisplayName,
+      email: context.email,
+      role: context.role,
+      companySsoAvailable: security.tenantSsoAdministration?.isInvitationSignInAvailable
+        ? await security.tenantSsoAdministration.isInvitationSignInAvailable(context.organizationId, context.email)
+        : false,
+      expiresAt: context.expiresAt,
+    });
+  });
+  app.post("/v1/auth/invitations/accept", async (request, reply) => {
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const contextToken = invitationContextFromCookie(request.headers.cookie);
+    if (!contextToken) {
+      throw new LemmaComputerError("INVITATION_SIGNIN_FAILED", "This invitation cannot be used to sign in", 403);
+    }
+    const accepted = await security.customerProductAuthentication.acceptInvitation(
+      fromNodeHeaders(request.raw.headers),
+      contextToken,
+    );
+    const secure = new URL(connectionOptions.publicWebUrl ?? "http://localhost:4174").protocol === "https:";
+    const clearCookie = [
+      `${invitationContextCookieName}=`,
+      "Path=/",
+      "HttpOnly",
+      "SameSite=Lax",
+      "Max-Age=0",
+      ...(secure ? ["Secure"] : []),
+    ];
+    return reply.header("cache-control", "no-store").header("set-cookie", clearCookie.join("; ")).send({
+      organization: { id: accepted.organizationId, displayName: accepted.tenantDisplayName },
+      membership: { id: accepted.membershipId, role: accepted.role, status: accepted.membershipStatus },
+    });
+  });
+  app.post<{ Body: { code: string } }>("/v1/auth/owner-step-up", async (request, reply) => {
+    if (!security.customerAuthentication || !security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const input = z.strictObject({ code: z.string().regex(/^\d{6}$/) }).parse(request.body ?? {});
+    const verificationUrl = new URL(
+      `${customerAuthenticationBasePath}/two-factor/verify-totp`,
+      security.customerAuthentication.options.baseURL as string,
+    );
+    const verificationResponse = await security.customerAuthentication.handler(new Request(verificationUrl, {
+      method: "POST",
+      headers: fromNodeHeaders(request.raw.headers),
+      body: JSON.stringify({ code: input.code, trustDevice: false }),
+    }));
+    if (!verificationResponse.ok) {
+      throw new LemmaComputerError("OWNER_STEP_UP_INVALID", "The authenticator code was not accepted", 401);
+    }
+    const proof = await security.customerProductAuthentication.recordRecentStepUp(fromNodeHeaders(request.raw.headers));
+    request.log.info({
+      event: "customer_authentication_security_event",
+      action: "organization.owner_step_up",
+      outcome: "succeeded",
+      accountUserId: proof.accountUserId,
+      authenticationSessionId: proof.authenticationSessionId,
+    }, "customer authentication security event");
+    return reply.header("cache-control", "no-store").send({
+      verifiedAt: proof.recentStepUpAt.toISOString(),
+      validForSeconds: recentAuthenticationStepUpWindowMs / 1_000,
+    });
+  });
+  app.delete("/v1/auth/product-session", async (request, reply) => {
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    await security.customerProductAuthentication.revokeCurrentSession(fromNodeHeaders(request.raw.headers));
+    return reply.code(204).send();
   });
   app.post("/v1/auth/logout", async (request, reply) => {
     if (!security.authentication) return reply.code(204).send();
@@ -1372,24 +1790,37 @@ export function createControlServer(
       ...(parsed.teamId ? { teamId: parsed.teamId } : {}),
       ...(parsed.subjectId ? { subjectId: parsed.subjectId } : {}),
       ...(parsed.taskId ? { taskId: parsed.taskId } : {}),
+      ...(parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {}),
+      ...(parsed.provider ? { provider: parsed.provider } : {}),
     };
   };
+  const requireUsageQueryPermission = (
+    request: object,
+    permission: "usage.read" | "usage.manage",
+    query: { workspaceId?: string; provider?: string },
+  ) => {
+    const actor = principal(request);
+    if (query.workspaceId && allowsPermission(actor, permission, { type: "workspace", resourceId: query.workspaceId })) return actor;
+    if (query.provider && allowsPermission(actor, permission, { type: "provider", resourceId: query.provider })) return actor;
+    return requirePermission(request, permission);
+  };
   app.get("/v1/admin/ai-usage/events", async (request, reply) => {
-    const actor = requirePermission(request, "usage.read");
-    const result = await requireUsageLedger().store.listUsageEvents(usageQueryFor(actor.tenantId, request.query));
+    const query = usageQueryFor(principal(request).tenantId, request.query);
+    const actor = requireUsageQueryPermission(request, "usage.read", query);
+    const result = await requireUsageLedger().store.listUsageEvents({ ...query, tenantId: actor.tenantId });
     reply.header("cache-control", "no-store");
     return { events: result.events, nextCursor: encodeUsageCursor(result.nextCursor) };
   });
   app.get("/v1/admin/ai-usage/totals", async (request, reply) => {
-    const actor = requirePermission(request, "usage.read");
-    const query = usageQueryFor(actor.tenantId, request.query);
+    const query = usageQueryFor(principal(request).tenantId, request.query);
+    const actor = requireUsageQueryPermission(request, "usage.read", query);
     const { limit: _limit, cursor: _cursor, ...totalsQuery } = query;
     reply.header("cache-control", "no-store");
     return { totals: await requireUsageLedger().store.providerCostTotals(totalsQuery) };
   });
   app.get("/v1/admin/ai-usage/export.csv", async (request, reply) => {
-    const actor = requirePermission(request, "usage.read");
-    const query = usageQueryFor(actor.tenantId, request.query);
+    const query = usageQueryFor(principal(request).tenantId, request.query);
+    const actor = requireUsageQueryPermission(request, "usage.read", query);
     const result = await requireUsageLedger().store.listUsageEvents({ ...query, limit: Math.min(query.limit, 500) });
     const csv = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const header = ["occurred_at","event_id","team","cost_center","subject","task","context","alias","provider","model","deployment","cost","currency","price_status"];
@@ -1401,14 +1832,18 @@ export function createControlServer(
       .header("content-disposition", "attachment; filename=ai-usage.csv")
       .send(`${header.join(",")}\n${rows.join("\n")}\n`);
   });
-  app.get("/v1/admin/ai-usage/rate-cards", async (request, reply) => {
-    const actor = requirePermission(request, "usage.read");
+  app.get<{ Querystring: { provider?: string } }>("/v1/admin/ai-usage/rate-cards", async (request, reply) => {
+    const provider = request.query.provider ? z.string().trim().min(1).max(200).parse(request.query.provider) : undefined;
+    const actor = provider
+      ? requirePermission(request, "usage.read", { type: "provider", resourceId: provider })
+      : requirePermission(request, "usage.read");
     reply.header("cache-control", "no-store");
-    return { rateCards: await requireUsageLedger().store.listRateCards(actor.tenantId) };
+    const rateCards = await requireUsageLedger().store.listRateCards(actor.tenantId);
+    return { rateCards: provider ? rateCards.filter((card) => card.provider === provider) : rateCards };
   });
   app.post("/v1/admin/ai-usage/rate-cards", async (request, reply) => {
-    const actor = requirePermission(request, "usage.manage");
     const input = adminRateCardSchema.parse(request.body ?? {});
+    const actor = requirePermission(request, "usage.manage", { type: "provider", resourceId: input.provider });
     const id = await requireUsageLedger().store.createRateCard({
       tenantId: actor.tenantId, provider: input.provider, providerAccountId: input.providerAccountId,
       baseModel: input.baseModel, deploymentId: input.deploymentId,
@@ -1433,7 +1868,7 @@ export function createControlServer(
     return reply.code(201).send(result);
   });
   app.get<{ Querystring: { includeArchived?: string } }>("/v1/admin/teams", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.read");
     return {
       teams: await requireTeams().listTeams(actor.tenantId, request.query.includeArchived === "true"),
     };
@@ -1479,7 +1914,7 @@ export function createControlServer(
       .send(spendReportCsv(report, actor.tenantId));
   });
   app.post("/v1/admin/teams", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.manage");
     const input = createTeamSchema.parse(request.body ?? {});
     const team = await requireTeams().createTeam({
       tenantId: actor.tenantId,
@@ -1490,13 +1925,13 @@ export function createControlServer(
     return reply.code(201).send({ team });
   });
   app.get<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.read");
     const team = await requireTeams().getTeam(actor.tenantId, z.uuid().parse(request.params.teamId));
     if (!team) throw new LemmaComputerError("TEAM_NOT_FOUND", "Team not found", 404);
     return { team };
   });
   app.patch<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.manage");
     const input = updateTeamSchema.parse(request.body ?? {});
     return {
       team: await requireTeams().updateTeam({
@@ -1508,7 +1943,7 @@ export function createControlServer(
     };
   });
   app.post<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId/archive", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.manage");
     return {
       team: await requireTeams().archiveTeam({
         tenantId: actor.tenantId,
@@ -1518,7 +1953,7 @@ export function createControlServer(
     };
   });
   app.post<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId/memberships", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.manage");
     const input = assignTeamMembershipSchema.parse(request.body ?? {});
     const membership = await requireTeams().assignMembership({
       tenantId: actor.tenantId,
@@ -1531,7 +1966,7 @@ export function createControlServer(
     return reply.code(201).send({ membership });
   });
   app.delete<{ Params: { teamId: string; userId: string } }>("/v1/admin/teams/:teamId/memberships/:userId", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.manage");
     const removed = await requireTeams().removeMembership({
       tenantId: actor.tenantId,
       teamId: z.uuid().parse(request.params.teamId),
@@ -1543,7 +1978,7 @@ export function createControlServer(
     });
   });
   app.put<{ Params: { teamId: string } }>("/v1/admin/teams/:teamId/default", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "usage.manage");
     const input = setDefaultSpendingTeamSchema.parse(request.body ?? {});
     return {
       team: await requireTeams().setDefaultSpendingTeam({
@@ -1556,45 +1991,46 @@ export function createControlServer(
     };
   });
   app.get("/v1/admin/teams-audit", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "audit.read");
     return { events: await requireTeams().listAuditEvents(actor.tenantId) };
   });
   app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget",async(request)=>{
-    const actor=requireAdministrator(request);return{status:await requireBudgets().get(actor,z.uuid().parse(request.params.teamId))};
+    const actor=requirePermission(request,"usage.read");return{status:await requireBudgets().get(actor,z.uuid().parse(request.params.teamId))};
   });
   app.put<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget",async(request)=>{
-    const actor=requireAdministrator(request);return requireBudgets().save(actor,z.uuid().parse(request.params.teamId),saveTeamBudgetSchema.parse(request.body??{}));
+    const actor=requirePermission(request,"usage.manage");return requireBudgets().save(actor,z.uuid().parse(request.params.teamId),saveTeamBudgetSchema.parse(request.body??{}));
   });
   app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget/override",async(request)=>{
-    const actor=requireAdministrator(request);return requireBudgets().override(actor,z.uuid().parse(request.params.teamId),budgetOverrideSchema.parse(request.body??{}));
+    const actor=requirePermission(request,"usage.manage");return requireBudgets().override(actor,z.uuid().parse(request.params.teamId),budgetOverrideSchema.parse(request.body??{}));
   });
   app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget/reconcile",async(request)=>{
-    const actor=requireAdministrator(request);return{reconciliation:await requireBudgets().sync(actor,z.uuid().parse(request.params.teamId))};
+    const actor=requirePermission(request,"usage.manage");return{reconciliation:await requireBudgets().sync(actor,z.uuid().parse(request.params.teamId))};
   });
   app.get("/v1/admin/routing/mappings/latest",async(request,reply)=>{
-    const actor=requireAdministrator(request);
+    const actor=requirePermission(request,"provider.manage");
     reply.header("cache-control","no-store");
     return {mapping:await requireRouting().latestMapping(actor)};
   });
   app.post("/v1/admin/routing/mappings",async(request,reply)=>{
-    const actor=requireAdministrator(request);const mapping=await requireRouting().createMapping(actor,createRoutingMappingSchema.parse(request.body??{}));
+    const actor=requirePermission(request,"provider.manage");const mapping=await requireRouting().createMapping(actor,createRoutingMappingSchema.parse(request.body??{}));
     reply.header("cache-control","no-store");return reply.code(201).send({mapping});
   });
-  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing",async(request)=>{const actor=requireAdministrator(request);return requireRouting().settings(actor,z.uuid().parse(request.params.teamId));});
-  app.put<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/policy",async(request)=>{const actor=requireAdministrator(request);return requireRouting().savePolicy(actor,z.uuid().parse(request.params.teamId),saveRoutingPolicySchema.parse(request.body??{}));});
-  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/reviews",async(request,reply)=>{const actor=requireAdministrator(request);const review=await requireRouting().review(actor,z.uuid().parse(request.params.teamId),saveRoutingReviewSchema.parse(request.body??{}));return reply.code(201).send({review});});
-  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/rollout",async(request,reply)=>{const actor=requireAdministrator(request);const rollout=await requireRouting().rollout(actor,z.uuid().parse(request.params.teamId),changeRoutingRolloutSchema.parse(request.body??{}));return reply.code(201).send({rollout});});
+  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing",async(request)=>{const actor=requirePermission(request,"policy.manage");return requireRouting().settings(actor,z.uuid().parse(request.params.teamId));});
+  app.put<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/policy",async(request)=>{const actor=requirePermission(request,"policy.manage");return requireRouting().savePolicy(actor,z.uuid().parse(request.params.teamId),saveRoutingPolicySchema.parse(request.body??{}));});
+  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/reviews",async(request,reply)=>{const actor=requirePermission(request,"policy.manage");const review=await requireRouting().review(actor,z.uuid().parse(request.params.teamId),saveRoutingReviewSchema.parse(request.body??{}));return reply.code(201).send({review});});
+  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/rollout",async(request,reply)=>{const actor=requirePermission(request,"policy.manage");const rollout=await requireRouting().rollout(actor,z.uuid().parse(request.params.teamId),changeRoutingRolloutSchema.parse(request.body??{}));return reply.code(201).send({rollout});});
   app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/kill-switch",async(request,reply)=>{
-    const actor=requireAdministrator(request);const body=z.strictObject({reason:z.string().trim().min(8).max(1000)}).parse(request.body??{});const rollout=await requireRouting().killSwitch(actor,z.uuid().parse(request.params.teamId),body.reason);return reply.code(201).send({rollout});
+    const actor=requirePermission(request,"policy.manage");const body=z.strictObject({reason:z.string().trim().min(8).max(1000)}).parse(request.body??{});const rollout=await requireRouting().killSwitch(actor,z.uuid().parse(request.params.teamId),body.reason);return reply.code(201).send({rollout});
   });
-  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/shadow-report",async(request)=>{const actor=requireAdministrator(request);return requireRouting().report(actor,z.uuid().parse(request.params.teamId));});
-  app.get<{Params:{decisionId:string}}>("/v1/admin/routing/decisions/:decisionId",async(request,reply)=>{const actor=requireAdministrator(request);const decision=await requireRouting().decision(actor,z.uuid().parse(request.params.decisionId));if(!decision)return reply.code(404).send({error:{code:"ROUTING_DECISION_NOT_FOUND",message:"Routing decision not found",correlationId:request.id,retryable:false}});return decision;});
+  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/shadow-report",async(request)=>{const actor=requirePermission(request,"audit.read");return requireRouting().report(actor,z.uuid().parse(request.params.teamId));});
+  app.get<{Params:{decisionId:string}}>("/v1/admin/routing/decisions/:decisionId",async(request,reply)=>{const actor=requirePermission(request,"audit.read");const decision=await requireRouting().decision(actor,z.uuid().parse(request.params.decisionId));if(!decision)return reply.code(404).send({error:{code:"ROUTING_DECISION_NOT_FOUND",message:"Routing decision not found",correlationId:request.id,retryable:false}});return decision;});
   app.get("/v1/admin/users", async (request) => {
     const actor = requirePermission(request, "organization.manage_members");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     return {
+      delegableBuiltInRoles: delegableBuiltInRolesFor(actor),
       users: await Promise.all(users.map(async (user) => {
         const targetIdentity = identityContextSchema.parse({
           tenantId: actor.tenantId,
@@ -1636,6 +2072,135 @@ export function createControlServer(
       })),
     };
   });
+  const organizationRoleScopeSchema = z.discriminatedUnion("type", [
+    z.strictObject({ type: z.literal("organization") }),
+    z.strictObject({ type: z.literal("workspace"), resourceId: z.string().trim().min(1).max(200) }),
+    z.strictObject({ type: z.literal("provider"), resourceId: z.string().trim().min(1).max(200) }),
+  ]);
+  const organizationRoleGrantSchema = z.strictObject({
+    permission: z.enum(organizationPermissions),
+    scope: organizationRoleScopeSchema,
+  });
+  const organizationRoleDocumentSchema = z.strictObject({
+    name: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(500),
+    grants: z.array(organizationRoleGrantSchema).min(1).max(100),
+  });
+  const requireRoleStore = () => {
+    const roleStore = security.identityPolicyStore;
+    if (!roleStore?.listOrganizationRoles || !roleStore.createOrganizationRole
+      || !roleStore.updateOrganizationRole || !roleStore.archiveOrganizationRole
+      || !roleStore.assignOrganizationRole || !roleStore.unassignOrganizationRole) {
+      throw new LemmaComputerError("ROLE_ADMIN_NOT_CONFIGURED", "Organization role administration is unavailable", 503, true);
+    }
+    return roleStore;
+  };
+  const delegableBuiltInRolesFor = (actor: SessionPrincipal) => (["owner", "admin", "member"] as const).filter((role) => (
+    role === "owner"
+      ? actor.role === "owner"
+      : permissionsByOrganizationRole[role].every((permission) => allowsPermission(actor, permission))
+  ));
+  const delegablePermissionCatalogFor = (actor: SessionPrincipal): Array<{
+    key: OrganizationPermission;
+    description: string;
+    scopeTypes: OrganizationResourceScopeType[];
+    resourceIds?: Partial<Record<OrganizationResourceScopeType, string[]>>;
+  }> => organizationPermissions.flatMap((key) => {
+    if (key === "organization.transfer_ownership") return [];
+    const catalogEntry = organizationPermissionCatalog[key];
+    const supportedScopeTypes: readonly OrganizationResourceScopeType[] = catalogEntry.scopeTypes;
+    if (allowsPermission(actor, key)) {
+      return [{ key, description: catalogEntry.description, scopeTypes: [...supportedScopeTypes] }];
+    }
+    const exactGrants = actor.effectiveAuthorization?.valid
+      ? actor.effectiveAuthorization.grants.filter((grant) => (
+          grant.permission === key
+          && grant.scope.type !== "organization"
+          && supportedScopeTypes.includes(grant.scope.type)
+        ))
+      : [];
+    const scopeTypes = supportedScopeTypes.filter((type) => (
+      type !== "organization" && exactGrants.some((grant) => grant.scope.type === type)
+    ));
+    if (!scopeTypes.length) return [];
+    const resourceIds = Object.fromEntries(scopeTypes.map((type) => [
+      type,
+      [...new Set(exactGrants
+        .filter((grant) => grant.scope.type === type)
+        .map((grant) => grant.scope.resourceId)
+        .filter((resourceId): resourceId is string => Boolean(resourceId)))],
+    ]));
+    return [{ key, description: catalogEntry.description, scopeTypes, resourceIds }];
+  });
+
+  app.get("/v1/admin/roles", async (request) => {
+    const actor = requirePermission(request, "organization.manage_roles");
+    const roleStore = requireRoleStore();
+    const memberships = roleStore.listOrganizationMemberships
+      ? await roleStore.listOrganizationMemberships(actor.tenantId)
+      : [];
+    return {
+      catalog: {
+        version: organizationPermissionCatalogVersion,
+        permissions: delegablePermissionCatalogFor(actor),
+      },
+      builtInRoles: ["owner", "admin", "member"],
+      delegableBuiltInRoles: delegableBuiltInRolesFor(actor),
+      memberships,
+      roles: await roleStore.listOrganizationRoles!(actor.tenantId),
+    };
+  });
+  app.post("/v1/admin/roles", async (request, reply) => {
+    const input = organizationRoleDocumentSchema.parse(request.body ?? {});
+    const actor = requirePermission(request, "organization.manage_roles");
+    const role = await requireRoleStore().createOrganizationRole!({
+      organizationId: actor.tenantId,
+      ...input,
+      createdBy: actor.userId,
+    });
+    return reply.code(201).send({ role });
+  });
+  app.patch<{ Params: { roleId: string } }>("/v1/admin/roles/:roleId", async (request) => {
+    const input = organizationRoleDocumentSchema.extend({ expectedVersion: z.number().int().positive() }).parse(request.body ?? {});
+    const actor = requirePermission(request, "organization.manage_roles");
+    const role = await requireRoleStore().updateOrganizationRole!({
+      organizationId: actor.tenantId,
+      roleId: z.uuid().parse(request.params.roleId),
+      ...input,
+      updatedBy: actor.userId,
+    });
+    return { role };
+  });
+  app.delete<{ Params: { roleId: string } }>("/v1/admin/roles/:roleId", async (request) => {
+    const input = z.strictObject({ expectedVersion: z.number().int().positive() }).parse(request.body ?? {});
+    const actor = requirePermission(request, "organization.manage_roles");
+    return requireRoleStore().archiveOrganizationRole!({
+      organizationId: actor.tenantId,
+      roleId: z.uuid().parse(request.params.roleId),
+      expectedVersion: input.expectedVersion,
+      archivedBy: actor.userId,
+    });
+  });
+  app.post<{ Params: { membershipId: string } }>("/v1/admin/memberships/:membershipId/roles", async (request) => {
+    const input = z.strictObject({ roleId: z.uuid() }).parse(request.body ?? {});
+    const actor = requirePermission(request, "organization.manage_roles");
+    return requireRoleStore().assignOrganizationRole!({
+      organizationId: actor.tenantId,
+      membershipId: z.uuid().parse(request.params.membershipId),
+      roleId: input.roleId,
+      assignedBy: actor.userId,
+    });
+  });
+  app.delete<{ Params: { membershipId: string; roleId: string } }>("/v1/admin/memberships/:membershipId/roles/:roleId", async (request) => {
+    const actor = requirePermission(request, "organization.manage_roles");
+    return requireRoleStore().unassignOrganizationRole!({
+      organizationId: actor.tenantId,
+      membershipId: z.uuid().parse(request.params.membershipId),
+      roleId: z.uuid().parse(request.params.roleId),
+      unassignedBy: actor.userId,
+    });
+  });
+
   app.get("/v1/admin/memberships", async (request) => {
     const actor = requirePermission(request, "organization.manage_members");
     const membershipStore = security.identityPolicyStore;
@@ -1644,6 +2209,211 @@ export function createControlServer(
     }
     return { memberships: await membershipStore.listOrganizationMemberships(actor.tenantId) };
   });
+  const tenantSsoRegistrationSchema = z.discriminatedUnion("protocol", [
+    z.strictObject({
+      protocol: z.literal("oidc"),
+      domain: z.string().trim().toLowerCase().min(3).max(253),
+      issuer: z.url({ protocol: /^https$/ }).max(2_048),
+      clientId: z.string().trim().min(1).max(1_024),
+      clientSecret: z.string().min(1).max(8_192),
+      discoveryEndpoint: z.url({ protocol: /^https$/ }).max(2_048).optional(),
+    }),
+    z.strictObject({
+      protocol: z.literal("saml"),
+      domain: z.string().trim().toLowerCase().min(3).max(253),
+      issuer: z.url({ protocol: /^https$/ }).max(2_048),
+      entryPoint: z.url({ protocol: /^https$/ }).max(2_048),
+      certificate: z.string().trim().min(64).max(24 * 1_024),
+    }),
+  ]);
+  const tenantSsoCredentialRotationSchema = z.discriminatedUnion("protocol", [
+    z.strictObject({
+      protocol: z.literal("oidc"),
+      clientId: z.string().trim().min(1).max(1_024),
+      clientSecret: z.string().min(1).max(8_192),
+    }),
+    z.strictObject({
+      protocol: z.literal("saml"),
+      certificate: z.string().trim().min(64).max(24 * 1_024),
+    }),
+  ]);
+  const tenantSsoMetadataRefreshSchema = z.discriminatedUnion("protocol", [
+    z.strictObject({ protocol: z.literal("oidc") }),
+    z.strictObject({
+      protocol: z.literal("saml"),
+      metadata: z.string().trim().min(64).max(100 * 1_024),
+    }),
+  ]);
+  const requireTenantSsoAdministration = () => {
+    if (!security.tenantSsoAdministration) {
+      throw new LemmaComputerError("SSO_ADMIN_NOT_CONFIGURED", "Organization SSO administration is unavailable", 503, true);
+    }
+    return security.tenantSsoAdministration;
+  };
+  const requireSsoOwner = (request: object) => {
+    const actor = requirePermission(request, "organization.manage_settings");
+    if (actor.role !== "owner") {
+      throw new LemmaComputerError("SSO_OWNER_REQUIRED", "The organization owner must complete this SSO action", 403);
+    }
+    return actor;
+  };
+  const requireProtectedSsoOwner = async (request: object & { raw: { headers: Parameters<typeof fromNodeHeaders>[0] } }) => {
+    const actor = requireSsoOwner(request);
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("OWNER_STEP_UP_REQUIRED", "Customer MFA verification is required", 403);
+    }
+    await security.customerProductAuthentication.requireRecentStepUp(fromNodeHeaders(request.raw.headers));
+    return actor;
+  };
+  app.get("/v1/admin/sso", async (request) => {
+    const actor = requirePermission(request, "organization.manage_settings");
+    return { connections: await requireTenantSsoAdministration().list(actor.tenantId) };
+  });
+  app.post("/v1/admin/sso", async (request, reply) => {
+    // Better Auth's SSO provider row is owned by the registering Better Auth
+    // account when its organization plugin is not authoritative. Bind the
+    // lifecycle to LemmaComputer's single protected owner so later verify,
+    // test, rotation, recovery, and disconnect calls use the same account.
+    const actor = requireSsoOwner(request);
+    const input = tenantSsoRegistrationSchema.parse(request.body ?? {});
+    const result = await requireTenantSsoAdministration().register(fromNodeHeaders(request.raw.headers), {
+      ...input,
+      organizationId: actor.tenantId,
+      actorUserId: actor.userId,
+    });
+    return reply.code(201).send(result);
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/domain-verification", async (request) => {
+    const actor = requireSsoOwner(request);
+    return requireTenantSsoAdministration().verifyDomain(
+      fromNodeHeaders(request.raw.headers),
+      actor.tenantId,
+      z.uuid().parse(request.params.connectionId),
+      actor.userId,
+    );
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/domain-verification/request", async (request) => {
+    const actor = requireSsoOwner(request);
+    return requireTenantSsoAdministration().requestDomainVerification(
+      fromNodeHeaders(request.raw.headers),
+      actor.tenantId,
+      z.uuid().parse(request.params.connectionId),
+    );
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/test", async (request, reply) => {
+    const actor = requirePermission(request, "organization.manage_settings");
+    const started = await requireTenantSsoAdministration().startTest(
+      fromNodeHeaders(request.raw.headers),
+      actor.tenantId,
+      z.uuid().parse(request.params.connectionId),
+    );
+    if (started.cookies.length) reply.header("set-cookie", started.cookies);
+    return reply.header("cache-control", "no-store").send({ location: started.location });
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/test/complete", async (request) => {
+    const actor = requirePermission(request, "organization.manage_settings");
+    return requireTenantSsoAdministration().completeTest(
+      fromNodeHeaders(request.raw.headers),
+      actor.tenantId,
+      z.uuid().parse(request.params.connectionId),
+      actor.userId,
+    );
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/recovery", async (request) => {
+    const actor = await requireProtectedSsoOwner(request);
+    return requireTenantSsoAdministration().transition(actor.tenantId, z.uuid().parse(request.params.connectionId), "recovery_confirmed", actor.userId);
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/enforce", async (request) => {
+    const actor = await requireProtectedSsoOwner(request);
+    return requireTenantSsoAdministration().transition(actor.tenantId, z.uuid().parse(request.params.connectionId), "enforce", actor.userId);
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/credentials/rotation", async (request) => {
+    const actor = await requireProtectedSsoOwner(request);
+    const input = tenantSsoCredentialRotationSchema.parse(request.body ?? {});
+    return requireTenantSsoAdministration().rotateCredentials(fromNodeHeaders(request.raw.headers), {
+      ...input,
+      organizationId: actor.tenantId,
+      connectionId: z.uuid().parse(request.params.connectionId),
+      actorUserId: actor.userId,
+    });
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/metadata/refresh", async (request) => {
+    const actor = await requireProtectedSsoOwner(request);
+    const input = tenantSsoMetadataRefreshSchema.parse(request.body ?? {});
+    return requireTenantSsoAdministration().refreshMetadata(fromNodeHeaders(request.raw.headers), {
+      ...input,
+      organizationId: actor.tenantId,
+      connectionId: z.uuid().parse(request.params.connectionId),
+      actorUserId: actor.userId,
+    });
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/suspend", async (request) => {
+    const actor = requirePermission(request, "organization.manage_settings");
+    return requireTenantSsoAdministration().transition(actor.tenantId, z.uuid().parse(request.params.connectionId), "suspend", actor.userId);
+  });
+  app.post<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId/rollback", async (request) => {
+    const actor = await requireProtectedSsoOwner(request);
+    return requireTenantSsoAdministration().transition(actor.tenantId, z.uuid().parse(request.params.connectionId), "rollback", actor.userId);
+  });
+  app.delete<{ Params: { connectionId: string } }>("/v1/admin/sso/:connectionId", async (request) => {
+    const actor = await requireProtectedSsoOwner(request);
+    return requireTenantSsoAdministration().disconnect(
+      fromNodeHeaders(request.raw.headers),
+      actor.tenantId,
+      z.uuid().parse(request.params.connectionId),
+      actor.userId,
+    );
+  });
+  app.post<{ Body: { targetMembershipId: string } }>("/v1/admin/organization/ownership-transfer", async (request) => {
+    const actor = requirePermission(request, "organization.transfer_ownership");
+    if (actor.role !== "owner") {
+      throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an active organization owner can transfer ownership", 403);
+    }
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("OWNER_STEP_UP_REQUIRED", "Customer MFA verification is required", 403);
+    }
+    const ownershipStore = security.identityPolicyStore;
+    if (!ownershipStore?.transferOrganizationOwnership) {
+      throw new LemmaComputerError("OWNER_LIFECYCLE_NOT_CONFIGURED", "Protected owner operations are unavailable", 503, true);
+    }
+    const input = z.strictObject({ targetMembershipId: z.uuid() }).parse(request.body ?? {});
+    const proof = await security.customerProductAuthentication.requireRecentStepUp(fromNodeHeaders(request.raw.headers));
+    return ownershipStore.transferOrganizationOwnership({
+      organizationId: actor.tenantId,
+      currentOwnerUserId: actor.userId,
+      targetMembershipId: input.targetMembershipId,
+      recentStepUpAt: proof.recentStepUpAt,
+      now: new Date(),
+    });
+  });
+  app.post<{ Body: { reason: string }; Headers: { "idempotency-key"?: string } }>(
+    "/v1/admin/organization/closure",
+    async (request, reply) => {
+      const actor = requirePermission(request, "organization.manage_settings");
+      if (actor.role !== "owner") {
+        throw new LemmaComputerError("OWNER_CHANGE_FORBIDDEN", "Only an active organization owner can initiate closure", 403);
+      }
+      if (!security.customerProductAuthentication) {
+        throw new LemmaComputerError("OWNER_STEP_UP_REQUIRED", "Customer MFA verification is required", 403);
+      }
+      const ownershipStore = security.identityPolicyStore;
+      if (!ownershipStore?.initiateOrganizationClosure) {
+        throw new LemmaComputerError("OWNER_LIFECYCLE_NOT_CONFIGURED", "Protected owner operations are unavailable", 503, true);
+      }
+      const input = z.strictObject({ reason: z.string().trim().min(12).max(1_000) }).parse(request.body ?? {});
+      const idempotencyKey = z.uuid().parse(request.headers["idempotency-key"]);
+      const proof = await security.customerProductAuthentication.requireRecentStepUp(fromNodeHeaders(request.raw.headers));
+      const result = await ownershipStore.initiateOrganizationClosure({
+        organizationId: actor.tenantId,
+        requestedBy: actor.userId,
+        reason: input.reason,
+        idempotencyKey,
+        recentStepUpAt: proof.recentStepUpAt,
+        now: new Date(),
+      });
+      return reply.code(result.replayed ? 200 : 201).send(result);
+    },
+  );
   app.get("/v1/admin/invitations", async (request) => {
     const actor = requirePermission(request, "organization.manage_members");
     const invitationStore = security.identityPolicyStore;
@@ -1658,11 +2428,16 @@ export function createControlServer(
       role: z.enum(["owner", "admin", "member"]),
     }).parse(request.body ?? {});
     const actor = requirePermission(request, "organization.manage_members");
+    if (input.role === "owner") {
+      throw new LemmaComputerError("OWNER_TRANSFER_REQUIRED", "Use the protected ownership transfer flow", 409);
+    }
     if (input.role !== "member") requirePermission(request, "organization.manage_roles");
-    if (input.role === "owner") requirePermission(request, "organization.transfer_ownership");
     const invitationStore = security.identityPolicyStore;
     if (!invitationStore?.createOrganizationInvitation) {
       throw new LemmaComputerError("INVITATION_ADMIN_NOT_CONFIGURED", "Organization invitation administration is unavailable", 503, true);
+    }
+    if (!invitationDelivery) {
+      throw new LemmaComputerError("INVITATION_DELIVERY_NOT_CONFIGURED", "Invitation delivery is unavailable", 503, true);
     }
     const token = `oci_${randomBytes(32).toString("base64url")}`;
     const now = new Date();
@@ -1676,10 +2451,26 @@ export function createControlServer(
       createdBy: actor.userId,
       now,
     });
+    const acceptancePath = `/invite?token=${encodeURIComponent(token)}`;
+    if (!result.replayed && invitationDelivery.mode === "email") {
+      await deliverOrganizationInvitationEmail(invitationDelivery.email!, {
+        recipient: result.invitation.email,
+        organizationDisplayName: actor.tenantDisplayName,
+        role: result.invitation.role,
+        activationUrl: new URL(acceptancePath, connectionOptions.publicWebUrl ?? "http://localhost:4174").toString(),
+        expiresAt: new Date(result.invitation.expiresAt),
+      });
+    }
     return reply.code(result.replayed ? 200 : 201).send({
       invitation: result.invitation,
       replayed: result.replayed,
-      acceptancePath: result.replayed ? null : `/invite?token=${encodeURIComponent(token)}`,
+      acceptancePath: !result.replayed && invitationDelivery.mode === "copy-link" ? acceptancePath : null,
+      delivery: {
+        mode: invitationDelivery.mode,
+        warning: invitationDelivery.mode === "copy-link"
+          ? "Copy-link delivery is intended only for explicit local or customer-managed operation. Share it through a trusted channel."
+          : null,
+      },
     });
   });
   app.post<{ Params: { invitationId: string } }>("/v1/admin/invitations/:invitationId/resend", async (request) => {
@@ -1687,6 +2478,9 @@ export function createControlServer(
     const invitationStore = security.identityPolicyStore;
     if (!invitationStore?.resendOrganizationInvitation) {
       throw new LemmaComputerError("INVITATION_ADMIN_NOT_CONFIGURED", "Organization invitation administration is unavailable", 503, true);
+    }
+    if (!invitationDelivery) {
+      throw new LemmaComputerError("INVITATION_DELIVERY_NOT_CONFIGURED", "Invitation delivery is unavailable", 503, true);
     }
     const token = `oci_${randomBytes(32).toString("base64url")}`;
     const now = new Date();
@@ -1699,10 +2493,26 @@ export function createControlServer(
       updatedBy: actor.userId,
       now,
     });
+    const acceptancePath = `/invite?token=${encodeURIComponent(token)}`;
+    if (!result.replayed && invitationDelivery.mode === "email") {
+      await deliverOrganizationInvitationEmail(invitationDelivery.email!, {
+        recipient: result.invitation.email,
+        organizationDisplayName: actor.tenantDisplayName,
+        role: result.invitation.role,
+        activationUrl: new URL(acceptancePath, connectionOptions.publicWebUrl ?? "http://localhost:4174").toString(),
+        expiresAt: new Date(result.invitation.expiresAt),
+      });
+    }
     return {
       invitation: result.invitation,
       replayed: result.replayed,
-      acceptancePath: result.replayed ? null : `/invite?token=${encodeURIComponent(token)}`,
+      acceptancePath: !result.replayed && invitationDelivery.mode === "copy-link" ? acceptancePath : null,
+      delivery: {
+        mode: invitationDelivery.mode,
+        warning: invitationDelivery.mode === "copy-link"
+          ? "Copy-link delivery is intended only for explicit local or customer-managed operation. Share it through a trusted channel."
+          : null,
+      },
     };
   });
   app.delete<{ Params: { invitationId: string } }>("/v1/admin/invitations/:invitationId", async (request) => {
@@ -1727,7 +2537,9 @@ export function createControlServer(
       ? requirePermission(request, "organization.manage_roles")
       : requirePermission(request, "organization.manage_members");
     if (input.status) requirePermission(request, "organization.manage_members");
-    if (input.role === "owner") requirePermission(request, "organization.transfer_ownership");
+    if (input.role === "owner") {
+      throw new LemmaComputerError("OWNER_TRANSFER_REQUIRED", "Use the protected ownership transfer flow", 409);
+    }
     if (request.params.userId === actor.userId && (input.status === "suspended" || input.status === "revoked")) {
       throw new LemmaComputerError("ADMIN_SELF_DISABLE_FORBIDDEN", "You cannot suspend your own administrator account", 409);
     }
@@ -1737,6 +2549,9 @@ export function createControlServer(
     }
     const target = (await membershipStore.listUsers(actor.tenantId)).find((item) => item.userId === request.params.userId);
     if (!target) throw new LemmaComputerError("MEMBERSHIP_NOT_FOUND", "Membership not found", 404);
+    if (target.role === "owner") {
+      throw new LemmaComputerError("OWNER_TRANSFER_REQUIRED", "Use the protected ownership transfer flow", 409);
+    }
     const targetIdentity = identityContextSchema.parse({
       tenantId: actor.tenantId,
       subjectId: target.userId,
@@ -1869,18 +2684,18 @@ export function createControlServer(
     return revoked ? reply.code(204).send() : reply.code(404).send({ error: { code: "POLICY_ASSIGNMENT_NOT_FOUND", message: "Active policy assignment not found", correlationId: request.id, retryable: false } });
   });
   app.post<{ Body: { revisionNote?: string } }>("/v1/admin/policy/versions", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const note = z.object({ revisionNote: z.string().min(3).max(160) }).parse(request.body ?? {});
     return security.identityPolicyStore.createMvpPolicyVersion({ tenantId: actor.tenantId, createdBy: actor.userId, revisionNote: note.revisionNote });
   });
   app.get("/v1/admin/egress-security-groups", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     return { securityGroups: await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId) };
   });
   app.post("/v1/admin/egress-security-groups", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const input = saveEgressSecurityGroupSchema.parse(request.body ?? {});
     const saved = await security.identityPolicyStore.saveEgressSecurityGroup({
@@ -1909,12 +2724,13 @@ export function createControlServer(
     });
   });
   app.post<{ Params: { grantId: string } }>("/v1/admin/workspaces/:grantId/egress-security-group", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = principal(request);
+    const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
+    const grantId = z.string().min(1).max(128).parse(request.params.grantId);
+    await requireWorkspaceGrantPermission(request, "policy.manage", actor.identity, grantId);
     if (!security.identityPolicyStore?.assignWorkspaceEgressSecurityGroup) {
       throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
     }
-    const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
-    const grantId = z.string().min(1).max(128).parse(request.params.grantId);
     const assigned = await security.identityPolicyStore.assignWorkspaceEgressSecurityGroup({
       tenantId: actor.tenantId,
       subjectId: actor.userId,
@@ -1963,12 +2779,20 @@ export function createControlServer(
     };
   });
   app.get("/v1/admin/provider-settings", async (request) => {
-    const actor = requirePermission(request, "provider.manage");
-    return requireProviderSettings().list(actor);
+    const actor = principal(request);
+    if (!hasAnyPermissionGrant(actor, "provider.manage")) {
+      throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
+    }
+    const { providers } = await requireProviderSettings().list(actor);
+    const visible = providers.filter((provider) => allowsPermission(actor, "provider.manage", {
+      type: "provider",
+      resourceId: provider.provider,
+    }));
+    return { providers: visible };
   });
   app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
-    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
     const input = provider === "bedrock"
       ? { provider, ...saveBedrockProviderApiKeySchema.parse(request.body ?? {}) }
       : provider === "openai"
@@ -1979,13 +2803,13 @@ export function createControlServer(
     return { provider: await requireProviderSettings().configure(actor, input) };
   });
   app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/test", async (request) => {
-    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
     return { provider: await requireProviderSettings().test(actor, provider) };
   });
   app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/disable", async (request) => {
-    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
     const disabled = await requireProviderSettings().disable(actor, provider);
     return {
       provider: disabled.provider,
@@ -1994,8 +2818,8 @@ export function createControlServer(
     };
   });
   app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/reconcile", async (request) => {
-    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
     const reconciled = await requireProviderSettings().reconcile(actor, provider);
     return {
       provider: reconciled.provider,
@@ -2004,8 +2828,8 @@ export function createControlServer(
     };
   });
   app.delete<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
-    const actor = requirePermission(request, "provider.manage");
     const provider = providerNameSchema.parse(request.params.provider);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
     const removed = await requireProviderSettings().remove(actor, provider);
     return {
       deleted: true,
@@ -2015,20 +2839,37 @@ export function createControlServer(
   });
   app.get("/v1/connections", async (request) => {
     const actor = principal(request);
-    const { connections: catalog, connectionProjectionChanged } = await requireConnections().list(actor.identity, isAdministrator(actor));
+    const { connections: catalog, connectionProjectionChanged } = await requireConnections().list(actor.identity, false);
     if (connectionProjectionChanged) await refreshOwnedWorkspaceConnectionGrants(actor);
-    return { connections: catalog };
+    return { connections: catalog.map((connector) => {
+      const canAdministerConnector = allowsPermission(actor, "provider.manage", {
+        type: "provider",
+        resourceId: connector.id,
+      });
+      return {
+        ...connector,
+        canAdministerConnector,
+        canManageConnection: connector.canManageConnection || canAdministerConnector,
+      };
+    }) };
   });
   app.get("/v1/admin/connectors", async (request) => {
-    const actor = requireAdministrator(request);
-    return requireConnections().adminList(actor.identity);
+    const actor = principal(request);
+    if (!hasAnyPermissionGrant(actor, "provider.manage")) {
+      throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
+    }
+    const result = await requireConnections().adminList(actor.identity);
+    return { connectors: result.connectors.filter((connector) => allowsPermission(actor, "provider.manage", {
+      type: "provider",
+      resourceId: connector.id,
+    })) };
   });
   app.post("/v1/admin/connectors/discover", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage");
     return requireConnections().discoverConnector(actor.identity, createConnectorSchema.parse(request.body ?? {}));
   });
   app.post("/v1/admin/connectors", async (request, reply) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage");
     const connector = await requireConnections().createConnector(
       actor.identity,
       actor.userId,
@@ -2037,11 +2878,11 @@ export function createControlServer(
     return reply.code(201).send({ connector });
   });
   app.get<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/tool-policy", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
     return requireConnections().connectorToolPolicy(actor.identity, request.params.connectorId);
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/tool-policy", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
     const input = saveHostedConnectorToolPolicySchema.parse(request.body ?? {});
     const saved = await requireConnections().saveConnectorToolPolicy(
       actor.identity,
@@ -2052,7 +2893,7 @@ export function createControlServer(
     return { ...saved, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/access-policy", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
     const input = z.strictObject({
       enabled: z.boolean(),
       membersCanManage: z.boolean(),
@@ -2066,12 +2907,12 @@ export function createControlServer(
     return { connector, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/icon", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
     const input = connectorIconSchema.parse(request.body ?? {});
     return { connector: await requireConnections().updateConnectorIcon(actor.identity, request.params.connectorId, input.iconDataUrl) };
   });
   app.delete<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
     const result = await requireConnections().deleteConnector(actor.identity, request.params.connectorId);
     await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
     return result;
@@ -2084,7 +2925,9 @@ export function createControlServer(
   });
   app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId/authorize", async (request, reply) => {
     const actor = principal(request);
-    const started = await requireConnections().start(actor.identity, request.params.connectorId, isAdministrator(actor));
+    const started = await requireConnections().start(actor.identity, request.params.connectorId, allowsPermission(actor, "provider.manage", {
+      type: "provider", resourceId: request.params.connectorId,
+    }));
     if (started.cookies.length) reply.header("set-cookie", started.cookies);
     return reply.code(302).header("location", started.location).send();
   });
@@ -2096,7 +2939,7 @@ export function createControlServer(
         state: request.query.state,
         code: request.query.code,
         error: request.query.error,
-      }, isAdministrator(actor));
+      }, allowsPermission(actor, "provider.manage", { type: "provider", resourceId: request.params.connectorId }));
       await refreshOwnedWorkspaceConnectionGrants(actor);
       return reply.code(303).header("location", service.resultUrl(request.params.connectorId, "connected")).send();
     } catch (error) {
@@ -2106,7 +2949,9 @@ export function createControlServer(
   });
   app.delete<{ Params: { connectorId: string } }>("/v1/connections/:connectorId", async (request) => {
     const actor = principal(request);
-    const result = await requireConnections().disconnect(actor.identity, request.params.connectorId, isAdministrator(actor));
+    const result = await requireConnections().disconnect(actor.identity, request.params.connectorId, allowsPermission(actor, "provider.manage", {
+      type: "provider", resourceId: request.params.connectorId,
+    }));
     await refreshOwnedWorkspaceConnectionGrants(actor);
     return result;
   });
@@ -2207,6 +3052,7 @@ export function createControlServer(
   });
   app.put<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/channels/telegram", async (request) => {
     const workspaceId = z.uuid().parse(request.params.workspaceId);
+    requireOwnedWorkspaceManagement(request, workspaceId);
     const input = saveTelegramChannelConnectionSchema.parse({ ...(request.body as object ?? {}), workspaceId });
     const { policy } = await requireWorkspacePolicy(request, workspaceId);
     if (!assignedChatAgentIds(policy).includes(input.defaultAgentId)) {
@@ -2216,6 +3062,7 @@ export function createControlServer(
   });
   app.delete<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/channels/telegram", async (request, reply) => {
     const workspaceId = z.uuid().parse(request.params.workspaceId);
+    requireOwnedWorkspaceManagement(request, workspaceId);
     await requireWorkspacePolicy(request, workspaceId);
     await requireChannelBroker().disconnect(identity(request), workspaceId);
     return reply.code(204).send();
@@ -2355,29 +3202,45 @@ export function createControlServer(
   app.get<{ Params: { userId: string }; Querystring: { grantId?: string } }>(
     "/v1/admin/users/:userId/sandbox-settings",
     async (request) => {
-      const actor = requireAdministrator(request);
+      const actor = principal(request);
+      const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
+      const targetIdentity = identityContextSchema.parse({ tenantId: actor.tenantId, subjectId: request.params.userId, audience: "lemmacomputer-control" });
+      await requireWorkspaceGrantPermission(request, "workspace.manage", targetIdentity, grantId);
       const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
       if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
-      const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
-      return sandboxSettingsFor(targetPrincipal, target.effectivePolicy, grantId, true);
+      return sandboxSettingsFor(
+        targetPrincipal,
+        target.effectivePolicy,
+        grantId,
+        await allowsWorkspaceGrantPermission(actor, "policy.manage", targetIdentity, grantId),
+      );
     },
   );
   app.put<{ Params: { userId: string } }>("/v1/admin/users/:userId/sandbox-settings", async (request) => {
-    const actor = requireAdministrator(request);
+    const actor = principal(request);
     const input = saveSandboxSettingsSchema.parse(request.body ?? {});
+    const targetIdentity = identityContextSchema.parse({ tenantId: actor.tenantId, subjectId: request.params.userId, audience: "lemmacomputer-control" });
+    await requireWorkspaceGrantPermission(request, "workspace.manage", targetIdentity, input.grantId);
     const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
     if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
-    return saveSandboxSettingsFor(targetPrincipal, target.effectivePolicy, input, true);
+    return saveSandboxSettingsFor(
+      targetPrincipal,
+      target.effectivePolicy,
+      input,
+      await allowsWorkspaceGrantPermission(actor, "policy.manage", targetIdentity, input.grantId),
+    );
   });
   app.post<{ Params: { userId: string; grantId: string } }>(
     "/v1/admin/users/:userId/workspaces/:grantId/egress-security-group",
     async (request) => {
-      const actor = requireAdministrator(request);
+      const actor = principal(request);
+      const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
+      const grantId = z.string().min(1).max(128).parse(request.params.grantId);
+      const targetIdentity = identityContextSchema.parse({ tenantId: actor.tenantId, subjectId: request.params.userId, audience: "lemmacomputer-control" });
+      await requireWorkspaceGrantPermission(request, "policy.manage", targetIdentity, grantId);
       if (!security.identityPolicyStore?.assignWorkspaceEgressSecurityGroup) {
         throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
       }
-      const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
-      const grantId = z.string().min(1).max(128).parse(request.params.grantId);
       const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
       const assigned = await security.identityPolicyStore.assignWorkspaceEgressSecurityGroup({
         tenantId: actor.tenantId,
@@ -2396,12 +3259,22 @@ export function createControlServer(
   app.get<{ Querystring: { grantId?: string } }>("/v1/sandbox-settings", async (request) => {
     const { principal: actor, effective } = await assignedPolicy(request);
     const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
-    return sandboxSettingsFor(actor, effective, grantId, actor.roles.includes("administrator"));
+    return sandboxSettingsFor(
+      actor,
+      effective,
+      grantId,
+      await allowsWorkspaceGrantPermission(actor, "policy.manage", actor.identity, grantId),
+    );
   });
   app.put("/v1/sandbox-settings", async (request) => {
     const input = saveSandboxSettingsSchema.parse(request.body ?? {});
     const { principal: actor, effective } = await assignedPolicy(request);
-    return saveSandboxSettingsFor(actor, effective, input, actor.roles.includes("administrator"));
+    return saveSandboxSettingsFor(
+      actor,
+      effective,
+      input,
+      await allowsWorkspaceGrantPermission(actor, "policy.manage", actor.identity, input.grantId),
+    );
   });
   app.post("/v1/openvtc/enrollment-challenges", async (request, reply) => {
     if (!security.openVtc) throw new LemmaComputerError("OPENVTC_NOT_CONFIGURED", "OpenVTC approvals are not configured", 503, true);
@@ -2488,13 +3361,19 @@ export function createControlServer(
   app.get("/v1/workspaces/current", async (request, reply) => {
     const { policy } = await requirePolicy(request);
     const current = await service.current(identity(request), policy, "personal");
+    if (current) requirePermission(request, "workspace.use", { type: "workspace", resourceId: current.id });
     return current ? reply.send(current) : reply.code(404).send({ error: { code: "WORKSPACE_NOT_FOUND", message: "Workspace not found", correlationId: request.id, retryable: false } });
   });
   app.get("/v1/workspaces", async (request) => {
     const { principal: actor, effective } = await assignedPolicy(request);
-    return { workspaces: await service.list(actor.identity, async (grantId) => (await policyForGrant(actor, effective, grantId)).policy) };
+    const workspaces = await service.list(actor.identity, async (grantId) => (await policyForGrant(actor, effective, grantId)).policy);
+    return { workspaces: workspaces.filter((workspace) => allowsPermission(actor, "workspace.use", {
+      type: "workspace",
+      resourceId: workspace.id,
+    })) };
   });
   app.post("/v1/workspaces", async (request, reply) => {
+    requirePermission(request, "workspace.create");
     const input = createWorkspaceSchema.parse(request.body ?? {});
     const { principal: actor, effective } = await assignedPolicy(request);
     const { policy } = await policyForGrant(actor, effective, input.grantId);
@@ -2509,13 +3388,19 @@ export function createControlServer(
     return service.open(actor.identity, policy, request.params.workspaceId);
   });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/restart", async (request) => {
+    requireOwnedWorkspaceManagement(request, request.params.workspaceId);
     const actor = principal(request);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     await assertProviderConfiguration(actor, policy);
     return service.restart(actor.identity, policy, request.params.workspaceId, request.id);
   });
-  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/stop", async (request) => { const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId); return service.stop(identity(request), policy, request.params.workspaceId); });
+  app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/stop", async (request) => {
+    requireOwnedWorkspaceManagement(request, request.params.workspaceId);
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    return service.stop(identity(request), policy, request.params.workspaceId);
+  });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/gateway/test", async (request) => {
+    requireOwnedWorkspaceManagement(request, request.params.workspaceId);
     const actor = principal(request);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     await assertProviderConfiguration(actor, policy);
@@ -2661,6 +3546,32 @@ export function createControlServer(
     "/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/turns/:turnId/activity/stream",
     async (request, reply) => {
       const { owner, scope } = await activityScope(request);
+      const expected = principal(request);
+      const customerHeaders = fromNodeHeaders(request.raw.headers);
+      const customerProductAuthentication = security.customerProductAuthentication;
+      const legacyAuthentication = security.authentication;
+      const authorize = security.testIdentityMode
+        ? undefined
+        : async () => {
+            const current = customerProductAuthentication
+              ? await customerProductAuthentication.resolve(customerHeaders).then((resolution) => (
+                  resolution.status === "authorized" ? resolution.principal : null
+                ))
+              : legacyAuthentication
+                ? await legacyAuthentication.authenticate(request.headers.cookie)
+                : null;
+            if (!current
+              || current.userId !== expected.userId
+              || current.tenantId !== expected.tenantId
+              || current.membershipId !== expected.membershipId
+              || current.accountUserId !== expected.accountUserId) {
+              throw new LemmaComputerError(
+                "ACTIVITY_STREAM_REVOKED",
+                "Activity stream access is no longer active",
+                403,
+              );
+            }
+          };
       const lastEventId = Array.isArray(request.headers["last-event-id"])
         ? request.headers["last-event-id"][0]
         : request.headers["last-event-id"];
@@ -2672,7 +3583,7 @@ export function createControlServer(
         if (!reply.raw.writableFinished) abort.abort("browser-disconnected");
       });
       async function* frames() {
-        for await (const event of activityEvents.subscribe(owner, scope, after, abort.signal)) {
+        for await (const event of activityEvents.subscribe(owner, scope, after, abort.signal, authorize)) {
           yield activitySseFrame(event);
         }
       }
@@ -2823,6 +3734,7 @@ export function createControlServer(
     },
   );
   app.delete<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId", async (request, reply) => {
+    requireOwnedWorkspaceManagement(request, request.params.workspaceId);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     await service.delete(identity(request), policy, request.params.workspaceId);
     return reply.code(204).send();
@@ -2964,6 +3876,51 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const env = envSchema.parse(process.env);
   const store = PostgresWorkspaceStore.fromConnectionString(env.DATABASE_URL);
   await store.assertSchemaCompatible();
+  const authenticationSchema = await PostgresAuthenticationStore.fromConnectionString(env.AUTH_DATABASE_URL);
+  try {
+    await authenticationSchema.assertSchemaCompatible();
+  } finally {
+    await authenticationSchema.close();
+  }
+  const googleConfigured = Boolean(env.GOOGLE_AUTH_CLIENT_ID || env.GOOGLE_AUTH_CLIENT_SECRET);
+  if (googleConfigured && !(env.GOOGLE_AUTH_CLIENT_ID && env.GOOGLE_AUTH_CLIENT_SECRET)) {
+    throw new Error("Google customer authentication client ID and secret must be configured together");
+  }
+  const microsoftConfigured = Boolean(env.MICROSOFT_AUTH_CLIENT_ID || env.MICROSOFT_AUTH_CLIENT_SECRET);
+  if (microsoftConfigured && !(env.MICROSOFT_AUTH_CLIENT_ID && env.MICROSOFT_AUTH_CLIENT_SECRET)) {
+    throw new Error("Microsoft customer authentication client ID and secret must be configured together");
+  }
+  const authenticationPool = new postgres.Pool({ connectionString: env.AUTH_DATABASE_URL });
+  const publicWebOrigin = new URL(env.PUBLIC_WEB_URL).origin;
+  const transactionalEmail = createTransactionalEmailAdapter({
+    transport: env.AUTH_EMAIL_TRANSPORT,
+    installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
+    runtimeEnvironment: env.RUNTIME_ENVIRONMENT,
+    postmarkServerToken: env.POSTMARK_SERVER_TOKEN,
+    postmarkFrom: env.POSTMARK_FROM,
+    postmarkMessageStream: env.POSTMARK_MESSAGE_STREAM,
+  });
+  const customerAuthenticationOptions = {
+    database: authenticationPool,
+    baseUrl: publicWebOrigin,
+    trustedOrigins: [publicWebOrigin],
+    ssoTrustedOrigins: env.CUSTOMER_SSO_TRUSTED_IDP_ORIGINS.split(",").map((value) => value.trim()).filter(Boolean),
+    versionedSecrets: parseVersionedBetterAuthSecrets(env.BETTER_AUTH_SECRETS),
+    installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
+    trustedProxyCidrs: env.BETTER_AUTH_TRUSTED_PROXY_CIDRS.split(",").map((value) => value.trim()).filter(Boolean),
+    email: transactionalEmail,
+    passkey: { rpId: new URL(publicWebOrigin).hostname, origin: publicWebOrigin },
+    socialProviders: {
+      google: env.GOOGLE_AUTH_CLIENT_ID && env.GOOGLE_AUTH_CLIENT_SECRET
+        ? { clientId: env.GOOGLE_AUTH_CLIENT_ID, clientSecret: env.GOOGLE_AUTH_CLIENT_SECRET }
+        : undefined,
+      microsoft: env.MICROSOFT_AUTH_CLIENT_ID && env.MICROSOFT_AUTH_CLIENT_SECRET
+        ? { clientId: env.MICROSOFT_AUTH_CLIENT_ID, clientSecret: env.MICROSOFT_AUTH_CLIENT_SECRET, tenantId: env.MICROSOFT_AUTH_TENANT_ID }
+        : undefined,
+    },
+  } satisfies Parameters<typeof createCustomerAuthentication>[0];
+  const customerAuthentication = createCustomerAuthentication(customerAuthenticationOptions);
+  const customerSsoAuthentication = createCustomerSsoAuthentication(customerAuthenticationOptions);
   const connectorRegistryStore = PostgresConnectorRegistryStore.fromConnectionString(env.DATABASE_URL);
   const providerSettingsStore = PostgresProviderSettingsStore.fromConnectionString(env.DATABASE_URL);
   const scheduleStore = PostgresScheduleStore.fromConnectionString(env.DATABASE_URL);
@@ -2972,6 +3929,19 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const usageLedgerStore = PostgresUsageLedgerStore.fromConnectionString(env.DATABASE_URL);
   const spendObservabilityStore = PostgresSpendObservabilityStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
+  const customerProductAuthentication = new CustomerProductAuthenticationService(
+    createBetterAuthSessionReader(customerAuthentication),
+    identityPolicyStore,
+    () => new Date(),
+    { installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND },
+  );
+  const tenantSsoAdministration = new TenantSsoAdministrationService(
+    createBetterAuthTenantSsoAuthenticationAdministration(customerSsoAuthentication),
+    identityPolicyStore as Required<Pick<IdentityPolicyStore,
+      "listOrganizationSsoConnections" | "findEnforcedOrganizationSsoConnectionByDomain"
+      | "createOrganizationSsoConnection" | "transitionOrganizationSsoConnection"
+      | "prepareOrganizationSsoConfigurationChange">>,
+  );
   const budgetStore=PostgresTeamBudgetStore.fromConnectionString(env.DATABASE_URL);
   const routingStore=PostgresRoutingStore.fromConnectionString(env.DATABASE_URL);
   await identityPolicyStore.upgradeLegacyWorkspaceProfiles();
@@ -3111,9 +4081,57 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         bootstrapOwnerObjectIds: [],
       })
     : undefined;
+  const platformOperatorValues = [
+    env.PLATFORM_OPERATOR_ENTRA_TENANT_ID,
+    env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID,
+    env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET,
+    env.PLATFORM_OPERATOR_SESSION_SECRET,
+    env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
+    env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL,
+    env.PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET,
+  ];
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !platformOperatorValues.every(Boolean)) {
+    throw new Error("Hosted deployments require the separate platform-operator workforce realm");
+  }
+  const platformOperatorStore = env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+    ? PostgresPlatformOperatorStore.fromConnectionString(env.DATABASE_URL)
+    : undefined;
+  const platformOperatorAuthentication = platformOperatorStore
+    && env.PLATFORM_OPERATOR_ENTRA_TENANT_ID
+    && env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID
+    && env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET
+    && env.PLATFORM_OPERATOR_SESSION_SECRET
+    && env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT
+    ? new PlatformOperatorAuthenticationService(platformOperatorStore, {
+        tenantId: env.PLATFORM_OPERATOR_ENTRA_TENANT_ID,
+        clientId: env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID,
+        clientSecret: env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET,
+        publicWebUrl: env.PUBLIC_WEB_URL,
+        sessionSecret: env.PLATFORM_OPERATOR_SESSION_SECRET,
+        stepUpAuthenticationContext: env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
+      })
+    : undefined;
+  const controller = new HttpControllerClient(env.CONTROLLER_URL, env.CONTROLLER_INTERNAL_TOKEN);
+  const platformSecurityAlertDispatcher = platformOperatorStore
+    && env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL
+    && env.PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET
+    ? new PlatformSecurityAlertDispatcher(
+        platformOperatorStore,
+        new SignedWebhookPlatformSecurityAlertAdapter(
+          env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL,
+          env.PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET,
+        ),
+      )
+    : undefined;
+  const platformTenantCleanupDispatcher = platformOperatorStore
+    ? new PlatformTenantCleanupDispatcher(
+        platformOperatorStore,
+        new ControlPlaneTenantCleanupAdapter(controller, gateway),
+      )
+    : undefined;
   const app = createControlServer(
     store,
-    new HttpControllerClient(env.CONTROLLER_URL, env.CONTROLLER_INTERNAL_TOKEN),
+    controller,
     env.WEB_PROXY_TOKEN,
     gateway,
     env.FIXTURE_APPROVAL_SECRET,
@@ -3138,8 +4156,26 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         ? externalIdAuthentication
         : workforceAuthentication,
       externalIdAuthentication,
+      customerAuthentication,
+      customerSsoAuthentication,
+      customerProductAuthentication,
+      tenantSsoAdministration,
+      invitationDelivery: {
+        mode: env.INVITATION_DELIVERY_MODE,
+        email: transactionalEmail,
+      },
+      closeCustomerAuthentication: () => authenticationPool.end(),
+      platformOperatorAuthentication,
+      platformOperatorStore,
+      platformSecurityAlertDispatcher,
+      platformTenantCleanupDispatcher,
+      platformOperatorApprovalConfigured: env.PLATFORM_SUPPORT_APPROVAL_REQUIRED === "true",
       openVtc,
       egressGrantSecret: env.EGRESS_GRANT_SECRET,
+      workspaceAccessAuthorization: {
+        url: env.AGENT_BRIDGE_URL,
+        token: env.CONTROLLER_INTERNAL_TOKEN,
+      },
       policyBundleAuthority,
       agentChatSecret: env.AGENT_CHAT_SECRET,
       channelBrokerClient,
@@ -3171,7 +4207,11 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     : undefined;
   pushRetryTimer?.unref();
   if (openVtc) await openVtc.flushCompanionPushQueue().catch(() => undefined);
+  platformSecurityAlertDispatcher?.start();
+  platformTenantCleanupDispatcher?.start();
   app.addHook("onClose", async () => {
+    await platformSecurityAlertDispatcher?.stop();
+    await platformTenantCleanupDispatcher?.stop();
     if (pushRetryTimer) clearInterval(pushRetryTimer);
     await store.close();
     await connectorRegistryStore.close();
@@ -3184,6 +4224,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await routingStore.close();
     await spendObservabilityStore.close();
     await identityPolicyStore.close();
+    await platformOperatorStore?.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });
 }
