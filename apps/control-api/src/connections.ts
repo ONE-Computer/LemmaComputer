@@ -638,10 +638,11 @@ export class McpConnectionService {
         && Object.keys(connector.toolPolicies).some((toolName) => explicitToolPolicy(connector.toolPolicies, toolName) !== "deny"))
       .map(async (connector) => {
         try {
-          if ((await this.connectionStatus(identity, connector)).state !== "connected") return null;
+          const status = await this.connectionStatus(identity, connector);
+          if (status.state !== "connected") return null;
           const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
           const { tools, toolPolicies } = this.reviewedToolsForProjection(connector, discoveredTools);
-          return tools.length ? { connector, tools, toolPolicies } : null;
+          return tools.length ? { connector, tools, toolPolicies, expiresAt: status.expiresAt } : null;
         } catch {
           return null;
         }
@@ -678,7 +679,18 @@ export class McpConnectionService {
         })),
       } : {}),
     });
-    this.projectionCache.set(cacheKey, { expiresAt: this.now() + 5 * 60_000, policy: projected });
+    // A cached connector grant must never outlive the OAuth credential that
+    // justified it. Otherwise a provider-side revocation could remain usable
+    // until the five-minute discovery cache expires without another status
+    // check. Unknown or malformed expiries deliberately disable caching.
+    const now = this.now();
+    const cacheTtlMs = active.reduce((ttlMs, entry) => {
+      const expiresAt = entry.expiresAt ? Date.parse(entry.expiresAt) : Number.NaN;
+      return Number.isFinite(expiresAt)
+        ? Math.min(ttlMs, Math.max(0, expiresAt - now))
+        : 0;
+    }, 5 * 60_000);
+    this.projectionCache.set(cacheKey, { expiresAt: now + cacheTtlMs, policy: projected });
     return projected;
   }
 
