@@ -125,6 +125,10 @@ const appFor = (actor: SessionPrincipal, calls: Array<{ method: string; input: u
       calls.push({ method: "listMemberAssignmentVersions", input: { tenantId: inputTenantId, subjectId } });
       return [assignmentVersion];
     },
+    revokeMember: async (input) => {
+      calls.push({ method: "revokeMember", input });
+      return true;
+    },
   };
   const identityPolicyStore = {
     listUsers: async (inputTenantId: string) => inputTenantId === tenantId ? [{
@@ -196,6 +200,14 @@ test("protected policy administration exposes immutable product provenance and a
     });
     assert.equal(assignmentHistory.statusCode, 200);
     assert.equal(assignmentHistory.json().versions.length, 1);
+    const revokedAssignment = await app.inject({
+      method: "DELETE",
+      url: "/v1/admin/protected-workspace-policy/members/member/assignment-versions",
+      headers,
+    });
+    assert.equal(revokedAssignment.statusCode, 200);
+    assert.equal(revokedAssignment.json().revoked, true);
+    assert.deepEqual(revokedAssignment.json().remediation, { required: false, action: "none", workspaceIds: [] });
     assert.deepEqual(calls, [
       { method: "overview", input: tenantId },
       { method: "createOrganizationPolicyVersion", input: {
@@ -212,6 +224,7 @@ test("protected policy administration exposes immutable product provenance and a
         assignedBy: "administrator",
       } },
       { method: "listMemberAssignmentVersions", input: { tenantId, subjectId: "member" } },
+      { method: "revokeMember", input: { tenantId, subjectId: "member", revokedBy: "administrator" } },
     ]);
   } finally {
     await app.close();

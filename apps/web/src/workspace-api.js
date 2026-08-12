@@ -249,6 +249,10 @@ export const authApi = {
 
 export const adminApi = {
   users: () => request("/api/v1/admin/users"),
+  protectedWorkspacePolicy: () => request("/api/v1/admin/protected-workspace-policy", { cache: "no-store" }),
+  protectedMemberPolicyVersions: (userId) => request(`/api/v1/admin/protected-workspace-policy/members/${encodeURIComponent(userId)}/assignment-versions`, { cache: "no-store" }),
+  assignProtectedMemberPolicy: (userId, selection) => request(`/api/v1/admin/protected-workspace-policy/members/${encodeURIComponent(userId)}/assignment-versions`, mutation("POST", { selection })),
+  revokeProtectedMemberPolicy: (userId) => request(`/api/v1/admin/protected-workspace-policy/members/${encodeURIComponent(userId)}/assignment-versions`, mutation("DELETE")),
   invitations: () => request("/api/v1/admin/invitations", { cache: "no-store" }),
   createInvitation: (input) => request("/api/v1/admin/invitations", mutation("POST", input)),
   resendInvitation: (invitationId) => request(`/api/v1/admin/invitations/${encodeURIComponent(invitationId)}/resend`, mutation()),

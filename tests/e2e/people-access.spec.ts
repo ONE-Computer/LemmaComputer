@@ -8,6 +8,14 @@ test("organization administrator invites a person and manages member access", as
   await page.reload();
   await expect(page.getByRole("heading", { name: "People and access" })).toBeVisible();
   await expect(page.getByText("Identity-provider credentials remain outside LemmaComputer.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Office worker workspace" })).toBeVisible();
+  await expect(page.getByText("Immutable · v1")).toBeVisible();
+  const protectedMember = page.locator('[aria-label="Protected workspace policy assignments"] article').filter({ hasText: "Example Admin" });
+  await protectedMember.getByRole("button", { name: "Assign baseline" }).click();
+  await expect(protectedMember).toContainText("Baseline assigned · version 1");
+  await expect(protectedMember).toContainText("Restart workspace to apply policy change");
+  await protectedMember.getByRole("button", { name: "Revoke workspace access" }).click();
+  await expect(protectedMember).toContainText("Workspace access revoked");
 
   const sectionActions = ["Invite person", "Initiate organization closure", "Add connection", "Create custom role"];
   for (const name of sectionActions) {
