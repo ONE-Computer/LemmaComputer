@@ -39,15 +39,45 @@ export type EffectiveConnectorPolicyInput = {
     accessPolicyVersion: number;
     accessPolicyUpdatedAt: string;
     configuredToolPolicies: Record<string, McpToolPolicyDecision>;
+    toolDisplayNames: Record<string, string>;
     reviewedToolDefinitionHashes: Record<string, string>;
     connectionState: "connected" | "expired" | "disconnected";
     reviewMode: "product_owned" | "provider_definition_hash";
   };
   observedTools: Array<{ name: string; definitionHash: string }> | null;
+  policyApplication?: ConnectorPolicyApplicationView;
+};
+
+export type ConnectorPolicyMemberVersionInput = {
+  userId: string;
+  status: "active" | "disabled";
+  policy: {
+    policyVersionId: string;
+    version: number;
+    documentHash: string;
+  } | null;
+};
+
+export type ConnectorPolicyApplicationView = {
+  state: "not_applicable" | "empty" | "current" | "mixed" | "conflict" | "unassigned";
+  currentVersion: {
+    version: number;
+    documentHash: string;
+  } | null;
+  activeMembers: number;
+  currentMembers: number;
+  remediationRequiredMembers: number;
+  unassignedMembers: number;
+  versions: Array<{
+    version: number;
+    documentHash: string;
+    memberCount: number;
+  }>;
 };
 
 export type EffectiveConnectorToolPolicy = {
   name: string;
+  displayName: string;
   configuredDecision: McpToolPolicyDecision;
   effectiveDecision: McpToolPolicyDecision;
   reviewState: "product_owned" | "current" | "awaiting_review" | "not_checked" | "removed";
@@ -73,10 +103,91 @@ export type EffectiveConnectorPolicyView = {
   sources: ConnectorPolicySource[];
   tools: EffectiveConnectorToolPolicy[];
   runtimeProjection: {
+    scope: "requesting_administrator";
     state: "excluded" | "connection_required" | "awaiting_review" | "partially_available" | "eligible";
     allowed: number;
     approvalRequired: number;
     denied: number;
+  };
+  policyApplication: ConnectorPolicyApplicationView;
+  remediation: {
+    required: boolean;
+    reasons: Array<
+      | "policy_change_required"
+      | "member_policy_update_required"
+      | "member_policy_assignment_required"
+      | "tool_review_required"
+      | "requesting_administrator_connection_required"
+    >;
+    workspaceGrantRefresh: {
+      status: "not_observed";
+      trigger: "automatic_after_policy_save";
+    };
+    restartRequired: false;
+  };
+};
+
+const notApplicablePolicyApplication = (): ConnectorPolicyApplicationView => ({
+  state: "not_applicable",
+  currentVersion: null,
+  activeMembers: 0,
+  currentMembers: 0,
+  remediationRequiredMembers: 0,
+  unassignedMembers: 0,
+  versions: [],
+});
+
+export const resolveConnectorPolicyApplication = (
+  members: ConnectorPolicyMemberVersionInput[],
+): ConnectorPolicyApplicationView => {
+  const active = members.filter((member) => member.status === "active");
+  if (!active.length) return { ...notApplicablePolicyApplication(), state: "empty" };
+  const assigned = active.filter((member): member is ConnectorPolicyMemberVersionInput & {
+    policy: NonNullable<ConnectorPolicyMemberVersionInput["policy"]>;
+  } => Boolean(member.policy));
+  const unassignedMembers = active.length - assigned.length;
+  if (!assigned.length) {
+    return {
+      state: "unassigned",
+      currentVersion: null,
+      activeMembers: active.length,
+      currentMembers: 0,
+      remediationRequiredMembers: active.length,
+      unassignedMembers,
+      versions: [],
+    };
+  }
+  const grouped = new Map<string, ConnectorPolicyApplicationView["versions"][number]>();
+  for (const member of assigned) {
+    const key = `${member.policy.version}\0${member.policy.documentHash}`;
+    const current = grouped.get(key);
+    grouped.set(key, current
+      ? { ...current, memberCount: current.memberCount + 1 }
+      : { version: member.policy.version, documentHash: member.policy.documentHash, memberCount: 1 });
+  }
+  const versions = [...grouped.values()].sort((left, right) => (
+    right.version - left.version || left.documentHash.localeCompare(right.documentHash)
+  ));
+  const newest = versions.filter((version) => version.version === versions[0]!.version);
+  const conflict = newest.length > 1;
+  const currentVersion = conflict ? null : newest[0]!;
+  const currentMembers = currentVersion?.memberCount ?? 0;
+  const remediationRequiredMembers = active.length - currentMembers;
+  return {
+    state: conflict
+      ? "conflict"
+      : remediationRequiredMembers || versions.length > 1
+        ? "mixed"
+        : "current",
+    currentVersion: currentVersion ? {
+      version: currentVersion.version,
+      documentHash: currentVersion.documentHash,
+    } : null,
+    activeMembers: active.length,
+    currentMembers,
+    remediationRequiredMembers,
+    unassignedMembers,
+    versions,
   };
 };
 
@@ -176,6 +287,8 @@ export const resolveEffectiveConnectorPolicy = (
       : "deny";
     return {
       name,
+      displayName: input.connector.toolDisplayNames[name]
+        ?? name.split(/[-_]+/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" "),
       configuredDecision,
       effectiveDecision,
       reviewState,
@@ -205,6 +318,15 @@ export const resolveEffectiveConnectorPolicy = (
         : reviewBlocked
           ? "awaiting_review" as const
           : "eligible" as const;
+  const policyApplication = input.policyApplication ?? notApplicablePolicyApplication();
+  const remediationReasons: EffectiveConnectorPolicyView["remediation"]["reasons"] = [];
+  if (access.effectiveDecision === "deny") remediationReasons.push("policy_change_required");
+  if (["mixed", "conflict"].includes(policyApplication.state)) remediationReasons.push("member_policy_update_required");
+  if (policyApplication.state === "unassigned") remediationReasons.push("member_policy_assignment_required");
+  if (reviewBlocked) remediationReasons.push("tool_review_required");
+  if (access.effectiveDecision === "allow" && input.connector.connectionState !== "connected") {
+    remediationReasons.push("requesting_administrator_connection_required");
+  }
 
   return {
     connector: { id: input.connector.id, name: input.connector.name },
@@ -219,6 +341,16 @@ export const resolveEffectiveConnectorPolicy = (
     },
     sources,
     tools,
-    runtimeProjection: { state: runtimeState, ...counts },
+    runtimeProjection: { scope: "requesting_administrator", state: runtimeState, ...counts },
+    policyApplication,
+    remediation: {
+      required: remediationReasons.length > 0,
+      reasons: remediationReasons,
+      workspaceGrantRefresh: {
+        status: "not_observed",
+        trigger: "automatic_after_policy_save",
+      },
+      restartRequired: false,
+    },
   };
 };

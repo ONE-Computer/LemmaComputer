@@ -16,7 +16,7 @@ import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
-import { resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
+import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
 import { EntraAuthenticationService, ExternalIdAuthenticationService, testPrincipalFromHeaders } from "./auth.js";
@@ -3147,19 +3147,38 @@ export function createControlServer(
     const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
-    const effective = users.map((user) => user.effectivePolicy).find(Boolean) ?? null;
+    const policyApplication = resolveConnectorPolicyApplication(users.map((user) => ({
+      userId: user.userId,
+      status: user.status,
+      policy: user.effectivePolicy ? {
+        policyVersionId: user.effectivePolicy.policyVersionId,
+        version: user.effectivePolicy.version,
+        documentHash: user.effectivePolicy.documentHash,
+      } : null,
+    })));
+    // A unique version/hash makes every matching assignment content-equivalent.
+    // Sorting by user id is only a deterministic way to obtain that verified
+    // document; it never decides which member's version becomes current.
+    const effective = policyApplication.currentVersion
+      ? users
+          .filter((user) => user.effectivePolicy
+            && user.effectivePolicy.version === policyApplication.currentVersion!.version
+            && user.effectivePolicy.documentHash === policyApplication.currentVersion!.documentHash)
+          .sort((left, right) => left.userId.localeCompare(right.userId))[0]?.effectivePolicy ?? null
+      : null;
     const runtime = effective ? runtimePolicyFor(effective) : null;
     return {
       serverName: "lemmacomputer_ms365",
       version: effective?.version ?? 1,
       documentHash: effective?.documentHash ?? "0".repeat(64),
+      policyApplication,
       tools: Object.entries(m365CapabilityDefinitions).map(([name, definition]) => ({
         name,
         displayName: definition.displayName,
         description: definition.description,
         service: definition.service,
         risk: definition.risk,
-        decision: runtime?.toolPolicies[name] ?? definition.mode,
+        decision: runtime?.toolPolicies[name] ?? (policyApplication.state === "empty" ? definition.mode : "deny"),
       })),
     };
   });
@@ -3265,23 +3284,46 @@ export function createControlServer(
   app.get<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/effective-policy", async (request) => {
     const connectorId = request.params.connectorId;
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: connectorId });
+    if (connectorId === "microsoft-365" && !security.identityPolicyStore) {
+      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    }
     const [protectedOverview, users] = await Promise.all([
       requireProtectedWorkspacePolicy().overview(actor.tenantId),
-      security.identityPolicyStore?.listUsers(actor.tenantId) ?? Promise.resolve([]),
+      connectorId === "microsoft-365"
+        ? security.identityPolicyStore!.listUsers(actor.tenantId)
+        : Promise.resolve([]),
     ]);
     const organizationPolicy = protectedOverview.organizationPolicyVersions[0] ?? null;
-    const effective = users.find((user) => user.userId === actor.userId)?.effectivePolicy
-      ?? users.map((user) => user.effectivePolicy).find(Boolean)
-      ?? null;
+    const policyApplication = connectorId === "microsoft-365"
+      ? resolveConnectorPolicyApplication(users.map((user) => ({
+          userId: user.userId,
+          status: user.status,
+          policy: user.effectivePolicy ? {
+            policyVersionId: user.effectivePolicy.policyVersionId,
+            version: user.effectivePolicy.version,
+            documentHash: user.effectivePolicy.documentHash,
+          } : null,
+        })))
+      : undefined;
+    const effective = policyApplication?.currentVersion
+      ? users
+          .filter((user) => user.effectivePolicy
+            && user.effectivePolicy.version === policyApplication.currentVersion!.version
+            && user.effectivePolicy.documentHash === policyApplication.currentVersion!.documentHash)
+          .sort((left, right) => left.userId.localeCompare(right.userId))[0]?.effectivePolicy ?? null
+      : null;
     const runtime = effective ? runtimePolicyFor(effective) : null;
     const configuredToolPolicies = connectorId === "microsoft-365"
       ? Object.fromEntries(Object.entries(m365CapabilityDefinitions).map(([name, definition]) => [
           name,
-          runtime?.toolPolicies[name] ?? definition.mode,
+          runtime?.toolPolicies[name] ?? (policyApplication?.state === "empty" ? definition.mode : "deny"),
         ]))
       : undefined;
     const snapshot = await requireConnections().connectorPolicyAdministrationSnapshot(actor.identity, connectorId, {
       configuredToolPolicies,
+      ...(connectorId === "microsoft-365" ? {
+        toolDisplayNames: Object.fromEntries(Object.entries(m365CapabilityDefinitions).map(([name, definition]) => [name, definition.displayName])),
+      } : {}),
       reviewMode: connectorId === "microsoft-365" ? "product_owned" : "provider_definition_hash",
     });
     return { policy: resolveEffectiveConnectorPolicy({
@@ -3297,6 +3339,7 @@ export function createControlServer(
         documentHash: organizationPolicy.documentHash,
         connectors: organizationPolicy.constraints.connectors,
       } : null,
+      ...(policyApplication ? { policyApplication } : {}),
       ...snapshot,
     }) };
   });
