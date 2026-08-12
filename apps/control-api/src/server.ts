@@ -1,12 +1,14 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { organizationWorkspacePolicyConstraintsSchema, protectedPolicySelectionSchema, type EffectiveProtectedWorkspacePolicy } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
 import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { PostgresProtectedWorkspacePolicyStore } from "@lemmacomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
@@ -55,6 +57,11 @@ import { PlatformOperatorAuthenticationService } from "./platform-operator-auth.
 import { PlatformSecurityAlertDispatcher, SignedWebhookPlatformSecurityAlertAdapter, type PlatformSecurityAlertDispatcherStatus } from "./platform-security-alert-dispatcher.js";
 import { ControlPlaneTenantCleanupAdapter, PlatformTenantCleanupDispatcher, type PlatformTenantCleanupDispatcherStatus } from "./platform-tenant-cleanup-dispatcher.js";
 import { createBetterAuthTenantSsoAuthenticationAdministration, TenantSsoAdministrationService } from "./tenant-sso.js";
+import {
+  loadProductPolicyRelease,
+  ProtectedWorkspacePolicyAdministrationService,
+  type ProtectedWorkspacePolicyAdministrationBoundary,
+} from "./protected-workspace-policy.js";
 
 import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
@@ -136,7 +143,7 @@ const sandboxModels = [
 ] as const;
 
 const workspaceServiceClasses = [
-  { value: "auto", displayName: "Auto", description: "LemmaComputer chooses the best eligible tier for each task." },
+  { value: "auto", displayName: "Auto (Beta)", description: "Fixed Balanced by default; dynamic selection requires explicit Team enablement." },
   { value: "lite", displayName: "Lite", description: "Fast, economical work." },
   { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
   { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },
@@ -189,6 +196,68 @@ const defaultAgentIds = (document: Record<string, unknown>, assigned = assignedA
     ? document.defaultAgents.filter((item): item is AgentCatalogId => assigned.includes(item as AgentCatalogId))
     : assigned;
   return configured.length ? configured : [assigned[0]!];
+};
+
+const intersectAssigned = <T extends string>(configured: unknown, allowed: readonly T[]): T[] => (
+  Array.isArray(configured)
+    ? configured.filter((value): value is T => typeof value === "string" && allowed.includes(value as T))
+    : []
+);
+
+export const constrainEffectivePolicy = (
+  policy: EffectivePolicy,
+  protectedPolicy: EffectiveProtectedWorkspacePolicy,
+): EffectivePolicy => {
+  const document = policy.document as Record<string, unknown>;
+  const workspaceProfiles = intersectAssigned(document.workspaceProfiles, protectedPolicy.allowed.workspaceProfileIds);
+  const agents = intersectAssigned(document.agents, protectedPolicy.allowed.agentIds);
+  const applications = intersectAssigned(document.applications, protectedPolicy.allowed.applicationIds);
+  const modelAliases = intersectAssigned(document.modelAliases, protectedPolicy.allowed.modelAliases);
+  const capabilities = intersectAssigned(document.capabilities, protectedPolicy.allowed.capabilityIds);
+  const mcp = structuredClone((document.mcp ?? {}) as Record<string, unknown>);
+  const servers = (mcp.servers ?? {}) as Record<string, unknown>;
+  const microsoft365 = servers.lemmacomputer_ms365 as Record<string, unknown> | undefined;
+  if (microsoft365) {
+    const ceiling = protectedPolicy.allowed.connectorToolPolicies["microsoft-365"] ?? {};
+    const configuredTools = Array.isArray(microsoft365.tools) ? microsoft365.tools.filter((tool): tool is string => typeof tool === "string") : [];
+    const configuredDecisions = (microsoft365.toolPolicies ?? {}) as Record<string, "allow" | "approval_required" | "deny">;
+    const rank = { allow: 0, approval_required: 1, deny: 2 } as const;
+    microsoft365.tools = configuredTools.filter((tool) => Object.hasOwn(ceiling, tool));
+    microsoft365.toolPolicies = Object.fromEntries((microsoft365.tools as string[]).map((tool) => {
+      const configured = configuredDecisions[tool] ?? "deny";
+      const maximum = ceiling[tool] ?? "deny";
+      return [tool, rank[configured] >= rank[maximum] ? configured : maximum];
+    }));
+  }
+  return {
+    ...policy,
+    policyVersionId: protectedPolicy.template.templateVersionId,
+    version: protectedPolicy.template.version,
+    documentHash: protectedPolicy.effectiveHash,
+    document: {
+      ...document,
+      workspaceProfiles,
+      workspaceProfile: protectedPolicy.selection.workspaceProfile,
+      agents,
+      defaultAgents: protectedPolicy.selection.agentIds.filter((id) => agents.includes(id)),
+      applications,
+      defaultApplications: protectedPolicy.selection.applicationIds.filter((id) => applications.includes(id)),
+      modelAliases,
+      capabilities,
+      clipboard: {
+        enabled: protectedPolicy.allowed.clipboard.localToWorkspace || protectedPolicy.allowed.clipboard.workspaceToLocal,
+        ...protectedPolicy.allowed.clipboard,
+      },
+      mcp,
+      serviceClasses: protectedPolicy.allowed.serviceClasses,
+      defaultServiceClass: protectedPolicy.selection.serviceClass,
+      maximumReasoningEffort: protectedPolicy.allowed.maximumReasoningEffort,
+      maximumEgressMode: protectedPolicy.allowed.maximumEgressMode,
+      protectedConnectorIds: protectedPolicy.allowed.connectorIds,
+      protectedPolicySources: protectedPolicy.sources,
+      protectedPolicyHash: protectedPolicy.effectiveHash,
+    } as EffectivePolicy["document"],
+  };
 };
 
 const optionalEnvString = (minimum = 1) => z.preprocess(
@@ -394,6 +463,7 @@ export function createControlServer(
     platformTenantCleanupDispatcher?: { status(): PlatformTenantCleanupDispatcherStatus };
     platformOperatorApprovalConfigured?: boolean;
     identityPolicyStore?: IdentityPolicyStore;
+    protectedWorkspacePolicy?: ProtectedWorkspacePolicyAdministrationBoundary;
     mcpPolicyToken?: string;
     mcpEgressProxyToken?: string;
     agentBridgeSecret?: string;
@@ -910,11 +980,45 @@ export function createControlServer(
     if (await allowsWorkspaceGrantPermission(actor, permission, owner, grantId)) return actor;
     throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
   };
+  const effectivePolicyFor = async (value: SessionPrincipal, effective: EffectivePolicy | null) => {
+    const protectedState = await security.protectedWorkspacePolicy?.effectiveMemberPolicy?.(value.tenantId, value.userId) ?? { state: "unassigned" as const };
+    if (protectedState.state === "revoked") {
+      throw new LemmaComputerError("PROTECTED_POLICY_REVOKED", "Protected workspace access has been revoked", 403);
+    }
+    const protectedPolicy = protectedState.state === "assigned" ? protectedState.policy : null;
+    return {
+      effective: effective && protectedPolicy ? constrainEffectivePolicy(effective, protectedPolicy) : effective,
+      protectedPolicy,
+    };
+  };
   const assignedPolicy = async (request: object) => {
     const value = principal(request);
     const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;
     if (security.identityPolicyStore && !effective) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
-    return { principal: value, effective };
+    return { principal: value, ...(await effectivePolicyFor(value, effective)) };
+  };
+  const requireProtectedWorkspacePolicy = () => {
+    if (!security.protectedWorkspacePolicy) {
+      throw new LemmaComputerError("PROTECTED_POLICY_STORE_NOT_CONFIGURED", "Protected workspace policy storage is unavailable", 503);
+    }
+    return security.protectedWorkspacePolicy;
+  };
+  const requirePolicyTarget = async (tenantId: string, userId: string) => {
+    if (!security.identityPolicyStore) {
+      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy identity storage is unavailable", 503);
+    }
+    const target = (await security.identityPolicyStore.listUsers(tenantId)).find((user) => user.userId === userId);
+    if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User was not found", 404);
+    return target;
+  };
+  const protectedPolicyRemediationFor = async (tenantId: string, subjectId: string) => {
+    const owner = identityContextSchema.parse({ tenantId, subjectId, audience: "lemmacomputer-control" });
+    const affected = (await store.listCurrent(owner)).filter((workspace) => !["not_created", "stopped", "failed"].includes(workspace.state));
+    return {
+      required: affected.length > 0,
+      action: affected.length ? "restart_workspace" as const : "none" as const,
+      workspaceIds: affected.map((workspace) => workspace.id),
+    };
   };
   const workspaceEgressFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string) => (
     await security.identityPolicyStore?.getWorkspaceEgressSecurityGroup?.({
@@ -937,6 +1041,13 @@ export function createControlServer(
       const governedRoutingAvailable = await governedRoutingAvailableFor(value.tenantId);
       const document = effective.document as Record<string, unknown>;
       const availableAgentIds = assignedAgentIds(document);
+      const availableServiceClasses = Array.isArray(document.serviceClasses)
+        ? document.serviceClasses.filter((item): item is "auto" | "lite" | "balanced" | "pro" => ["auto", "lite", "balanced", "pro"].includes(String(item)))
+        : ["auto", "lite", "balanced", "pro"];
+      const requestedServiceClass = (saved?.requestedServiceClass ?? (typeof document.defaultServiceClass === "string" ? document.defaultServiceClass : "auto")) as "auto" | "lite" | "balanced" | "pro";
+      if (!availableServiceClasses.includes(requestedServiceClass)) {
+        throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "The selected service class is not assigned by the active policy", 403);
+      }
       policy = {
         ...runtimePolicyFor(
           effective,
@@ -947,12 +1058,44 @@ export function createControlServer(
           workspaceEgress,
           governedRoutingAvailable ? ["lemmacomputer-auto"] : [],
         ),
-        requestedServiceClass: saved?.requestedServiceClass ?? "auto",
+        requestedServiceClass,
       };
+      if (document.maximumEgressMode === "restricted" && policy.egressMode !== "restricted") {
+        throw new LemmaComputerError("EGRESS_MODE_NOT_ASSIGNED", "Full-web egress is denied by the protected policy", 403);
+      }
     }
+    const projected = connections ? await connections.projectConnectedConnectors(value.identity, policy) : policy;
+    const protectedConnectorIds = effective?.document && Array.isArray((effective.document as Record<string, unknown>).protectedConnectorIds)
+      ? (effective.document as Record<string, unknown>).protectedConnectorIds as string[]
+      : null;
+    const constrainedProjection = protectedConnectorIds ? (() => {
+      const primaryAllowed = protectedConnectorIds.includes("microsoft-365");
+      const mcpServers = [projected.mcpServer];
+      const activeMcpServers = primaryAllowed
+        ? (projected.activeMcpServers ?? []).filter((server) => mcpServers.includes(server))
+        : [];
+      const allowedTools = primaryAllowed ? projected.mcpToolPermissions?.[projected.mcpServer] ?? projected.allowedTools : projected.allowedTools;
+      const toolPolicies = Object.fromEntries(allowedTools.map((tool) => [tool, primaryAllowed ? projected.toolPolicies[tool] ?? "deny" : "deny"]));
+      return runtimePolicySchema.parse({
+        ...projected,
+        mcpServers,
+        activeMcpServers,
+        mcpToolPermissions: primaryAllowed ? { [projected.mcpServer]: allowedTools } : {},
+        allowedTools,
+        toolPolicies,
+        ...(projected.agents ? { agents: projected.agents.map((agent) => ({
+          ...agent,
+          mcpServers,
+          activeMcpServers,
+          mcpToolPermissions: primaryAllowed ? { [projected.mcpServer]: allowedTools } : {},
+          allowedTools,
+          toolPolicies,
+        })) } : {}),
+      });
+    })() : projected;
     return {
       principal: value,
-      policy: connections ? await connections.projectConnectedConnectors(value.identity, policy) : policy,
+      policy: constrainedProjection,
     };
   };
   const refreshOwnedWorkspaceConnectionGrants = async (value: SessionPrincipal) => {
@@ -2653,6 +2796,79 @@ export function createControlServer(
     });
     return { userId: request.params.userId, revokedSessions };
   });
+  app.get("/v1/admin/protected-workspace-policy", async (request) => {
+    const actor = requirePermission(request, "policy.manage");
+    return requireProtectedWorkspacePolicy().overview(actor.tenantId);
+  });
+  app.get("/v1/admin/protected-workspace-policy/organization-versions", async (request) => {
+    const actor = requirePermission(request, "policy.manage");
+    return {
+      versions: await requireProtectedWorkspacePolicy().listOrganizationPolicyVersions(actor.tenantId),
+    };
+  });
+  app.post("/v1/admin/protected-workspace-policy/organization-versions", async (request, reply) => {
+    const actor = requirePermission(request, "policy.manage");
+    const input = z.strictObject({
+      constraints: organizationWorkspacePolicyConstraintsSchema,
+      revisionNote: z.string().trim().min(3).max(240),
+    }).parse(request.body ?? {});
+    const version = await requireProtectedWorkspacePolicy().createOrganizationPolicyVersion({
+      tenantId: actor.tenantId,
+      constraints: input.constraints,
+      revisionNote: input.revisionNote,
+      createdBy: actor.userId,
+    });
+    return reply.code(201).send({ version });
+  });
+  app.get<{ Params: { userId: string } }>(
+    "/v1/admin/protected-workspace-policy/members/:userId/assignment-versions",
+    async (request) => {
+      const actor = requirePermission(request, "policy.manage");
+      await requirePolicyTarget(actor.tenantId, request.params.userId);
+      return {
+        versions: await requireProtectedWorkspacePolicy().listMemberAssignmentVersions(
+          actor.tenantId,
+          request.params.userId,
+        ),
+      };
+    },
+  );
+  app.post<{ Params: { userId: string } }>(
+    "/v1/admin/protected-workspace-policy/members/:userId/assignment-versions",
+    async (request, reply) => {
+      const actor = requirePermission(request, "policy.manage");
+      await requirePolicyTarget(actor.tenantId, request.params.userId);
+      const input = z.strictObject({ selection: protectedPolicySelectionSchema }).parse(request.body ?? {});
+      const version = await requireProtectedWorkspacePolicy().assignMember({
+        tenantId: actor.tenantId,
+        subjectId: request.params.userId,
+        selection: input.selection,
+        assignedBy: actor.userId,
+      });
+      return reply.code(201).send({
+        version,
+        remediation: await protectedPolicyRemediationFor(actor.tenantId, request.params.userId),
+      });
+    },
+  );
+  app.delete<{ Params: { userId: string } }>(
+    "/v1/admin/protected-workspace-policy/members/:userId/assignment-versions",
+    async (request) => {
+      const actor = requirePermission(request, "policy.manage");
+      await requirePolicyTarget(actor.tenantId, request.params.userId);
+      const policy = requireProtectedWorkspacePolicy();
+      if (!policy.revokeMember) throw new LemmaComputerError("PROTECTED_POLICY_STORE_NOT_CONFIGURED", "Protected policy revocation is unavailable", 503);
+      const revoked = await policy.revokeMember({
+        tenantId: actor.tenantId,
+        subjectId: request.params.userId,
+        revokedBy: actor.userId,
+      });
+      return {
+        revoked,
+        remediation: await protectedPolicyRemediationFor(actor.tenantId, request.params.userId),
+      };
+    },
+  );
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request) => {
     const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
@@ -3088,6 +3304,9 @@ export function createControlServer(
     const assignedApplications = assignedApplicationIds(document);
     const availableApplications = sandboxApplications.filter((application) => assignedApplications.includes(application.id));
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
+    const assignedServiceClasses = Array.isArray(document.serviceClasses)
+      ? document.serviceClasses.filter((item): item is "auto" | "lite" | "balanced" | "pro" => workspaceServiceClasses.some((entry) => entry.value === item))
+      : workspaceServiceClasses.map((entry) => entry.value);
     const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "lemmacomputer-auto" : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
     if (!availableProfiles.length || !availableModels.length || !availableAgents.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, or agent", 500);
@@ -3096,7 +3315,10 @@ export function createControlServer(
     const profileId = saved && availableProfiles.some((profile) => profile.id === saved.profileId) ? saved.profileId : availableProfiles[0]!.id;
     const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
     const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
-    const requestedServiceClass = governedRoutingAvailable ? saved?.requestedServiceClass ?? "auto" : "auto";
+    const selectedServiceClass = saved?.requestedServiceClass ?? (typeof document.defaultServiceClass === "string" ? document.defaultServiceClass : "auto");
+    const requestedServiceClass = governedRoutingAvailable && assignedServiceClasses.includes(selectedServiceClass as typeof assignedServiceClasses[number])
+      ? selectedServiceClass
+      : assignedServiceClasses[0] ?? "auto";
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
@@ -3142,7 +3364,9 @@ export function createControlServer(
       availableProfiles,
       availableApplications,
       availableModels,
-      availableServiceClasses: governedRoutingAvailable ? workspaceServiceClasses : workspaceServiceClasses.slice(0, 1),
+      availableServiceClasses: governedRoutingAvailable
+        ? workspaceServiceClasses.filter((serviceClass) => assignedServiceClasses.includes(serviceClass.value))
+        : workspaceServiceClasses.slice(0, 1),
       agentIds: selectedAgentIds,
       availableAgents,
       ...(workspaceEgress ? { securityGroup: workspaceEgress } : {}),
@@ -3163,6 +3387,7 @@ export function createControlServer(
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
     const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
+    const serviceClasses = Array.isArray(document.serviceClasses) ? document.serviceClasses : workspaceServiceClasses.map((entry) => entry.value);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : input.modelAlias;
     const agents = Array.isArray(document.agents) ? document.agents : ownedAgentCatalog.map((agent) => agent.id);
@@ -3170,6 +3395,7 @@ export function createControlServer(
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
     if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
     if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
+    if (!serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
     const current = await store.getCurrent(actor.identity, input.grantId);
     if (current && !["not_created", "stopped", "failed"].includes(current.state)) throw new LemmaComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop the workspace before changing its profile or model route", 409, true);
     await store.saveSandboxSettings(actor.identity, {
@@ -3211,9 +3437,10 @@ export function createControlServer(
       await requireWorkspaceGrantPermission(request, "workspace.manage", targetIdentity, grantId);
       const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
       if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+      const { effective: targetEffective } = await effectivePolicyFor(targetPrincipal, target.effectivePolicy);
       return sandboxSettingsFor(
         targetPrincipal,
-        target.effectivePolicy,
+        targetEffective,
         grantId,
         await allowsWorkspaceGrantPermission(actor, "policy.manage", targetIdentity, grantId),
       );
@@ -3226,9 +3453,10 @@ export function createControlServer(
     await requireWorkspaceGrantPermission(request, "workspace.manage", targetIdentity, input.grantId);
     const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
     if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+    const { effective: targetEffective } = await effectivePolicyFor(targetPrincipal, target.effectivePolicy);
     return saveSandboxSettingsFor(
       targetPrincipal,
-      target.effectivePolicy,
+      targetEffective,
       input,
       await allowsWorkspaceGrantPermission(actor, "policy.manage", targetIdentity, input.grantId),
     );
@@ -3974,6 +4202,15 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const spendObservabilityStore = PostgresSpendObservabilityStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   const agentInstanceStore = PostgresAgentInstanceStore.fromConnectionString(env.DATABASE_URL);
+  const productPolicyRelease = await loadProductPolicyRelease();
+  const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(
+    env.DATABASE_URL,
+    productPolicyRelease.trustRoot,
+  );
+  const protectedWorkspacePolicy = new ProtectedWorkspacePolicyAdministrationService(
+    protectedWorkspacePolicyStore,
+    productPolicyRelease,
+  );
   const customerProductAuthentication = new CustomerProductAuthenticationService(
     createBetterAuthSessionReader(customerAuthentication),
     identityPolicyStore,
@@ -4190,6 +4427,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     },
     {
       identityPolicyStore,
+      protectedWorkspacePolicy,
       connectorRegistryStore,
       providerSettingsStore,
       providerAdministration,
@@ -4271,6 +4509,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await spendObservabilityStore.close();
     await identityPolicyStore.close();
     await agentInstanceStore.close();
+    await protectedWorkspacePolicyStore.close();
     await platformOperatorStore?.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });

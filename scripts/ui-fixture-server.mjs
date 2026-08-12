@@ -473,6 +473,36 @@ let adminUsers = [
     }],
   },
 ];
+const protectedWorkspacePolicyOverview = {
+  baseline: {
+    immutable: true,
+    editableByOrganization: false,
+    authority: "lemmacomputer_product_release",
+    templateId: "pbt_office_worker_claude",
+    templateVersionId: "pbtv_office_worker_claude_1",
+    version: 1,
+    supersedesTemplateVersionId: null,
+    documentHash: "c".repeat(64),
+    envelopeDigest: "d".repeat(64),
+    keyId: "prk_phase_0_5_20260812",
+    release: { releaseId: "0.5-policy-foundation-1", sourceCommit: "e".repeat(40), publishedAt: now },
+    constraints: {
+      workspaceProfiles: { allow: ["claude-desktop-standard-v1", "kasm-persistent-standard"], deny: ["disposable-open-v1"] },
+      agents: { allow: ["claude-desktop", "claude-cli"], deny: ["codex-cli", "hermes-desktop", "hermes-claw"] },
+      applications: { allow: ["firefox", "google-chrome"], deny: [] },
+      modelAliases: { allow: ["lemmacomputer-auto", "lemmacomputer-claude"], deny: [] },
+      serviceClasses: { allow: ["auto", "balanced"], deny: [] },
+      maximumReasoningEffort: "max",
+      maximumEgressMode: "restricted",
+      clipboard: { localToWorkspace: true, workspaceToLocal: true, maxBytes: 1048576 },
+      connectors: { allow: ["microsoft-365"], deny: [], toolPolicies: { "microsoft-365": { "list-mail-messages": "allow", "send-mail": "approval_required" } } },
+      capabilities: { allow: ["ai-assistant", "m365-read", "m365-write-protected"], deny: [] },
+    },
+    installedAt: now,
+  },
+  organizationPolicyVersions: [],
+};
+const protectedAssignments = new Map();
 const fixtureRoleCatalog = {
   version: 2,
   permissions: [
@@ -540,8 +570,8 @@ const fixtureRoutingSettings=()=>({teamId:fixtureSpendTeamId,policy:{id:routingP
   {id:routingDeploymentIds.pro,serviceClass:"pro",provider:"bedrock",providerModel:"private/sol",providerDeployment:"bedrock/sol",rateCardId:"99999999-9999-4999-8999-999999999993",approved:true,evaluationPassed:true},
 ]});
 const fixtureRoutingReport=()=>({teamId:fixtureSpendTeamId,sampleSize:240,selectedDistribution:{lite:142,balanced:74,pro:24},executedDistribution:{[routingDeploymentIds.balanced]:240},expectedCost:"91.580000000000",actualCost:"123.000000000000",currency:"USD",estimatedSavings:"31.420000000000",fallbackRate:"0.025",errorRate:"0.008",regretRate:"0.012",routerOverheadMs:"1.420000",decisions:[
-  {id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",createdAt:"2026-07-30T08:00:00.000Z",selectedServiceClass:"lite",reasonCode:"complexity_classifier",shadow:true,expectedCost:"0.018",currency:"USD",outcome:"success"},
-  {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",createdAt:"2026-07-30T07:00:00.000Z",selectedServiceClass:"pro",reasonCode:"capability_escalation",shadow:true,expectedCost:"0.084",currency:"USD",outcome:"override"},
+  {id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",createdAt:"2026-07-30T08:00:00.000Z",selectedServiceClass:"lite",selectedDeploymentId:routingDeploymentIds.lite,executedDeploymentId:routingDeploymentIds.balanced,executedServiceClass:"balanced",reasonCode:"complexity_classifier",shadow:true,expectedCost:"0.018",currency:"USD",outcome:"success"},
+  {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",createdAt:"2026-07-30T07:00:00.000Z",selectedServiceClass:"pro",selectedDeploymentId:routingDeploymentIds.pro,executedDeploymentId:routingDeploymentIds.balanced,executedServiceClass:"balanced",reasonCode:"capability_escalation",shadow:true,expectedCost:"0.084",currency:"USD",outcome:"override"},
 ]});
 const emptyBudgetStatus = { budget:null,period:null,effectiveLimitAmount:null,settledProviderCost:null,outstandingReservations:null,remainingAmount:null,percentConsumed:null,priceStatus:"unknown",enforcement:"none",alerts:[],lastReconciliation:null };
 const fixtureBudgetStatus = (teamId) => fixtureTeamBudgets.get(teamId) ?? emptyBudgetStatus;
@@ -1640,6 +1670,60 @@ const server = http.createServer((request, response) => {
   }
   if (key === "GET /v1/admin/users") {
     response.end(JSON.stringify({ delegableBuiltInRoles: ["owner", "admin", "member"], users: adminUsers }));
+    return;
+  }
+  if (key === "GET /v1/admin/protected-workspace-policy") {
+    response.end(JSON.stringify(protectedWorkspacePolicyOverview));
+    return;
+  }
+  if (request.method === "GET" && /^\/v1\/admin\/protected-workspace-policy\/members\/[^/]+\/assignment-versions$/.test(url.pathname)) {
+    const userId = url.pathname.split("/").at(-2);
+    response.end(JSON.stringify({ versions: protectedAssignments.get(userId) ?? [] }));
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/admin\/protected-workspace-policy\/members\/[^/]+\/assignment-versions$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const userId = url.pathname.split("/").at(-2);
+      const prior = protectedAssignments.get(userId) ?? [];
+      const version = {
+        id: `fixture-protected-${userId}-${prior.length + 1}`,
+        tenantId: session.tenant.id,
+        subjectId: userId,
+        assignmentVersion: prior.length + 1,
+        previousAssignmentId: prior[0]?.id ?? null,
+        state: "selected",
+        protectedTemplateVersionId: protectedWorkspacePolicyOverview.baseline.templateVersionId,
+        organizationPolicyVersionId: null,
+        selection: JSON.parse(body).selection,
+        selectionHash: "f".repeat(64),
+        assignedBy: session.user.id,
+        createdAt: new Date().toISOString(),
+      };
+      protectedAssignments.set(userId, [version, ...prior]);
+      response.statusCode = 201;
+      response.end(JSON.stringify({ version }));
+    });
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/admin\/protected-workspace-policy\/members\/[^/]+\/assignment-versions$/.test(url.pathname)) {
+    const userId = url.pathname.split("/").at(-2);
+    const prior = protectedAssignments.get(userId) ?? [];
+    if (!prior.length || prior[0].state === "revoked") {
+      response.end(JSON.stringify({ revoked: false, remediation: { required: false, action: "none", workspaceIds: [] } }));
+      return;
+    }
+    const version = {
+      ...prior[0],
+      id: `fixture-protected-${userId}-${prior.length + 1}`,
+      assignmentVersion: prior.length + 1,
+      previousAssignmentId: prior[0].id,
+      state: "revoked",
+      createdAt: new Date().toISOString(),
+    };
+    protectedAssignments.set(userId, [version, ...prior]);
+    response.end(JSON.stringify({ revoked: true, remediation: { required: true, action: "restart_workspace", workspaceIds: ["fixture-example-workspace"] } }));
     return;
   }
   if (key === "GET /v1/admin/invitations") {

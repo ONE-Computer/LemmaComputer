@@ -274,7 +274,10 @@ RUN chmod 0755 \
     && printf '%s\n' '<script src="app/lemmacomputer-kasm-clipboard.js"></script>' >> /usr/share/kasmvnc/www/index.html \
     && chown -R 1000:1000 /home/kasm-default-profile/Desktop /home/kasm-default-profile/.config
 
-HEALTHCHECK --interval=5s --timeout=2s --start-period=15s --retries=12 \
+# Probe frequently only while Docker still considers the container to be
+# starting. A successful check exits the start period immediately, after which
+# the existing five-second steady-state cadence applies.
+HEALTHCHECK --interval=5s --timeout=2s --start-period=15s --start-interval=1s --retries=12 \
   CMD test -f /run/lemmacomputer/workspace-ready \
     && timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6901' \
     && { test ! -f /run/lemmacomputer/gateway-proxy.pid || curl -fsS http://127.0.0.1:4312/healthz >/dev/null; } \

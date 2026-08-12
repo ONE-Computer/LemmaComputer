@@ -542,6 +542,10 @@
   min-height: 72px;
 }
 
+.route-evidence-card .routing-decisions button {
+  grid-template-columns: minmax(240px, 1.35fr) minmax(140px, 1fr) auto;
+}
+
 .route-price-target {
   display: grid;
   gap: 3px;
@@ -802,5 +806,9 @@
   .route-decision-list > div {
     grid-template-columns: 1fr;
     gap: 3px;
+  }
+
+  .route-evidence-card .routing-decisions button {
+    grid-template-columns: 1fr;
   }
 }

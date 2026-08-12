@@ -19,6 +19,7 @@ export * from "./usage-ledger.js";
 export * from "./budgets.js";
 export * from "./routing.js";
 export * from "./platform-operator.js";
+export * from "./protected-workspace-policy.js";
 
 export type WorkspaceRecord = {
   id: string;

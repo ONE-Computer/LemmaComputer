@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  containerMountedFilePaths,
   inspectReadablePaths,
   litellmMountedFilePaths,
+  postgresMountedFilePaths,
 } from "../scripts/dev-doctor-lib.mjs";
 
 test("dev doctor covers every repository file mounted into LiteLLM", () => {
@@ -13,6 +15,16 @@ test("dev doctor covers every repository file mounted into LiteLLM", () => {
     "config/litellm/config.yaml",
     "config/litellm/logging.yaml",
     "integrations/litellm/lemmacomputer_policy_callback.py",
+  ]);
+});
+
+test("worktree initialization repairs every repository file mounted into a container", () => {
+  assert.deepEqual(postgresMountedFilePaths, [
+    "infra/postgres/init-auth-database.sh",
+  ]);
+  assert.deepEqual(containerMountedFilePaths, [
+    ...litellmMountedFilePaths,
+    ...postgresMountedFilePaths,
   ]);
 });
 
