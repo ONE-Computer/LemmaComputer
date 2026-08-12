@@ -16,6 +16,7 @@ import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
+import { resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
 import { EntraAuthenticationService, ExternalIdAuthenticationService, testPrincipalFromHeaders } from "./auth.js";
@@ -3260,6 +3261,44 @@ export function createControlServer(
       type: "provider",
       resourceId: connector.id,
     })) };
+  });
+  app.get<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/effective-policy", async (request) => {
+    const connectorId = request.params.connectorId;
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: connectorId });
+    const [protectedOverview, users] = await Promise.all([
+      requireProtectedWorkspacePolicy().overview(actor.tenantId),
+      security.identityPolicyStore?.listUsers(actor.tenantId) ?? Promise.resolve([]),
+    ]);
+    const organizationPolicy = protectedOverview.organizationPolicyVersions[0] ?? null;
+    const effective = users.find((user) => user.userId === actor.userId)?.effectivePolicy
+      ?? users.map((user) => user.effectivePolicy).find(Boolean)
+      ?? null;
+    const runtime = effective ? runtimePolicyFor(effective) : null;
+    const configuredToolPolicies = connectorId === "microsoft-365"
+      ? Object.fromEntries(Object.entries(m365CapabilityDefinitions).map(([name, definition]) => [
+          name,
+          runtime?.toolPolicies[name] ?? definition.mode,
+        ]))
+      : undefined;
+    const snapshot = await requireConnections().connectorPolicyAdministrationSnapshot(actor.identity, connectorId, {
+      configuredToolPolicies,
+      reviewMode: connectorId === "microsoft-365" ? "product_owned" : "provider_definition_hash",
+    });
+    return { policy: resolveEffectiveConnectorPolicy({
+      baseline: {
+        templateVersionId: protectedOverview.baseline.templateVersionId,
+        version: protectedOverview.baseline.version,
+        documentHash: protectedOverview.baseline.documentHash,
+        connectors: protectedOverview.baseline.constraints.connectors,
+      },
+      organizationPolicy: organizationPolicy ? {
+        policyVersionId: organizationPolicy.policyVersionId,
+        version: organizationPolicy.version,
+        documentHash: organizationPolicy.documentHash,
+        connectors: organizationPolicy.constraints.connectors,
+      } : null,
+      ...snapshot,
+    }) };
   });
   app.post("/v1/admin/connectors/discover", async (request) => {
     const actor = requirePermission(request, "provider.manage");
