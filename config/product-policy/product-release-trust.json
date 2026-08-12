@@ -1,0 +1,13 @@
+{
+  "profile": "lemmacomputer-product-release-key-set/v1",
+  "keys": [
+    {
+      "keyId": "prk_phase_0_5_20260812",
+      "algorithm": "Ed25519",
+      "publicKeySpkiBase64": "MCowBQYDK2VwAyEA0ZDDIUG/nna4qp0jNaZFz8dGqsNP5idPtz8xlYIHOIo=",
+      "status": "active",
+      "activatedAt": "2026-08-12T04:56:25.000Z",
+      "expiresAt": null
+    }
+  ]
+}

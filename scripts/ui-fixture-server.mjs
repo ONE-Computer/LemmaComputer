@@ -540,8 +540,8 @@ const fixtureRoutingSettings=()=>({teamId:fixtureSpendTeamId,policy:{id:routingP
   {id:routingDeploymentIds.pro,serviceClass:"pro",provider:"bedrock",providerModel:"private/sol",providerDeployment:"bedrock/sol",rateCardId:"99999999-9999-4999-8999-999999999993",approved:true,evaluationPassed:true},
 ]});
 const fixtureRoutingReport=()=>({teamId:fixtureSpendTeamId,sampleSize:240,selectedDistribution:{lite:142,balanced:74,pro:24},executedDistribution:{[routingDeploymentIds.balanced]:240},expectedCost:"91.580000000000",actualCost:"123.000000000000",currency:"USD",estimatedSavings:"31.420000000000",fallbackRate:"0.025",errorRate:"0.008",regretRate:"0.012",routerOverheadMs:"1.420000",decisions:[
-  {id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",createdAt:"2026-07-30T08:00:00.000Z",selectedServiceClass:"lite",reasonCode:"complexity_classifier",shadow:true,expectedCost:"0.018",currency:"USD",outcome:"success"},
-  {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",createdAt:"2026-07-30T07:00:00.000Z",selectedServiceClass:"pro",reasonCode:"capability_escalation",shadow:true,expectedCost:"0.084",currency:"USD",outcome:"override"},
+  {id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",createdAt:"2026-07-30T08:00:00.000Z",selectedServiceClass:"lite",selectedDeploymentId:routingDeploymentIds.lite,executedDeploymentId:routingDeploymentIds.balanced,executedServiceClass:"balanced",reasonCode:"complexity_classifier",shadow:true,expectedCost:"0.018",currency:"USD",outcome:"success"},
+  {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",createdAt:"2026-07-30T07:00:00.000Z",selectedServiceClass:"pro",selectedDeploymentId:routingDeploymentIds.pro,executedDeploymentId:routingDeploymentIds.balanced,executedServiceClass:"balanced",reasonCode:"capability_escalation",shadow:true,expectedCost:"0.084",currency:"USD",outcome:"override"},
 ]});
 const emptyBudgetStatus = { budget:null,period:null,effectiveLimitAmount:null,settledProviderCost:null,outstandingReservations:null,remainingAmount:null,percentConsumed:null,priceStatus:"unknown",enforcement:"none",alerts:[],lastReconciliation:null };
 const fixtureBudgetStatus = (teamId) => fixtureTeamBudgets.get(teamId) ?? emptyBudgetStatus;

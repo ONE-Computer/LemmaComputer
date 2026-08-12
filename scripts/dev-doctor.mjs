@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { worktreeIsolationEnvironmentVariableNames } from "./deployment-config.mjs";
-import { inspectReadablePaths, litellmMountedFilePaths } from "./dev-doctor-lib.mjs";
+import { containerMountedFilePaths, inspectReadablePaths } from "./dev-doctor-lib.mjs";
 
 const run = (command, args) => spawnSync(command, args, { encoding: "utf8" });
 const failures = [];
@@ -22,10 +22,10 @@ const context = run("docker", ["context", "show"]);
 if (context.status === 0 && context.stdout.trim() === (process.env.LEMMACOMPUTER_DEMO_DOCKER_CONTEXT ?? "lemmacomputer-demo")) {
   failures.push("the active Docker context is reserved for the demo deployment");
 }
-for (const diagnostic of await inspectReadablePaths(litellmMountedFilePaths)) {
+for (const diagnostic of await inspectReadablePaths(containerMountedFilePaths)) {
   failures.push(
     diagnostic.reason === "missing"
-      ? `${diagnostic.path} is missing; restore the LiteLLM bind-mounted file`
+      ? `${diagnostic.path} is missing; restore the container bind-mounted file`
       : `${diagnostic.path} is unreadable; grant the current user read access before starting Compose`,
   );
 }

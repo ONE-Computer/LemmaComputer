@@ -104,6 +104,25 @@ export const saveRoutingPolicySchema = z
     requiredResidency: z.string().trim().min(2).max(64).optional(),
   })
   .superRefine((value, context) => {
+    if (value.identity.safeDefault !== "balanced")
+      context.addIssue({
+        code: "custom",
+        path: ["identity", "safeDefault"],
+        message: "Balanced is the Phase 0.5 fixed safe default",
+      });
+    if (!value.serviceClassPolicies.balanced.safeDefault)
+      context.addIssue({
+        code: "custom",
+        path: ["serviceClassPolicies", "balanced", "safeDefault"],
+        message: "Balanced must be marked as the fixed safe default",
+      });
+    for (const name of ["lite", "pro"] as const)
+      if (value.serviceClassPolicies[name].safeDefault)
+        context.addIssue({
+          code: "custom",
+          path: ["serviceClassPolicies", name, "safeDefault"],
+          message: "Only Balanced may be marked as the fixed safe default",
+        });
     if (value.team) {
       for (const item of value.team.allowedServiceClasses)
         if (!value.identity.allowedServiceClasses.includes(item))

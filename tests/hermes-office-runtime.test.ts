@@ -45,6 +45,31 @@ test("the pinned Hermes runtime forwards each AI usage binding without shared st
   assert.match(chatAdapter, /f"\{HERMES_URL\}\/api\/sessions\/\{vendor_session_id\}\/chat\/stream"/);
 });
 
+test("the pinned Hermes browser runtime binds a verified identity only to the request-local agent run", async () => {
+  const [dockerfile, patch, chatAdapter] = await Promise.all([
+    source("docker/Dockerfile.workspace"),
+    source("docker/workspace/hermes-agent-instance.patch"),
+    source("docker/workspace/lemmacomputer-agent-chat.py"),
+  ]);
+  assert.match(
+    dockerfile,
+    /patch --batch --forward --fuzz=0 -d \/opt\/lemmacomputer\/hermes-agent -p1 < \/tmp\/hermes-agent-instance\.patch/,
+  );
+  const additions = patch
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1))
+    .join("\n");
+  assert.match(additions, /_parse_agent_instance_id_header/);
+  assert.match(additions, /parsed\.version != 4 or str\(parsed\) != raw/);
+  assert.match(additions, /LEMMACOMPUTER_AGENT_INSTANCE_ID.*_AGENT_INSTANCE_ID/);
+  assert.match(additions, /agent_instance_id=agent_instance_id or ""/);
+  assert.match(additions, /agent_instance_id=agent_instance_id/);
+  assert.match(additions, /extra_headers\[self\._AGENT_INSTANCE_ID_HEADER\] = agent_instance_id/);
+  assert.match(chatAdapter, /"x-lemmacomputer-agent-instance-id": agent_instance_id/);
+  assert.doesNotMatch(additions, /os\.environ\["LEMMACOMPUTER_AGENT_INSTANCE_ID"\]/);
+});
+
 test("the Hermes API cannot report ready before the required connector MCP is registered", async () => {
   const [patch, entrypoint, chatAdapter, workspaceDockerfile] = await Promise.all([
     source("docker/workspace/hermes-agent-lemmacomputer.patch"),

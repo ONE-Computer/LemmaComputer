@@ -115,6 +115,7 @@ export interface AgentChatClient {
     message: ChatUiMessage,
     signal?: AbortSignal,
     usageTaskBinding?: string,
+    agentInstanceId?: string,
   ): AsyncIterable<AgentChatEvent>;
 }
 
@@ -359,11 +360,16 @@ export class HttpAgentChatClient implements AgentChatClient {
     message: ChatUiMessage,
     signal?: AbortSignal,
     usageTaskBinding?: string,
+    agentInstanceId?: string,
   ): AsyncIterable<AgentChatEvent> {
     const id = chatSessionIdSchema.parse(sessionId);
     const response = await this.response(access, `/api/sessions/${encodeURIComponent(id)}/turns`, {
       method: "POST",
-      body: JSON.stringify({ message,...(usageTaskBinding?{usageTaskBinding}:{}) }),
+      body: JSON.stringify({
+        message,
+        ...(usageTaskBinding ? { usageTaskBinding } : {}),
+        ...(agentInstanceId ? { agentInstanceId } : {}),
+      }),
       signal,
     }, agentTurnTimeoutMs);
     if (!response.body || !response.headers.get("content-type")?.startsWith("application/x-ndjson")) {

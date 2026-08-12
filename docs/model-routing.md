@@ -11,7 +11,10 @@ for the gateway hooks and grant boundary around this decision flow.
 
 Users choose one of four aliases:
 
-- `Auto` classifies the task and selects an eligible service class.
+- `Auto` is a Beta capability. A new or unconfigured Team executes its fixed
+  `Balanced` deployment. Dynamic task classification changes live traffic only
+  after a Team completes shadow review and an administrator explicitly enables
+  production routing.
 - `Lite` favors lower-cost work within its capability contract.
 - `Balanced` is the safe default for ambiguous work.
 - `Pro` is reserved for work that needs its stronger capability contract.
@@ -74,7 +77,15 @@ An observation is accepted only when its immutable usage event belongs to the sa
 
 ## Rollout and rollback
 
-Start every Team's Auto classifier in shadow mode. Auto requests execute the fixed deployment while the router records its hypothetical choice, expected cost, candidate evidence, fallback rate, errors, regret, and overhead. Explicit Lite, Balanced, and Pro requests are not classifier experiments: they execute the eligible deployment mapped to the requested class and are excluded from Auto shadow evidence. A denied explicit class or one without an eligible deployment fails closed instead of silently executing the fixed route.
+New Teams start in fixed mode on `Balanced`. Shadow mode remains non-activating:
+Auto requests execute the fixed deployment while the router records the
+hypothetical class and deployment separately from the deployment that actually
+ran, along with expected cost, candidate evidence, fallback rate, errors,
+regret, and overhead. Explicit Lite, Balanced, and Pro requests are not
+classifier experiments: they execute the eligible deployment mapped to the
+requested class and are excluded from Auto shadow evidence. A denied explicit
+class or one without an eligible deployment fails closed instead of silently
+executing the fixed route.
 
 Shadow mode never blocks the fixed route when the hypothetical policy has no eligible, priced, or budget-feasible candidate; it records an explicit `no_candidate` decision instead. Disabled mode bypasses hypothetical policy, budget, and pricing selection entirely and executes the rollout's validated fixed deployment.
 

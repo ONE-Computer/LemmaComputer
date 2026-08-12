@@ -101,6 +101,9 @@ export type RoutingShadowReport = {
     id: string;
     createdAt: Date;
     selectedServiceClass: string;
+    selectedDeploymentId: string;
+    executedDeploymentId: string;
+    executedServiceClass: string;
     selectionStatus: string;
     reasonCode: string;
     shadow: boolean;
@@ -1189,7 +1192,7 @@ export class PostgresRoutingStore implements RoutingStore {
       };
     const rollout = rolloutFrom(rolloutResult.rows[0]);
     const result = await this.pool.query(
-      "SELECT d.*,o.outcome observation_outcome,o.actual_cost observation_actual_cost,o.currency observation_currency FROM ai_routing_decisions d LEFT JOIN LATERAL (SELECT outcome,actual_cost,currency FROM ai_routing_decision_observations WHERE tenant_id=d.tenant_id AND decision_id=d.id ORDER BY observed_at DESC LIMIT 1) o ON true WHERE d.tenant_id=$1 AND d.team_id=$2 AND d.rollout_version_id=$3 AND d.shadow=true ORDER BY d.created_at DESC,id DESC LIMIT 1000",
+      "SELECT d.*,e.service_class executed_service_class,o.outcome observation_outcome,o.actual_cost observation_actual_cost,o.currency observation_currency FROM ai_routing_decisions d JOIN ai_routing_deployments e ON e.tenant_id=d.tenant_id AND e.id=d.executed_deployment_id LEFT JOIN LATERAL (SELECT outcome,actual_cost,currency FROM ai_routing_decision_observations WHERE tenant_id=d.tenant_id AND decision_id=d.id ORDER BY observed_at DESC LIMIT 1) o ON true WHERE d.tenant_id=$1 AND d.team_id=$2 AND d.rollout_version_id=$3 AND d.shadow=true ORDER BY d.created_at DESC,d.id DESC LIMIT 1000",
       [tenantId, teamId, rollout.id],
     );
     const selectedDistribution: Record<string, number> = {};
@@ -1268,6 +1271,9 @@ export class PostgresRoutingStore implements RoutingStore {
         id: String(row.id),
         createdAt: new Date(row.created_at),
         selectedServiceClass: String(row.selected_service_class),
+        selectedDeploymentId: String(row.selected_deployment_id),
+        executedDeploymentId: String(row.executed_deployment_id),
+        executedServiceClass: String(row.executed_service_class),
         selectionStatus: String(row.selection_status),
         reasonCode: String(row.reason_code),
         shadow: Boolean(row.shadow),

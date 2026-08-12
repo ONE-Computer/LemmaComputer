@@ -150,6 +150,7 @@ try {
   const featureTests = exec(process.execPath, [
     "--import", "tsx", "--test",
     "tests/activity-events-postgres.test.ts",
+    "tests/agent-instances-postgres.test.ts",
     "tests/teams-postgres.test.ts",
     "tests/team-budgets-postgres.test.ts",
     "tests/schedules-postgres.test.ts",
@@ -159,6 +160,7 @@ try {
     "tests/provider-settings-postgres.test.ts",
     "tests/spend-cost-coverage-postgres.test.ts",
     "tests/workspace-settings-postgres.test.ts",
+    "tests/protected-workspace-policy-postgres.test.ts",
     "tests/organization-rbac-postgres.test.ts",
     "tests/organization-onboarding-postgres.test.ts",
     "tests/better-auth-invitation-postgres.test.ts",
@@ -171,6 +173,7 @@ try {
     env: {
       ...process.env,
       ACTIVITY_TEST_DATABASE_URL: postgresUrl,
+      AGENT_INSTANCE_TEST_DATABASE_URL: postgresUrl,
       TEAM_TEST_DATABASE_URL: postgresUrl,
       USAGE_LEDGER_TEST_DATABASE_URL: postgresUrl,
       ROUTING_TEST_DATABASE_URL: postgresUrl,
@@ -180,6 +183,7 @@ try {
       PROVIDER_SETTINGS_TEST_DATABASE_URL: postgresUrl,
       SPEND_COVERAGE_TEST_DATABASE_URL: postgresUrl,
       WORKSPACE_SETTINGS_TEST_DATABASE_URL: postgresUrl,
+      POLICY_TEST_DATABASE_URL: postgresUrl,
       ORGANIZATION_RBAC_TEST_DATABASE_URL: organizationRbacUrl,
       ORGANIZATION_ONBOARDING_TEST_DATABASE_URL: organizationOnboardingUrl,
       BETTER_AUTH_INVITATION_TEST_DATABASE_URL: betterAuthInvitationUrl,
@@ -225,7 +229,7 @@ try {
   if (!migrate("postgres", false).includes("historical migrations are immutable")) throw new Error("checksum drift did not fail closed");
   sql("authentication", "UPDATE lemmacomputer_auth_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='001'");
   if (!migrateAuth("authentication", false).includes("historical migrations are immutable")) throw new Error("authentication checksum drift did not fail closed");
-  process.stdout.write("Database gate passed: product and authentication fresh, no-op, concurrent, mismatch, checksum, backup/restore, and dependency-rollback cases; product legacy baseline, organization RBAC, platform operator authority, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
+  process.stdout.write("Database gate passed: product and authentication fresh, no-op, concurrent, mismatch, checksum, backup/restore, and dependency-rollback cases; product legacy baseline, organization RBAC, platform operator authority, agent instances, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
 } finally {
   exec("docker", ["rm", "-f", container]);
 }
