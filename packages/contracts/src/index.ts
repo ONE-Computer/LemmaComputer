@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 
 export * from "./authentication.js";
+export * from "./tool-audit.js";
 
 export const workspaceStates = [
   "not_created",

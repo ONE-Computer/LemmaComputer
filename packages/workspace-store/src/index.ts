@@ -20,6 +20,7 @@ export * from "./budgets.js";
 export * from "./routing.js";
 export * from "./platform-operator.js";
 export * from "./protected-workspace-policy.js";
+export * from "./tool-audit.js";
 
 export type WorkspaceRecord = {
   id: string;
