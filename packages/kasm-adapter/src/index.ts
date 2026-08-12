@@ -117,6 +117,17 @@ const textValue = (object: JsonObject, ...keys: string[]) => {
 
 const clipboardPolicyFor = (policy?: RuntimePolicy): ClipboardPolicy => policy?.clipboard ?? defaultClipboardPolicy;
 
+// Supplying VNCOPTIONS replaces the Kasm image default rather than appending to
+// it. Keep the upstream adaptive-quality settings when signed ingress disables
+// Kasm's second browser-authentication prompt.
+export const localKasmVncOptions = [
+  "-DisableBasicAuth=1",
+  "-PreferBandwidth",
+  "-DynamicQualityMin=4",
+  "-DynamicQualityMax=7",
+  "-DLP_ClipDelay=0",
+].join(" ");
+
 // Docker's embedded DNS follows the 63-character DNS label limit. The full
 // `lemmacomputer-sandbox-<uuid>-relay` container name is 64 characters, so it
 // cannot be used as a routable hostname even though Docker accepts the name.
@@ -415,7 +426,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       Env: [
         "VNC_PW=lemmacomputer",
         "VNC_RESOLUTION=1440x900",
-        "VNCOPTIONS=-DisableBasicAuth=1",
+        `VNCOPTIONS=${localKasmVncOptions}`,
         ...(this.config.timeZone ? [
           `TZ=${this.config.timeZone}`,
           `LEMMACOMPUTER_TIME_ZONE=${this.config.timeZone}`,
