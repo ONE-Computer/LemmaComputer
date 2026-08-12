@@ -63,6 +63,32 @@ their latency distributions. A baseline should use at least 20 samples for each
 agreed matrix cell and distinguish empty, warm, and representative persistent
 homes as well as two- and four-CPU allocations.
 
+For an already-ready workspace, obtain a normal short-lived signed launch URL
+through the Control API and save it in a mode-0600 file. The browser collector
+uses a fresh browser context per sample, never prints the URL, and records only
+measurements:
+
+```bash
+npm run benchmark:kasm-browser -- \
+  --launch-url-file /tmp/lemma-workspace-launch-url \
+  --output .artifacts/workspace-benchmarks/local-host-events.jsonl \
+  --run-id local-host-2cpu \
+  --server-container lemmacomputer-sandbox-WORKSPACE_ID \
+  --samples 20
+```
+
+The first-frame gate requires a visible, non-uniform 640x480-or-larger desktop
+canvas. Input-to-paint opens the desktop Applications menu and detects the first
+changed canvas sample, then closes the menu. The FPS sample repeatedly opens and
+closes that menu and counts changed desktop samples; it is an interaction
+workload, not a video-playback claim. Bandwidth includes Chromium's received
+resource bytes and Kasm WebSocket frame payloads over the complete sample.
+Browser CPU and resident memory
+come from Chromium process IDs and host process statistics. When an explicit
+workspace container is supplied, server CPU and memory come from Docker stats.
+A launch URL is a credential: keep it out of logs and Git, and let it expire
+after collection.
+
 The local adapter must retain Kasm's `PreferBandwidth` and dynamic quality range
 when it supplies `VNCOPTIONS` to disable the redundant browser-authentication
 prompt. Docker replaces the image's complete `VNCOPTIONS` value; supplying only

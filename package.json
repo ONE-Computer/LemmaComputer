@@ -19,6 +19,7 @@
     "qualify:providers": "tsx scripts/qualify-provider-settings.mts",
     "qualify:workspace-startup": "tsx scripts/qualify-workspace-startup.mts",
     "benchmark:workspace": "node scripts/benchmark-workspace.mjs",
+    "benchmark:kasm-browser": "node scripts/collect-kasm-browser-runtime.mjs",
     "fixtures:office-regression": "python3 scripts/generate-office-regression-corpus.py --output tests/fixtures/office-regression",
     "qualify:office-roundtrip": "node scripts/qualify-office-roundtrip.mjs",
     "qualify:deployment-profiles": "node scripts/qualify-deployment-profiles.mjs",

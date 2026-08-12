@@ -39,7 +39,10 @@ test("release attestation requires an isolated built Hermes workspace readiness 
     );
   }
   assert.match(releaseTag, /requiredReleaseGates\.some/);
-  assert.match(qualifier, /agentProfile: "hermes-claw-managed-v1"/);
+  assert.match(qualifier, /PostgresWorkspaceStore\.fromConnectionString/);
+  assert.match(qualifier, /runtimePolicyFor\([\s\S]+\["hermes-claw"\]/);
+  assert.match(qualifier, /saveSandboxSettings[\s\S]+agentIds:\s*\["hermes-claw"\]/);
+  assert.match(qualifier, /state:\s*"provisioning"/);
   assert.match(qualifier, /chatRuntimes: \[\{/);
   assert.match(qualifier, /AgentBridgeAuthority\(agentBridgeSecret\)/);
   assert.match(qualifier, /new LiteLLMGatewayAdapter\(\{/);
@@ -48,6 +51,7 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(qualifier, /http:\/\/lemmacomputer-sandbox-\$\{workspaceId\}:8642\/health/);
   assert.match(qualifier, /hermesHealth\?\.connectors !== "ready"/);
   assert.match(qualifier, /gateway\.revoke\(workspaceId, agentId\)/);
+  assert.match(qualifier, /workspaceStore\.remove\(identity, workspaceId\)/);
   assert.match(qualifier, /status\?\.state !== "ready"/);
   assert.match(qualifier, /method: "DELETE"/);
   assert.match(qualifier, /\/internal\/v1\/workspaces\/\$\{workspaceId\}\/storage/);

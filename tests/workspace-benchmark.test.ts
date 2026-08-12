@@ -9,6 +9,12 @@ import {
   summarizeWorkspaceMeasurements,
   validateWorkspaceBenchmarkEvent,
 } from "../scripts/workspace-benchmark-lib.mjs";
+import {
+  parseDockerStats,
+  parseKasmCollectorArguments,
+  webSocketPayloadBytes,
+  workspaceBenchmarkEvent,
+} from "../scripts/collect-kasm-browser-runtime.mjs";
 
 const execute = promisify(execFile);
 
@@ -163,4 +169,55 @@ test("benchmark CLI can emit a deterministic metadata-only baseline without touc
 
   const cli = await readFile("scripts/benchmark-workspace.mjs", "utf8");
   assert.doesNotMatch(cli, /docker\s+(?:run|create|start|stop|restart|rm|rmi|pull)|compose\s+(?:up|down|build)/);
+});
+
+test("Kasm browser collector requires explicit credential and evidence paths", () => {
+  assert.deepEqual(parseKasmCollectorArguments([
+    "--launch-url-file", "/tmp/launch-url",
+    "--output", "/tmp/events.jsonl",
+    "--run-id", "local-host-2cpu",
+    "--samples", "20",
+    "--headed", "false",
+  ]), {
+    launchUrlFile: "/tmp/launch-url",
+    output: "/tmp/events.jsonl",
+    runId: "local-host-2cpu",
+    samples: 20,
+    timeoutMs: 15_000,
+    activityMs: 3_000,
+    headed: false,
+    serverContainer: undefined,
+  });
+  assert.throws(() => parseKasmCollectorArguments([
+    "--output", "/tmp/events.jsonl",
+    "--run-id", "run",
+  ]), /--launch-url-file is required/);
+});
+
+test("Kasm browser collector parses Docker CPU and IEC memory evidence", () => {
+  assert.deepEqual(parseDockerStats({ CPUPerc: "12.50%", MemUsage: "1.25GiB / 8GiB" }), {
+    cpuPercent: 12.5,
+    memoryBytes: 1_342_177_280,
+  });
+  assert.throws(() => parseDockerStats({ CPUPerc: "unknown", MemUsage: "0B / 8GiB" }), /invalid CPU or memory/);
+});
+
+test("Kasm browser collector counts text and binary WebSocket payload bytes", () => {
+  assert.equal(webSocketPayloadBytes({ opcode: 1, payloadData: "hello" }), 5);
+  assert.equal(webSocketPayloadBytes({ opcode: 2, payloadData: Buffer.from("desktop-frame").toString("base64") }), 13);
+});
+
+test("Kasm browser collector emits benchmark-contract events", () => {
+  assert.deepEqual(workspaceBenchmarkEvent(
+    "local-host-2cpu-01",
+    ["input_to_paint_ms", "ms", "browser-frame"],
+    17.1236,
+  ), {
+    schemaVersion: 1,
+    runId: "local-host-2cpu-01",
+    metric: "input_to_paint_ms",
+    unit: "ms",
+    value: 17.124,
+    source: "browser-frame",
+  });
 });
