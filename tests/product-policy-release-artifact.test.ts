@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { productReleaseVerificationKeySetSchema, signedProtectedBaselineTemplateSchema } from "@lemmacomputer/contracts";
 import { verifyProtectedBaselineTemplate } from "@lemmacomputer/policy-integrity";
+import { parseProductPolicyRelease } from "../apps/control-api/src/protected-workspace-policy.js";
 
 const root = new URL("../", import.meta.url);
 const readJson = async (path: string) => JSON.parse(await readFile(new URL(path, root), "utf8")) as unknown;
@@ -37,5 +38,14 @@ test("the packaged office-worker baseline verifies against the explicit product 
   assert.equal(
     verified.payload.document.constraints.connectors.toolPolicies["microsoft-365"]?.["send-mail"],
     "approval_required",
+  );
+});
+
+test("product policy release loading fails closed for a tampered checked-in envelope", async () => {
+  const trustRoot = await readJson("config/product-policy/product-release-trust.json");
+  const envelope = await readJson("config/product-policy/protected-baselines/office-worker-claude-v1.json") as Record<string, unknown>;
+  assert.throws(
+    () => parseProductPolicyRelease(trustRoot, { ...envelope, payloadDigest: "0".repeat(64) }, new Date("2026-08-12T05:00:00.000Z")),
+    /digest/i,
   );
 });

@@ -2,11 +2,13 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { organizationWorkspacePolicyConstraintsSchema, protectedPolicySelectionSchema } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
 import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { PostgresProtectedWorkspacePolicyStore } from "@lemmacomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
@@ -55,6 +57,11 @@ import { PlatformOperatorAuthenticationService } from "./platform-operator-auth.
 import { PlatformSecurityAlertDispatcher, SignedWebhookPlatformSecurityAlertAdapter, type PlatformSecurityAlertDispatcherStatus } from "./platform-security-alert-dispatcher.js";
 import { ControlPlaneTenantCleanupAdapter, PlatformTenantCleanupDispatcher, type PlatformTenantCleanupDispatcherStatus } from "./platform-tenant-cleanup-dispatcher.js";
 import { createBetterAuthTenantSsoAuthenticationAdministration, TenantSsoAdministrationService } from "./tenant-sso.js";
+import {
+  loadProductPolicyRelease,
+  ProtectedWorkspacePolicyAdministrationService,
+  type ProtectedWorkspacePolicyAdministrationBoundary,
+} from "./protected-workspace-policy.js";
 
 import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
@@ -394,6 +401,7 @@ export function createControlServer(
     platformTenantCleanupDispatcher?: { status(): PlatformTenantCleanupDispatcherStatus };
     platformOperatorApprovalConfigured?: boolean;
     identityPolicyStore?: IdentityPolicyStore;
+    protectedWorkspacePolicy?: ProtectedWorkspacePolicyAdministrationBoundary;
     mcpPolicyToken?: string;
     mcpEgressProxyToken?: string;
     agentBridgeSecret?: string;
@@ -915,6 +923,20 @@ export function createControlServer(
     const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;
     if (security.identityPolicyStore && !effective) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
     return { principal: value, effective };
+  };
+  const requireProtectedWorkspacePolicy = () => {
+    if (!security.protectedWorkspacePolicy) {
+      throw new LemmaComputerError("PROTECTED_POLICY_STORE_NOT_CONFIGURED", "Protected workspace policy storage is unavailable", 503);
+    }
+    return security.protectedWorkspacePolicy;
+  };
+  const requirePolicyTarget = async (tenantId: string, userId: string) => {
+    if (!security.identityPolicyStore) {
+      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy identity storage is unavailable", 503);
+    }
+    const target = (await security.identityPolicyStore.listUsers(tenantId)).find((user) => user.userId === userId);
+    if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User was not found", 404);
+    return target;
   };
   const workspaceEgressFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string) => (
     await security.identityPolicyStore?.getWorkspaceEgressSecurityGroup?.({
@@ -2653,6 +2675,58 @@ export function createControlServer(
     });
     return { userId: request.params.userId, revokedSessions };
   });
+  app.get("/v1/admin/protected-workspace-policy", async (request) => {
+    const actor = requirePermission(request, "policy.manage");
+    return requireProtectedWorkspacePolicy().overview(actor.tenantId);
+  });
+  app.get("/v1/admin/protected-workspace-policy/organization-versions", async (request) => {
+    const actor = requirePermission(request, "policy.manage");
+    return {
+      versions: await requireProtectedWorkspacePolicy().listOrganizationPolicyVersions(actor.tenantId),
+    };
+  });
+  app.post("/v1/admin/protected-workspace-policy/organization-versions", async (request, reply) => {
+    const actor = requirePermission(request, "policy.manage");
+    const input = z.strictObject({
+      constraints: organizationWorkspacePolicyConstraintsSchema,
+      revisionNote: z.string().trim().min(3).max(240),
+    }).parse(request.body ?? {});
+    const version = await requireProtectedWorkspacePolicy().createOrganizationPolicyVersion({
+      tenantId: actor.tenantId,
+      constraints: input.constraints,
+      revisionNote: input.revisionNote,
+      createdBy: actor.userId,
+    });
+    return reply.code(201).send({ version });
+  });
+  app.get<{ Params: { userId: string } }>(
+    "/v1/admin/protected-workspace-policy/members/:userId/assignment-versions",
+    async (request) => {
+      const actor = requirePermission(request, "policy.manage");
+      await requirePolicyTarget(actor.tenantId, request.params.userId);
+      return {
+        versions: await requireProtectedWorkspacePolicy().listMemberAssignmentVersions(
+          actor.tenantId,
+          request.params.userId,
+        ),
+      };
+    },
+  );
+  app.post<{ Params: { userId: string } }>(
+    "/v1/admin/protected-workspace-policy/members/:userId/assignment-versions",
+    async (request, reply) => {
+      const actor = requirePermission(request, "policy.manage");
+      await requirePolicyTarget(actor.tenantId, request.params.userId);
+      const input = z.strictObject({ selection: protectedPolicySelectionSchema }).parse(request.body ?? {});
+      const version = await requireProtectedWorkspacePolicy().assignMember({
+        tenantId: actor.tenantId,
+        subjectId: request.params.userId,
+        selection: input.selection,
+        assignedBy: actor.userId,
+      });
+      return reply.code(201).send({ version });
+    },
+  );
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request) => {
     const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
@@ -3974,6 +4048,15 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const spendObservabilityStore = PostgresSpendObservabilityStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   const agentInstanceStore = PostgresAgentInstanceStore.fromConnectionString(env.DATABASE_URL);
+  const productPolicyRelease = await loadProductPolicyRelease();
+  const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(
+    env.DATABASE_URL,
+    productPolicyRelease.trustRoot,
+  );
+  const protectedWorkspacePolicy = new ProtectedWorkspacePolicyAdministrationService(
+    protectedWorkspacePolicyStore,
+    productPolicyRelease,
+  );
   const customerProductAuthentication = new CustomerProductAuthenticationService(
     createBetterAuthSessionReader(customerAuthentication),
     identityPolicyStore,
@@ -4190,6 +4273,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     },
     {
       identityPolicyStore,
+      protectedWorkspacePolicy,
       connectorRegistryStore,
       providerSettingsStore,
       providerAdministration,
@@ -4271,6 +4355,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await spendObservabilityStore.close();
     await identityPolicyStore.close();
     await agentInstanceStore.close();
+    await protectedWorkspacePolicyStore.close();
     await platformOperatorStore?.close();
   });
   await app.listen({ host: env.CONTROL_HOST, port: env.CONTROL_PORT });
