@@ -1,5 +1,25 @@
 import { expect, test } from "@playwright/test";
 
+const workspaceManagerSession = {
+  user: { id: "workspace-manager", displayName: "Workspace Manager", email: "manager@example.test" },
+  tenant: { id: "acme", displayName: "Example Organization" },
+  roles: ["member", "employee"],
+  capabilities: ["organization.read", "workspace.use", "workspace.manage"],
+  resourceCapabilities: [],
+};
+
+const managedWorkspace = (id: string, name: string, state = "ready") => ({
+  id,
+  name,
+  state,
+  health: { status: state === "ready" ? "healthy" : state === "failed" ? "needs_attention" : "transitioning", reasonCode: state === "failed" ? "RUNTIME_UNAVAILABLE" : null },
+  profile: { id: "kasm-persistent-standard", executionMode: "managed" },
+  policyAssignment: { authority: "protected_baseline", version: 1, hash: "a".repeat(64) },
+  lastActivityAt: "2026-08-12T01:30:00.000Z",
+  lastTransitionAt: "2026-08-12T01:45:00.000Z",
+  createdAt: "2026-08-11T01:00:00.000Z",
+});
+
 test("organization administrator invites a person and manages member access", async ({ page }) => {
   await page.goto("/?view=settings");
   await page.getByRole("button", { name: "People and access" }).click();
@@ -632,6 +652,147 @@ test("custom role administrator reaches only the granted People and Access contr
   await expect(page.getByRole("button", { name: "Create custom role" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Invite person" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Organization members" })).toHaveCount(0);
+});
+
+test("workspace manager sees a content-free empty member workspace console", async ({ page }) => {
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(workspaceManagerSession),
+  }));
+  await page.route("**/api/v1/admin/member-workspaces", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ members: [] }),
+  }));
+
+  await page.goto("/?view=settings");
+  await page.getByRole("button", { name: "People and access" }).click();
+  await expect(page.getByRole("heading", { name: "Member workspaces" })).toBeVisible();
+  await expect(page.getByText("No member workspaces are assigned to you.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite person" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Organization members" })).toHaveCount(0);
+  await expect(page.locator(".member-workspace-console").getByRole("button", { name: /open|view|files|chat/i })).toHaveCount(0);
+});
+
+test("workspace manager operates multiple runtimes with confirmation and bounded status refresh", async ({ page }) => {
+  const baseWorkspaces = [
+    managedWorkspace("workspace-a", "Personal workspace"),
+    managedWorkspace("workspace-b", "Finance workspace"),
+  ];
+  let transitionReads = 0;
+  let commandCount = 0;
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(workspaceManagerSession),
+  }));
+  await page.route("**/api/v1/admin/member-workspaces", (route) => {
+    const transitioning = transitionReads > 0;
+    if (transitioning) transitionReads -= 1;
+    const workspaces = baseWorkspaces.map((workspace) => workspace.id === "workspace-a" && transitioning
+      ? managedWorkspace(workspace.id, workspace.name, "restarting")
+      : workspace);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        members: [{
+          userId: "member-a",
+          displayName: "Alex Morgan",
+          email: "alex@example.test",
+          status: "active",
+          membershipStatus: "active",
+          workspaceCount: workspaces.length,
+          workspaces,
+        }, {
+          userId: "member-empty",
+          displayName: "No Workspace",
+          email: "empty@example.test",
+          status: "active",
+          membershipStatus: "active",
+          workspaceCount: 0,
+          workspaces: [],
+        }],
+      }),
+    });
+  });
+  await page.route("**/api/v1/admin/users/*/workspaces/*/runtime/*", (route) => {
+    commandCount += 1;
+    transitionReads = 2;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        command: { id: "command-a", status: "succeeded", replayed: false },
+        workspace: { id: "workspace-a", state: "restarting", failureCode: null, updatedAt: "2026-08-12T02:00:00.000Z" },
+      }),
+    });
+  });
+
+  await page.goto("/?view=settings");
+  await page.getByRole("button", { name: "People and access" }).click();
+  await expect(page.getByText("2 workspaces", { exact: true })).toBeVisible();
+  await expect(page.getByText("No workspaces created.")).toBeVisible();
+  const personal = page.getByRole("region", { name: "Personal workspace for Alex Morgan" });
+  await expect(personal.getByText("Healthy")).toBeVisible();
+  await expect(personal.getByText("kasm-persistent-standard")).toBeVisible();
+  await expect(personal.getByText(/Policy v1/)).toBeVisible();
+  await expect(personal.getByRole("button", { name: /open|view|files|chat/i })).toHaveCount(0);
+
+  await personal.getByRole("button", { name: "Restart" }).click();
+  const restartDialog = page.getByRole("dialog", { name: "Restart Personal workspace?" });
+  await expect(restartDialog.getByText("Persistent files are retained.")).toBeVisible();
+  await restartDialog.getByRole("button", { name: "Cancel" }).click();
+  expect(commandCount).toBe(0);
+
+  await personal.getByRole("button", { name: "Restart" }).click();
+  await page.getByRole("dialog", { name: "Restart Personal workspace?" }).getByRole("button", { name: "Restart workspace" }).click();
+  await expect(page.getByText("Personal workspace runtime restarted.")).toBeVisible();
+  expect(commandCount).toBe(1);
+
+  const finance = page.getByRole("region", { name: "Finance workspace for Alex Morgan" });
+  await finance.getByRole("button", { name: "Terminate runtime" }).click();
+  const terminateDialog = page.getByRole("dialog", { name: "Terminate Finance workspace runtime?" });
+  await expect(terminateDialog.getByText("Persistent files are retained and the workspace record is not deleted.")).toBeVisible();
+  await terminateDialog.getByRole("button", { name: "Cancel" }).click();
+  expect(commandCount).toBe(1);
+});
+
+test("workspace command failures stay scoped and actionable", async ({ page }) => {
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(workspaceManagerSession),
+  }));
+  await page.route("**/api/v1/admin/member-workspaces", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      members: [{
+        userId: "member-a",
+        displayName: "Alex Morgan",
+        email: "alex@example.test",
+        status: "active",
+        membershipStatus: "active",
+        workspaceCount: 1,
+        workspaces: [managedWorkspace("workspace-a", "Personal workspace")],
+      }],
+    }),
+  }));
+  await page.route("**/api/v1/admin/users/*/workspaces/*/runtime/*", (route) => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ error: { code: "WORKSPACE_COMMAND_FAILED", message: "Runtime control is temporarily unavailable.", retryable: false } }),
+  }));
+
+  await page.goto("/?view=settings");
+  await page.getByRole("button", { name: "People and access" }).click();
+  const personal = page.getByRole("region", { name: "Personal workspace for Alex Morgan" });
+  await personal.getByRole("button", { name: "Stop" }).click();
+  await page.getByRole("dialog", { name: "Stop Personal workspace?" }).getByRole("button", { name: "Stop workspace" }).click();
+  await expect(page.getByRole("alert")).toContainText("Runtime control is temporarily unavailable.");
+  await expect(page.getByRole("alert")).not.toContainText("WORKSPACE_COMMAND_FAILED");
 });
 
 test("member manager cannot change protected roles and manages only an exact workspace", async ({ page }) => {

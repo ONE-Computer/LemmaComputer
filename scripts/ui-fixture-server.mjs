@@ -473,6 +473,34 @@ let adminUsers = [
     }],
   },
 ];
+const memberWorkspaceInventory = () => adminUsers.map((user) => ({
+  userId: user.userId,
+  displayName: user.displayName,
+  email: user.email,
+  status: user.status,
+  membershipStatus: user.membershipStatus,
+  workspaceCount: user.workspaces.length,
+  workspaces: user.workspaces.map((item) => ({
+    id: item.id,
+    name: item.grantId === "personal"
+      ? "Personal workspace"
+      : item.grantId.split(/[-_]+/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" "),
+    state: item.state,
+    health: {
+      status: item.state === "failed"
+        ? "needs_attention"
+        : ["provisioning", "restarting", "stopping"].includes(item.state)
+          ? "transitioning"
+          : ["stopped", "not_created"].includes(item.state) ? "offline" : "healthy",
+      reasonCode: null,
+    },
+    profile: { id: item.profileId, executionMode: item.executionMode },
+    policyAssignment: { authority: "runtime_policy", version: user.effectivePolicy.version, hash: user.effectivePolicy.documentHash },
+    lastActivityAt: null,
+    lastTransitionAt: now,
+    createdAt: now,
+  })),
+}));
 const protectedWorkspacePolicyOverview = {
   baseline: {
     immutable: true,
@@ -1670,6 +1698,27 @@ const server = http.createServer((request, response) => {
   }
   if (key === "GET /v1/admin/users") {
     response.end(JSON.stringify({ delegableBuiltInRoles: ["owner", "admin", "member"], users: adminUsers }));
+    return;
+  }
+  if (key === "GET /v1/admin/member-workspaces") {
+    response.setHeader("cache-control", "no-store");
+    response.end(JSON.stringify({ members: memberWorkspaceInventory() }));
+    return;
+  }
+  const workspaceAdministrationMatch = url.pathname.match(/^\/v1\/admin\/users\/([^/]+)\/workspaces\/([^/]+)\/runtime\/(start|restart|stop|terminate_runtime)$/);
+  if (request.method === "POST" && workspaceAdministrationMatch) {
+    const [, encodedUserId, encodedWorkspaceId, action] = workspaceAdministrationMatch;
+    const userId = decodeURIComponent(encodedUserId);
+    const administeredWorkspaceId = decodeURIComponent(encodedWorkspaceId);
+    const nextState = action === "stop" || action === "terminate_runtime" ? "stopped" : "ready";
+    adminUsers = adminUsers.map((user) => user.userId === userId ? {
+      ...user,
+      workspaces: user.workspaces.map((item) => item.id === administeredWorkspaceId ? { ...item, state: nextState } : item),
+    } : user);
+    response.end(JSON.stringify({
+      command: { id: `fixture-workspace-command-${Date.now()}`, action, status: "succeeded", replayed: false },
+      workspace: { id: administeredWorkspaceId, state: nextState, failureCode: null, updatedAt: new Date().toISOString() },
+    }));
     return;
   }
   if (key === "GET /v1/admin/protected-workspace-policy") {

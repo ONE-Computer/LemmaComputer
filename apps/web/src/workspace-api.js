@@ -249,6 +249,10 @@ export const authApi = {
 
 export const adminApi = {
   users: () => request("/api/v1/admin/users"),
+  memberWorkspaces: () => request("/api/v1/admin/member-workspaces", { cache: "no-store" }),
+  commandMemberWorkspace: (userId, workspaceId, action) => retryableMutation(
+    `/api/v1/admin/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceId)}/runtime/${encodeURIComponent(action)}`,
+  ),
   protectedWorkspacePolicy: () => request("/api/v1/admin/protected-workspace-policy", { cache: "no-store" }),
   protectedMemberPolicyVersions: (userId) => request(`/api/v1/admin/protected-workspace-policy/members/${encodeURIComponent(userId)}/assignment-versions`, { cache: "no-store" }),
   assignProtectedMemberPolicy: (userId, selection) => request(`/api/v1/admin/protected-workspace-policy/members/${encodeURIComponent(userId)}/assignment-versions`, mutation("POST", { selection })),

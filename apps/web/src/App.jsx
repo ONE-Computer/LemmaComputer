@@ -1946,7 +1946,52 @@ function ProtectedWorkspacePolicySection({ users }) {
   </section>;
 }
 
-function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId, loading, invitationBusy, busyUserId, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageWorkspace, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
+const workspaceHealthLabel = {
+  healthy: "Healthy",
+  transitioning: "Updating",
+  offline: "Offline",
+  needs_attention: "Needs attention",
+};
+const workspaceAdminDate = (value) => value
+  ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+  : "No agent activity yet";
+
+function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCommand }) {
+  const total = members.reduce((count, member) => count + member.workspaceCount, 0);
+  return <section className="member-workspace-console" aria-labelledby="member-workspace-console-heading">
+    <div className="admin-section-heading">
+      <div><p>Runtime operations</p><h2 id="member-workspace-console-heading">Member workspaces</h2><small>Review status and operate runtimes without opening screens, files, chats, or workspace content.</small></div>
+      <span aria-label={`${total} workspaces`}>{total}</span>
+    </div>
+    {error && <div className="member-workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace controls unavailable</strong>{error}</span></div>}
+    {loading ? <p className="admin-empty-state" role="status">Loading member workspaces…</p> : members.length === 0 ? (
+      <p className="admin-empty-state">No member workspaces are assigned to you.</p>
+    ) : <div className="member-workspace-members">{members.map((member) => <article className="member-workspace-member" key={member.userId}>
+      <header><div><strong>{member.displayName}</strong><small>{member.email}</small></div><span>{member.workspaceCount} {member.workspaceCount === 1 ? "workspace" : "workspaces"}</span></header>
+      {member.workspaces.length === 0 ? <p>No workspaces created.</p> : <div className="member-workspace-list">{member.workspaces.map((workspace) => {
+        const busy = busyWorkspaceId === workspace.id || busyStates.has(workspace.state);
+        const running = ["provisioning", "ready", "open", "restarting"].includes(workspace.state);
+        return <section key={workspace.id} aria-label={`${workspace.name} for ${member.displayName}`}>
+          <div className="member-workspace-copy">
+            <div><strong>{workspace.name}</strong><span className={`workspace-state state-${workspace.state}`}>{workspaceStatus(workspace.state)}</span></div>
+            <small>{workspace.profile?.id ?? "Profile unavailable"} · Policy {workspace.policyAssignment ? `v${workspace.policyAssignment.version}` : "not assigned"}</small>
+            <small>{workspaceHealthLabel[workspace.health.status] ?? "Unknown"}{workspace.health.reasonCode ? ` · ${workspace.health.reasonCode}` : ""} · Last agent activity: {workspaceAdminDate(workspace.lastActivityAt)}</small>
+            <small>Last transition: {workspaceAdminDate(workspace.lastTransitionAt)}</small>
+          </div>
+          <div className="member-workspace-actions">
+            {!running && <button className="primary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "start")}>Start</button>}
+            {running && <button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "restart")}>Restart</button>}
+            {running && <button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "stop")}>Stop</button>}
+            {running && <button className="connection-quiet-button danger-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "terminate_runtime")}>Terminate runtime</button>}
+            {busy && <small role="status">Updating…</small>}
+          </div>
+        </section>;
+      })}</div>}
+    </article>)}</div>}
+  </section>;
+}
+
+function AdminScreen({ users, workspaceMembers, invitations, delegableBuiltInRoles, currentUserId, loading, workspaceError, workspaceBusyId, invitationBusy, busyUserId, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageAnyWorkspace, canManageWorkspace, onWorkspaceCommand, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
   const allRoleOptions = [
     { value: "member", label: "Member" },
     { value: "admin", label: "Administrator" },
@@ -2009,6 +2054,7 @@ function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId,
         <h1>People and access</h1>
         <span>Invite people, assign organization roles, and remove access. Identity-provider credentials remain outside LemmaComputer.</span>
       </header>
+      {canManageAnyWorkspace && <MemberWorkspaceConsole members={workspaceMembers} loading={loading} error={workspaceError} busyWorkspaceId={workspaceBusyId} onCommand={onWorkspaceCommand} />}
       {canManageMembers && <><section className="admin-access-summary" aria-labelledby="organization-access-heading">
         <div><p>Organization access</p><h2 id="organization-access-heading">Members and invitations</h2><span>Invitations expire after seven days. The selected organization and role cannot be changed by identity-provider claims.</span></div>
         <button className="primary-button admin-section-action" type="button" disabled={!roleOptions.length} onClick={() => setInviteOpen(true)}>Invite person</button>
@@ -2257,7 +2303,7 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
   );
 }
 
-function SettingsScreen({ view, isAdmin, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageWorkspace, delegableBuiltInRoles, currentUserId, onOpenAdmin, onOpenCredentials, onOpenAccountSecurity, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, invitations, loading, invitationBusy, busyUserId, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
+function SettingsScreen({ view, isAdmin, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageWorkspace, delegableBuiltInRoles, currentUserId, onOpenAdmin, onOpenCredentials, onOpenAccountSecurity, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, workspaceMembers, invitations, loading, workspaceError, workspaceBusyId, invitationBusy, busyUserId, onWorkspaceCommand, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
   if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
     return <WorkspaceConfigurationScreen
       settings={adminSandboxSettings}
@@ -2283,20 +2329,25 @@ function SettingsScreen({ view, isAdmin, canManageMembers, canManageRoles, canMa
       backLabel="Back to organization users"
     />;
   }
-  if (view === "admin" && (canManageMembers || canManageRoles || canManageSettings)) {
+  if (view === "admin" && (isAdmin || canManageMembers || canManageRoles || canManageSettings)) {
     return <AdminScreen
       users={users}
+      workspaceMembers={workspaceMembers}
       invitations={invitations}
       delegableBuiltInRoles={delegableBuiltInRoles}
       currentUserId={currentUserId}
       loading={loading}
+      workspaceError={workspaceError}
+      workspaceBusyId={workspaceBusyId}
       invitationBusy={invitationBusy}
       busyUserId={busyUserId}
       canManageMembers={canManageMembers}
       canManageRoles={canManageRoles}
       canManageSettings={canManageSettings}
       canManagePolicy={canManagePolicy}
+      canManageAnyWorkspace={isAdmin}
       canManageWorkspace={canManageWorkspace}
+      onWorkspaceCommand={onWorkspaceCommand}
       onInvite={onInvite}
       onResendInvitation={onResendInvitation}
       onRevokeInvitation={onRevokeInvitation}
@@ -2334,7 +2385,7 @@ function SettingsScreen({ view, isAdmin, canManageMembers, canManageRoles, canMa
           <span className="settings-item-copy"><strong>Credentials</strong><small>Manage write-only credentials for official workspace channels.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
         </button>
-        {(canManageMembers || canManageRoles || canManageSettings) && <button className="settings-item" type="button" onClick={onOpenAdmin}>
+        {(isAdmin || canManageMembers || canManageRoles || canManageSettings) && <button className="settings-item" type="button" onClick={onOpenAdmin}>
           <span className="settings-item-icon"><Settings24Regular aria-hidden="true" /></span>
           <span className="settings-item-copy"><strong>People and access</strong><small>Invite people, assign organization roles, and manage workspace access.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
@@ -4465,6 +4516,9 @@ export function App() {
   const [adminTeamsBusy, setAdminTeamsBusy] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyUserId, setAdminBusyUserId] = useState("");
+  const [adminWorkspaceMembers, setAdminWorkspaceMembers] = useState([]);
+  const [adminWorkspaceError, setAdminWorkspaceError] = useState("");
+  const [adminWorkspaceBusyId, setAdminWorkspaceBusyId] = useState("");
   const [adminWorkspaceTarget, setAdminWorkspaceTarget] = useState(null);
   const [adminSandboxSettings, setAdminSandboxSettings] = useState(null);
   const [adminSandboxLoading, setAdminSandboxLoading] = useState(false);
@@ -4905,7 +4959,7 @@ export function App() {
     const workspaceAdminOpen = activeNav === "Settings" && settingsView === "admin";
     const teamsOpen = activeNav === "AI control plane" && aiControlPlaneView === "teams-budgets";
     if ((!workspaceAdminOpen && !teamsOpen)
-      || workspaceAdminOpen && !canManageMembers && !canManageRoles
+      || workspaceAdminOpen && !canManageMembers && !canManageRoles && !canManageSettings && !canManageAnyWorkspace
       || teamsOpen && !canManageUsage) return;
     if (workspaceAdminOpen) setAdminLoading(true);
     if (teamsOpen) setAdminTeamsLoading(true);
@@ -4913,13 +4967,22 @@ export function App() {
       canManageMembers ? adminApi.users() : Promise.resolve({ users: [] }),
       workspaceAdminOpen && canManageMembers ? adminApi.invitations() : Promise.resolve(null),
       workspaceAdminOpen && canManagePolicy ? adminApi.mcpPolicy() : Promise.resolve(null),
+      workspaceAdminOpen && canManageAnyWorkspace
+        ? adminApi.memberWorkspaces()
+          .then((value) => ({ ...value, error: null }))
+          .catch((error) => ({ members: [], error }))
+        : Promise.resolve(null),
       teamsOpen ? adminApi.teams(true) : Promise.resolve(null),
     ])
-      .then(([users, invitations, policy, teams]) => {
+      .then(([users, invitations, policy, memberWorkspaces, teams]) => {
         setAdminUsers(users.users);
         setAdminDelegableBuiltInRoles(users.delegableBuiltInRoles ?? []);
         if (invitations) setAdminInvitations(invitations.invitations);
         if (policy) setMcpPolicy(policy);
+        if (memberWorkspaces) {
+          setAdminWorkspaceMembers(memberWorkspaces.members);
+          setAdminWorkspaceError(memberWorkspaces.error?.message ?? "");
+        }
         if (teams) setAdminTeams(teams.teams);
       })
       .catch(showApiError)
@@ -4927,7 +4990,7 @@ export function App() {
         if (workspaceAdminOpen) setAdminLoading(false);
         if (teamsOpen) setAdminTeamsLoading(false);
       });
-  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id, canManageMembers, canManageRoles, canManagePolicy, canManageUsage]);
+  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageAnyWorkspace, canManageUsage]);
 
   useEffect(() => {
     if (activeNav !== "Firewall" || !canManagePolicy) return;
@@ -5764,12 +5827,63 @@ export function App() {
     setAdminUsers(value.users);
     setAdminDelegableBuiltInRoles(value.delegableBuiltInRoles ?? []);
   });
+  const refreshAdminWorkspaceMembers = () => adminApi.memberWorkspaces().then((value) => {
+    setAdminWorkspaceMembers(value.members);
+    setAdminWorkspaceError("");
+    return value.members;
+  });
   const refreshAdminAccess = () => Promise.all([adminApi.users(), adminApi.invitations()]).then(([users, invitations]) => {
     setAdminUsers(users.users);
     setAdminDelegableBuiltInRoles(users.delegableBuiltInRoles ?? []);
     setAdminInvitations(invitations.invitations);
   });
   const refreshAdminTeams = () => adminApi.teams(true).then((value) => setAdminTeams(value.teams));
+  const commandAdminWorkspace = async (member, targetWorkspace, action) => {
+    const confirmations = {
+      restart: {
+        title: `Restart ${targetWorkspace.name}?`,
+        description: "The active runtime and viewer sessions will disconnect. Persistent files are retained.",
+        confirmLabel: "Restart workspace",
+      },
+      stop: {
+        title: `Stop ${targetWorkspace.name}?`,
+        description: "The runtime, viewer sessions, agents, and grants will stop. Persistent files are retained.",
+        confirmLabel: "Stop workspace",
+      },
+      terminate_runtime: {
+        title: `Terminate ${targetWorkspace.name} runtime?`,
+        description: "This immediately revokes the active runtime, viewer sessions, agents, and grants. Persistent files are retained and the workspace record is not deleted.",
+        confirmLabel: "Terminate runtime",
+        danger: true,
+      },
+    };
+    const confirmationOptions = confirmations[action];
+    if (confirmationOptions && !await requestConfirmation(confirmationOptions)) return;
+
+    const actionLabel = {
+      start: "started",
+      restart: "restarted",
+      stop: "stopped",
+      terminate_runtime: "terminated",
+    }[action];
+    setAdminWorkspaceBusyId(targetWorkspace.id);
+    setAdminWorkspaceError("");
+    try {
+      await adminApi.commandMemberWorkspace(member.userId, targetWorkspace.id, action);
+      let members = await refreshAdminWorkspaceMembers();
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const refreshed = members.flatMap((item) => item.workspaces).find((item) => item.id === targetWorkspace.id);
+        if (!refreshed || !busyStates.has(refreshed.state)) break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        members = await refreshAdminWorkspaceMembers();
+      }
+      setToast(`${targetWorkspace.name} runtime ${actionLabel}.`);
+    } catch (error) {
+      setAdminWorkspaceError(error.message ?? "The workspace command could not be completed.");
+    } finally {
+      setAdminWorkspaceBusyId("");
+    }
+  };
   const createAdminTeam = async (input) => {
     setAdminTeamsBusy(true);
     try {
@@ -6427,10 +6541,14 @@ export function App() {
           onRotateCredential={rotateTelegramCredential}
           onDeleteCredential={deleteTelegramCredential}
           users={adminUsers}
+          workspaceMembers={adminWorkspaceMembers}
           invitations={adminInvitations}
           loading={adminLoading}
+          workspaceError={adminWorkspaceError}
+          workspaceBusyId={adminWorkspaceBusyId}
           invitationBusy={adminInvitationBusy}
           busyUserId={adminBusyUserId}
+          onWorkspaceCommand={commandAdminWorkspace}
           onInvite={createOrganizationInvitation}
           onResendInvitation={resendOrganizationInvitation}
           onRevokeInvitation={revokeOrganizationInvitation}

@@ -5887,6 +5887,31 @@ textarea:focus-visible,
 .admin-section-heading p { margin-bottom: 3px; color: #68727d; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .admin-section-heading h2 { color: #172334; font-size: 20px; }
 .admin-section-heading > span { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: #eef3f8; color: #244a73; font-size: 13px; font-weight: 700; }
+.member-workspace-console { overflow: hidden; margin-bottom: 28px; border: 1px solid #d6dee6; border-radius: 14px; background: #fff; }
+.member-workspace-console .admin-section-heading { align-items: center; background: #f8fafc; }
+.member-workspace-console .admin-section-heading small { display: block; max-width: 680px; margin-top: 6px; color: #68727d; font-size: 12px; font-weight: 400; line-height: 1.5; }
+.member-workspace-error { display: flex; align-items: start; gap: 10px; margin: 16px 24px 0; padding: 13px 15px; border: 1px solid #e8c8c4; border-radius: 10px; background: #fff5f3; color: #7f2f28; }
+.member-workspace-error svg { flex: none; }
+.member-workspace-error span { display: grid; gap: 2px; font-size: 13px; line-height: 1.45; }
+.member-workspace-members { display: grid; }
+.member-workspace-member { padding: 20px 24px 24px; border-bottom: 1px solid #e6e9ec; }
+.member-workspace-member:last-child { border-bottom: 0; }
+.member-workspace-member > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.member-workspace-member > header div { display: grid; gap: 3px; min-width: 0; }
+.member-workspace-member > header strong,
+.member-workspace-member > header small { overflow: hidden; text-overflow: ellipsis; }
+.member-workspace-member > header small { color: #68727d; }
+.member-workspace-member > header > span { flex: none; padding: 5px 9px; border-radius: 999px; background: #edf3f8; color: #31516e; font-size: 12px; font-weight: 700; }
+.member-workspace-member > p { margin: 0; padding: 14px; border-radius: 10px; background: #f7f8f8; color: #68727d; }
+.member-workspace-list { display: grid; gap: 10px; }
+.member-workspace-list > section { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 16px; border: 1px solid #dfe4e8; border-radius: 12px; background: #fcfcfb; }
+.member-workspace-copy { display: grid; gap: 5px; min-width: 0; }
+.member-workspace-copy > div { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.member-workspace-copy > div strong { overflow: hidden; color: #172334; text-overflow: ellipsis; }
+.member-workspace-copy small { color: #68727d; font-size: 12px; line-height: 1.4; }
+.member-workspace-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; max-width: 340px; }
+.member-workspace-actions button { min-height: 36px; padding: 0 12px; }
+.member-workspace-actions small { width: 100%; color: #68727d; text-align: right; }
 .admin-empty-state { margin: 0; padding: 24px; color: #68727d; }
 .admin-invitation-list > article { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: center; gap: 20px; min-height: 74px; padding: 12px 24px; border-bottom: 1px solid #e8e8e4; }
 .admin-invitation-list > article:last-child { border-bottom: 0; }
@@ -6320,6 +6345,13 @@ textarea:focus-visible,
   .sso-copy-button { justify-self: start; }
   .admin-invitation-actions { align-items: stretch; flex-direction: column; }
   .admin-invitation-actions button { width: 100%; }
+  .member-workspace-console .admin-section-heading,
+  .member-workspace-member > header { align-items: flex-start; }
+  .member-workspace-member { padding: 18px; }
+  .member-workspace-list > section { grid-template-columns: 1fr; }
+  .member-workspace-actions { align-items: stretch; flex-direction: column; max-width: none; }
+  .member-workspace-actions button { width: 100%; }
+  .member-workspace-actions small { text-align: left; }
   .admin-connector-summary { grid-template-columns: 52px minmax(0, 1fr); }
   .admin-connector-summary button { grid-column: 1 / -1; width: 100%; }
   .admin-team-heading { align-items: stretch; flex-direction: column; }
