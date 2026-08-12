@@ -1,7 +1,7 @@
 # Phase 0.5 model-routing UX review
 
-Status: proposed product specification for issue #67. Product-owner approval is
-required before issue #68 implements it.
+Status: product-owner approved on 2026-08-13, with the Phase 0.5 implementation
+boundary recorded below.
 
 ## Audit scope and evidence
 
@@ -130,7 +130,7 @@ this server-backed role boundary; it should not add a member routing screen.
 | P2 | Evidence review hides the decision evidence and binding details | Review feels ceremonial rather than auditable | Summarize Team, mapping, sample, thresholds, and pass/fail in the dialog |
 | P2 | Provider readiness is fragmented across Models, Pricing, and Model routes | Administrators discover blockers late | Add a route-readiness summary and direct links, without merging the three domains |
 
-## Approved mental model to implement
+## Approved mental model
 
 The implementation should teach two objects, not one large workflow:
 
@@ -143,7 +143,7 @@ Provider credentials and pricing remain their existing prerequisite screens.
 Auto is not a fourth deployment mapping; it is a Beta rollout mode that chooses
 among the allowed Lite, Balanced, and Pro routes.
 
-## Proposed information architecture
+## Future information architecture
 
 Keep the existing **Model routes** top-level tab. Within it use two URL-backed
 subsections:
@@ -157,6 +157,28 @@ Do not create a separate page for every lifecycle stage. Evidence history and
 technical identifiers belong in expandable details beneath the current Team
 state. Pricing continues to live in **Pricing**, linked from a named readiness
 problem.
+
+## Approved Phase 0.5 release boundary
+
+Phase 0.5 will not implement the full Auto-routing lifecycle redesign described
+below. The release posture is intentionally smaller:
+
+- Members choose an explicit **Lite**, **Balanced**, or **Pro** model tier in
+  chat, subject to organization policy and provider readiness.
+- Auto routing is unavailable for executed traffic in Phase 0.5. It must not be
+  presented as an active fourth model tier or as a production-ready choice.
+- Administrators retain only the routing configuration and evidence needed to
+  support explicit tier selection and the fixed-Balanced fallback safely.
+- #68 should remove misleading or contradictory Auto controls and clarify the
+  model-tier choice. It should not build the full Team rollout, Shadow,
+  Reviewed-ready, Live-Auto, or Rolled-back administration experience.
+- The approved future labels are **Auto routing** and **Model tiers**. If the
+  lifecycle is implemented after Phase 0.5, Auto remains a mode that selects
+  among tiers; it is not a model tier itself. The emergency action is
+  **Restore fixed route**, producing a durable **Rolled back** state.
+
+This boundary reduces release risk without changing the future mental model or
+weakening immutable publication, policy, authorization, and rollback evidence.
 
 ## Terminology and state contract
 
@@ -174,7 +196,10 @@ Avoid **Disabled** because it does not explain whether the Team is new or was
 rolled back. Keep **kill switch** as the emergency-control name, but label its
 action **Restore fixed route** and the resulting state **Rolled back**.
 
-## Screen and interaction acceptance criteria for #68
+## Deferred full-lifecycle acceptance criteria
+
+The criteria in this section describe the later Auto-routing experience, not
+the reduced Phase 0.5 scope assigned to #68.
 
 ### Team rollout
 
@@ -233,7 +258,7 @@ action **Restore fixed route** and the resulting state **Rolled back**.
 - #70/#71 must verify 200% zoom, screen-reader names and relationships, target
   sizes, focus order, and announcement behavior before any WCAG claim.
 
-## Required deterministic fixtures for #68
+## Deferred deterministic fixtures
 
 Cover Draft, Published, Fixed route, Shadow collecting, Reviewed-ready,
 Reviewed-failed, Live, and Rolled-back states, plus missing pricing, stale
@@ -241,12 +266,16 @@ review, provider unavailable, permission denied, and empty/no-Team states.
 Every fixture must assert the visible state, executed consequence, one primary
 action, and the absence of contradictory stage actions.
 
-## Product decision requested
+## Product decision record
 
-Approve or amend these three decisions before implementation:
+Approved on 2026-08-13:
 
-1. Model routes defaults to **Team rollout**, with **Route map** as its second
-   subsection.
-2. Auto is removed from the mapping table and explained as a Team rollout mode.
-3. The post-kill-switch state is named **Rolled back**, while the emergency
-   action is labelled **Restore fixed route**.
+1. The future routing experience separates **Auto routing** from **Model
+   tiers**; implementation-shaped labels such as Team rollout and Route map are
+   not the primary user-facing terminology.
+2. Auto is not a fourth model tier. It is a future routing mode over Lite,
+   Balanced, and Pro.
+3. A future kill switch is labelled **Restore fixed route**, and its durable
+   resulting state is **Rolled back**.
+4. For Phase 0.5, members select a tier explicitly in chat and Auto routing is
+   unavailable. The full lifecycle redesign is deferred.
