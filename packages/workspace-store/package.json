@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@lemmacomputer/contracts": "*",
+    "@lemmacomputer/policy-integrity": "*",
     "@lemmacomputer/model-router": "*",
     "@lemmacomputer/egress-policy": "*",
     "cron-parser": "5.4.0",
