@@ -135,7 +135,7 @@ const sandboxModels = [
 ] as const;
 
 const workspaceServiceClasses = [
-  { value: "auto", displayName: "Auto", description: "LemmaComputer chooses the best eligible tier for each task." },
+  { value: "auto", displayName: "Auto (Beta)", description: "Fixed Balanced by default; dynamic selection requires explicit Team enablement." },
   { value: "lite", displayName: "Lite", description: "Fast, economical work." },
   { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
   { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },

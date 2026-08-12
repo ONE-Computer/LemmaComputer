@@ -25,18 +25,18 @@ test("routes the next turn through the selected workspace, agent, and stable mod
     await route.continue();
   });
 
-  await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Auto/ }).click();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Auto \(Beta\)/ }).click();
   await choose(page, "Choose workspace", "Product");
   await expect(page.getByRole("heading", { name: "Chat", exact: true })).toHaveCount(0);
   await expect(page.locator(".chat-runtime-state")).toBeVisible();
   releaseProductAgents();
-  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto \(Beta\)/ })).toBeVisible();
 
-  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto/ }).click();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto \(Beta\)/ }).click();
   await choose(page, "Choose chat agent", "Codex CLI");
-  await expect(page.getByRole("button", { name: /Codex CLI · Product · Auto/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Codex CLI · Product · Auto \(Beta\)/ })).toBeVisible();
 
-  await page.getByRole("button", { name: /Codex CLI · Product · Auto/ }).click();
+  await page.getByRole("button", { name: /Codex CLI · Product · Auto \(Beta\)/ }).click();
   await choose(page, "Choose model mode", "Pro · highest capability");
   await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
 

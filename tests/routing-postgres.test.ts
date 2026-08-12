@@ -532,6 +532,7 @@ test(
       assert.equal(report.sampleSize, 2);
       assert.equal(report.currency, "USD");
       assert.equal(report.expectedCost, "0.002400000000");
+      assert.equal(report.decisions[0]?.executedServiceClass, "lite");
       const review = await routing.createReview({
         tenantId: tenant,
         teamId: team.id,

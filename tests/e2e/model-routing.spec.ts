@@ -10,7 +10,8 @@ test("administrator can inspect alias mappings, pricing coverage, and supported 
   await expect(page.getByRole("button", { name: "Publish mapping version" })).toBeDisabled();
 
   const aliasTable = page.getByRole("table");
-  await expect(aliasTable.getByText("Auto", { exact: true })).toBeVisible();
+  await expect(aliasTable.getByText("Auto · Beta", { exact: true })).toBeVisible();
+  await expect(aliasTable.getByText("Fixed Balanced unless this Team is explicitly enabled")).toBeVisible();
   await expect(aliasTable.getByText("Lite", { exact: true })).toBeVisible();
   await expect(aliasTable.getByText("Balanced", { exact: true })).toBeVisible();
   await expect(aliasTable.getByText("Pro", { exact: true })).toBeVisible();
@@ -20,6 +21,7 @@ test("administrator can inspect alias mappings, pricing coverage, and supported 
   await expect(aliasTable.getByText("$15.00")).toHaveCount(2);
   await expect(aliasTable.getByText("2 gaps")).toBeVisible();
   await expect(aliasTable.getByText("Not reported")).toHaveCount(3);
+  await expect(page.getByText("Hypothetical Lite → Executed Balanced")).toBeVisible();
 
   await page.getByRole("button", { name: "Create draft" }).click();
   const mappingEditor = page.getByRole("dialog", { name: "Create a mapping draft" });
@@ -70,27 +72,28 @@ test("administrator can inspect alias mappings, pricing coverage, and supported 
   await page.getByRole("button", { name: "Publish mapping version" }).click();
   await page.getByRole("dialog", { name: "Publish mapping version?" }).getByRole("button", { name: "Publish mapping version" }).click();
   await expect(page.getByRole("status")).toContainText("Published for policy/shadow evaluation; current Team rollouts are unchanged.");
+  await expect(page.getByText("Hypothetical Lite → Executed Balanced")).toBeVisible();
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("lemmacomputer.routing-mapping-draft:")))).toEqual([]);
 
   await page.getByLabel("Pro").uncheck();
   await page.getByRole("button", { name: "Save Team policy" }).click();
   await expect(page.getByLabel("Pro")).not.toBeChecked();
-  await expect(page.getByRole("button", { name: "Enable production routing" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Enable Auto (Beta) routing" })).toBeDisabled();
 
-  await page.getByRole("button", { name: "Review evidence" }).click();
-  const review = page.getByRole("dialog", { name: "Record administrator review" });
+  await page.getByRole("button", { name: "Review Auto (Beta) evidence" }).click();
+  const review = page.getByRole("dialog", { name: "Record Auto (Beta) review" });
   await review.getByLabel("Routing review note").fill("Finance sample passed the configured quality and cost thresholds.");
-  await review.getByLabel("Evidence passed the configured evaluation threshold.").check();
+  await review.getByLabel("Auto (Beta) evidence passed the configured evaluation threshold.").check();
   await review.getByRole("button", { name: "Record review" }).click();
 
-  await page.getByRole("button", { name: "Enable production routing" }).click();
-  const enable = page.getByRole("dialog", { name: "Enable production routing?" });
-  await expect(enable.getByRole("button", { name: "Enable Auto routing" })).toBeDisabled();
-  await enable.getByLabel("I reviewed the shadow evidence and understand this changes the executed deployment.").check();
-  await enable.getByRole("button", { name: "Enable Auto routing" }).click();
+  await page.getByRole("button", { name: "Enable Auto (Beta) routing" }).click();
+  const enable = page.getByRole("dialog", { name: "Enable Auto (Beta) routing?" });
+  await expect(enable.getByRole("button", { name: "Enable Auto (Beta) routing" })).toBeDisabled();
+  await enable.getByLabel("I reviewed the Auto (Beta) shadow evidence and understand this changes the executed deployment.").check();
+  await enable.getByRole("button", { name: "Enable Auto (Beta) routing" }).click();
   await expect(page.getByText("enabled", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: /Lite complexity classifier/ }).click();
+  await page.getByRole("region", { name: "Recent routing decisions" }).getByRole("button").first().click();
   const detail = page.getByRole("dialog", { name: "Routing decision" });
   await expect(detail.getByText("bedrock", { exact: true })).toBeVisible();
   await expect(detail.getByText("private/terra", { exact: true })).toBeVisible();
@@ -121,7 +124,7 @@ test("administrator can configure the first alias mapping from provider inventor
   await page.goto("/?view=ai-control-plane&section=model-routes");
 
   await expect(page.getByText("No model routes yet")).toBeVisible();
-  await expect(page.getByText("Auto", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Auto · Beta", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Configure first mapping" }).click();
   const editor = page.getByRole("dialog", { name: "Create a mapping draft" });
   await expect(editor.getByLabel("Lite provider deployment")).toBeVisible();
@@ -238,7 +241,7 @@ test("administrator can set up a published mapping for a Team and start first sh
   const policyRequest = page.waitForRequest((request) => request.method() === "PUT" && /\/api\/v1\/admin\/teams\/[^/]+\/routing\/policy$/.test(request.url()));
   await page.getByRole("button", { name: "Set up Team rollout" }).click();
 
-  await expect(page.getByText("Finance can use Auto now through its fixed Balanced route. Shadow evaluation is optional.")).toBeVisible();
+  await expect(page.getByText("Finance can use Auto (Beta) now through its fixed Balanced route. Shadow evaluation is optional.")).toBeVisible();
   const savedPolicy = (await policyRequest).postDataJSON();
   expect(savedPolicy.mappingVersionId).toBe(mappingId);
   expect(savedPolicy.billingCurrency).toBe("USD");
@@ -246,10 +249,10 @@ test("administrator can set up a published mapping for a Team and start first sh
   expect(savedPolicy.serviceClassPolicies.balanced.safeDefault).toBe(true);
   await expect(page.locator(".route-readonly-badge")).toHaveText("Fixed route active");
   await expect(page.locator(".route-health.healthy")).toContainText("Fixed route active");
-  await expect(page.getByRole("button", { name: "Start shadow mode" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Start Auto (Beta) shadow mode" })).toBeEnabled();
 
   const rolloutRequest = page.waitForRequest((request) => request.method() === "POST" && /\/api\/v1\/admin\/teams\/[^/]+\/routing\/rollout$/.test(request.url()));
-  await page.getByRole("button", { name: "Start shadow mode" }).click();
+  await page.getByRole("button", { name: "Start Auto (Beta) shadow mode" }).click();
 
   const savedRollout = (await rolloutRequest).postDataJSON();
   expect(savedRollout.mode).toBe("shadow");
@@ -258,8 +261,8 @@ test("administrator can set up a published mapping for a Team and start first sh
   expect(savedRollout.fixedDeploymentId).toBe(deployments[1].id);
   await expect(page.locator(".route-readonly-badge")).toHaveText("Shadow evaluation");
   await expect(page.getByText("Shadow evaluation started for this Team.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start shadow mode" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Enable production routing" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Start Auto (Beta) shadow mode" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Enable Auto (Beta) routing" })).toBeDisabled();
 });
 
 test("mapping editor keeps a clear vertical rhythm at compact width", async ({ page }) => {

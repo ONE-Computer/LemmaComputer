@@ -58,6 +58,12 @@ in the signed decision.
 ## Model selection scopes
 
 Auto, Lite, Balanced, and Pro are service contracts, not provider models.
+Auto is labelled Beta for Phase 0.5. New Team policy setup creates a fixed
+Balanced rollout; selecting Auto or publishing a mapping does not enable
+dynamic execution. Shadow evidence records the hypothetical selection and the
+executed fixed route as distinct facts. Only a matching passed review followed
+by explicit Team enablement changes live routing, and the kill switch appends a
+disabled rollout that immediately restores the fixed route.
 There are two user selection scopes:
 
 - **Workspace default:** saved in the policy-bounded workspace configuration
