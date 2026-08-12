@@ -41,6 +41,11 @@ test("the packaged office-worker baseline verifies against the explicit product 
   );
 });
 
+test("the Control runtime image contains the signed product policy release", async () => {
+  const dockerfile = await readFile(new URL("docker/Dockerfile.node", root), "utf8");
+  assert.match(dockerfile, /^COPY config\/product-policy \.\/config\/product-policy$/m);
+});
+
 test("product policy release loading fails closed for a tampered checked-in envelope", async () => {
   const trustRoot = await readJson("config/product-policy/product-release-trust.json");
   const envelope = await readJson("config/product-policy/protected-baselines/office-worker-claude-v1.json") as Record<string, unknown>;
