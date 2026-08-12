@@ -2288,7 +2288,9 @@ export function createControlServer(
           subjectId: user.userId,
           audience: "lemmacomputer-control",
         });
-        const workspaces = await store.listCurrent(targetIdentity);
+        const workspaces = (await store.listCurrent(targetIdentity)).filter((workspace) => (
+          allowsPermission(actor, "workspace.manage", { type: "workspace", resourceId: workspace.id })
+        ));
         return {
           ...user,
           workspaces: await Promise.all(workspaces.map(async (workspace) => {
@@ -2322,6 +2324,70 @@ export function createControlServer(
         };
       })),
     };
+  });
+  app.get("/v1/admin/member-workspaces", async (request, reply) => {
+    const actor = principal(request);
+    if (!hasAnyPermissionGrant(actor, "workspace.manage")) {
+      throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
+    }
+    if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    const users = await security.identityPolicyStore.listUsers(actor.tenantId);
+    const managesOrganization = allowsPermission(actor, "workspace.manage");
+    const members = (await Promise.all(users.map(async (user) => {
+      const targetIdentity = identityContextSchema.parse({
+        tenantId: actor.tenantId,
+        subjectId: user.userId,
+        audience: "lemmacomputer-control",
+      });
+      const authorized = (await store.listCurrent(targetIdentity)).filter((workspace) => (
+        allowsPermission(actor, "workspace.manage", { type: "workspace", resourceId: workspace.id })
+      ));
+      if (!managesOrganization && authorized.length === 0) return null;
+      const workspaces = await Promise.all(authorized.map(async (workspace) => {
+        const settings = await store.getSandboxSettings?.(targetIdentity, workspace.grantId);
+        const document = user.effectivePolicy?.document as Record<string, unknown> | undefined;
+        const configuredProfile = settings?.profileId
+          ?? (Array.isArray(document?.workspaceProfiles) ? document.workspaceProfiles.find((value): value is string => typeof value === "string") : undefined)
+          ?? (typeof document?.workspaceProfile === "string" ? document.workspaceProfile : null);
+        const executionMode = configuredProfile === "disposable-open-v1" ? "disposable-open" : configuredProfile ? "managed" : null;
+        const health = workspace.state === "failed"
+          ? "needs_attention"
+          : ["provisioning", "restarting", "stopping"].includes(workspace.state)
+            ? "transitioning"
+            : workspace.state === "stopped" || workspace.state === "not_created"
+              ? "offline"
+              : "healthy";
+        return {
+          id: workspace.id,
+          name: workspace.grantId === "personal"
+            ? "Personal workspace"
+            : workspace.grantId.split(/[-_]+/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" "),
+          state: workspace.state,
+          health: {
+            status: health,
+            reasonCode: workspace.failureCode,
+          },
+          profile: configuredProfile ? { id: configuredProfile, executionMode } : null,
+          policyAssignment: user.effectivePolicy ? {
+            version: user.effectivePolicy.version,
+            hash: user.effectivePolicy.documentHash,
+          } : null,
+          lastActivityAt: workspace.updatedAt.toISOString(),
+          lastTransitionAt: workspace.updatedAt.toISOString(),
+          createdAt: workspace.createdAt.toISOString(),
+        };
+      }));
+      return {
+        userId: user.userId,
+        displayName: user.displayName,
+        email: user.email,
+        status: user.status,
+        membershipStatus: user.membershipStatus ?? null,
+        workspaceCount: workspaces.length,
+        workspaces,
+      };
+    }))).filter((member): member is NonNullable<typeof member> => Boolean(member));
+    return reply.header("cache-control", "no-store").send({ members });
   });
   const organizationRoleScopeSchema = z.discriminatedUnion("type", [
     z.strictObject({ type: z.literal("organization") }),
