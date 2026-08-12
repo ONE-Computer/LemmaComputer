@@ -45,18 +45,28 @@ export type MemberWorkspacePolicyAssignment = {
   createdAt: Date;
 };
 
+export type OrganizationWorkspacePolicyVersionRecord = OrganizationWorkspacePolicy & {
+  tenantId: string;
+  previousPolicyVersionId: string | null;
+  revisionNote: string;
+  createdBy: string;
+  createdAt: Date;
+};
+
 export interface ProtectedWorkspacePolicyStore {
   installReleaseOwnedBaseline(input: {
     tenantId: string;
     signedEnvelope: unknown;
     now?: Date;
   }): Promise<ProtectedTemplateVersionRecord>;
+  getLatestReleaseOwnedBaseline(tenantId: string): Promise<ProtectedTemplateVersionRecord | null>;
   createOrganizationPolicyVersion(input: {
     tenantId: string;
     constraints: OrganizationWorkspacePolicyConstraints;
     revisionNote: string;
     createdBy: string;
   }): Promise<OrganizationWorkspacePolicy>;
+  listOrganizationPolicyVersions(tenantId: string): Promise<OrganizationWorkspacePolicyVersionRecord[]>;
   assignMemberSelection(input: {
     tenantId: string;
     subjectId: string;
@@ -66,6 +76,7 @@ export interface ProtectedWorkspacePolicyStore {
     assignedBy: string;
   }): Promise<MemberWorkspacePolicyAssignment>;
   getCurrentMemberAssignment(tenantId: string, subjectId: string): Promise<MemberWorkspacePolicyAssignment | null>;
+  listMemberAssignmentVersions(tenantId: string, subjectId: string): Promise<MemberWorkspacePolicyAssignment[]>;
   revokeMemberAssignment(input: { tenantId: string; subjectId: string; assignedBy: string }): Promise<boolean>;
 }
 
@@ -100,6 +111,18 @@ const assignmentRecord = (row: Record<string, unknown>): MemberWorkspacePolicyAs
   selection: protectedPolicySelectionSchema.parse(row.selection),
   selectionHash: String(row.selection_hash),
   assignedBy: String(row.assigned_by),
+  createdAt: new Date(String(row.created_at)),
+});
+
+const organizationPolicyRecord = (row: Record<string, unknown>): OrganizationWorkspacePolicyVersionRecord => ({
+  tenantId: String(row.tenant_id),
+  policyVersionId: String(row.id),
+  version: Number(row.version),
+  previousPolicyVersionId: row.previous_policy_version_id ? String(row.previous_policy_version_id) : null,
+  documentHash: String(row.document_hash),
+  constraints: organizationWorkspacePolicyConstraintsSchema.parse(row.constraints),
+  revisionNote: String(row.revision_note),
+  createdBy: String(row.created_by),
   createdAt: new Date(String(row.created_at)),
 });
 
@@ -193,6 +216,15 @@ export class PostgresProtectedWorkspacePolicyStore implements ProtectedWorkspace
     }
   }
 
+  async getLatestReleaseOwnedBaseline(tenantId: string): Promise<ProtectedTemplateVersionRecord | null> {
+    const result = await this.pool.query(
+      `SELECT * FROM protected_policy_template_versions
+       WHERE tenant_id=$1 ORDER BY published_at DESC,template_id,version DESC LIMIT 1`,
+      [tenantId],
+    );
+    return result.rowCount ? templateRecord(result.rows[0]) : null;
+  }
+
   async createOrganizationPolicyVersion(input: {
     tenantId: string;
     constraints: OrganizationWorkspacePolicyConstraints;
@@ -234,6 +266,15 @@ export class PostgresProtectedWorkspacePolicyStore implements ProtectedWorkspace
     }
   }
 
+  async listOrganizationPolicyVersions(tenantId: string): Promise<OrganizationWorkspacePolicyVersionRecord[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM organization_workspace_policy_versions
+       WHERE tenant_id=$1 ORDER BY version DESC,id DESC`,
+      [tenantId],
+    );
+    return result.rows.map(organizationPolicyRecord);
+  }
+
   async assignMemberSelection(input: {
     tenantId: string;
     subjectId: string;
@@ -264,6 +305,15 @@ export class PostgresProtectedWorkspacePolicyStore implements ProtectedWorkspace
     );
     if (!result.rowCount || result.rows[0].state === "revoked") return null;
     return assignmentRecord(result.rows[0]);
+  }
+
+  async listMemberAssignmentVersions(tenantId: string, subjectId: string): Promise<MemberWorkspacePolicyAssignment[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM member_workspace_policy_assignment_versions
+       WHERE tenant_id=$1 AND subject_id=$2 ORDER BY assignment_version DESC,id DESC`,
+      [tenantId, subjectId],
+    );
+    return result.rows.map(assignmentRecord);
   }
 
   async revokeMemberAssignment(input: { tenantId: string; subjectId: string; assignedBy: string }): Promise<boolean> {

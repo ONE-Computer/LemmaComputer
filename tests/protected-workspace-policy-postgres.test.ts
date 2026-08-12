@@ -4,6 +4,10 @@ import test from "node:test";
 import pg from "pg";
 import { productReleaseVerificationKeySetSchema } from "@lemmacomputer/contracts";
 import { PostgresProtectedWorkspacePolicyStore } from "@lemmacomputer/workspace-store";
+import {
+  parseProductPolicyRelease,
+  ProtectedWorkspacePolicyAdministrationService,
+} from "../apps/control-api/src/protected-workspace-policy.js";
 
 const connectionString = process.env.POLICY_TEST_DATABASE_URL;
 const root = new URL("../", import.meta.url);
@@ -21,11 +25,12 @@ const selection = (applicationIds: Array<"firefox" | "google-chrome"> = ["firefo
 
 test("protected policy persistence is signed, immutable, append-only, and tenant scoped", { skip: !connectionString }, async () => {
   const pool = new pg.Pool({ connectionString });
-  const trustRoot = productReleaseVerificationKeySetSchema.parse(
-    await readJson("config/product-policy/product-release-trust.json"),
-  );
+  const trustRootInput = await readJson("config/product-policy/product-release-trust.json");
+  const trustRoot = productReleaseVerificationKeySetSchema.parse(trustRootInput);
   const envelope = await readJson("config/product-policy/protected-baselines/office-worker-claude-v1.json");
+  const release = parseProductPolicyRelease(trustRootInput, envelope, new Date("2026-08-12T05:00:00.000Z"));
   const store = PostgresProtectedWorkspacePolicyStore.fromConnectionString(connectionString!, trustRoot);
+  const administration = new ProtectedWorkspacePolicyAdministrationService(store, release);
   const suffix = crypto.randomUUID();
   const tenant = `protected-policy-${suffix}`;
   const otherTenant = `protected-policy-other-${suffix}`;
@@ -52,18 +57,15 @@ test("protected policy persistence is signed, immutable, append-only, and tenant
       ],
     );
 
-    const installed = await store.installReleaseOwnedBaseline({
-      tenantId: tenant,
-      signedEnvelope: envelope,
-      now: new Date("2026-08-12T05:00:00.000Z"),
-    });
+    const automaticOverview = await administration.overview(tenant);
+    const installed = await store.getLatestReleaseOwnedBaseline(tenant);
+    assert.ok(installed);
+    assert.equal(automaticOverview.baseline.immutable, true);
+    assert.equal(automaticOverview.baseline.editableByOrganization, false);
     assert.equal(installed.templateVersionId, "pbtv_office_worker_claude_1");
     assert.equal(installed.sourceCommit, "30e04d9610a17d24a0d6717fc3f99f562c5626e9");
-    assert.equal((await store.installReleaseOwnedBaseline({
-      tenantId: tenant,
-      signedEnvelope: envelope,
-      now: new Date("2026-08-12T05:00:00.000Z"),
-    })).envelopeDigest, installed.envelopeDigest, "release installation is idempotent");
+    assert.equal((await administration.overview(tenant)).baseline.envelopeDigest, installed.envelopeDigest,
+      "automatic release installation is idempotent");
 
     const firstOrganizationPolicy = await store.createOrganizationPolicyVersion({
       tenantId: tenant,
@@ -82,6 +84,27 @@ test("protected policy persistence is signed, immutable, append-only, and tenant
     });
     assert.equal(firstOrganizationPolicy.version, 1);
     assert.equal(secondOrganizationPolicy.version, 2);
+    assert.deepEqual((await store.listOrganizationPolicyVersions(tenant)).map((item) => item.version), [2, 1]);
+
+    const automaticallyAssigned = await administration.assignMember({
+      tenantId: tenant,
+      subjectId: administrator,
+      selection: selection(),
+      assignedBy: administrator,
+    });
+    assert.equal(automaticallyAssigned.protectedTemplateVersionId, installed.templateVersionId);
+    assert.equal(automaticallyAssigned.organizationPolicyVersionId, secondOrganizationPolicy.policyVersionId,
+      "new assignments snapshot the latest organization overlay");
+    await assert.rejects(
+      administration.assignMember({
+        tenantId: tenant,
+        subjectId: member,
+        selection: { ...selection(), agentIds: ["hermes-claw"] },
+        assignedBy: administrator,
+      }),
+      /denied/i,
+      "an organization administrator cannot expand the product-owned agent ceiling",
+    );
 
     const firstAssignment = await store.assignMemberSelection({
       tenantId: tenant,
@@ -106,6 +129,7 @@ test("protected policy persistence is signed, immutable, append-only, and tenant
       "firefox",
       "google-chrome",
     ]);
+    assert.deepEqual((await store.listMemberAssignmentVersions(tenant, member)).map((item) => item.assignmentVersion), [2, 1]);
     assert.equal(await store.getCurrentMemberAssignment(otherTenant, member), null);
 
     await assert.rejects(
