@@ -98,10 +98,11 @@ export class AgentProcessLifecycleService {
   constructor(private readonly store?: AgentInstanceStore) {}
 
   async beginBrowserChat(input: BrowserChatLaunch): Promise<AgentProcessLifecycle> {
-    // Increment 2 deliberately wires only the browser Claude SDK subprocess.
-    // Long-lived catalogue brokers and every other launch type remain explicit
-    // legacy identities until their own trusted process boundary is available.
-    if (!this.store || input.catalogId !== "claude-cli") return legacyLifecycle;
+    // Browser chat requests are the managed execution boundary. The adapter
+    // keeps long-lived catalogue brokers unlabelled and propagates this
+    // identity only into the per-turn Claude/Codex vendor process or the
+    // request-local Hermes run context and any tool subprocesses it launches.
+    if (!this.store) return legacyLifecycle;
     const registered = await this.store.registerLaunch({
       tenantId: input.identity.tenantId,
       ownerSubjectId: input.identity.subjectId,
