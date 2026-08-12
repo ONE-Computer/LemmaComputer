@@ -130,6 +130,12 @@ test("protected policy persistence is signed, immutable, append-only, and tenant
       "google-chrome",
     ]);
     assert.deepEqual((await store.listMemberAssignmentVersions(tenant, member)).map((item) => item.assignmentVersion), [2, 1]);
+    const effectiveMemberPolicy = await administration.effectiveMemberPolicy(tenant, member);
+    assert.equal(effectiveMemberPolicy.state, "assigned");
+    if (effectiveMemberPolicy.state === "assigned") {
+      assert.deepEqual(effectiveMemberPolicy.policy.allowed.agentIds, ["claude-desktop", "claude-cli"]);
+      assert.deepEqual(effectiveMemberPolicy.policy.selection.applicationIds, ["firefox", "google-chrome"]);
+    }
     assert.equal(await store.getCurrentMemberAssignment(otherTenant, member), null);
 
     await assert.rejects(
@@ -176,8 +182,9 @@ test("protected policy persistence is signed, immutable, append-only, and tenant
       /immutable/i,
     );
 
-    assert.equal(await store.revokeMemberAssignment({ tenantId: tenant, subjectId: member, assignedBy: administrator }), true);
+    assert.equal(await administration.revokeMember({ tenantId: tenant, subjectId: member, revokedBy: administrator }), true);
     assert.equal(await store.getCurrentMemberAssignment(tenant, member), null);
+    assert.deepEqual(await administration.effectiveMemberPolicy(tenant, member), { state: "revoked" });
     const history = await pool.query(
       `SELECT assignment_version,state FROM member_workspace_policy_assignment_versions
        WHERE tenant_id=$1 AND subject_id=$2 ORDER BY assignment_version`,

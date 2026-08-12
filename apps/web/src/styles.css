@@ -6050,6 +6050,17 @@ textarea:focus-visible,
   padding: 16px 0;
   border-bottom: 1px solid #dededb;
 }
+.protected-policy-assignments { margin-top: 20px; border-top: 1px solid #dededb; }
+.protected-policy-assignments > p { padding: 28px 0; color: #68727d; }
+.protected-policy-assignments article {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  min-height: 104px;
+  padding: 16px 0;
+  border-bottom: 1px solid #dededb;
+}
 .sso-connection-list article { padding: 16px 0; }
 .sso-connection-list .admin-user-actions { align-self: start; }
 .admin-user-badges { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -6317,7 +6328,7 @@ textarea:focus-visible,
   .team-editor-fields,
   .team-membership-editor { grid-template-columns: 1fr; }
   .team-editor-actions { grid-template-columns: 1fr; }
-  .admin-user-list article { grid-template-columns: 1fr; gap: 14px; padding: 22px 0; }
+  .admin-user-list article, .protected-policy-assignments article { grid-template-columns: 1fr; gap: 14px; padding: 22px 0; }
   .firewall-page-heading,
   .firewall-editor-actions { align-items: stretch; flex-direction: column; }
   .firewall-page-actions { flex-wrap: wrap; }

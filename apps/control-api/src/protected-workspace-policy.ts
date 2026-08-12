@@ -5,6 +5,7 @@ import {
   protectedPolicySelectionSchema,
   signedProtectedBaselineTemplateSchema,
   type OrganizationWorkspacePolicyConstraints,
+  type EffectiveProtectedWorkspacePolicy,
   type ProductReleaseVerificationKeySet,
   type ProtectedPolicySelection,
   type SignedProtectedBaselineTemplate,
@@ -70,6 +71,11 @@ export type ProtectedBaselineAdministrationView = {
   installedAt: string;
 };
 
+export type ResolvedMemberProtectedWorkspacePolicy =
+  | { state: "unassigned" }
+  | { state: "revoked" }
+  | { state: "assigned"; policy: EffectiveProtectedWorkspacePolicy };
+
 export interface ProtectedWorkspacePolicyAdministrationBoundary {
   overview(tenantId: string): Promise<{
     baseline: ProtectedBaselineAdministrationView;
@@ -89,6 +95,8 @@ export interface ProtectedWorkspacePolicyAdministrationBoundary {
     assignedBy: string;
   }): Promise<MemberWorkspacePolicyAssignment>;
   listMemberAssignmentVersions(tenantId: string, subjectId: string): Promise<MemberWorkspacePolicyAssignment[]>;
+  revokeMember?(input: { tenantId: string; subjectId: string; revokedBy: string }): Promise<boolean>;
+  effectiveMemberPolicy?(tenantId: string, subjectId: string): Promise<ResolvedMemberProtectedWorkspacePolicy>;
 }
 
 const baselineView = (
@@ -197,5 +205,50 @@ export class ProtectedWorkspacePolicyAdministrationService implements ProtectedW
   async listMemberAssignmentVersions(tenantId: string, subjectId: string) {
     await this.ensureTenantBaseline(tenantId);
     return this.store.listMemberAssignmentVersions(tenantId, subjectId);
+  }
+
+  async revokeMember(input: { tenantId: string; subjectId: string; revokedBy: string }) {
+    await this.ensureTenantBaseline(input.tenantId);
+    return this.store.revokeMemberAssignment({
+      tenantId: input.tenantId,
+      subjectId: input.subjectId,
+      assignedBy: input.revokedBy,
+    });
+  }
+
+  async effectiveMemberPolicy(tenantId: string, subjectId: string): Promise<ResolvedMemberProtectedWorkspacePolicy> {
+    const [installed, assignment, assignmentVersions, organizationPolicyVersions] = await Promise.all([
+      this.ensureTenantBaseline(tenantId),
+      this.store.getCurrentMemberAssignment(tenantId, subjectId),
+      this.store.listMemberAssignmentVersions(tenantId, subjectId),
+      this.store.listOrganizationPolicyVersions(tenantId),
+    ]);
+    if (!assignment) return { state: assignmentVersions[0]?.state === "revoked" ? "revoked" : "unassigned" };
+    if (assignment.protectedTemplateVersionId !== installed.templateVersionId) {
+      throw new Error("The member assignment references a protected baseline that is not installed by this release");
+    }
+    const organizationPolicyVersion = assignment.organizationPolicyVersionId
+      ? organizationPolicyVersions.find((version) => version.policyVersionId === assignment.organizationPolicyVersionId)
+      : null;
+    if (assignment.organizationPolicyVersionId && !organizationPolicyVersion) {
+      throw new Error("The member assignment references an unavailable organization policy version");
+    }
+    return { state: "assigned", policy: resolveProtectedBaselinePolicy({
+      baseline: this.release.verified,
+      organizationPolicy: organizationPolicyVersion ? {
+        policyVersionId: organizationPolicyVersion.policyVersionId,
+        version: organizationPolicyVersion.version,
+        documentHash: organizationPolicyVersion.documentHash,
+        constraints: organizationPolicyVersion.constraints,
+      } : null,
+      connectorPolicies: assignment.selection.connectorIds.map((connectorId) => ({
+        connectorId,
+        version: 1,
+        documentHash: installed.documentHash,
+        enabled: true,
+        toolPolicies: installed.payload.document.constraints.connectors.toolPolicies[connectorId] ?? {},
+      })),
+      selection: assignment.selection,
+    }) };
   }
 }

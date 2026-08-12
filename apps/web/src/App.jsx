@@ -1878,6 +1878,74 @@ function OrganizationSsoSection({ isOwner }) {
   </section>;
 }
 
+function ProtectedWorkspacePolicySection({ users }) {
+  const [overview, setOverview] = useState(null);
+  const [assignments, setAssignments] = useState({});
+  const [busyUserId, setBusyUserId] = useState("");
+  const [error, setError] = useState("");
+  const load = async () => {
+    const policy = await adminApi.protectedWorkspacePolicy();
+    const histories = await Promise.all(users.map(async (user) => [user.userId, await adminApi.protectedMemberPolicyVersions(user.userId)]));
+    setOverview(policy);
+    setAssignments(Object.fromEntries(histories.map(([userId, history]) => [userId, history.versions?.[0] ?? null])));
+  };
+  useEffect(() => {
+    let active = true;
+    load().catch((loadError) => active && setError(loadError.message ?? "Protected workspace policy could not be loaded."));
+    return () => { active = false; };
+  }, [users.map((user) => user.userId).join(",")]);
+  if (error) return <section className="admin-policy-section"><div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Protected policy needs attention</strong>{error}</span></div></section>;
+  if (!overview) return <section className="admin-policy-section"><p className="admin-empty-state">Loading protected workspace policy…</p></section>;
+  const { baseline } = overview;
+  const allowed = (constraint) => constraint.allow.filter((value) => !constraint.deny.includes(value));
+  const selection = {
+    workspaceProfile: allowed(baseline.constraints.workspaceProfiles).includes("kasm-persistent-standard") ? "kasm-persistent-standard" : allowed(baseline.constraints.workspaceProfiles)[0],
+    agentIds: allowed(baseline.constraints.agents),
+    applicationIds: allowed(baseline.constraints.applications),
+    modelAlias: allowed(baseline.constraints.modelAliases).includes("lemmacomputer-auto") ? "lemmacomputer-auto" : allowed(baseline.constraints.modelAliases)[0],
+    serviceClass: allowed(baseline.constraints.serviceClasses).includes("balanced") ? "balanced" : allowed(baseline.constraints.serviceClasses)[0],
+    reasoningEffort: baseline.constraints.maximumReasoningEffort,
+    egressMode: baseline.constraints.maximumEgressMode,
+    connectorIds: allowed(baseline.constraints.connectors),
+  };
+  const assign = async (user) => {
+    setBusyUserId(user.userId);
+    setError("");
+    try {
+      const result = await adminApi.assignProtectedMemberPolicy(user.userId, selection);
+      setAssignments((current) => ({ ...current, [user.userId]: result.version }));
+    } catch (assignError) {
+      setError(assignError.message ?? "Protected workspace policy could not be assigned.");
+    } finally {
+      setBusyUserId("");
+    }
+  };
+  const revoke = async (user) => {
+    setBusyUserId(user.userId);
+    setError("");
+    try {
+      await adminApi.revokeProtectedMemberPolicy(user.userId);
+      await load();
+    } catch (revokeError) {
+      setError(revokeError.message ?? "Protected workspace access could not be revoked.");
+    } finally {
+      setBusyUserId("");
+    }
+  };
+  return <section className="admin-policy-section" aria-labelledby="protected-workspace-policy-heading">
+    <div className="admin-section-heading"><div><p>Product-owned baseline</p><h2 id="protected-workspace-policy-heading">Office worker workspace</h2><small>Signed by LemmaComputer release {baseline.release.releaseId}. Organization administrators can assign this baseline but cannot edit or weaken it.</small></div><span>Immutable · v{baseline.version}</span></div>
+    <div className="admin-connector-summary">
+      <div><p>Effective ceiling</p><h2>Claude agents with full browser choice</h2><small>Agents: {allowed(baseline.constraints.agents).join(", ")} · Apps: {allowed(baseline.constraints.applications).join(", ")} · Connectors: {allowed(baseline.constraints.connectors).join(", ") || "none"}</small><small>Members may choose any listed app. Denied agents and connector tools remain blocked in the API and runtime.</small></div>
+    </div>
+    <div className="protected-policy-assignments" aria-label="Protected workspace policy assignments">{users.map((user) => {
+      const assignment = assignments[user.userId];
+      const assigned = assignment?.state === "selected";
+      const running = user.workspaces?.some((workspace) => !["not_created", "stopped", "failed"].includes(workspace.state));
+      return <article key={user.userId}><div className="admin-user-copy"><strong>{user.displayName}</strong><small>{assigned ? `Baseline assigned · version ${assignment.assignmentVersion}` : assignment?.state === "revoked" ? "Workspace access revoked" : "Protected baseline not assigned"}</small>{assignment && running && <div className="admin-user-badges"><span>Restart workspace to apply policy change</span></div>}</div><div className="admin-user-actions"><button className="secondary-button admin-row-action" type="button" disabled={busyUserId === user.userId} onClick={() => assign(user)}>{busyUserId === user.userId ? "Updating" : assigned ? "Reapply latest baseline" : "Assign baseline"}</button>{assigned && <button className="connection-quiet-button danger-button admin-row-action" type="button" disabled={busyUserId === user.userId} onClick={() => revoke(user)}>Revoke workspace access</button>}</div></article>;
+    })}</div>
+  </section>;
+}
+
 function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId, loading, invitationBusy, busyUserId, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageWorkspace, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
   const allRoleOptions = [
     { value: "member", label: "Member" },
@@ -2003,10 +2071,10 @@ function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId,
       </>}
       {canManageSettings && <OrganizationSsoSection isOwner={isOwner} />}
       {canManageRoles && <OrganizationRoleEditor users={users} />}
+      {canManagePolicy && <ProtectedWorkspacePolicySection users={users} />}
       {canManagePolicy && <section className="admin-policy-section" aria-labelledby="workspace-policy-heading">
         <div className="admin-toolbar">
-          <div><strong id="workspace-policy-heading">MVP standard workspace</strong><small>Workspace, agent, model, network, connector, and protected-operation rules</small></div>
-          <button className="secondary-button" type="button" onClick={onVersion}>Create new version</button>
+          <div><strong id="workspace-policy-heading">Connector policy</strong><small>Review the tool decisions that remain inside the product-owned workspace ceiling.</small></div>
         </div>
         <section className="admin-connector-summary" aria-labelledby="admin-connector-heading">
           <span className="connection-logo compact"><PlugConnected24Regular aria-hidden="true" /></span>
