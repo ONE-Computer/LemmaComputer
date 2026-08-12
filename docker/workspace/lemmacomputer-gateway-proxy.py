@@ -27,6 +27,7 @@ DEFAULT_SERVICE_CLASS = os.environ.get("LEMMACOMPUTER_REQUESTED_SERVICE_CLASS", 
 CONTROL = urlsplit(os.environ["LEMMACOMPUTER_CONTROL_UPSTREAM"])
 AGENT_BRIDGE_TOKEN = os.environ["LEMMACOMPUTER_AGENT_BRIDGE_TOKEN"]
 LISTEN_PORT = int(os.environ.get("LEMMACOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
+INFER_SINGLE_ACTIVE_AGENT_INSTANCE = os.environ.get("LEMMACOMPUTER_INFER_SINGLE_ACTIVE_AGENT_INSTANCE", "0") == "1"
 INFERENCE_PATHS = {"/v1/messages", "/v1/messages/count_tokens", "/v1/chat/completions", "/v1/responses"}
 ALLOWED_PATHS = INFERENCE_PATHS | {"/v1/models", "/mcp-rest/tools/list", "/mcp-rest/tools/call"}
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
@@ -46,6 +47,8 @@ UPLOAD_KEYS: dict[tuple, str] = {}
 UPLOAD_LOCK = threading.Lock()
 AGENT_BRIDGE_LOCK = threading.RLock()
 AGENT_BRIDGE_TERMINAL_CODE: str | None = None
+ACTIVE_AGENT_INSTANCE_LOCK = threading.RLock()
+ACTIVE_AGENT_INSTANCE_IDS: set[str] = set()
 
 
 class AgentBridgeTerminalError(RuntimeError):
@@ -185,6 +188,19 @@ def issue_task_binding(agent_instance_id: str | None) -> str:
     if not isinstance(binding, str) or not TASK_BINDING_PATTERN.fullmatch(binding):
         raise ValueError("invalid issued AI task binding")
     return binding
+
+
+def request_agent_instance_id(explicit: str | None) -> str | None:
+    if explicit:
+        if not AGENT_INSTANCE_PATTERN.fullmatch(explicit):
+            raise ValueError("invalid agent instance identity")
+        return explicit
+    if not INFER_SINGLE_ACTIVE_AGENT_INSTANCE:
+        return None
+    with ACTIVE_AGENT_INSTANCE_LOCK:
+        if len(ACTIVE_AGENT_INSTANCE_IDS) != 1:
+            return None
+        return next(iter(ACTIVE_AGENT_INSTANCE_IDS))
 
 
 def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tuple[bytes, str]:
@@ -385,7 +401,9 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def control_json(self, path: str, body: dict | None = None) -> dict:
-        return control_json_request(path, body, self.headers.get("x-lemmacomputer-agent-instance-id"))
+        return control_json_request(path, body, request_agent_instance_id(
+            self.headers.get("x-lemmacomputer-agent-instance-id")
+        ))
 
     def agent_instance_create(self) -> None:
         try:
@@ -399,7 +417,13 @@ class Handler(BaseHTTPRequestHandler):
             if not AGENT_INSTANCE_PATTERN.fullmatch(instance_id):
                 raise ValueError("invalid agent instance identity")
             value = self.read_json()
-            self.send_json(200, control_json_request(f"/internal/v1/agent/instances/{instance_id}/{action}", value))
+            result = control_json_request(f"/internal/v1/agent/instances/{instance_id}/{action}", value)
+            with ACTIVE_AGENT_INSTANCE_LOCK:
+                if action == "running":
+                    ACTIVE_AGENT_INSTANCE_IDS.add(instance_id)
+                else:
+                    ACTIVE_AGENT_INSTANCE_IDS.discard(instance_id)
+            self.send_json(200, result)
         except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
             self.send_json(409, {"error": str(error)[:240]})
 
@@ -618,7 +642,9 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 task_binding = self.headers.get("x-lemmacomputer-ai-task-binding")
                 if task_binding is None and MODEL_ALIAS == "lemmacomputer-auto":
-                    task_binding = issue_task_binding(self.headers.get("x-lemmacomputer-agent-instance-id"))
+                    task_binding = issue_task_binding(request_agent_instance_id(
+                        self.headers.get("x-lemmacomputer-agent-instance-id")
+                    ))
                 if task_binding is not None and (
                     not 32 <= len(task_binding) <= 4096
                     or not TASK_BINDING_PATTERN.fullmatch(task_binding)

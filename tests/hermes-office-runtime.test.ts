@@ -104,11 +104,12 @@ test("the Hermes API cannot report ready before the required connector MCP is re
 });
 
 test("the workspace image pins the Hermes Office skills and their native runtimes", async () => {
-  const [dockerfile, requirements, nodePackage, nodeLock] = await Promise.all([
+  const [dockerfile, requirements, nodePackage, nodeLock, entrypoint] = await Promise.all([
     source("docker/Dockerfile.workspace"),
     source("docker/workspace/hermes-office-requirements.txt"),
     source("docker/workspace/hermes-office-node/package.json"),
     source("docker/workspace/hermes-office-node/package-lock.json"),
+    source("docker/workspace/lemmacomputer-workspace-entrypoint.sh"),
   ]);
 
   assert.match(dockerfile, /HERMES_OFFICE_SKILLS_COMMIT=a606d24cf2a9d1137d77fd92e7da459c89947fbd/);
@@ -141,6 +142,10 @@ test("the workspace image pins the Hermes Office skills and their native runtime
   assert.match(dockerfile, /lemmacomputer-libreoffice/);
   assert.match(dockerfile, /command -v npm soffice libreoffice pandoc pdftoppm pdftotext qpdf tesseract unzip zip/);
   assert.match(dockerfile, /soffice --headless --version/);
+  assert.match(entrypoint, /remove_stale_libreoffice_lock\(\)/);
+  assert.match(entrypoint, /pgrep -u 1000 -f '\/usr\/lib\/libreoffice\/program\/\(oosplash\|soffice\\\.bin\)'/);
+  assert.match(entrypoint, /rm -f -- "\$office_profile\/\.lock"/);
+  assert.match(entrypoint, /remove_stale_libreoffice_lock/);
   assert.match(dockerfile, /hermes-office-venv/);
   assert.match(dockerfile, /hermes-office-requirements\.txt/);
 

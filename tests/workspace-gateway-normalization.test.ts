@@ -149,6 +149,7 @@ const availableBrokerPort = async () => {
 test("the loopback broker forwards only the assigned model, scoped credential, and broker-owned task binding", async () => {
   let bindingRequests = 0;
   let renewalRequests = 0;
+  const agentInstanceId = "11111111-1111-4111-8111-111111111111";
   const initialBridgeGrant = bridgeGrant(Math.floor(Date.now() / 1_000) + 1);
   const renewedBridgeGrant = bridgeGrant(Math.floor(Date.now() / 1_000) + 900);
   let received: {
@@ -169,9 +170,33 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       response.end(JSON.stringify({ token: renewedBridgeGrant }));
       return;
     }
+    if (request.url === "/internal/v1/agent/instances") {
+      assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString("utf8")), {
+        launchNonce: "22222222-2222-4222-8222-222222222222",
+      });
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({ agentInstanceId }));
+      return;
+    }
+    if (request.url === `/internal/v1/agent/instances/${agentInstanceId}/running`) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ agentInstanceId, status: "running" }));
+      return;
+    }
+    if (request.url === `/internal/v1/agent/instances/${agentInstanceId}/end`) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ agentInstanceId, status: "completed" }));
+      return;
+    }
     if (request.url === "/internal/v1/agent/usage-bindings") {
+      if (request.headers["x-lemmacomputer-agent-instance-id"] !== agentInstanceId) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { code: "AGENT_INSTANCE_INVALID" } }));
+        return;
+      }
       bindingRequests += 1;
       assert.equal(request.headers.authorization, `Bearer ${renewedBridgeGrant}`);
+      assert.equal(request.headers["x-lemmacomputer-agent-instance-id"], agentInstanceId);
       const bindingRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       assert.equal(bindingRequest.requestedServiceClass, "lite");
       assert.match(bindingRequest.taskId, /^workspace-native:/);
@@ -204,6 +229,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       LEMMACOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
       LEMMACOMPUTER_AGENT_BRIDGE_TOKEN: initialBridgeGrant,
       LEMMACOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
+      LEMMACOMPUTER_INFER_SINGLE_ACTIVE_AGENT_INSTANCE: "1",
     },
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -224,6 +250,18 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(renewalRequests, 1, "the broker renews a near-expiry grant without waiting for agent traffic");
+    const created = await fetch(`http://127.0.0.1:${brokerPort}/lemmacomputer/agent-instances`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ launchNonce: "22222222-2222-4222-8222-222222222222" }),
+    });
+    assert.equal(created.status, 201, await created.text());
+    const running = await fetch(`http://127.0.0.1:${brokerPort}/lemmacomputer/agent-instances/${agentInstanceId}/running`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ providerRuntimeId: "workspace-pid:123" }),
+    });
+    assert.equal(running.status, 200, await running.text());
     const response = await fetch(`http://127.0.0.1:${brokerPort}/v1/messages`, {
       method: "POST",
       headers: {
@@ -259,6 +297,19 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.match(stderr, /normalized model "<nonstandard>"/);
     assert.doesNotMatch(stderr, /secret-value/);
+    const ended = await fetch(`http://127.0.0.1:${brokerPort}/lemmacomputer/agent-instances/${agentInstanceId}/end`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "process_exited" }),
+    });
+    assert.equal(ended.status, 200, await ended.text());
+    const afterEnd = await fetch(`http://127.0.0.1:${brokerPort}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "client-default", max_tokens: 1, messages: [] }),
+    });
+    assert.equal(afterEnd.status, 400, "headerless inference fails closed after the process identity ends");
+    assert.equal(bindingRequests, 1);
   } finally {
     child.kill("SIGTERM");
     await once(child, "exit");

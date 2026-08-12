@@ -141,6 +141,18 @@ remove_stale_chrome_singletons() {
     "$chrome_profile/SingletonSocket"
 }
 
+remove_stale_libreoffice_lock() {
+  local office_profile="/home/kasm-user/.config/libreoffice/4"
+  [[ -d "$office_profile" ]] || return 0
+  if pgrep -u 1000 -f '/usr/lib/libreoffice/program/(oosplash|soffice\.bin)' >/dev/null; then
+    return 0
+  fi
+  # The profile persists across workspace-container generations, but the
+  # process named by this lock does not. LibreOffice otherwise opens a blank,
+  # inaccessible recovery shell and every Office document joins that process.
+  rm -f -- "$office_profile/.lock"
+}
+
 require_agent_environment() {
   local prefix="$1"
   local label="$2"
@@ -571,6 +583,7 @@ if application_enabled google-chrome; then
 else
   chmod 0700 /opt/google/chrome/google-chrome
 fi
+remove_stale_libreoffice_lock
 
 # Claude Desktop's Chat runtime uses the exact Claude Code engine embedded in
 # its signed build manifest. Seed that generated cache from the immutable image
@@ -599,6 +612,7 @@ start_agent_broker() {
   local prefix="$1"
   local port="$2"
   local pid_name="$3"
+  local infer_single_active_agent_instance=0
   local upstream_variable="${prefix}_GATEWAY_UPSTREAM"
   local credential_variable="${prefix}_GATEWAY_CREDENTIAL"
   local control_variable="${prefix}_CONTROL_UPSTREAM"
@@ -606,6 +620,11 @@ start_agent_broker() {
   local model_variable="${prefix}_MODEL_ALIAS"
   local transport_model_variable="${prefix}_TRANSPORT_MODEL_ALIAS"
   local service_class_variable="${prefix}_REQUESTED_SERVICE_CLASS"
+  # Claude Desktop does not consistently forward ANTHROPIC_CUSTOM_HEADERS
+  # from its Linux Cowork runtime. Its catalogue-scoped loopback broker may
+  # therefore recover the identity only when exactly one Control-verified
+  # interactive process is active. Other catalogue brokers stay header-only.
+  [[ "$port" == 4312 ]] && infer_single_active_agent_instance=1
   env -i \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     LEMMACOMPUTER_GATEWAY_UPSTREAM="${!upstream_variable}" \
@@ -616,6 +635,7 @@ start_agent_broker() {
     LEMMACOMPUTER_CONTROL_UPSTREAM="${!control_variable}" \
     LEMMACOMPUTER_AGENT_BRIDGE_TOKEN="${!bridge_variable}" \
     LEMMACOMPUTER_GATEWAY_LISTEN_PORT="$port" \
+    LEMMACOMPUTER_INFER_SINGLE_ACTIVE_AGENT_INSTANCE="$infer_single_active_agent_instance" \
     /usr/local/libexec/lemmacomputer-gateway-proxy &
   printf '%s\n' "$!" > "/run/lemmacomputer/${pid_name}.pid"
 }
