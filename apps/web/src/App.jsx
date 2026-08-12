@@ -33,6 +33,7 @@ import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { PlugConnected24Regular } from "@fluentui/react-icons/svg/plug-connected";
 import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
+import { Search24Regular } from "@fluentui/react-icons/svg/search";
 import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
 import { SpendDashboard } from "./SpendDashboard.jsx";
 import { UsageDataHealth } from "./UsageDataHealth.jsx";
@@ -261,6 +262,13 @@ const navFromLocation = () => {
   const view = new URLSearchParams(window.location.search).get("view") ?? "home";
   return navByView[view] ?? "Workspace";
 };
+const workspaceSections = new Set(["mine", "organization", "policies"]);
+const workspaceSectionFromLocation = () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("view") && params.get("view") !== "home") return "mine";
+  const section = params.get("section") ?? "mine";
+  return workspaceSections.has(section) ? section : "mine";
+};
 const settingsSectionByView = Object.freeze({
   admin: "people",
   credentials: "credentials",
@@ -403,19 +411,35 @@ function WorkspaceAssignment({ label, icon: Icon, children, detail }) {
   );
 }
 
-function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, onOpen, onRestart, onStop, onDelete, onCreate, onManage }) {
+function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, policyUsers }) {
+  const organizationSection = section === "organization" && canManageAnyWorkspace;
+  const policySection = section === "policies" && canManagePolicy;
   return (
     <div className="home-screen workspace-overview">
       <header className="page-heading workspace-overview-heading">
         <div>
-          <p>Good morning, {userName}</p>
-          <h1>Your workspaces</h1>
-          <span>See what is running and the apps, agents, model, and policy assigned to each workspace.</span>
+          <p>{organizationSection || policySection ? "Organization administration" : "Your workspace"}</p>
+          <h1>Workspace</h1>
+          <span>{organizationSection
+            ? "Monitor and manage member workspace runtimes. Workspace contents remain private to each member."
+            : policySection
+              ? "Review the protected workspace baseline and assign it to organization members."
+              : "Create and manage the workspaces available to you."}</span>
         </div>
-        {canCreateWorkspace && <button className="primary-button create-workspace-button" type="button" onClick={onCreate}>
+        {!organizationSection && !policySection && canCreateWorkspace && <button className="primary-button create-workspace-button" type="button" onClick={onCreate}>
           <Add24Regular aria-hidden="true" />Create workspace
         </button>}
       </header>
+
+      {(canManageAnyWorkspace || canManagePolicy) && <nav className="workspace-page-tabs" aria-label="Workspace sections">
+        <button type="button" className={section === "mine" ? "active" : ""} aria-current={section === "mine" ? "page" : undefined} onClick={() => onSectionChange("mine")}>My workspaces</button>
+        {canManageAnyWorkspace && <button type="button" className={organizationSection ? "active" : ""} aria-current={organizationSection ? "page" : undefined} onClick={() => onSectionChange("organization")}>Organization workspaces</button>}
+        {canManagePolicy && <button type="button" className={policySection ? "active" : ""} aria-current={policySection ? "page" : undefined} onClick={() => onSectionChange("policies")}>Workspace policies</button>}
+      </nav>}
+
+      {organizationSection ? <MemberWorkspaceConsole members={workspaceMembers} loading={adminLoading} error={workspaceError} busyWorkspaceId={workspaceBusyId} onCommand={onWorkspaceCommand} />
+        : policySection ? <ProtectedWorkspacePolicySection users={policyUsers} />
+          : <>
 
       {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong>{apiError}</span></div>}
 
@@ -481,6 +505,7 @@ function WorkspaceScreen({ userName, workspaces, loading, apiError, actionWorksp
           })}
         </section>
       )}
+      </>}
     </div>
   );
 }
@@ -1957,41 +1982,61 @@ const workspaceAdminDate = (value) => value
   : "No agent activity yet";
 
 function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCommand }) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const total = members.reduce((count, member) => count + member.workspaceCount, 0);
+  const normalizedSearch = search.trim().toLowerCase();
+  const statusMatches = (workspace) => statusFilter === "all"
+    || statusFilter === "running" && ["provisioning", "ready", "open", "restarting"].includes(workspace.state)
+    || statusFilter === "stopped" && ["not_created", "stopped"].includes(workspace.state)
+    || statusFilter === "attention" && (workspace.state === "failed" || workspace.health.status === "needs_attention");
+  const filteredMembers = members.map((member) => ({
+    ...member,
+    workspaces: member.workspaces.filter((workspace) => statusMatches(workspace)
+      && (!normalizedSearch || `${member.displayName} ${member.email} ${workspace.name}`.toLowerCase().includes(normalizedSearch))),
+  })).filter((member) => member.workspaces.length > 0
+    || statusFilter === "all" && (!normalizedSearch || `${member.displayName} ${member.email}`.toLowerCase().includes(normalizedSearch)));
   return <section className="member-workspace-console" aria-labelledby="member-workspace-console-heading">
-    <div className="admin-section-heading">
-      <div><p>Runtime operations</p><h2 id="member-workspace-console-heading">Member workspaces</h2><small>Review status and operate runtimes without opening screens, files, chats, or workspace content.</small></div>
-      <span aria-label={`${total} workspaces`}>{total}</span>
+    <div className="member-workspace-filters">
+      <label className="member-workspace-search"><span className="sr-only">Search members or workspaces</span><Search24Regular aria-hidden="true" /><input type="search" value={search} placeholder="Search members or workspaces" onChange={(event) => setSearch(event.target.value)} /></label>
+      <SelectMenu value={statusFilter} options={[{ value: "all", label: "All statuses" }, { value: "running", label: "Running" }, { value: "stopped", label: "Stopped" }, { value: "attention", label: "Needs attention" }]} ariaLabel="Workspace status" onValueChange={setStatusFilter} />
     </div>
     {error && <div className="member-workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace controls unavailable</strong>{error}</span></div>}
     {loading ? <p className="admin-empty-state" role="status">Loading member workspaces…</p> : members.length === 0 ? (
       <p className="admin-empty-state">No member workspaces are assigned to you.</p>
-    ) : <div className="member-workspace-members">{members.map((member) => <article className="member-workspace-member" key={member.userId}>
-      <header><div><strong>{member.displayName}</strong><small>{member.email}</small></div><span>{member.workspaceCount} {member.workspaceCount === 1 ? "workspace" : "workspaces"}</span></header>
-      {member.workspaces.length === 0 ? <p>No workspaces created.</p> : <div className="member-workspace-list">{member.workspaces.map((workspace) => {
+    ) : <div className="member-workspace-table" role="table" aria-label="Organization workspaces">
+      <div className="member-workspace-summary"><strong>{members.length} {members.length === 1 ? "member" : "members"}</strong><strong>{total} {total === 1 ? "workspace" : "workspaces"}</strong><small>Administrators can manage runtime state but cannot open member workspaces or view their content.</small></div>
+      <div className="member-workspace-table-header" role="row">
+        <span role="columnheader">Member</span><span role="columnheader">Workspace</span><span role="columnheader">Status</span><span role="columnheader">Health</span><span role="columnheader">Profile</span><span role="columnheader">Policy version</span><span role="columnheader">Last agent activity</span><span role="columnheader">Actions</span>
+      </div>
+      {filteredMembers.length === 0 ? <p className="admin-empty-state">No workspaces match these filters.</p> : <div className="member-workspace-members">{filteredMembers.map((member) => member.workspaces.length === 0
+        ? <div className="member-workspace-row empty" role="row" key={member.userId}>
+          <div className="member-workspace-member-copy" role="cell"><strong>{member.displayName}</strong><small>{member.email}</small><span>No workspaces</span></div>
+          <div className="member-workspace-no-runtime" role="cell">No workspace has been created yet.</div>
+        </div>
+        : member.workspaces.map((workspace, index) => {
         const busy = busyWorkspaceId === workspace.id || busyStates.has(workspace.state);
         const running = ["provisioning", "ready", "open", "restarting"].includes(workspace.state);
-        return <section key={workspace.id} aria-label={`${workspace.name} for ${member.displayName}`}>
-          <div className="member-workspace-copy">
-            <div><strong>{workspace.name}</strong><span className={`workspace-state state-${workspace.state}`}>{workspaceStatus(workspace.state)}</span></div>
-            <small>{workspace.profile?.id ?? "Profile unavailable"} · Policy {workspace.policyAssignment ? `v${workspace.policyAssignment.version}` : "not assigned"}</small>
-            <small>{workspaceHealthLabel[workspace.health.status] ?? "Unknown"}{workspace.health.reasonCode ? ` · ${workspace.health.reasonCode}` : ""} · Last agent activity: {workspaceAdminDate(workspace.lastActivityAt)}</small>
-            <small>Last transition: {workspaceAdminDate(workspace.lastTransitionAt)}</small>
-          </div>
-          <div className="member-workspace-actions">
+        return <section className="member-workspace-row" role="row" key={workspace.id} aria-label={`${workspace.name} for ${member.displayName}`}>
+          <div className="member-workspace-member-copy" role="cell">{index === 0 && <><strong>{member.displayName}</strong><small>{member.email}</small><span>{member.workspaceCount} {member.workspaceCount === 1 ? "workspace" : "workspaces"}</span></>}</div>
+          <div className="member-workspace-name" role="cell" data-label="Workspace"><strong>{workspace.name}</strong></div>
+          <div role="cell" data-label="Status"><span className={`workspace-state state-${workspace.state}`}>{workspaceStatus(workspace.state)}</span></div>
+          <div className={`member-workspace-health ${workspace.health.status}`} role="cell" data-label="Health">{workspace.health.status === "healthy" && <CheckmarkCircle24Regular aria-hidden="true" />}<span>{workspaceHealthLabel[workspace.health.status] ?? "Unknown"}</span></div>
+          <div className="member-workspace-profile" role="cell" data-label="Profile">{workspace.profile?.id ?? "Unavailable"}</div>
+          <div role="cell" data-label="Policy version">{workspace.policyAssignment ? `Policy v${workspace.policyAssignment.version}` : "Not assigned"}</div>
+          <div className="member-workspace-activity" role="cell" data-label="Last agent activity">{workspaceAdminDate(workspace.lastActivityAt)}</div>
+          <div className="member-workspace-actions" role="cell" data-label="Actions">
             {!running && <button className="primary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "start")}>Start</button>}
-            {running && <button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "restart")}>Restart</button>}
-            {running && <button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "stop")}>Stop</button>}
-            {running && <button className="connection-quiet-button danger-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "terminate_runtime")}>Terminate runtime</button>}
+            {running && <><div><button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "restart")}>Restart</button><button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "stop")}>Stop</button></div><button className="connection-quiet-button danger-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "terminate_runtime")}>Terminate runtime</button></>}
             {busy && <small role="status">Updating…</small>}
           </div>
         </section>;
-      })}</div>}
-    </article>)}</div>}
+      }))}</div>}
+    </div>}
   </section>;
 }
 
-function AdminScreen({ users, workspaceMembers, invitations, delegableBuiltInRoles, currentUserId, loading, workspaceError, workspaceBusyId, invitationBusy, busyUserId, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageAnyWorkspace, canManageWorkspace, onWorkspaceCommand, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, onVersion, mcpPolicy, onConfigureConnector, onBack }) {
+function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId, loading, invitationBusy, busyUserId, canManageMembers, canManageRoles, canManageSettings, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onBack }) {
   const allRoleOptions = [
     { value: "member", label: "Member" },
     { value: "admin", label: "Administrator" },
@@ -2054,7 +2099,6 @@ function AdminScreen({ users, workspaceMembers, invitations, delegableBuiltInRol
         <h1>People and access</h1>
         <span>Invite people, assign organization roles, and remove access. Identity-provider credentials remain outside LemmaComputer.</span>
       </header>
-      {canManageAnyWorkspace && <MemberWorkspaceConsole members={workspaceMembers} loading={loading} error={workspaceError} busyWorkspaceId={workspaceBusyId} onCommand={onWorkspaceCommand} />}
       {canManageMembers && <><section className="admin-access-summary" aria-labelledby="organization-access-heading">
         <div><p>Organization access</p><h2 id="organization-access-heading">Members and invitations</h2><span>Invitations expire after seven days. The selected organization and role cannot be changed by identity-provider claims.</span></div>
         <button className="primary-button admin-section-action" type="button" disabled={!roleOptions.length} onClick={() => setInviteOpen(true)}>Invite person</button>
@@ -2094,10 +2138,6 @@ function AdminScreen({ users, workspaceMembers, invitations, delegableBuiltInRol
               </div>
               <div className="admin-policy-copy">
                 {canManageRoles && roleOptions.some((option) => option.value === (item.role ?? (item.roles.includes("administrator") ? "admin" : "member"))) && <label><span>Organization role</span><SelectMenu value={item.role ?? (item.roles.includes("administrator") ? "admin" : "member")} options={roleOptions} ariaLabel={`Organization role for ${item.displayName}`} disabled={busyUserId === item.userId || membershipStatus !== "active"} onValueChange={(role) => onRoleChange(item, role)} /></label>}
-                {item.effectivePolicy ? <small>Workspace policy version {item.effectivePolicy.version} assigned</small> : <small>No active workspace policy assigned.</small>}
-                {item.workspaces?.length ? <div className="admin-user-workspaces">
-                  {item.workspaces.filter((workspace) => canManageWorkspace(workspace.id)).map((workspace) => <button className="connection-quiet-button" type="button" key={workspace.id} disabled={busyUserId === item.userId} onClick={() => onManageWorkspace(item, workspace)}>Manage {workspaceName(workspace)}</button>)}
-                </div> : <small>No workspace has been created yet.</small>}
               </div>
               <div className="admin-user-actions">
                 {isOwner && item.userId !== currentUserId && membershipStatus === "active" && <button className="secondary-button admin-row-action" type="button" disabled={busyUserId === item.userId} onClick={() => { setTransferCode(""); setTransferTarget(item); }}>Transfer ownership</button>}
@@ -2117,21 +2157,6 @@ function AdminScreen({ users, workspaceMembers, invitations, delegableBuiltInRol
       </>}
       {canManageSettings && <OrganizationSsoSection isOwner={isOwner} />}
       {canManageRoles && <OrganizationRoleEditor users={users} />}
-      {canManagePolicy && <ProtectedWorkspacePolicySection users={users} />}
-      {canManagePolicy && <section className="admin-policy-section" aria-labelledby="workspace-policy-heading">
-        <div className="admin-toolbar">
-          <div><strong id="workspace-policy-heading">Connector policy</strong><small>Review the tool decisions that remain inside the product-owned workspace ceiling.</small></div>
-        </div>
-        <section className="admin-connector-summary" aria-labelledby="admin-connector-heading">
-          <span className="connection-logo compact"><PlugConnected24Regular aria-hidden="true" /></span>
-          <div>
-            <p>Microsoft 365 connector</p>
-            <h2 id="admin-connector-heading">Tool controls are configured with the connection</h2>
-            <small>{mcpPolicy ? `Active policy version ${mcpPolicy.version} · ${mcpPolicy.tools.length} tools` : "Open the connector to review its tools and approval rules."}</small>
-          </div>
-          <button className="secondary-button" type="button" onClick={onConfigureConnector}>Open connector settings<ChevronRight16Regular aria-hidden="true" /></button>
-        </section>
-      </section>}
       {canManageMembers && inviteOpen && <ModalDialog title="Invite a person" description="Create pending product access. The person will choose their password and complete supported MFA with the configured identity provider." eyebrow="Organization access" labelledBy="organization-invite-title" onClose={invitationBusy ? () => undefined : () => setInviteOpen(false)}>
         <label className="modal-field"><span>Email address</span><input name="organization-invite-email" type="email" autoComplete="off" value={inviteDraft.email} onChange={(event) => setInviteDraft({ ...inviteDraft, email: event.target.value })} placeholder="person@example.com" disabled={invitationBusy} /></label>
         <label className="modal-field"><span>Organization role</span><SelectMenu value={roleOptions.some((option) => option.value === inviteDraft.role) ? inviteDraft.role : roleOptions[0]?.value ?? ""} options={roleOptions} ariaLabel="Invited organization role" disabled={invitationBusy || !roleOptions.length} onValueChange={(role) => setInviteDraft({ ...inviteDraft, role })} /><small>Only roles within your server-verified delegation authority are available.</small></label>
@@ -2303,51 +2328,19 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
   );
 }
 
-function SettingsScreen({ view, isAdmin, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageWorkspace, delegableBuiltInRoles, currentUserId, onOpenAdmin, onOpenCredentials, onOpenAccountSecurity, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, workspaceMembers, invitations, loading, workspaceError, workspaceBusyId, invitationBusy, busyUserId, onWorkspaceCommand, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onManageWorkspace, adminWorkspaceTarget, adminSandboxSettings, adminSandboxLoading, adminSandboxSaving, adminSandboxError, onSaveAdminSandbox, onAssignAdminSecurityGroup, onCloseAdminWorkspace, onVersion, mcpPolicy, onConfigureConnector }) {
-  if (view === "admin-workspace" && isAdmin && adminWorkspaceTarget) {
-    return <WorkspaceConfigurationScreen
-      settings={adminSandboxSettings}
-      workspaces={adminWorkspaceTarget.user.workspaces}
-      loading={adminSandboxLoading}
-      saving={adminSandboxSaving}
-      error={adminSandboxError}
-      selectedGrantId={adminWorkspaceTarget.workspace.grantId}
-      onBack={onCloseAdminWorkspace}
-      onSave={onSaveAdminSandbox}
-      onAssignSecurityGroup={onAssignAdminSecurityGroup}
-      canManageFirewall
-      telegram={null}
-      credentials={[]}
-      channelLoading={false}
-      channelBusy={false}
-      channelError=""
-      onSaveTelegram={() => undefined}
-      onDisconnectTelegram={() => undefined}
-      onCreateCredential={() => undefined}
-      showChannels={false}
-      ownerName={adminWorkspaceTarget.user.displayName}
-      backLabel="Back to organization users"
-    />;
-  }
-  if (view === "admin" && (isAdmin || canManageMembers || canManageRoles || canManageSettings)) {
+function SettingsScreen({ view, canManageMembers, canManageRoles, canManageSettings, delegableBuiltInRoles, currentUserId, onOpenAdmin, onOpenCredentials, onOpenAccountSecurity, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, invitations, loading, invitationBusy, busyUserId, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions }) {
+  if (view === "admin" && (canManageMembers || canManageRoles || canManageSettings)) {
     return <AdminScreen
       users={users}
-      workspaceMembers={workspaceMembers}
       invitations={invitations}
       delegableBuiltInRoles={delegableBuiltInRoles}
       currentUserId={currentUserId}
       loading={loading}
-      workspaceError={workspaceError}
-      workspaceBusyId={workspaceBusyId}
       invitationBusy={invitationBusy}
       busyUserId={busyUserId}
       canManageMembers={canManageMembers}
       canManageRoles={canManageRoles}
       canManageSettings={canManageSettings}
-      canManagePolicy={canManagePolicy}
-      canManageAnyWorkspace={isAdmin}
-      canManageWorkspace={canManageWorkspace}
-      onWorkspaceCommand={onWorkspaceCommand}
       onInvite={onInvite}
       onResendInvitation={onResendInvitation}
       onRevokeInvitation={onRevokeInvitation}
@@ -2356,10 +2349,6 @@ function SettingsScreen({ view, isAdmin, canManageMembers, canManageRoles, canMa
       onTransferOwnership={onTransferOwnership}
       onInitiateClosure={onInitiateClosure}
       onRevokeSessions={onRevokeSessions}
-      onManageWorkspace={onManageWorkspace}
-      onVersion={onVersion}
-      mcpPolicy={mcpPolicy}
-      onConfigureConnector={onConfigureConnector}
       onBack={onBack}
     />;
   }
@@ -2385,9 +2374,9 @@ function SettingsScreen({ view, isAdmin, canManageMembers, canManageRoles, canMa
           <span className="settings-item-copy"><strong>Credentials</strong><small>Manage write-only credentials for official workspace channels.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
         </button>
-        {(isAdmin || canManageMembers || canManageRoles || canManageSettings) && <button className="settings-item" type="button" onClick={onOpenAdmin}>
+        {(canManageMembers || canManageRoles || canManageSettings) && <button className="settings-item" type="button" onClick={onOpenAdmin}>
           <span className="settings-item-icon"><Settings24Regular aria-hidden="true" /></span>
-          <span className="settings-item-copy"><strong>People and access</strong><small>Invite people, assign organization roles, and manage workspace access.</small></span>
+          <span className="settings-item-copy"><strong>People and access</strong><small>Invite people, assign organization roles, and configure company sign-in.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
         </button>}
       </section>
@@ -4449,6 +4438,7 @@ export function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [activeNav, setActiveNav] = useState(navFromLocation);
+  const [workspaceSection, setWorkspaceSection] = useState(workspaceSectionFromLocation);
   const [workspace, setWorkspace] = useState(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(() => readPreference(workspacePreferenceKey));
   const [workspaceState, setWorkspaceState] = useState("loading");
@@ -4519,11 +4509,6 @@ export function App() {
   const [adminWorkspaceMembers, setAdminWorkspaceMembers] = useState([]);
   const [adminWorkspaceError, setAdminWorkspaceError] = useState("");
   const [adminWorkspaceBusyId, setAdminWorkspaceBusyId] = useState("");
-  const [adminWorkspaceTarget, setAdminWorkspaceTarget] = useState(null);
-  const [adminSandboxSettings, setAdminSandboxSettings] = useState(null);
-  const [adminSandboxLoading, setAdminSandboxLoading] = useState(false);
-  const [adminSandboxSaving, setAdminSandboxSaving] = useState(false);
-  const [adminSandboxError, setAdminSandboxError] = useState("");
   const [egressVersions, setEgressVersions] = useState([]);
   const [egressSaving, setEgressSaving] = useState(false);
   const [mcpPolicy, setMcpPolicy] = useState(null);
@@ -4693,6 +4678,7 @@ export function App() {
     const onPopState = () => {
       const name = navFromLocation();
       setActiveNav(name);
+      setWorkspaceSection(workspaceSectionFromLocation());
       setActiveChatSessionId(chatSessionFromLocation());
       setAiControlPlaneView(aiControlPlaneViewFromLocation());
       if (name === "Connections") {
@@ -4716,6 +4702,19 @@ export function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    if (!session || activeNav !== "Workspace") return;
+    const allowed = workspaceSection === "mine"
+      || workspaceSection === "organization" && canManageAnyWorkspace
+      || workspaceSection === "policies" && canManagePolicy;
+    if (allowed) return;
+    setWorkspaceSection("mine");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("view");
+    url.searchParams.delete("section");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }, [session, activeNav, workspaceSection, canManageAnyWorkspace, canManagePolicy]);
 
   useEffect(() => {
     if (activeNav !== "Chat" || !activeChatSessionId) return;
@@ -4956,29 +4955,32 @@ export function App() {
   }, [activeNav, aiControlPlaneView, canOpenAiControlPlane, canReadUsage, availableAiControlPlaneTabs]);
 
   useEffect(() => {
-    const workspaceAdminOpen = activeNav === "Settings" && settingsView === "admin";
+    const peopleOpen = activeNav === "Settings" && settingsView === "admin";
+    const organizationWorkspacesOpen = activeNav === "Workspace" && workspaceSection === "organization";
+    const workspacePoliciesOpen = activeNav === "Workspace" && workspaceSection === "policies";
     const teamsOpen = activeNav === "AI control plane" && aiControlPlaneView === "teams-budgets";
+    const workspaceAdminOpen = peopleOpen || organizationWorkspacesOpen || workspacePoliciesOpen;
     if ((!workspaceAdminOpen && !teamsOpen)
-      || workspaceAdminOpen && !canManageMembers && !canManageRoles && !canManageSettings && !canManageAnyWorkspace
+      || peopleOpen && !canManageMembers && !canManageRoles && !canManageSettings
+      || organizationWorkspacesOpen && !canManageAnyWorkspace
+      || workspacePoliciesOpen && !canManagePolicy
       || teamsOpen && !canManageUsage) return;
     if (workspaceAdminOpen) setAdminLoading(true);
     if (teamsOpen) setAdminTeamsLoading(true);
     Promise.all([
-      canManageMembers ? adminApi.users() : Promise.resolve({ users: [] }),
-      workspaceAdminOpen && canManageMembers ? adminApi.invitations() : Promise.resolve(null),
-      workspaceAdminOpen && canManagePolicy ? adminApi.mcpPolicy() : Promise.resolve(null),
-      workspaceAdminOpen && canManageAnyWorkspace
+      (peopleOpen || workspacePoliciesOpen || teamsOpen) && canManageMembers ? adminApi.users() : Promise.resolve({ users: [] }),
+      peopleOpen && canManageMembers ? adminApi.invitations() : Promise.resolve(null),
+      organizationWorkspacesOpen && canManageAnyWorkspace
         ? adminApi.memberWorkspaces()
           .then((value) => ({ ...value, error: null }))
           .catch((error) => ({ members: [], error }))
         : Promise.resolve(null),
       teamsOpen ? adminApi.teams(true) : Promise.resolve(null),
     ])
-      .then(([users, invitations, policy, memberWorkspaces, teams]) => {
+      .then(([users, invitations, memberWorkspaces, teams]) => {
         setAdminUsers(users.users);
         setAdminDelegableBuiltInRoles(users.delegableBuiltInRoles ?? []);
         if (invitations) setAdminInvitations(invitations.invitations);
-        if (policy) setMcpPolicy(policy);
         if (memberWorkspaces) {
           setAdminWorkspaceMembers(memberWorkspaces.members);
           setAdminWorkspaceError(memberWorkspaces.error?.message ?? "");
@@ -4990,7 +4992,7 @@ export function App() {
         if (workspaceAdminOpen) setAdminLoading(false);
         if (teamsOpen) setAdminTeamsLoading(false);
       });
-  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageAnyWorkspace, canManageUsage]);
+  }, [activeNav, aiControlPlaneView, settingsView, workspaceSection, session?.user.id, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageAnyWorkspace, canManageUsage]);
 
   useEffect(() => {
     if (activeNav !== "Firewall" || !canManagePolicy) return;
@@ -5634,6 +5636,7 @@ export function App() {
 
   const selectNav = (name, historyMode = "push") => {
     setActiveNav(name);
+    if (name === "Workspace") setWorkspaceSection("mine");
     const url = new URL(window.location.href);
     if (name === "Workspace") url.searchParams.delete("view");
     else url.searchParams.set("view", viewByNav[name]);
@@ -5657,6 +5660,28 @@ export function App() {
     if (name === "Workspace") { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); }
     setProfileOpen(false);
     setMobileNavOpen(false);
+    window.requestAnimationFrame(() => mainContentRef.current?.focus());
+  };
+
+  const selectWorkspaceSection = (section = "mine", historyMode = "push") => {
+    const nextSection = workspaceSections.has(section) ? section : "mine";
+    setActiveNav("Workspace");
+    setWorkspaceSection(nextSection);
+    setSelectedSandboxGrantId(null);
+    setSandboxSettings(null);
+    setSandboxError("");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("chat");
+    if (nextSection === "mine") {
+      url.searchParams.delete("view");
+      url.searchParams.delete("section");
+    } else {
+      url.searchParams.set("view", "home");
+      url.searchParams.set("section", nextSection);
+    }
+    const nextLocation = `${url.pathname}${url.search}`;
+    if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
+    else if (nextLocation !== `${window.location.pathname}${window.location.search}`) window.history.pushState({}, "", nextLocation);
     window.requestAnimationFrame(() => mainContentRef.current?.focus());
   };
 
@@ -6138,67 +6163,6 @@ export function App() {
       setAdminBusyUserId("");
     }
   };
-  const manageAdminWorkspace = async (user, workspace) => {
-    const target = { user, workspace };
-    setAdminWorkspaceTarget(target);
-    setSettingsView("admin-workspace");
-    setAdminSandboxSettings(null);
-    setAdminSandboxError("");
-    setAdminSandboxLoading(true);
-    try {
-      setAdminSandboxSettings(await adminApi.sandboxSettings(user.userId, workspace.grantId));
-    } catch (error) {
-      setAdminSandboxError(error.message);
-    } finally {
-      setAdminSandboxLoading(false);
-    }
-  };
-  const closeAdminWorkspace = () => {
-    setSettingsView("admin");
-    setAdminWorkspaceTarget(null);
-    setAdminSandboxSettings(null);
-    setAdminSandboxError("");
-  };
-  const saveAdminSandbox = async (configuration) => {
-    if (!adminWorkspaceTarget) return;
-    setAdminSandboxSaving(true);
-    setAdminSandboxError("");
-    try {
-      const { securityGroupVersionId, ...sandboxConfiguration } = configuration;
-      if (securityGroupVersionId && securityGroupVersionId !== adminSandboxSettings?.securityGroup?.id) {
-        await adminApi.assignUserWorkspaceEgressSecurityGroup(
-          adminWorkspaceTarget.user.userId,
-          configuration.grantId,
-          securityGroupVersionId,
-        );
-      }
-      setAdminSandboxSettings(await adminApi.saveSandboxSettings(adminWorkspaceTarget.user.userId, sandboxConfiguration));
-      await refreshAdminUsers();
-      setToast(`${adminWorkspaceTarget.user.displayName}’s workspace configuration was saved. Restart it to apply profile, app, agent, or model changes.`);
-    } catch (error) {
-      setAdminSandboxError(error.message);
-    } finally {
-      setAdminSandboxSaving(false);
-    }
-  };
-  const assignAdminWorkspaceSecurityGroup = async (grantId, securityGroupVersionId) => {
-    if (!adminWorkspaceTarget) return;
-    setAdminSandboxSaving(true);
-    setAdminSandboxError("");
-    try {
-      const assigned = await adminApi.assignUserWorkspaceEgressSecurityGroup(
-        adminWorkspaceTarget.user.userId,
-        grantId,
-        securityGroupVersionId,
-      );
-      setAdminSandboxSettings(await adminApi.sandboxSettings(adminWorkspaceTarget.user.userId, grantId));
-      setToast(`${assigned.name} is now active for ${adminWorkspaceTarget.user.displayName}.`);
-    } catch (error) {
-      setAdminSandboxError(error.message);
-    } finally {
-      setAdminSandboxSaving(false);
-    }
-  };
   const createPolicyVersion = async () => {
     setRevisionPromptOpen(true);
   };
@@ -6303,7 +6267,6 @@ export function App() {
       onSignedIn={() => refreshAuthentication(invitationAcceptable)}
     />;
   }
-  const firstName = session.user.displayName.split(" ")[0] || session.user.displayName;
   const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen || accountSecurityOpen);
 
   return (
@@ -6374,19 +6337,28 @@ export function App() {
 
         {activeNav === "Workspace" && !selectedSandboxGrantId && (
           <WorkspaceScreen
-            userName={firstName}
+            section={workspaceSection}
             workspaces={homeWorkspaces}
             loading={homeWorkspacesLoading}
             apiError={apiError}
             actionWorkspaceId={workspaceActionId}
             canCreateWorkspace={hasCapability("workspace.create")}
             canManageWorkspace={(workspaceId) => hasScopedCapability("workspace.manage", "workspace", workspaceId) || hasScopedCapability("workspace.manage_own", "workspace", workspaceId)}
+            canManageAnyWorkspace={canManageAnyWorkspace}
+            canManagePolicy={canManagePolicy}
+            onSectionChange={selectWorkspaceSection}
             onOpen={openWorkspace}
             onRestart={restartWorkspace}
             onStop={stopWorkspace}
             onDelete={deleteWorkspace}
             onCreate={() => setSandboxCreateOpen(true)}
             onManage={selectWorkspaceConfiguration}
+            workspaceMembers={adminWorkspaceMembers}
+            adminLoading={adminLoading}
+            workspaceError={adminWorkspaceError}
+            workspaceBusyId={adminWorkspaceBusyId}
+            onWorkspaceCommand={commandAdminWorkspace}
+            policyUsers={adminUsers}
           />
         )}
         {activeNav === "Sites" && <SitesScreen
@@ -6520,12 +6492,9 @@ export function App() {
         )}
         {activeNav === "Settings" && <SettingsScreen
           view={settingsView}
-          isAdmin={canManageAnyWorkspace}
           canManageMembers={canManageMembers}
           canManageRoles={canManageRoles}
           canManageSettings={canManageSettings}
-          canManagePolicy={canManagePolicy}
-          canManageWorkspace={(workspaceId) => hasScopedCapability("workspace.manage", "workspace", workspaceId)}
           delegableBuiltInRoles={adminDelegableBuiltInRoles}
           currentUserId={session.user.id}
           onOpenAdmin={() => selectSettingsView("admin")}
@@ -6541,14 +6510,10 @@ export function App() {
           onRotateCredential={rotateTelegramCredential}
           onDeleteCredential={deleteTelegramCredential}
           users={adminUsers}
-          workspaceMembers={adminWorkspaceMembers}
           invitations={adminInvitations}
           loading={adminLoading}
-          workspaceError={adminWorkspaceError}
-          workspaceBusyId={adminWorkspaceBusyId}
           invitationBusy={adminInvitationBusy}
           busyUserId={adminBusyUserId}
-          onWorkspaceCommand={commandAdminWorkspace}
           onInvite={createOrganizationInvitation}
           onResendInvitation={resendOrganizationInvitation}
           onRevokeInvitation={revokeOrganizationInvitation}
@@ -6557,18 +6522,6 @@ export function App() {
           onTransferOwnership={transferOrganizationOwnership}
           onInitiateClosure={initiateOrganizationClosure}
           onRevokeSessions={revokeUserSessions}
-          onManageWorkspace={manageAdminWorkspace}
-          adminWorkspaceTarget={adminWorkspaceTarget}
-          adminSandboxSettings={adminSandboxSettings}
-          adminSandboxLoading={adminSandboxLoading}
-          adminSandboxSaving={adminSandboxSaving}
-          adminSandboxError={adminSandboxError}
-          onSaveAdminSandbox={saveAdminSandbox}
-          onAssignAdminSecurityGroup={assignAdminWorkspaceSecurityGroup}
-          onCloseAdminWorkspace={closeAdminWorkspace}
-          onVersion={createPolicyVersion}
-          mcpPolicy={mcpPolicy}
-          onConfigureConnector={configureMicrosoft365}
         />}
       </main>
 

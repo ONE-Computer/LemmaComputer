@@ -28,6 +28,11 @@ test("organization administrator invites a person and manages member access", as
   await page.reload();
   await expect(page.getByRole("heading", { name: "People and access" })).toBeVisible();
   await expect(page.getByText("Identity-provider credentials remain outside LemmaComputer.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Office worker workspace" })).toHaveCount(0);
+
+  await page.goto("/?view=home&section=policies");
+  await expect(page.getByRole("heading", { name: "Workspace", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workspace policies" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Office worker workspace" })).toBeVisible();
   await expect(page.getByText("Immutable · v1")).toBeVisible();
   const protectedMember = page.locator('[aria-label="Protected workspace policy assignments"] article').filter({ hasText: "Example Admin" });
@@ -36,6 +41,8 @@ test("organization administrator invites a person and manages member access", as
   await expect(protectedMember).toContainText("Restart workspace to apply policy change");
   await protectedMember.getByRole("button", { name: "Revoke workspace access" }).click();
   await expect(protectedMember).toContainText("Workspace access revoked");
+
+  await page.goto("/?view=settings&section=people");
 
   const sectionActions = ["Invite person", "Initiate organization closure", "Add connection", "Create custom role"];
   for (const name of sectionActions) {
@@ -667,8 +674,9 @@ test("workspace manager sees a content-free empty member workspace console", asy
   }));
 
   await page.goto("/?view=settings");
-  await page.getByRole("button", { name: "People and access" }).click();
-  await expect(page.getByRole("heading", { name: "Member workspaces" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "People and access" })).toHaveCount(0);
+  await page.goto("/?view=home&section=organization");
+  await expect(page.getByRole("button", { name: "Organization workspaces" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("No member workspaces are assigned to you.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Invite person" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Organization members" })).toHaveCount(0);
@@ -730,15 +738,20 @@ test("workspace manager operates multiple runtimes with confirmation and bounded
     });
   });
 
-  await page.goto("/?view=settings");
-  await page.getByRole("button", { name: "People and access" }).click();
-  await expect(page.getByText("2 workspaces", { exact: true })).toBeVisible();
-  await expect(page.getByText("No workspaces created.")).toBeVisible();
-  const personal = page.getByRole("region", { name: "Personal workspace for Alex Morgan" });
+  await page.goto("/?view=home&section=organization");
+  await expect(page.locator(".member-workspace-summary").getByText("2 workspaces", { exact: true })).toBeVisible();
+  await expect(page.getByText("No workspace has been created yet.")).toBeVisible();
+  const personal = page.getByRole("row", { name: "Personal workspace for Alex Morgan" });
   await expect(personal.getByText("Healthy")).toBeVisible();
   await expect(personal.getByText("kasm-persistent-standard")).toBeVisible();
   await expect(personal.getByText(/Policy v1/)).toBeVisible();
   await expect(personal.getByRole("button", { name: /open|view|files|chat/i })).toHaveCount(0);
+
+  const search = page.getByPlaceholder("Search members or workspaces");
+  await search.fill("Finance");
+  await expect(personal).toHaveCount(0);
+  await expect(page.getByRole("row", { name: "Finance workspace for Alex Morgan" })).toBeVisible();
+  await search.clear();
 
   await personal.getByRole("button", { name: "Restart" }).click();
   const restartDialog = page.getByRole("dialog", { name: "Restart Personal workspace?" });
@@ -751,12 +764,16 @@ test("workspace manager operates multiple runtimes with confirmation and bounded
   await expect(page.getByText("Personal workspace runtime restarted.")).toBeVisible();
   expect(commandCount).toBe(1);
 
-  const finance = page.getByRole("region", { name: "Finance workspace for Alex Morgan" });
+  const finance = page.getByRole("row", { name: "Finance workspace for Alex Morgan" });
   await finance.getByRole("button", { name: "Terminate runtime" }).click();
   const terminateDialog = page.getByRole("dialog", { name: "Terminate Finance workspace runtime?" });
   await expect(terminateDialog.getByText("Persistent files are retained and the workspace record is not deleted.")).toBeVisible();
   await terminateDialog.getByRole("button", { name: "Cancel" }).click();
   expect(commandCount).toBe(1);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("row", { name: "Finance workspace for Alex Morgan" }).getByRole("button", { name: "Stop" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test("workspace command failures stay scoped and actionable", async ({ page }) => {
@@ -786,9 +803,8 @@ test("workspace command failures stay scoped and actionable", async ({ page }) =
     body: JSON.stringify({ error: { code: "WORKSPACE_COMMAND_FAILED", message: "Runtime control is temporarily unavailable.", retryable: false } }),
   }));
 
-  await page.goto("/?view=settings");
-  await page.getByRole("button", { name: "People and access" }).click();
-  const personal = page.getByRole("region", { name: "Personal workspace for Alex Morgan" });
+  await page.goto("/?view=home&section=organization");
+  const personal = page.getByRole("row", { name: "Personal workspace for Alex Morgan" });
   await personal.getByRole("button", { name: "Stop" }).click();
   await page.getByRole("dialog", { name: "Stop Personal workspace?" }).getByRole("button", { name: "Stop workspace" }).click();
   await expect(page.getByRole("alert")).toContainText("Runtime control is temporarily unavailable.");
@@ -835,7 +851,7 @@ test("member manager cannot change protected roles and manages only an exact wor
   await page.getByRole("button", { name: "People and access" }).click();
   const member = page.locator(".admin-user-list article").filter({ hasText: "admin@example.test" });
   await expect(member.getByRole("combobox", { name: "Organization role for Example Admin" })).toHaveCount(0);
-  await expect(member.getByRole("button", { name: "Manage A" })).toBeVisible();
+  await expect(member.getByRole("button", { name: "Manage A" })).toHaveCount(0);
   await expect(member.getByRole("button", { name: "Manage B" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Invite person" }).click();

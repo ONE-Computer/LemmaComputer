@@ -23,12 +23,14 @@ test("LemmaComputer branding appears in the primary, mobile, sign-in, and compan
   assert.doesNotMatch(`${app}\n${companion}\n${index}\n${manifest}`, new RegExp(["One", "Computer"].join("")));
 });
 
-test("Workspace is the single multi-workspace overview without redundant reassurance or activity", async () => {
+test("Workspace is the contextual personal and organization workspace surface without redundant reassurance or activity", async () => {
   const [app, ui] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/ui.jsx"),
   ]);
-  assert.match(app, /<h1>Your workspaces<\/h1>/);
+  assert.match(app, /<h1>Workspace<\/h1>/);
+  assert.match(app, /Organization workspaces/);
+  assert.match(app, /Workspace policies/);
   assert.match(app, /home: "Workspace"/);
   assert.match(app, /label="Workspace"/);
   assert.match(app, /workspace-overview-list/);
@@ -54,7 +56,7 @@ test("Workspace configuration is reached from its overview card instead of a dup
   assert.match(app, /title="Create workspace"/);
   assert.match(app, /canCreateWorkspace=\{hasCapability\("workspace\.create"\)\}/);
   assert.match(app, /canManageWorkspace=\{\(workspaceId\) => hasScopedCapability\("workspace\.manage", "workspace", workspaceId\) \|\| hasScopedCapability\("workspace\.manage_own", "workspace", workspaceId\)\}/);
-  assert.match(app, /\{canCreateWorkspace && <button className="primary-button create-workspace-button"/);
+  assert.match(app, /!organizationSection && !policySection && canCreateWorkspace && <button className="primary-button create-workspace-button"/);
   assert.doesNotMatch(app, /title="Create a managed sandbox"/);
 });
 
@@ -370,7 +372,7 @@ test("built-in connectors use locally served branded icons", async () => {
 });
 
 
-test("administration exposes member lifecycle, workspace management, and organization connector locks", async () => {
+test("administration keeps identity in People and access while workspace operations remain contextual", async () => {
   const app = await readFile(new URL("../apps/web/src/App.jsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../apps/web/src/workspace-api.js", import.meta.url), "utf8");
   assert.match(app, /Invite person/);
@@ -379,7 +381,10 @@ test("administration exposes member lifecycle, workspace management, and organiz
   assert.match(app, /Suspend/);
   assert.match(app, /Reactivate/);
   assert.match(app, /Sign out sessions/);
-  assert.match(app, /Manage \{workspaceName\(workspace\)\}/);
+  assert.match(app, /function MemberWorkspaceConsole/);
+  assert.match(app, /Administrators can manage runtime state but cannot open member workspaces or view their content/);
+  assert.match(app, /<ProtectedWorkspacePolicySection users=\{policyUsers\}/);
+  assert.doesNotMatch(app.slice(app.indexOf("function AdminScreen"), app.indexOf("function CredentialsScreen")), /MemberWorkspaceConsole|ProtectedWorkspacePolicySection|Manage \{workspaceName\(workspace\)\}/);
   assert.match(app, /Members can manage connections/);
   assert.match(app, /Connector enabled/);
   assert.match(api, /admin\/invitations/);

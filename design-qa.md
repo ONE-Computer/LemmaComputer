@@ -1,61 +1,47 @@
-# AI control plane design QA
+# Workspace administration design QA
 
-- The source screenshots were local review artifacts and are intentionally not tracked.
-- Implementation captures were local review artifacts and are intentionally not tracked.
-- Comparison surface: all three source/implementation pairs were loaded together in one local browser board.
-- Comparison viewport: 1900 × 1200; application captures: 1440 × 1000, light theme, administrator fixture state.
-- Data-state note: illustrative reference numbers were not copied into live views; unavailable evidence stays explicitly qualified.
+## Evidence
 
-**Full-view comparison evidence**
+- Source visual truth: `/home/mike/.codex/generated_images/019ff3d5-555a-7de1-926f-b4be4ca7be5a/exec-4cc7d871-d339-4c01-a4b3-3a309c7de406.png`
+- Implementation screenshot: `/home/mike/.codex/visualizations/2026/08/12/019ff3d5-555a-7de1-926f-b4be4ca7be5a/workspace-admin-implementation.png`
+- Side-by-side comparison: `/home/mike/.codex/visualizations/2026/08/12/019ff3d5-555a-7de1-926f-b4be4ca7be5a/workspace-admin-comparison.png`
+- Viewport and CSS size: 1487 × 1058 px
+- Source pixels: 1487 × 1058
+- Implementation pixels: 1487 × 1058
+- Device scale factor: 1
+- Density normalization: none required; both artifacts have identical pixel dimensions.
+- State: desktop, light theme, organization administrator, Organization workspaces selected, two members and three representative workspaces.
 
-The Overview and Model routes references were placed beside their matched application captures in the same browser input. The implementation preserves the selected information hierarchy, restrained LemmaComputer palette, compact tab navigation, card rhythm, and enterprise data density.
+The full-view comparison used the side-by-side artifact above. A separate focused crop was not required because the equal-size source and implementation keep the table copy, controls, state labels, icons, and spacing legible at original resolution.
 
-**Focused region comparison evidence**
+## Findings
 
-The profile-menu reference and implementation were compared together. The implementation retains the identity block, Settings, and Log out layout, adds a clearly scoped `Organization` group above Settings, and keeps the AI control plane out of primary navigation. Model routes table typography, row alignment, price density, status colors, and primary actions were also reviewed side by side.
+No actionable P0, P1, or P2 differences remain.
 
-**Findings**
+- Fonts and typography: the implementation uses the product's existing Inter-based typography and preserves the source hierarchy. Its table text is slightly denser than the generated concept, but remains legible and consistent with the shipped application.
+- Spacing and layout rhythm: page hierarchy, tab spacing, filter row, table structure, row grouping, and action alignment match the selected direction. The implementation retains the product's existing 336 px sidebar and content cap, so the table is slightly narrower than the concept without losing controls.
+- Colors and visual tokens: the implementation uses existing product blue, neutral, success, stopped, border, and focus tokens. The concept's decorative green status dot in the filter is omitted because the shared select control does not encode a status icon.
+- Image and asset fidelity: there is no photographic or illustrative imagery. The implementation uses the product's existing LemmaComputer wordmark and Fluent UI vector icons; no substitute glyphs, CSS drawings, or custom SVG assets were introduced.
+- Copy and content: the selected privacy copy is preserved. Workspace names remain non-link text because administrators cannot open member content. `Ready` and `Offline` reflect actual runtime state rather than the concept's illustrative `Running` and dash values.
 
-- [P1 resolved] Model routes caused document-level horizontal overflow at 1440 px.
-  - Fix: removed nested page padding, contained the control-plane content, and consolidated four price dimensions into one compact pricing-coverage cell.
-- [P2 resolved] The Model routes heading wrapped into a narrow column and then gained excessive height during the first correction.
-  - Fix: stacked mapping actions below a stable title block and removed column flex growth.
-- [P2 resolved] The first dashboard chart used an inline SVG and gradient; it now uses accessible ledger-bucket bars and a flat background.
-- [P2 resolved] Pricing was a placeholder even though rate-card editing existed; Pricing is now a functional tab backed by the immutable rate-card and mapping workflow.
-- No open P0, P1, or P2 visual findings remain at the reviewed desktop viewport.
+## Comparison history
 
-**Required fidelity surfaces**
+### Pass 1
 
-- Fonts and typography: passed; Inter and the existing LemmaComputer heading hierarchy are preserved.
-- Spacing and layout rhythm: passed after the header, nested-padding, and table-density fixes.
-- Colors and visual tokens: passed; existing navy, warm-white, line, and semantic status tokens are reused.
-- Image quality and asset fidelity: passed; the existing brand wordmark and Fluent UI icons are used, with no fabricated image assets.
-- Copy and content: passed; stable employee aliases and administrator-only provider, pricing, and rollout boundaries are explicit.
+- [P2] The member/workspace summary helper was compressed onto the same line as the counts, reducing the hierarchy shown in the selected concept.
+- Fix: wrapped the summary, removed the redundant word `total`, and placed the privacy helper on its own line.
+- Post-fix evidence: `workspace-admin-comparison.png` shows the corrected two-line summary at the same 1487 × 1058 viewport.
 
-**Interaction evidence**
+### Pass 2
 
-- Loaded Auto, Lite, Balanced, and Pro aliases with concrete provider deployments.
-- Displayed input, output, cache-read, and cache-write price buckets and explicit pricing gaps.
-- Created and edited a local mapping draft.
-- Published an immutable mapping version without changing Team rollout state.
-- Created an immutable price record, attached it to a local mapping draft, and published the priced mapping.
-- Preserved Team policy, evidence review, production enablement, routing-decision inspection, and kill-switch flows.
-- Final Chrome console inspection found no errors or warnings; the Playwright scenario completed without page or action failure.
+- No P0, P1, or P2 findings.
+- Primary interactions verified: URL-backed workspace tabs, admin-only visibility, member/workspace search, status menu rendering, start/restart/stop/terminate confirmation flows, bounded status refresh, and responsive 390 px layout without horizontal page overflow.
+- Browser console errors: checked in the final capture state; none observed.
 
-**Comparison history**
+## Follow-up polish
 
-- Initial same-input comparison found document overflow, cramped route-heading geometry, a placeholder Pricing tab, and a generated chart treatment.
-- Second comparison verified the Overview hierarchy and profile-menu placement, then found a residual Model routes table scrollbar.
-- Final comparison confirmed the compact six-column table fits the target viewport, all four token-price dimensions remain visible, and no P0/P1/P2 issue remains.
+- [P3] A future shared-select enhancement could support a semantic status icon without embedding presentation-specific markup in option labels.
 
-**Verification**
-
-- Chrome accessibility snapshots confirmed one organization-level h1 and semantic child headings.
-- Browser geometry confirmed the document and route table fit the reviewed desktop viewport.
-- Focused Playwright covers administrator discovery, employee denial, URL/history-backed tabs, Pricing, route mapping, immutable rate cards, publication, shadow review, enablement, decision evidence, and the kill switch.
-
-**Follow-up polish**
-
-- Tablet and narrow-mobile visual comparison remains future polish; responsive layout and table containment are implemented but were not selected reference surfaces.
+## Final result
 
 final result: passed
