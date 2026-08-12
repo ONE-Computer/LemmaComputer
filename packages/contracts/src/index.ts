@@ -1911,6 +1911,235 @@ export type OperationView = z.infer<typeof operationViewSchema>;
 export const mcpToolPolicyDecisionSchema = z.enum(["allow", "approval_required", "deny"]);
 export type McpToolPolicyDecision = z.infer<typeof mcpToolPolicyDecisionSchema>;
 
+export const protectedPolicyTemplateIdSchema = z.string().regex(/^pbt_[a-z0-9][a-z0-9_]{2,63}$/);
+export const protectedPolicyTemplateVersionIdSchema = z.string().regex(/^pbtv_[a-z0-9][a-z0-9_]{2,95}$/);
+export const productReleaseKeyIdSchema = z.string().regex(/^prk_[a-z0-9][a-z0-9_]{2,63}$/);
+export const protectedPolicyConnectorIdSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(128);
+export const protectedPolicyToolIdSchema = z.string().min(1).max(128);
+export const workspaceReasoningEffortLevels = ["disabled", "low", "medium", "high", "max"] as const;
+export const workspaceReasoningEffortSchema = z.enum(workspaceReasoningEffortLevels);
+export type WorkspaceReasoningEffort = z.infer<typeof workspaceReasoningEffortSchema>;
+export const workspaceCapabilityIds = ["ai-assistant", "coding-tools", "m365-read", "m365-write-protected"] as const;
+export const workspaceCapabilityIdSchema = z.enum(workspaceCapabilityIds);
+export type WorkspaceCapabilityId = z.infer<typeof workspaceCapabilityIdSchema>;
+
+const uniquePolicyValues = <T>(values: T[]) => new Set(values).size === values.length;
+const baselineResourceConstraintSchema = <T extends z.ZodType>(valueSchema: T, maximum: number) => z.strictObject({
+  allow: z.array(valueSchema).min(1).max(maximum).refine(uniquePolicyValues, "Policy allow values must be unique"),
+  deny: z.array(valueSchema).max(maximum).refine(uniquePolicyValues, "Policy deny values must be unique"),
+});
+const overlayResourceConstraintSchema = <T extends z.ZodType>(valueSchema: T, maximum: number) => z.strictObject({
+  allow: z.array(valueSchema).max(maximum).refine(uniquePolicyValues, "Policy allow values must be unique").optional(),
+  deny: z.array(valueSchema).max(maximum).refine(uniquePolicyValues, "Policy deny values must be unique").default([]),
+});
+
+const baselineConnectorConstraintSchema = z.strictObject({
+  allow: z.array(protectedPolicyConnectorIdSchema).max(128).refine(uniquePolicyValues, "Connector allow values must be unique"),
+  deny: z.array(protectedPolicyConnectorIdSchema).max(128).refine(uniquePolicyValues, "Connector deny values must be unique"),
+  toolPolicies: z.record(
+    protectedPolicyConnectorIdSchema,
+    z.record(protectedPolicyToolIdSchema, mcpToolPolicyDecisionSchema),
+  ),
+}).superRefine((value, context) => {
+  const referenced = new Set([...value.allow, ...value.deny]);
+  for (const connectorId of Object.keys(value.toolPolicies)) {
+    if (!referenced.has(connectorId)) {
+      context.addIssue({ code: "custom", path: ["toolPolicies", connectorId], message: "Connector tool policy must reference an allowed or denied connector" });
+    }
+  }
+});
+
+const overlayConnectorConstraintSchema = z.strictObject({
+  allow: z.array(protectedPolicyConnectorIdSchema).max(128).refine(uniquePolicyValues, "Connector allow values must be unique").optional(),
+  deny: z.array(protectedPolicyConnectorIdSchema).max(128).refine(uniquePolicyValues, "Connector deny values must be unique").default([]),
+  toolPolicies: z.record(
+    protectedPolicyConnectorIdSchema,
+    z.record(protectedPolicyToolIdSchema, mcpToolPolicyDecisionSchema),
+  ).default({}),
+});
+
+export const protectedBaselineTemplateDocumentSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  constraints: z.strictObject({
+    workspaceProfiles: baselineResourceConstraintSchema(sandboxProfileIdSchema, sandboxProfileIds.length),
+    agents: baselineResourceConstraintSchema(agentCatalogIdSchema, agentCatalogIds.length),
+    applications: baselineResourceConstraintSchema(sandboxApplicationIdSchema, sandboxApplicationIds.length),
+    modelAliases: baselineResourceConstraintSchema(sandboxModelAliasSchema, sandboxModelAliases.length),
+    serviceClasses: baselineResourceConstraintSchema(workspaceRequestedServiceClassSchema, workspaceRequestedServiceClasses.length),
+    maximumReasoningEffort: workspaceReasoningEffortSchema,
+    maximumEgressMode: egressModeSchema,
+    clipboard: z.strictObject({
+      localToWorkspace: z.boolean(),
+      workspaceToLocal: z.boolean(),
+      maxBytes: z.number().int().positive().max(1_048_576),
+    }),
+    connectors: baselineConnectorConstraintSchema,
+    capabilities: baselineResourceConstraintSchema(workspaceCapabilityIdSchema, workspaceCapabilityIds.length),
+  }),
+});
+export type ProtectedBaselineTemplateDocument = z.infer<typeof protectedBaselineTemplateDocumentSchema>;
+
+export const organizationWorkspacePolicyConstraintsSchema = z.strictObject({
+  workspaceProfiles: overlayResourceConstraintSchema(sandboxProfileIdSchema, sandboxProfileIds.length).optional(),
+  agents: overlayResourceConstraintSchema(agentCatalogIdSchema, agentCatalogIds.length).optional(),
+  applications: overlayResourceConstraintSchema(sandboxApplicationIdSchema, sandboxApplicationIds.length).optional(),
+  modelAliases: overlayResourceConstraintSchema(sandboxModelAliasSchema, sandboxModelAliases.length).optional(),
+  serviceClasses: overlayResourceConstraintSchema(workspaceRequestedServiceClassSchema, workspaceRequestedServiceClasses.length).optional(),
+  maximumReasoningEffort: workspaceReasoningEffortSchema.optional(),
+  maximumEgressMode: egressModeSchema.optional(),
+  clipboard: z.strictObject({
+    localToWorkspace: z.boolean().optional(),
+    workspaceToLocal: z.boolean().optional(),
+    maxBytes: z.number().int().positive().max(1_048_576).optional(),
+  }).optional(),
+  connectors: overlayConnectorConstraintSchema.optional(),
+  capabilities: overlayResourceConstraintSchema(workspaceCapabilityIdSchema, workspaceCapabilityIds.length).optional(),
+});
+export type OrganizationWorkspacePolicyConstraints = z.infer<typeof organizationWorkspacePolicyConstraintsSchema>;
+
+export const protectedBaselineTemplatePayloadSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  issuer: z.literal("lemmacomputer-product-release"),
+  audience: z.literal("lemmacomputer-protected-baseline"),
+  templateId: protectedPolicyTemplateIdSchema,
+  templateVersionId: protectedPolicyTemplateVersionIdSchema,
+  version: z.number().int().positive(),
+  supersedesTemplateVersionId: protectedPolicyTemplateVersionIdSchema.nullable(),
+  release: z.strictObject({
+    releaseId: z.string().trim().min(1).max(64),
+    sourceCommit: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+    publishedAt: z.iso.datetime(),
+  }),
+  documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  document: protectedBaselineTemplateDocumentSchema,
+}).superRefine((value, context) => {
+  if (value.version === 1 && value.supersedesTemplateVersionId !== null) {
+    context.addIssue({ code: "custom", path: ["supersedesTemplateVersionId"], message: "The first template version cannot supersede another version" });
+  }
+  if (value.version > 1 && value.supersedesTemplateVersionId === null) {
+    context.addIssue({ code: "custom", path: ["supersedesTemplateVersionId"], message: "A later template version must supersede an earlier immutable version" });
+  }
+  if (value.supersedesTemplateVersionId === value.templateVersionId) {
+    context.addIssue({ code: "custom", path: ["supersedesTemplateVersionId"], message: "A template version cannot supersede itself" });
+  }
+});
+export type ProtectedBaselineTemplatePayload = z.infer<typeof protectedBaselineTemplatePayloadSchema>;
+
+export const signedProtectedBaselineTemplateSchema = z.strictObject({
+  profile: z.literal("lemmacomputer-protected-baseline-signature/v1"),
+  canonicalization: z.literal("RFC8785-JCS"),
+  algorithm: z.literal("Ed25519"),
+  keyId: productReleaseKeyIdSchema,
+  payload: z.string().regex(/^[A-Za-z0-9_-]+$/).min(32),
+  payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
+});
+export type SignedProtectedBaselineTemplate = z.infer<typeof signedProtectedBaselineTemplateSchema>;
+
+export const productReleaseVerificationKeySchema = z.strictObject({
+  keyId: productReleaseKeyIdSchema,
+  algorithm: z.literal("Ed25519"),
+  publicKeySpkiBase64: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).min(40).max(256),
+  status: z.enum(["active", "retiring", "revoked"]),
+  activatedAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime().nullable(),
+});
+export type ProductReleaseVerificationKey = z.infer<typeof productReleaseVerificationKeySchema>;
+
+export const productReleaseVerificationKeySetSchema = z.strictObject({
+  profile: z.literal("lemmacomputer-product-release-key-set/v1"),
+  keys: z.array(productReleaseVerificationKeySchema).min(1).max(8)
+    .refine((keys) => uniquePolicyValues(keys.map((key) => key.keyId)), "Product release key ids must be unique"),
+});
+export type ProductReleaseVerificationKeySet = z.infer<typeof productReleaseVerificationKeySetSchema>;
+
+export const protectedPolicySelectionSchema = z.strictObject({
+  workspaceProfile: sandboxProfileIdSchema,
+  agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length).refine(uniquePolicyValues, "Selected agents must be unique"),
+  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).refine(uniquePolicyValues, "Selected applications must be unique"),
+  modelAlias: sandboxModelAliasSchema,
+  serviceClass: workspaceRequestedServiceClassSchema,
+  reasoningEffort: workspaceReasoningEffortSchema,
+  egressMode: egressModeSchema,
+  connectorIds: z.array(protectedPolicyConnectorIdSchema).max(128).refine(uniquePolicyValues, "Selected connectors must be unique"),
+});
+export type ProtectedPolicySelection = z.infer<typeof protectedPolicySelectionSchema>;
+
+export const organizationWorkspacePolicySchema = z.strictObject({
+  policyVersionId: z.string().min(1).max(128),
+  version: z.number().int().positive(),
+  documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  constraints: organizationWorkspacePolicyConstraintsSchema,
+});
+export type OrganizationWorkspacePolicy = z.infer<typeof organizationWorkspacePolicySchema>;
+
+export const connectorPolicyProjectionSchema = z.strictObject({
+  connectorId: protectedPolicyConnectorIdSchema,
+  version: z.number().int().positive(),
+  documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  enabled: z.boolean(),
+  toolPolicies: z.record(protectedPolicyToolIdSchema, mcpToolPolicyDecisionSchema),
+});
+export type ConnectorPolicyProjection = z.infer<typeof connectorPolicyProjectionSchema>;
+
+const effectivePolicySourceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("protected_baseline"),
+    sourceId: protectedPolicyTemplateVersionIdSchema,
+    version: z.number().int().positive(),
+    documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+    releaseId: z.string().min(1).max(64),
+  }),
+  z.strictObject({
+    kind: z.literal("organization_policy"),
+    sourceId: z.string().min(1).max(128),
+    version: z.number().int().positive(),
+    documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+  z.strictObject({
+    kind: z.literal("connector_policy"),
+    sourceId: protectedPolicyConnectorIdSchema,
+    version: z.number().int().positive(),
+    documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+]);
+
+export const effectiveProtectedWorkspacePolicySchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  template: z.strictObject({
+    templateId: protectedPolicyTemplateIdSchema,
+    templateVersionId: protectedPolicyTemplateVersionIdSchema,
+    version: z.number().int().positive(),
+    documentHash: z.string().regex(/^[a-f0-9]{64}$/),
+    envelopeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    release: protectedBaselineTemplatePayloadSchema.shape.release,
+  }),
+  allowed: z.strictObject({
+    workspaceProfileIds: z.array(sandboxProfileIdSchema),
+    agentIds: z.array(agentCatalogIdSchema),
+    applicationIds: z.array(sandboxApplicationIdSchema),
+    modelAliases: z.array(sandboxModelAliasSchema),
+    serviceClasses: z.array(workspaceRequestedServiceClassSchema),
+    maximumReasoningEffort: workspaceReasoningEffortSchema,
+    maximumEgressMode: egressModeSchema,
+    clipboard: z.strictObject({
+      localToWorkspace: z.boolean(),
+      workspaceToLocal: z.boolean(),
+      maxBytes: z.number().int().positive().max(1_048_576),
+    }),
+    connectorIds: z.array(protectedPolicyConnectorIdSchema),
+    connectorToolPolicies: z.record(
+      protectedPolicyConnectorIdSchema,
+      z.record(protectedPolicyToolIdSchema, mcpToolPolicyDecisionSchema),
+    ),
+    capabilityIds: z.array(workspaceCapabilityIdSchema),
+  }),
+  selection: protectedPolicySelectionSchema,
+  sources: z.array(effectivePolicySourceSchema).min(1),
+  effectiveHash: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type EffectiveProtectedWorkspacePolicy = z.infer<typeof effectiveProtectedWorkspacePolicySchema>;
+
 export const m365ToolCatalog = {
   "list-mail-folders": { service: "mail", risk: "read", decision: "allow" },
   "list-mail-messages": { service: "mail", risk: "read", decision: "allow" },
