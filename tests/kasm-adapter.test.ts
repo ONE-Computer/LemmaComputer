@@ -544,6 +544,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.ok(serialized.includes("TZ=Asia/Singapore"));
     assert.ok(serialized.includes("LEMMACOMPUTER_TIME_ZONE=Asia/Singapore"));
     assert.ok(serialized.includes("LEMMACOMPUTER_COWORK_ENABLED=true"));
+    assert.ok(serialized.includes(
+      "VNCOPTIONS=-DisableBasicAuth=1 -PreferBandwidth -DynamicQualityMin=4 -DynamicQualityMax=7 -DLP_ClipDelay=0",
+    ));
     assert.ok(serialized.includes('"com.lemmacomputer.cowork-enabled":"true"'));
     assert.ok(serialized.includes('"com.lemmacomputer.time-zone":"Asia/Singapore"'));
     assert.ok(serialized.includes("API_SERVER_ENABLED=true"));

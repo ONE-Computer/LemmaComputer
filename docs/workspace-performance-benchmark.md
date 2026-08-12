@@ -63,6 +63,11 @@ their latency distributions. A baseline should use at least 20 samples for each
 agreed matrix cell and distinguish empty, warm, and representative persistent
 homes as well as two- and four-CPU allocations.
 
+The local adapter must retain Kasm's `PreferBandwidth` and dynamic quality range
+when it supplies `VNCOPTIONS` to disable the redundant browser-authentication
+prompt. Docker replaces the image's complete `VNCOPTIONS` value; supplying only
+`DisableBasicAuth` silently disables those adaptive streaming defaults.
+
 ## Office regression corpus
 
 The deterministic corpus contains:
