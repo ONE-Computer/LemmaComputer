@@ -254,6 +254,11 @@ export const adminApi = {
     `/api/v1/admin/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceId)}/runtime/${encodeURIComponent(action)}`,
   ),
   protectedWorkspacePolicy: () => request("/api/v1/admin/protected-workspace-policy", { cache: "no-store" }),
+  protectedOrganizationPolicyVersions: () => request("/api/v1/admin/protected-workspace-policy/organization-versions", { cache: "no-store" }),
+  createProtectedOrganizationPolicyVersion: (constraints, revisionNote) => request(
+    "/api/v1/admin/protected-workspace-policy/organization-versions",
+    mutation("POST", { constraints, revisionNote }),
+  ),
   protectedMemberPolicyVersions: (userId) => request(`/api/v1/admin/protected-workspace-policy/members/${encodeURIComponent(userId)}/assignment-versions`, { cache: "no-store" }),
   assignProtectedMemberPolicy: (userId, selection) => request(`/api/v1/admin/protected-workspace-policy/members/${encodeURIComponent(userId)}/assignment-versions`, mutation("POST", { selection })),
   revokeProtectedMemberPolicy: (userId) => request(`/api/v1/admin/protected-workspace-policy/members/${encodeURIComponent(userId)}/assignment-versions`, mutation("DELETE")),

@@ -5973,6 +5973,110 @@ textarea:focus-visible,
 .admin-member-section .admin-user-list { margin-top: 0; padding: 0 28px; border-top: 0; }
 .admin-policy-copy label { display: grid; gap: 5px; color: #4f5965; font-size: 12px; }
 .admin-policy-section { margin-top: 28px; padding-top: 28px; border-top: 1px solid #dededb; }
+.workspace-policy-admin { display: grid; gap: 0; margin-top: 30px; color: #172334; }
+.workspace-policy-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; padding-bottom: 28px; }
+.workspace-policy-heading h2,
+.workspace-policy-heading p { margin: 0; }
+.workspace-policy-heading h2 { font-size: clamp(26px, 2.2vw, 32px); letter-spacing: -.025em; }
+.workspace-policy-heading p { max-width: 720px; margin-top: 10px; color: #5d6774; font-size: 14px; line-height: 1.55; }
+.workspace-policy-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.workspace-policy-title-line > span { padding: 4px 9px; border-radius: 6px; background: #eaf1f9; color: #174f8d; font-size: 12px; font-weight: 700; }
+.workspace-policy-primary-action { flex: 0 0 auto; min-height: 44px; }
+.workspace-policy-error { margin: 0 0 24px; }
+.workspace-policy-overview { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .72fr); gap: 42px; padding: 8px 0 26px; border-bottom: 1px solid #dfe2e5; }
+.workspace-policy-controls h3,
+.workspace-policy-context h3,
+.workspace-policy-members h3 { margin: 0; color: #172334; }
+.workspace-policy-controls > h3 { margin-bottom: 8px; font-size: 18px; }
+.workspace-policy-control-group { display: grid; grid-template-columns: 28px minmax(138px, .55fr) minmax(0, 1fr); align-items: start; gap: 14px; min-height: 78px; padding: 18px 0; border-bottom: 1px solid #e1e3e5; }
+.workspace-policy-control-group:last-child { border-bottom: 0; }
+.workspace-policy-control-group > svg { width: 22px; height: 22px; color: #263a52; }
+.workspace-policy-control-group > strong { padding-top: 2px; font-size: 14px; }
+.workspace-policy-control-group > div { display: grid; gap: 6px; min-width: 0; color: #334357; font-size: 14px; line-height: 1.4; }
+.workspace-policy-control-group button,
+.workspace-policy-context button,
+.workspace-policy-member-actions button { width: fit-content; padding: 2px 0; border: 0; background: transparent; color: #0b4f98; cursor: pointer; font: inherit; font-size: 13px; font-weight: 650; text-align: left; }
+.workspace-policy-control-group button:hover,
+.workspace-policy-context button:hover,
+.workspace-policy-member-actions button:hover { text-decoration: underline; }
+.workspace-policy-context { display: grid; align-content: space-between; gap: 36px; padding-left: 40px; border-left: 1px solid #dfe2e5; }
+.workspace-policy-context > section { display: grid; align-content: start; gap: 11px; }
+.workspace-policy-context-title { display: flex; align-items: center; gap: 10px; }
+.workspace-policy-context-title svg { width: 21px; height: 21px; }
+.workspace-policy-context h3 { font-size: 20px; }
+.workspace-policy-context h3 span { margin-left: 6px; padding: 3px 7px; border-radius: 5px; background: #eaf1f9; color: #174f8d; font-size: 12px; vertical-align: middle; }
+.workspace-policy-context p { margin: 0; color: #536070; font-size: 13px; line-height: 1.55; }
+.workspace-policy-context p strong { color: #26384e; }
+.workspace-policy-members { display: grid; gap: 18px; padding: 28px 0 0; }
+.workspace-policy-members > div:first-child { display: grid; gap: 5px; }
+.workspace-policy-members h3 { font-size: 18px; }
+.workspace-policy-members p { margin: 0; color: #64707d; font-size: 13px; }
+.workspace-policy-member-table { overflow: hidden; border-top: 1px solid #dfe2e5; }
+.workspace-policy-member-header,
+.workspace-policy-member-row { display: grid; grid-template-columns: minmax(190px, 1.3fr) minmax(170px, 1fr) minmax(120px, .75fr) minmax(150px, .9fr) 100px; align-items: center; gap: 18px; }
+.workspace-policy-member-header { min-height: 43px; color: #526070; font-size: 11px; font-weight: 700; }
+.workspace-policy-member-row { min-height: 72px; border-top: 1px solid #e2e4e6; color: #334357; font-size: 13px; }
+.workspace-policy-member-copy { display: grid; gap: 3px; min-width: 0; }
+.workspace-policy-member-copy strong,
+.workspace-policy-member-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-policy-member-copy strong { color: #172334; }
+.workspace-policy-member-copy small { color: #68727d; }
+.workspace-policy-state { display: inline-flex; width: fit-content; align-items: center; gap: 6px; font-weight: 650; }
+.workspace-policy-state::before { width: 8px; height: 8px; border-radius: 50%; background: #7d8791; content: ""; }
+.workspace-policy-state.current { color: #28633b; }
+.workspace-policy-state.current::before { background: #2e9b57; }
+.workspace-policy-state.attention { color: #855f12; }
+.workspace-policy-state.attention::before { background: #d99513; }
+.workspace-policy-state.muted { color: #6a737d; }
+.workspace-policy-history { margin-top: 24px; border: 1px solid #dfe2e5; border-radius: 8px; background: #fff; }
+.workspace-policy-history summary { display: flex; min-height: 66px; align-items: center; justify-content: space-between; gap: 18px; padding: 0 18px; cursor: pointer; list-style: none; }
+.workspace-policy-history summary::-webkit-details-marker { display: none; }
+.workspace-policy-history summary > span { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 2px 10px; }
+.workspace-policy-history summary svg { width: 21px; height: 21px; }
+.workspace-policy-history summary > svg { transition: transform 150ms ease; }
+.workspace-policy-history[open] summary > svg { transform: rotate(180deg); }
+.workspace-policy-history summary strong { font-size: 14px; }
+.workspace-policy-history summary small { grid-column: 2; color: #68727d; }
+.workspace-policy-history-list { border-top: 1px solid #e1e3e5; }
+.workspace-policy-history-list article { display: grid; grid-template-columns: 100px minmax(0, 1fr) minmax(220px, auto); gap: 18px; align-items: center; min-height: 64px; padding: 0 18px; border-bottom: 1px solid #e7e9eb; font-size: 13px; }
+.workspace-policy-history-list article:last-child { border-bottom: 0; }
+.workspace-policy-history-list small { color: #68727d; text-align: right; }
+.modal-card.workspace-policy-editor-modal { width: min(100%, 880px); max-height: min(900px, calc(100vh - 48px)); overflow: auto; }
+.workspace-policy-editor-body { display: grid; gap: 0; }
+.workspace-policy-editor-group { margin: 0; padding: 22px 0; border: 0; border-bottom: 1px solid #e1e4e7; }
+.workspace-policy-editor-group legend { padding: 0; color: #172334; font-size: 16px; font-weight: 700; }
+.workspace-policy-editor-group > p { margin: 6px 0 14px; color: #65717e; font-size: 13px; line-height: 1.5; }
+.workspace-policy-editor-group > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.workspace-policy-choice,
+.workspace-policy-switch { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #dce1e6; border-radius: 8px; background: #fff; }
+.workspace-policy-choice:has(input:checked),
+.workspace-policy-switch:has(input:checked) { border-color: #9eb8d1; background: #f4f8fc; }
+.workspace-policy-choice input,
+.workspace-policy-switch input { flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0; accent-color: #15589b; }
+.workspace-policy-choice span,
+.workspace-policy-switch span { display: grid; gap: 3px; }
+.workspace-policy-choice strong,
+.workspace-policy-switch strong { color: #27384c; font-size: 13px; }
+.workspace-policy-choice small,
+.workspace-policy-switch small { color: #687480; font-size: 11px; line-height: 1.4; }
+.workspace-policy-editor-limits > div.workspace-policy-limit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.workspace-policy-limit-grid > label:not(.workspace-policy-switch) { display: grid; gap: 6px; color: #405064; font-size: 12px; font-weight: 650; }
+.workspace-policy-limit-grid .select-menu,
+.workspace-policy-limit-grid .select-menu-trigger { width: 100%; }
+.workspace-policy-limit-grid .select-menu-trigger,
+.workspace-policy-limit-grid input[type="number"] { min-height: 42px; padding: 0 11px; border: 1px solid #9ba6b1; border-radius: 6px; background: #fff; color: #172334; font: inherit; }
+.workspace-policy-revision-note { display: grid; gap: 7px; padding: 22px 0 4px; color: #304057; font-size: 13px; font-weight: 650; }
+.workspace-policy-revision-note textarea { min-height: 84px; resize: vertical; padding: 10px 11px; border: 1px solid #9ba6b1; border-radius: 7px; color: #172334; font: inherit; line-height: 1.45; }
+.workspace-policy-revision-note small { color: #68727d; font-size: 11px; font-weight: 400; }
+.workspace-policy-modal-error { margin-top: 16px; padding: 12px 14px; border: 1px solid #e4c5c1; border-radius: 7px; background: #fff4f2; color: #87342c; font-size: 13px; }
+.modal-card.workspace-policy-baseline-modal,
+.modal-card.workspace-policy-review-modal { width: min(100%, 720px); }
+.workspace-policy-baseline-details,
+.workspace-policy-review-details { display: grid; border-top: 1px solid #e1e4e7; }
+.workspace-policy-baseline-details section,
+.workspace-policy-review-details section { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 18px; padding: 14px 0; border-bottom: 1px solid #e1e4e7; color: #405064; font-size: 13px; line-height: 1.5; }
+.workspace-policy-baseline-details strong,
+.workspace-policy-review-details strong { color: #172334; }
 .admin-role-section { margin-top: 28px; border: 1px solid #dededb; border-radius: 18px; background: #fff; overflow: hidden; }
 .admin-role-section .admin-section-heading { align-items: center; }
 .admin-role-intro { margin: 0; padding: 16px 24px; border-bottom: 1px solid #ecece8; color: #56616d; line-height: 1.55; }
@@ -6351,6 +6455,13 @@ textarea:focus-visible,
 .tool-policy-actions > span { display: flex; align-items: center; gap: 9px; color: #4e5f70; font-size: 13px; }
 .tool-policy-actions svg { flex: 0 0 auto; color: #0b4a8f; }
 
+@media (max-width: 1050px) {
+  .workspace-policy-overview { grid-template-columns: 1fr; gap: 24px; }
+  .workspace-policy-context { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 28px; padding: 26px 0 0; border-top: 1px solid #dfe2e5; border-left: 0; }
+  .workspace-policy-member-header,
+  .workspace-policy-member-row { grid-template-columns: minmax(170px, 1.2fr) minmax(145px, 1fr) minmax(105px, .75fr) minmax(135px, .9fr) 90px; gap: 12px; }
+}
+
 @media (max-width: 1180px) {
   .firewall-page-heading { align-items: stretch; flex-direction: column; gap: 20px; }
   .firewall-security-group-list article { grid-template-columns: minmax(240px, 1fr) auto auto; }
@@ -6409,6 +6520,27 @@ textarea:focus-visible,
   .member-workspace-actions { grid-column: 1 / -1; }
   .member-workspace-actions button { width: 100%; }
   .member-workspace-no-runtime { grid-column: 1 / -1; }
+  .workspace-policy-heading { align-items: stretch; flex-direction: column; gap: 18px; }
+  .workspace-policy-primary-action { width: 100%; justify-content: center; }
+  .workspace-policy-overview { padding-top: 0; }
+  .workspace-policy-control-group { grid-template-columns: 24px minmax(0, 1fr); gap: 8px 12px; min-height: 0; padding: 17px 0; }
+  .workspace-policy-control-group > strong { padding-top: 1px; }
+  .workspace-policy-control-group > div { grid-column: 2; }
+  .workspace-policy-context { grid-template-columns: 1fr; }
+  .workspace-policy-member-header { display: none; }
+  .workspace-policy-member-table { display: grid; gap: 12px; padding-top: 12px; border-top: 0; }
+  .workspace-policy-member-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px 18px; min-height: 0; padding: 17px; border: 1px solid #dfe2e5; border-radius: 8px; background: #fff; }
+  .workspace-policy-member-row > [data-label] { display: grid; align-content: start; gap: 5px; }
+  .workspace-policy-member-row > [data-label]::before { color: #68727d; content: attr(data-label); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .workspace-policy-member-copy { grid-column: 1 / -1; padding-bottom: 12px; border-bottom: 1px solid #e4e6e8; }
+  .workspace-policy-member-actions { grid-column: 1 / -1; }
+  .workspace-policy-member-actions button { min-height: 36px; }
+  .workspace-policy-history-list article { grid-template-columns: 1fr; gap: 6px; padding-block: 15px; }
+  .workspace-policy-history-list small { text-align: left; }
+  .workspace-policy-editor-group > div,
+  .workspace-policy-editor-limits > div.workspace-policy-limit-grid { grid-template-columns: 1fr; }
+  .workspace-policy-baseline-details section,
+  .workspace-policy-review-details section { grid-template-columns: 1fr; gap: 5px; }
   .admin-connector-summary { grid-template-columns: 52px minmax(0, 1fr); }
   .admin-connector-summary button { grid-column: 1 / -1; width: 100%; }
   .admin-team-heading { align-items: stretch; flex-direction: column; }
@@ -6913,3 +7045,10 @@ textarea:focus-visible,
 .routing-decisions { display: grid; border-top: 1px solid #e4e7eb; }.routing-decisions button { appearance:none;background:none;color:inherit;font:inherit;text-align:left;display:grid;grid-template-columns:90px 1fr auto;gap:12px;padding:12px 2px;border:0;border-bottom:1px solid #e4e7eb;cursor:pointer; }.routing-decisions button:hover,.routing-decisions button:focus-visible{background:#f6f8fa}.routing-decisions small { color: #6f7984; }
 .routing-decision-dialog dl>div{display:grid;grid-template-columns:140px 1fr;gap:12px;padding:7px 0}.routing-decision-dialog dt{color:#6f7984}.routing-decision-dialog dd{margin:0;overflow-wrap:anywhere}.routing-decision-dialog ul{padding-left:20px}
 @media (max-width:720px){.routing-class-grid,.routing-metrics{grid-template-columns:1fr}.routing-decisions button{grid-template-columns:1fr;gap:4px}}
+
+@media (max-width: 430px) {
+  .workspace-page-tabs { justify-content: space-between; gap: 0; overflow: visible; }
+  .workspace-page-tabs button { padding-inline: 4px; font-size: 11px; letter-spacing: -.01em; }
+  .workspace-policy-member-row { grid-template-columns: 1fr; }
+  .workspace-policy-member-row > .workspace-policy-state::before { width: auto; height: auto; border-radius: 0; background: transparent; }
+}

@@ -384,11 +384,18 @@ test("administration keeps identity in People and access while workspace operati
   assert.match(app, /function MemberWorkspaceConsole/);
   assert.match(app, /Administrators can manage runtime state but cannot open member workspaces or view their content/);
   assert.match(app, /<ProtectedWorkspacePolicySection users=\{policyUsers\}/);
+  assert.match(app, /Current organization policy/);
+  assert.match(app, /Baseline only/);
+  assert.match(app, /Version \$\{latest\.version\} is the latest policy available to assign/);
+  assert.match(app, /Tool permissions are managed in Connections/);
+  assert.match(app, /Save as new version/);
+  assert.doesNotMatch(app, /Create organization policy/);
   assert.doesNotMatch(app.slice(app.indexOf("function AdminScreen"), app.indexOf("function CredentialsScreen")), /MemberWorkspaceConsole|ProtectedWorkspacePolicySection|Manage \{workspaceName\(workspace\)\}/);
   assert.match(app, /Members can manage connections/);
   assert.match(app, /Connector enabled/);
   assert.match(api, /admin\/invitations/);
   assert.match(api, /admin\/memberships/);
+  assert.match(api, /protected-workspace-policy\/organization-versions/);
   assert.match(api, /admin\/users\/.*\/sandbox-settings/);
   assert.match(api, /connectors\/.*\/access-policy/);
 });

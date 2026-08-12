@@ -1725,6 +1725,33 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify(protectedWorkspacePolicyOverview));
     return;
   }
+  if (key === "GET /v1/admin/protected-workspace-policy/organization-versions") {
+    response.end(JSON.stringify({ versions: protectedWorkspacePolicyOverview.organizationPolicyVersions }));
+    return;
+  }
+  if (key === "POST /v1/admin/protected-workspace-policy/organization-versions") {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const previous = protectedWorkspacePolicyOverview.organizationPolicyVersions[0] ?? null;
+      const version = {
+        tenantId: session.tenant.id,
+        policyVersionId: `fixture-organization-policy-${(previous?.version ?? 0) + 1}`,
+        version: (previous?.version ?? 0) + 1,
+        previousPolicyVersionId: previous?.policyVersionId ?? null,
+        documentHash: "9".repeat(64),
+        constraints: input.constraints,
+        revisionNote: input.revisionNote,
+        createdBy: session.user.id,
+        createdAt: new Date().toISOString(),
+      };
+      protectedWorkspacePolicyOverview.organizationPolicyVersions.unshift(version);
+      response.statusCode = 201;
+      response.end(JSON.stringify({ version }));
+    });
+    return;
+  }
   if (request.method === "GET" && /^\/v1\/admin\/protected-workspace-policy\/members\/[^/]+\/assignment-versions$/.test(url.pathname)) {
     const userId = url.pathname.split("/").at(-2);
     response.end(JSON.stringify({ versions: protectedAssignments.get(userId) ?? [] }));
@@ -1744,7 +1771,7 @@ const server = http.createServer((request, response) => {
         previousAssignmentId: prior[0]?.id ?? null,
         state: "selected",
         protectedTemplateVersionId: protectedWorkspacePolicyOverview.baseline.templateVersionId,
-        organizationPolicyVersionId: null,
+        organizationPolicyVersionId: protectedWorkspacePolicyOverview.organizationPolicyVersions[0]?.policyVersionId ?? null,
         selection: JSON.parse(body).selection,
         selectionHash: "f".repeat(64),
         assignedBy: session.user.id,
@@ -1752,7 +1779,7 @@ const server = http.createServer((request, response) => {
       };
       protectedAssignments.set(userId, [version, ...prior]);
       response.statusCode = 201;
-      response.end(JSON.stringify({ version }));
+      response.end(JSON.stringify({ version, remediation: { required: true, action: "restart_workspace", workspaceIds: ["fixture-example-workspace"] } }));
     });
     return;
   }
