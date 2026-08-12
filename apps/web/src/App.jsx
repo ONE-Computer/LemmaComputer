@@ -102,7 +102,7 @@ const chatAttachmentMaxBytes = 8 * 1024 * 1024;
 const chatAttachmentMaxTotalBytes = 16 * 1024 * 1024;
 const restoredChatTurnMaxAgeMs = 16 * 60 * 1000;
 const chatServiceClassOptions = [
-  { value: "auto", label: "Auto · best fit per task" },
+  { value: "auto", label: "Auto (Beta) · Balanced unless Team-enabled" },
   { value: "lite", label: "Lite · lowest cost" },
   { value: "balanced", label: "Balanced · everyday work" },
   { value: "pro", label: "Pro · highest capability" },

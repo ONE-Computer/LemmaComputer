@@ -1,0 +1,50 @@
+{
+  "files": [
+    {
+      "byteLength": 1705,
+      "expectations": {
+        "imageCount": 1,
+        "tableCount": 1
+      },
+      "features": [
+        "table",
+        "embedded-image"
+      ],
+      "name": "office-regression.docx",
+      "sha256": "63b78308dd54a63083c3585461f16932c227065bd1b0f4f7c2347c0a94e5ddeb"
+    },
+    {
+      "byteLength": 5852,
+      "expectations": {
+        "imageCount": 1,
+        "layoutCount": 1,
+        "notesSlideCount": 1,
+        "slideCount": 1
+      },
+      "features": [
+        "slide-layout",
+        "embedded-image",
+        "speaker-notes"
+      ],
+      "name": "office-regression.pptx",
+      "sha256": "67ba35d524df20e4680e0b06bfb7f1bc911ecc3255eec5900b77761965e82cd9"
+    },
+    {
+      "byteLength": 3711,
+      "expectations": {
+        "chartCount": 1,
+        "formulaCount": 1,
+        "worksheetCount": 2
+      },
+      "features": [
+        "formula",
+        "two-worksheets",
+        "chart"
+      ],
+      "name": "office-regression.xlsx",
+      "sha256": "578fc476ca726e258c20329b6670f0398e7bb7daa52f55a8bfad14dcd9524705"
+    }
+  ],
+  "generator": "scripts/generate-office-regression-corpus.py",
+  "schemaVersion": 1
+}

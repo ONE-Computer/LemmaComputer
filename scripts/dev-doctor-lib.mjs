@@ -7,6 +7,15 @@ export const litellmMountedFilePaths = Object.freeze([
   "integrations/litellm/lemmacomputer_policy_callback.py",
 ]);
 
+export const postgresMountedFilePaths = Object.freeze([
+  "infra/postgres/init-auth-database.sh",
+]);
+
+export const containerMountedFilePaths = Object.freeze([
+  ...litellmMountedFilePaths,
+  ...postgresMountedFilePaths,
+]);
+
 const defaultAccessPath = (path) => access(path, constants.R_OK);
 
 export const inspectReadablePaths = async (paths, { accessPath = defaultAccessPath } = {}) => {

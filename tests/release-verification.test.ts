@@ -27,6 +27,11 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(verifyRelease, /input: await readFile\(qualifier\)/);
   assert.match(verifyRelease, /stdio: \["pipe", "inherit", "inherit"\]/);
   assert.match(workspaceDockerfile, /workspace-ready[\s\S]+\/dev\/tcp\/127\.0\.0\.1\/6901/);
+  assert.match(
+    workspaceDockerfile,
+    /HEALTHCHECK --interval=5s --timeout=2s --start-period=15s --start-interval=1s --retries=12/,
+    "workspace readiness must probe quickly during startup without increasing the steady-state cadence",
+  );
   for (const port of [4312, 4314, 4315, 4316, 4317]) {
     assert.ok(
       workspaceDockerfile.includes(`http://127.0.0.1:${port}/healthz`),

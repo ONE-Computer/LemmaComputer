@@ -45,6 +45,7 @@ ARG NODE_SHA256=9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578
 COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 COPY --chmod=0755 docker/workspace/lemmacomputer-libreoffice /usr/local/libexec/lemmacomputer-libreoffice
 COPY docker/workspace/hermes-agent-lemmacomputer.patch /tmp/hermes-agent-lemmacomputer.patch
+COPY docker/workspace/hermes-agent-instance.patch /tmp/hermes-agent-instance.patch
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get purge -y \
@@ -104,6 +105,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && install -d -o root -g root -m 0755 /opt/lemmacomputer/hermes-agent \
     && tar -xzf /tmp/hermes-agent.tar.gz -C /opt/lemmacomputer/hermes-agent --strip-components=1 \
     && patch --batch --forward --fuzz=0 -d /opt/lemmacomputer/hermes-agent -p1 < /tmp/hermes-agent-lemmacomputer.patch \
+    && patch --batch --forward --fuzz=0 -d /opt/lemmacomputer/hermes-agent -p1 < /tmp/hermes-agent-instance.patch \
     && install -d -o root -g root -m 0755 /tmp/hermes-office-skills \
     && tar -xzf /tmp/hermes-office-skills.tar.gz -C /tmp/hermes-office-skills --strip-components=1 \
     && rm -rf \
@@ -154,7 +156,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && test "$(/opt/firefox/firefox --version | awk '{print $3}')" = "${FIREFOX_VERSION}" \
     && test "$(google-chrome-stable --version | awk '{print $3}')" = "${GOOGLE_CHROME_VERSION%-1}" \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /root/.cache/uv /tmp/claude-desktop.deb /tmp/claude-code.zst /tmp/firefox.tar.xz /tmp/google-chrome.deb /tmp/hermes-agent-lemmacomputer.patch /tmp/hermes-agent.tar.gz /tmp/hermes-office-skills.tar.gz /tmp/hermes-office-skills /tmp/node.tar.xz /opt/Telegram \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/uv /tmp/claude-desktop.deb /tmp/claude-code.zst /tmp/firefox.tar.xz /tmp/google-chrome.deb /tmp/hermes-agent-instance.patch /tmp/hermes-agent-lemmacomputer.patch /tmp/hermes-agent.tar.gz /tmp/hermes-office-skills.tar.gz /tmp/hermes-office-skills /tmp/node.tar.xz /opt/Telegram \
       /home/kasm-default-profile/Desktop/* \
       /home/kasm-default-profile/.mozilla \
       /home/kasm-default-profile/.local/share/remmina \
@@ -272,7 +274,10 @@ RUN chmod 0755 \
     && printf '%s\n' '<script src="app/lemmacomputer-kasm-clipboard.js"></script>' >> /usr/share/kasmvnc/www/index.html \
     && chown -R 1000:1000 /home/kasm-default-profile/Desktop /home/kasm-default-profile/.config
 
-HEALTHCHECK --interval=5s --timeout=2s --start-period=15s --retries=12 \
+# Probe frequently only while Docker still considers the container to be
+# starting. A successful check exits the start period immediately, after which
+# the existing five-second steady-state cadence applies.
+HEALTHCHECK --interval=5s --timeout=2s --start-period=15s --start-interval=1s --retries=12 \
   CMD test -f /run/lemmacomputer/workspace-ready \
     && timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6901' \
     && { test ! -f /run/lemmacomputer/gateway-proxy.pid || curl -fsS http://127.0.0.1:4312/healthz >/dev/null; } \

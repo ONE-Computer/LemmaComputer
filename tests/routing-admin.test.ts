@@ -66,6 +66,15 @@ test("Team routing schema can narrow but never widen identity policy", () => {
     }).success,
     false,
   );
+  assert.equal(
+    saveRoutingPolicySchema.safeParse({
+      ...base,
+      identity: { ...identity, safeDefault: "lite" },
+      team: null,
+    }).success,
+    false,
+    "new Team routing policies must retain Balanced as the fixed safe default",
+  );
 });
 test("production enablement requires both evidence and an explicit typed confirmation", () => {
   const base = {

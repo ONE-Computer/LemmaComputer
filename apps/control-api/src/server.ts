@@ -7,7 +7,7 @@ import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministrat
 import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { PostgresProtectedWorkspacePolicyStore } from "@lemmacomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
@@ -39,6 +39,7 @@ import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchema, TeamBudgetAdministrationService } from "./budgets.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
+import { AgentProcessLifecycleService, callerSuppliedAgentInstanceId } from "./agent-process-lifecycle.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
 import { assertHostedLiteLlmAdminSecurity } from "./litellm-admin-security.js";
 import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
@@ -142,7 +143,7 @@ const sandboxModels = [
 ] as const;
 
 const workspaceServiceClasses = [
-  { value: "auto", displayName: "Auto", description: "LemmaComputer chooses the best eligible tier for each task." },
+  { value: "auto", displayName: "Auto (Beta)", description: "Fixed Balanced by default; dynamic selection requires explicit Team enablement." },
   { value: "lite", displayName: "Lite", description: "Fast, economical work." },
   { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
   { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },
@@ -412,6 +413,7 @@ export function createControlServer(
     policyBundleAuthority?: PolicyBundleAuthority;
     agentChatSecret?: string;
     agentChatClient?: AgentChatClient;
+    agentInstanceStore?: AgentInstanceStore;
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
     telegramTokenIntake?: {
@@ -513,6 +515,7 @@ export function createControlServer(
   const agentBridgeAuthority = new AgentBridgeAuthority(agentBridgeSecret, security.agentBridgeGrantTtlSeconds);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
+  const agentProcesses = new AgentProcessLifecycleService(security.agentInstanceStore);
   const activityEvents = new ActivityEventService(store);
   const sites = security.siteStore ? new SitesService(security.siteStore) : undefined;
   const requireSites = () => {
@@ -1052,7 +1055,7 @@ export function createControlServer(
     const { principal: value, effective } = await assignedPolicy(request);
     const workspace = await store.getOwned(value.identity, workspaceId);
     if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
-    return policyForGrant(value, effective, workspace.grantId);
+    return { ...await policyForGrant(value, effective, workspace.grantId), workspace };
   };
   const channelPolicy = async (channelIdentity: IdentityContext, workspaceId: string) => {
     const workspace = await store.getOwned(channelIdentity, workspaceId);
@@ -3685,14 +3688,21 @@ export function createControlServer(
     "/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages",
     { bodyLimit: 24 * 1024 * 1024 },
     async (request, reply) => {
-    idempotency(request.headers);
+    const launchIdempotencyKey = idempotency(request.headers);
+    if (callerSuppliedAgentInstanceId(request.body)) {
+      throw new LemmaComputerError(
+        "AGENT_INSTANCE_ID_FORBIDDEN",
+        "Agent instance identities are issued only by the trusted Control launch boundary",
+        400,
+      );
+    }
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
     const input = sendChatTurnSchema.parse(request.body ?? {});
     if (input.message.metadata.agentCatalogId !== catalogId) {
       throw new LemmaComputerError("CHAT_AGENT_MISMATCH", "The submitted message does not belong to the selected agent", 409);
     }
-    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const { policy, workspace } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const includesImage = input.message.parts.some(
       (part) => part.type === "file" && part.mediaType.startsWith("image/"),
     );
@@ -3716,6 +3726,15 @@ export function createControlServer(
     }
     const owner = identity(request);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
+    const processLifecycle = await agentProcesses.beginBrowserChat({
+      identity: owner,
+      workspace,
+      policy,
+      catalogId,
+      logicalAgentId: access.agentId,
+      sessionId,
+      idempotencyKey: launchIdempotencyKey,
+    });
     const mapper = new AgentUiStreamMapper(catalogId);
     const chunks: ReturnType<AgentUiStreamMapper["chunks"]>[number][] = [];
     const waiters = new Set<() => void>();
@@ -3727,12 +3746,23 @@ export function createControlServer(
     };
     const pump = async () => {
       let lastEvent: AgentChatEvent | undefined;
+      let processStarted = false;
+      let processEnded = false;
       try {
         const usageTaskBinding = issueUsageTaskBinding(
           owner, request.params.workspaceId, access.agentId, "chat", input.message.id, sessionId,
           undefined, input.requestedServiceClass,
         );
-        for await (const event of agentChat.streamTurn(access, sessionId, input.message, undefined, usageTaskBinding)) {
+        const agentInstanceId = processLifecycle.identity.state === "verified"
+          ? processLifecycle.identity.agentInstanceId
+          : undefined;
+        for await (const event of agentChat.streamTurn(
+          access, sessionId, input.message, undefined, usageTaskBinding, agentInstanceId,
+        )) {
+          if (event.type === "turn-start") {
+            await processLifecycle.markRunning(event.turnId);
+            processStarted = true;
+          }
           let projected = event;
           if (event.type === "approval") {
             try {
@@ -3755,10 +3785,24 @@ export function createControlServer(
           });
           lastEvent = projected;
           chunks.push(...mapper.chunks(projected));
+          if (event.type === "turn-finish") {
+            await processLifecycle.end(event.state === "failed" ? "provider_failed" : "process_exited");
+            processEnded = true;
+          }
           notify();
         }
       } catch (error) {
         pumpError = error;
+        if (!processEnded) {
+          try {
+            await processLifecycle.end(processStarted ? "provider_failed" : "launch_failed");
+          } catch (lifecycleError) {
+            // Compliance evidence is part of the launch contract. A failure to
+            // record it must surface rather than being hidden by the upstream
+            // process error that triggered lifecycle closure.
+            pumpError = lifecycleError;
+          }
+        }
         if (lastEvent && lastEvent.type !== "turn-finish") {
           const completedAt = new Date().toISOString();
           const terminal = {
@@ -4003,6 +4047,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const usageLedgerStore = PostgresUsageLedgerStore.fromConnectionString(env.DATABASE_URL);
   const spendObservabilityStore = PostgresSpendObservabilityStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
+  const agentInstanceStore = PostgresAgentInstanceStore.fromConnectionString(env.DATABASE_URL);
   const productPolicyRelease = await loadProductPolicyRelease();
   const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(
     env.DATABASE_URL,
@@ -4262,6 +4307,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       },
       policyBundleAuthority,
       agentChatSecret: env.AGENT_CHAT_SECRET,
+      agentInstanceStore,
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
       telegramTokenIntake,
@@ -4308,6 +4354,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await routingStore.close();
     await spendObservabilityStore.close();
     await identityPolicyStore.close();
+    await agentInstanceStore.close();
     await protectedWorkspacePolicyStore.close();
     await platformOperatorStore?.close();
   });
