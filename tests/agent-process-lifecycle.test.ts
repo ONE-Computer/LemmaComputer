@@ -157,14 +157,17 @@ test("pre-start failures are recorded while existing registrations cannot launch
   await assert.rejects(service.beginBrowserChat(launch), { code: "AGENT_INSTANCE_LAUNCH_REPLAYED" });
 });
 
-test("unwired launch types remain explicit legacy identities without touching the authority", async () => {
+test("each browser chat vendor registers its own process while an absent authority remains legacy", async () => {
   const store = new RecordingAgentInstanceStore();
   const service = new AgentProcessLifecycleService(store);
   const codex = await service.beginBrowserChat({ ...launch, catalogId: "codex-cli", logicalAgentId: "agent-1:codex-cli" });
+  assert.equal(codex.identity.state, "verified");
+  assert.equal(store.registration?.agentCatalogId, "codex-cli");
+  const hermes = await service.beginBrowserChat({ ...launch, catalogId: "hermes-claw", logicalAgentId: "agent-1:hermes-claw" });
+  assert.equal(hermes.identity.state, "verified");
+  assert.equal(store.registration?.agentCatalogId, "hermes-claw");
   const absent = await new AgentProcessLifecycleService().beginBrowserChat(launch);
-  assert.deepEqual(codex.identity, agentInstanceIdentityState(null));
   assert.deepEqual(absent.identity, agentInstanceIdentityState(null));
-  assert.equal(store.registration, undefined);
 });
 
 test("caller-supplied agent instance identifiers fail closed at any request-body depth", () => {

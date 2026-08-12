@@ -992,7 +992,58 @@ async def claude_vendor_events(
     }
 
 
+def codex_config(agent_instance_id: str | None = None) -> Any:
+    from openai_codex import CodexConfig
+
+    return CodexConfig(
+        cwd=str(HOME),
+        env={
+            "CODEX_HOME": str(HOME / ".codex-chat-sdk"),
+            "HOME": str(HOME),
+            "OPENAI_API_KEY": "lemmacomputer-loopback-broker",
+            "OPENAI_BASE_URL": f"{BROKER}/v1",
+            "LEMMACOMPUTER_SITES_BROKER": BROKER,
+            **({
+                "LEMMACOMPUTER_AGENT_INSTANCE_ID": agent_instance_id,
+            } if agent_instance_id else {}),
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "NO_PROXY": "localhost,127.0.0.1",
+        },
+    )
+
+
 async def codex_vendor_events(
+    item: dict[str, Any],
+    text: str,
+    attachments: list[dict[str, Any]],
+    turn_id: str,
+    return_artifacts: bool,
+    usage_task_binding: str | None,
+    agent_instance_id: str | None,
+) -> AsyncIterator[dict[str, Any]]:
+    if agent_instance_id is None:
+        async for event in _codex_vendor_events_with_client(
+            codex, item, text, attachments, turn_id,
+            return_artifacts, usage_task_binding,
+        ):
+            yield event
+        return
+
+    from openai_codex import AsyncCodex
+
+    # Verified browser turns own an actual Codex app-server subprocess. The
+    # adapter's legacy shared app server remains only for channels/schedules
+    # until those launch boundaries receive their own Control registrations.
+    async with AsyncCodex(codex_config(agent_instance_id)) as process:
+        async for event in _codex_vendor_events_with_client(
+            process, item, text, attachments, turn_id,
+            return_artifacts, usage_task_binding,
+        ):
+            yield event
+
+
+async def _codex_vendor_events_with_client(
+    codex_client: Any,
     item: dict[str, Any],
     text: str,
     attachments: list[dict[str, Any]],
@@ -1014,7 +1065,7 @@ async def codex_vendor_events(
         },
     } if usage_task_binding else None)
     if vendor_id:
-        thread = await codex.thread_resume(
+        thread = await codex_client.thread_resume(
             vendor_id,
             approval_mode=ApprovalMode.deny_all,
             base_instructions=system_prompt(),
@@ -1024,7 +1075,7 @@ async def codex_vendor_events(
             config=usage_config,
         )
     else:
-        thread = await codex.thread_start(
+        thread = await codex_client.thread_start(
             approval_mode=ApprovalMode.deny_all,
             base_instructions=system_prompt(),
             cwd=str(HOME),
@@ -1183,6 +1234,7 @@ async def hermes_vendor_events(
     turn_id: str,
     return_artifacts: bool,
     usage_task_binding: str | None,
+    agent_instance_id: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
     assert http is not None
     vendor_session_id = item.get("vendorSessionId")
@@ -1214,6 +1266,9 @@ async def hermes_vendor_events(
             **({
                 "x-lemmacomputer-ai-task-binding": usage_task_binding,
             } if usage_task_binding else {}),
+            **({
+                "x-lemmacomputer-agent-instance-id": agent_instance_id,
+            } if agent_instance_id else {}),
         },
         json={"message": message, "instructions": system_prompt()},
         timeout=MAX_TURN_SECONDS,
@@ -1341,8 +1396,14 @@ def vendor_events(
             usage_task_binding, agent_instance_id,
         )
     if AGENT == "codex-cli":
-        return codex_vendor_events(item, text, attachments, turn_id, return_artifacts, usage_task_binding)
-    return hermes_vendor_events(item, text, attachments, turn_id, return_artifacts, usage_task_binding)
+        return codex_vendor_events(
+            item, text, attachments, turn_id, return_artifacts,
+            usage_task_binding, agent_instance_id,
+        )
+    return hermes_vendor_events(
+        item, text, attachments, turn_id, return_artifacts,
+        usage_task_binding, agent_instance_id,
+    )
 
 
 def upsert_session_message(item: dict[str, Any], message: dict[str, Any]) -> None:
@@ -1553,14 +1614,12 @@ async def turns(request: Request) -> Response:
             )
         ):
             raise ValueError("invalid AI usage task binding")
-        if AGENT == "claude-cli" and agent_instance_id is not None:
+        if agent_instance_id is not None:
             if not isinstance(agent_instance_id, str):
                 raise ValueError("invalid agent instance identity")
             parsed_agent_instance_id = uuid.UUID(agent_instance_id)
             if parsed_agent_instance_id.version != 4 or str(parsed_agent_instance_id) != agent_instance_id:
                 raise ValueError("invalid agent instance identity")
-        elif agent_instance_id is not None:
-            raise ValueError("agent instance identity is not supported for this runtime")
         return_artifacts = user_message["metadata"].get("source") == "telegram"
         outbox_before = snapshot_outbox() if return_artifacts else {}
     except ValueError:
@@ -1915,20 +1974,9 @@ async def lifespan(_: Starlette):
     os.chmod(ARTIFACT_OUTBOX_ROOT, 0o700)
     http = httpx.AsyncClient()
     if AGENT == "codex-cli":
-        from openai_codex import AsyncCodex, CodexConfig
+        from openai_codex import AsyncCodex
 
-        codex = AsyncCodex(CodexConfig(
-            cwd=str(HOME),
-            env={
-                "CODEX_HOME": str(HOME / ".codex-chat-sdk"),
-                "HOME": str(HOME),
-                "OPENAI_API_KEY": "lemmacomputer-loopback-broker",
-                "OPENAI_BASE_URL": f"{BROKER}/v1",
-                "LEMMACOMPUTER_SITES_BROKER": BROKER,
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
-                "NO_PROXY": "localhost,127.0.0.1",
-            },
-        ))
+        codex = AsyncCodex(codex_config())
         await codex.__aenter__()
     try:
         yield
