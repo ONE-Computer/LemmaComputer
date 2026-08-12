@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   LemmaComputerError,
-  type ChatAgentCatalogId,
+  type AgentCatalogId,
   type IdentityContext,
   type RuntimePolicy,
 } from "@lemmacomputer/contracts";
@@ -13,13 +13,14 @@ import {
   type WorkspaceRecord,
 } from "@lemmacomputer/workspace-store";
 
-type BrowserChatLaunch = {
+export type AgentProcessLaunch = {
   identity: IdentityContext;
   workspace: WorkspaceRecord;
   policy: RuntimePolicy;
-  catalogId: ChatAgentCatalogId;
+  catalogId: AgentCatalogId;
   logicalAgentId: string;
-  sessionId: string;
+  launchKind: "browser-chat" | "channel" | "schedule" | "interactive";
+  sessionId?: string;
   idempotencyKey: string;
 };
 
@@ -35,7 +36,7 @@ const legacyLifecycle: AgentProcessLifecycle = Object.freeze({
   end: async () => undefined,
 });
 
-const launchKey = (input: BrowserChatLaunch) => `browser-chat:v1:${createHash("sha256")
+const launchKey = (input: AgentProcessLaunch) => `${input.launchKind}:v1:${createHash("sha256")
   .update(JSON.stringify({
     tenantId: input.identity.tenantId,
     ownerSubjectId: input.identity.subjectId,
@@ -53,7 +54,7 @@ class RegisteredAgentProcessLifecycle implements AgentProcessLifecycle {
 
   constructor(
     private readonly store: AgentInstanceStore,
-    private readonly input: BrowserChatLaunch,
+    private readonly input: AgentProcessLaunch,
     agentInstanceId: string,
   ) {
     this.identity = { state: "verified", agentInstanceId };
@@ -97,11 +98,10 @@ class RegisteredAgentProcessLifecycle implements AgentProcessLifecycle {
 export class AgentProcessLifecycleService {
   constructor(private readonly store?: AgentInstanceStore) {}
 
-  async beginBrowserChat(input: BrowserChatLaunch): Promise<AgentProcessLifecycle> {
-    // Browser chat requests are the managed execution boundary. The adapter
-    // keeps long-lived catalogue brokers unlabelled and propagates this
-    // identity only into the per-turn Claude/Codex vendor process or the
-    // request-local Hermes run context and any tool subprocesses it launches.
+  async begin(input: AgentProcessLaunch): Promise<AgentProcessLifecycle> {
+    // Each managed execution boundary gets its own identity. Long-lived
+    // catalogue brokers remain unlabelled; they propagate the identity only
+    // into the actual chat turn, interactive process, or child tool process.
     if (!this.store) return legacyLifecycle;
     const registered = await this.store.registerLaunch({
       tenantId: input.identity.tenantId,
@@ -123,6 +123,27 @@ export class AgentProcessLifecycleService {
       );
     }
     return new RegisteredAgentProcessLifecycle(this.store, input, registered.instance.id);
+  }
+
+  async beginBrowserChat(input: Omit<AgentProcessLaunch, "launchKind">): Promise<AgentProcessLifecycle> {
+    return this.begin({ ...input, launchKind: "browser-chat" });
+  }
+
+  async requireActive(input: {
+    identity: IdentityContext; workspace: WorkspaceRecord; logicalAgentId: string; agentInstanceId: string;
+  }) {
+    if (!this.store) throw new LemmaComputerError("AGENT_INSTANCE_NOT_CONFIGURED", "Agent process identity is unavailable", 503, true);
+    const record = await this.store.get({
+      tenantId: input.identity.tenantId,
+      ownerSubjectId: input.identity.subjectId,
+      workspaceId: input.workspace.id,
+      agentInstanceId: input.agentInstanceId,
+    });
+    if (!record || record.status !== "running" || record.accessGeneration !== input.workspace.accessGeneration
+      || record.logicalAgentId !== input.logicalAgentId) {
+      throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "The agent process identity is unknown, stale, or belongs to another execution boundary", 403);
+    }
+    return record;
   }
 }
 

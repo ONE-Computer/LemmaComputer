@@ -443,6 +443,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
         `LEMMACOMPUTER_COWORK_ENABLED=${coworkEnabled}`,
         `LEMMACOMPUTER_EXECUTION_MODE=${input.policy.executionMode}`,
         `LEMMACOMPUTER_EGRESS_MODE=${input.policy.egressMode}`,
+        `LEMMACOMPUTER_WORKSPACE_IMAGE_VERSION=${this.config.image}`,
+        ...(this.config.image.includes("@sha256:") ? [`LEMMACOMPUTER_WORKSPACE_IMAGE_DIGEST=${this.config.image.slice(this.config.image.indexOf("@") + 1)}`] : []),
         `LEMMACOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
         `LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(canonicalJson(input.policyVerificationKeys), "utf8").toString("base64url")}`,
         ...(input.chatRuntimes?.flatMap(chatRuntimeEnvironment) ?? []),

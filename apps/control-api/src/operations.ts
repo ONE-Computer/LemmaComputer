@@ -239,6 +239,7 @@ const toView = (record: GovernedOperationRecord): OperationView => ({
   id: record.id,
   workspaceId: record.workspaceId,
   agentId: record.agentId,
+  agentInstanceId: record.agentInstanceId,
   policyVersionId: record.policyVersionId,
   policyHash: record.policyHash,
   serverName: record.serverName,
@@ -533,6 +534,7 @@ export class GovernedOperationService {
     idempotencyKey: string,
     correlationId: string,
     retryTerminal = false,
+    agentInstanceId?: string,
   ) {
     const workspace = await this.store.getOwned(identity, workspaceId);
     if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
@@ -549,6 +551,7 @@ export class GovernedOperationService {
       subjectId: identity.subjectId,
       workspaceId,
       agentId,
+      ...(agentInstanceId ? { agentInstanceId } : {}),
       audience: identity.audience,
       capabilityId: input.capabilityId,
       serverName: input.serverName,
@@ -571,6 +574,7 @@ export class GovernedOperationService {
       identity,
       workspaceId,
       agentId,
+      ...(agentInstanceId ? { agentInstanceId } : {}),
       policyVersionId: policy.policyVersionId,
       policyHash: policy.policyHash,
       capabilityId: operationEnvelope.capabilityId,
@@ -593,6 +597,7 @@ export class GovernedOperationService {
     if (record.operationDigest !== operationDigest) {
       const sameRequest = record.workspaceId === workspaceId
         && record.agentId === agentId
+        && record.agentInstanceId === (agentInstanceId ?? null)
         && record.policyVersionId === policy.policyVersionId
         && record.policyHash === policy.policyHash
         && record.capabilityId === input.capabilityId
@@ -614,9 +619,9 @@ export class GovernedOperationService {
     return toView(record);
   }
 
-  async getForAgent(identity: IdentityContext, operationId: string, binding: { workspaceId: string; agentId: string }) {
+  async getForAgent(identity: IdentityContext, operationId: string, binding: { workspaceId: string; agentId: string; agentInstanceId?: string }) {
     const record = await this.store.recoverOperation(identity, operationId, new Date(), "agent-operation-read");
-    if (!record || record.workspaceId !== binding.workspaceId || record.agentId !== binding.agentId) {
+    if (!record || record.workspaceId !== binding.workspaceId || record.agentId !== binding.agentId || record.agentInstanceId !== (binding.agentInstanceId ?? null)) {
       throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     }
     return toView(record);
@@ -791,13 +796,14 @@ export class GovernedOperationService {
   async beginResumableUpload(
     identity: IdentityContext,
     operationId: string,
-    binding: { workspaceId: string; agentId: string },
+    binding: { workspaceId: string; agentId: string; agentInstanceId?: string },
     correlationId: string,
   ) {
     const operation = await this.requireOwned(identity, operationId);
     if (
       operation.workspaceId !== binding.workspaceId
       || operation.agentId !== binding.agentId
+      || operation.agentInstanceId !== (binding.agentInstanceId ?? null)
       || operation.toolName !== "create-upload-session"
       || operation.serverName !== "lemmacomputer_ms365"
       || operation.approval?.decision !== "approve"
@@ -857,12 +863,12 @@ export class GovernedOperationService {
   async completeResumableUpload(
     identity: IdentityContext,
     operationId: string,
-    binding: { workspaceId: string; agentId: string },
+    binding: { workspaceId: string; agentId: string; agentInstanceId?: string },
     leaseId: string,
     correlationId: string,
   ) {
     const operation = await this.requireOwned(identity, operationId);
-    if (operation.workspaceId !== binding.workspaceId || operation.agentId !== binding.agentId || operation.toolName !== "create-upload-session") {
+    if (operation.workspaceId !== binding.workspaceId || operation.agentId !== binding.agentId || operation.agentInstanceId !== (binding.agentInstanceId ?? null) || operation.toolName !== "create-upload-session") {
       throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     }
     const file = (operation.arguments as Record<string, OwnedJson>).lemmacomputerFile as Record<string, OwnedJson> | undefined;
@@ -881,12 +887,12 @@ export class GovernedOperationService {
   async failResumableUpload(
     identity: IdentityContext,
     operationId: string,
-    binding: { workspaceId: string; agentId: string },
+    binding: { workspaceId: string; agentId: string; agentInstanceId?: string },
     leaseId: string,
     correlationId: string,
   ) {
     const operation = await this.requireOwned(identity, operationId);
-    if (operation.workspaceId !== binding.workspaceId || operation.agentId !== binding.agentId || operation.toolName !== "create-upload-session") {
+    if (operation.workspaceId !== binding.workspaceId || operation.agentId !== binding.agentId || operation.agentInstanceId !== (binding.agentInstanceId ?? null) || operation.toolName !== "create-upload-session") {
       throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     }
     await this.store.failExecution(identity, operation.id, leaseId, "UPLOAD_TRANSFER_FAILED", correlationId, "The approved OneDrive upload did not complete");

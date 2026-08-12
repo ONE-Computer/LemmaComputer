@@ -251,6 +251,7 @@ export class ActivityEventService {
     sessionId: string;
     displayName: string;
     event: AgentChatEvent;
+    agentInstanceId?: string;
     receivedAt?: Date;
   }) {
     const drafts = new ActivityEventMapper(input.displayName).drafts(input.event);
@@ -258,6 +259,7 @@ export class ActivityEventService {
     for (const [index, draft] of drafts.entries()) {
       const event = await this.store.appendActivityEvent({
         identity: input.identity,
+        agentInstanceId: input.agentInstanceId,
         workspaceId: input.workspaceId,
         agentCatalogId: input.agentCatalogId,
         sessionId: input.sessionId,

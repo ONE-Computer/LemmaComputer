@@ -67,7 +67,7 @@ test("the pinned Hermes browser runtime binds a verified identity only to the re
   assert.match(additions, /agent_instance_id=agent_instance_id/);
   assert.match(additions, /extra_headers\[self\._AGENT_INSTANCE_ID_HEADER\] = agent_instance_id/);
   assert.match(chatAdapter, /"x-lemmacomputer-agent-instance-id": agent_instance_id/);
-  assert.doesNotMatch(additions, /os\.environ\["LEMMACOMPUTER_AGENT_INSTANCE_ID"\]/);
+  assert.match(additions, /os\.environ\.get\("LEMMACOMPUTER_AGENT_INSTANCE_ID"/);
 });
 
 test("the Hermes API cannot report ready before the required connector MCP is registered", async () => {

@@ -428,6 +428,7 @@ base_url = "http://127.0.0.1:4317/v1"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
 supports_websockets = false
+env_http_headers = { "x-lemmacomputer-agent-instance-id" = "LEMMACOMPUTER_AGENT_INSTANCE_ID" }
 
 [analytics]
 enabled = false

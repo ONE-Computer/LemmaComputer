@@ -420,6 +420,10 @@ const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeSco
   const path = url.split("?", 1)[0];
   if (method === "POST" && path === "/internal/v1/agent/grants/renew") return "agent:renew";
   if (method === "POST" && path === "/internal/v1/agent/usage-bindings") return "agent:usage-bindings";
+  if (method === "POST" && (
+    path === "/internal/v1/agent/instances"
+    || /^\/internal\/v1\/agent\/instances\/[^/]+\/(?:running|end)$/.test(path)
+  )) return "agent:instances";
   if (method === "GET" && path === "/internal/v1/agent/mcp-discovery-plan") return "agent:mcp-discovery";
   if (method === "POST" && path === "/internal/v1/agent/sites") return "agent:sites";
   if (method === "GET" && /^\/internal\/v1\/agent\/operations\/[^/]+$/.test(path)) return "agent:operations:read";
@@ -599,7 +603,12 @@ export function createControlServer(
     : undefined;
   const usageRecordedHook=security.budgetStore?new BudgetUsageEventRecordedHook(security.budgetStore):undefined;
   const usageLedger = security.usageLedgerStore && security.teamStore && usageBindings
-    ? new UsageLedgerService(security.usageLedgerStore, security.teamStore, usageBindings, security.usageAdmissionHook, usageRecordedHook)
+    ? new UsageLedgerService(security.usageLedgerStore, security.teamStore, usageBindings, security.usageAdmissionHook, usageRecordedHook, async (binding) => {
+        const owner = { tenantId: binding.tenantId, subjectId: binding.subjectId, audience: "lemmacomputer-control" as const };
+        const workspace = await store.getOwned(owner, binding.workspaceId);
+        if (!workspace) throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "The usage identity does not belong to an active workspace", 403);
+        await agentProcesses.requireActive({ identity: owner, workspace, logicalAgentId: binding.agentId, agentInstanceId: binding.agentInstanceId! });
+      })
     : undefined;
   const requireUsageLedger = () => {
     if (!usageLedger || !security.usageLedgerStore) {
@@ -616,9 +625,11 @@ export function createControlServer(
     sessionId?: string,
     turnId?: string,
     requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto",
+    agentInstanceId?: string,
   ) => usageBindings?.issue({
     tenantId: owner.tenantId, subjectId: owner.subjectId, workspaceId, agentId,
     contextKind, taskId, ...(sessionId ? { sessionId } : {}), ...(turnId ? { turnId } : {}),
+    ...(agentInstanceId ? { agentInstanceId } : {}),
     requestedServiceClass,
   });
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
@@ -1205,7 +1216,18 @@ export function createControlServer(
     } else {
       throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503, true);
     }
-    return policyForGrant(actor, effective, workspace.grantId);
+    return { ...await policyForGrant(actor, effective, workspace.grantId), workspace };
+  };
+  const requireAgentInstance = async (request: { headers: Record<string, unknown> }, actor: AgentBridgeIdentity) => {
+    if (!security.agentInstanceStore) return undefined;
+    const raw = request.headers["x-lemmacomputer-agent-instance-id"];
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    const agentInstanceId = z.uuid().parse(value);
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
+    const workspace = await store.getOwned(owner, actor.workspaceId);
+    if (!workspace) throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "The agent process identity is unavailable", 403);
+    await agentProcesses.requireActive({ identity: owner, workspace, logicalAgentId: actor.agentId, agentInstanceId });
+    return agentInstanceId;
   };
   const schedules = security.scheduleStore && security.schedulePromptSecret
     ? new ScheduleService(
@@ -1222,9 +1244,16 @@ export function createControlServer(
           const { policy } = await channelPolicy(owner, workspaceId);
           return service.agentChatAccess(owner, policy, workspaceId, catalogId);
         },
-        ({ identity: owner, workspaceId, agentId, taskId, sessionId, turnId }) => issueUsageTaskBinding(
-          owner, workspaceId, agentId, "schedule", taskId, sessionId, turnId,
+        ({ identity: owner, workspaceId, agentId, taskId, sessionId, turnId, agentInstanceId }) => issueUsageTaskBinding(
+          owner, workspaceId, agentId, "schedule", taskId, sessionId, turnId, "auto", agentInstanceId,
         ),
+        async ({ identity: owner, workspaceId, catalogId, logicalAgentId, sessionId, runId }) => {
+          const { policy, workspace } = await channelPolicy(owner, workspaceId);
+          return agentProcesses.begin({
+            identity: owner, workspace, policy, catalogId, logicalAgentId,
+            launchKind: "schedule", sessionId, idempotencyKey: runId,
+          });
+        },
       )
     : undefined;
   const requireSchedules = () => {
@@ -1251,12 +1280,13 @@ export function createControlServer(
         throw new LemmaComputerError("CHANNEL_AGENT_MISMATCH", "The channel agent route changed", 409);
       }
     }
-    const { policy } = await channelPolicy(route.identity, route.workspaceId);
+    const { policy, workspace } = await channelPolicy(route.identity, route.workspaceId);
     if (!assignedChatAgentIds(policy).includes(route.agentCatalogId)) {
       throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
     }
     return {
       policy,
+      workspace,
       access: await service.agentChatAccess(route.identity, policy, route.workspaceId, route.agentCatalogId),
     };
   };
@@ -1299,7 +1329,15 @@ export function createControlServer(
   });
   app.post("/internal/v1/mcp/authorize", { bodyLimit: 6 * 1024 * 1024 }, async (request) => {
     if (!mcpPolicy) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "MCP policy storage is unavailable", 503, true);
-    return mcpPolicy.authorize(mcpPolicyRequestSchema.parse(request.body ?? {}), request.id);
+    const input = mcpPolicyRequestSchema.parse(request.body ?? {});
+    if (security.agentInstanceStore) {
+      if (!input.agentInstanceId) throw new LemmaComputerError("AGENT_INSTANCE_REQUIRED", "Tool calls require an authoritative agent process identity", 403);
+      const owner = { tenantId: input.tenantId, subjectId: input.subjectId, audience: "lemmacomputer-control" as const };
+      const workspace = await store.getOwned(owner, input.workspaceId);
+      if (!workspace) throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "The tool-call identity is not bound to this workspace", 403);
+      await agentProcesses.requireActive({ identity: owner, workspace, logicalAgentId: input.agentId, agentInstanceId: input.agentInstanceId });
+    }
+    return mcpPolicy.authorize(input, request.id);
   });
   app.post("/internal/v1/workspace-access/authorize", async (request) => {
     const input = z.strictObject({
@@ -1326,7 +1364,7 @@ export function createControlServer(
   });
   app.post("/internal/v1/channels/turns", { bodyLimit: 112 * 1024 * 1024 }, async (request, reply) => {
     const input = channelTurnRequestSchema.parse(request.body ?? {});
-    const { access } = await verifiedChannelRoute(input, true);
+    const { access, policy, workspace } = await verifiedChannelRoute(input, true);
     if (!store.claimChannelUpdate || !await store.claimChannelUpdate(
       input.connectionId,
       input.updateId,
@@ -1359,14 +1397,27 @@ export function createControlServer(
       const notices: string[] = [];
       const artifacts: Array<{ artifactId: string; mediaType: string; filename: string; byteLength: number; sha256: string }> = [];
       let state: "needs_input" | "completed" | "cancelled" | "failed" = "failed";
+      let lifecycle: Awaited<ReturnType<AgentProcessLifecycleService["begin"]>> | undefined;
+      let processStarted = false;
+      let processEnded = false;
       try {
+        lifecycle = await agentProcesses.begin({
+          identity: input.identity, workspace, policy, catalogId: input.agentCatalogId,
+          logicalAgentId: access.agentId, launchKind: "channel", sessionId: session.id,
+          idempotencyKey: `${input.connectionId}:${input.updateId}`,
+        });
+        const agentInstanceId = lifecycle.identity.state === "verified" ? lifecycle.identity.agentInstanceId : undefined;
         const usageTaskBinding = issueUsageTaskBinding(
           input.identity, input.workspaceId, access.agentId, "channel",
-          `channel:${input.connectionId}:${input.updateId}`, session.id,
+          `channel:${input.connectionId}:${input.updateId}`, session.id, undefined, "auto", agentInstanceId,
         );
         for await (const event of agentChat.streamTurn(
-          access, session.id, message, undefined, usageTaskBinding,
+          access, session.id, message, undefined, usageTaskBinding, agentInstanceId,
         )) {
+          if (event.type === "turn-start") {
+            await lifecycle.markRunning(event.turnId);
+            processStarted = true;
+          }
           if (event.type === "progress") {
             yield frame({ type: "heartbeat" });
           }
@@ -1401,6 +1452,8 @@ export function createControlServer(
           }
           if (event.type === "turn-finish") {
             state = event.state;
+            await lifecycle.end(event.state === "failed" ? "provider_failed" : "process_exited");
+            processEnded = true;
             if (event.state === "failed" && !text) {
               yield frame({
                 type: "error",
@@ -1417,6 +1470,9 @@ export function createControlServer(
           response: channelTurnResponseSchema.parse({ sessionId: session.id, text, notices, ...(artifacts.length ? { artifacts } : {}), state }),
         });
       } catch (error) {
+        if (lifecycle && !processEnded) {
+          try { await lifecycle.end(processStarted ? "provider_failed" : "launch_failed"); } catch (lifecycleError) { error = lifecycleError; }
+        }
         const owned = error instanceof LemmaComputerError ? error : undefined;
         yield frame({
           type: "error",
@@ -1485,9 +1541,48 @@ export function createControlServer(
     if (!allowedAgentIds.has(actor.agentId)) {
       throw new LemmaComputerError("AI_USAGE_TASK_BINDING_MISMATCH", "The route preference is not assigned to this workspace agent", 403);
     }
-    const binding = issueUsageTaskBinding(owner, actor.workspaceId, actor.agentId, "background", input.taskId, undefined, undefined, input.requestedServiceClass);
+    const agentInstanceId = await requireAgentInstance(request, actor);
+    const binding = issueUsageTaskBinding(owner, actor.workspaceId, actor.agentId, "background", input.taskId, undefined, undefined, input.requestedServiceClass, agentInstanceId);
     if (!binding) throw new LemmaComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
     return { binding };
+  });
+
+  app.post("/internal/v1/agent/instances", async (request, reply) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const input = z.strictObject({ launchNonce: z.uuid() }).parse(request.body ?? {});
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
+    const { policy, workspace } = await channelPolicy(owner, actor.workspaceId);
+    const assigned = policy.agents?.find((candidate) => candidate.agentId === actor.agentId);
+    const catalogId = assigned?.catalogId ?? (policy.agentId === actor.agentId
+      ? ({ "claude-desktop-managed-v1": "claude-desktop", "claude-cli-managed-v1": "claude-cli", "codex-cli-managed-v1": "codex-cli", "hermes-desktop-managed-v1": "hermes-desktop", "hermes-claw-managed-v1": "hermes-claw" } as const)[policy.agentProfile as Exclude<typeof policy.agentProfile, "lemmacomputer-default-agent">]
+      : undefined);
+    if (!catalogId) throw new LemmaComputerError("AGENT_INSTANCE_POLICY_MISMATCH", "The launcher is not assigned to this workspace", 403);
+    const lifecycle = await agentProcesses.begin({
+      identity: owner, workspace, policy, catalogId, logicalAgentId: actor.agentId,
+      launchKind: "interactive", idempotencyKey: `${actor.jti}:${input.launchNonce}`,
+    });
+    if (lifecycle.identity.state !== "verified") throw new LemmaComputerError("AGENT_INSTANCE_NOT_CONFIGURED", "Agent process identity is unavailable", 503, true);
+    return reply.code(201).send({ agentInstanceId: lifecycle.identity.agentInstanceId });
+  });
+  app.post<{ Params: { agentInstanceId: string } }>("/internal/v1/agent/instances/:agentInstanceId/running", async (request) => {
+    const actor = agentPrincipals.get(request)!;
+    const input = z.strictObject({ providerRuntimeId: z.string().min(1).max(300), imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(), imageVersion: z.string().min(1).max(200).optional() }).parse(request.body ?? {});
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
+    const workspace = await store.getOwned(owner, actor.workspaceId);
+    if (!workspace) throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "Agent process identity is unavailable", 403);
+    const current = await security.agentInstanceStore?.get({ tenantId: actor.tenantId, ownerSubjectId: actor.subjectId, workspaceId: actor.workspaceId, agentInstanceId: z.uuid().parse(request.params.agentInstanceId) });
+    if (!current || current.logicalAgentId !== actor.agentId || current.accessGeneration !== actor.workspaceGeneration) throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "Agent process identity is unknown or stale", 403);
+    const updated = await security.agentInstanceStore!.markRunning({ tenantId: actor.tenantId, ownerSubjectId: actor.subjectId, workspaceId: actor.workspaceId, agentInstanceId: current.id, ...input });
+    return { agentInstanceId: updated!.id, status: updated!.status };
+  });
+  app.post<{ Params: { agentInstanceId: string } }>("/internal/v1/agent/instances/:agentInstanceId/end", async (request) => {
+    const actor = agentPrincipals.get(request)!;
+    const input = z.strictObject({ reason: z.enum(["process_exited", "launch_failed", "provider_failed"]) }).parse(request.body ?? {});
+    const current = await security.agentInstanceStore?.get({ tenantId: actor.tenantId, ownerSubjectId: actor.subjectId, workspaceId: actor.workspaceId, agentInstanceId: z.uuid().parse(request.params.agentInstanceId) });
+    if (!current || current.logicalAgentId !== actor.agentId || current.accessGeneration !== actor.workspaceGeneration) throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "Agent process identity is unknown or stale", 403);
+    const updated = await security.agentInstanceStore!.end({ tenantId: actor.tenantId, ownerSubjectId: actor.subjectId, workspaceId: actor.workspaceId, agentInstanceId: current.id, reason: input.reason });
+    return { agentInstanceId: updated!.id, status: updated!.status };
   });
 
   app.post("/internal/v1/agent/sites", { bodyLimit: 800 * 1024 }, async (request, reply) => {
@@ -1511,10 +1606,11 @@ export function createControlServer(
   app.get<{ Params: { operationId: string } }>("/internal/v1/agent/operations/:operationId", async (request) => {
     const actor = agentPrincipals.get(request);
     if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const agentInstanceId = await requireAgentInstance(request, actor);
     return operations.getForAgent(
       { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" },
       request.params.operationId,
-      { workspaceId: actor.workspaceId, agentId: actor.agentId },
+      { workspaceId: actor.workspaceId, agentId: actor.agentId, agentInstanceId },
     );
   });
   app.post("/internal/v1/agent/uploads", async (request, reply) => {
@@ -1529,6 +1625,7 @@ export function createControlServer(
       idempotencyKey: z.string().min(16).max(128),
     }).parse(request.body ?? {});
     const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
+    const agentInstanceId = await requireAgentInstance(request, actor);
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
     if (
@@ -1562,6 +1659,8 @@ export function createControlServer(
       { policyVersionId: policy.policyVersionId, policyHash: policy.policyHash },
       input.idempotencyKey,
       request.id,
+      false,
+      agentInstanceId,
     );
     return reply.code(201).send(operation);
   });
@@ -1576,6 +1675,7 @@ export function createControlServer(
       idempotencyKey: z.string().min(16).max(128),
     }).parse(request.body ?? {});
     const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
+    const agentInstanceId = await requireAgentInstance(request, actor);
     const { policy } = await channelPolicy(owner, actor.workspaceId);
     const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((agent) => agent.agentId) ?? [])]);
     if (
@@ -1610,16 +1710,19 @@ export function createControlServer(
       { policyVersionId: policy.policyVersionId, policyHash: policy.policyHash },
       input.idempotencyKey,
       request.id,
+      false,
+      agentInstanceId,
     );
     return reply.code(201).send(operation);
   });
   app.post<{ Params: { operationId: string } }>("/internal/v1/agent/uploads/:operationId/begin", async (request) => {
     const actor = agentPrincipals.get(request);
     if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const agentInstanceId = await requireAgentInstance(request, actor);
     return operations.beginResumableUpload(
       { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" },
       request.params.operationId,
-      { workspaceId: actor.workspaceId, agentId: actor.agentId },
+      { workspaceId: actor.workspaceId, agentId: actor.agentId, agentInstanceId },
       request.id,
     );
   });
@@ -1627,10 +1730,11 @@ export function createControlServer(
     const actor = agentPrincipals.get(request);
     if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const input = z.strictObject({ leaseId: z.uuid() }).parse(request.body ?? {});
+    const agentInstanceId = await requireAgentInstance(request, actor);
     return operations.completeResumableUpload(
       { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" },
       request.params.operationId,
-      { workspaceId: actor.workspaceId, agentId: actor.agentId },
+      { workspaceId: actor.workspaceId, agentId: actor.agentId, agentInstanceId },
       input.leaseId,
       request.id,
     );
@@ -1639,10 +1743,11 @@ export function createControlServer(
     const actor = agentPrincipals.get(request);
     if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const input = z.strictObject({ leaseId: z.uuid() }).parse(request.body ?? {});
+    const agentInstanceId = await requireAgentInstance(request, actor);
     return operations.failResumableUpload(
       { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" },
       request.params.operationId,
-      { workspaceId: actor.workspaceId, agentId: actor.agentId },
+      { workspaceId: actor.workspaceId, agentId: actor.agentId, agentInstanceId },
       input.leaseId,
       request.id,
     );
@@ -3623,12 +3728,17 @@ export function createControlServer(
     const actor = principal(request);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     await assertProviderConfiguration(actor, policy);
-    return service.restart(actor.identity, policy, request.params.workspaceId, request.id);
+    const result = await service.restart(actor.identity, policy, request.params.workspaceId, request.id);
+    await security.agentInstanceStore?.endActiveForWorkspace({ tenantId: actor.tenantId, ownerSubjectId: actor.identity.subjectId, workspaceId: request.params.workspaceId, reason: "workspace_restarted" });
+    return result;
   });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/stop", async (request) => {
     requireOwnedWorkspaceManagement(request, request.params.workspaceId);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    return service.stop(identity(request), policy, request.params.workspaceId);
+    const owner = identity(request);
+    const result = await service.stop(owner, policy, request.params.workspaceId);
+    await security.agentInstanceStore?.endActiveForWorkspace({ tenantId: owner.tenantId, ownerSubjectId: owner.subjectId, workspaceId: request.params.workspaceId, reason: "workspace_stopped" });
+    return result;
   });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/gateway/test", async (request) => {
     requireOwnedWorkspaceManagement(request, request.params.workspaceId);
@@ -3902,14 +4012,14 @@ export function createControlServer(
       let lastEvent: AgentChatEvent | undefined;
       let processStarted = false;
       let processEnded = false;
+      const agentInstanceId = processLifecycle.identity.state === "verified"
+        ? processLifecycle.identity.agentInstanceId
+        : undefined;
       try {
         const usageTaskBinding = issueUsageTaskBinding(
           owner, request.params.workspaceId, access.agentId, "chat", input.message.id, sessionId,
-          undefined, input.requestedServiceClass,
+          undefined, input.requestedServiceClass, agentInstanceId,
         );
-        const agentInstanceId = processLifecycle.identity.state === "verified"
-          ? processLifecycle.identity.agentInstanceId
-          : undefined;
         for await (const event of agentChat.streamTurn(
           access, sessionId, input.message, undefined, usageTaskBinding, agentInstanceId,
         )) {
@@ -3931,6 +4041,7 @@ export function createControlServer(
           }
           await activityEvents.recordAgentEvent({
             identity: owner,
+            ...(agentInstanceId ? { agentInstanceId } : {}),
             workspaceId: request.params.workspaceId,
             agentCatalogId: catalogId,
             sessionId,
@@ -3971,6 +4082,7 @@ export function createControlServer(
           };
           await activityEvents.recordAgentEvent({
             identity: owner,
+            ...(agentInstanceId ? { agentInstanceId } : {}),
             workspaceId: request.params.workspaceId,
             agentCatalogId: catalogId,
             sessionId,
@@ -4009,6 +4121,8 @@ export function createControlServer(
     requireOwnedWorkspaceManagement(request, request.params.workspaceId);
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     await service.delete(identity(request), policy, request.params.workspaceId);
+    const owner = identity(request);
+    await security.agentInstanceStore?.endActiveForWorkspace({ tenantId: owner.tenantId, ownerSubjectId: owner.subjectId, workspaceId: request.params.workspaceId, reason: "workspace_terminated" });
     return reply.code(204).send();
   });
   app.get("/v1/skills", async (request, reply) => {
@@ -4411,6 +4525,11 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         new ControlPlaneTenantCleanupAdapter(controller, gateway),
       )
     : undefined;
+  await agentInstanceStore.reconcileAbandoned(new Date(Date.now() - 5 * 60_000));
+  const agentInstanceReconciliationTimer = setInterval(() => {
+    void agentInstanceStore.reconcileAbandoned(new Date(Date.now() - 5 * 60_000)).catch(() => undefined);
+  }, 60_000);
+  agentInstanceReconciliationTimer.unref();
   const app = createControlServer(
     store,
     controller,
@@ -4497,6 +4616,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await platformSecurityAlertDispatcher?.stop();
     await platformTenantCleanupDispatcher?.stop();
     if (pushRetryTimer) clearInterval(pushRetryTimer);
+    clearInterval(agentInstanceReconciliationTimer);
     await store.close();
     await connectorRegistryStore.close();
     await providerSettingsStore.close();

@@ -51,6 +51,7 @@ test("agent bridge grants are scoped and reject mutation", () => {
     "agent:uploads",
     "agent:deletions",
     "agent:renew",
+    "agent:instances",
   ]);
   assert.match(grant.jti, /^[0-9a-f-]{36}$/);
   assert.ok(grant.expiresAt > grant.issuedAt);

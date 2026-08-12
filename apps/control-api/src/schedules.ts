@@ -25,6 +25,7 @@ import {
   type ScheduleStore,
 } from "@lemmacomputer/workspace-store";
 import type { AgentChatAccess, AgentChatClient } from "./agent-chat.js";
+import type { AgentProcessLifecycle } from "./agent-process-lifecycle.js";
 
 const key = (secret: string) => createHash("sha256")
   .update("lemmacomputer/schedule-prompt/k1\0")
@@ -140,8 +141,12 @@ export class ScheduleService {
     ) => Promise<AgentChatAccess>,
     private readonly issueUsageTaskBinding?: (input: {
       identity: IdentityContext; workspaceId: string; agentId: string;
-      taskId: string; sessionId: string; turnId: string;
+      taskId: string; sessionId: string; turnId: string; agentInstanceId?: string;
     }) => string | undefined,
+    private readonly beginAgentProcess?: (input: {
+      identity: IdentityContext; workspaceId: string; catalogId: ChatAgentCatalogId;
+      logicalAgentId: string; sessionId: string; runId: string;
+    }) => Promise<AgentProcessLifecycle>,
   ) {}
 
   private next(cronExpression: string, timeZone: string, after = new Date()) {
@@ -245,11 +250,19 @@ export class ScheduleService {
   private async execute({ run, schedule }: ClaimedScheduleRun) {
     const identity = identityFor(schedule);
     let sessionId: string | undefined;
+    let lifecycle: AgentProcessLifecycle | undefined;
+    let processStarted = false;
+    let processEnded = false;
     try {
       const access = await this.resolveAccess(identity, schedule.workspaceId, schedule.agentCatalogId);
       await this.agentChat.health(access);
       const session = await this.agentChat.createSession(access, `Scheduled: ${schedule.title}`);
       sessionId = session.id;
+      lifecycle = await this.beginAgentProcess?.({
+        identity, workspaceId: schedule.workspaceId, catalogId: schedule.agentCatalogId,
+        logicalAgentId: access.agentId, sessionId, runId: run.id,
+      });
+      const agentInstanceId = lifecycle?.identity.state === "verified" ? lifecycle.identity.agentInstanceId : undefined;
       const message: ChatUiMessage = {
         id: randomUUID(),
         role: "user",
@@ -267,14 +280,16 @@ export class ScheduleService {
       let terminalMessage: string | undefined;
       const usageTaskBinding = this.issueUsageTaskBinding?.({
         identity, workspaceId: schedule.workspaceId, agentId: access.agentId,
-        taskId: `schedule:${run.id}`, sessionId: session.id, turnId: message.id,
+        taskId: `schedule:${run.id}`, sessionId: session.id, turnId: message.id, agentInstanceId,
       });
-      for await (const event of this.agentChat.streamTurn(access, session.id, message, undefined, usageTaskBinding)) {
+      for await (const event of this.agentChat.streamTurn(access, session.id, message, undefined, usageTaskBinding, agentInstanceId)) {
+        if (event.type === "turn-start" && lifecycle) { await lifecycle.markRunning(event.turnId); processStarted = true; }
         if (event.type === "turn-finish") {
           terminal = event.state;
           terminalMessage = event.message;
         }
       }
+      if (lifecycle) { await lifecycle.end(terminal === "failed" ? "provider_failed" : "process_exited"); processEnded = true; }
       if (terminal !== "completed") {
         throw new LemmaComputerError(
           terminal === "cancelled"
@@ -297,6 +312,9 @@ export class ScheduleService {
       if (!completed) throw new Error("Scheduled run ownership was lost");
       return runView(completed);
     } catch (error) {
+      if (lifecycle && !processEnded) {
+        try { await lifecycle.end(processStarted ? "provider_failed" : "launch_failed"); } catch (lifecycleError) { error = lifecycleError; }
+      }
       const known = error instanceof LemmaComputerError ? error : new LemmaComputerError(
         "SCHEDULE_EXECUTION_FAILED",
         "The scheduled agent turn failed",

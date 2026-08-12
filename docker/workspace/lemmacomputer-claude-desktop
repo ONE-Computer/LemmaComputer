@@ -30,4 +30,4 @@ if [[ -r /etc/claude-desktop/code-model ]]; then
 fi
 
 sleep 4
-exec claude-desktop --no-sandbox
+exec /usr/local/libexec/lemmacomputer-agent-launch claude-desktop claude-desktop --no-sandbox

@@ -86,10 +86,15 @@
      ) -> Any:
          """
          Create an AIAgent instance using the gateway's runtime config.
-@@ -1814,12 +1837,15 @@
+@@ -1814,12 +1837,20 @@
          if raw_request_overrides is not None and not isinstance(raw_request_overrides, dict):
              raise TypeError("runtime request_overrides must be a mapping")
          request_overrides = dict(raw_request_overrides or {})
++        # Interactive CLI/Desktop launches receive this value from the
++        # server-issued process wrapper. API turns use the request-local
++        # ContextVar above and the long-lived gateway has no ambient value.
++        if not agent_instance_id:
++            agent_instance_id = os.environ.get("LEMMACOMPUTER_AGENT_INSTANCE_ID", "").strip() or None
 -        if usage_task_binding:
 +        if usage_task_binding or agent_instance_id:
              raw_extra_headers = request_overrides.get("extra_headers")

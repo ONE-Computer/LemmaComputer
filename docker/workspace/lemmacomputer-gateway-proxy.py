@@ -33,6 +33,7 @@ HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authoriza
 MODEL_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 AGENT_BRIDGE_TOKEN_PATTERN = re.compile(r"^ocab2_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$")
+AGENT_INSTANCE_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 TERMINAL_AGENT_BRIDGE_CODES = {"AGENT_BRIDGE_GRANT_REVOKED", "AGENT_BRIDGE_GRANT_EXPIRED"}
 MCP_DISCOVERY_TIMEOUT_SECONDS = 5
@@ -166,15 +167,18 @@ def task_service_class(task_binding: str) -> str:
     return requested
 
 
-def issue_task_binding() -> str:
+def issue_task_binding(agent_instance_id: str | None) -> str:
     payload = json.dumps({"requestedServiceClass": DEFAULT_SERVICE_CLASS, "taskId": f"workspace-native:{uuid.uuid4()}"}, separators=(",", ":")).encode()
     control_path = CONTROL.path.rstrip("/")
     path = f"{control_path}/internal/v1/agent/usage-bindings"
     target = CONTROL._replace(path=path, query="", fragment="").geturl()
-    request = urllib.request.Request(target, data=payload, method="POST", headers={
+    headers = {
         "authorization": f"Bearer {agent_bridge_token()}",
         "content-type": "application/json",
-    })
+    }
+    if agent_instance_id:
+        headers["x-lemmacomputer-agent-instance-id"] = agent_instance_id
+    request = urllib.request.Request(target, data=payload, method="POST", headers=headers)
     with urllib.request.urlopen(request, timeout=10) as response:
         document = json.loads(response.read())
     binding = document.get("binding") if isinstance(document, dict) else None
@@ -229,8 +233,12 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
     return json.dumps(request, separators=(",", ":")).encode(), requested_model
 
 
-def control_json_request(path: str, body: dict | None = None) -> dict:
+def control_json_request(path: str, body: dict | None = None, agent_instance_id: str | None = None) -> dict:
     headers = {"authorization": f"Bearer {agent_bridge_token()}"}
+    if agent_instance_id:
+        if not AGENT_INSTANCE_PATTERN.fullmatch(agent_instance_id):
+            raise ValueError("invalid agent instance identity")
+        headers["x-lemmacomputer-agent-instance-id"] = agent_instance_id
     encoded = None
     if body is not None:
         encoded = json.dumps(body, separators=(",", ":")).encode()
@@ -330,6 +338,13 @@ class Handler(BaseHTTPRequestHandler):
         self.forward()
 
     def do_POST(self) -> None:
+        if self.path == "/lemmacomputer/agent-instances":
+            self.agent_instance_create()
+            return
+        match = re.fullmatch(r"/lemmacomputer/agent-instances/([0-9a-f-]{36})/(running|end)", self.path)
+        if match:
+            self.agent_instance_transition(match.group(1), match.group(2))
+            return
         if self.path == "/lemmacomputer/uploads":
             self.create_local_upload()
             return
@@ -370,7 +385,23 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def control_json(self, path: str, body: dict | None = None) -> dict:
-        return control_json_request(path, body)
+        return control_json_request(path, body, self.headers.get("x-lemmacomputer-agent-instance-id"))
+
+    def agent_instance_create(self) -> None:
+        try:
+            value = self.read_json()
+            self.send_json(201, control_json_request("/internal/v1/agent/instances", value))
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+            self.send_json(409, {"error": str(error)[:240]})
+
+    def agent_instance_transition(self, instance_id: str, action: str) -> None:
+        try:
+            if not AGENT_INSTANCE_PATTERN.fullmatch(instance_id):
+                raise ValueError("invalid agent instance identity")
+            value = self.read_json()
+            self.send_json(200, control_json_request(f"/internal/v1/agent/instances/{instance_id}/{action}", value))
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+            self.send_json(409, {"error": str(error)[:240]})
 
     def discover_mcp_tools(self) -> None:
         try:
@@ -451,6 +482,7 @@ class Handler(BaseHTTPRequestHandler):
                 "mtimeNs": stat.st_mtime_ns,
                 "sha256": digest.hexdigest(),
                 "running": False,
+                "agentInstanceId": self.headers.get("x-lemmacomputer-agent-instance-id"),
             }
             with UPLOAD_LOCK:
                 UPLOAD_KEYS[key] = operation["id"]
@@ -586,7 +618,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 task_binding = self.headers.get("x-lemmacomputer-ai-task-binding")
                 if task_binding is None and MODEL_ALIAS == "lemmacomputer-auto":
-                    task_binding = issue_task_binding()
+                    task_binding = issue_task_binding(self.headers.get("x-lemmacomputer-agent-instance-id"))
                 if task_binding is not None and (
                     not 32 <= len(task_binding) <= 4096
                     or not TASK_BINDING_PATTERN.fullmatch(task_binding)
@@ -645,16 +677,19 @@ class Handler(BaseHTTPRequestHandler):
             connection.close()
 
 
-def control_job_update(operation_id: str, action: str, lease_id: str) -> None:
+def control_job_update(operation_id: str, action: str, lease_id: str, agent_instance_id: str | None) -> None:
     target = f"{CONTROL.scheme}://{CONTROL.hostname}:{CONTROL.port}{CONTROL.path.rstrip('/')}/internal/v1/agent/uploads/{operation_id}/{action}"
+    headers = {
+        "authorization": f"Bearer {agent_bridge_token()}",
+        "content-type": "application/json",
+    }
+    if agent_instance_id:
+        headers["x-lemmacomputer-agent-instance-id"] = agent_instance_id
     request = urllib.request.Request(
         target,
         data=json.dumps({"leaseId": lease_id}, separators=(",", ":")).encode(),
         method="POST",
-        headers={
-            "authorization": f"Bearer {agent_bridge_token()}",
-            "content-type": "application/json",
-        },
+        headers=headers,
     )
     with urllib.request.urlopen(request, timeout=70) as response:
         response.read()
@@ -695,10 +730,10 @@ def run_upload(job: dict) -> None:
                 offset = end + 1
         if digest.hexdigest() != job["sha256"]:
             raise ValueError("the local file changed while it was uploading")
-        control_job_update(operation_id, "complete", lease_id)
+        control_job_update(operation_id, "complete", lease_id, job.get("agentInstanceId"))
     except (OSError, ValueError, urllib.error.URLError):
         try:
-            control_job_update(operation_id, "fail", lease_id)
+            control_job_update(operation_id, "fail", lease_id, job.get("agentInstanceId"))
         except (OSError, urllib.error.URLError):
             pass
     finally:

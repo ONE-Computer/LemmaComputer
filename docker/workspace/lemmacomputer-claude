@@ -7,7 +7,7 @@ export ANTHROPIC_AUTH_TOKEN=lemmacomputer-loopback-broker
 export CLAUDE_CONFIG_DIR=/home/kasm-user/.claude-cli
 source /home/kasm-user/.claude-cli/lemmacomputer.env
 
-exec /opt/lemmacomputer/claude-code/2.1.215/claude \
+exec /usr/local/libexec/lemmacomputer-agent-launch claude-cli /opt/lemmacomputer/claude-code/2.1.215/claude \
   --model "$LEMMACOMPUTER_MODEL_ALIAS" \
   --mcp-config /home/kasm-user/.claude-cli/mcp.json \
   --strict-mcp-config \

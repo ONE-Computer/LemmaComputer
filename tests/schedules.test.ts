@@ -159,6 +159,7 @@ const access: AgentChatAccess = {
   key: "workspace-bound-key",
   baseUrl: "http://sandbox",
 };
+const scheduledInstanceId = "22222222-2222-4222-8222-222222222222";
 
 const successfulAgent: AgentChatClient = {
   health: async () => {},
@@ -171,9 +172,10 @@ const successfulAgent: AgentChatClient = {
   }),
   listMessages: async () => [],
   cancelTurn: async () => {},
-  async *streamTurn(_access, sessionId, message, _signal, usageTaskBinding) {
+  async *streamTurn(_access, sessionId, message, _signal, usageTaskBinding, agentInstanceId) {
     assert.equal(usageTaskBinding, "signed-schedule-binding");
     assert.equal(sessionId, "session-scheduled-1");
+    assert.equal(agentInstanceId, scheduledInstanceId);
     assert.equal(message.parts[0]?.type, "text");
     assert.equal(message.parts[0]?.type === "text" ? message.parts[0].text : "", "Summarize the project.");
     yield {
@@ -226,6 +228,8 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
   const store = new MemoryScheduleStore();
   let validations = 0;
   let bindingIssued = false;
+  let runningTurn: string | undefined;
+  let endReason: string | undefined;
   const service = new ScheduleService(
     store,
     new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
@@ -245,7 +249,17 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
       assert.match(input.taskId, /^schedule:[0-9a-f-]{36}$/);
       assert.equal(input.sessionId, "session-scheduled-1");
       assert.match(input.turnId, /^[0-9a-f-]{36}$/);
+      assert.equal(input.agentInstanceId, scheduledInstanceId);
       return "signed-schedule-binding";
+    },
+    async (input) => {
+      assert.equal(input.catalogId, "codex-cli");
+      assert.match(input.runId, /^[0-9a-f-]{36}$/);
+      return {
+        identity: { state: "verified", agentInstanceId: scheduledInstanceId },
+        markRunning: async (turnId: string) => { runningTurn = turnId; },
+        end: async (reason) => { endReason = reason; },
+      };
     },
   );
   const schedule = await service.create(identity, {
@@ -266,6 +280,8 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
   assert.equal(completed.sessionId, "session-scheduled-1");
   assert.equal(validations, 2);
   assert.equal(bindingIssued, true);
+  assert.equal(runningTurn, "turn-scheduled-1");
+  assert.equal(endReason, "process_exited");
 });
 
 test("a claimed run with revoked authority is skipped before contacting the agent", async () => {
