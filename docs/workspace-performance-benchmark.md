@@ -68,6 +68,12 @@ when it supplies `VNCOPTIONS` to disable the redundant browser-authentication
 prompt. Docker replaces the image's complete `VNCOPTIONS` value; supplying only
 `DisableBasicAuth` silently disables those adaptive streaming defaults.
 
+The workspace health check uses a one-second startup interval and returns to its
+five-second steady-state interval after the first success. Keep those settings
+distinct: reducing the steady-state interval would add continuous health-probe
+load, while omitting the startup interval can leave an already-listening desktop
+reported as provisioning until the next five-second check.
+
 ## Office regression corpus
 
 The deterministic corpus contains:
