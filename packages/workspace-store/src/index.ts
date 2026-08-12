@@ -35,6 +35,43 @@ export type WorkspaceRecord = {
   updatedAt: Date;
 };
 
+export type WorkspaceAdministrationAction = "start" | "restart" | "stop" | "terminate_runtime";
+export type WorkspaceAdministrationCommandStatus = "pending" | "succeeded" | "failed";
+
+export type WorkspaceAdministrationCommandRecord = {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  ownerSubjectId: string;
+  actorUserId: string;
+  action: WorkspaceAdministrationAction;
+  idempotencyKeyHash: string;
+  requestHash: string;
+  status: WorkspaceAdministrationCommandStatus;
+  resultWorkspaceState: WorkspaceState | null;
+  failureCode: string | null;
+  failureHttpStatus: number | null;
+  failureRetryable: boolean | null;
+  correlationId: string;
+  requestedAt: Date;
+  completedAt: Date | null;
+};
+
+export type WorkspaceAdministrationAuditEvent = {
+  id: string;
+  tenantId: string;
+  commandId: string;
+  workspaceId: string;
+  ownerSubjectId: string;
+  actorUserId: string;
+  action: WorkspaceAdministrationAction;
+  outcome: "requested" | "succeeded" | "failed";
+  workspaceState: WorkspaceState | null;
+  failureCode: string | null;
+  correlationId: string;
+  occurredAt: Date;
+};
+
 export type SandboxSettingsRecord = {
   tenantId: string;
   subjectId: string;
@@ -430,6 +467,29 @@ export interface WorkspaceStore {
   getSandboxSettings?(identity: IdentityContext, grantId: string): Promise<SandboxSettingsRecord | null>;
   saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
   registerPolicyVerificationKeys?(keys: PolicyVerificationKey[]): Promise<void>;
+  beginWorkspaceAdministrationCommand(input: {
+    tenantId: string;
+    workspaceId: string;
+    ownerSubjectId: string;
+    actorUserId: string;
+    action: WorkspaceAdministrationAction;
+    idempotencyKeyHash: string;
+    requestHash: string;
+    correlationId: string;
+    requestedAt: Date;
+  }): Promise<{ command: WorkspaceAdministrationCommandRecord; replayed: boolean }>;
+  completeWorkspaceAdministrationCommand(input: {
+    tenantId: string;
+    commandId: string;
+    status: "succeeded" | "failed";
+    workspaceState: WorkspaceState;
+    failureCode?: string;
+    failureHttpStatus?: number;
+    failureRetryable?: boolean;
+    completedAt: Date;
+  }): Promise<WorkspaceAdministrationCommandRecord>;
+  listWorkspaceAdministrationAuditEvents(tenantId: string, workspaceId: string): Promise<WorkspaceAdministrationAuditEvent[]>;
+  lastWorkspaceActivityAt(identity: IdentityContext, workspaceId: string): Promise<Date | null>;
 }
 
 const mapRow = (row: Record<string, unknown>): WorkspaceRecord => ({
@@ -444,6 +504,40 @@ const mapRow = (row: Record<string, unknown>): WorkspaceRecord => ({
   accessGeneration: Number(row.access_generation ?? 1),
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
+});
+
+const mapWorkspaceAdministrationCommandRow = (row: Record<string, unknown>): WorkspaceAdministrationCommandRecord => ({
+  id: String(row.id),
+  tenantId: String(row.tenant_id),
+  workspaceId: String(row.workspace_id),
+  ownerSubjectId: String(row.owner_subject_id),
+  actorUserId: String(row.actor_user_id),
+  action: String(row.action) as WorkspaceAdministrationAction,
+  idempotencyKeyHash: String(row.idempotency_key_hash),
+  requestHash: String(row.request_hash),
+  status: String(row.status) as WorkspaceAdministrationCommandStatus,
+  resultWorkspaceState: row.result_workspace_state ? String(row.result_workspace_state) as WorkspaceState : null,
+  failureCode: row.failure_code ? String(row.failure_code) : null,
+  failureHttpStatus: row.failure_http_status === null || row.failure_http_status === undefined ? null : Number(row.failure_http_status),
+  failureRetryable: row.failure_retryable === null || row.failure_retryable === undefined ? null : Boolean(row.failure_retryable),
+  correlationId: String(row.correlation_id),
+  requestedAt: new Date(String(row.requested_at)),
+  completedAt: row.completed_at ? new Date(String(row.completed_at)) : null,
+});
+
+const mapWorkspaceAdministrationAuditRow = (row: Record<string, unknown>): WorkspaceAdministrationAuditEvent => ({
+  id: String(row.id),
+  tenantId: String(row.tenant_id),
+  commandId: String(row.command_id),
+  workspaceId: String(row.workspace_id),
+  ownerSubjectId: String(row.owner_subject_id),
+  actorUserId: String(row.actor_user_id),
+  action: String(row.action) as WorkspaceAdministrationAction,
+  outcome: String(row.outcome) as WorkspaceAdministrationAuditEvent["outcome"],
+  workspaceState: row.workspace_state ? String(row.workspace_state) as WorkspaceState : null,
+  failureCode: row.failure_code ? String(row.failure_code) : null,
+  correlationId: String(row.correlation_id),
+  occurredAt: new Date(String(row.occurred_at)),
 });
 
 const mapSandboxSettingsRow = (row: Record<string, unknown>): SandboxSettingsRecord => ({
@@ -918,6 +1012,143 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     );
     if (!result.rowCount) throw new Error("Workspace not found");
     return mapRow(result.rows[0]);
+  }
+
+  async beginWorkspaceAdministrationCommand(input: {
+    tenantId: string;
+    workspaceId: string;
+    ownerSubjectId: string;
+    actorUserId: string;
+    action: WorkspaceAdministrationAction;
+    idempotencyKeyHash: string;
+    requestHash: string;
+    correlationId: string;
+    requestedAt: Date;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const workspace = await client.query(
+        "SELECT id FROM workspaces WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
+        [input.workspaceId, input.tenantId, input.ownerSubjectId],
+      );
+      if (!workspace.rowCount) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+      const inserted = await client.query(
+        `INSERT INTO workspace_administration_commands (
+           id,tenant_id,workspace_id,owner_subject_id,actor_user_id,action,
+           idempotency_key_hash,request_hash,status,correlation_id,requested_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10)
+         ON CONFLICT (tenant_id,actor_user_id,idempotency_key_hash) DO NOTHING
+         RETURNING *`,
+        [randomUUID(), input.tenantId, input.workspaceId, input.ownerSubjectId, input.actorUserId, input.action,
+          input.idempotencyKeyHash, input.requestHash, input.correlationId, input.requestedAt],
+      );
+      const selected = inserted.rowCount ? inserted : await client.query(
+        `SELECT * FROM workspace_administration_commands
+         WHERE tenant_id=$1 AND actor_user_id=$2 AND idempotency_key_hash=$3 FOR UPDATE`,
+        [input.tenantId, input.actorUserId, input.idempotencyKeyHash],
+      );
+      const command = mapWorkspaceAdministrationCommandRow(selected.rows[0]);
+      if (
+        command.workspaceId !== input.workspaceId
+        || command.ownerSubjectId !== input.ownerSubjectId
+        || command.action !== input.action
+        || command.requestHash !== input.requestHash
+      ) {
+        throw new LemmaComputerError("IDEMPOTENCY_KEY_REUSED", "That idempotency key was already used for a different workspace command", 409);
+      }
+      if (inserted.rowCount) {
+        await client.query(
+          `INSERT INTO workspace_administration_audit_events (
+             id,tenant_id,command_id,workspace_id,owner_subject_id,actor_user_id,action,outcome,
+             workspace_state,failure_code,correlation_id,occurred_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,'requested',NULL,NULL,$8,$9)`,
+          [randomUUID(), command.tenantId, command.id, command.workspaceId, command.ownerSubjectId,
+            command.actorUserId, command.action, command.correlationId, command.requestedAt],
+        );
+      }
+      await client.query("COMMIT");
+      return { command, replayed: !inserted.rowCount };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async completeWorkspaceAdministrationCommand(input: {
+    tenantId: string;
+    commandId: string;
+    status: "succeeded" | "failed";
+    workspaceState: WorkspaceState;
+    failureCode?: string;
+    failureHttpStatus?: number;
+    failureRetryable?: boolean;
+    completedAt: Date;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const selected = await client.query(
+        "SELECT * FROM workspace_administration_commands WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+        [input.commandId, input.tenantId],
+      );
+      if (!selected.rowCount) throw new LemmaComputerError("WORKSPACE_COMMAND_NOT_FOUND", "Workspace command not found", 404);
+      let command = mapWorkspaceAdministrationCommandRow(selected.rows[0]);
+      if (command.status !== "pending") {
+        if (command.status !== input.status) throw new LemmaComputerError("WORKSPACE_COMMAND_COMPLETED", "Workspace command already completed", 409);
+        await client.query("COMMIT");
+        return command;
+      }
+      const failureCode = input.status === "failed" ? input.failureCode ?? "WORKSPACE_COMMAND_FAILED" : null;
+      const failureHttpStatus = input.status === "failed" ? input.failureHttpStatus ?? 500 : null;
+      const failureRetryable = input.status === "failed" ? input.failureRetryable ?? false : null;
+      const updated = await client.query(
+        `UPDATE workspace_administration_commands SET
+           status=$3,result_workspace_state=$4,failure_code=$5,failure_http_status=$6,
+           failure_retryable=$7,completed_at=$8
+         WHERE id=$1 AND tenant_id=$2 RETURNING *`,
+        [input.commandId, input.tenantId, input.status, input.workspaceState, failureCode,
+          failureHttpStatus, failureRetryable, input.completedAt],
+      );
+      command = mapWorkspaceAdministrationCommandRow(updated.rows[0]);
+      await client.query(
+        `INSERT INTO workspace_administration_audit_events (
+           id,tenant_id,command_id,workspace_id,owner_subject_id,actor_user_id,action,outcome,
+           workspace_state,failure_code,correlation_id,occurred_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [randomUUID(), command.tenantId, command.id, command.workspaceId, command.ownerSubjectId,
+          command.actorUserId, command.action, input.status, input.workspaceState, failureCode,
+          command.correlationId, input.completedAt],
+      );
+      await client.query("COMMIT");
+      return command;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listWorkspaceAdministrationAuditEvents(tenantId: string, workspaceId: string) {
+    const result = await this.pool.query(
+      `SELECT * FROM workspace_administration_audit_events
+       WHERE tenant_id=$1 AND workspace_id=$2
+       ORDER BY occurred_at ASC,command_id ASC,CASE outcome WHEN 'requested' THEN 0 ELSE 1 END,id ASC`,
+      [tenantId, workspaceId],
+    );
+    return result.rows.map(mapWorkspaceAdministrationAuditRow);
+  }
+
+  async lastWorkspaceActivityAt(identity: IdentityContext, workspaceId: string) {
+    const result = await this.pool.query(
+      `SELECT max(occurred_at) AS occurred_at FROM activity_events
+       WHERE tenant_id=$1 AND subject_id=$2 AND workspace_id=$3`,
+      [identity.tenantId, identity.subjectId, workspaceId],
+    );
+    return result.rows[0]?.occurred_at ? new Date(String(result.rows[0].occurred_at)) : null;
   }
 
   async getSandboxSettings(identity: IdentityContext, grantId: string) {
@@ -1988,6 +2219,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
 export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore, ActivityStore {
   private records = new Map<string, WorkspaceRecord>();
+  private workspaceAdministrationCommands = new Map<string, WorkspaceAdministrationCommandRecord>();
+  private workspaceAdministrationCommandKeys = new Map<string, string>();
+  private workspaceAdministrationAuditEvents: WorkspaceAdministrationAuditEvent[] = [];
   private channelConnections = new Map<string, ChannelConnectionRecord>();
   private channelCredentials = new Map<string, ChannelCredentialRecord>();
   private telegramTokenIntakeGrants = new Map<string, TelegramTokenIntakeGrantUse>();
@@ -2135,6 +2369,116 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     const record = this.records.get(workspaceId);
     if (!record) throw new Error("Workspace not found");
     return this.save(record, { accessGeneration: record.accessGeneration + 1 });
+  }
+  async beginWorkspaceAdministrationCommand(input: {
+    tenantId: string;
+    workspaceId: string;
+    ownerSubjectId: string;
+    actorUserId: string;
+    action: WorkspaceAdministrationAction;
+    idempotencyKeyHash: string;
+    requestHash: string;
+    correlationId: string;
+    requestedAt: Date;
+  }) {
+    const workspace = this.records.get(input.workspaceId);
+    if (!workspace || workspace.tenantId !== input.tenantId || workspace.subjectId !== input.ownerSubjectId) {
+      throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    }
+    const key = `${input.tenantId}\0${input.actorUserId}\0${input.idempotencyKeyHash}`;
+    const existingId = this.workspaceAdministrationCommandKeys.get(key);
+    if (existingId) {
+      const command = this.workspaceAdministrationCommands.get(existingId)!;
+      if (
+        command.workspaceId !== input.workspaceId
+        || command.ownerSubjectId !== input.ownerSubjectId
+        || command.action !== input.action
+        || command.requestHash !== input.requestHash
+      ) throw new LemmaComputerError("IDEMPOTENCY_KEY_REUSED", "That idempotency key was already used for a different workspace command", 409);
+      return { command, replayed: true };
+    }
+    const command: WorkspaceAdministrationCommandRecord = {
+      id: randomUUID(),
+      ...input,
+      status: "pending",
+      resultWorkspaceState: null,
+      failureCode: null,
+      failureHttpStatus: null,
+      failureRetryable: null,
+      completedAt: null,
+    };
+    this.workspaceAdministrationCommands.set(command.id, command);
+    this.workspaceAdministrationCommandKeys.set(key, command.id);
+    this.workspaceAdministrationAuditEvents.push({
+      id: randomUUID(),
+      tenantId: command.tenantId,
+      commandId: command.id,
+      workspaceId: command.workspaceId,
+      ownerSubjectId: command.ownerSubjectId,
+      actorUserId: command.actorUserId,
+      action: command.action,
+      outcome: "requested",
+      workspaceState: null,
+      failureCode: null,
+      correlationId: command.correlationId,
+      occurredAt: command.requestedAt,
+    });
+    return { command, replayed: false };
+  }
+  async completeWorkspaceAdministrationCommand(input: {
+    tenantId: string;
+    commandId: string;
+    status: "succeeded" | "failed";
+    workspaceState: WorkspaceState;
+    failureCode?: string;
+    failureHttpStatus?: number;
+    failureRetryable?: boolean;
+    completedAt: Date;
+  }) {
+    const existing = this.workspaceAdministrationCommands.get(input.commandId);
+    if (!existing || existing.tenantId !== input.tenantId) {
+      throw new LemmaComputerError("WORKSPACE_COMMAND_NOT_FOUND", "Workspace command not found", 404);
+    }
+    if (existing.status !== "pending") {
+      if (existing.status !== input.status) throw new LemmaComputerError("WORKSPACE_COMMAND_COMPLETED", "Workspace command already completed", 409);
+      return existing;
+    }
+    const failureCode = input.status === "failed" ? input.failureCode ?? "WORKSPACE_COMMAND_FAILED" : null;
+    const command: WorkspaceAdministrationCommandRecord = {
+      ...existing,
+      status: input.status,
+      resultWorkspaceState: input.workspaceState,
+      failureCode,
+      failureHttpStatus: input.status === "failed" ? input.failureHttpStatus ?? 500 : null,
+      failureRetryable: input.status === "failed" ? input.failureRetryable ?? false : null,
+      completedAt: input.completedAt,
+    };
+    this.workspaceAdministrationCommands.set(command.id, command);
+    this.workspaceAdministrationAuditEvents.push({
+      id: randomUUID(),
+      tenantId: command.tenantId,
+      commandId: command.id,
+      workspaceId: command.workspaceId,
+      ownerSubjectId: command.ownerSubjectId,
+      actorUserId: command.actorUserId,
+      action: command.action,
+      outcome: input.status,
+      workspaceState: input.workspaceState,
+      failureCode,
+      correlationId: command.correlationId,
+      occurredAt: input.completedAt,
+    });
+    return command;
+  }
+  async listWorkspaceAdministrationAuditEvents(tenantId: string, workspaceId: string) {
+    return this.workspaceAdministrationAuditEvents
+      .filter((event) => event.tenantId === tenantId && event.workspaceId === workspaceId);
+  }
+  async lastWorkspaceActivityAt(identity: IdentityContext, workspaceId: string) {
+    const timestamps = this.activityEvents
+      .filter((event) => event.tenantId === identity.tenantId && event.subjectId === identity.subjectId && event.workspaceId === workspaceId)
+      .map((event) => new Date(event.event.timestamp).getTime());
+    return timestamps.length ? new Date(Math.max(...timestamps)) : null;
   }
   async remove(identity: IdentityContext, workspaceId: string) {
     if (!await this.getOwned(identity, workspaceId)) return false;

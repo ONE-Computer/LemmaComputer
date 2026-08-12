@@ -160,6 +160,7 @@ try {
     "tests/provider-settings-postgres.test.ts",
     "tests/spend-cost-coverage-postgres.test.ts",
     "tests/workspace-settings-postgres.test.ts",
+    "tests/workspace-administration-postgres.test.ts",
     "tests/protected-workspace-policy-postgres.test.ts",
     "tests/organization-rbac-postgres.test.ts",
     "tests/organization-onboarding-postgres.test.ts",

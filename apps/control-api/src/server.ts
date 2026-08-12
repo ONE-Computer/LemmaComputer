@@ -2343,8 +2343,10 @@ export function createControlServer(
         allowsPermission(actor, "workspace.manage", { type: "workspace", resourceId: workspace.id })
       ));
       if (!managesOrganization && authorized.length === 0) return null;
+      const protectedPolicy = await security.protectedWorkspacePolicy?.effectiveMemberPolicy?.(actor.tenantId, user.userId);
       const workspaces = await Promise.all(authorized.map(async (workspace) => {
         const settings = await store.getSandboxSettings?.(targetIdentity, workspace.grantId);
+        const lastActivityAt = await store.lastWorkspaceActivityAt(targetIdentity, workspace.id);
         const document = user.effectivePolicy?.document as Record<string, unknown> | undefined;
         const configuredProfile = settings?.profileId
           ?? (Array.isArray(document?.workspaceProfiles) ? document.workspaceProfiles.find((value): value is string => typeof value === "string") : undefined)
@@ -2368,11 +2370,16 @@ export function createControlServer(
             reasonCode: workspace.failureCode,
           },
           profile: configuredProfile ? { id: configuredProfile, executionMode } : null,
-          policyAssignment: user.effectivePolicy ? {
+          policyAssignment: protectedPolicy?.state === "assigned" ? {
+            authority: "protected_baseline",
+            version: protectedPolicy.policy.template.version,
+            hash: protectedPolicy.policy.effectiveHash,
+          } : user.effectivePolicy ? {
+            authority: "runtime_policy",
             version: user.effectivePolicy.version,
             hash: user.effectivePolicy.documentHash,
           } : null,
-          lastActivityAt: workspace.updatedAt.toISOString(),
+          lastActivityAt: lastActivityAt?.toISOString() ?? null,
           lastTransitionAt: workspace.updatedAt.toISOString(),
           createdAt: workspace.createdAt.toISOString(),
         };
@@ -3599,6 +3606,168 @@ export function createControlServer(
     };
     return { target, principal };
   };
+  const workspaceAdministrationCommandView = (command: Awaited<ReturnType<WorkspaceStore["completeWorkspaceAdministrationCommand"]>>, replayed: boolean) => ({
+    id: command.id,
+    action: command.action,
+    status: command.status,
+    replayed,
+    resultWorkspaceState: command.resultWorkspaceState,
+    failureCode: command.failureCode,
+    failureRetryable: command.failureRetryable,
+    requestedAt: command.requestedAt.toISOString(),
+    completedAt: command.completedAt?.toISOString() ?? null,
+  });
+  const administratorWorkspaceCommand = async (
+    request: { params: { userId: string; workspaceId: string; action: string }; headers: Record<string, unknown>; id: string },
+    reply: { code(statusCode: number): { send(payload: unknown): unknown } },
+  ) => {
+    const actor = principal(request);
+    const action = z.enum(["start", "restart", "stop", "terminate_runtime"]).parse(request.params.action);
+    const targetIdentity = identityContextSchema.parse({
+      tenantId: actor.tenantId,
+      subjectId: request.params.userId,
+      audience: "lemmacomputer-control",
+    });
+    let workspace = await store.getOwned(targetIdentity, request.params.workspaceId);
+    const workspaceScope = { type: "workspace" as const, resourceId: request.params.workspaceId };
+    if (!workspace || !allowsPermission(actor, "workspace.manage", workspaceScope)) {
+      throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    }
+    const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+    if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+    const { effective: targetEffective } = await effectivePolicyFor(targetPrincipal, target.effectivePolicy);
+    if (!targetEffective) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+    const { policy } = await policyForGrant(targetPrincipal, targetEffective, workspace.grantId);
+    const key = idempotency(request.headers);
+    const idempotencyKeyHash = createHash("sha256").update(key).digest("hex");
+    const requestHash = createHash("sha256")
+      .update(`${actor.tenantId}\0${actor.userId}\0${target.userId}\0${workspace.id}\0${action}`)
+      .digest("hex");
+    const begun = await store.beginWorkspaceAdministrationCommand({
+      tenantId: actor.tenantId,
+      workspaceId: workspace.id,
+      ownerSubjectId: target.userId,
+      actorUserId: actor.userId,
+      action,
+      idempotencyKeyHash,
+      requestHash,
+      correlationId: request.id,
+      requestedAt: new Date(),
+    });
+    if (begun.replayed) {
+      if (begun.command.status === "failed") {
+        throw new LemmaComputerError(
+          begun.command.failureCode ?? "WORKSPACE_COMMAND_FAILED",
+          "The workspace command previously failed",
+          begun.command.failureHttpStatus ?? 500,
+          begun.command.failureRetryable ?? false,
+        );
+      }
+      if (begun.command.status === "succeeded") {
+        workspace = await store.getOwned(targetIdentity, workspace.id) ?? workspace;
+        return {
+          command: workspaceAdministrationCommandView(begun.command, true),
+          workspace: { id: workspace.id, state: workspace.state, failureCode: workspace.failureCode, updatedAt: workspace.updatedAt.toISOString() },
+        };
+      }
+      workspace = await store.getOwned(targetIdentity, workspace.id) ?? workspace;
+      const reachedTerminalState = action === "start"
+        ? ["provisioning", "restarting", "ready", "open"].includes(workspace.state)
+        : action === "stop"
+          ? workspace.state === "stopped"
+          : workspace.updatedAt >= begun.command.requestedAt && (
+            action === "restart"
+              ? ["provisioning", "restarting", "ready", "open"].includes(workspace.state)
+              : workspace.state === "stopped"
+          );
+      if (reachedTerminalState) {
+        const completed = await store.completeWorkspaceAdministrationCommand({
+          tenantId: actor.tenantId,
+          commandId: begun.command.id,
+          status: "succeeded",
+          workspaceState: workspace.state,
+          completedAt: new Date(),
+        });
+        return {
+          command: workspaceAdministrationCommandView(completed, true),
+          workspace: { id: workspace.id, state: workspace.state, failureCode: workspace.failureCode, updatedAt: workspace.updatedAt.toISOString() },
+        };
+      }
+      return reply.code(202).send({
+        command: workspaceAdministrationCommandView(begun.command, true),
+        workspace: { id: workspace.id, state: workspace.state, failureCode: workspace.failureCode, updatedAt: workspace.updatedAt.toISOString() },
+      });
+    }
+    try {
+      if (action === "start") {
+        if (!["ready", "open"].includes(workspace.state)) {
+          await assertProviderConfiguration(targetPrincipal, policy);
+          if (workspace.state === "not_created") {
+            await service.create(targetIdentity, policy, workspace.grantId, key, request.id);
+          } else {
+            await service.restart(targetIdentity, policy, workspace.id, request.id);
+          }
+        }
+      } else if (action === "restart") {
+        await assertProviderConfiguration(targetPrincipal, policy);
+        await service.restart(targetIdentity, policy, workspace.id, request.id);
+        await security.agentInstanceStore?.endActiveForWorkspace({
+          tenantId: actor.tenantId,
+          ownerSubjectId: target.userId,
+          workspaceId: workspace.id,
+          reason: "workspace_restarted",
+        });
+      } else if (action === "stop") {
+        await service.stop(targetIdentity, policy, workspace.id);
+        await security.agentInstanceStore?.endActiveForWorkspace({
+          tenantId: actor.tenantId,
+          ownerSubjectId: target.userId,
+          workspaceId: workspace.id,
+          reason: "workspace_stopped",
+        });
+      } else {
+        await service.terminateRuntime(targetIdentity, policy, workspace.id);
+        await security.agentInstanceStore?.endActiveForWorkspace({
+          tenantId: actor.tenantId,
+          ownerSubjectId: target.userId,
+          workspaceId: workspace.id,
+          reason: "workspace_terminated",
+        });
+      }
+      workspace = await store.getOwned(targetIdentity, workspace.id) ?? workspace;
+      const completed = await store.completeWorkspaceAdministrationCommand({
+        tenantId: actor.tenantId,
+        commandId: begun.command.id,
+        status: "succeeded",
+        workspaceState: workspace.state,
+        completedAt: new Date(),
+      });
+      return {
+        command: workspaceAdministrationCommandView(completed, false),
+        workspace: { id: workspace.id, state: workspace.state, failureCode: workspace.failureCode, updatedAt: workspace.updatedAt.toISOString() },
+      };
+    } catch (error) {
+      workspace = await store.getOwned(targetIdentity, workspace.id) ?? workspace;
+      const failure = error instanceof LemmaComputerError
+        ? error
+        : new LemmaComputerError("WORKSPACE_COMMAND_FAILED", "The workspace command failed", 500, true);
+      await store.completeWorkspaceAdministrationCommand({
+        tenantId: actor.tenantId,
+        commandId: begun.command.id,
+        status: "failed",
+        workspaceState: workspace.state,
+        failureCode: failure.code,
+        failureHttpStatus: failure.statusCode,
+        failureRetryable: failure.retryable,
+        completedAt: new Date(),
+      });
+      throw error;
+    }
+  };
+  app.post<{ Params: { userId: string; workspaceId: string; action: string } }>(
+    "/v1/admin/users/:userId/workspaces/:workspaceId/runtime/:action",
+    administratorWorkspaceCommand,
+  );
   app.get<{ Params: { userId: string }; Querystring: { grantId?: string } }>(
     "/v1/admin/users/:userId/sandbox-settings",
     async (request) => {

@@ -26,7 +26,17 @@ const assignedPolicy = {
   assignedAt: "2026-08-12T00:00:00.000Z",
   agentId: "agent-target",
   vendorUserId: "target-user",
-  document: { workspaceProfiles: ["persistent-office-v1"] },
+  document: {
+    schemaVersion: 1,
+    workspaceProfile: "kasm-persistent-standard",
+    workspaceProfiles: ["kasm-persistent-standard"],
+    applications: ["firefox"],
+    agents: ["claude-desktop"],
+    defaultAgents: ["claude-desktop"],
+    modelAliases: ["lemmacomputer-claude"],
+    networkProfile: "controlled-egress-v1",
+    mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"], toolPolicies: { "list-mail-folders": "allow" } } } },
+  },
 };
 
 const actor = (overrides: Partial<SessionPrincipal> = {}): SessionPrincipal => ({
@@ -62,9 +72,14 @@ const users: AdminUserSummary[] = [
   },
 ];
 
-const appFor = (principal: SessionPrincipal, store: MemoryWorkspaceStore) => createControlServer(
+const appFor = (
+  principal: SessionPrincipal,
+  store: MemoryWorkspaceStore,
+  controller: ControllerClient = {} as ControllerClient,
+  agentInstanceStore?: { endActiveForWorkspace(input: Record<string, unknown>): Promise<number> },
+) => createControlServer(
   store,
-  {} as ControllerClient,
+  controller,
   proxyToken,
   undefined,
   undefined,
@@ -77,6 +92,7 @@ const appFor = (principal: SessionPrincipal, store: MemoryWorkspaceStore) => cre
       logout: async () => "",
     },
     identityPolicyStore: { listUsers: async (tenantId: string) => tenantId === "acme" ? users : [] } as unknown as IdentityPolicyStore,
+    ...(agentInstanceStore ? { agentInstanceStore: agentInstanceStore as never } : {}),
     agentBridgeSecret: "member-workspace-admin-agent-bridge-secret-at-least-32-characters",
   },
 );
@@ -98,9 +114,9 @@ test("organization workspace managers receive a content-free member-first invent
       name: "Personal workspace",
       state: "ready",
       health: { status: "healthy", reasonCode: null },
-      profile: { id: "persistent-office-v1", executionMode: "managed" },
-      policyAssignment: { version: 7, hash: "a".repeat(64) },
-      lastActivityAt: body.members[0].workspaces[0].lastActivityAt,
+      profile: { id: "kasm-persistent-standard", executionMode: "managed" },
+      policyAssignment: { authority: "runtime_policy", version: 7, hash: "a".repeat(64) },
+      lastActivityAt: null,
       lastTransitionAt: body.members[0].workspaces[0].lastTransitionAt,
       createdAt: body.members[0].workspaces[0].createdAt,
     });
@@ -141,6 +157,20 @@ test("an exact workspace manager sees only the authorized workspace and its memb
     assert.deepEqual(response.json().members[0].workspaces.map((workspace: { id: string }) => workspace.id), [allowed.id]);
     assert.equal(JSON.stringify(response.json()).includes(hidden.id), false);
     assert.equal(JSON.stringify(response.json()).includes("empty@acme.test"), false);
+    const hiddenCommand = await app.inject({
+      method: "POST",
+      url: `/v1/admin/users/target-user/workspaces/${hidden.id}/runtime/stop`,
+      headers: { ...headers, "idempotency-key": "scoped-hidden-workspace-command" },
+    });
+    assert.equal(hiddenCommand.statusCode, 404);
+    assert.equal(hiddenCommand.json().error.code, "WORKSPACE_NOT_FOUND");
+    const forgedOwner = await app.inject({
+      method: "POST",
+      url: `/v1/admin/users/empty-user/workspaces/${allowed.id}/runtime/stop`,
+      headers: { ...headers, "idempotency-key": "scoped-forged-owner-command" },
+    });
+    assert.equal(forgedOwner.statusCode, 404);
+    assert.equal(forgedOwner.json().error.code, "WORKSPACE_NOT_FOUND");
   } finally {
     await app.close();
   }
@@ -172,6 +202,78 @@ test("member administration alone does not disclose workspace inventory", async 
     const existing = await app.inject({ method: "GET", url: "/v1/admin/users", headers });
     assert.equal(existing.statusCode, 200);
     assert.deepEqual(existing.json().users.flatMap((user: { workspaces: unknown[] }) => user.workspaces), []);
+  } finally {
+    await app.close();
+  }
+});
+
+test("admin lifecycle commands are idempotent, attributed, and terminate only the runtime", async () => {
+  const store = new MemoryWorkspaceStore();
+  const workspace = await store.createOrGet(targetIdentity, "personal", "member-workspace-admin-lifecycle");
+  const calls = { creates: 0, destroys: 0, purges: 0 };
+  const controller: ControllerClient = {
+    create: async ({ workspaceId }) => {
+      calls.creates += 1;
+      return { providerId: `sandbox-${workspaceId}-${calls.creates}`, state: "ready", failureCode: null };
+    },
+    updateEgressPolicy: async () => undefined,
+    status: async (providerId) => ({ providerId, state: "ready", failureCode: null }),
+    open: async () => ({ launchUrl: "https://workspace.test", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
+    destroy: async () => { calls.destroys += 1; },
+    purgeWorkspace: async () => { calls.purges += 1; },
+  };
+  const ended: Record<string, unknown>[] = [];
+  const app = appFor(actor(), store, controller, {
+    endActiveForWorkspace: async (input) => { ended.push(input); return 1; },
+  });
+  const command = (action: string, key: string) => app.inject({
+    method: "POST",
+    url: `/v1/admin/users/target-user/workspaces/${workspace.id}/runtime/${action}`,
+    headers: { ...headers, "idempotency-key": key },
+  });
+  try {
+    const started = await command("start", "workspace-admin-start-0001");
+    assert.equal(started.statusCode, 200);
+    assert.equal(started.json().workspace.state, "ready");
+    assert.equal(started.json().command.replayed, false);
+    const startReplay = await command("start", "workspace-admin-start-0001");
+    assert.equal(startReplay.statusCode, 200);
+    assert.equal(startReplay.json().command.replayed, true);
+    assert.equal(calls.creates, 1, "an exact retry cannot create another runtime");
+
+    const reused = await command("stop", "workspace-admin-start-0001");
+    assert.equal(reused.statusCode, 409);
+    assert.equal(reused.json().error.code, "IDEMPOTENCY_KEY_REUSED");
+
+    const restarted = await command("restart", "workspace-admin-restart-0001");
+    assert.equal(restarted.statusCode, 200);
+    assert.equal(restarted.json().workspace.state, "ready");
+    assert.equal(calls.creates, 2);
+    assert.equal(calls.destroys, 1);
+
+    const stopped = await command("stop", "workspace-admin-stop-0001");
+    assert.equal(stopped.statusCode, 200);
+    assert.equal(stopped.json().workspace.state, "stopped");
+    assert.equal(calls.destroys, 2);
+
+    const accessBeforeTerminate = (await store.getOwned(targetIdentity, workspace.id))!.accessGeneration;
+    const terminated = await command("terminate_runtime", "workspace-admin-terminate-0001");
+    assert.equal(terminated.statusCode, 200);
+    assert.equal(terminated.json().workspace.state, "stopped");
+    assert.equal(calls.purges, 0, "terminate runtime must preserve the persistent home");
+    assert.ok((await store.getOwned(targetIdentity, workspace.id))!.accessGeneration > accessBeforeTerminate,
+      "terminate runtime revokes every previously issued viewer session");
+    assert.deepEqual(ended.map((event) => event.reason), ["workspace_restarted", "workspace_stopped", "workspace_terminated"]);
+
+    const audit = await store.listWorkspaceAdministrationAuditEvents("acme", workspace.id);
+    assert.equal(audit.length, 8);
+    assert.deepEqual(audit.map((event) => `${event.action}:${event.outcome}`), [
+      "start:requested", "start:succeeded",
+      "restart:requested", "restart:succeeded",
+      "stop:requested", "stop:succeeded",
+      "terminate_runtime:requested", "terminate_runtime:succeeded",
+    ]);
+    assert.ok(audit.every((event) => event.actorUserId === "workspace-admin" && event.ownerSubjectId === "target-user"));
   } finally {
     await app.close();
   }

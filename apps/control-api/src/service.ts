@@ -584,6 +584,18 @@ export class WorkspaceService {
     return toView(await this.store.finish(claimed.id, claimed.operationToken!, { state: "stopped", providerId: null, failureCode: null }), undefined, policy);
   }
 
+  async terminateRuntime(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
+    await this.stop(identity, policy, workspaceId);
+    const record = await this.store.revokeAccessGrants(workspaceId);
+    try {
+      await this.revokeAgentGrantsReliably(workspaceId, policy);
+    } catch (error) {
+      await this.store.update(workspaceId, { state: "stopped", providerId: null, failureCode: "WORKSPACE_ACCESS_CLEANUP_FAILED" });
+      throw error;
+    }
+    return toView(record, undefined, policy);
+  }
+
   async delete(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
     await this.store.revokeAccessGrants(record.id);
