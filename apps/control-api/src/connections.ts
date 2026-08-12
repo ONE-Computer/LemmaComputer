@@ -20,6 +20,7 @@ import {
   type ConnectorRegistryStore,
 } from "@lemmacomputer/workspace-store";
 import { connectorActivation, connectorCatalog, type ConnectorDefinition } from "./connector-catalog.js";
+import type { EffectiveConnectorPolicyInput } from "./connector-policy-administration.js";
 
 type PendingConnection = {
   tenantId: string;
@@ -337,6 +338,47 @@ export class McpConnectionService {
 
   async adminList(identity: IdentityContext) {
     return { connectors: await this.connectors(identity.tenantId) };
+  }
+
+  async connectorPolicyAdministrationSnapshot(
+    identity: IdentityContext,
+    connectorId: string,
+    input: {
+      configuredToolPolicies?: Record<string, McpToolPolicyDecision>;
+      reviewMode?: EffectiveConnectorPolicyInput["connector"]["reviewMode"];
+    } = {},
+  ): Promise<Pick<EffectiveConnectorPolicyInput, "connector" | "observedTools">> {
+    const connector = await this.connector(identity.tenantId, connectorId);
+    let stored = await this.registry.getConnectionState(identity.tenantId, identity.subjectId, connector.id);
+    let observedTools: EffectiveConnectorPolicyInput["observedTools"] = null;
+    const reviewMode = input.reviewMode ?? (connector.id === "microsoft-365" ? "product_owned" : "provider_definition_hash");
+    if (reviewMode === "provider_definition_hash" && stored?.state === "connected") {
+      try {
+        const current = await this.connectorToolPolicy(identity, connector.id);
+        observedTools = current.tools.map((tool) => ({ name: tool.name, definitionHash: tool.definitionHash }));
+      } catch {
+        // The effective read model stays available during a provider outage,
+        // but reports the saved review as unchecked so the UI cannot imply
+        // that a provider definition is current.
+        observedTools = null;
+      }
+      stored = await this.registry.getConnectionState(identity.tenantId, identity.subjectId, connector.id);
+    }
+    return {
+      connector: {
+        id: connector.id,
+        name: connector.name,
+        enabled: connector.enabled,
+        membersCanManage: connector.membersCanManage,
+        accessPolicyVersion: connector.accessPolicyVersion,
+        accessPolicyUpdatedAt: connector.accessPolicyUpdatedAt.toISOString(),
+        configuredToolPolicies: input.configuredToolPolicies ?? connector.toolPolicies,
+        reviewedToolDefinitionHashes: reviewMode === "product_owned" ? {} : connector.toolDefinitionHashes,
+        connectionState: stored?.state ?? "disconnected",
+        reviewMode,
+      },
+      observedTools,
+    };
   }
 
   async updateAccessPolicy(
