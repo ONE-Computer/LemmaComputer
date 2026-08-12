@@ -542,11 +542,15 @@ CURATED_WRITE_DESCRIPTIONS = {
 
 
 def request_json(path: str, body: dict | None = None) -> dict:
+    headers = {} if body is None else {"content-type": "application/json"}
+    agent_instance_id = os.environ.get("LEMMACOMPUTER_AGENT_INSTANCE_ID", "")
+    if agent_instance_id:
+        headers["x-lemmacomputer-agent-instance-id"] = agent_instance_id
     request = urllib.request.Request(
         f"{BROKER}{path}",
         data=None if body is None else json.dumps(body, separators=(",", ":")).encode("utf-8"),
         method="GET" if body is None else "POST",
-        headers={} if body is None else {"content-type": "application/json"},
+        headers=headers,
     )
     with urllib.request.urlopen(request, timeout=70) as response:
         return json.load(response)

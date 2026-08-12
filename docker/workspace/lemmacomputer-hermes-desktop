@@ -9,4 +9,4 @@ export HERMES_DESKTOP_PYTHON=/opt/lemmacomputer/hermes-venv/bin/python
 export PATH=/opt/lemmacomputer/hermes-office-venv/bin:/opt/lemmacomputer/hermes-venv/bin:/usr/local/bin:/usr/bin:/bin
 export NODE_PATH=/opt/lemmacomputer/hermes-office-node/node_modules
 
-exec /opt/lemmacomputer/hermes-desktop/Hermes --no-sandbox "$@"
+exec /usr/local/libexec/lemmacomputer-agent-launch hermes-desktop /opt/lemmacomputer/hermes-desktop/Hermes --no-sandbox "$@"

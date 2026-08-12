@@ -9,4 +9,4 @@ export NODE_PATH=/opt/lemmacomputer/hermes-office-node/node_modules
 export OPENAI_API_KEY=lemmacomputer-loopback-broker
 export LEMMACOMPUTER_CONNECTORS_BROKER=http://127.0.0.1:4314
 
-exec /opt/lemmacomputer/hermes-venv/bin/hermes chat "$@"
+exec /usr/local/libexec/lemmacomputer-agent-launch hermes-claw /opt/lemmacomputer/hermes-venv/bin/hermes chat "$@"

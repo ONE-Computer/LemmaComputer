@@ -181,6 +181,39 @@ test("PostgreSQL agent instances are tenant scoped, server allocated, idempotent
     assert.deepEqual(concurrent.map(({ disposition }) => disposition).sort(), ["created", "existing"]);
     assert.equal(concurrent[0]!.instance.id, concurrent[1]!.instance.id);
 
+    await store.markRunning({ ...locator, agentInstanceId: secondLaunch.instance.id, providerRuntimeId: `process-${suffix}-2` });
+    assert.equal(await store.endActiveForWorkspace({
+      tenantId, ownerSubjectId: subjectId, workspaceId, reason: "workspace_stopped",
+    }), 2, "all still-active launches close together at a workspace lifecycle boundary");
+    assert.equal((await store.get({ ...locator, agentInstanceId: secondLaunch.instance.id }))?.endReason, "workspace_stopped");
+
+    for (const reason of ["workspace_restarted", "workspace_terminated"] as const) {
+      const lifecycleLaunch = await store.registerLaunch({
+        ...registration,
+        launchIdempotencyKey: `trusted-launch-${reason}-${suffix}`,
+      });
+      await store.markRunning({
+        ...locator,
+        agentInstanceId: lifecycleLaunch.instance.id,
+        providerRuntimeId: `process-${suffix}-${reason}`,
+      });
+      assert.equal(await store.endActiveForWorkspace({
+        tenantId, ownerSubjectId: subjectId, workspaceId, reason,
+      }), 1);
+      assert.equal((await store.get({
+        ...locator,
+        agentInstanceId: lifecycleLaunch.instance.id,
+      }))?.endReason, reason);
+    }
+
+    const abandoned = await store.registerLaunch({
+      ...registration,
+      launchIdempotencyKey: `trusted-launch-abandoned-${suffix}`,
+    });
+    await pool.query("UPDATE agent_instances SET launch_requested_at=now()-interval '10 minutes',created_at=now()-interval '10 minutes' WHERE id=$1", [abandoned.instance.id]);
+    assert.equal(await store.reconcileAbandoned(new Date(Date.now() - 5 * 60_000)), 1);
+    assert.equal((await store.get({ ...locator, agentInstanceId: abandoned.instance.id }))?.endReason, "reconciled_abandoned");
+
     await pool.query("DELETE FROM workspaces WHERE id=$1 AND tenant_id=$2", [workspaceId, tenantId]);
     const retained = await store.get(locator);
     assert.equal(retained?.id, created.instance.id, "workspace removal must not erase process evidence");

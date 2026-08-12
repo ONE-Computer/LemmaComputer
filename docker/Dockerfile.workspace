@@ -216,6 +216,7 @@ RUN python -c \
 COPY --from=hermes_desktop_builder /src/apps/desktop/release/linux-unpacked /opt/lemmacomputer/hermes-desktop
 COPY --from=hermes_desktop_builder /src/apps/desktop/assets/icon.png /opt/lemmacomputer/hermes-desktop-icon.png
 COPY docker/workspace/lemmacomputer-gateway-proxy.py /usr/local/libexec/lemmacomputer-gateway-proxy
+COPY docker/workspace/lemmacomputer-agent-launch.py /usr/local/libexec/lemmacomputer-agent-launch
 COPY docker/workspace/lemmacomputer-sites.py /usr/local/bin/lemmacomputer-sites
 COPY skills/make-a-site /opt/lemmacomputer/skills/make-a-site
 COPY skills/make-a-site /opt/lemmacomputer/hermes-agent/skills/lemmacomputer/make-a-site
@@ -246,6 +247,7 @@ COPY docker/workspace/SCHEDULING.md /usr/local/share/lemmacomputer/SCHEDULING.md
 RUN chmod 0755 \
       /usr/local/libexec/lemmacomputer-egress-broker \
       /usr/local/libexec/lemmacomputer-gateway-proxy \
+      /usr/local/libexec/lemmacomputer-agent-launch \
       /usr/local/libexec/lemmacomputer-connectors-stdio \
       /usr/local/libexec/lemmacomputer-agent-chat \
       /usr/local/libexec/lemmacomputer-hermes-config \

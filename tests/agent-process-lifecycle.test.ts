@@ -107,6 +107,8 @@ class RecordingAgentInstanceStore implements AgentInstanceStore {
     return { ...record(this.registration!), status: "ended" as const, endReason: input.reason };
   }
   async recordCleanupOutcome() { return null; }
+  async endActiveForWorkspace() { return 0; }
+  async reconcileAbandoned() { return 0; }
 }
 
 const launch = {

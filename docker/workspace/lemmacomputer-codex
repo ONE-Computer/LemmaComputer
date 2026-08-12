@@ -12,7 +12,7 @@ else
   sandbox_mode="read-only"
 fi
 
-exec /usr/local/libexec/lemmacomputer-codex-bin \
+exec /usr/local/libexec/lemmacomputer-agent-launch codex-cli /usr/local/libexec/lemmacomputer-codex-bin \
   --model "$LEMMACOMPUTER_CODEX_CLI_MODEL_ALIAS" \
   --sandbox "$sandbox_mode" \
   --ask-for-approval never \

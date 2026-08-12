@@ -99,6 +99,8 @@ export interface AgentInstanceStore {
     status: AgentInstanceCleanupStatus;
     failureCode?: string | null;
   }): Promise<AgentInstanceRecord | null>;
+  endActiveForWorkspace(input: Omit<AgentInstanceLocator, "agentInstanceId"> & { reason: Extract<AgentInstanceEndReason, "workspace_restarted" | "workspace_stopped" | "workspace_terminated"> }): Promise<number>;
+  reconcileAbandoned(staleStartingBefore: Date): Promise<number>;
 }
 
 const dateOrNull = (value: unknown) => value === null || value === undefined
@@ -380,6 +382,34 @@ export class PostgresAgentInstanceStore implements AgentInstanceStore {
       );
       return mapRow(result.rows[0]);
     });
+  }
+
+  async endActiveForWorkspace(input: Omit<AgentInstanceLocator, "agentInstanceId"> & { reason: Extract<AgentInstanceEndReason, "workspace_restarted" | "workspace_stopped" | "workspace_terminated"> }) {
+    const result = await this.pool.query(
+      `UPDATE agent_instances SET status='ended',ended_at=now(),end_reason=$4,
+         cleanup_status='confirmed',cleanup_confirmed_at=now(),cleanup_updated_at=now(),updated_at=now()
+       WHERE tenant_id=$1 AND owner_subject_id=$2 AND workspace_id=$3 AND status IN ('starting','running')`,
+      [input.tenantId, input.ownerSubjectId, input.workspaceId, input.reason],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  async reconcileAbandoned(staleStartingBefore: Date) {
+    const result = await this.pool.query(
+      `UPDATE agent_instances instance SET status='ended',ended_at=now(),end_reason='reconciled_abandoned',
+         cleanup_status=CASE WHEN instance.status='running' THEN 'incomplete' ELSE 'not_required' END,
+         cleanup_failure_code=CASE WHEN instance.status='running' THEN 'PROCESS_CLEANUP_UNCONFIRMED' ELSE NULL END,
+         cleanup_failure_at=CASE WHEN instance.status='running' THEN now() ELSE NULL END,
+         cleanup_updated_at=now(),updated_at=now()
+       WHERE instance.status IN ('starting','running') AND (
+         (instance.status='starting' AND instance.launch_requested_at < $1)
+         OR NOT EXISTS (SELECT 1 FROM workspaces workspace WHERE workspace.id=instance.workspace_id
+           AND workspace.tenant_id=instance.tenant_id AND workspace.subject_id=instance.owner_subject_id
+           AND workspace.access_generation=instance.access_generation AND workspace.state IN ('provisioning','ready','open','restarting'))
+       )`,
+      [staleStartingBefore],
+    );
+    return result.rowCount ?? 0;
   }
 
   private async withLockedInstance<T>(

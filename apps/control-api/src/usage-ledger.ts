@@ -108,12 +108,13 @@ export type UsageTaskContextKind = "chat"|"channel"|"schedule"|"background";
 export type UsageTaskBinding = {
   schemaVersion:1; tenantId:string; subjectId:string; workspaceId:string; agentId:string;
   contextKind:UsageTaskContextKind; taskId:string; sessionId?:string; turnId?:string;
+  agentInstanceId?:string;
   requestedServiceClass?:"auto"|"lite"|"balanced"|"pro";
   issuedAt:string; expiresAt:string;
 };
 const taskBindingSchema = z.object({
   schemaVersion:z.literal(1),tenantId:boundedId,subjectId:boundedId,workspaceId:boundedId,agentId:boundedId,
-  contextKind:z.enum(["chat","channel","schedule","background"]),taskId:boundedId,sessionId:boundedId.optional(),turnId:boundedId.optional(),
+  contextKind:z.enum(["chat","channel","schedule","background"]),taskId:boundedId,sessionId:boundedId.optional(),turnId:boundedId.optional(),agentInstanceId:z.uuid().optional(),
   requestedServiceClass:serviceClass.default("auto"),
   issuedAt:z.iso.datetime(),expiresAt:z.iso.datetime(),
 }).strict();
@@ -150,10 +151,12 @@ export class UsageLedgerService {
     private readonly bindings: UsageTaskBindingAuthority,
     private readonly admissionHook: UsageAttemptAdmissionHook = new AllowUsageAttemptAdmission(),
     private readonly recordedHook: UsageEventRecordedHook = new NoopUsageEventRecordedHook(),
+    private readonly validateAgentInstance?: (binding: UsageTaskBinding) => Promise<void>,
   ) {}
 
   async admit(input: InternalUsageAdmission) {
     const binding = input.taskBinding ? this.bindings.verify(input.taskBinding) : null;
+    if (binding?.agentInstanceId && this.validateAgentInstance) await this.validateAgentInstance(binding);
     if (binding && (
       binding.tenantId !== input.tenantId || binding.subjectId !== input.subjectId
       || binding.workspaceId !== input.workspaceId || binding.agentId !== input.agentId
@@ -161,6 +164,7 @@ export class UsageLedgerService {
     const attempt: AttemptAdmissionSemanticInput = {
       tenantId:input.tenantId,sourceSystem:input.sourceSystem,sourceAttemptId:input.sourceAttemptId,subjectId:input.subjectId,
       ...(input.workspaceId?{workspaceId:input.workspaceId}:{}),...(input.agentId?{agentId:input.agentId}:{}),
+      ...(binding?.agentInstanceId?{agentInstanceId:binding.agentInstanceId}:{}),
       ...(binding?.sessionId?{sessionId:binding.sessionId}:{}),taskId:binding?.taskId??unboundTaskId(input),
       ...(binding?.turnId?{turnId:binding.turnId}:{}),taskBindingProvenance:binding?"explicit_signed":"unbound_generated",contextKind:binding?.contextKind??"background",
       ...(input.policyVersionId?{policyVersionId:input.policyVersionId}:{}),...(input.policyHash?{policyHash:input.policyHash}:{}),

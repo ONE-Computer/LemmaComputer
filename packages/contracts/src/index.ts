@@ -1779,6 +1779,7 @@ export type GovernedOperationEnvelope = {
   subjectId: string;
   workspaceId: string;
   agentId?: string;
+  agentInstanceId?: string;
   audience: string;
   capabilityId: string;
   serverName: string;
@@ -1852,6 +1853,7 @@ export const mcpPolicyRequestSchema = z.strictObject({
   subjectId: z.string().min(1).max(128),
   workspaceId: z.uuid(),
   agentId: z.string().min(1).max(128),
+  agentInstanceId: z.uuid().nullable().default(null),
   policyVersionId: z.string().min(1).max(128).nullable(),
   policyHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   operationId: z.uuid().nullable(),
@@ -1879,6 +1881,7 @@ export const operationViewSchema = z.object({
   id: z.uuid(),
   workspaceId: z.uuid(),
   agentId: z.string().min(1).nullable(),
+  agentInstanceId: z.uuid().nullable(),
   policyVersionId: z.string().min(1).nullable(),
   policyHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   serverName: z.string().min(1),

@@ -155,6 +155,7 @@ export type GovernedOperationRecord = {
   subjectId: string;
   workspaceId: string;
   agentId: string | null;
+  agentInstanceId: string | null;
   policyVersionId: string | null;
   policyHash: string | null;
   capabilityId: string;
@@ -183,10 +184,11 @@ export type GovernedOperationRecord = {
 };
 
 export type CreateGovernedOperationRecord = Omit<GovernedOperationRecord,
-  "tenantId" | "subjectId" | "agentId" | "policyVersionId" | "policyHash" | "state" | "policyDecision" | "leaseId" | "leaseExpiresAt" | "dispatchStartedAt" | "failureCode" | "failureSummary" | "createdAt" | "updatedAt" | "approval" | "receipt"
+  "tenantId" | "subjectId" | "agentId" | "agentInstanceId" | "policyVersionId" | "policyHash" | "state" | "policyDecision" | "leaseId" | "leaseExpiresAt" | "dispatchStartedAt" | "failureCode" | "failureSummary" | "createdAt" | "updatedAt" | "approval" | "receipt"
 > & {
   identity: IdentityContext;
   agentId?: string;
+  agentInstanceId?: string;
   policyVersionId?: string;
   policyHash?: string;
   idempotencyKey: string;
@@ -398,6 +400,7 @@ export type ActivityEventScope = {
 
 export type AppendActivityEventInput = ActivityEventScope & {
   identity: IdentityContext;
+  agentInstanceId?: string;
   dedupeKey: string;
   occurredAt: Date;
   draft: ActivityEventDraft;
@@ -528,6 +531,7 @@ const mapOperationRow = (row: Record<string, unknown>): GovernedOperationRecord 
   subjectId: String(row.subject_id),
   workspaceId: String(row.workspace_id),
   agentId: row.agent_id ? String(row.agent_id) : null,
+  agentInstanceId: row.agent_instance_id ? String(row.agent_instance_id) : null,
   policyVersionId: row.policy_version_id ? String(row.policy_version_id) : null,
   policyHash: row.policy_hash ? String(row.policy_hash) : null,
   capabilityId: String(row.capability_id),
@@ -699,12 +703,13 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       });
       await client.query(
         `INSERT INTO activity_events (
-           event_id,tenant_id,subject_id,workspace_id,agent_catalog_id,session_id,turn_id,
+           event_id,tenant_id,subject_id,workspace_id,agent_catalog_id,session_id,turn_id,agent_instance_id,
            sequence,dedupe_key,occurred_at,kind,state,provenance,visibility,payload
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)`,
         [
           event.eventId,
           ...values,
+          input.agentInstanceId ?? null,
           event.sequence,
           input.dedupeKey,
           event.timestamp,
@@ -1269,13 +1274,13 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       }
       await client.query(
         `INSERT INTO governed_operations (
-          id,tenant_id,subject_id,workspace_id,agent_id,policy_version_id,policy_hash,capability_id,server_name,tool_name,schema_id,arguments_json,
+          id,tenant_id,subject_id,workspace_id,agent_id,agent_instance_id,policy_version_id,policy_hash,capability_id,server_name,tool_name,schema_id,arguments_json,
           operation_digest,nonce,state,policy_decision,safe_summary,resource_name,resource_location,
           idempotency_key,correlation_id,created_at,updated_at,expires_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,'approval_required','approval_required',$15,$16,$17,$18,$19,$20,$20,$21)`,
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,'approval_required','approval_required',$16,$17,$18,$19,$20,$21,$21,$22)`,
         [
           input.id, input.identity.tenantId, input.identity.subjectId, input.workspaceId, input.agentId ?? null,
-          input.policyVersionId ?? null, input.policyHash ?? null, input.capabilityId,
+          input.agentInstanceId ?? null, input.policyVersionId ?? null, input.policyHash ?? null, input.capabilityId,
           input.serverName, input.toolName, input.schemaId, JSON.stringify(input.arguments), input.operationDigest,
           input.nonce, input.safeSummary, input.resourceName, input.resourceLocation, input.idempotencyKey,
           input.correlationId, input.createdAt, input.expiresAt,
@@ -2395,6 +2400,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       subjectId: input.identity.subjectId,
       workspaceId: input.workspaceId,
       agentId: input.agentId ?? null,
+      agentInstanceId: input.agentInstanceId ?? null,
       policyVersionId: input.policyVersionId ?? null,
       policyHash: input.policyHash ?? null,
       capabilityId: input.capabilityId,
