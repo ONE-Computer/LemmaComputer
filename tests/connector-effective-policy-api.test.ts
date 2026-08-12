@@ -3,7 +3,10 @@ import test from "node:test";
 import {
   MemoryConnectorRegistryStore,
   MemoryWorkspaceStore,
+  mvpPolicyDocument,
   resolveEffectiveOrganizationPermissions,
+  type AdminUserSummary,
+  type EffectivePolicy,
   type IdentityPolicyStore,
   type SessionPrincipal,
 } from "@lemmacomputer/workspace-store";
@@ -73,9 +76,12 @@ const protectedWorkspacePolicy = {
       release: { releaseId: "0.5-test", sourceCommit: definitionHash("c").slice(0, 40), publishedAt: "2026-08-12T00:00:00.000Z" },
       constraints: {
         connectors: {
-          allow: ["reports"],
+          allow: ["reports", "microsoft-365"],
           deny: [],
-          toolPolicies: { reports: { read_report: "allow", export_report: "approval_required" } },
+          toolPolicies: {
+            reports: { read_report: "allow", export_report: "approval_required" },
+            "microsoft-365": { "list-mail-messages": "allow" },
+          },
         },
       },
       installedAt: "2026-08-12T00:00:00.000Z",
@@ -83,11 +89,6 @@ const protectedWorkspacePolicy = {
     organizationPolicyVersions: [],
   }),
 } as unknown as ProtectedWorkspacePolicyAdministrationBoundary;
-
-const identityPolicyStore = {
-  listUsers: async () => [],
-  getEffectivePolicy: async () => null,
-} as unknown as IdentityPolicyStore;
 
 const connector = (tenantId: string, id: string) => ({
   tenantId,
@@ -110,7 +111,37 @@ const connector = (tenantId: string, id: string) => ({
   createdBy: "connector-owner",
 });
 
-const appFor = async (actor: SessionPrincipal) => {
+const memberPolicy = (
+  version: number,
+  hashCharacter: string,
+  listMailDecision: "allow" | "approval_required" | "deny",
+): EffectivePolicy => {
+  const document = mvpPolicyDocument();
+  document.mcp.servers.lemmacomputer_ms365.toolPolicies["list-mail-messages"] = listMailDecision;
+  return {
+    assignmentId: `assignment-${version}-${hashCharacter}`,
+    policyBundleId: "mvp-standard:acme",
+    policyVersionId: `policy-version-${version}-${hashCharacter}`,
+    version,
+    documentHash: definitionHash(hashCharacter),
+    assignedBy: owner.userId,
+    assignedAt: "2026-08-12T00:00:00.000Z",
+    agentId: `agent-${version}`,
+    vendorUserId: `vendor-${version}`,
+    document,
+  };
+};
+
+const policyMember = (userId: string, policy: EffectivePolicy | null, status: "active" | "disabled" = "active"): AdminUserSummary => ({
+  userId,
+  email: `${userId}@example.test`,
+  displayName: userId,
+  status,
+  roles: ["employee"],
+  effectivePolicy: policy,
+});
+
+const appFor = async (actor: SessionPrincipal, users: AdminUserSummary[] = []) => {
   const registry = new MemoryConnectorRegistryStore();
   await registry.saveConnector(connector("acme", "reports"));
   await registry.saveConnector(connector("foreign", "foreign-reports"));
@@ -132,6 +163,10 @@ const appFor = async (actor: SessionPrincipal) => {
     ],
     disconnectUserOAuthConnection: async () => ({ state: "disconnected", connectedAt: null, expiresAt: null, account: null }),
   } as unknown as GatewayClient & OAuthConnectionGateway;
+  const identityPolicyStore = {
+    listUsers: async (tenantId: string) => tenantId === actor.tenantId ? users : [],
+    getEffectivePolicy: async () => null,
+  } as unknown as IdentityPolicyStore;
   return createControlServer(
     new MemoryWorkspaceStore(),
     {} as ControllerClient,
@@ -198,5 +233,78 @@ test("connector effective-policy reads derive the tenant and enforce exact provi
       "a connector stored for another tenant is not resolved from a caller-supplied id");
   } finally {
     await ownerApp.close();
+  }
+});
+
+test("Microsoft 365 selects the unique newest member policy and reports older or missing assignments", async () => {
+  const app = await appFor(owner, [
+    policyMember(owner.userId, memberPolicy(2, "2", "deny")),
+    policyMember("newest-member", memberPolicy(4, "4", "allow")),
+    policyMember("missing-policy", null),
+    policyMember("disabled-newer", memberPolicy(9, "9", "deny"), "disabled"),
+  ]);
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/admin/connectors/microsoft-365/effective-policy",
+      headers,
+    });
+    assert.equal(response.statusCode, 200);
+    const policy = response.json().policy;
+    assert.deepEqual(policy.policyApplication.currentVersion, {
+      version: 4,
+      documentHash: definitionHash("4"),
+    });
+    assert.deepEqual({
+      state: policy.policyApplication.state,
+      activeMembers: policy.policyApplication.activeMembers,
+      currentMembers: policy.policyApplication.currentMembers,
+      remediationRequiredMembers: policy.policyApplication.remediationRequiredMembers,
+      unassignedMembers: policy.policyApplication.unassignedMembers,
+    }, {
+      state: "mixed",
+      activeMembers: 3,
+      currentMembers: 1,
+      remediationRequiredMembers: 2,
+      unassignedMembers: 1,
+    });
+    const listMail = policy.tools.find((tool: { name: string }) => tool.name === "list-mail-messages");
+    assert.equal(listMail.displayName, "List email messages");
+    assert.equal(listMail.configuredDecision, "allow",
+      "the requester\'s older deny must not replace the unique newest organization version");
+    assert.equal(listMail.effectiveDecision, "allow");
+    assert.ok(policy.remediation.reasons.includes("member_policy_update_required"));
+    assert.equal(policy.remediation.workspaceGrantRefresh.status, "not_observed");
+    assert.equal(policy.remediation.restartRequired, false);
+    const editorResponse = await app.inject({ method: "GET", url: "/v1/admin/mcp-policy", headers });
+    assert.equal(editorResponse.statusCode, 200);
+    assert.equal(editorResponse.json().version, 4);
+    assert.equal(editorResponse.json().tools.find((tool: { name: string }) => tool.name === "list-mail-messages").decision, "allow",
+      "the editable Microsoft 365 view must use the same deterministic current version");
+  } finally {
+    await app.close();
+  }
+});
+
+test("Microsoft 365 fails closed when the newest member policy version has conflicting documents", async () => {
+  const app = await appFor(owner, [
+    policyMember("member-a", memberPolicy(4, "a", "allow")),
+    policyMember("member-b", memberPolicy(4, "b", "approval_required")),
+  ]);
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/admin/connectors/microsoft-365/effective-policy",
+      headers,
+    });
+    assert.equal(response.statusCode, 200);
+    const policy = response.json().policy;
+    assert.equal(policy.policyApplication.state, "conflict");
+    assert.equal(policy.policyApplication.currentVersion, null);
+    assert.ok(policy.tools.every((tool: { configuredDecision: string; effectiveDecision: string }) => (
+      tool.configuredDecision === "deny" && tool.effectiveDecision === "deny"
+    )));
+  } finally {
+    await app.close();
   }
 });

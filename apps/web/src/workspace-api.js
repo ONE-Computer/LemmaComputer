@@ -340,6 +340,7 @@ export const adminApi = {
   discoverConnector: (connector) => request("/api/v1/admin/connectors/discover", mutation("POST", connector)),
   createConnector: (connector) => request("/api/v1/admin/connectors", mutation("POST", connector)),
   saveConnectorIcon: (connectorId, iconDataUrl) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/icon`, mutation("PUT", { iconDataUrl })),
+  connectorEffectivePolicy: (connectorId) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/effective-policy`, { cache: "no-store" }),
   connectorToolPolicy: (connectorId) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/tool-policy`, { cache: "no-store" }),
   saveConnectorToolPolicy: (connectorId, tools, expectedDocumentHash) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/tool-policy`, mutation("PUT", { tools, expectedDocumentHash })),
   saveConnectorAccessPolicy: (connectorId, policy) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/access-policy`, mutation("PUT", policy)),

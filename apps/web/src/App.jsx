@@ -3098,6 +3098,75 @@ function Microsoft365AccountMetadata({ account }) {
   );
 }
 
+const connectorPolicyDecisionLabel = {
+  allow: "Allowed",
+  approval_required: "Approval required",
+  deny: "Blocked",
+};
+const connectorPolicySourceLabel = {
+  protected_baseline: "LemmaComputer baseline",
+  organization_policy: "Organization policy",
+  connector_policy: "Connector policy",
+};
+const connectorReviewStateLabel = {
+  product_owned: "Product definition",
+  current: "Definition current",
+  awaiting_review: "Review required",
+  not_checked: "Definition not checked",
+  removed: "No longer provided",
+};
+
+function ConnectorEffectivePolicyCard({ policy, loading, error }) {
+  if (loading && !policy) return <section className="connector-effective-policy-card loading" aria-live="polite">Loading effective connector policy…</section>;
+  if (error && !policy) return <section className="connector-effective-policy-card error" role="alert"><strong>Effective policy unavailable</strong><span>{error}</span></section>;
+  if (!policy) return null;
+  const application = policy.policyApplication;
+  const applicationMessage = application.state === "mixed"
+    ? `${application.remediationRequiredMembers} of ${application.activeMembers} active members need the current policy version.`
+    : application.state === "conflict"
+      ? "Conflicting documents share the newest member-policy version. Tools remain blocked until the assignments are reconciled."
+      : application.state === "unassigned"
+        ? `${application.unassignedMembers} active members do not have a workspace policy assignment.`
+        : application.state === "current"
+          ? `All ${application.currentMembers} assigned active members use version ${application.currentVersion?.version}.`
+          : application.state === "empty"
+            ? "There are no active members to evaluate."
+            : "This connector uses one organization connector policy rather than member policy versions.";
+  const reviewRequired = policy.tools.filter((tool) => ["awaiting_review", "not_checked"].includes(tool.reviewState)).length;
+  return (
+    <section className="connector-effective-policy-card" aria-labelledby={`connector-effective-policy-${policy.connector.id}`}>
+      <div className="connector-effective-policy-heading">
+        <div><p>Effective organization policy</p><h2 id={`connector-effective-policy-${policy.connector.id}`}>What workspace agents can use</h2></div>
+        <span className={`connector-effective-access ${policy.access.effectiveDecision}`}>{connectorPolicyDecisionLabel[policy.access.effectiveDecision]}</span>
+      </div>
+      <dl className="connector-effective-summary">
+        <div><dt>Connector access</dt><dd>{connectorPolicyDecisionLabel[policy.access.effectiveDecision]}<small>{connectorPolicySourceLabel[policy.access.controllingSource.kind]} · v{policy.access.controllingSource.version}</small></dd></div>
+        <div><dt>Member connections</dt><dd>{policy.access.membersCanManage ? "Members can manage connections" : "Members cannot manage connections"}<small>{policy.access.membersCanManage ? "Members may connect or disconnect their own account." : "Members cannot connect or disconnect their own account."}</small></dd></div>
+        <div><dt>Policy application</dt><dd>{application.state === "current" || application.state === "not_applicable" ? "Current" : "Action needed"}<small>{applicationMessage}</small></dd></div>
+      </dl>
+      <div className="connector-effective-tools" role="table" aria-label="Effective connector tool policy">
+        <div className="connector-effective-tool-heading" role="row">
+          <span role="columnheader">Tool</span><span role="columnheader">Effective decision</span><span role="columnheader">Definition review</span><span role="columnheader">Controlling sources</span>
+        </div>
+        {policy.tools.map((tool) => <div className="connector-effective-tool-row" role="row" key={tool.name}>
+          <span role="cell" data-label="Tool"><strong>{tool.displayName}</strong><code>{tool.name}</code></span>
+          <span role="cell" data-label="Effective decision"><strong className={`connector-tool-decision ${tool.effectiveDecision}`}>{connectorPolicyDecisionLabel[tool.effectiveDecision]}</strong></span>
+          <span role="cell" data-label="Definition review"><strong>{connectorReviewStateLabel[tool.reviewState]}</strong>{tool.observedDefinitionHash && <small>Current hash {tool.observedDefinitionHash.slice(0, 10)}…</small>}</span>
+          <span role="cell" data-label="Controlling sources"><small>{tool.sources.map((source) => `${connectorPolicySourceLabel[source.kind]} v${source.version}: ${connectorPolicyDecisionLabel[source.decision]}`).join(" · ")}</small></span>
+        </div>)}
+      </div>
+      <div className={`connector-effective-remediation${policy.remediation.required ? " action" : ""}`} role="status">
+        <Info24Regular aria-hidden="true" />
+        <div>
+          <strong>{policy.remediation.required ? "Remediation required" : "No policy remediation required"}</strong>
+          <span>{reviewRequired ? `${reviewRequired} tool ${reviewRequired === 1 ? "definition is" : "definitions are"} blocked pending review. ` : ""}{applicationMessage}</span>
+          <small>Workspace grant delivery is not persisted in this view. Saving a policy attempts a live grant refresh and reports failures immediately. A connector policy change itself does not require a workspace restart.</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ConnectorAccessPolicyCard({ connector, busy, onSave }) {
   const [enabled, setEnabled] = useState(connector.enabled !== false);
   const [membersCanManage, setMembersCanManage] = useState(connector.membersCanManage !== false);
@@ -3120,7 +3189,7 @@ function ConnectorAccessPolicyCard({ connector, busy, onSave }) {
   );
 }
 
-function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect, onAccessPolicySave, displayName, canManageConnector, canManagePolicy, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect, onAccessPolicySave, displayName, canManageConnector, canManagePolicy, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError }) {
   const connected = connection?.state === "connected";
   const expired = connection?.state === "expired";
   const organizationDisabled = connection?.enabled === false;
@@ -3169,6 +3238,7 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
               )}
             </div>
           </section>
+          {canManageConnector && <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} />}
           {canManageConnector && <ConnectorAccessPolicyCard connector={connection} busy={busy} onSave={onAccessPolicySave} />}
         </div>
       )}
@@ -3228,7 +3298,7 @@ function ConnectorRemovalCard({ connector, busy, onRemove }) {
   );
 }
 
-function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemove, onBack, canManageConnector, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemove, onBack, canManageConnector, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
   const activation = activationFor(connector);
@@ -3310,6 +3380,7 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
             )}
           </div>
         </section>
+        {canManageConnector && <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} />}
         {canManageConnector && <ConnectorAccessPolicyCard connector={connector} busy={busy} onSave={onAccessPolicySave} />}
         <div className="connector-policy-note">
           <Info24Regular aria-hidden="true" />
@@ -3582,15 +3653,15 @@ function AddConnectorDialog({ onCreated, onClose }) {
   );
 }
 
-function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, canAddConnector, canManagePolicy, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave }) {
+function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, canAddConnector, canManagePolicy, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError }) {
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
-      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === microsoft.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} />;
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
-      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} canManageConnector={Boolean(selected.canAdministerConnector)} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />;
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} canManageConnector={Boolean(selected.canAdministerConnector)} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === selected.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} />;
     }
   }
   return (
@@ -4739,6 +4810,10 @@ export function App() {
   const [mcpPolicy, setMcpPolicy] = useState(null);
   const [mcpPolicyLoading, setMcpPolicyLoading] = useState(false);
   const [mcpPolicySaving, setMcpPolicySaving] = useState(false);
+  const [connectorEffectivePolicy, setConnectorEffectivePolicy] = useState(null);
+  const [connectorEffectivePolicyLoading, setConnectorEffectivePolicyLoading] = useState(false);
+  const [connectorEffectivePolicyError, setConnectorEffectivePolicyError] = useState("");
+  const [connectorEffectivePolicyRefresh, setConnectorEffectivePolicyRefresh] = useState(0);
   const [sandboxSettings, setSandboxSettings] = useState(null);
   const [sandboxLoading, setSandboxLoading] = useState(false);
   const [sandboxSaving, setSandboxSaving] = useState(false);
@@ -5244,6 +5319,44 @@ export function App() {
   }, [activeNav, connectionsView, session?.user.id, mcpConnections, canManagePolicy]);
 
   useEffect(() => {
+    if (activeNav !== "Connections" || connectionsView === "list") {
+      setConnectorEffectivePolicy(null);
+      setConnectorEffectivePolicyError("");
+      setConnectorEffectivePolicyLoading(false);
+      return;
+    }
+    const selected = mcpConnections.find((connector) => (
+      connector.id === "microsoft-365"
+        ? connectionsView.startsWith("microsoft365-")
+        : connectionsView === `connector-${connector.id}` || connectionsView === `connector-${connector.id}-tools`
+    ));
+    if (!selected?.canAdministerConnector) {
+      setConnectorEffectivePolicy(null);
+      setConnectorEffectivePolicyError("");
+      setConnectorEffectivePolicyLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setConnectorEffectivePolicyLoading(true);
+    setConnectorEffectivePolicyError("");
+    adminApi.connectorEffectivePolicy(selected.id)
+      .then((result) => {
+        if (!cancelled) setConnectorEffectivePolicy(result.policy);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setConnectorEffectivePolicy(null);
+          setConnectorEffectivePolicyError(error.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setConnectorEffectivePolicyLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeNav, connectionsView, session?.user.id, connectorEffectivePolicyRefresh,
+    mcpConnections.map((connector) => `${connector.id}:${connector.canAdministerConnector}:${connector.accessPolicyVersion}`).join("|")]);
+
+  useEffect(() => {
     if (activeNav !== "Workspace" || !session || !selectedSandboxGrantId) return;
     const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
     setSandboxLoading(true);
@@ -5580,9 +5693,10 @@ export function App() {
       const result = await adminApi.saveConnectorAccessPolicy(connectorId, policy);
       const catalog = await connectionApi.catalog();
       setMcpConnections(catalog.connections);
+      setConnectorEffectivePolicyRefresh((current) => current + 1);
       const failures = result.workspaceGrants?.failed ?? 0;
       setToast(failures
-        ? `Connector access policy saved. ${failures} workspace grant refreshes failed and will retry automatically.`
+        ? `Connector access policy saved. ${failures} workspace grant refreshes failed; those connector tools remain unavailable until a refresh succeeds.`
         : "Connector access policy is active for the organization.");
       return result.connector;
     } catch (error) {
@@ -6426,7 +6540,10 @@ export function App() {
       if (mcpPolicy.connectorId) {
         const refreshed = await adminApi.saveConnectorToolPolicy(mcpPolicy.connectorId, decisions, mcpPolicy.documentHash);
         setMcpPolicy(refreshed);
-        if (refreshed.tools?.some((tool) => tool.reviewRequired)) {
+        setConnectorEffectivePolicyRefresh((current) => current + 1);
+        if (refreshed.workspaceGrants?.failed) {
+          setToast(`${mcpPolicy.connectorName} policy saved. ${refreshed.workspaceGrants.failed} workspace grant refreshes failed; those tools remain unavailable until a refresh succeeds.`);
+        } else if (refreshed.tools?.some((tool) => tool.reviewRequired)) {
           setToast(`${mcpPolicy.connectorName} changed again while it was being saved. Review the current definitions before they can be used.`);
         } else {
           setToast(`${mcpPolicy.connectorName} tool and approval rules are active.`);
@@ -6437,8 +6554,9 @@ export function App() {
       const refreshed = await adminApi.mcpPolicy();
       setMcpPolicy(refreshed);
       await refreshAdminUsers();
+      setConnectorEffectivePolicyRefresh((current) => current + 1);
       setToast(saved.workspaceGrants?.failed
-        ? `Microsoft 365 tool policy version ${saved.version} is active. ${saved.workspaceGrants.failed} running workspace grant could not refresh; restart that workspace before retrying.`
+        ? `Microsoft 365 tool policy version ${saved.version} is saved. ${saved.workspaceGrants.failed} workspace grant refreshes failed; those tools remain unavailable until a refresh succeeds.`
         : `Microsoft 365 tool policy version ${saved.version} is active for new calls${saved.workspaceGrants?.refreshed ? ` in ${saved.workspaceGrants.refreshed} running workspace` : ""}.`);
     } catch (error) { showApiError(error); }
     finally { setMcpPolicySaving(false); }
@@ -6677,6 +6795,9 @@ export function App() {
             policySaving={mcpPolicySaving}
             onPolicyChange={changeMcpPolicy}
             onPolicySave={saveMcpPolicy}
+            effectivePolicy={connectorEffectivePolicy}
+            effectivePolicyLoading={connectorEffectivePolicyLoading}
+            effectivePolicyError={connectorEffectivePolicyError}
           />
         )}
         {activeNav === "Firewall" && canManagePolicy && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}

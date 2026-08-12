@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  resolveConnectorPolicyApplication,
   resolveEffectiveConnectorPolicy,
   type EffectiveConnectorPolicyInput,
 } from "../apps/control-api/src/connector-policy-administration.js";
@@ -27,6 +28,7 @@ const input = (overrides: Partial<EffectiveConnectorPolicyInput> = {}): Effectiv
     accessPolicyVersion: 3,
     accessPolicyUpdatedAt: "2026-08-12T00:00:00.000Z",
     configuredToolPolicies: { read_report: "allow", export_report: "allow" },
+    toolDisplayNames: { read_report: "Read report", export_report: "Export report" },
     reviewedToolDefinitionHashes: { read_report: hash("b"), export_report: hash("c") },
     connectionState: "connected",
     reviewMode: "provider_definition_hash",
@@ -111,4 +113,33 @@ test("review drift in one connector does not affect an unrelated connector", () 
   assert.equal(unrelated.access.effectiveDecision, "allow");
   assert.equal(unrelated.tools[0]?.effectiveDecision, "allow");
   assert.equal(unrelated.runtimeProjection.state, "eligible");
+});
+
+test("member policy application selects the unique newest version deterministically and reports remediation", () => {
+  const application = resolveConnectorPolicyApplication([
+    { userId: "z-user", status: "active", policy: { policyVersionId: "v2", version: 2, documentHash: hash("b") } },
+    { userId: "a-user", status: "active", policy: { policyVersionId: "v4", version: 4, documentHash: hash("d") } },
+    { userId: "unassigned", status: "active", policy: null },
+    { userId: "disabled", status: "disabled", policy: { policyVersionId: "v9", version: 9, documentHash: hash("f") } },
+  ]);
+  assert.equal(application.state, "mixed");
+  assert.deepEqual(application.currentVersion, { version: 4, documentHash: hash("d") });
+  assert.deepEqual({
+    active: application.activeMembers,
+    current: application.currentMembers,
+    remediation: application.remediationRequiredMembers,
+    unassigned: application.unassignedMembers,
+  }, { active: 3, current: 1, remediation: 2, unassigned: 1 });
+  assert.deepEqual(application.versions.map((version) => [version.version, version.memberCount]), [[4, 1], [2, 1]]);
+});
+
+test("conflicting documents at the newest member policy version do not invent a current policy", () => {
+  const application = resolveConnectorPolicyApplication([
+    { userId: "a-user", status: "active", policy: { policyVersionId: "v4-a", version: 4, documentHash: hash("a") } },
+    { userId: "b-user", status: "active", policy: { policyVersionId: "v4-b", version: 4, documentHash: hash("b") } },
+  ]);
+  assert.equal(application.state, "conflict");
+  assert.equal(application.currentVersion, null);
+  assert.equal(application.currentMembers, 0);
+  assert.equal(application.remediationRequiredMembers, 2);
 });

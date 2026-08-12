@@ -90,6 +90,89 @@ const policy = {
   ],
 };
 
+const source = (kind: "protected_baseline" | "organization_policy" | "connector_policy", version: number, decision?: "allow" | "approval_required" | "deny") => ({
+  kind,
+  sourceId: `${kind}-${version}`,
+  version,
+  documentHash: String(version).repeat(64),
+  ...(decision ? { decision } : {}),
+});
+
+const effectivePolicy = {
+  connector: { id: connector.id, name: connector.name },
+  access: {
+    configuredEnabled: true,
+    effectiveDecision: "allow",
+    membersCanManage: false,
+    accessPolicyVersion: 3,
+    updatedAt: "2026-08-13T00:00:00.000Z",
+    reason: "allowed",
+    controllingSource: source("connector_policy", 3),
+  },
+  sources: [source("protected_baseline", 1), source("organization_policy", 2), source("connector_policy", 3)],
+  tools: [
+    {
+      name: "search-reports",
+      displayName: "Search reports",
+      configuredDecision: "allow",
+      effectiveDecision: "allow",
+      reviewState: "current",
+      observedDefinitionHash: "a".repeat(64),
+      reviewedDefinitionHash: "a".repeat(64),
+      sources: [source("protected_baseline", 1, "allow"), source("organization_policy", 2, "allow"), source("connector_policy", 3, "allow")],
+    },
+    {
+      name: "export-report",
+      displayName: "Export report",
+      configuredDecision: "allow",
+      effectiveDecision: "approval_required",
+      reviewState: "current",
+      observedDefinitionHash: "b".repeat(64),
+      reviewedDefinitionHash: "b".repeat(64),
+      sources: [source("protected_baseline", 1, "approval_required"), source("connector_policy", 3, "allow")],
+    },
+    {
+      name: "delete-report",
+      displayName: "Delete report",
+      configuredDecision: "deny",
+      effectiveDecision: "deny",
+      reviewState: "current",
+      observedDefinitionHash: "c".repeat(64),
+      reviewedDefinitionHash: "c".repeat(64),
+      sources: [source("protected_baseline", 1, "allow"), source("organization_policy", 2, "deny"), source("connector_policy", 3, "deny")],
+    },
+    {
+      name: "upload-report",
+      displayName: "Upload report",
+      configuredDecision: "allow",
+      effectiveDecision: "deny",
+      reviewState: "awaiting_review",
+      observedDefinitionHash: "e".repeat(64),
+      reviewedDefinitionHash: "d".repeat(64),
+      sources: [source("protected_baseline", 1, "allow"), source("connector_policy", 3, "allow")],
+    },
+  ],
+  runtimeProjection: { scope: "requesting_administrator", state: "partially_available", allowed: 1, approvalRequired: 1, denied: 2 },
+  policyApplication: {
+    state: "mixed",
+    currentVersion: { version: 4, documentHash: "4".repeat(64) },
+    activeMembers: 3,
+    currentMembers: 2,
+    remediationRequiredMembers: 1,
+    unassignedMembers: 0,
+    versions: [
+      { version: 4, documentHash: "4".repeat(64), memberCount: 2 },
+      { version: 3, documentHash: "3".repeat(64), memberCount: 1 },
+    ],
+  },
+  remediation: {
+    required: true,
+    reasons: ["member_policy_update_required", "tool_review_required"],
+    workspaceGrantRefresh: { status: "not_observed", trigger: "automatic_after_policy_save" },
+    restartRequired: false,
+  },
+};
+
 test("custom connector tools stay blocked until the administrator reviews and saves their exact definition", async ({ page }) => {
   let saved = false;
   await page.route("**/api/v1/connections", async (route) => {
@@ -165,4 +248,74 @@ test("Exa appears as an available built-in connector in the Search category", as
   await expect(search.getByText("Search the web")).toBeVisible();
   await expect(search.locator(".connector-mark.exa img")).toHaveAttribute("src", "/connector-icons/exa.png");
   await expect(search.getByRole("button", { name: "Connect" })).toBeEnabled();
+});
+
+test("administrators can read member controls, mixed tool decisions, drift, and honest remediation state", async ({ page }) => {
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      connections: [{ ...connector, membersCanManage: false }],
+    }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports/effective-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy: effectivePolicy }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connections" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+
+  const effective = page.getByRole("region", { name: "What workspace agents can use" });
+  await expect(effective).toBeVisible();
+  await expect(effective.getByText("Members cannot manage connections")).toBeVisible();
+  await expect(effective.getByText("Members cannot connect or disconnect their own account.")).toBeVisible();
+  const tools = effective.getByRole("table", { name: "Effective connector tool policy" });
+  await expect(tools.getByRole("row").filter({ hasText: "Search reports" })).toContainText("Allowed");
+  await expect(tools.getByRole("row").filter({ hasText: "Export report" })).toContainText("Approval required");
+  await expect(tools.getByRole("row").filter({ hasText: "Delete report" })).toContainText("Blocked");
+  await expect(tools.getByRole("row").filter({ hasText: "Upload report" })).toContainText("Review required");
+  await expect(effective.getByText("1 of 3 active members need the current policy version.", { exact: true })).toBeVisible();
+  await expect(effective.getByText(/Workspace grant delivery is not persisted in this view/)).toBeVisible();
+  await expect(effective.getByText(/does not require a workspace restart/)).toBeVisible();
+
+  await page.setViewportSize({ width: 600, height: 900 });
+  await expect(tools.locator(".connector-effective-tool-heading")).toBeHidden();
+  const mobileLabels = await tools.getByRole("row").filter({ hasText: "Search reports" }).locator("[data-label]").evaluateAll((cells) => (
+    cells.map((cell) => getComputedStyle(cell, "::before").content.replaceAll('"', ""))
+  ));
+  assert.deepEqual(mobileLabels, ["Tool", "Effective decision", "Definition review", "Controlling sources"]);
+});
+
+test("the effective view makes a disabled connector and its denied tools explicit", async ({ page }) => {
+  const disabledPolicy = {
+    ...effectivePolicy,
+    access: {
+      ...effectivePolicy.access,
+      configuredEnabled: false,
+      effectiveDecision: "deny",
+      membersCanManage: false,
+      reason: "connector_disabled",
+    },
+    tools: effectivePolicy.tools.map((tool) => ({ ...tool, effectiveDecision: "deny" })),
+    runtimeProjection: { ...effectivePolicy.runtimeProjection, state: "excluded", allowed: 0, approvalRequired: 0, denied: 4 },
+    policyApplication: { ...effectivePolicy.policyApplication, state: "not_applicable", currentVersion: null, activeMembers: 0, currentMembers: 0, remediationRequiredMembers: 0, versions: [] },
+    remediation: { ...effectivePolicy.remediation, reasons: ["policy_change_required"] },
+  };
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      connections: [{ ...connector, enabled: false, membersCanManage: false }],
+    }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports/effective-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy: disabledPolicy }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connections" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+
+  await expect(page.getByRole("heading", { name: "Disabled by your organization" })).toBeVisible();
+  const effective = page.getByRole("region", { name: "What workspace agents can use" });
+  await expect(effective.locator(".connector-effective-access")).toHaveText("Blocked");
+  await expect(effective.getByRole("row").filter({ hasText: "Search reports" })).toContainText("Blocked");
+  await expect(page.getByRole("checkbox", { name: "Connector enabled" })).not.toBeChecked();
 });
