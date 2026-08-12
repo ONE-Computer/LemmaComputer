@@ -838,6 +838,7 @@ async def claude_vendor_events(
     turn_id: str,
     return_artifacts: bool,
     usage_task_binding: str | None,
+    agent_instance_id: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
     from claude_agent_sdk import (
         AssistantMessage, ClaudeAgentOptions, ResultMessage, StreamEvent,
@@ -881,6 +882,9 @@ async def claude_vendor_events(
             "ANTHROPIC_AUTH_TOKEN": "lemmacomputer-loopback-broker",
             "CLAUDE_CONFIG_DIR": str(HOME / ".claude-chat-sdk"),
             "LEMMACOMPUTER_SITES_BROKER": BROKER,
+            **({
+                "LEMMACOMPUTER_AGENT_INSTANCE_ID": agent_instance_id,
+            } if agent_instance_id else {}),
             **({
                 "ANTHROPIC_CUSTOM_HEADERS": f"x-lemmacomputer-ai-task-binding: {usage_task_binding}",
             } if usage_task_binding else {}),
@@ -1329,9 +1333,13 @@ def vendor_events(
     turn_id: str,
     return_artifacts: bool,
     usage_task_binding: str | None,
+    agent_instance_id: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
     if AGENT == "claude-cli":
-        return claude_vendor_events(item, text, attachments, turn_id, return_artifacts, usage_task_binding)
+        return claude_vendor_events(
+            item, text, attachments, turn_id, return_artifacts,
+            usage_task_binding, agent_instance_id,
+        )
     if AGENT == "codex-cli":
         return codex_vendor_events(item, text, attachments, turn_id, return_artifacts, usage_task_binding)
     return hermes_vendor_events(item, text, attachments, turn_id, return_artifacts, usage_task_binding)
@@ -1535,6 +1543,7 @@ async def turns(request: Request) -> Response:
         value = await body(request, MAX_TURN_BODY)
         user_message, text, attachments = validate_user_message(value.get("message"))
         usage_task_binding = value.get("usageTaskBinding")
+        agent_instance_id = value.get("agentInstanceId")
         if (
             usage_task_binding is not None
             and (
@@ -1544,6 +1553,14 @@ async def turns(request: Request) -> Response:
             )
         ):
             raise ValueError("invalid AI usage task binding")
+        if AGENT == "claude-cli" and agent_instance_id is not None:
+            if not isinstance(agent_instance_id, str):
+                raise ValueError("invalid agent instance identity")
+            parsed_agent_instance_id = uuid.UUID(agent_instance_id)
+            if parsed_agent_instance_id.version != 4 or str(parsed_agent_instance_id) != agent_instance_id:
+                raise ValueError("invalid agent instance identity")
+        elif agent_instance_id is not None:
+            raise ValueError("agent instance identity is not supported for this runtime")
         return_artifacts = user_message["metadata"].get("source") == "telegram"
         outbox_before = snapshot_outbox() if return_artifacts else {}
     except ValueError:
@@ -1642,7 +1659,8 @@ async def turns(request: Request) -> Response:
             progress_started = False
             terminal_state: str | None = None
             events = vendor_events(
-                snapshot, text, attachments, turn_id, return_artifacts, usage_task_binding
+                snapshot, text, attachments, turn_id, return_artifacts,
+                usage_task_binding, agent_instance_id,
             ).__aiter__()
             next_event = asyncio.ensure_future(anext(events))
             try:

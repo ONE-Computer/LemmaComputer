@@ -182,13 +182,26 @@ test("Control pumps workspace events independently of the browser response", asy
   const pathIndex = control.lastIndexOf(path);
   const route = control.slice(control.lastIndexOf("app.post", pathIndex), control.indexOf("app.delete", pathIndex));
   assert.match(route, /const pump = async \(\) =>/);
-  assert.match(route, /agentChat\.streamTurn\(access, sessionId, input\.message, undefined, usageTaskBinding\)/);
+  assert.match(route, /agentProcesses\.beginBrowserChat\(/);
+  assert.match(route, /agentChat\.streamTurn\([\s\S]*usageTaskBinding, agentInstanceId,/);
+  assert.match(route, /processLifecycle\.markRunning\(event\.turnId\)/);
+  assert.match(route, /processLifecycle\.end\(event\.state === "failed" \? "provider_failed" : "process_exited"\)/);
   assert.match(route, /issueUsageTaskBinding\(/);
   assert.match(route, /void pump\(\)/);
   assert.match(route, /chunks\.push\(\.\.\.mapper\.chunks\(projected\)\)/);
   assert.doesNotMatch(route, /browser-disconnected|abort\.signal/);
   assert.match(control, /sessions\/:sessionId\/turns\/active/);
   assert.match(control, /await agentChat\.cancelTurn\(access, sessionId\)/);
+  assert.match(control, /callerSuppliedAgentInstanceId\(request\.body\)/);
+});
+
+test("the trusted Claude chat identity reaches the actual SDK subprocess", async () => {
+  const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
+  const turns = adapter.slice(adapter.indexOf("async def turns"), adapter.indexOf("async def cancel_active_turn"));
+  const claude = adapter.slice(adapter.indexOf("async def claude_vendor_events"), adapter.indexOf("async def codex_vendor_events"));
+  assert.match(turns, /agent_instance_id = value\.get\("agentInstanceId"\)/);
+  assert.match(turns, /parsed_agent_instance_id\.version != 4/);
+  assert.match(claude, /"LEMMACOMPUTER_AGENT_INSTANCE_ID": agent_instance_id/);
 });
 
 test("agent turns receive a fresh trusted timezone context and require clarification without one", async () => {
@@ -389,10 +402,14 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
       };
       const client = new HttpAgentChatClient();
       const events = [];
-      for await (const event of client.streamTurn(access, "session-1", {
-        ...message,
-        metadata: { ...message.metadata, agentCatalogId: catalogId },
-      })) events.push(event);
+      for await (const event of client.streamTurn(
+        access,
+        "session-1",
+        { ...message, metadata: { ...message.metadata, agentCatalogId: catalogId } },
+        undefined,
+        undefined,
+        catalogId === "claude-cli" ? "22222222-2222-4222-8222-222222222222" : undefined,
+      )) events.push(event);
       assert.deepEqual(events.map((event) => event.type), [
         "turn-start", "tool", "tool", "text-delta", "turn-finish",
       ]);
@@ -410,7 +427,13 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
     }
     assert.deepEqual(requests.map(({ url, body }) => ({ url, body })), [
       { url: "/api/sessions/session-1/turns", body: { message } },
-      { url: "/api/sessions/session-1/turns", body: { message: { ...message, metadata: { ...message.metadata, agentCatalogId: "claude-cli" } } } },
+      {
+        url: "/api/sessions/session-1/turns",
+        body: {
+          message: { ...message, metadata: { ...message.metadata, agentCatalogId: "claude-cli" } },
+          agentInstanceId: "22222222-2222-4222-8222-222222222222",
+        },
+      },
       { url: "/api/sessions/session-1/turns", body: { message: { ...message, metadata: { ...message.metadata, agentCatalogId: "codex-cli" } } } },
     ]);
   } finally {
