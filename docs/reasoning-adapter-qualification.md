@@ -26,6 +26,8 @@ Changing a record from discovery to qualified is a reviewed product change. Admi
 
 Hermes and Codex both expose upstream reasoning controls, but that does not make their labels or behavior equivalent to Claude or to one another. LemmaComputer's Low, Medium, and High values are bounded product intents. The separately qualified provider route decides their concrete wire meaning. Direct Anthropic is the first existing route registration from #69, not a prerequisite for these adapters or for future route registrations.
 
+The managed OpenAI models `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` are route discoveries under `openai-gpt-5.6-managed-effort-route-discovery-2026-08-13`. They remain ineligible for product thinking controls until the credentialed route gates below pass. Recording them as discoveries lets the qualification tooling recognize the exact intended routes without treating their configured presence as proof.
+
 ## Shared transport contract
 
 Every qualifying runtime must prove the same boundary:
@@ -43,6 +45,20 @@ This is why the Codex discovery branch's native `AsyncThread.turn(..., effort=..
 ## Promotion gates
 
 Run these gates against the exact runtime version and a separately qualified route that supports the proposed levels. The adapter evidence remains valid for any other route that satisfies the same signed gateway contract; provider semantics are evidenced by that route's own qualification. Use an isolated worktree deployment. Add any chosen provider credential through **AI control plane -> Models & providers**; do not place credentials in `.env`, documentation, test output, or evidence artifacts.
+
+### Isolated worktree handoff
+
+The qualification worktree owns a fresh database, generated trust keys, ports, Compose project, provider records, routing policy, and workspaces. Never copy `.env`, authentication rows, LiteLLM records, encrypted provider settings, volumes, or workspace grants from `main` or another worktree.
+
+Before a human live run:
+
+1. Run `npm run dev:doctor`, confirm `docker compose ps` is healthy, and check the worktree's `LEMMACOMPUTER_WEB_PORT` rather than assuming the main-stack URL.
+2. Configure one supported authentication path for the isolated stack. The default `capture` email adapter is sufficient for automated tests but cannot deliver a human verification link. For manual email/password signup, configure Postmark as documented in [Development workflow](development-workflow.md#human-supplied-values), or configure one complete supported social/enterprise identity path. Do not import an account from another stack.
+3. Create and verify the isolated administrator account and organization.
+4. In **AI control plane -> Models & providers**, configure and test the chosen gateway upstream. The runtime never receives that credential and does not connect directly to a named provider.
+5. Publish the explicit `Lite`, `Balanced`, and `Pro` mapping/policy needed by the run, create an isolated workspace with the candidate agent, and keep the source commit fixed while collecting evidence.
+
+Discovery records remain absent from ordinary product controls. The qualification operator may stage one candidate route/runtime promotion only on this isolated issue branch to exercise the live path. Do not merge that staged promotion unless the complete evidence record passes, is reviewed, and is tied to the exact source commit. Revert a failed candidate to discovery before any integration decision.
 
 ### 1. Static and fixture evidence
 
@@ -67,6 +83,25 @@ For each proposed level, start a new conversation and run a prompt that requires
 - confirmation that no hidden reasoning content appeared in product surfaces or retained logs.
 
 Repeat one conversation turn to exercise resume behavior. Run concurrent conversations at different permitted levels and confirm their signed bindings and usage records do not cross. Revoke or alter the route after capability projection and confirm stale or mismatched execution fails closed.
+
+Record the bounded observations in a strict JSON evidence file and validate it against the exact checked-out commit:
+
+```bash
+npm run qualify:reasoning-adapter -- --evidence=/absolute/path/to/reasoning-adapter-evidence.json
+```
+
+The validator accepts discovery records for any reviewed runtime and a candidate or separately qualified provider/model route. It does not read a provider credential, prompt, response, tool arguments/results, signed binding, or hidden reasoning. Unknown fields fail closed; likely credentials and signed bindings are rejected before parsing. Passing this command proves that the required evidence record is complete and commit-bound. It does not itself prove that the observations are truthful or promote a runtime.
+
+The evidence file contains only:
+
+- exact source commit, runtime pin/discovery ID, route identity, deployment and mapping IDs;
+- one bounded observation for every proposed provider effort level;
+- Auto-thinking resolution, resume and concurrent-conversation isolation results;
+- fail-closed negative-case results and hidden-reasoning absence across product surfaces;
+- provider-confirmed token availability, bounded latency, and confirmed/estimated/unavailable cost status;
+- explicit evidence limitations.
+
+Keep the evidence outside the repository until it has been reviewed. Never add screenshots, prompts, responses, tool payloads, access tokens, credentials, or signed bindings to it.
 
 ### 3. Cache and comparative evidence
 

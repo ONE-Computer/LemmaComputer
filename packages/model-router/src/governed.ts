@@ -33,17 +33,31 @@ export type QualifiedReasoningCapabilities = {
   reasoningTokenTelemetry: boolean;
 };
 
-export type ReasoningRouteQualificationRegistration = {
-  qualificationId: string;
+type ReasoningRouteReviewBase = {
   provider: ManagedRoutingProvider;
   providerModels: readonly string[];
   providerMechanism: string;
-  thinkingMode: QualifiedReasoningCapabilities["thinkingMode"];
   effortLevels: readonly ResolvedReasoningEffort[];
+};
+
+export type ReasoningRouteQualificationRegistration = ReasoningRouteReviewBase & {
+  reviewStatus: "qualified";
+  qualificationId: string;
+  thinkingMode: QualifiedReasoningCapabilities["thinkingMode"];
   defaultEffort: ResolvedReasoningEffort;
   interleavedThinking: boolean;
   reasoningTokenTelemetry: boolean;
 };
+
+export type ReasoningRouteDiscovery = ReasoningRouteReviewBase & {
+  reviewStatus: "discovery";
+  discoveryId: string;
+  blockingEvidence: readonly string[];
+};
+
+export type ReasoningRouteReview =
+  | ReasoningRouteQualificationRegistration
+  | ReasoningRouteDiscovery;
 
 export type AgentReasoningAdapterQualification = {
   qualificationId: string;
@@ -80,12 +94,14 @@ export type AgentReasoningAdapterReview =
   | AgentReasoningAdapterDiscovery;
 
 export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-effort-route-2026-08-13";
+export const openAiReasoningRouteDiscoveryId = "openai-gpt-5.6-managed-effort-route-discovery-2026-08-13";
 export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
 export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
 export const codexReasoningAdapterDiscoveryId = "codex-cli-0.144.4-governed-effort-discovery-2026-08-13";
 
-const reviewedReasoningRoutes: readonly ReasoningRouteQualificationRegistration[] = Object.freeze([
+const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
   Object.freeze({
+    reviewStatus: "qualified",
     qualificationId: anthropicReasoningRouteQualificationId,
     provider: "anthropic",
     providerModels: Object.freeze(["claude-sonnet-4-6", "claude-opus-4-8"]),
@@ -95,6 +111,19 @@ const reviewedReasoningRoutes: readonly ReasoningRouteQualificationRegistration[
     defaultEffort: "high",
     interleavedThinking: true,
     reasoningTokenTelemetry: true,
+  }),
+  Object.freeze({
+    reviewStatus: "discovery",
+    discoveryId: openAiReasoningRouteDiscoveryId,
+    provider: "openai",
+    providerModels: Object.freeze(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]),
+    providerMechanism: "openai-compatible-reasoning-effort",
+    effortLevels: resolvedReasoningEfforts,
+    blockingEvidence: Object.freeze([
+      "live_reasoning_with_streaming_and_tools",
+      "live_provider_usage_cost_latency_and_cache_evidence",
+      "live_fail_closed_route_mismatch_evidence",
+    ]),
   }),
 ]);
 
@@ -191,6 +220,31 @@ export const qualifiedAgentReasoningAdapter = (
 };
 
 /**
+ * Return the code-owned review for an exact provider/model route.
+ *
+ * Discovery routes are available to qualification tooling but remain absent
+ * from persisted route capabilities and Web Chat until promoted by review.
+ */
+export const reasoningRouteReview = (
+  input: { provider: ManagedRoutingProvider; providerModel: string },
+  reviews: readonly ReasoningRouteReview[] = reviewedReasoningRoutes,
+): ReasoningRouteReview | null => {
+  const review = reviews.find((candidate) => (
+    candidate.provider === input.provider
+    && candidate.providerModels.includes(input.providerModel)
+  ));
+  if (!review) return null;
+  return {
+    ...review,
+    providerModels: [...review.providerModels],
+    effortLevels: [...review.effortLevels],
+    ...(review.reviewStatus === "discovery"
+      ? { blockingEvidence: [...review.blockingEvidence] }
+      : {}),
+  } as ReasoningRouteReview;
+};
+
+/**
  * Product-owned qualification, not provider-name inference.
  *
  * Exact provider/model routes join through reviewed registrations without
@@ -201,12 +255,9 @@ export const qualifiedAgentReasoningAdapter = (
 export const qualifiedReasoningRouteCapabilities = (input: {
   provider: ManagedRoutingProvider;
   providerModel: string;
-}, registrations: readonly ReasoningRouteQualificationRegistration[] = reviewedReasoningRoutes): QualifiedReasoningCapabilities | null => {
-  const registration = registrations.find((candidate) => (
-    candidate.provider === input.provider
-    && candidate.providerModels.includes(input.providerModel)
-  ));
-  if (!registration) return null;
+}, reviews: readonly ReasoningRouteReview[] = reviewedReasoningRoutes): QualifiedReasoningCapabilities | null => {
+  const registration = reasoningRouteReview(input, reviews);
+  if (!registration || registration.reviewStatus !== "qualified") return null;
   return {
     qualificationId: registration.qualificationId,
     providerMechanism: registration.providerMechanism,

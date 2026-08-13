@@ -17,6 +17,7 @@
     "qualify:mcp-egress": "node scripts/qualify-mcp-egress.mjs",
     "qualify:oauth": "tsx scripts/qualify-oauth-renewal.mts",
     "qualify:providers": "tsx scripts/qualify-provider-settings.mts",
+    "qualify:reasoning-adapter": "tsx scripts/qualify-reasoning-adapter.mts",
     "qualify:workspace-startup": "tsx scripts/qualify-workspace-startup.mts",
     "benchmark:workspace": "node scripts/benchmark-workspace.mjs",
     "benchmark:kasm-browser": "node scripts/collect-kasm-browser-runtime.mjs",

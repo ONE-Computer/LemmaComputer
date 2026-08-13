@@ -6,8 +6,10 @@ import {
   claudeReasoningAdapterQualificationId,
   codexReasoningAdapterDiscoveryId,
   hermesReasoningAdapterDiscoveryId,
+  openAiReasoningRouteDiscoveryId,
   qualifiedAgentReasoningAdapter,
   qualifiedReasoningRouteCapabilities,
+  reasoningRouteReview,
   type AgentReasoningAdapterReview,
   type AgentReasoningAdapterRegistration,
   type ReasoningRouteQualificationRegistration,
@@ -43,6 +45,7 @@ test("provider mismatch and unreviewed model routes fail closed", () => {
 
 test("a future provider route joins through registration without changing Web, Control, or agent adapters", () => {
   const registrations: readonly ReasoningRouteQualificationRegistration[] = [{
+    reviewStatus: "qualified",
     qualificationId: "example-provider-reasoning-route-2026-08-13",
     provider: "openai",
     providerModels: ["example-reasoning-model"],
@@ -69,6 +72,25 @@ test("a future provider route joins through registration without changing Web, C
     provider: "openai",
     providerModel: "unreviewed-model",
   }, registrations), null);
+});
+
+test("managed OpenAI reasoning routes remain discovery-only before live qualification", () => {
+  for (const providerModel of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+    assert.deepEqual(reasoningRouteReview({ provider: "openai", providerModel }), {
+      reviewStatus: "discovery",
+      discoveryId: openAiReasoningRouteDiscoveryId,
+      provider: "openai",
+      providerModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+      providerMechanism: "openai-compatible-reasoning-effort",
+      effortLevels: ["low", "medium", "high"],
+      blockingEvidence: [
+        "live_reasoning_with_streaming_and_tools",
+        "live_provider_usage_cost_latency_and_cache_evidence",
+        "live_fail_closed_route_mismatch_evidence",
+      ],
+    });
+    assert.equal(qualifiedReasoningRouteCapabilities({ provider: "openai", providerModel }), null);
+  }
 });
 
 test("the pinned Claude runtime is the first registered reasoning adapter", () => {
