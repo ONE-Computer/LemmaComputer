@@ -25,39 +25,87 @@ export type ProductReasoningEffort = (typeof productReasoningEfforts)[number];
 export type ResolvedReasoningEffort = (typeof resolvedReasoningEfforts)[number];
 export type QualifiedReasoningCapabilities = {
   qualificationId: string;
-  client: "claude-code";
-  clientVersion: string;
-  thinkingMode: "adaptive";
+  providerMechanism: string;
+  thinkingMode: "adaptive" | "budgeted" | "opaque";
   effortLevels: ResolvedReasoningEffort[];
   defaultEffort: ResolvedReasoningEffort;
-  interleavedThinking: true;
-  reasoningTokenTelemetry: true;
+  interleavedThinking: boolean;
+  reasoningTokenTelemetry: boolean;
 };
 
-export const claudeReasoningQualificationId = "claude-code-2.1.215-anthropic-effort-2026-08-13";
+export type AgentReasoningAdapterQualification = {
+  qualificationId: string;
+  agentCatalogId: string;
+  clientVersion: string;
+  effortLevels: ResolvedReasoningEffort[];
+  conversationPinned: true;
+  signedTaskBinding: true;
+};
+
+export type AgentReasoningAdapterRegistration = {
+  qualificationId: string;
+  agentCatalogId: string;
+  clientVersion: string;
+  effortLevels: readonly ResolvedReasoningEffort[];
+};
+
+export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-effort-route-2026-08-13";
+export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
+
+const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterRegistration[] = Object.freeze([
+  Object.freeze({
+    qualificationId: claudeReasoningAdapterQualificationId,
+    agentCatalogId: "claude-cli",
+    clientVersion: "2.1.215",
+    effortLevels: resolvedReasoningEfforts,
+  }),
+]);
+
+/**
+ * Resolve a code-owned agent adapter qualification.
+ *
+ * Agent runtimes are registered independently from provider/model routes. A
+ * future adapter can join this registry without adding agent-specific branches
+ * to Control or Web. Unknown catalog IDs and client versions fail closed.
+ */
+export const qualifiedAgentReasoningAdapter = (
+  input: { agentCatalogId: string; clientVersion: string },
+  registrations: readonly AgentReasoningAdapterRegistration[] = reviewedAgentReasoningAdapters,
+): AgentReasoningAdapterQualification | null => {
+  const registration = registrations.find((candidate) => (
+    candidate.agentCatalogId === input.agentCatalogId
+    && candidate.clientVersion === input.clientVersion
+  ));
+  if (!registration) return null;
+  return {
+    qualificationId: registration.qualificationId,
+    agentCatalogId: registration.agentCatalogId,
+    clientVersion: registration.clientVersion,
+    effortLevels: [...registration.effortLevels],
+    conversationPinned: true,
+    signedTaskBinding: true,
+  };
+};
 
 /**
  * Product-owned qualification, not provider-name inference.
  *
- * Only exact direct-Anthropic model/client combinations that were reviewed for
- * the Phase 0.5 wire contract receive effort capabilities. Unknown models,
- * alternate providers, and changed client versions deliberately return null.
+ * Only exact direct-Anthropic model routes that were reviewed for the Phase
+ * 0.5 wire contract receive effort capabilities. Unknown models and alternate
+ * providers deliberately return null. Agent runtime qualification is resolved
+ * independently by `qualifiedAgentReasoningAdapter`.
  */
-export const qualifiedClaudeReasoningCapabilities = (input: {
+export const qualifiedReasoningRouteCapabilities = (input: {
   provider: ManagedRoutingProvider;
   providerModel: string;
-  clientVersion?: string;
 }): QualifiedReasoningCapabilities | null => {
-  const clientVersion = input.clientVersion ?? "2.1.215";
   if (
     input.provider !== "anthropic"
-    || clientVersion !== "2.1.215"
     || !["claude-sonnet-4-6", "claude-opus-4-8"].includes(input.providerModel)
   ) return null;
   return {
-    qualificationId: claudeReasoningQualificationId,
-    client: "claude-code",
-    clientVersion,
+    qualificationId: anthropicReasoningRouteQualificationId,
+    providerMechanism: "anthropic-adaptive-effort",
     thinkingMode: "adaptive",
     effortLevels: [...resolvedReasoningEfforts],
     defaultEffort: "high",

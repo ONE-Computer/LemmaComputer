@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { sendChatTurnSchema } from "@lemmacomputer/contracts";
-import { RoutingDecisionBindingAuthority } from "@lemmacomputer/model-router";
+import {
+  qualifiedAgentReasoningAdapter,
+  RoutingDecisionBindingAuthority,
+} from "@lemmacomputer/model-router";
 import type { RoutingStore, TeamStore } from "@lemmacomputer/workspace-store";
 import { RoutingExecutionService } from "../apps/control-api/src/routing.js";
 import { UsageTaskBindingAuthority } from "../apps/control-api/src/usage-ledger.js";
@@ -220,4 +223,56 @@ test("a duplicate request cannot reuse a persisted route without the signed effo
     requiredCapabilities: {},
     expectedUsage: [{ unit: "request", quantity: "1" }],
   }), /does not satisfy/);
+});
+
+test("reasoning options intersect a registered agent adapter with qualified model routes", async () => {
+  const adapter = qualifiedAgentReasoningAdapter({
+    agentCatalogId: "future-agent",
+    clientVersion: "1.0.0",
+  }, [{
+    qualificationId: "future-agent-1.0-governed-effort-adapter",
+    agentCatalogId: "future-agent",
+    clientVersion: "1.0.0",
+    effortLevels: ["low", "medium"],
+  }]);
+  assert.ok(adapter);
+  const route = {
+    id: "deployment-balanced",
+    provider: "anthropic",
+    serviceClass: "balanced",
+    approved: true,
+    healthy: true,
+    evaluationPassed: true,
+    capabilities: {
+      reasoning: {
+        effortLevels: ["low", "medium", "high"],
+      },
+    },
+  };
+  const service = new RoutingExecutionService(
+    {
+      resolveEffectivePolicy: async () => ({
+        policy: {
+          identity: {
+            allowedServiceClasses: ["balanced"],
+            allowedDeploymentIds: [route.id],
+          },
+          team: null,
+          deployments: [route],
+          approvedProviders: ["anthropic"],
+          fixedDeploymentId: route.id,
+        },
+      }),
+    } as unknown as RoutingStore,
+    { getCurrentDefaultSpendingTeam: async () => ({ id: "team-1" }) } as Pick<TeamStore, "getCurrentDefaultSpendingTeam">,
+    new RoutingDecisionBindingAuthority("future-agent-routing-secret-at-least-32-characters"),
+    new UsageTaskBindingAuthority("future-agent-routing-secret-at-least-32-characters"),
+  );
+
+  assert.deepEqual(await service.reasoningOptions("acme", "alex", adapter), {
+    auto: ["low", "medium"],
+    lite: [],
+    balanced: ["low", "medium"],
+    pro: [],
+  });
 });

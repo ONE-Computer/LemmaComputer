@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  claudeReasoningQualificationId,
-  qualifiedClaudeReasoningCapabilities,
+  anthropicReasoningRouteQualificationId,
+  claudeReasoningAdapterQualificationId,
+  qualifiedAgentReasoningAdapter,
+  qualifiedReasoningRouteCapabilities,
+  type AgentReasoningAdapterRegistration,
 } from "@lemmacomputer/model-router";
 
-test("the pinned Claude client qualifies only reviewed direct Anthropic effort routes", () => {
+test("reviewed direct Anthropic model routes expose provider effort capabilities", () => {
   for (const providerModel of ["claude-sonnet-4-6", "claude-opus-4-8"]) {
     assert.deepEqual(
-      qualifiedClaudeReasoningCapabilities({ provider: "anthropic", providerModel }),
+      qualifiedReasoningRouteCapabilities({ provider: "anthropic", providerModel }),
       {
-        qualificationId: claudeReasoningQualificationId,
-        client: "claude-code",
-        clientVersion: "2.1.215",
+        qualificationId: anthropicReasoningRouteQualificationId,
+        providerMechanism: "anthropic-adaptive-effort",
         thinkingMode: "adaptive",
         effortLevels: ["low", "medium", "high"],
         defaultEffort: "high",
@@ -23,18 +25,55 @@ test("the pinned Claude client qualifies only reviewed direct Anthropic effort r
   }
 });
 
-test("provider mismatch, stale clients, and unreviewed models fail closed", () => {
-  assert.equal(qualifiedClaudeReasoningCapabilities({
+test("provider mismatch and unreviewed model routes fail closed", () => {
+  assert.equal(qualifiedReasoningRouteCapabilities({
     provider: "bedrock",
     providerModel: "claude-sonnet-4-6",
   }), null);
-  assert.equal(qualifiedClaudeReasoningCapabilities({
+  assert.equal(qualifiedReasoningRouteCapabilities({
     provider: "anthropic",
     providerModel: "claude-sonnet-4-5",
   }), null);
-  assert.equal(qualifiedClaudeReasoningCapabilities({
-    provider: "anthropic",
-    providerModel: "claude-sonnet-4-6",
+});
+
+test("the pinned Claude runtime is the first registered reasoning adapter", () => {
+  assert.deepEqual(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "claude-cli",
+    clientVersion: "2.1.215",
+  }), {
+    qualificationId: claudeReasoningAdapterQualificationId,
+    agentCatalogId: "claude-cli",
+    clientVersion: "2.1.215",
+    effortLevels: ["low", "medium", "high"],
+    conversationPinned: true,
+    signedTaskBinding: true,
+  });
+  assert.equal(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "claude-cli",
     clientVersion: "2.1.216",
   }), null);
+  assert.equal(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "hermes-claw",
+    clientVersion: "0.19.0",
+  }), null);
+});
+
+test("a future agent joins through registration without changing route or UI contracts", () => {
+  const registrations: readonly AgentReasoningAdapterRegistration[] = [{
+    qualificationId: "test-agent-1.0-governed-effort-adapter",
+    agentCatalogId: "test-agent",
+    clientVersion: "1.0.0",
+    effortLevels: ["low", "medium"],
+  }];
+  assert.deepEqual(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "test-agent",
+    clientVersion: "1.0.0",
+  }, registrations), {
+    qualificationId: "test-agent-1.0-governed-effort-adapter",
+    agentCatalogId: "test-agent",
+    clientVersion: "1.0.0",
+    effortLevels: ["low", "medium"],
+    conversationPinned: true,
+    signedTaskBinding: true,
+  });
 });

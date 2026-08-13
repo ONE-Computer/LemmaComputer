@@ -157,8 +157,7 @@ test("fixed routing fails closed unless the exact deployment qualifies the reque
       ...candidate.capabilities,
       reasoning: {
         qualificationId: "qualified-test-route",
-        client: "claude-code" as const,
-        clientVersion: "2.1.215",
+        providerMechanism: "anthropic-adaptive-effort" as const,
         thinkingMode: "adaptive" as const,
         effortLevels: ["low", "medium", "high"] as const,
         defaultEffort: "high" as const,

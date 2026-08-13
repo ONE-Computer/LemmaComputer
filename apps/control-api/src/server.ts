@@ -4,7 +4,7 @@ import Fastify, { LogController } from "fastify";
 import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
 import { organizationWorkspacePolicyConstraintsSchema, protectedPolicySelectionSchema, type EffectiveProtectedWorkspacePolicy } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
-import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
+import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
 import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
@@ -654,10 +654,17 @@ export function createControlServer(
       "auto" | "lite" | "balanced" | "pro",
       Array<"auto" | "low" | "medium" | "high">
     >;
-    if (catalogId !== "claude-cli" || !routingExecution || !policy.maximumReasoningEffort) return empty;
+    const catalogEntry = ownedAgentCatalog.find((entry) => entry.id === catalogId);
+    const adapter = catalogEntry
+      ? qualifiedAgentReasoningAdapter({
+          agentCatalogId: catalogEntry.id,
+          clientVersion: catalogEntry.clientVersion,
+        })
+      : null;
+    if (!adapter || !routingExecution || !policy.maximumReasoningEffort) return empty;
     const maximumRank = ({ disabled: 0, low: 1, medium: 2, high: 3, max: 3 } as const)[policy.maximumReasoningEffort];
     if (maximumRank === 0) return empty;
-    const qualified = await routingExecution.reasoningOptions(owner.tenantId, owner.subjectId);
+    const qualified = await routingExecution.reasoningOptions(owner.tenantId, owner.subjectId, adapter);
     return Object.fromEntries(Object.entries(empty).map(([serviceClass]) => {
       const levels = (qualified[serviceClass as keyof typeof qualified] ?? []).filter(
         (effort) => ({ low: 1, medium: 2, high: 3 } as const)[effort] <= maximumRank,

@@ -3,8 +3,9 @@ import { managedProviderAliasForAccessGroup } from "@lemmacomputer/litellm-adapt
 import {
   DeterministicModelRouter,
   RoutingDecisionBindingAuthority,
-  qualifiedClaudeReasoningCapabilities,
+  qualifiedReasoningRouteCapabilities,
   resolvedReasoningEfforts,
+  type AgentReasoningAdapterQualification,
   type ModelRoutingPolicy,
   type ProductReasoningEffort,
   type ResolvedReasoningEffort,
@@ -272,7 +273,7 @@ export class RoutingAdministrationService {
         ...deployment,
         capabilities: {
           ...deployment.capabilities,
-          reasoning: qualifiedClaudeReasoningCapabilities({
+          reasoning: qualifiedReasoningRouteCapabilities({
             provider: deployment.provider,
             providerModel: deployment.providerModel,
           }),
@@ -469,7 +470,11 @@ export class RoutingExecutionService {
   ) {
     this.router = new DeterministicModelRouter(store);
   }
-  async reasoningOptions(tenantId: string, subjectId: string): Promise<Record<
+  async reasoningOptions(
+    tenantId: string,
+    subjectId: string,
+    adapter: AgentReasoningAdapterQualification,
+  ): Promise<Record<
     "auto" | "lite" | "balanced" | "pro",
     ResolvedReasoningEffort[]
   >> {
@@ -501,8 +506,11 @@ export class RoutingExecutionService {
       && deployment.capabilities.reasoning !== undefined
     ));
     const intersection = (deployments: typeof eligible) => deployments.length
-      ? resolvedReasoningEfforts.filter((effort) => deployments.every(
-          (deployment) => deployment.capabilities.reasoning?.effortLevels.includes(effort),
+      ? resolvedReasoningEfforts.filter((effort) => (
+          adapter.effortLevels.includes(effort)
+          && deployments.every(
+            (deployment) => deployment.capabilities.reasoning?.effortLevels.includes(effort),
+          )
         ))
       : [];
     const fixed = eligible.filter((deployment) => deployment.id === policy.fixedDeploymentId);
