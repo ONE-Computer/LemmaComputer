@@ -1,6 +1,6 @@
 # Reasoning adapter qualification
 
-LemmaComputer exposes one provider-neutral thinking-effort control. An agent runtime becomes eligible only when its exact client pin has a qualified adapter and the selected organization route separately qualifies the same effort level. No runtime requires an Anthropic, OpenAI, or other named provider; it works through the organization's assigned model alias.
+LemmaComputer exposes one provider-neutral thinking-effort control. An agent runtime becomes eligible only when its exact client pin has a qualified adapter and the selected organization route separately qualifies the same effort level. No runtime requires an Anthropic, OpenAI, or other named provider; it works through the organization's assigned model alias. The implementation lessons and end-to-end extension sequence are recorded in the [Agent model and reasoning adapter playbook](agent-reasoning-adapter-playbook.md).
 
 `Auto` in this document means only the thinking-effort default that follows the organization's allowed maximum. Employee Web Chat does not expose an Auto model mode: model selection remains the explicit `Lite`, `Balanced`, or `Pro` tier shipped by #68.
 
@@ -116,8 +116,8 @@ Effort is immutable within a conversation. Compare repeated same-effort turns in
 - Run focused registry, gateway, chat adapter, usage, and Playwright tests, then `npm run verify:quick`. Run `npm run verify:db` if persistence or migration behavior changed.
 - A client or provider upgrade requires a new discovery and qualification record; never widen an old exact-version match.
 
-## Current discovery evidence and limits
+## Implementation evidence and limits
 
-The Hermes branch `codex/hermes-reasoning-adapter` at local commit `4741eb934c605eaa030c4d36605613327c166d1a` and Codex branch `codex/codex-reasoning-adapter` at local commit `1d80ca3eef5129c75cdb72f1cae77128e9721e46` are research inputs. Their pinned-source inspection, compilation, fixture, streaming/tool, browser, and quick-gate results support the discovery records. They do not supply a credentialed live reasoning-plus-tool run, provider-confirmed usage/cost/latency/cache evidence, or a basis for merging either branch wholesale.
+The historical Hermes branch `codex/hermes-reasoning-adapter` at local commit `4741eb934c605eaa030c4d36605613327c166d1a` and Codex branch `codex/codex-reasoning-adapter` at local commit `1d80ca3eef5129c75cdb72f1cae77128e9721e46` were research inputs, not branches to merge wholesale. Hermes was subsequently integrated through the provider-neutral #76 path and live-checked with Balanced, Medium, streaming, and automatic function-tool selection. Its governed usage evidence resolved the concrete route to `openai/gpt-5.6-terra` and recorded a successful routing observation.
 
-Until those live gates pass, both runtimes remain discoverable to qualification tooling but intentionally absent from the Web Chat thinking selector.
+The Hermes live run did not establish a comparative cache, latency, reasoning-token, or cost benchmark, and unavailable provider evidence remains unavailable rather than zero. A representative human-verified governed tool execution remains part of release acceptance. Codex remains discovery-only and intentionally absent from ordinary product controls until its separate workspace integration and complete live gates pass.

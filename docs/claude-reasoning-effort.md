@@ -20,7 +20,8 @@ Agent-adapter qualification ID: `claude-cli-2.1.215-governed-effort-adapter-2026
 | Agent runtime | Pinned version | Product levels | Status |
 | --- | --- | --- | --- |
 | Claude CLI | `2.1.215` | Auto, Low, Medium, High | Qualified for signed, conversation-pinned propagation |
-| Hermes Agent CLI | `0.19.0` | None | Discovery recorded; credentialed reasoning-plus-tool evidence remains incomplete; fail closed |
+| Hermes Agent CLI | `0.19.0` | Low, Medium, High | Qualified separately under `hermes-claw-0.19.0-governed-effort-adapter-2026-08-13`; route capability still intersects independently |
+| Hermes Desktop | `0.17.0` | Low, Medium, High | Qualified separately under `hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13`; unsupported upstream levels are hidden on LemmaComputer routes |
 | Codex CLI | `0.144.4` | None | Discovery recorded; credentialed reasoning-plus-tool evidence remains incomplete; fail closed |
 | Any other runtime or version | Any | None | No reviewed registration; fail closed |
 
@@ -49,4 +50,4 @@ Adding an agent does not add a new Web or Control conditional. Exact runtime pin
 
 Higher effort can increase latency and reasoning-token cost. Changing effort can also invalidate prompt-cache reuse, which is why the phase-0.5 control is stable for the life of a conversation. The Activity panel continues to show only allow-listed summaries and actions, never hidden chain-of-thought.
 
-This record qualifies the documented direct-Anthropic request/response contract, the Claude CLI adapter, and the local gateway behavior. It does not qualify Hermes, Codex, or another agent merely because its upstream runtime has a similarly named setting. It also does not claim a live Anthropic account smoke test or comparative latency/cost benchmark; those require an explicitly provisioned direct Anthropic route and provider credentials.
+This record qualifies the documented direct-Anthropic request/response contract, the Claude CLI adapter, and the local gateway behavior. Hermes is qualified by its own exact adapter registrations and separately qualified organization route, not merely because its upstream runtime has a similarly named setting. Codex and any other agent remain unqualified until their own gates pass. This record also does not claim a live Anthropic account smoke test or comparative latency/cost benchmark; those require an explicitly provisioned direct Anthropic route and provider credentials. See the [Agent model and reasoning adapter playbook](agent-reasoning-adapter-playbook.md) for the Claude/Hermes implementation comparison and failure lessons.

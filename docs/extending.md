@@ -193,6 +193,12 @@ For a chat-capable agent:
 4. project an independently scoped gateway key for that agent;
 5. update channel broker selection if external channels may route to it.
 
+If the agent exposes native model or thinking controls, follow the
+[Agent model and reasoning adapter playbook](agent-reasoning-adapter-playbook.md)
+before promoting it. Native labels are product intent only: the exact runtime
+adapter, provider route, signed task binding, LiteLLM translation, tool and
+stream transport, and completion evidence must each qualify independently.
+
 Test that disabled software is absent, local credentials cannot be used outside
 the broker, provider keys are absent from the user environment and home volume,
 and policy changes require a restart.
