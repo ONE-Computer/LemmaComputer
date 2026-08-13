@@ -35,7 +35,7 @@ The qualification is based on Anthropic's current documented contracts for [adap
 1. Routing administration derives route capability from the provider and model. A separate code-owned registry derives agent-adapter capability from the agent catalog ID and pinned client version. Administrator-supplied capability claims are ignored.
 2. Control intersects route capability, agent-adapter capability, the employee's Team route, and the protected organization maximum. Only that intersection reaches the UI.
 3. The conversation stores the selected product effort. Once created, the selector is locked; a different effort starts a new conversation so prompt-cache behavior remains predictable.
-4. Control signs the requested effort and maximum into the AI task binding. The workspace gateway removes client-supplied `thinking`, `output_config`, `reasoning`, and `reasoning_effort` fields.
+4. Control signs the requested effort and maximum into the AI task binding. The workspace gateway removes client-supplied `thinking`, `output_config`, `reasoning`, and enabled `reasoning_effort` fields. The only client-side value it may preserve is the non-escalating Chat Completions opt-out `reasoning_effort: none` for unqualified tool-capable runtimes.
 5. After governed route resolution, the LiteLLM callback injects only the resolved `low`, `medium`, or `high` value. The route must advertise that exact capability or routing fails closed.
 6. Usage admission records both requested and resolved effort. Provider-reported reasoning tokens remain a separate `reasoning_token` usage bucket; hidden reasoning text is never stored or exposed.
 

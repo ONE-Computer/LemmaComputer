@@ -626,6 +626,24 @@ async def assert_provider_boundary():
     assert effort_admission[1]["resolvedReasoningEffort"] == "medium"
     authority_calls.clear()
 
+    disabled_tool_transport = {
+        "model": "lemmacomputer-auto",
+        "messages": [{"role": "user", "content": "use the available tool"}],
+        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+        "reasoning_effort": "none",
+        "litellm_params": {"reasoning_effort": "none"},
+        "litellm_call_id": "route-disabled-tool-call",
+        "metadata": {"lemmacomputer_task_binding": "signed." + "n" * 64},
+    }
+    routed_disabled_tool = await callback.async_pre_call_hook(
+        AutoAuth(), None, disabled_tool_transport, "acompletion"
+    )
+    assert authority_calls[-1][0] == "routing/decide"
+    assert "requestedReasoningEffort" not in authority_calls[-1][1]
+    assert routed_disabled_tool["reasoning_effort"] == "none"
+    assert routed_disabled_tool["litellm_params"]["reasoning_effort"] == "none"
+    authority_calls.clear()
+
     probe = {
         "model": "openai/gpt-real",
         "messages": [{"role": "user", "content": "probe"}],

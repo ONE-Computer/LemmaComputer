@@ -51,7 +51,10 @@ credential. On every native inference request, the root-owned
 loopback broker translates the exact product alias into an explicit service
 class, obtains a fresh Control-signed task binding, removes client routing
 and native reasoning metadata (including Hermes's `think` flag), and forwards
-only the internal synthetic transport alias. Unknown
+only the internal synthetic transport alias. The broker preserves only the
+non-escalating Chat Completions opt-out `reasoning_effort: none`; this prevents
+an unqualified reasoning-model default from conflicting with Hermes function
+tools, while enabled effort still requires a signed qualified binding. Unknown
 `lemmacomputer-*` aliases and unavailable or disallowed service classes fail
 closed.
 

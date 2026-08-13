@@ -253,7 +253,11 @@ def request_agent_instance_id(explicit: str | None) -> str | None:
         return next(iter(ACTIVE_AGENT_INSTANCE_IDS))
 
 
-def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tuple[bytes, str]:
+def normalize_inference_body(
+    body: bytes,
+    task_binding: str | None = None,
+    request_path: str | None = None,
+) -> tuple[bytes, str]:
     request = json.loads(body)
     if not isinstance(request, dict):
         raise ValueError("inference request must be an object")
@@ -271,9 +275,19 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
             request.pop(name, None)
     # The workspace client is not a reasoning-policy authority. Strip every
     # provider spelling before the signed task binding is resolved against the
-    # concrete route by Control and the LiteLLM policy callback.
+    # concrete route by Control and the LiteLLM policy callback. The sole safe
+    # exception is an explicit Chat Completions opt-out: reasoning models can
+    # otherwise apply a provider default that is incompatible with function
+    # tools. "none" can only reduce capability and is preserved through the
+    # policy callback; enabled effort values still require a signed binding.
+    reasoning_disabled = (
+        request_path == "/v1/chat/completions"
+        and request.get("reasoning_effort") == "none"
+    )
     for name in ("think", "thinking", "output_config", "reasoning_effort", "reasoning"):
         request.pop(name, None)
+    if reasoning_disabled:
+        request["reasoning_effort"] = "none"
     metadata = request.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
     internal_metadata = {
@@ -743,7 +757,7 @@ class Handler(BaseHTTPRequestHandler):
                     or not TASK_BINDING_PATTERN.fullmatch(task_binding)
                 ):
                     raise ValueError("invalid AI task binding")
-                body, requested_model = normalize_inference_body(body, task_binding)
+                body, requested_model = normalize_inference_body(body, task_binding, path)
                 if requested_model != MODEL_ALIAS:
                     logged_model = requested_model if MODEL_ALIAS_PATTERN.fullmatch(requested_model) else "<nonstandard>"
                     self.log_message(

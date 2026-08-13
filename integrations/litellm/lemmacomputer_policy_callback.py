@@ -1208,6 +1208,10 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                 raise RuntimeError("Governed routing authority returned a malformed decision")
             _set_routing_state(kwargs, result)
             kwargs["model"] = result["executedModelGroup"]
+            reasoning_disabled = kwargs.get("reasoning_effort") == "none"
+            params = kwargs.get("litellm_params")
+            if isinstance(params, dict):
+                reasoning_disabled = reasoning_disabled or params.get("reasoning_effort") == "none"
             for name in ("thinking", "output_config", "reasoning", "reasoning_effort"):
                 kwargs.pop(name, None)
             resolved_reasoning_effort = result.get("resolvedReasoningEffort")
@@ -1217,17 +1221,23 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                 # LiteLLM maps this trusted provider-neutral field to Anthropic's
                 # adaptive thinking plus output_config.effort wire contract.
                 kwargs["reasoning_effort"] = resolved_reasoning_effort
+            elif reasoning_disabled:
+                # Preserve only the broker-vetted off switch. Some reasoning
+                # models default to an enabled effort and reject function tools
+                # on Chat Completions unless the request explicitly says none.
+                kwargs["reasoning_effort"] = "none"
             output_limit = result["executedOutputTokenLimit"]
             for name in ("max_tokens", "max_output_tokens"):
                 requested = kwargs.get(name)
                 if isinstance(requested, (int, float)) and requested > output_limit:
                     kwargs[name] = output_limit
-            params = kwargs.get("litellm_params")
             if isinstance(params, dict):
                 for name in ("thinking", "output_config", "reasoning", "reasoning_effort"):
                     params.pop(name, None)
                 if resolved_reasoning_effort is not None:
                     params["reasoning_effort"] = resolved_reasoning_effort
+                elif reasoning_disabled:
+                    params["reasoning_effort"] = "none"
                 for name in ("max_tokens", "max_output_tokens"):
                     requested = params.get(name)
                     if isinstance(requested, (int, float)) and requested > output_limit:

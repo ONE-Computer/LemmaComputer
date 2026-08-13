@@ -36,7 +36,7 @@ Every qualifying runtime must prove the same boundary:
 2. Control intersects the agent review, exact route capability, effective organization policy, and maximum effort.
 3. Control signs the requested effort and ceiling into the per-turn AI task binding.
 4. The runtime adapter carries that binding request-locally to the loopback gateway before the first model call and on every resumed turn.
-5. The gateway strips `thinking`, `output_config`, `reasoning`, and `reasoning_effort` supplied by the runtime.
+5. The gateway strips `thinking`, `output_config`, `reasoning`, and enabled `reasoning_effort` values supplied by the runtime. It may preserve the exact non-escalating `reasoning_effort: none` opt-out on Chat Completions so an unqualified runtime can use function tools without a reasoning-model provider default.
 6. The route authority injects only the resolved qualified value and records requested and resolved effort in usage evidence.
 7. The adapter projects allow-listed text, tool, progress, source, and terminal events. It never emits or persists hidden reasoning text.
 
