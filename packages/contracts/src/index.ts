@@ -642,7 +642,7 @@ export const saveSandboxSettingsSchema = z.object({
   profileId: sandboxProfileIdSchema,
   applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).default(["firefox"]),
   modelAlias: sandboxModelAliasSchema.optional(),
-  requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
+  requestedServiceClass: workspaceRequestedServiceClassSchema.default("balanced"),
   agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length).refine(
     (ids) => new Set(ids).size === ids.length,
     "Agent selections must not contain duplicates",

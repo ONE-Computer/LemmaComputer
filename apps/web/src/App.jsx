@@ -2985,11 +2985,21 @@ const workspaceConfigurationStatus = (state) => ({
   failed: "Needs attention",
 }[state] ?? "Unknown");
 
+const workspaceExplicitServiceClassValues = new Set(["lite", "balanced", "pro"]);
+const explicitWorkspaceServiceClassOptions = (settings) => (
+  settings?.availableServiceClasses?.filter(({ value }) => workspaceExplicitServiceClassValues.has(value)) ?? []
+);
+const explicitWorkspaceServiceClass = (value, options) => (
+  workspaceExplicitServiceClassValues.has(value) && options.some((option) => option.value === value)
+    ? value
+    : options.some((option) => option.value === "balanced") ? "balanced" : options[0]?.value ?? "balanced"
+);
+
 function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onAssignSecurityGroup, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState("");
-  const [requestedServiceClass, setRequestedServiceClass] = useState("auto");
+  const [requestedServiceClass, setRequestedServiceClass] = useState("balanced");
   const [agentIds, setAgentIds] = useState([]);
   const [securityGroupVersionId, setSecurityGroupVersionId] = useState("");
 
@@ -2998,7 +3008,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
     setProfileId(settings.profileId);
     setApplicationIds(settings.applicationIds);
     setModelAlias(settings.modelAlias);
-    setRequestedServiceClass(settings.requestedServiceClass);
+    setRequestedServiceClass(explicitWorkspaceServiceClass(settings.requestedServiceClass, explicitWorkspaceServiceClassOptions(settings)));
     setAgentIds(settings.agentIds);
     setSecurityGroupVersionId(settings.securityGroup?.id ?? settings.availableSecurityGroups?.find((group) => group.isDefault)?.id ?? "");
   }, [settings?.profileId, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
@@ -3024,6 +3034,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   ));
   const selectedProfile = settings?.availableProfiles.find((profile) => profile.id === profileId) ?? settings?.profile;
   const disposableOpen = selectedProfile?.executionMode === "disposable-open";
+  const availableServiceClasses = explicitWorkspaceServiceClassOptions(settings);
 
   return (
     <div className="secondary-screen sandbox-screen sandbox-detail-screen">
@@ -3092,7 +3103,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">Default model mode</h2><p>Choose the default quality and cost mode for this workspace. You can choose a different mode for each conversation in Chat.</p></span></div>
-            <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{settings.availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
+            <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
           </section>
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">

@@ -146,11 +146,28 @@ const sandboxModels = [
 ] as const;
 
 const workspaceServiceClasses = [
-  { value: "auto", displayName: "Auto (Beta)", description: "Fixed Balanced by default; dynamic selection requires explicit Team enablement." },
   { value: "lite", displayName: "Lite", description: "Fast, economical work." },
   { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
   { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },
 ] as const;
+type ExplicitWorkspaceServiceClass = typeof workspaceServiceClasses[number]["value"];
+const explicitWorkspaceServiceClassValues = new Set<string>(workspaceServiceClasses.map(({ value }) => value));
+const assignedWorkspaceServiceClasses = (document: Record<string, unknown>): ExplicitWorkspaceServiceClass[] => {
+  if (!Array.isArray(document.serviceClasses)) return workspaceServiceClasses.map(({ value }) => value);
+  const assigned = document.serviceClasses.filter(
+    (value): value is ExplicitWorkspaceServiceClass => explicitWorkspaceServiceClassValues.has(String(value)),
+  );
+  if (document.serviceClasses.includes("auto") && !assigned.includes("balanced")) assigned.push("balanced");
+  return assigned;
+};
+const explicitWorkspaceServiceClass = (
+  value: unknown,
+  assigned: ExplicitWorkspaceServiceClass[],
+): ExplicitWorkspaceServiceClass | null => (
+  typeof value === "string" && explicitWorkspaceServiceClassValues.has(value) && assigned.includes(value as ExplicitWorkspaceServiceClass)
+    ? value as ExplicitWorkspaceServiceClass
+    : assigned.includes("balanced") ? "balanced" : assigned[0] ?? null
+);
 
 const sandboxApplications = [
   sandboxApplicationSchema.parse({
@@ -1135,13 +1152,12 @@ export function createControlServer(
       const governedRoutingAvailable = await governedRoutingAvailableFor(value.tenantId);
       const document = effective.document as Record<string, unknown>;
       const availableAgentIds = assignedAgentIds(document);
-      const availableServiceClasses = Array.isArray(document.serviceClasses)
-        ? document.serviceClasses.filter((item): item is "auto" | "lite" | "balanced" | "pro" => ["auto", "lite", "balanced", "pro"].includes(String(item)))
-        : ["auto", "lite", "balanced", "pro"];
-      const requestedServiceClass = (saved?.requestedServiceClass ?? (typeof document.defaultServiceClass === "string" ? document.defaultServiceClass : "auto")) as "auto" | "lite" | "balanced" | "pro";
-      if (!availableServiceClasses.includes(requestedServiceClass)) {
-        throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "The selected service class is not assigned by the active policy", 403);
-      }
+      const availableServiceClasses = assignedWorkspaceServiceClasses(document);
+      const requestedServiceClass = explicitWorkspaceServiceClass(
+        saved?.requestedServiceClass ?? document.defaultServiceClass,
+        availableServiceClasses,
+      );
+      if (!requestedServiceClass) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "The active policy assigns no Phase 0.5 model tier", 403);
       policy = {
         ...runtimePolicyFor(
           effective,
@@ -3879,21 +3895,20 @@ export function createControlServer(
     const assignedApplications = assignedApplicationIds(document);
     const availableApplications = sandboxApplications.filter((application) => assignedApplications.includes(application.id));
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
-    const assignedServiceClasses = Array.isArray(document.serviceClasses)
-      ? document.serviceClasses.filter((item): item is "auto" | "lite" | "balanced" | "pro" => workspaceServiceClasses.some((entry) => entry.value === item))
-      : workspaceServiceClasses.map((entry) => entry.value);
+    const assignedServiceClasses = assignedWorkspaceServiceClasses(document);
     const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "lemmacomputer-auto" : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
-    if (!availableProfiles.length || !availableModels.length || !availableAgents.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, or agent", 500);
+    if (!availableProfiles.length || !availableModels.length || !availableAgents.length || !assignedServiceClasses.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, agent, or model tier", 500);
     if (!availableApplications.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const profileId = saved && availableProfiles.some((profile) => profile.id === saved.profileId) ? saved.profileId : availableProfiles[0]!.id;
     const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
     const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
-    const selectedServiceClass = saved?.requestedServiceClass ?? (typeof document.defaultServiceClass === "string" ? document.defaultServiceClass : "auto");
-    const requestedServiceClass = governedRoutingAvailable && assignedServiceClasses.includes(selectedServiceClass as typeof assignedServiceClasses[number])
-      ? selectedServiceClass
-      : assignedServiceClasses[0] ?? "auto";
+    const requestedServiceClass = explicitWorkspaceServiceClass(
+      saved?.requestedServiceClass ?? document.defaultServiceClass,
+      assignedServiceClasses,
+    );
+    if (!requestedServiceClass) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported Phase 0.5 model tier", 500);
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
@@ -3941,7 +3956,7 @@ export function createControlServer(
       availableModels,
       availableServiceClasses: governedRoutingAvailable
         ? workspaceServiceClasses.filter((serviceClass) => assignedServiceClasses.includes(serviceClass.value))
-        : workspaceServiceClasses.slice(0, 1),
+        : workspaceServiceClasses.filter((serviceClass) => serviceClass.value === "balanced" && assignedServiceClasses.includes(serviceClass.value)),
       agentIds: selectedAgentIds,
       availableAgents,
       ...(workspaceEgress ? { securityGroup: workspaceEgress } : {}),
@@ -3962,7 +3977,7 @@ export function createControlServer(
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
     const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
-    const serviceClasses = Array.isArray(document.serviceClasses) ? document.serviceClasses : workspaceServiceClasses.map((entry) => entry.value);
+    const serviceClasses = assignedWorkspaceServiceClasses(document);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : input.modelAlias;
     const agents = Array.isArray(document.agents) ? document.agents : ownedAgentCatalog.map((agent) => agent.id);
@@ -3970,7 +3985,7 @@ export function createControlServer(
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
     if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
     if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
-    if (!serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
+    if (input.requestedServiceClass === "auto" || !serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
     const current = await store.getCurrent(actor.identity, input.grantId);
     if (current && !["not_created", "stopped", "failed"].includes(current.state)) throw new LemmaComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop the workspace before changing its profile or model route", 409, true);
     await store.saveSandboxSettings(actor.identity, {
