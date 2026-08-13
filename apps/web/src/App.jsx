@@ -2269,7 +2269,34 @@ function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCo
   </section>;
 }
 
-function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId, loading, invitationBusy, busyUserId, canManageMembers, canManageRoles, canManageSettings, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onBack }) {
+function OrganizationDetails({ displayName, isOwner, onRename }) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [draft, setDraft] = useState(displayName);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      const organization = await onRename(draft);
+      if (!organization) return;
+      setDraft(organization.displayName);
+      setEditorOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <>
+    <section className="admin-access-summary admin-organization-summary" aria-labelledby="organization-details-heading">
+      <div><p>Organization</p><h2 id="organization-details-heading">{displayName}</h2><span>This name is shown to people across LemmaComputer. Renaming it does not change organization access.</span></div>
+      {isOwner && <button className="secondary-button admin-section-action" type="button" onClick={() => { setDraft(displayName); setEditorOpen(true); }}>Edit organization name</button>}
+    </section>
+    {editorOpen && <ModalDialog title="Edit organization name" description="Choose the organization name shown to people across LemmaComputer." eyebrow="Organization details" labelledBy="organization-name-editor-title" onClose={busy ? () => undefined : () => setEditorOpen(false)}>
+      <label className="modal-field"><span>Organization name</span><input value={draft} minLength={2} maxLength={100} autoComplete="organization" autoFocus onChange={(event) => setDraft(event.target.value)} /></label>
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setEditorOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || draft.trim().length < 2 || draft.trim() === displayName} onClick={save}>{busy ? "Saving" : "Save name"}</button></div>
+    </ModalDialog>}
+  </>;
+}
+
+function AdminScreen({ organizationDisplayName, isOwner, users, invitations, delegableBuiltInRoles, currentUserId, loading, invitationBusy, busyUserId, canManageMembers, canManageRoles, canManageSettings, onRenameOrganization, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions, onBack }) {
   const allRoleOptions = [
     { value: "member", label: "Member" },
     { value: "admin", label: "Administrator" },
@@ -2289,7 +2316,7 @@ function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId,
   const [closureStatus, setClosureStatus] = useState("");
   const closureIdempotencyKey = useRef(crypto.randomUUID());
   const currentMembership = users.find((user) => user.userId === currentUserId);
-  const isOwner = currentMembership?.role === "owner" && currentMembership?.membershipStatus === "active";
+  const isActiveOwner = isOwner || currentMembership?.role === "owner" && currentMembership?.membershipStatus === "active";
   const invite = async () => {
     const result = await onInvite(inviteDraft);
     if (!result) return;
@@ -2332,6 +2359,7 @@ function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId,
         <h1>People and access</h1>
         <span>Invite people, assign organization roles, and remove access. Identity-provider credentials remain outside LemmaComputer.</span>
       </header>
+      <OrganizationDetails displayName={organizationDisplayName} isOwner={isActiveOwner} onRename={onRenameOrganization} />
       {canManageMembers && <><section className="admin-access-summary" aria-labelledby="organization-access-heading">
         <div><p>Organization access</p><h2 id="organization-access-heading">Members and invitations</h2><span>Invitations expire after seven days. The selected organization and role cannot be changed by identity-provider claims.</span></div>
         <button className="primary-button admin-section-action" type="button" disabled={!roleOptions.length} onClick={() => setInviteOpen(true)}>Invite person</button>
@@ -2373,7 +2401,7 @@ function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId,
                 {canManageRoles && roleOptions.some((option) => option.value === (item.role ?? (item.roles.includes("administrator") ? "admin" : "member"))) && <label><span>Organization role</span><SelectMenu value={item.role ?? (item.roles.includes("administrator") ? "admin" : "member")} options={roleOptions} ariaLabel={`Organization role for ${item.displayName}`} disabled={busyUserId === item.userId || membershipStatus !== "active"} onValueChange={(role) => onRoleChange(item, role)} /></label>}
               </div>
               <div className="admin-user-actions">
-                {isOwner && item.userId !== currentUserId && membershipStatus === "active" && <button className="secondary-button admin-row-action" type="button" disabled={busyUserId === item.userId} onClick={() => { setTransferCode(""); setTransferTarget(item); }}>Transfer ownership</button>}
+                {isActiveOwner && item.userId !== currentUserId && membershipStatus === "active" && <button className="secondary-button admin-row-action" type="button" disabled={busyUserId === item.userId} onClick={() => { setTransferCode(""); setTransferTarget(item); }}>Transfer ownership</button>}
                 <button className="secondary-button admin-row-action" type="button" disabled={busyUserId === item.userId} onClick={() => onRevokeSessions(item.userId)}>Sign out sessions</button>
                 {item.userId !== currentUserId && membershipStatus !== "revoked" && <button className={`secondary-button admin-row-action${membershipStatus === "active" ? " danger-button" : ""}`} type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, membershipStatus === "active" ? "suspended" : "active")}>{membershipStatus === "active" ? "Suspend" : "Reactivate"}</button>}
                 {item.userId !== currentUserId && membershipStatus !== "revoked" && <button className="secondary-button admin-row-action danger-button" type="button" disabled={busyUserId === item.userId} onClick={() => onStatusChange(item, "revoked")}>Remove access</button>}
@@ -2382,13 +2410,13 @@ function AdminScreen({ users, invitations, delegableBuiltInRoles, currentUserId,
           })}
         </div>
       </section>
-      {isOwner && <section className="admin-access-summary admin-lifecycle-summary" aria-labelledby="organization-lifecycle-heading">
+      {isActiveOwner && <section className="admin-access-summary admin-lifecycle-summary" aria-labelledby="organization-lifecycle-heading">
         <div><p>Protected owner action</p><h2 id="organization-lifecycle-heading">Organization lifecycle</h2><span>Closure starts a seven-day pending period. Recent MFA verification is required, and no data is deleted by this initiation step.</span></div>
         <button className="secondary-button danger-button admin-section-action" type="button" onClick={() => { setClosureCode(""); setClosureOpen(true); }}>Initiate organization closure</button>
       </section>}
       {closureStatus && <div className="signin-status" role="status">{closureStatus}</div>}
       </>}
-      {canManageSettings && <OrganizationSsoSection isOwner={isOwner} />}
+      {canManageSettings && <OrganizationSsoSection isOwner={isActiveOwner} />}
       {canManageRoles && <OrganizationRoleEditor users={users} />}
       {canManageMembers && inviteOpen && <ModalDialog title="Invite a person" description="Create pending product access. The person will choose their password and complete supported MFA with the configured identity provider." eyebrow="Organization access" labelledBy="organization-invite-title" onClose={invitationBusy ? () => undefined : () => setInviteOpen(false)}>
         <label className="modal-field"><span>Email address</span><input name="organization-invite-email" type="email" autoComplete="off" value={inviteDraft.email} onChange={(event) => setInviteDraft({ ...inviteDraft, email: event.target.value })} placeholder="person@example.com" disabled={invitationBusy} /></label>
@@ -2561,9 +2589,11 @@ function ProviderSettingsScreen({ providers, loading, busy, error, onSave, onTes
   );
 }
 
-function SettingsScreen({ view, canManageMembers, canManageRoles, canManageSettings, delegableBuiltInRoles, currentUserId, onOpenAdmin, onOpenCredentials, onOpenAccountSecurity, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, invitations, loading, invitationBusy, busyUserId, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions }) {
+function SettingsScreen({ view, organizationDisplayName, isOrganizationOwner, canManageMembers, canManageRoles, canManageSettings, delegableBuiltInRoles, currentUserId, onOpenAdmin, onOpenCredentials, onOpenAccountSecurity, onBack, credentials, workspaces, credentialsLoading, credentialsBusy, credentialsError, onCreateCredential, onRotateCredential, onDeleteCredential, users, invitations, loading, invitationBusy, busyUserId, onRenameOrganization, onInvite, onResendInvitation, onRevokeInvitation, onRoleChange, onStatusChange, onTransferOwnership, onInitiateClosure, onRevokeSessions }) {
   if (view === "admin" && (canManageMembers || canManageRoles || canManageSettings)) {
     return <AdminScreen
+      organizationDisplayName={organizationDisplayName}
+      isOwner={isOrganizationOwner}
       users={users}
       invitations={invitations}
       delegableBuiltInRoles={delegableBuiltInRoles}
@@ -2574,6 +2604,7 @@ function SettingsScreen({ view, canManageMembers, canManageRoles, canManageSetti
       canManageMembers={canManageMembers}
       canManageRoles={canManageRoles}
       canManageSettings={canManageSettings}
+      onRenameOrganization={onRenameOrganization}
       onInvite={onInvite}
       onResendInvitation={onResendInvitation}
       onRevokeInvitation={onRevokeInvitation}
@@ -2609,7 +2640,7 @@ function SettingsScreen({ view, canManageMembers, canManageRoles, canManageSetti
         </button>
         {(canManageMembers || canManageRoles || canManageSettings) && <button className="settings-item" type="button" onClick={onOpenAdmin}>
           <span className="settings-item-icon"><Settings24Regular aria-hidden="true" /></span>
-          <span className="settings-item-copy"><strong>People and access</strong><small>Invite people, assign organization roles, and configure company sign-in.</small></span>
+          <span className="settings-item-copy"><strong>People and access</strong><small>{organizationDisplayName} · View organization details, invite people, assign roles, and configure company sign-in.</small></span>
           <ChevronRight16Regular aria-hidden="true" />
         </button>}
       </section>
@@ -6513,6 +6544,20 @@ export function App() {
       setAdminBusyUserId("");
     }
   };
+  const renameOrganization = async (displayName) => {
+    try {
+      const result = await adminApi.renameOrganization(displayName);
+      setSession((current) => current ? {
+        ...current,
+        tenant: { ...current.tenant, displayName: result.organization.displayName },
+      } : current);
+      setToast(`Organization name updated to ${result.organization.displayName}.`);
+      return result.organization;
+    } catch (error) {
+      showApiError(error);
+      return null;
+    }
+  };
   const initiateOrganizationClosure = async (reason, idempotencyKey, authenticatorCode) => {
     setAdminInvitationBusy(true);
     try {
@@ -6905,6 +6950,8 @@ export function App() {
         )}
         {activeNav === "Settings" && <SettingsScreen
           view={settingsView}
+          organizationDisplayName={session.tenant.displayName}
+          isOrganizationOwner={session.roles.includes("owner")}
           canManageMembers={canManageMembers}
           canManageRoles={canManageRoles}
           canManageSettings={canManageSettings}
@@ -6927,6 +6974,7 @@ export function App() {
           loading={adminLoading}
           invitationBusy={adminInvitationBusy}
           busyUserId={adminBusyUserId}
+          onRenameOrganization={renameOrganization}
           onInvite={createOrganizationInvitation}
           onResendInvitation={resendOrganizationInvitation}
           onRevokeInvitation={revokeOrganizationInvitation}

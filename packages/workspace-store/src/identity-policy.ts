@@ -449,6 +449,12 @@ export interface IdentityPolicyStore {
   getPrincipal(userId: string): Promise<SessionPrincipal | null>;
   getEffectivePolicy(userId: string): Promise<EffectivePolicy | null>;
   listUsers(tenantId: string): Promise<AdminUserSummary[]>;
+  updateOrganizationDisplayName?(input: {
+    organizationId: string;
+    updatedBy: string;
+    displayName: string;
+    now: Date;
+  }): Promise<{ id: string; displayName: string }>;
   listOrganizationMemberships?(organizationId: string): Promise<OrganizationMembershipSummary[]>;
   listOrganizationInvitations?(organizationId: string, now: Date): Promise<OrganizationInvitationSummary[]>;
   getOrganizationInvitationContext?(tokenHash: string, now: Date): Promise<OrganizationInvitationContext | null>;
@@ -3324,6 +3330,68 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     const ageMs = now.getTime() - recentStepUpAt.getTime();
     if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > recentAuthenticationStepUpWindowMs) {
       throw new LemmaComputerError("OWNER_STEP_UP_REQUIRED", "Recent MFA verification is required", 403);
+    }
+  }
+
+  async updateOrganizationDisplayName(input: {
+    organizationId: string;
+    updatedBy: string;
+    displayName: string;
+    now: Date;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`organization-settings:${input.organizationId}`],
+      );
+      const owner = await client.query(
+        `SELECT organization.display_name
+         FROM organizations organization
+         JOIN organization_memberships membership
+           ON membership.organization_id=organization.id
+          AND membership.subject_user_id=$2
+          AND membership.role='owner'
+          AND membership.status='active'
+         WHERE organization.id=$1 AND organization.status='active'
+         FOR UPDATE OF organization`,
+        [input.organizationId, input.updatedBy],
+      );
+      if (!owner.rowCount) {
+        throw new LemmaComputerError(
+          "ORGANIZATION_OWNER_REQUIRED",
+          "Only the active organization owner can rename the organization",
+          403,
+        );
+      }
+      const previousDisplayName = String(owner.rows[0].display_name);
+      if (previousDisplayName !== input.displayName) {
+        await client.query(
+          "UPDATE organizations SET display_name=$2,updated_at=$3 WHERE id=$1",
+          [input.organizationId, input.displayName, input.now],
+        );
+        await client.query(
+          "UPDATE tenants SET display_name=$2 WHERE id=$1",
+          [input.organizationId, input.displayName],
+        );
+        await client.query(
+          `INSERT INTO organization_lifecycle_audit_events (
+             organization_id,actor_user_id,event_type,detail,occurred_at
+           ) VALUES ($1,$2,'organization.renamed',$3::jsonb,$4)`,
+          [input.organizationId, input.updatedBy, JSON.stringify({
+            previousDisplayName,
+            displayName: input.displayName,
+          }), input.now],
+        );
+      }
+      await client.query("COMMIT");
+      return { id: input.organizationId, displayName: input.displayName };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
     }
   }
 

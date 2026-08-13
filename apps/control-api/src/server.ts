@@ -2736,6 +2736,37 @@ export function createControlServer(
       actor.userId,
     );
   });
+  app.patch<{ Body: { displayName: string } }>("/v1/admin/organization", async (request) => {
+    const actor = requirePermission(request, "organization.manage_settings");
+    if (actor.role !== "owner") {
+      throw new LemmaComputerError(
+        "ORGANIZATION_OWNER_REQUIRED",
+        "Only the active organization owner can rename the organization",
+        403,
+      );
+    }
+    const organizationStore = security.identityPolicyStore;
+    if (!organizationStore?.updateOrganizationDisplayName) {
+      throw new LemmaComputerError(
+        "ORGANIZATION_SETTINGS_NOT_CONFIGURED",
+        "Organization settings are unavailable",
+        503,
+        true,
+      );
+    }
+    const input = z.strictObject({
+      displayName: z.string()
+        .transform((value) => value.trim().replace(/\s+/g, " "))
+        .pipe(z.string().min(2).max(100)),
+    }).parse(request.body ?? {});
+    const organization = await organizationStore.updateOrganizationDisplayName({
+      organizationId: actor.tenantId,
+      updatedBy: actor.userId,
+      displayName: input.displayName,
+      now: new Date(),
+    });
+    return { organization };
+  });
   app.post<{ Body: { targetMembershipId: string } }>("/v1/admin/organization/ownership-transfer", async (request) => {
     const actor = requirePermission(request, "organization.transfer_ownership");
     if (actor.role !== "owner") {

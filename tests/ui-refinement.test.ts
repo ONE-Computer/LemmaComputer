@@ -406,8 +406,8 @@ test("People and access uses consistent section and row action sizing", async ()
     source("apps/web/src/styles.css"),
   ]);
 
-  assert.equal(app.match(/className="[^"]*admin-section-action[^"]*"/g)?.length, 4);
-  for (const label of ["Invite person", "Add connection", "Create custom role", "Initiate organization closure"]) assert.match(app, new RegExp(`>${label}<`));
+  assert.equal(app.match(/className="[^"]*admin-section-action[^"]*"/g)?.length, 5);
+  for (const label of ["Edit organization name", "Invite person", "Add connection", "Create custom role", "Initiate organization closure"]) assert.match(app, new RegExp(`>${label}<`));
   assert.match(app, /className="secondary-button admin-row-action"/);
   assert.match(app, />Sign out sessions</);
   assert.match(styles, /\.admin-section-action\s*\{[^}]*width:\s*260px;[^}]*min-height:\s*56px;/s);

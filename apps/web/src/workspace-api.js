@@ -280,6 +280,7 @@ export const adminApi = {
   rollbackSso: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}/rollback`, mutation()),
   disconnectSso: (connectionId) => request(`/api/v1/admin/sso/${encodeURIComponent(connectionId)}`, mutation("DELETE")),
   changeMembership: (userId, input) => request(`/api/v1/admin/memberships/${encodeURIComponent(userId)}`, mutation("PATCH", input)),
+  renameOrganization: (displayName) => request("/api/v1/admin/organization", mutation("PATCH", { displayName })),
   transferOwnership: (targetMembershipId) => request("/api/v1/admin/organization/ownership-transfer", mutation("POST", { targetMembershipId })),
   initiateOrganizationClosure: (reason, idempotencyKey) => request("/api/v1/admin/organization/closure", {
     method: "POST",
