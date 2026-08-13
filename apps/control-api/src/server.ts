@@ -3194,7 +3194,8 @@ export function createControlServer(
     const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
-    const policyApplication = resolveConnectorPolicyApplication(users.map((user) => ({
+    const workspaceOwners = new Set((await store.listTenantCurrent(actor.tenantId)).map((workspace) => workspace.subjectId));
+    const policyAuthority = resolveConnectorPolicyApplication(users.map((user) => ({
       userId: user.userId,
       status: user.status,
       policy: user.effectivePolicy ? {
@@ -3203,14 +3204,28 @@ export function createControlServer(
         documentHash: user.effectivePolicy.documentHash,
       } : null,
     })));
+    const policyApplication = resolveConnectorPolicyApplication(users
+      .filter((user) => workspaceOwners.has(user.userId))
+      .map((user) => ({
+        userId: user.userId,
+        status: user.status,
+        policy: user.effectivePolicy ? {
+          policyVersionId: user.effectivePolicy.policyVersionId,
+          version: user.effectivePolicy.version,
+          documentHash: user.effectivePolicy.documentHash,
+        } : null,
+      })), {
+        currentVersion: policyAuthority.currentVersion,
+        conflict: policyAuthority.state === "conflict",
+      });
     // A unique version/hash makes every matching assignment content-equivalent.
     // Sorting by user id is only a deterministic way to obtain that verified
     // document; it never decides which member's version becomes current.
-    const effective = policyApplication.currentVersion
+    const effective = policyAuthority.currentVersion
       ? users
           .filter((user) => user.effectivePolicy
-            && user.effectivePolicy.version === policyApplication.currentVersion!.version
-            && user.effectivePolicy.documentHash === policyApplication.currentVersion!.documentHash)
+            && user.effectivePolicy.version === policyAuthority.currentVersion!.version
+            && user.effectivePolicy.documentHash === policyAuthority.currentVersion!.documentHash)
           .sort((left, right) => left.userId.localeCompare(right.userId))[0]?.effectivePolicy ?? null
       : null;
     const runtime = effective ? runtimePolicyFor(effective) : null;
@@ -3225,7 +3240,7 @@ export function createControlServer(
         description: definition.description,
         service: definition.service,
         risk: definition.risk,
-        decision: runtime?.toolPolicies[name] ?? (policyApplication.state === "empty" ? definition.mode : "deny"),
+        decision: runtime?.toolPolicies[name] ?? (policyAuthority.state === "empty" ? definition.mode : "deny"),
       })),
     };
   });
@@ -3340,8 +3355,11 @@ export function createControlServer(
         ? security.identityPolicyStore.listUsers(actor.tenantId)
         : Promise.resolve([]),
     ]);
+    const currentWorkspaces = await store.listTenantCurrent(actor.tenantId);
+    const currentWorkspacesById = new Map(currentWorkspaces.map((workspace) => [workspace.id, workspace]));
+    const workspaceOwners = new Set(currentWorkspaces.map((workspace) => workspace.subjectId));
     const organizationPolicy = protectedOverview.organizationPolicyVersions[0] ?? null;
-    const policyApplication = connectorId === "microsoft-365"
+    const policyAuthority = connectorId === "microsoft-365"
       ? resolveConnectorPolicyApplication(users.map((user) => ({
           userId: user.userId,
           status: user.status,
@@ -3352,18 +3370,34 @@ export function createControlServer(
           } : null,
         })))
       : undefined;
-    const effective = policyApplication?.currentVersion
+    const policyApplication = connectorId === "microsoft-365"
+      ? resolveConnectorPolicyApplication(users
+          .filter((user) => workspaceOwners.has(user.userId))
+          .map((user) => ({
+            userId: user.userId,
+            status: user.status,
+            policy: user.effectivePolicy ? {
+              policyVersionId: user.effectivePolicy.policyVersionId,
+              version: user.effectivePolicy.version,
+              documentHash: user.effectivePolicy.documentHash,
+            } : null,
+          })), {
+            currentVersion: policyAuthority?.currentVersion ?? null,
+            conflict: policyAuthority?.state === "conflict",
+          })
+      : undefined;
+    const effective = policyAuthority?.currentVersion
       ? users
           .filter((user) => user.effectivePolicy
-            && user.effectivePolicy.version === policyApplication.currentVersion!.version
-            && user.effectivePolicy.documentHash === policyApplication.currentVersion!.documentHash)
+            && user.effectivePolicy.version === policyAuthority.currentVersion!.version
+            && user.effectivePolicy.documentHash === policyAuthority.currentVersion!.documentHash)
           .sort((left, right) => left.userId.localeCompare(right.userId))[0]?.effectivePolicy ?? null
       : null;
     const runtime = effective ? runtimePolicyFor(effective) : null;
     const configuredToolPolicies = connectorId === "microsoft-365"
       ? Object.fromEntries(Object.entries(m365CapabilityDefinitions).map(([name, definition]) => [
           name,
-          runtime?.toolPolicies[name] ?? (policyApplication?.state === "empty" ? definition.mode : "deny"),
+          runtime?.toolPolicies[name] ?? (policyAuthority?.state === "empty" ? definition.mode : "deny"),
         ]))
       : undefined;
     const snapshot = await requireConnections().connectorPolicyAdministrationSnapshot(actor.identity, connectorId, {
@@ -3375,13 +3409,33 @@ export function createControlServer(
     });
     const latestDelivery = await security.connectorRegistryStore?.latestPolicyDelivery(actor.tenantId, connectorId) ?? null;
     const usersById = new Map(users.map((user) => [user.userId, user]));
-    const deliveryByMember = new Map<string, typeof latestDelivery extends null ? never : NonNullable<typeof latestDelivery>["receipts"]>();
+    const deliveryByMember = new Map<string, Array<{
+      workspaceId: string;
+      ownerSubjectId: string;
+      grantId: string;
+      workspaceState: WorkspaceState;
+      outcome: "refreshed" | "failed" | "applies_on_next_start" | "applied_on_start";
+      failureCode: string | null;
+    }>>();
     const observedDeliveryWorkspaces = new Set<string>();
     for (const receipt of latestDelivery?.receipts ?? []) {
       if (observedDeliveryWorkspaces.has(receipt.workspaceId)) continue;
       observedDeliveryWorkspaces.add(receipt.workspaceId);
+      const currentWorkspace = currentWorkspacesById.get(receipt.workspaceId);
+      if (!currentWorkspace) continue;
       const current = deliveryByMember.get(receipt.ownerSubjectId) ?? [];
-      current.push(receipt);
+      current.push({
+        workspaceId: receipt.workspaceId,
+        ownerSubjectId: receipt.ownerSubjectId,
+        grantId: receipt.grantId,
+        workspaceState: currentWorkspace.state,
+        outcome: receipt.outcome === "applies_on_next_start"
+          && ["ready", "open"].includes(currentWorkspace.state)
+          && currentWorkspace.updatedAt >= receipt.occurredAt
+          ? "applied_on_start"
+          : receipt.outcome,
+        failureCode: receipt.failureCode,
+      });
       deliveryByMember.set(receipt.ownerSubjectId, current);
     }
     const policy = resolveEffectiveConnectorPolicy({

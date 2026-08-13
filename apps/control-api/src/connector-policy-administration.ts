@@ -114,8 +114,6 @@ export type EffectiveConnectorPolicyView = {
     required: boolean;
     reasons: Array<
       | "policy_change_required"
-      | "member_policy_update_required"
-      | "member_policy_assignment_required"
       | "tool_review_required"
       | "requesting_administrator_connection_required"
     >;
@@ -139,6 +137,10 @@ const notApplicablePolicyApplication = (): ConnectorPolicyApplicationView => ({
 
 export const resolveConnectorPolicyApplication = (
   members: ConnectorPolicyMemberVersionInput[],
+  authority?: {
+    currentVersion: ConnectorPolicyApplicationView["currentVersion"];
+    conflict: boolean;
+  },
 ): ConnectorPolicyApplicationView => {
   const active = members.filter((member) => member.status === "active");
   if (!active.length) return { ...notApplicablePolicyApplication(), state: "empty" };
@@ -169,9 +171,12 @@ export const resolveConnectorPolicyApplication = (
     right.version - left.version || left.documentHash.localeCompare(right.documentHash)
   ));
   const newest = versions.filter((version) => version.version === versions[0]!.version);
-  const conflict = newest.length > 1;
-  const currentVersion = conflict ? null : newest[0]!;
-  const currentMembers = currentVersion?.memberCount ?? 0;
+  const conflict = authority?.conflict ?? newest.length > 1;
+  const derivedCurrentVersion = newest.length > 1 ? null : newest[0]!;
+  const currentVersion = conflict ? null : authority?.currentVersion ?? derivedCurrentVersion;
+  const currentMembers = currentVersion
+    ? versions.find((version) => version.version === currentVersion.version && version.documentHash === currentVersion.documentHash)?.memberCount ?? 0
+    : 0;
   const remediationRequiredMembers = active.length - currentMembers;
   return {
     state: conflict
@@ -321,8 +326,6 @@ export const resolveEffectiveConnectorPolicy = (
   const policyApplication = input.policyApplication ?? notApplicablePolicyApplication();
   const remediationReasons: EffectiveConnectorPolicyView["remediation"]["reasons"] = [];
   if (access.effectiveDecision === "deny") remediationReasons.push("policy_change_required");
-  if (["mixed", "conflict"].includes(policyApplication.state)) remediationReasons.push("member_policy_update_required");
-  if (policyApplication.state === "unassigned") remediationReasons.push("member_policy_assignment_required");
   if (reviewBlocked) remediationReasons.push("tool_review_required");
   if (access.effectiveDecision === "allow" && input.connector.connectionState !== "connected") {
     remediationReasons.push("requesting_administrator_connection_required");

@@ -141,7 +141,11 @@ const policyMember = (userId: string, policy: EffectivePolicy | null, status: "a
   effectivePolicy: policy,
 });
 
-const appFor = async (actor: SessionPrincipal, users: AdminUserSummary[] = []) => {
+const appFor = async (
+  actor: SessionPrincipal,
+  users: AdminUserSummary[] = [],
+  workspaceUserIds = users.filter((candidate) => candidate.status === "active").map((candidate) => candidate.userId),
+) => {
   const registry = new MemoryConnectorRegistryStore();
   const workspaceStore = new MemoryWorkspaceStore();
   await registry.saveConnector(connector("acme", "reports"));
@@ -178,14 +182,14 @@ const appFor = async (actor: SessionPrincipal, users: AdminUserSummary[] = []) =
       } : null;
     },
   } as unknown as IdentityPolicyStore;
-  for (const user of users.filter((candidate) => candidate.status === "active")) {
+  for (const user of users.filter((candidate) => candidate.status === "active" && workspaceUserIds.includes(candidate.userId))) {
     await workspaceStore.createOrGet(
       { tenantId: actor.tenantId, subjectId: user.userId, audience: "lemmacomputer-control" },
       "personal",
       `fixture-${user.userId}`,
     );
   }
-  return createControlServer(
+  const app = createControlServer(
     workspaceStore,
     {} as ControllerClient,
     proxyToken,
@@ -200,10 +204,11 @@ const appFor = async (actor: SessionPrincipal, users: AdminUserSummary[] = []) =
       agentBridgeSecret: "connector-effective-policy-agent-bridge-secret",
     },
   );
+  return { app, workspaceStore };
 };
 
 test("policy saves persist named workspace delivery evidence and inactive workspaces apply on next start", async () => {
-  const app = await appFor(owner, [policyMember("jane", null)]);
+  const { app, workspaceStore } = await appFor(owner, [policyMember("jane", null)]);
   try {
     const saved = await app.inject({
       method: "PUT",
@@ -236,13 +241,25 @@ test("policy saves persist named workspace delivery evidence and inactive worksp
     assert.equal(effective.json().policy.delivery.members[0].displayName, "jane");
     assert.equal(effective.json().policy.delivery.members[0].workspaces[0].delivery, "applies_on_next_start");
     assert.equal(effective.json().policy.remediation.restartRequired, false);
+
+    const workspaceId = saved.json().workspaceGrants.members[0].workspaces[0].workspaceId;
+    await workspaceStore.update(workspaceId, { state: "ready" });
+    const afterStart = await app.inject({
+      method: "GET",
+      url: "/v1/admin/connectors/reports/effective-policy",
+      headers,
+    });
+    assert.equal(afterStart.statusCode, 200);
+    assert.equal(afterStart.json().policy.delivery.members[0].workspaces[0].delivery, "applied_on_start",
+      "a successful later start must reconcile the original apply-on-next-start receipt");
+    assert.equal(afterStart.json().policy.delivery.members[0].workspaces[0].state, "ready");
   } finally {
     await app.close();
   }
 });
 
 test("the provider-scoped endpoint returns only safe effective-policy metadata and fails changed tools closed", async () => {
-  const app = await appFor(owner);
+  const { app } = await appFor(owner);
   try {
     const response = await app.inject({
       method: "GET",
@@ -269,7 +286,7 @@ test("the provider-scoped endpoint returns only safe effective-policy metadata a
 });
 
 test("connector effective-policy reads derive the tenant and enforce exact provider scope before lookup", async () => {
-  const scopedApp = await appFor(scopedAdministrator);
+  const { app: scopedApp } = await appFor(scopedAdministrator);
   try {
     assert.equal((await scopedApp.inject({
       method: "GET", url: "/v1/admin/connectors/reports/effective-policy", headers,
@@ -281,7 +298,7 @@ test("connector effective-policy reads derive the tenant and enforce exact provi
     await scopedApp.close();
   }
 
-  const ownerApp = await appFor(owner);
+  const { app: ownerApp } = await appFor(owner);
   try {
     const foreign = await ownerApp.inject({
       method: "GET", url: "/v1/admin/connectors/foreign-reports/effective-policy", headers,
@@ -294,7 +311,7 @@ test("connector effective-policy reads derive the tenant and enforce exact provi
 });
 
 test("Microsoft 365 selects the unique newest member policy and reports older or missing assignments", async () => {
-  const app = await appFor(owner, [
+  const { app } = await appFor(owner, [
     policyMember(owner.userId, memberPolicy(2, "2", "deny")),
     policyMember("newest-member", memberPolicy(4, "4", "allow")),
     policyMember("missing-policy", null),
@@ -330,7 +347,8 @@ test("Microsoft 365 selects the unique newest member policy and reports older or
     assert.equal(listMail.configuredDecision, "allow",
       "the requester\'s older deny must not replace the unique newest organization version");
     assert.equal(listMail.effectiveDecision, "allow");
-    assert.ok(policy.remediation.reasons.includes("member_policy_update_required"));
+    assert.equal(policy.remediation.reasons.includes("member_policy_update_required"), false,
+      "workspace-policy coverage is a separate dependency, not connector remediation");
     assert.equal(policy.remediation.workspaceGrantRefresh.status, "not_observed");
     assert.equal(policy.remediation.restartRequired, false);
     const editorResponse = await app.inject({ method: "GET", url: "/v1/admin/mcp-policy", headers });
@@ -343,8 +361,41 @@ test("Microsoft 365 selects the unique newest member policy and reports older or
   }
 });
 
+test("Microsoft 365 workspace-policy coverage excludes active members without a workspace", async () => {
+  const workspaceOwner = policyMember(owner.userId, memberPolicy(4, "4", "allow"));
+  const { app } = await appFor(owner, [
+    workspaceOwner,
+    policyMember("assigned-without-workspace", memberPolicy(2, "2", "deny")),
+    policyMember("unassigned-without-workspace", null),
+  ], [workspaceOwner.userId]);
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/admin/connectors/microsoft-365/effective-policy",
+      headers,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().policy.policyApplication, {
+      state: "current",
+      currentVersion: { version: 4, documentHash: definitionHash("4") },
+      activeMembers: 1,
+      currentMembers: 1,
+      remediationRequiredMembers: 0,
+      unassignedMembers: 0,
+      versions: [{ version: 4, documentHash: definitionHash("4"), memberCount: 1 }],
+    });
+    const editorResponse = await app.inject({ method: "GET", url: "/v1/admin/mcp-policy", headers });
+    assert.equal(editorResponse.statusCode, 200);
+    assert.equal(editorResponse.json().version, 4,
+      "the editable policy authority still uses the newest assigned organization document");
+    assert.equal(editorResponse.json().policyApplication.activeMembers, 1);
+  } finally {
+    await app.close();
+  }
+});
+
 test("Microsoft 365 fails closed when the newest member policy version has conflicting documents", async () => {
-  const app = await appFor(owner, [
+  const { app } = await appFor(owner, [
     policyMember("member-a", memberPolicy(4, "a", "allow")),
     policyMember("member-b", memberPolicy(4, "b", "approval_required")),
   ]);

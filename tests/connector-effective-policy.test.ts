@@ -143,3 +143,16 @@ test("conflicting documents at the newest member policy version do not invent a 
   assert.equal(application.currentMembers, 0);
   assert.equal(application.remediationRequiredMembers, 2);
 });
+
+test("workspace coverage compares members with workspaces to the authoritative current version", () => {
+  const application = resolveConnectorPolicyApplication([
+    { userId: "workspace-owner", status: "active", policy: { policyVersionId: "v2", version: 2, documentHash: hash("b") } },
+  ], {
+    currentVersion: { version: 4, documentHash: hash("d") },
+    conflict: false,
+  });
+  assert.equal(application.state, "mixed");
+  assert.deepEqual(application.currentVersion, { version: 4, documentHash: hash("d") });
+  assert.equal(application.currentMembers, 0);
+  assert.equal(application.remediationRequiredMembers, 1);
+});
