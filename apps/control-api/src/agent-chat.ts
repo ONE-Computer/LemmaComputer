@@ -4,6 +4,7 @@ import {
   LemmaComputerError,
   agentChatEventSchema,
   chatAgentCatalogIdSchema,
+  chatReasoningEffortSchema,
   channelArtifactMaxBytes,
   chatSessionIdSchema,
   chatUiMessageSchema,
@@ -11,6 +12,7 @@ import {
   type AgentChatEvent,
   type ChatAgentCatalogId,
   type ChatArtifact,
+  type ChatReasoningEffort,
   type ChatUiMessage,
   type IdentityContext,
   type RuntimePolicy,
@@ -30,6 +32,7 @@ export type AgentChatSession = {
   title: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  reasoningEffort?: ChatReasoningEffort;
 };
 
 export type AgentChatSessionPage = {
@@ -105,7 +108,7 @@ export class AgentChatAuthority {
 export interface AgentChatClient {
   health(access: AgentChatAccess): Promise<void>;
   listSessions(access: AgentChatAccess, options?: { cursor?: string; limit?: number }): Promise<AgentChatSessionPage>;
-  createSession(access: AgentChatAccess, title?: string): Promise<AgentChatSession>;
+  createSession(access: AgentChatAccess, title?: string, reasoningEffort?: ChatReasoningEffort): Promise<AgentChatSession>;
   listMessages(access: AgentChatAccess, sessionId: string): Promise<ChatUiMessage[]>;
   cancelTurn(access: AgentChatAccess, sessionId: string): Promise<void>;
   downloadArtifact(access: AgentChatAccess, artifactId: string): Promise<Buffer>;
@@ -116,6 +119,7 @@ export interface AgentChatClient {
     signal?: AbortSignal,
     usageTaskBinding?: string,
     agentInstanceId?: string,
+    reasoningEffort?: ChatReasoningEffort,
   ): AsyncIterable<AgentChatEvent>;
 }
 
@@ -217,11 +221,19 @@ const session = (value: unknown): AgentChatSession => {
   const item = object(value);
   const id = chatSessionIdSchema.safeParse(item.id);
   if (!id.success) throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid session", 502, true);
+  const reasoningEffort = item.reasoning_effort ?? item.reasoningEffort;
+  const parsedReasoningEffort = reasoningEffort === undefined
+    ? undefined
+    : chatReasoningEffortSchema.safeParse(reasoningEffort);
+  if (parsedReasoningEffort && !parsedReasoningEffort.success) {
+    throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid session", 502, true);
+  }
   return {
     id: id.data,
     title: nullableText(item.title),
     createdAt: nullableText(item.created_at ?? item.createdAt),
     updatedAt: nullableText(item.updated_at ?? item.updatedAt),
+    ...(parsedReasoningEffort?.success ? { reasoningEffort: parsedReasoningEffort.data } : {}),
   };
 };
 
@@ -324,10 +336,10 @@ export class HttpAgentChatClient implements AgentChatClient {
     };
   }
 
-  async createSession(access: AgentChatAccess, title?: string) {
+  async createSession(access: AgentChatAccess, title?: string, reasoningEffort?: ChatReasoningEffort) {
     const payload = object(await this.json(access, "/api/sessions", {
       method: "POST",
-      body: JSON.stringify(title ? { title } : {}),
+      body: JSON.stringify({ ...(title ? { title } : {}), ...(reasoningEffort ? { reasoningEffort } : {}) }),
     }));
     return session(payload.session ?? payload);
   }
@@ -361,6 +373,7 @@ export class HttpAgentChatClient implements AgentChatClient {
     signal?: AbortSignal,
     usageTaskBinding?: string,
     agentInstanceId?: string,
+    reasoningEffort?: ChatReasoningEffort,
   ): AsyncIterable<AgentChatEvent> {
     const id = chatSessionIdSchema.parse(sessionId);
     const response = await this.response(access, `/api/sessions/${encodeURIComponent(id)}/turns`, {
@@ -369,6 +382,7 @@ export class HttpAgentChatClient implements AgentChatClient {
         message,
         ...(usageTaskBinding ? { usageTaskBinding } : {}),
         ...(agentInstanceId ? { agentInstanceId } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       }),
       signal,
     }, agentTurnTimeoutMs);

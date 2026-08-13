@@ -110,6 +110,18 @@ const chatServiceClassOptions = [
 ];
 const chatServiceClassLabel = Object.fromEntries(chatServiceClassOptions.map((item) => [item.value, item.label.split(" · ")[0]]));
 const chatServiceClassValues = new Set(chatServiceClassOptions.map((item) => item.value));
+const chatReasoningEffortLabel = {
+  auto: "Auto",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+const chatReasoningEffortDescription = {
+  auto: "Auto · follows your organization maximum",
+  low: "Low · fastest, lowest thinking cost",
+  medium: "Medium · balanced latency and cost",
+  high: "High · deepest, highest latency and cost",
+};
 const workspaceModelNames = {
   "lemmacomputer-auto": "Governed routing",
   "lemmacomputer-claude": "Claude",
@@ -4010,6 +4022,7 @@ function ChatConversation({
   agentName,
   supportsVision,
   requestedServiceClass,
+  reasoningEffort,
   onTurnBusyChange,
   sessionId,
   onSessionsChange,
@@ -4061,10 +4074,14 @@ function ChatConversation({
         headers: {
           "idempotency-key": crypto.randomUUID(),
         },
-        body: { message: messages.at(-1), requestedServiceClass },
+        body: {
+          message: messages.at(-1),
+          requestedServiceClass,
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+        },
       };
     },
-  }), [workspaceId, agentId, requestedServiceClass]);
+  }), [workspaceId, agentId, requestedServiceClass, reasoningEffort]);
   const {
     messages,
     sendMessage,
@@ -4239,7 +4256,13 @@ function ChatConversation({
         const title = (text || attachments.map((attachment) => attachment.part.filename).join(", "))
           .replace(/\s+/g, " ")
           .slice(0, 56);
-        const created = await chatApi.createSession(workspaceId, agentId, title);
+        const created = await chatApi.createSession(
+          workspaceId,
+          agentId,
+          title,
+          requestedServiceClass,
+          reasoningEffort,
+        );
         sessionId = created.id;
         sessionRef.current = sessionId;
         loadedSessionRef.current = sessionId;
@@ -4594,6 +4617,7 @@ export function ChatScreen({
   const [activeThreadId, setActiveThreadId] = useState("");
   const [threadBusy, setThreadBusy] = useState({});
   const [threadServiceClasses, setThreadServiceClasses] = useState({});
+  const [threadReasoningEfforts, setThreadReasoningEfforts] = useState({});
   const handledHistoryLoadRequest = useRef(historyLoadRequest);
   const handledNewThreadRequest = useRef(newThreadRequest);
 
@@ -4601,7 +4625,11 @@ export function ChatScreen({
   const selectedSessionId = activeThread?.sessionId ?? "";
   const contextBusy = Object.values(threadBusy).some(Boolean);
   const serviceClassFor = (thread) => threadServiceClasses[thread.id] ?? "auto";
+  const reasoningEffortFor = (thread) => threadReasoningEfforts[thread.id]
+    ?? sessions.find((session) => session.id === thread.sessionId)?.reasoningEffort
+    ?? "auto";
   const activeRequestedServiceClass = activeThread ? serviceClassFor(activeThread) : "auto";
+  const activeReasoningEffort = activeThread ? reasoningEffortFor(activeThread) : "auto";
 
   useEffect(() => {
     if (!activeThreadId) return;
@@ -4694,6 +4722,7 @@ export function ChatScreen({
     setActiveThreadId("");
     setThreadBusy({});
     setThreadServiceClasses({});
+    setThreadReasoningEfforts({});
     if (!workspace || !["ready", "open"].includes(workspaceState)) {
       setStatus("offline");
       setReasonCode("WORKSPACE_NOT_READY");
@@ -4736,6 +4765,7 @@ export function ChatScreen({
     setActiveThreadId("");
     setThreadBusy({});
     setThreadServiceClasses({});
+    setThreadReasoningEfforts({});
     chatApi.status(workspace.id, activeAgentId)
       .then(async (nextStatus) => {
         if (!active) return;
@@ -4796,6 +4826,7 @@ export function ChatScreen({
   const offline = status === "offline";
   const unavailable = status === "unavailable";
   const activeAgent = agents.find((agent) => agent.catalogId === activeAgentId);
+  const activeReasoningEfforts = activeAgent?.reasoningEffortsByServiceClass?.[activeRequestedServiceClass] ?? [];
   const agentName = activeAgent?.displayName ?? "workspace agent";
   const agentOptions = agents.map((agent) => ({
     value: agent.catalogId,
@@ -4810,12 +4841,20 @@ export function ChatScreen({
   const selectRequestedServiceClass = (serviceClass) => {
     if (!activeThread) return;
     setThreadServiceClasses((current) => ({ ...current, [activeThread.id]: serviceClass }));
+    const qualified = activeAgent?.reasoningEffortsByServiceClass?.[serviceClass] ?? [];
+    if (!qualified.includes(activeReasoningEffort)) {
+      setThreadReasoningEfforts((current) => ({ ...current, [activeThread.id]: "auto" }));
+    }
     if (workspace?.id && activeAgentId && selectedSessionId) {
       writePreference(
         chatServiceClassPreferenceKey(workspace.id, activeAgentId, selectedSessionId),
         serviceClass,
       );
     }
+  };
+  const selectReasoningEffort = (effort) => {
+    if (!activeThread || selectedSessionId || !activeReasoningEfforts.includes(effort)) return;
+    setThreadReasoningEfforts((current) => ({ ...current, [activeThread.id]: effort }));
   };
   const workspaceOptions = workspaces?.length ? workspaces : workspace ? [workspace] : [];
   const hasContextControls = workspaceOptions.length > 0 || agents.length > 0;
@@ -4851,6 +4890,19 @@ export function ChatScreen({
           options={chatServiceClassOptions}
         />
       </div>
+      {activeReasoningEfforts.length > 0 && <div className="chat-agent-selector" title={selectedSessionId ? "Thinking effort stays fixed for this conversation to preserve prompt caching." : undefined}>
+        <span className="chat-agent-selector-label">Thinking</span>
+        <SelectMenu
+          value={activeReasoningEffort}
+          onValueChange={selectReasoningEffort}
+          disabled={contextBusy || Boolean(selectedSessionId)}
+          ariaLabel="Choose thinking effort"
+          options={activeReasoningEfforts.map((effort) => ({
+            value: effort,
+            label: chatReasoningEffortDescription[effort],
+          }))}
+        />
+      </div>}
     </>
   ) : null;
   const contextSelector = contextControls ? (
@@ -4904,7 +4956,14 @@ export function ChatScreen({
       <div className="chat-thread-panes">
         {threads.map((thread) => {
           const requestedServiceClass = serviceClassFor(thread);
-          const threadContextSummary = [agentName, workspace ? workspaceName(workspace) : "", chatServiceClassLabel[requestedServiceClass]]
+          const reasoningEffort = reasoningEffortFor(thread);
+          const qualifiedEfforts = activeAgent?.reasoningEffortsByServiceClass?.[requestedServiceClass] ?? [];
+          const threadContextSummary = [
+            agentName,
+            workspace ? workspaceName(workspace) : "",
+            chatServiceClassLabel[requestedServiceClass],
+            ...(qualifiedEfforts.length ? [`${chatReasoningEffortLabel[reasoningEffort]} thinking`] : []),
+          ]
             .filter(Boolean)
             .join(" · ");
           return <div className="chat-thread-pane" key={`${workspace.id}:${activeAgentId}:${thread.id}`} hidden={thread.id !== activeThreadId}>
@@ -4915,6 +4974,7 @@ export function ChatScreen({
               agentName={agentName}
               supportsVision={workspace.modelRoute?.capabilities?.vision === true}
               requestedServiceClass={requestedServiceClass}
+              reasoningEffort={qualifiedEfforts.includes(reasoningEffort) ? reasoningEffort : undefined}
               onTurnBusyChange={(busy) => changeThreadBusy(thread.id, busy)}
               sessionId={thread.sessionId}
               onSessionsChange={onSessionsChange}

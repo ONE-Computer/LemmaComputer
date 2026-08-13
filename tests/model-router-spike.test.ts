@@ -142,6 +142,37 @@ test("exact decimal ranking never converts money to Number", async () => {
     currency: "USD",
   });
 });
+test("fixed routing fails closed unless the exact deployment qualifies the requested Claude effort", async () => {
+  const router = new DeterministicModelRouter();
+  await assert.rejects(
+    router.route(
+      request({ requiredCapabilities: { reasoningEffort: "medium" } }),
+      policy({ mode: "disabled" }),
+    ),
+    errorCode("NO_ELIGIBLE_DEPLOYMENT"),
+  );
+  const qualified = deployments.map((candidate) => candidate.id !== "balanced" ? candidate : {
+    ...candidate,
+    capabilities: {
+      ...candidate.capabilities,
+      reasoning: {
+        qualificationId: "qualified-test-route",
+        client: "claude-code" as const,
+        clientVersion: "2.1.215",
+        thinkingMode: "adaptive" as const,
+        effortLevels: ["low", "medium", "high"] as const,
+        defaultEffort: "high" as const,
+        interleavedThinking: true as const,
+        reasoningTokenTelemetry: true as const,
+      },
+    },
+  });
+  const decision = await router.route(
+    request({ requiredCapabilities: { reasoningEffort: "medium" } }),
+    policy({ mode: "disabled", deployments: qualified }),
+  );
+  assert.equal(decision.executedDeployment.id, "balanced");
+});
 test("governed transport exposes one alias and cannot directly name provider models", () => {
   const authority = new RoutingDecisionBindingAuthority(
     "routing-test-secret-at-least-32-characters",

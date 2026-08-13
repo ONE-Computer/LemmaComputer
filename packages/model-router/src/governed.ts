@@ -19,6 +19,52 @@ export type InternalTaskClass = (typeof internalTaskClasses)[number];
 export type RoutingMode = (typeof routingModes)[number];
 export type ManagedRoutingProvider =
   "foundry" | "openai" | "anthropic" | "glm" | "bedrock";
+export const productReasoningEfforts = ["auto", "low", "medium", "high"] as const;
+export const resolvedReasoningEfforts = ["low", "medium", "high"] as const;
+export type ProductReasoningEffort = (typeof productReasoningEfforts)[number];
+export type ResolvedReasoningEffort = (typeof resolvedReasoningEfforts)[number];
+export type QualifiedReasoningCapabilities = {
+  qualificationId: string;
+  client: "claude-code";
+  clientVersion: string;
+  thinkingMode: "adaptive";
+  effortLevels: ResolvedReasoningEffort[];
+  defaultEffort: ResolvedReasoningEffort;
+  interleavedThinking: true;
+  reasoningTokenTelemetry: true;
+};
+
+export const claudeReasoningQualificationId = "claude-code-2.1.215-anthropic-effort-2026-08-13";
+
+/**
+ * Product-owned qualification, not provider-name inference.
+ *
+ * Only exact direct-Anthropic model/client combinations that were reviewed for
+ * the Phase 0.5 wire contract receive effort capabilities. Unknown models,
+ * alternate providers, and changed client versions deliberately return null.
+ */
+export const qualifiedClaudeReasoningCapabilities = (input: {
+  provider: ManagedRoutingProvider;
+  providerModel: string;
+  clientVersion?: string;
+}): QualifiedReasoningCapabilities | null => {
+  const clientVersion = input.clientVersion ?? "2.1.215";
+  if (
+    input.provider !== "anthropic"
+    || clientVersion !== "2.1.215"
+    || !["claude-sonnet-4-6", "claude-opus-4-8"].includes(input.providerModel)
+  ) return null;
+  return {
+    qualificationId: claudeReasoningQualificationId,
+    client: "claude-code",
+    clientVersion,
+    thinkingMode: "adaptive",
+    effortLevels: [...resolvedReasoningEfforts],
+    defaultEffort: "high",
+    interleavedThinking: true,
+    reasoningTokenTelemetry: true,
+  };
+};
 export type RoutingSignal =
   | "short_request"
   | "code_request"
@@ -49,6 +95,7 @@ export type RoutingCapabilities = {
   contextTokens: number;
   outputTokens: number;
   residency: string[];
+  reasoning?: QualifiedReasoningCapabilities | null;
 };
 export type ExactMoney = { amount: string; currency: string };
 export type RoutingDeployment = {
@@ -120,7 +167,7 @@ export type ModelRoutingRequest = {
       RoutingCapabilities,
       "vision" | "tools" | "streaming" | "contextTokens" | "outputTokens"
     >
-  >;
+  > & { reasoningEffort?: ResolvedReasoningEffort };
   unavailableDeploymentIds?: string[];
 };
 export type SessionAffinity = {
@@ -445,6 +492,10 @@ const satisfies = (
     deployment.capabilities.contextTokens &&
   (request.requiredCapabilities.outputTokens ?? 0) <=
     deployment.capabilities.outputTokens &&
+  (!request.requiredCapabilities.reasoningEffort
+    || deployment.capabilities.reasoning?.effortLevels.includes(
+      request.requiredCapabilities.reasoningEffort,
+    ) === true) &&
   (!residency || deployment.capabilities.residency.includes(residency));
 
 export class DeterministicModelRouter {
@@ -488,11 +539,15 @@ export class DeterministicModelRouter {
       );
     if (
       policy.mode !== "enabled" &&
-      (!fixed.healthy || unavailable.has(fixed.id))
+      (
+        !fixed.healthy
+        || unavailable.has(fixed.id)
+        || !satisfies(fixed, request, policy.requiredResidency)
+      )
     )
       throw new ModelRoutingError(
         "NO_ELIGIBLE_DEPLOYMENT",
-        "The fixed rollout deployment is unavailable; governed routing will not bypass its binding",
+        "The fixed rollout deployment is unavailable or lacks a required capability; governed routing will not bypass its binding",
       );
     if (policy.mode === "disabled")
       return {

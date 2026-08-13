@@ -788,6 +788,10 @@ export const runtimeAgentPolicySchema = z.object({
 }).strict();
 export type RuntimeAgentPolicy = z.infer<typeof runtimeAgentPolicySchema>;
 
+export const workspaceReasoningEffortLevels = ["disabled", "low", "medium", "high", "max"] as const;
+export const workspaceReasoningEffortSchema = z.enum(workspaceReasoningEffortLevels);
+export type WorkspaceReasoningEffort = z.infer<typeof workspaceReasoningEffortSchema>;
+
 export const runtimePolicySchema = z.object({
   schemaVersion: z.literal(1),
   policyVersionId: z.string().min(1),
@@ -806,6 +810,7 @@ export const runtimePolicySchema = z.object({
   modelAlias: z.string().min(1).max(128),
   mcpServer: z.string().min(1).max(128),
   requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
+  maximumReasoningEffort: workspaceReasoningEffortSchema.optional(),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
   mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
   activeMcpServers: z.array(z.string().min(1).max(128)).max(32).optional(),
@@ -971,12 +976,19 @@ export const chatSessionIdSchema = z.string().regex(
   /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
   "Invalid chat session identifier",
 );
+export const chatReasoningEffortLevels = ["auto", "low", "medium", "high"] as const;
+export const chatReasoningEffortSchema = z.enum(chatReasoningEffortLevels);
+export type ChatReasoningEffort = z.infer<typeof chatReasoningEffortSchema>;
+export const chatRequestedServiceClassSchema = z.enum(["auto", "lite", "balanced", "pro"]);
+export type ChatRequestedServiceClass = z.infer<typeof chatRequestedServiceClassSchema>;
 export const chatPartIdSchema = z.string().regex(
   /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
   "Invalid chat part identifier",
 );
 export const createChatSessionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
+  requestedServiceClass: chatRequestedServiceClassSchema.default("auto"),
+  reasoningEffort: chatReasoningEffortSchema.optional(),
 }).strict();
 
 export const chatTurnStateSchema = z.enum(["streaming", "needs_input", "completed", "cancelled", "failed"]);
@@ -1100,11 +1112,9 @@ export const chatUiMessageSchema = z.object({
 }).strict();
 export type ChatUiMessage = z.infer<typeof chatUiMessageSchema>;
 
-export const chatRequestedServiceClassSchema = z.enum(["auto", "lite", "balanced", "pro"]);
-export type ChatRequestedServiceClass = z.infer<typeof chatRequestedServiceClassSchema>;
-
 export const sendChatTurnSchema = z.object({
   requestedServiceClass: chatRequestedServiceClassSchema.default("auto"),
+  reasoningEffort: chatReasoningEffortSchema.optional(),
   message: chatUiMessageSchema.superRefine((message, context) => {
     const textParts = message.parts.filter((part) => part.type === "text");
     const fileParts = message.parts.filter((part) => part.type === "file");
@@ -1921,9 +1931,6 @@ export const protectedPolicyTemplateVersionIdSchema = z.string().regex(/^pbtv_[a
 export const productReleaseKeyIdSchema = z.string().regex(/^prk_[a-z0-9][a-z0-9_]{2,63}$/);
 export const protectedPolicyConnectorIdSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(128);
 export const protectedPolicyToolIdSchema = z.string().min(1).max(128);
-export const workspaceReasoningEffortLevels = ["disabled", "low", "medium", "high", "max"] as const;
-export const workspaceReasoningEffortSchema = z.enum(workspaceReasoningEffortLevels);
-export type WorkspaceReasoningEffort = z.infer<typeof workspaceReasoningEffortSchema>;
 export const workspaceCapabilityIds = ["ai-assistant", "coding-tools", "m365-read", "m365-write-protected"] as const;
 export const workspaceCapabilityIdSchema = z.enum(workspaceCapabilityIds);
 export type WorkspaceCapabilityId = z.infer<typeof workspaceCapabilityIdSchema>;

@@ -90,3 +90,35 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await page.getByRole("button", { name: "Send message" }).click();
   expect((await sentAgain).postDataJSON().requestedServiceClass).toBe("pro");
 });
+
+test("exposes only qualified Claude thinking efforts and binds the choice to the conversation", async ({ page }) => {
+  await page.goto("/?view=chat");
+  await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Auto \(Beta\)/ }).click();
+  await choose(page, "Choose workspace", "Product");
+  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto \(Beta\)/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto \(Beta\)/ }).click();
+  await choose(page, "Choose chat agent", "Claude Code");
+  await page.getByRole("button", { name: /Claude Code · Product · Auto \(Beta\) · Auto thinking/ }).click();
+  await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toHaveText("Auto · follows your organization maximum");
+  await choose(page, "Choose thinking effort", "High · deepest, highest latency and cost");
+
+  const created = page.waitForRequest((request) => request.method() === "POST"
+    && request.url().endsWith("/chat/agents/claude-cli/sessions"));
+  const sent = page.waitForRequest((request) => request.method() === "POST"
+    && request.url().includes("/chat/agents/claude-cli/sessions/")
+    && request.url().endsWith("/messages"));
+  await page.getByPlaceholder("Message Claude Code").fill("Qualify this architecture decision.");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  expect((await created).postDataJSON()).toMatchObject({
+    requestedServiceClass: "auto",
+    reasoningEffort: "high",
+  });
+  expect((await sent).postDataJSON()).toMatchObject({
+    requestedServiceClass: "auto",
+    reasoningEffort: "high",
+  });
+  await page.getByRole("button", { name: /Claude Code · Product · Auto \(Beta\) · High thinking/ }).click();
+  await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toBeDisabled();
+});

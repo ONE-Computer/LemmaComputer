@@ -630,10 +630,14 @@ export function createControlServer(
     turnId?: string,
     requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto",
     agentInstanceId?: string,
+    requestedReasoningEffort?: "auto"|"low"|"medium"|"high",
+    maximumReasoningEffort?: "disabled"|"low"|"medium"|"high"|"max",
   ) => usageBindings?.issue({
     tenantId: owner.tenantId, subjectId: owner.subjectId, workspaceId, agentId,
     contextKind, taskId, ...(sessionId ? { sessionId } : {}), ...(turnId ? { turnId } : {}),
     ...(agentInstanceId ? { agentInstanceId } : {}),
+    ...(requestedReasoningEffort ? { requestedReasoningEffort } : {}),
+    ...(maximumReasoningEffort ? { maximumReasoningEffort } : {}),
     requestedServiceClass,
   });
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
@@ -641,6 +645,43 @@ export function createControlServer(
   const routingExecution=security.routingStore&&security.teamStore&&usageBindings?new RoutingExecutionService(security.routingStore,security.teamStore,new RoutingDecisionBindingAuthority(security.usageTaskBindingSecret!),usageBindings,security.budgetStore):undefined;
   const routing=security.routingStore?new RoutingAdministrationService(security.routingStore):undefined;
   const requireRouting=()=>{if(!routing)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
+  const reasoningEffortsFor = async (
+    owner: IdentityContext,
+    policy: RuntimePolicy,
+    catalogId: string,
+  ) => {
+    const empty = { auto: [], lite: [], balanced: [], pro: [] } as Record<
+      "auto" | "lite" | "balanced" | "pro",
+      Array<"auto" | "low" | "medium" | "high">
+    >;
+    if (catalogId !== "claude-cli" || !routingExecution || !policy.maximumReasoningEffort) return empty;
+    const maximumRank = ({ disabled: 0, low: 1, medium: 2, high: 3, max: 3 } as const)[policy.maximumReasoningEffort];
+    if (maximumRank === 0) return empty;
+    const qualified = await routingExecution.reasoningOptions(owner.tenantId, owner.subjectId);
+    return Object.fromEntries(Object.entries(empty).map(([serviceClass]) => {
+      const levels = (qualified[serviceClass as keyof typeof qualified] ?? []).filter(
+        (effort) => ({ low: 1, medium: 2, high: 3 } as const)[effort] <= maximumRank,
+      );
+      return [serviceClass, levels.length ? ["auto", ...levels] : []];
+    })) as typeof empty;
+  };
+  const requireReasoningEffort = async (
+    owner: IdentityContext,
+    policy: RuntimePolicy,
+    catalogId: string,
+    serviceClass: "auto" | "lite" | "balanced" | "pro",
+    effort?: "auto" | "low" | "medium" | "high",
+  ) => {
+    if (!effort) return;
+    const options = await reasoningEffortsFor(owner, policy, catalogId);
+    if (!options[serviceClass].includes(effort)) {
+      throw new LemmaComputerError(
+        "MODEL_REASONING_EFFORT_UNAVAILABLE",
+        "That thinking effort is not qualified for the selected organization route",
+        422,
+      );
+    }
+  };
   const channelBroker = security.channelBrokerClient;
   const telegramRawTokenInputMode = security.telegramRawTokenInputMode ?? "legacy";
   const requireSpendObservability = (request: object) => {
@@ -4292,7 +4333,8 @@ export function createControlServer(
   });
   app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/agents", async (request, reply) => {
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const assigned = await service.agentChatAgents(identity(request), policy, request.params.workspaceId);
+    const owner = identity(request);
+    const assigned = await service.agentChatAgents(owner, policy, request.params.workspaceId);
     const running = ["ready", "open"].includes(assigned.state);
     const agents = await Promise.all(assigned.accesses.map(async (access) => {
       if (!running) {
@@ -4310,6 +4352,7 @@ export function createControlServer(
           displayName: access.displayName,
           state: "ready",
           reasonCode: "CHAT_AGENT_READY",
+          reasoningEffortsByServiceClass: await reasoningEffortsFor(owner, policy, access.catalogId),
         };
       } catch (error) {
         if (!(error instanceof LemmaComputerError) || error.code !== "CHAT_RUNTIME_UNAVAILABLE") throw error;
@@ -4371,8 +4414,10 @@ export function createControlServer(
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const input = createChatSessionSchema.parse(request.body ?? {});
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
-    const session = await agentChat.createSession(access, input.title);
+    const owner = identity(request);
+    await requireReasoningEffort(owner, policy, catalogId, input.requestedServiceClass, input.reasoningEffort);
+    const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
+    const session = await agentChat.createSession(access, input.title, input.reasoningEffort);
     return reply.code(201).header("cache-control", "no-store").send({ ...session, agentCatalogId: catalogId });
   });
   app.get<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages", async (request, reply) => {
@@ -4510,6 +4555,14 @@ export function createControlServer(
       throw new LemmaComputerError("CHAT_AGENT_MISMATCH", "The submitted message does not belong to the selected agent", 409);
     }
     const { policy, workspace } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const owner = identity(request);
+    await requireReasoningEffort(
+      owner,
+      policy,
+      catalogId,
+      input.requestedServiceClass,
+      input.reasoningEffort,
+    );
     const includesImage = input.message.parts.some(
       (part) => part.type === "file" && part.mediaType.startsWith("image/"),
     );
@@ -4531,7 +4584,6 @@ export function createControlServer(
         );
       }
     }
-    const owner = identity(request);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
     const processLifecycle = await agentProcesses.beginBrowserChat({
       identity: owner,
@@ -4562,9 +4614,11 @@ export function createControlServer(
         const usageTaskBinding = issueUsageTaskBinding(
           owner, request.params.workspaceId, access.agentId, "chat", input.message.id, sessionId,
           undefined, input.requestedServiceClass, agentInstanceId,
+          input.reasoningEffort, policy.maximumReasoningEffort,
         );
         for await (const event of agentChat.streamTurn(
           access, sessionId, input.message, undefined, usageTaskBinding, agentInstanceId,
+          input.reasoningEffort,
         )) {
           if (event.type === "turn-start") {
             await processLifecycle.markRunning(event.turnId);

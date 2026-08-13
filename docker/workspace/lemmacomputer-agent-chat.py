@@ -290,12 +290,16 @@ def write_state(document: dict[str, Any]) -> None:
 
 
 def public_session(item: dict[str, Any]) -> dict[str, Any]:
-    return {
+    session = {
         "id": item["id"],
         "title": item.get("title"),
         "created_at": item["createdAt"],
         "updated_at": item["updatedAt"],
     }
+    reasoning_effort = item.get("reasoningEffort")
+    if reasoning_effort in {"auto", "low", "medium", "high"}:
+        session["reasoning_effort"] = reasoning_effort
+    return session
 
 
 async def body(request: Request, max_bytes: int = 32 * 1024) -> dict[str, Any]:
@@ -1521,6 +1525,9 @@ async def sessions(request: Request) -> Response:
         title = value.get("title")
         if title is not None and (not isinstance(title, str) or not title.strip()):
             raise ValueError("invalid title")
+        reasoning_effort = value.get("reasoningEffort")
+        if reasoning_effort is not None and reasoning_effort not in {"auto", "low", "medium", "high"}:
+            raise ValueError("invalid reasoning effort")
         created = now()
         item = {
             "id": str(uuid.uuid4()),
@@ -1529,6 +1536,7 @@ async def sessions(request: Request) -> Response:
             "createdAt": created,
             "updatedAt": created,
             "messages": [],
+            **({"reasoningEffort": reasoning_effort} if reasoning_effort is not None else {}),
         }
         if AGENT == "hermes-claw":
             assert http is not None
@@ -1605,6 +1613,9 @@ async def turns(request: Request) -> Response:
         user_message, text, attachments = validate_user_message(value.get("message"))
         usage_task_binding = value.get("usageTaskBinding")
         agent_instance_id = value.get("agentInstanceId")
+        reasoning_effort = value.get("reasoningEffort")
+        if reasoning_effort is not None and reasoning_effort not in {"auto", "low", "medium", "high"}:
+            raise ValueError("invalid reasoning effort")
         if (
             usage_task_binding is not None
             and (
@@ -1628,6 +1639,8 @@ async def turns(request: Request) -> Response:
         item = find_session(read_state(), session_id)
         if item is None:
             return JSONResponse({"error": "session not found"}, status_code=404)
+        if item.get("reasoningEffort") != reasoning_effort:
+            return JSONResponse({"error": "reasoning effort does not match the session"}, status_code=400)
         snapshot = json.loads(json.dumps(item))
     async with active_lock:
         if session_id in active_sessions:

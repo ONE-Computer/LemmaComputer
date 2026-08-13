@@ -43,9 +43,13 @@ const normalize = (assigned: string, payload: Record<string, unknown>, taskBindi
   { encoding: "utf8" },
 )) as { requested: string; body: Record<string, unknown> };
 
-const taskBinding = (requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto") => `${Buffer.from(JSON.stringify({
+const taskBinding = (
+  requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto",
+  requestedReasoningEffort?: "auto"|"low"|"medium"|"high",
+) => `${Buffer.from(JSON.stringify({
   schemaVersion: 1,
   requestedServiceClass,
+  ...(requestedReasoningEffort ? { requestedReasoningEffort } : {}),
 })).toString("base64url")}.${"s".repeat(43)}`;
 
 const bridgeGrant = (expiresAt: number) => `ocab2_${Buffer.from(JSON.stringify({ exp: expiresAt })).toString("base64url")}.${"s".repeat(43)}`;
@@ -129,6 +133,27 @@ test("only the broker-owned task binding crosses the workspace trust boundary", 
     customer_tag: "preserved",
     lemmacomputer_task_binding: binding,
     lemmacomputer_requested_service_class: "pro",
+  });
+});
+
+test("the broker strips forged thinking controls and projects only the signed effort request", () => {
+  const binding = taskBinding("balanced", "medium");
+  const normalized = normalize("lemmacomputer-auto", {
+    model: "claude-sonnet-4-6",
+    thinking: { type: "enabled", budget_tokens: 999999 },
+    output_config: { effort: "max" },
+    reasoning_effort: "max",
+    reasoning: { effort: "xhigh" },
+    messages: [{ role: "user", content: "Review this plan." }],
+  }, binding);
+  assert.equal("thinking" in normalized.body, false);
+  assert.equal("output_config" in normalized.body, false);
+  assert.equal("reasoning_effort" in normalized.body, false);
+  assert.equal("reasoning" in normalized.body, false);
+  assert.deepEqual(normalized.body.metadata, {
+    lemmacomputer_task_binding: binding,
+    lemmacomputer_requested_service_class: "balanced",
+    lemmacomputer_requested_reasoning_effort: "medium",
   });
 });
 
