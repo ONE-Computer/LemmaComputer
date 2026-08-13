@@ -5,7 +5,13 @@ import {
   qualifiedAgentReasoningAdapter,
   RoutingDecisionBindingAuthority,
 } from "@lemmacomputer/model-router";
-import type { RoutingStore, TeamStore } from "@lemmacomputer/workspace-store";
+import {
+  priceUsage,
+  type RateAmount,
+  type RoutingStore,
+  type TeamStore,
+  type UsageAmount,
+} from "@lemmacomputer/workspace-store";
 import { RoutingExecutionService } from "../apps/control-api/src/routing.js";
 import { UsageTaskBindingAuthority } from "../apps/control-api/src/usage-ledger.js";
 
@@ -290,7 +296,6 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
       healthy: true,
       evaluationPassed: true,
       rateCardId: "rate-lite",
-      expectedCost: { amount: "0.001", currency: "USD" },
       capabilities: { vision: false, tools: false, streaming: true, contextTokens: 32000, outputTokens: 8000, residency: [] },
     },
     {
@@ -301,7 +306,6 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
       healthy: true,
       evaluationPassed: true,
       rateCardId: null,
-      expectedCost: null,
       capabilities: { vision: false, tools: true, streaming: true, contextTokens: 64000, outputTokens: 16000, residency: [] },
     },
     {
@@ -312,13 +316,31 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
       healthy: false,
       evaluationPassed: true,
       rateCardId: "rate-pro",
-      expectedCost: { amount: "0.01", currency: "USD" },
       capabilities: { vision: true, tools: true, streaming: true, contextTokens: 200000, outputTokens: 64000, residency: [] },
     },
   ];
+  const tokenRates: RateAmount[] = [
+    { unit: "input_uncached_token", amountPerUnit: "2", unitScale: "1000000" },
+    { unit: "output_token", amountPerUnit: "12", unitScale: "1000000" },
+  ];
+  let readinessUsage: UsageAmount[] = [];
+  const pricedRoutes = (expectedUsage: UsageAmount[]) => {
+    readinessUsage = expectedUsage;
+    return routes.map((route) => {
+      const priced = route.rateCardId
+        ? priceUsage(expectedUsage, tokenRates)
+        : null;
+      return {
+        ...route,
+        expectedCost: priced?.providerCost
+          ? { amount: priced.providerCost, currency: "USD" }
+          : null,
+      };
+    });
+  };
   const service = new RoutingExecutionService(
     {
-      resolveEffectivePolicy: async () => ({
+      resolveEffectivePolicy: async (_tenantId, _teamId, expectedUsage) => ({
         policy: {
           billingCurrency: "USD",
           identity: {
@@ -339,7 +361,7 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
             capabilityFloor: { vision: false, tools: false, streaming: true, contextTokens: 8000, outputTokens: 1000 },
             eligibleDeploymentIds: [route.id],
           }])),
-          deployments: routes,
+          deployments: pricedRoutes(expectedUsage),
           approvedProviders: ["openai", "anthropic"],
           budgetEligibleDeploymentIds: routes.map((route) => route.id),
         },
@@ -354,5 +376,9 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
     { value: "lite", available: true, reasonCode: "ready" },
     { value: "balanced", available: false, reasonCode: "pricing_unavailable" },
     { value: "pro", available: false, reasonCode: "provider_unavailable" },
+  ]);
+  assert.deepEqual(readinessUsage, [
+    { unit: "input_uncached_token", quantity: "1" },
+    { unit: "output_token", quantity: "1" },
   ]);
 });
