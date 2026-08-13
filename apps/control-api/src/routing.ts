@@ -464,6 +464,14 @@ const constrainOutputToPolicy = (
   };
 };
 
+// The chat selector only needs to prove that a route has the base token prices
+// required for a text turn. Real routing resolves the policy again with the
+// request's bounded usage estimate before enforcing price and budget limits.
+const chatTierReadinessUsage: UsageAmount[] = [
+  { unit: "input_uncached_token", quantity: "1" },
+  { unit: "output_token", quantity: "1" },
+];
+
 export class RoutingExecutionService {
   private readonly router: DeterministicModelRouter;
   constructor(
@@ -489,9 +497,11 @@ export class RoutingExecutionService {
     );
     const team = await this.teams.getCurrentDefaultSpendingTeam(tenantId, subjectId);
     if (!team) return unavailable("policy_denied");
-    const resolved = await this.store.resolveEffectivePolicy(tenantId, team.id, [
-      { unit: "request", quantity: "1" },
-    ]);
+    const resolved = await this.store.resolveEffectivePolicy(
+      tenantId,
+      team.id,
+      chatTierReadinessUsage,
+    );
     if (!resolved) return unavailable("route_unavailable");
     const policy = resolved.policy;
     const identityClasses = new Set(policy.identity.allowedServiceClasses);
