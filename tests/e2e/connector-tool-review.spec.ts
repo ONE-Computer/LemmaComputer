@@ -219,14 +219,14 @@ test("custom connector tools stay blocked until the administrator reviews and sa
   await page.goto("/");
   await page.getByRole("button", { name: "Connections" }).click();
   await page.getByRole("button", { name: "Manage" }).click();
-  await page.getByRole("button", { name: "Tools & approvals" }).click();
+  await page.getByRole("button", { name: "Policy" }).click();
 
   await expect(page.locator(".tool-policy-change-summary")).toContainText("1 added, 1 changed, 1 removed");
   await expect(page.getByText("New provider tool. Blocked until reviewed.")).toBeVisible();
   await page.getByText("View current provider definition").click();
   await expect(page.locator(".tool-definition-preview pre")).toContainText("export-report");
 
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("button", { name: "Save tool permissions" }).click();
   await expect.poll(() => saved).toBe(true);
   await expect(page.locator(".tool-policy-change-summary")).toHaveCount(0);
 });
@@ -275,11 +275,11 @@ test("a stale tool-policy save fails visibly instead of overwriting a newer vers
   await page.goto("/");
   await page.getByRole("button", { name: "Connections" }).click();
   await page.getByRole("button", { name: "Manage" }).click();
-  await page.getByRole("button", { name: "Tools & approvals" }).click();
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("button", { name: "Policy" }).click();
+  await page.getByRole("button", { name: "Save tool permissions" }).click();
 
   await expect(page.getByText("This connector policy changed while you were editing it. Refresh and review the latest version before saving again.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Save tool permissions" })).toBeEnabled();
 });
 
 test("Exa appears as an available built-in connector in the Search category", async ({ page }) => {
@@ -308,6 +308,22 @@ test("administrators can read member controls, mixed tool decisions, drift, and 
   await page.route("**/api/v1/admin/connectors/reports/effective-policy", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy: effectivePolicy }) });
   });
+  await page.route("**/api/v1/admin/connectors/reports/tool-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      ...policy,
+      changes: { added: [], changed: [], removed: [] },
+      tools: effectivePolicy.tools.map((tool) => ({
+        name: tool.name,
+        definitionHash: tool.observedDefinitionHash,
+        displayName: tool.displayName,
+        description: `${tool.displayName} through the Reports connector.`,
+        service: "tools",
+        risk: "reviewed",
+        decision: tool.configuredDecision,
+        reviewRequired: tool.reviewState !== "current",
+      })),
+    }) });
+  });
   await page.route("**/api/v1/admin/connectors/reports/policy-delivery/retry", async (route) => {
     deliveryRetries += 1;
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ workspaceGrants: { refreshed: 1, failed: 0, appliesOnNextStart: 1, members: [] } }) });
@@ -316,16 +332,22 @@ test("administrators can read member controls, mixed tool decisions, drift, and 
   await page.goto("/");
   await page.getByRole("button", { name: "Connections" }).click();
   await page.getByRole("button", { name: "Manage" }).click();
+  await expect(page.getByRole("heading", { name: "Connection ready" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connector access" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Policy" }).click();
 
-  const effective = page.getByRole("region", { name: "What workspace agents can use" });
+  await expect(page.getByRole("heading", { name: "Control access and tool permissions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connector access" })).toBeVisible();
+  const effective = page.getByRole("region", { name: "Application and workspace delivery" });
   await expect(effective).toBeVisible();
   await expect(effective.getByText("Members cannot manage connections")).toBeVisible();
   await expect(effective.getByText("Members cannot connect or disconnect their own account.")).toBeVisible();
-  const tools = effective.getByRole("table", { name: "Effective connector tool policy" });
-  await expect(tools.getByRole("row").filter({ hasText: "Search reports" })).toContainText("Allowed");
-  await expect(tools.getByRole("row").filter({ hasText: "Export report" })).toContainText("Approval required");
-  await expect(tools.getByRole("row").filter({ hasText: "Delete report" })).toContainText("Blocked");
-  await expect(tools.getByRole("row").filter({ hasText: "Upload report" })).toContainText("Review required");
+  await expect(effective.getByRole("table", { name: "Effective connector tool policy" })).toHaveCount(0);
+  const tools = page.locator(".tool-policy-list");
+  await expect(tools.locator("label").filter({ hasText: "Search reports" })).toContainText("Effective nowAllowed");
+  await expect(tools.locator("label").filter({ hasText: "Export report" })).toContainText("Effective nowApproval required");
+  await expect(tools.locator("label").filter({ hasText: "Delete report" })).toContainText("Effective nowBlocked");
+  await expect(tools.locator("label").filter({ hasText: "Upload report" })).toContainText("Review required");
   await expect(effective.getByText("1 of 3 active members need the current policy version.", { exact: true })).toBeVisible();
   await expect(effective.getByRole("region", { name: "Workspace delivery" })).toContainText("Jane Tan");
   await expect(effective.getByRole("region", { name: "Workspace delivery" })).toContainText("personal");
@@ -335,13 +357,10 @@ test("administrators can read member controls, mixed tool decisions, drift, and 
   await expect.poll(() => deliveryRetries).toBe(1);
   await expect(effective.getByText(/records each workspace delivery attempt/)).toBeVisible();
   await expect(effective.getByText(/does not require a restart/)).toBeVisible();
-
   await page.setViewportSize({ width: 600, height: 900 });
-  await expect(tools.locator(".connector-effective-tool-heading")).toBeHidden();
-  const mobileLabels = await tools.getByRole("row").filter({ hasText: "Search reports" }).locator("[data-label]").evaluateAll((cells) => (
-    cells.map((cell) => getComputedStyle(cell, "::before").content.replaceAll('"', ""))
-  ));
-  assert.deepEqual(mobileLabels, ["Tool", "Effective decision", "Definition review", "Controlling sources"]);
+  const mobileRow = tools.locator("label").filter({ hasText: "Search reports" });
+  await expect(mobileRow.locator(".tool-policy-effective")).toBeVisible();
+  await expect(mobileRow.locator(".select-menu-trigger")).toBeVisible();
 });
 
 test("the effective view makes a disabled connector and its denied tools explicit", async ({ page }) => {
@@ -367,14 +386,18 @@ test("the effective view makes a disabled connector and its denied tools explici
   await page.route("**/api/v1/admin/connectors/reports/effective-policy", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy: disabledPolicy }) });
   });
+  await page.route("**/api/v1/admin/connectors/reports/tool-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(policy) });
+  });
 
   await page.goto("/");
   await page.getByRole("button", { name: "Connections" }).click();
   await page.getByRole("button", { name: "Manage" }).click();
 
   await expect(page.getByRole("heading", { name: "Disabled by your organization" })).toBeVisible();
-  const effective = page.getByRole("region", { name: "What workspace agents can use" });
+  await page.getByRole("button", { name: "Policy" }).click();
+  const effective = page.getByRole("region", { name: "Application and workspace delivery" });
   await expect(effective.locator(".connector-effective-access")).toHaveText("Blocked");
-  await expect(effective.getByRole("row").filter({ hasText: "Search reports" })).toContainText("Blocked");
+  await expect(page.locator(".tool-policy-list label").filter({ hasText: "Search reports" })).toContainText("Blocked");
   await expect(page.getByRole("checkbox", { name: "Connector enabled" })).not.toBeChecked();
 });

@@ -1190,7 +1190,7 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
   ><AccountSecurityPanel onSessionChanged={onSelected} onSignOutAll={onSignOut} /></ModalDialog>}</>;
 }
 
-function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, onPolicySave }) {
+function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, onPolicySave, effectivePolicy }) {
   const serviceLabels = mcpPolicy?.connectorId
     ? { tools: `${mcpPolicy.connectorName} tools` }
     : { mail: "Outlook Mail", calendar: "Calendar", onedrive: "OneDrive", teams: "Teams" };
@@ -1205,23 +1205,25 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
   const groupedTools = Object.entries(serviceLabels)
     .map(([service, label]) => ({ service, label, tools: mcpPolicy?.tools.filter((tool) => tool.service === service) ?? [] }))
     .filter((group) => group.tools.length);
+  const effectiveTools = new Map((effectivePolicy?.tools ?? []).map((tool) => [tool.name, tool]));
   if (loading && !mcpPolicy) return <div className="tool-policy-loading">Loading connector tools…</div>;
   return (
       <section className="tool-policy-card connector-tool-policy" aria-labelledby="tool-policy-heading">
         <div className="tool-policy-heading">
-          <div><p>Organization tool policy</p><h2 id="tool-policy-heading">Tools &amp; approvals</h2></div>
+          <div><p>Organization policy</p><h2 id="tool-policy-heading">Tool permissions</h2></div>
           {mcpPolicy && <span>{mcpPolicy.version ? `Version ${mcpPolicy.version} · ` : ""}{mcpPolicy.documentHash.slice(0, 12)}…</span>}
         </div>
         <p className="tool-policy-intro">{mcpPolicy?.connectorId
           ? "Review the provider-supplied definition before choosing what workspace agents may run. New or changed tools stay blocked until this exact definition is saved; a later provider change requires another review."
-          : "Choose what assigned workspace agents may run immediately, what requires a signed approval, and what is blocked. Saving creates an immutable policy version and refreshes running workspace grants."}</p>
+          : "Choose what workspace agents can run, what needs an administrator's approval, and what is blocked. The effective result shows when the locked LemmaComputer baseline is more restrictive than your setting."}</p>
         {changeSummary && <p className="tool-policy-change-summary"><strong>Review required:</strong> {changeSummary}. Open each provider definition before allowing it.</p>}
         <div className="tool-policy-groups">
           {groupedTools.map((group) => <section key={group.service} className="tool-policy-group">
             <h3>{group.label}<span>{group.tools.length} tools</span></h3>
             <div className="tool-policy-list">
-              {group.tools.map((tool) => (
-                <label key={tool.name}>
+              {group.tools.map((tool) => {
+                const effectiveTool = effectiveTools.get(tool.name);
+                return <label key={tool.name} className={effectiveTool ? "with-effective-policy" : ""}>
                   <span>
                     <strong>{tool.displayName}</strong>
                     <small>{tool.description}</small>
@@ -1231,6 +1233,12 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
                       <pre>{tool.definitionPreview}</pre>
                     </details>}
                   </span>
+                  {effectiveTool && <span className="tool-policy-effective">
+                    <small>Effective now</small>
+                    <strong className={`connector-tool-decision ${effectiveTool.effectiveDecision}`}>{connectorPolicyDecisionLabel[effectiveTool.effectiveDecision]}</strong>
+                    <span>{effectiveTool.sources.map((source) => `${connectorPolicySourceLabel[source.kind]}: ${connectorPolicyDecisionLabel[source.decision]}`).join(" · ")}</span>
+                    {effectiveTool.reviewState !== "current" && <span>{connectorReviewStateLabel[effectiveTool.reviewState]}</span>}
+                  </span>}
                   <SelectMenu
                     value={tool.decision}
                     onValueChange={(value) => onPolicyChange(tool.name, value)}
@@ -1241,14 +1249,14 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
                       { value: "deny", label: "Block" },
                     ]}
                   />
-                </label>
-              ))}
+                </label>;
+              })}
             </div>
           </section>)}
         </div>
         <div className="tool-policy-actions">
           <span><ShieldCheckmark24Regular aria-hidden="true" />Approval rules are enforced in Control, not trusted to the desktop client.</span>
-          <button className="primary-button compact-button" type="button" onClick={onPolicySave} disabled={!mcpPolicy || policySaving}>{policySaving ? "Saving changes" : "Save changes"}</button>
+          <button className="primary-button compact-button" type="button" onClick={onPolicySave} disabled={!mcpPolicy || policySaving}>{policySaving ? "Saving tool permissions" : "Save tool permissions"}</button>
         </div>
       </section>
   );
@@ -3116,7 +3124,7 @@ const connectorReviewStateLabel = {
   removed: "No longer provided",
 };
 
-function ConnectorEffectivePolicyCard({ policy, loading, error, deliveryBusy, onRetryDelivery }) {
+function ConnectorEffectivePolicyCard({ policy, loading, error, deliveryBusy, onRetryDelivery, showTools = true }) {
   if (loading && !policy) return <section className="connector-effective-policy-card loading" aria-live="polite">Loading effective connector policy…</section>;
   if (error && !policy) return <section className="connector-effective-policy-card error" role="alert"><strong>Effective policy unavailable</strong><span>{error}</span></section>;
   if (!policy) return null;
@@ -3140,7 +3148,7 @@ function ConnectorEffectivePolicyCard({ policy, loading, error, deliveryBusy, on
   return (
     <section className="connector-effective-policy-card" aria-labelledby={`connector-effective-policy-${policy.connector.id}`}>
       <div className="connector-effective-policy-heading">
-        <div><p>Effective organization policy</p><h2 id={`connector-effective-policy-${policy.connector.id}`}>What workspace agents can use</h2></div>
+        <div><p>{showTools ? "Effective organization policy" : "Policy status"}</p><h2 id={`connector-effective-policy-${policy.connector.id}`}>{showTools ? "What workspace agents can use" : "Application and workspace delivery"}</h2></div>
         <span className={`connector-effective-access ${policy.access.effectiveDecision}`}>{connectorPolicyDecisionLabel[policy.access.effectiveDecision]}</span>
       </div>
       <dl className="connector-effective-summary">
@@ -3148,7 +3156,7 @@ function ConnectorEffectivePolicyCard({ policy, loading, error, deliveryBusy, on
         <div><dt>Member connections</dt><dd>{policy.access.membersCanManage ? "Members can manage connections" : "Members cannot manage connections"}<small>{policy.access.membersCanManage ? "Members may connect or disconnect their own account." : "Members cannot connect or disconnect their own account."}</small></dd></div>
         <div><dt>Policy application</dt><dd>{application.state === "current" || application.state === "not_applicable" ? "Current" : "Action needed"}<small>{applicationMessage}</small></dd></div>
       </dl>
-      <div className="connector-effective-tools" role="table" aria-label="Effective connector tool policy">
+      {showTools && <div className="connector-effective-tools" role="table" aria-label="Effective connector tool policy">
         <div className="connector-effective-tool-heading" role="row">
           <span role="columnheader">Tool</span><span role="columnheader">Effective decision</span><span role="columnheader">Definition review</span><span role="columnheader">Controlling sources</span>
         </div>
@@ -3158,7 +3166,7 @@ function ConnectorEffectivePolicyCard({ policy, loading, error, deliveryBusy, on
           <span role="cell" data-label="Definition review"><strong>{connectorReviewStateLabel[tool.reviewState]}</strong>{tool.observedDefinitionHash && <small>Current hash {tool.observedDefinitionHash.slice(0, 10)}…</small>}</span>
           <span role="cell" data-label="Controlling sources"><small>{tool.sources.map((source) => `${connectorPolicySourceLabel[source.kind]} v${source.version}: ${connectorPolicyDecisionLabel[source.decision]}`).join(" · ")}</small></span>
         </div>)}
-      </div>
+      </div>}
       <section className="connector-policy-delivery" aria-labelledby={`connector-policy-delivery-${policy.connector.id}`}>
         <div className="connector-policy-delivery-heading">
           <div><h3 id={`connector-policy-delivery-${policy.connector.id}`}>Workspace delivery</h3><p>{policy.delivery ? `Policy v${policy.delivery.policyVersion} · last attempted ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(policy.delivery.changedAt))}` : "No connector policy delivery has been recorded yet."}</p></div>
@@ -3197,14 +3205,29 @@ function ConnectorAccessPolicyCard({ connector, busy, onSave }) {
   return (
     <section className="connector-access-policy-card" aria-labelledby={`connector-access-${connector.id}`}>
       <div>
-        <p>Organization access</p>
-        <h2 id={`connector-access-${connector.id}`}>Member connection policy</h2>
-        <span>These controls apply to every organization member and are enforced by Control.</span>
+        <p>Organization policy</p>
+        <h2 id={`connector-access-${connector.id}`}>Connector access</h2>
+        <span>Control whether the connector is available and whether members can connect their own account.</span>
       </div>
       <label><input type="checkbox" checked={enabled} disabled={busy} onChange={(event) => setEnabled(event.target.checked)} /><span><strong>Connector enabled</strong><small>Assigned workspaces may use approved tools from this service.</small></span></label>
       <label><input type="checkbox" checked={membersCanManage} disabled={busy || !enabled} onChange={(event) => setMembersCanManage(event.target.checked)} /><span><strong>Members can manage connections</strong><small>Members may connect and disconnect their own work account.</small></span></label>
-      <button className="primary-button compact-button" type="button" disabled={busy || !dirty} onClick={() => onSave(connector.id, { enabled, membersCanManage, expectedVersion: connector.accessPolicyVersion })}>{busy ? "Saving policy" : "Save access policy"}</button>
+      <button className="primary-button compact-button" type="button" disabled={busy || !dirty} onClick={() => onSave(connector.id, { enabled, membersCanManage, expectedVersion: connector.accessPolicyVersion })}>{busy ? "Saving access settings" : "Save access settings"}</button>
     </section>
+  );
+}
+
+function ConnectorPolicyAdministration({ connector, busy, onAccessPolicySave, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, deliveryBusy, onRetryDelivery, canManageAccess = true }) {
+  return (
+    <div className="connector-policy-administration">
+      <header className="connector-policy-administration-heading">
+        <p>Organization connector policy</p>
+        <h2>Control access and tool permissions</h2>
+        <span>These settings apply across the organization. Access settings and tool permissions are saved separately so each change has a clear audit record.</span>
+      </header>
+      {canManageAccess && <ConnectorAccessPolicyCard connector={connector} busy={busy} onSave={onAccessPolicySave} />}
+      <ToolPolicyEditor mcpPolicy={mcpPolicy} loading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy} />
+      <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} showTools={false} />
+    </div>
   );
 }
 
@@ -3233,12 +3256,12 @@ function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDis
 
       <nav className="connector-tabs" aria-label="Microsoft 365 settings">
         <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
-        {canManagePolicy && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
+        {canManagePolicy && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Policy</button>}
       </nav>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connector was not updated</strong>{error}</span></div>}
 
       {activeTab === "tools" && canManagePolicy ? (
-        <ToolPolicyEditor mcpPolicy={mcpPolicy} loading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />
+        <ConnectorPolicyAdministration connector={connection} busy={busy} onAccessPolicySave={onAccessPolicySave} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} canManageAccess={canManageConnector} />
       ) : (
         <div className="connector-overview">
           <section className="connector-overview-card">
@@ -3258,8 +3281,6 @@ function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDis
               )}
             </div>
           </section>
-          {canManageConnector && <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} />}
-          {canManageConnector && <ConnectorAccessPolicyCard connector={connection} busy={busy} onSave={onAccessPolicySave} />}
         </div>
       )}
     </div>
@@ -3358,12 +3379,12 @@ function HostedConnectorDetail({ connector, loading, busy, error, onConnect, onD
 
       <nav className="connector-tabs" aria-label={`${connector.name} settings`}>
         <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
-        {canManageConnector && connected && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
+        {canManageConnector && connected && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Policy</button>}
       </nav>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connector was not updated</strong>{error}</span></div>}
 
       {activeTab === "tools" && canManageConnector && connected ? (
-        <ToolPolicyEditor mcpPolicy={mcpPolicy} loading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />
+        <ConnectorPolicyAdministration connector={connector} busy={busy} onAccessPolicySave={onAccessPolicySave} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} />
       ) : <div className="connector-overview">
         <section className="connector-overview-card">
           <div>
@@ -3401,8 +3422,6 @@ function HostedConnectorDetail({ connector, loading, busy, error, onConnect, onD
             )}
           </div>
         </section>
-        {canManageConnector && <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} />}
-        {canManageConnector && <ConnectorAccessPolicyCard connector={connector} busy={busy} onSave={onAccessPolicySave} />}
         <div className="connector-policy-note">
           <Info24Regular aria-hidden="true" />
           <p><strong>{connector.policySupport === "governed" ? "Approved tools available" : "Available to your workspace agents"}</strong>{connector.policySupport === "governed"
