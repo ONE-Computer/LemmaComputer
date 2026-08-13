@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sendChatTurnSchema } from "@lemmacomputer/contracts";
+import { createChatSessionSchema, sendChatTurnSchema } from "@lemmacomputer/contracts";
 import {
   qualifiedAgentReasoningAdapter,
   RoutingDecisionBindingAuthority,
@@ -20,11 +20,12 @@ const message = {
   parts: [{ type: "text", text: "Prepare the launch analysis." }],
 };
 
-test("chat accepts only stable model modes and defaults old clients to Auto", () => {
+test("Phase 0.5 chat accepts only explicit model tiers and defaults old clients to Balanced", () => {
   assert.equal(
     sendChatTurnSchema.parse({ message }).requestedServiceClass,
-    "auto",
+    "balanced",
   );
+  assert.equal(createChatSessionSchema.parse({}).requestedServiceClass, "balanced");
   assert.equal(
     sendChatTurnSchema.parse({ message, requestedServiceClass: "pro" })
       .requestedServiceClass,
@@ -36,6 +37,8 @@ test("chat accepts only stable model modes and defaults old clients to Auto", ()
       requestedServiceClass: "bedrock/opus",
     }),
   );
+  assert.throws(() => sendChatTurnSchema.parse({ message, requestedServiceClass: "auto" }));
+  assert.throws(() => createChatSessionSchema.parse({ requestedServiceClass: "auto" }));
 });
 
 test("chat accepts only Phase 0.5 Claude reasoning efforts", () => {
@@ -275,4 +278,81 @@ test("reasoning options intersect a registered agent adapter with qualified mode
     balanced: ["low", "medium"],
     pro: [],
   });
+});
+
+test("chat tier options expose only policy-allowed and route-ready explicit tiers", async () => {
+  const routes = [
+    {
+      id: "deployment-lite",
+      provider: "openai",
+      serviceClass: "lite",
+      approved: true,
+      healthy: true,
+      evaluationPassed: true,
+      rateCardId: "rate-lite",
+      expectedCost: { amount: "0.001", currency: "USD" },
+      capabilities: { vision: false, tools: false, streaming: true, contextTokens: 32000, outputTokens: 8000, residency: [] },
+    },
+    {
+      id: "deployment-balanced",
+      provider: "openai",
+      serviceClass: "balanced",
+      approved: true,
+      healthy: true,
+      evaluationPassed: true,
+      rateCardId: null,
+      expectedCost: null,
+      capabilities: { vision: false, tools: true, streaming: true, contextTokens: 64000, outputTokens: 16000, residency: [] },
+    },
+    {
+      id: "deployment-pro",
+      provider: "anthropic",
+      serviceClass: "pro",
+      approved: true,
+      healthy: false,
+      evaluationPassed: true,
+      rateCardId: "rate-pro",
+      expectedCost: { amount: "0.01", currency: "USD" },
+      capabilities: { vision: true, tools: true, streaming: true, contextTokens: 200000, outputTokens: 64000, residency: [] },
+    },
+  ];
+  const service = new RoutingExecutionService(
+    {
+      resolveEffectivePolicy: async () => ({
+        policy: {
+          billingCurrency: "USD",
+          identity: {
+            allowedServiceClasses: ["lite", "balanced", "pro"],
+            allowedDeploymentIds: routes.map((route) => route.id),
+            explicitSelectionAllowed: true,
+            forceServiceClass: null,
+            safeDefault: "balanced",
+          },
+          team: {
+            allowedServiceClasses: ["lite", "balanced", "pro"],
+            allowedDeploymentIds: routes.map((route) => route.id),
+            explicitSelectionAllowed: true,
+            forceServiceClass: null,
+            safeDefault: "balanced",
+          },
+          serviceClassPolicies: Object.fromEntries(routes.map((route) => [route.serviceClass, {
+            capabilityFloor: { vision: false, tools: false, streaming: true, contextTokens: 8000, outputTokens: 1000 },
+            eligibleDeploymentIds: [route.id],
+          }])),
+          deployments: routes,
+          approvedProviders: ["openai", "anthropic"],
+          budgetEligibleDeploymentIds: routes.map((route) => route.id),
+        },
+      }),
+    } as unknown as RoutingStore,
+    { getCurrentDefaultSpendingTeam: async () => ({ id: "team-1" }) } as Pick<TeamStore, "getCurrentDefaultSpendingTeam">,
+    new RoutingDecisionBindingAuthority("chat-tier-options-secret-at-least-32-characters"),
+    new UsageTaskBindingAuthority("chat-tier-options-secret-at-least-32-characters"),
+  );
+
+  assert.deepEqual(await service.serviceClassOptions("acme", "alex"), [
+    { value: "lite", available: true, reasonCode: "ready" },
+    { value: "balanced", available: false, reasonCode: "pricing_unavailable" },
+    { value: "pro", available: false, reasonCode: "provider_unavailable" },
+  ]);
 });
