@@ -236,9 +236,17 @@ export const reasoningRouteReview = (
   input: { provider: ManagedRoutingProvider; providerModel: string },
   reviews: readonly ReasoningRouteReview[] = reviewedReasoningRoutes,
 ): ReasoningRouteReview | null => {
+  // Managed-provider inventory uses LiteLLM's canonical `provider/model`
+  // spelling, while qualification registrations intentionally store the
+  // provider-neutral upstream model ID. Strip only the already-validated
+  // provider's exact prefix; other prefixes and arbitrary model aliases must
+  // continue to fail closed.
+  const providerModel = input.providerModel.startsWith(`${input.provider}/`)
+    ? input.providerModel.slice(input.provider.length + 1)
+    : input.providerModel;
   const review = reviews.find((candidate) => (
     candidate.provider === input.provider
-    && candidate.providerModels.includes(input.providerModel)
+    && candidate.providerModels.includes(providerModel)
   ));
   if (!review) return null;
   return {

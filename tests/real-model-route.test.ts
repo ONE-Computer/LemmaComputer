@@ -54,7 +54,8 @@ test("managed Claude Desktop accepts the organization auto route", async () => {
 });
 
 test("historic demo defaults gain GLM and Bedrock while customer policy remains unchanged", async () => {
-  const historic = mvpPolicyDocument("Initial MVP policy", ["lemmacomputer-claude", "lemmacomputer-openai"]);
+  const currentShape = mvpPolicyDocument("Initial MVP policy", ["lemmacomputer-claude", "lemmacomputer-openai"]);
+  const { maximumReasoningEffort: _legacyMissingCeiling, ...historic } = currentShape;
   const upgraded = upgradeHistoricMvpPolicyDocument(historic);
   assert.ok(upgraded && typeof upgraded === "object" && !Array.isArray(upgraded));
   assert.deepEqual((upgraded as Record<string, unknown>).modelAliases, [
@@ -63,6 +64,20 @@ test("historic demo defaults gain GLM and Bedrock while customer policy remains 
     "lemmacomputer-glm",
     "lemmacomputer-bedrock",
   ]);
+  assert.equal((upgraded as Record<string, unknown>).maximumReasoningEffort, "max");
+  const currentLegacyShape = mvpPolicyDocument(
+    "Enabled managed GLM and Bedrock for the demo default policy",
+  );
+  const {
+    maximumReasoningEffort: _currentLegacyMissingCeiling,
+    ...currentLegacy
+  } = currentLegacyShape;
+  const upgradedCurrentLegacy = upgradeHistoricMvpPolicyDocument(currentLegacy);
+  assert.ok(upgradedCurrentLegacy && typeof upgradedCurrentLegacy === "object" && !Array.isArray(upgradedCurrentLegacy));
+  assert.equal(
+    (upgradedCurrentLegacy as Record<string, unknown>).maximumReasoningEffort,
+    "max",
+  );
   assert.equal(
     upgradeHistoricMvpPolicyDocument({ ...historic, revisionNote: "Customer-restricted model policy" }),
     null,

@@ -4,6 +4,7 @@ import { createChatSessionSchema, sendChatTurnSchema } from "@lemmacomputer/cont
 import {
   qualifiedAgentReasoningAdapter,
   RoutingDecisionBindingAuthority,
+  type ModelRoutingPolicy,
 } from "@lemmacomputer/model-router";
 import {
   priceUsage,
@@ -12,7 +13,10 @@ import {
   type TeamStore,
   type UsageAmount,
 } from "@lemmacomputer/workspace-store";
-import { RoutingExecutionService } from "../apps/control-api/src/routing.js";
+import {
+  projectQualifiedReasoningRoutes,
+  RoutingExecutionService,
+} from "../apps/control-api/src/routing.js";
 import { UsageTaskBindingAuthority } from "../apps/control-api/src/usage-ledger.js";
 
 const message = {
@@ -252,14 +256,13 @@ test("reasoning options intersect a registered agent adapter with qualified mode
   const route = {
     id: "deployment-balanced",
     provider: "anthropic",
+    model: "anthropic/claude-sonnet-4-6",
     serviceClass: "balanced",
     approved: true,
     healthy: true,
     evaluationPassed: true,
     capabilities: {
-      reasoning: {
-        effortLevels: ["low", "medium", "high"],
-      },
+      reasoning: null,
     },
   };
   const service = new RoutingExecutionService(
@@ -288,6 +291,43 @@ test("reasoning options intersect a registered agent adapter with qualified mode
     balanced: ["low", "medium"],
     pro: [],
   });
+});
+
+test("legacy managed routes gain only exact code-owned reasoning qualifications", () => {
+  const route = (provider: "openai" | "anthropic", model: string) => ({
+    id: `deployment-${provider}-${model}`,
+    provider,
+    model,
+    deployment: model,
+    serviceClass: "balanced" as const,
+    mappingVersionId: "mapping-1",
+    rateCardId: null,
+    expectedCost: null,
+    capabilities: {
+      vision: true,
+      tools: true,
+      streaming: true,
+      contextTokens: 128000,
+      outputTokens: 16000,
+      residency: [],
+      reasoning: null,
+    },
+    approved: true,
+    healthy: true,
+    evaluationPassed: true,
+  });
+  const reviewed = route("openai", "openai/gpt-5.6-terra");
+  const unknown = route("openai", "openai/future-unreviewed-model");
+  const policy = {
+    deployments: [reviewed, unknown],
+  } as ModelRoutingPolicy;
+
+  const projected = projectQualifiedReasoningRoutes(policy);
+  assert.equal(
+    projected.deployments[0]?.capabilities.reasoning?.providerMechanism,
+    "openai-responses-reasoning-effort",
+  );
+  assert.equal(projected.deployments[1]?.capabilities.reasoning, null);
 });
 
 test("chat tier options expose only policy-allowed and route-ready explicit tiers", async () => {

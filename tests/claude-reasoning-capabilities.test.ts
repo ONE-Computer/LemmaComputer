@@ -17,7 +17,12 @@ import {
 } from "@lemmacomputer/model-router";
 
 test("reviewed direct Anthropic model routes expose provider effort capabilities", () => {
-  for (const providerModel of ["claude-sonnet-4-6", "claude-opus-4-8"]) {
+  for (const providerModel of [
+    "claude-sonnet-4-6",
+    "claude-opus-4-8",
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-opus-4-8",
+  ]) {
     assert.deepEqual(
       qualifiedReasoningRouteCapabilities({ provider: "anthropic", providerModel }),
       {
@@ -41,6 +46,10 @@ test("provider mismatch and unreviewed model routes fail closed", () => {
   assert.equal(qualifiedReasoningRouteCapabilities({
     provider: "anthropic",
     providerModel: "claude-sonnet-4-5",
+  }), null);
+  assert.equal(qualifiedReasoningRouteCapabilities({
+    provider: "openai",
+    providerModel: "anthropic/gpt-5.6-terra",
   }), null);
 });
 
@@ -76,7 +85,14 @@ test("a future provider route joins through registration without changing Web, C
 });
 
 test("managed OpenAI reasoning routes use the qualified Responses transport", () => {
-  for (const providerModel of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+  for (const providerModel of [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "openai/gpt-5.6-sol",
+    "openai/gpt-5.6-terra",
+    "openai/gpt-5.6-luna",
+  ]) {
     assert.deepEqual(reasoningRouteReview({ provider: "openai", providerModel }), {
       reviewStatus: "qualified",
       qualificationId: openAiReasoningRouteQualificationId,

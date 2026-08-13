@@ -376,6 +376,35 @@ export class RoutingAdministrationService {
 const executionModelGroup = (tenantId: string, providerDeployment: string) =>
   managedProviderAliasForAccessGroup(tenantId, providerDeployment) ?? providerDeployment;
 
+/**
+ * Older immutable mappings predate the reasoning-capability projection.
+ * Enrich only missing capabilities from the code-owned exact route registry;
+ * persisted qualifications remain authoritative and unknown routes stay
+ * unavailable.
+ */
+export const projectQualifiedReasoningRoutes = (
+  policy: ModelRoutingPolicy,
+): ModelRoutingPolicy => {
+  let changed = false;
+  const deployments = policy.deployments.map((deployment) => {
+    if (deployment.capabilities.reasoning || !deployment.model) return deployment;
+    const reasoning = qualifiedReasoningRouteCapabilities({
+      provider: deployment.provider,
+      providerModel: deployment.model,
+    });
+    if (!reasoning) return deployment;
+    changed = true;
+    return {
+      ...deployment,
+      capabilities: {
+        ...deployment.capabilities,
+        reasoning,
+      },
+    };
+  });
+  return changed ? { ...policy, deployments } : policy;
+};
+
 const scaled = (value: string) => {
   const match = /^(-?)(\d+)(?:\.(\d{1,12}))?$/.exec(value);
   if (!match) throw new Error("Invalid exact decimal");
@@ -483,6 +512,20 @@ export class RoutingExecutionService {
   ) {
     this.router = new DeterministicModelRouter(store);
   }
+  private async resolveEffectivePolicy(
+    tenantId: string,
+    teamId: string,
+    expectedUsage: UsageAmount[],
+  ) {
+    const resolved = await this.store.resolveEffectivePolicy(
+      tenantId,
+      teamId,
+      expectedUsage,
+    );
+    return resolved
+      ? { ...resolved, policy: projectQualifiedReasoningRoutes(resolved.policy) }
+      : null;
+  }
   async serviceClassOptions(
     tenantId: string,
     subjectId: string,
@@ -497,7 +540,7 @@ export class RoutingExecutionService {
     );
     const team = await this.teams.getCurrentDefaultSpendingTeam(tenantId, subjectId);
     if (!team) return unavailable("policy_denied");
-    const resolved = await this.store.resolveEffectivePolicy(
+    const resolved = await this.resolveEffectivePolicy(
       tenantId,
       team.id,
       chatTierReadinessUsage,
@@ -564,7 +607,7 @@ export class RoutingExecutionService {
     >;
     const team = await this.teams.getCurrentDefaultSpendingTeam(tenantId, subjectId);
     if (!team) return empty;
-    const resolved = await this.store.resolveEffectivePolicy(tenantId, team.id, [
+    const resolved = await this.resolveEffectivePolicy(tenantId, team.id, [
       { unit: "request", quantity: "1" },
     ]);
     if (!resolved) return empty;
@@ -698,7 +741,7 @@ export class RoutingExecutionService {
       throw new Error(
         "A default spending Team is required for governed routing",
       );
-    let resolved = await this.store.resolveEffectivePolicy(
+    let resolved = await this.resolveEffectivePolicy(
       input.tenantId,
       team.id,
       input.expectedUsage as UsageAmount[],
@@ -713,7 +756,7 @@ export class RoutingExecutionService {
     }
     let constrained = constrainOutputToPolicy(reasoningConstrainedInput, resolved.policy);
     if (constrained.input !== reasoningConstrainedInput) {
-      resolved = await this.store.resolveEffectivePolicy(
+      resolved = await this.resolveEffectivePolicy(
         input.tenantId,
         team.id,
         constrained.input.expectedUsage as UsageAmount[],
