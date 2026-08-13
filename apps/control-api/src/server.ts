@@ -66,6 +66,7 @@ import {
 } from "./protected-workspace-policy.js";
 
 import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
+import { parsePersonalAiUsageQuery, personalAiUsageReport } from "./personal-ai-usage.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
@@ -2280,6 +2281,20 @@ export function createControlServer(
     const report = await readSpendReport(actor.tenantId, query.range);
     reply.header("cache-control", "no-store");
     return paginateSpendReport(report, query);
+  });
+  app.get("/v1/me/ai-usage", async (request, reply) => {
+    const actor = principal(request);
+    if (!security.spendObservabilityStore) {
+      throw new LemmaComputerError("PERSONAL_AI_USAGE_NOT_CONFIGURED", "Your AI usage overview is unavailable", 503, true);
+    }
+    const range = {
+      ...parsePersonalAiUsageQuery(request.query),
+      userId: actor.userId,
+    };
+    const report = await readSpendReport(actor.tenantId, range);
+    const providers = await security.providerSettingsStore?.listProviderSettings(actor.tenantId) ?? [];
+    reply.header("cache-control", "private, no-store");
+    return { report: personalAiUsageReport(report, providers) };
   });
   app.post("/v1/admin/spend/cost-coverage/acknowledgements", async (request, reply) => {
     const { actor, store: spendStore } = requireSpendObservability(request);

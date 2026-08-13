@@ -834,12 +834,58 @@ const fixtureSpendReport = (tasks = fixtureSpendTasks, empty = false) => ({
   trend: empty ? null : { previousRange: { from: "2026-05-31T00:00:00.000Z", to: "2026-07-01T00:00:00.000Z" }, costs: [{ currency: "USD", amount: "150" }], providerConfirmedCosts: [], attemptCount: 180, attemptCountDelta: 22, costDeltas: [{ currency: "USD", amount: "23.75" }] },
   tasks: empty ? [] : tasks,
 });
+const personalGroup = (overrides = {}) => ({
+  costs: [{ currency: "USD", amount: "173.75" }],
+  providerConfirmedCosts: [{ currency: "USD", amount: "54" }],
+  usage: { input_uncached_token: "20100", cache_read_token: "8040", cache_write_token: "1608", output_token: "4020", reasoning_token: "1005", image: "2" },
+  attemptCount: 202,
+  eventCount: 203,
+  failedAttemptCount: 0,
+  unknownCostEventCount: 1,
+  incompleteCostEventCount: 0,
+  correctedEventCount: 1,
+  ...overrides,
+});
+const fixturePersonalAiUsageReport = () => ({
+  contractVersion: 1,
+  range: { from: "2026-08-01T00:00:00.000Z", to: "2026-08-13T00:00:00.000Z" },
+  asOf: "2026-08-13T00:00:00.000Z",
+  state: "partial",
+  totals: personalGroup({
+    costs: [{ currency: "EUR", amount: "12" }, { currency: "USD", amount: "173.75" }],
+    delayedAttemptCount: 1,
+  }),
+  costCoverage: {
+    status: "multiple_gaps",
+    unpricedUsage: { activeEventCount: 1, missingPriceEventCount: 1, partialPriceEventCount: 0, acknowledgedEventCount: 0 },
+    delayedReporting: { attemptCount: 1 },
+    failedWithoutUsage: { attemptCount: 0 },
+  },
+  breakdowns: {
+    workspaces: [
+      personalGroup({ workspaceId, attemptCount: 180, costs: [{ currency: "USD", amount: "160" }], usage: { input_uncached_token: "18000", cache_read_token: "7000", cache_write_token: "1400", output_token: "3500", reasoning_token: "900" } }),
+      personalGroup({ workspaceId: sandboxWorkspace.id, attemptCount: 22, eventCount: 22, correctedEventCount: 0, unknownCostEventCount: 0, costs: [{ currency: "EUR", amount: "12" }, { currency: "USD", amount: "13.75" }], providerConfirmedCosts: [], usage: { input_uncached_token: "2100", cache_read_token: "1040", cache_write_token: "208", output_token: "520", reasoning_token: "105", image: "2" } }),
+    ],
+    agents: [
+      personalGroup({ agentId: "agent-alex:hermes", attemptCount: 180, costs: [{ currency: "USD", amount: "160" }], usage: { input_uncached_token: "18000", cache_read_token: "7000", cache_write_token: "1400", output_token: "3500", reasoning_token: "900" } }),
+      personalGroup({ agentId: "agent-alex:research", attemptCount: 22, eventCount: 22, correctedEventCount: 0, unknownCostEventCount: 0, costs: [{ currency: "EUR", amount: "12" }, { currency: "USD", amount: "13.75" }], providerConfirmedCosts: [], usage: { input_uncached_token: "2100", cache_read_token: "1040", cache_write_token: "208", output_token: "520", reasoning_token: "105", image: "2" } }),
+    ],
+  },
+  providerUsage: [
+    { provider: "openai", usage: { input_uncached_token: "16000", cache_read_token: "7000", cache_write_token: "1500", output_token: "3000", reasoning_token: "700" } },
+    { provider: "anthropic", usage: { input_uncached_token: "4100", cache_read_token: "1040", cache_write_token: "108", output_token: "1020", reasoning_token: "305" } },
+  ],
+  servingGridAssumptions: [{ provider: "openai", emissionsRegion: "sg" }],
+  trend: { previousRange: { from: "2026-07-20T00:00:00.000Z", to: "2026-08-01T00:00:00.000Z" }, costs: [{ currency: "USD", amount: "150" }], providerConfirmedCosts: [], attemptCount: 180, attemptCountDelta: 22, costDeltas: [{ currency: "EUR", amount: "12" }, { currency: "USD", amount: "23.75" }] },
+  privacy: { scope: "authenticated_member", description: "Only AI usage attributed to your active organization membership is included.", contentExcluded: true },
+});
 
 const responses = new Map([
   ["GET /v1/auth/session", session],
   ["GET /v1/workspaces/current", workspace],
   ["GET /v1/skills", { skills: reviewedSkills }],
   ["GET /v1/workspaces", { workspaces: [workspace, sandboxWorkspace] }],
+  ["GET /v1/me/ai-usage", { report: fixturePersonalAiUsageReport() }],
   ["GET /v1/sandbox-settings", sandboxSettings],
   ["GET /v1/operations/recent", operation],
   ["GET /v1/operations", { operations: [operation] }],
