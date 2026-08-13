@@ -687,6 +687,7 @@ export const mvpPolicyDocument = (
 // remain opt-in and are never broadened by the demo adoption path.
 const historicMvpPolicyDocuments = () => [
   ...historicMvpDefaultModelAliasSets.map((aliases) => createMvpPolicyDocument("Initial MVP policy", aliases, false)),
+  createMvpPolicyDocument("Initial MVP policy", mvpDefaultModelAliases, false),
   createMvpPolicyDocument("Enabled Bedrock for the historic default MVP policy", historicMvpDefaultModelAliasSets[2], false),
   createMvpPolicyDocument("Enabled managed GLM and Bedrock for the demo default policy", mvpDefaultModelAliases, false),
 ];

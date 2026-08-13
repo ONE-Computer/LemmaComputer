@@ -66,7 +66,7 @@ test("historic demo defaults gain GLM and Bedrock while customer policy remains 
   ]);
   assert.equal((upgraded as Record<string, unknown>).maximumReasoningEffort, "max");
   const currentLegacyShape = mvpPolicyDocument(
-    "Enabled managed GLM and Bedrock for the demo default policy",
+    "Initial MVP policy",
   );
   const {
     maximumReasoningEffort: _currentLegacyMissingCeiling,
