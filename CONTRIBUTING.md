@@ -7,18 +7,22 @@ they affect.
 
 ## Development setup
 
+Start with the canonical [development workflow](docs/development-workflow.md).
+It covers a fresh clone, the required task worktree, agent bootstrap, host
+support, environment ownership, and verification gates. Do not develop directly
+in the primary `main` checkout.
+
+From an initialized task worktree:
+
 ```bash
-npm ci
-npm run build
-npm test
+npm run dev:doctor
+npm run verify:quick
 ```
 
-For Compose or configuration changes:
-
-```bash
-npm run env:init
-npm run compose:config
-```
+For a complete local product instance, follow the ordered
+[local deployment runbook](docs/local-deployment.md). `npm run worktree:init`
+already creates the worktree's `.env`; do not replace it with another
+checkout's environment.
 
 Build the managed workspace image only when working on its packaged software or
 runtime:

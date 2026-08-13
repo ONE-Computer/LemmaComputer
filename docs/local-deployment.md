@@ -1,9 +1,20 @@
 # Local deployment and Microsoft integration setup
 
-This runbook is ordered for an operator or coding agent starting from a fresh
-clone. It produces a loopback-only LemmaComputer deployment with the local Docker
-sandbox driver, embedded Better Auth customer sign-in, optional Microsoft
-integrations, and at least one model route. The current strict
+This is an integration-specific supplement, not the starting point for normal
+local development. A coding agent must first follow the
+[local development workflow](development-workflow.md), keep the stack in its
+task worktree, and retain `LEMMACOMPUTER_INSTALLATION_KIND=worktree`. Use this
+page when the task specifically requires the transitional customer-managed
+Entra or Microsoft 365 integration path.
+
+This page uses the dedicated evaluation checkout's default URL in a few
+examples. In a task worktree, use the exact
+`LEMMACOMPUTER_PUBLIC_WEB_URL` generated in that worktree's `.env` for every
+browser URL and OAuth callback. Do not change the worktree port to `4174`.
+
+The runbook produces a loopback-only LemmaComputer deployment with the local
+Docker sandbox driver, embedded Better Auth customer sign-in, optional
+Microsoft integrations, and at least one model route. The current strict
 customer-managed preflight still requires the transitional workforce-Entra
 application values described below; customer roles and workspace access remain
 LemmaComputer organization decisions.
@@ -19,8 +30,8 @@ A setup is complete when:
 
 - `docker compose ps` reports every long-running service healthy;
 - `lemmacomputer/workspace:dev`, or the configured workspace image, exists;
-- `http://localhost:4174` accepts an enabled Better Auth customer sign-in
-  method and, when configured, Microsoft sign-in;
+- the worktree's `LEMMACOMPUTER_PUBLIC_WEB_URL` accepts an enabled Better Auth
+  customer sign-in method and, when configured, Microsoft sign-in;
 - the configured administrator has the administrator role;
 - **Connections → Microsoft 365** completes consent and reports connected;
 - a workspace can be created and opened; and
@@ -44,6 +55,14 @@ A setup is complete when:
 - At least 4 GiB of memory for one running workspace, plus capacity for the
   control stack. Allow substantial disk space and time for the desktop image
   build.
+
+This full-stack runbook is not currently supported directly on macOS,
+including Apple Silicon with Docker Desktop emulation. A Mac contributor may
+use macOS for editing and non-containerized development, but must use a Linux
+x86_64 host or VM for the reference stack and workspace-runtime validation.
+Do not force an architecture override: starting some Compose services would not
+prove that the Docker-socket, managed desktop, device, and sandbox boundaries
+work correctly.
 
 Check the host without changing it:
 
@@ -94,9 +113,12 @@ Microsoft's current registration guide is
 
 Open **Authentication → Add a platform → Web** and add these exact URIs:
 
+Append these paths to the exact `LEMMACOMPUTER_PUBLIC_WEB_URL` in the current
+`.env` and register the two resulting absolute URLs:
+
 ```text
-http://localhost:4174/api/v1/auth/callback
-http://localhost:4174/oauth/mcp/callback
+/api/v1/auth/callback
+/oauth/mcp/callback
 ```
 
 The first is the LemmaComputer sign-in callback. The second is used by the
@@ -173,11 +195,11 @@ Separating the app registrations isolates Graph consent and connector-secret
 rotation from product sign-in:
 
 - The Web sign-in app uses
-  `http://localhost:4174/api/v1/auth/callback` and the
+  `${LEMMACOMPUTER_PUBLIC_WEB_URL}/api/v1/auth/callback` and the
   `LEMMACOMPUTER_ENTRA_*` variables. It needs only the OpenID sign-in scopes used
   by LemmaComputer.
 - The Microsoft 365 connector app uses
-  `http://localhost:4174/oauth/mcp/callback`, the delegated Graph permissions above, and
+  `${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback`, the delegated Graph permissions above, and
   the `LEMMACOMPUTER_MS365_*` variables.
 
 Both apps should be single-tenant. If one app is used for both roles, leave all
@@ -187,7 +209,14 @@ Microsoft 365 values; do not partially configure the group.
 
 ## Initialize the environment
 
-From the repository root:
+For development, first complete the [fresh-clone worktree
+setup](development-workflow.md#fresh-clone). `npm run worktree:init` installs the
+dependencies and creates that worktree's isolated `.env`, so do not run
+`env:init` again. Continue with the required values below.
+
+For a dedicated evaluation checkout that will not be used for development or
+share state with another checkout, initialize it once from the repository
+root:
 
 ```bash
 npm ci
@@ -198,6 +227,12 @@ The initializer renders the canonical deployment contract, generates fresh servi
 encryption keys, policy-signing material, an OpenVTC executor identity, and Web
 Push keys, then writes `.env` with mode `0600`. It refuses to overwrite an
 existing `.env`.
+
+The generated file is a usable first pass, not a blank form. It already
+contains the internal passwords, bearer tokens, signing and encryption keys,
+local topology, safe development defaults, and every optional variable name.
+The operator should edit only the external values required for the selected
+flow. Never replace generated secrets with shared sample values.
 
 Do not run `npm run env:init -- --force` on an initialized deployment unless
 the intent is to invalidate existing sessions, signed policies, approvals,
@@ -231,7 +266,8 @@ projection to a non-Compose deployment adapter.
 ### Values the operator must set
 
 Edit `.env` without printing it to shared logs. Do not add OpenAI or Anthropic
-provider keys there; replace these placeholders instead:
+provider keys there; replace these four placeholders for the complete
+customer-managed reference flow:
 
 | Variable | Required for the reference path | Value |
 | --- | --- | --- |
@@ -245,6 +281,12 @@ provider keys there; replace these placeholders instead:
 Entra object-ID comparison is case-insensitive. Keep the bootstrap list
 small. Every user in the configured Entra tenant may authenticate, but only the
 listed immutable object IDs can perform the one-time organization-owner bootstrap.
+
+A worktree intentionally permits these placeholders so agents can build and
+test unrelated code without external credentials. Therefore `npm run
+env:check` can pass in a worktree before these values are replaced; that result
+proves contract validity, not live authentication readiness. List unresolved
+markers safely with `rg -n '=replace-with-' .env`.
 
 OpenAI, Anthropic, GLM (Z.ai), and Bedrock keys are configured only after the stack is healthy:
 sign in as the bootstrapped owner, open **AI control plane → Models &
@@ -350,16 +392,17 @@ traffic are sensitive.
 
 ## Verify the deployment
 
-Check the two published health endpoints:
+Check the published worktree endpoint and LiteLLM's private container endpoint:
 
 ```bash
-curl --fail --silent http://localhost:4174/__lemmacomputer/healthz
-curl --fail --silent http://localhost:4000/health/liveliness
+LEMMACOMPUTER_LOCAL_WEB_URL="$(sed -n 's/^LEMMACOMPUTER_PUBLIC_WEB_URL=//p' .env)"
+curl --fail --silent "${LEMMACOMPUTER_LOCAL_WEB_URL}/__lemmacomputer/healthz"
+docker compose exec -T litellm python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=2)"
 ```
 
 Then:
 
-1. Open `http://localhost:4174`.
+1. Open the exact `LEMMACOMPUTER_PUBLIC_WEB_URL` from the current `.env`.
 2. Configure the signing-in account's immutable Entra `oid` in
    `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS`, then sign in with that identity.
 3. Verify the account has administrator navigation.
@@ -422,9 +465,11 @@ for ownership and backup details.
 Verify the callback exactly, including `http`, hostname, port, path, and lack of
 a trailing slash:
 
+Use the exact generated public origin plus these paths:
+
 ```text
-http://localhost:4174/api/v1/auth/callback
-http://localhost:4174/oauth/mcp/callback
+/api/v1/auth/callback
+/oauth/mcp/callback
 ```
 
 Remove stale tunnel callbacks once they are no longer used.
@@ -442,7 +487,7 @@ and role assignment rather than changing bootstrap identifiers blindly.
 
 ### Microsoft 365 connection fails
 
-- Confirm the `http://localhost:4174/oauth/mcp/callback` Web redirect.
+- Confirm the `${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback` Web redirect.
 - Confirm all 13 delegated Graph permissions are configured and granted.
 - Confirm the client and tenant values belong to the app that holds those
   permissions.
@@ -488,7 +533,7 @@ An automation agent preparing a local instance should leave the operator with:
 - confirmation that `.env` exists with mode `0600`, without displaying it;
 - the workspace image tag and build result;
 - `docker compose ps` status;
-- the product URL, `http://localhost:4174`; and
+- the exact product URL from `LEMMACOMPUTER_PUBLIC_WEB_URL`; and
 - any failing service name with a redacted error summary.
 
 Never include `.env`, provider keys, client secrets, OAuth codes/tokens, full

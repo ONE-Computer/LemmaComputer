@@ -14,11 +14,14 @@ Do not fork a separate self-hosted codebase. Keep deployment-specific behavior b
 ## Before changing code
 
 1. Treat the user's request as the task contract. If a GitHub issue exists, also read its definition of success and unresolved `blocked by` relationships.
-2. Use one task per branch and one branch per worktree. Do not develop directly on `main`.
-3. Run `npm run worktree:init` once in a new worktree, then `npm run dev:doctor` at the start of each work session.
-4. Keep changes inside the task scope. Record substantial follow-up work separately instead of expanding the task silently.
+2. Before preparing a fresh checkout or developer machine, follow `docs/development-workflow.md`. Read `docs/local-deployment.md` only when the task specifically needs the customer-managed Entra or Microsoft 365 integration flow.
+3. Use one task per branch and one branch per worktree. Do not develop directly on `main`.
+4. Run `npm run worktree:init` once in a new worktree, then `npm run dev:doctor` at the start of each work session.
+5. Keep changes inside the task scope. Record substantial follow-up work separately instead of expanding the task silently.
 
 Branch names should use `codex/<issue>-<short-name>` when an issue exists and `codex/<short-name>` otherwise. Parallel worktrees must never share `.env`, Compose project names, container names, ports, networks, images, volumes, or databases.
+
+Local development never owns a shared stack on `main`. Each task worktree owns one `worktree`-profile stack created from its generated `.env`. Do not switch to `hosted` to test multiple organizations, choose a Compose file by name, copy another checkout's `.env`, or hand-edit `.env.example`.
 
 ## Integration and demo releases
 
