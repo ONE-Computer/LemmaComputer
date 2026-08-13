@@ -37,7 +37,7 @@ test("workspace creation is shown only when the organization grants workspace.cr
     },
   }));
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Your workspaces" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Workspace", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create workspace" })).toHaveCount(0);
 
   await page.unroute("**/api/v1/auth/session");
@@ -175,12 +175,13 @@ test("workspace model route tiers persist after save and refresh", async ({ page
   await expect(page.getByRole("heading", { name: "Default model mode" })).toBeVisible();
   await expect(page.getByText("Choose the default quality and cost mode for this workspace. You can choose a different mode for each conversation in Chat.")).toBeVisible();
   const modelRoutes = page.getByRole("radiogroup", { name: "Default model mode" });
-  await expect(modelRoutes.getByRole("radio")).toHaveCount(4);
+  await expect(modelRoutes.getByRole("radio")).toHaveCount(3);
+  await expect(modelRoutes.getByText("Auto", { exact: true })).toHaveCount(0);
   await modelRoutes.getByText("Pro", { exact: true }).click();
   await expect(modelRoutes.getByRole("radio", { name: /^Pro/ })).toBeChecked();
   await page.getByRole("button", { name: "Save configuration" }).click();
   await expect(page.getByText("Workspace configuration saved. Restart the workspace to apply changes.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Your workspaces" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Your workspaces" })).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Restart required" })).toHaveCount(0);
 
   await page.reload();

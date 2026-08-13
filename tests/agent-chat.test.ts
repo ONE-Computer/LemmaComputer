@@ -49,6 +49,8 @@ test("Hermes session titles stay in the LemmaComputer adapter so duplicate user 
   assert.match(adapter, /nextCursor/);
   assert.match(adapter, /NEEDS_INPUT_MARKER = "\[LEMMACOMPUTER_NEEDS_INPUT\]"/);
   assert.match(adapter, /terminal_state = "needs_input"/);
+  assert.match(adapter, /"reasoningEffort": reasoning_effort/);
+  assert.match(adapter, /item\.get\("reasoningEffort"\) != reasoning_effort/);
   assert.equal(chatTurnStateSchema.safeParse("needs_input").success, true);
 });
 
@@ -209,6 +211,30 @@ test("trusted browser chat identities reach each vendor's per-turn execution bou
   assert.match(codex, /"LEMMACOMPUTER_AGENT_INSTANCE_ID": agent_instance_id/);
   assert.match(hermes, /"x-lemmacomputer-agent-instance-id": agent_instance_id,[\s\S]*if agent_instance_id else \{\}/);
   assert.match(adapter, /codex = AsyncCodex\(codex_config\(\)\)/);
+});
+
+test("every reasoning-capable runtime delegates provider effort to the signed governed route", async () => {
+  const [adapter, gateway, hermesConfig] = await Promise.all([
+    readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8"),
+    readFile(new URL("../docker/workspace/lemmacomputer-gateway-proxy.py", import.meta.url), "utf8"),
+    readFile(new URL("../docker/workspace/lemmacomputer-hermes-config.py", import.meta.url), "utf8"),
+  ]);
+  const claude = adapter.slice(adapter.indexOf("async def claude_vendor_events"), adapter.indexOf("async def codex_vendor_events"));
+  const codex = adapter.slice(adapter.indexOf("def codex_config"), adapter.indexOf("async def hermes_vendor_events"));
+  const hermes = adapter.slice(adapter.indexOf("async def hermes_vendor_events"), adapter.indexOf("def vendor_events"));
+
+  assert.match(claude, /ANTHROPIC_CUSTOM_HEADERS.*x-lemmacomputer-ai-task-binding/s);
+  assert.match(codex, /"http_headers": \{[\s\S]*"x-lemmacomputer-ai-task-binding": usage_task_binding/);
+  assert.match(hermes, /"x-lemmacomputer-ai-task-binding": usage_task_binding/);
+  assert.doesNotMatch(codex, /\beffort\s*=/);
+  assert.doesNotMatch(codex, /item\/reasoning\/textDelta/);
+  assert.doesNotMatch(hermes, /reasoning\.available/);
+  assert.match(hermesConfig, /"reasoning_effort": False/);
+  assert.match(
+    gateway,
+    /for name in \("thinking", "output_config", "reasoning_effort", "reasoning"\):[\s\S]*request\.pop\(name, None\)/,
+  );
+  assert.match(gateway, /metadata\["lemmacomputer_requested_reasoning_effort"\] = reasoning_effort/);
 });
 
 test("agent turns receive a fresh trusted timezone context and require clarification without one", async () => {
@@ -416,6 +442,7 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
         undefined,
         undefined,
         "22222222-2222-4222-8222-222222222222",
+        catalogId === "claude-cli" ? "medium" : undefined,
       )) events.push(event);
       assert.deepEqual(events.map((event) => event.type), [
         "turn-start", "tool", "tool", "text-delta", "turn-finish",
@@ -442,6 +469,7 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
         body: {
           message: { ...message, metadata: { ...message.metadata, agentCatalogId: "claude-cli" } },
           agentInstanceId: "22222222-2222-4222-8222-222222222222",
+          reasoningEffort: "medium",
         },
       },
       {

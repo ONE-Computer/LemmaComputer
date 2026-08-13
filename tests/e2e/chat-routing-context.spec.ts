@@ -25,27 +25,32 @@ test("routes the next turn through the selected workspace, agent, and stable mod
     await route.continue();
   });
 
-  await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Auto \(Beta\)/ }).click();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Balanced/ }).click();
+  await expect(page.getByText("Lite is not allowed by your organization. Pro does not have a ready route.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Choose model mode" }).click();
+  await expect(page.getByRole("option", { name: "Balanced · everyday work" })).toBeVisible();
+  await expect(page.getByRole("option", { name: /Lite|Pro|Auto/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Balanced/ }).click();
   await choose(page, "Choose workspace", "Product");
   await expect(page.getByRole("heading", { name: "Chat", exact: true })).toHaveCount(0);
   await expect(page.locator(".chat-runtime-state")).toBeVisible();
   releaseProductAgents();
-  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto \(Beta\)/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Balanced/ })).toBeVisible();
 
-  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Auto \(Beta\)/ }).click();
-  await choose(page, "Choose chat agent", "Codex CLI");
-  await expect(page.getByRole("button", { name: /Codex CLI · Product · Auto \(Beta\)/ })).toBeVisible();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Balanced/ }).click();
+  await page.getByRole("combobox", { name: "Choose model mode" }).click();
+  await expect(page.getByRole("option", { name: /Auto/ })).toHaveCount(0);
+  await page.getByRole("option", { name: "Pro · highest capability" }).click();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).click();
+  await page.screenshot({ path: "test-results/chat-explicit-model-tiers.png", fullPage: true });
 
-  await page.getByRole("button", { name: /Codex CLI · Product · Auto \(Beta\)/ }).click();
-  await choose(page, "Choose model mode", "Pro · highest capability");
-  await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
-
-  const composer = page.getByPlaceholder("Message Codex CLI");
+  const composer = page.getByPlaceholder("Message Hermes Agent CLI");
   await composer.fill("Line one\nLine two\nLine three\nLine four");
   const [rowBox, actionsBox, contextBox, sendBox] = await Promise.all([
     page.locator(".companion-chat-composer-row").boundingBox(),
     page.getByRole("button", { name: "Chat actions" }).boundingBox(),
-    page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).boundingBox(),
+    page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).boundingBox(),
     page.getByRole("button", { name: "Send message" }).boundingBox(),
   ]);
   expect(rowBox).not.toBeNull();
@@ -59,16 +64,16 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await composer.fill("Prepare the launch analysis with the selected context.");
   const sent = page.waitForRequest((request) => (
     request.method() === "POST"
-    && request.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/codex-cli/`)
+    && request.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/`)
     && request.url().endsWith("/messages")
   ));
   await page.getByRole("button", { name: "Send message" }).click();
   const request = await sent;
   const payload = request.postDataJSON();
   expect(payload.requestedServiceClass).toBe("pro");
-  expect(payload.message.metadata.agentCatalogId).toBe("codex-cli");
+  expect(payload.message.metadata.agentCatalogId).toBe("hermes-claw");
 
-  await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).click();
   await expect(page.getByRole("combobox", { name: "Choose workspace" })).toBeDisabled();
   await expect(page.getByRole("combobox", { name: "Choose chat agent" })).toBeDisabled();
   await expect(page.getByRole("combobox", { name: "Choose model mode" })).toBeDisabled();
@@ -77,16 +82,54 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await expect(page.getByRole("combobox", { name: "Choose model mode" })).toHaveText("Pro · highest capability");
 
   await page.reload();
-  await expect(page.getByRole("button", { name: /Codex CLI · Product · Pro/ })).toBeVisible();
-  await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
+  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ })).toBeVisible();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).click();
   await expect(page.getByRole("combobox", { name: "Choose model mode" })).toHaveText("Pro · highest capability");
 
   await composer.fill("Continue with the same model mode.");
   const sentAgain = page.waitForRequest((nextRequest) => (
     nextRequest.method() === "POST"
-    && nextRequest.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/codex-cli/`)
+    && nextRequest.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/`)
     && nextRequest.url().endsWith("/messages")
   ));
   await page.getByRole("button", { name: "Send message" }).click();
   expect((await sentAgain).postDataJSON().requestedServiceClass).toBe("pro");
+});
+
+test("keeps discovery adapters fail closed and binds a qualified effort to the conversation", async ({ page }) => {
+  await page.goto("/?view=chat");
+  await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Balanced/ }).click();
+  await choose(page, "Choose workspace", "Product");
+  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Balanced/ })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Balanced/ }).click();
+  await choose(page, "Choose chat agent", "Codex CLI");
+  await expect(page.getByRole("button", { name: /Codex CLI · Product · Balanced/ })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Codex CLI · Product · Balanced/ }).click();
+  await choose(page, "Choose chat agent", "Claude Code");
+  await page.getByRole("button", { name: /Claude Code · Product · Balanced · Auto thinking/ }).click();
+  await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toHaveText("Auto · follows your organization maximum");
+  await choose(page, "Choose thinking effort", "High · deepest, highest latency and cost");
+
+  const created = page.waitForRequest((request) => request.method() === "POST"
+    && request.url().endsWith("/chat/agents/claude-cli/sessions"));
+  const sent = page.waitForRequest((request) => request.method() === "POST"
+    && request.url().includes("/chat/agents/claude-cli/sessions/")
+    && request.url().endsWith("/messages"));
+  await page.getByPlaceholder("Message Claude Code").fill("Qualify this architecture decision.");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  expect((await created).postDataJSON()).toMatchObject({
+    requestedServiceClass: "balanced",
+    reasoningEffort: "high",
+  });
+  expect((await sent).postDataJSON()).toMatchObject({
+    requestedServiceClass: "balanced",
+    reasoningEffort: "high",
+  });
+  await page.getByRole("button", { name: /Claude Code · Product · Balanced · High thinking/ }).click();
+  await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toBeDisabled();
 });

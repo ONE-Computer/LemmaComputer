@@ -19,6 +19,8 @@ os.environ.update({
     "LEMMACOMPUTER_GATEWAY_UPSTREAM": "http://127.0.0.1:4000",
     "LEMMACOMPUTER_GATEWAY_CREDENTIAL": "scoped-credential-at-least-24-characters",
     "LEMMACOMPUTER_MODEL_ALIAS": sys.argv[2],
+    "LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS": sys.argv[2],
+    "LEMMACOMPUTER_REQUESTED_SERVICE_CLASS": sys.argv[5] if len(sys.argv) > 5 else "balanced",
     "LEMMACOMPUTER_CONTROL_UPSTREAM": "http://127.0.0.1:4173",
     "LEMMACOMPUTER_AGENT_BRIDGE_TOKEN": f"ocab2_{bridge_payload}.{'s' * 43}",
     "LEMMACOMPUTER_GATEWAY_LISTEN_PORT": "4312",
@@ -28,7 +30,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 task_binding = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] != "-" else None
 body, requested = module.normalize_inference_body(sys.argv[3].encode(), task_binding)
-print(json.dumps({"requested": requested, "body": json.loads(body)}))
+print(json.dumps({"requested": requested, "body": json.loads(body), "serviceClass": module.native_service_class_for_model(requested)}))
 `;
 
 const proxyPath = "docker/workspace/lemmacomputer-gateway-proxy.py";
@@ -37,15 +39,19 @@ test("the packaged workspace gateway proxy compiles", () => {
   execFileSync("python3", ["-c", "import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(), filename=sys.argv[1], feature_version=(3, 10))", proxyPath]);
 });
 
-const normalize = (assigned: string, payload: Record<string, unknown>, taskBinding?: string) => JSON.parse(execFileSync(
+const normalize = (assigned: string, payload: Record<string, unknown>, taskBinding?: string, serviceClass = "balanced") => JSON.parse(execFileSync(
   "python3",
-  ["-c", program, proxyPath, assigned, JSON.stringify(payload), taskBinding ?? "-"],
+  ["-c", program, proxyPath, assigned, JSON.stringify(payload), taskBinding ?? "-", serviceClass],
   { encoding: "utf8" },
-)) as { requested: string; body: Record<string, unknown> };
+)) as { requested: string; body: Record<string, unknown>; serviceClass: string };
 
-const taskBinding = (requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto") => `${Buffer.from(JSON.stringify({
+const taskBinding = (
+  requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto",
+  requestedReasoningEffort?: "auto"|"low"|"medium"|"high",
+) => `${Buffer.from(JSON.stringify({
   schemaVersion: 1,
   requestedServiceClass,
+  ...(requestedReasoningEffort ? { requestedReasoningEffort } : {}),
 })).toString("base64url")}.${"s".repeat(43)}`;
 
 const bridgeGrant = (expiresAt: number) => `ocab2_${Buffer.from(JSON.stringify({ exp: expiresAt })).toString("base64url")}.${"s".repeat(43)}`;
@@ -81,6 +87,30 @@ test("the workspace broker makes Claude Desktop's one-token gateway health probe
     messages: [{ role: "user", content: "Reply with one character." }],
   });
   assert.equal(ordinaryRequest.body.max_tokens, 1);
+});
+
+test("native product model aliases select only explicit governed service classes", () => {
+  for (const serviceClass of ["lite", "balanced", "pro"] as const) {
+    const normalized = normalize("lemmacomputer-auto", {
+      model: `lemmacomputer-${serviceClass}`,
+      messages: [{ role: "user", content: "Use this mode." }],
+    });
+    assert.equal(normalized.serviceClass, serviceClass);
+    assert.equal(normalized.body.model, "lemmacomputer-auto");
+  }
+
+  const rejected = spawnSync(
+    "python3",
+    ["-c", program, proxyPath, "lemmacomputer-auto", JSON.stringify({ model: "lemmacomputer-ultimate", messages: [] })],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /model mode is not assigned/);
+
+  assert.equal(normalize("lemmacomputer-auto", {
+    model: "claude-sonnet-4-6",
+    messages: [],
+  }, undefined, "auto").serviceClass, "balanced", "legacy Auto workspace defaults migrate safely to Balanced");
 });
 
 test("the same client request can be rebound to a non-Anthropic organization route", () => {
@@ -132,6 +162,27 @@ test("only the broker-owned task binding crosses the workspace trust boundary", 
   });
 });
 
+test("the broker strips forged thinking controls and projects only the signed effort request", () => {
+  const binding = taskBinding("balanced", "medium");
+  const normalized = normalize("lemmacomputer-auto", {
+    model: "claude-sonnet-4-6",
+    thinking: { type: "enabled", budget_tokens: 999999 },
+    output_config: { effort: "max" },
+    reasoning_effort: "max",
+    reasoning: { effort: "xhigh" },
+    messages: [{ role: "user", content: "Review this plan." }],
+  }, binding);
+  assert.equal("thinking" in normalized.body, false);
+  assert.equal("output_config" in normalized.body, false);
+  assert.equal("reasoning_effort" in normalized.body, false);
+  assert.equal("reasoning" in normalized.body, false);
+  assert.deepEqual(normalized.body.metadata, {
+    lemmacomputer_task_binding: binding,
+    lemmacomputer_requested_service_class: "balanced",
+    lemmacomputer_requested_reasoning_effort: "medium",
+  });
+});
+
 const availableBrokerPort = async () => {
   for (const port of [4312, 4314, 4315, 4316, 4317]) {
     const probe = createServer();
@@ -152,14 +203,14 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
   const agentInstanceId = "11111111-1111-4111-8111-111111111111";
   const initialBridgeGrant = bridgeGrant(Math.floor(Date.now() / 1_000) + 1);
   const renewedBridgeGrant = bridgeGrant(Math.floor(Date.now() / 1_000) + 900);
-  let received: {
+  const received: Array<{
     url?: string;
     authorization?: string;
     apiKey?: string;
     taskBindingHeader?: string;
     litellmCallId?: string;
     body?: Record<string, unknown>;
-  } = {};
+  }> = [];
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -198,20 +249,20 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       assert.equal(request.headers.authorization, `Bearer ${renewedBridgeGrant}`);
       assert.equal(request.headers["x-lemmacomputer-agent-instance-id"], agentInstanceId);
       const bindingRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      assert.equal(bindingRequest.requestedServiceClass, "lite");
+      assert.ok(["lite", "balanced", "pro"].includes(bindingRequest.requestedServiceClass));
       assert.match(bindingRequest.taskId, /^workspace-native:/);
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ binding: taskBinding("lite") }));
+      response.end(JSON.stringify({ binding: taskBinding(bindingRequest.requestedServiceClass) }));
       return;
     }
-    received = {
+    received.push({
       url: request.url,
       authorization: request.headers.authorization,
       apiKey: request.headers["x-api-key"] as string | undefined,
       taskBindingHeader: request.headers["x-lemmacomputer-ai-task-binding"] as string | undefined,
       litellmCallId: request.headers["x-litellm-call-id"] as string | undefined,
       body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
-    };
+    });
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ ok: true }));
   });
@@ -246,6 +297,14 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(ready, true, stderr);
+    const modelsResponse = await fetch(`http://127.0.0.1:${brokerPort}/v1/models`);
+    const modelsDocument = await modelsResponse.json();
+    assert.equal(modelsResponse.status, 200, JSON.stringify(modelsDocument));
+    assert.deepEqual(modelsDocument.data.map((model: { id: string }) => model.id), [
+      "lemmacomputer-lite",
+      "lemmacomputer-balanced",
+      "lemmacomputer-pro",
+    ]);
     for (let attempt = 0; attempt < 100 && renewalRequests === 0; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -283,16 +342,31 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     assert.equal(response.status, 200, await response.text());
     assert.equal(renewalRequests, 1, "the proactive renewal is reused for the Control request");
     assert.equal(bindingRequests, 1);
-    assert.equal(received.url, "/v1/messages");
-    assert.equal(received.authorization, "Bearer scoped-credential-at-least-24-characters");
-    assert.equal(received.apiKey, undefined);
-    assert.equal(received.taskBindingHeader, undefined);
-    assert.equal(received.litellmCallId, undefined);
-    assert.equal(received.body?.model, "lemmacomputer-auto");
-    assert.deepEqual(received.body?.metadata, {
+    assert.equal(received[0]?.url, "/v1/messages");
+    assert.equal(received[0]?.authorization, "Bearer scoped-credential-at-least-24-characters");
+    assert.equal(received[0]?.apiKey, undefined);
+    assert.equal(received[0]?.taskBindingHeader, undefined);
+    assert.equal(received[0]?.litellmCallId, undefined);
+    assert.equal(received[0]?.body?.model, "lemmacomputer-auto");
+    assert.deepEqual(received[0]?.body?.metadata, {
       customer_tag: "preserved",
       lemmacomputer_task_binding: taskBinding("lite"),
       lemmacomputer_requested_service_class: "lite",
+    });
+    const proResponse = await fetch(`http://127.0.0.1:${brokerPort}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "lemmacomputer-pro",
+        messages: [{ role: "user", content: "Use the selected product mode." }],
+      }),
+    });
+    assert.equal(proResponse.status, 200, await proResponse.text());
+    assert.equal(bindingRequests, 2);
+    assert.equal(received[1]?.body?.model, "lemmacomputer-auto");
+    assert.deepEqual(received[1]?.body?.metadata, {
+      lemmacomputer_task_binding: taskBinding("pro"),
+      lemmacomputer_requested_service_class: "pro",
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.match(stderr, /normalized model "<nonstandard>"/);
@@ -309,7 +383,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       body: JSON.stringify({ model: "client-default", max_tokens: 1, messages: [] }),
     });
     assert.equal(afterEnd.status, 400, "headerless inference fails closed after the process identity ends");
-    assert.equal(bindingRequests, 1);
+    assert.equal(bindingRequests, 2);
   } finally {
     child.kill("SIGTERM");
     await once(child, "exit");
@@ -318,14 +392,24 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
 });
 
 test("the workspace broker isolates failed and slow connector discovery and represents zero connected servers safely", async () => {
+  const agentInstanceId = "33333333-3333-4333-8333-333333333333";
   let activeServers = ["lemmacomputer_ms365", "lemmacomputer_slow", "lemmacomputer_exa"];
   let projectionHash = "a".repeat(64);
   const discoveryRequests: string[] = [];
   const toolCalls: Array<Record<string, unknown>> = [];
+  const toolInvocationIds: string[] = [];
+  const toolTerminals: Array<Record<string, unknown>> = [];
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     response.setHeader("content-type", "application/json");
+    if (request.url === "/internal/v1/agent/tool-audit/terminal") {
+      assert.equal(request.headers["x-lemmacomputer-agent-instance-id"], agentInstanceId);
+      toolTerminals.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.statusCode = 201;
+      response.end(JSON.stringify({ status: "created" }));
+      return;
+    }
     if (request.url === "/internal/v1/agent/mcp-discovery-plan") {
       response.end(JSON.stringify({ servers: activeServers, projectionHash }));
       return;
@@ -355,6 +439,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
     }
     if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
       toolCalls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      toolInvocationIds.push(String(request.headers["x-lemmacomputer-tool-invocation-id"]));
       response.end(JSON.stringify({ content: [{ type: "text", text: "Exa result" }] }));
       return;
     }
@@ -419,6 +504,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
         ...process.env,
         LEMMACOMPUTER_CONNECTORS_BROKER: `http://127.0.0.1:${brokerPort}`,
         LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS: "60",
+        LEMMACOMPUTER_AGENT_INSTANCE_ID: agentInstanceId,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -450,6 +536,12 @@ test("the workspace broker isolates failed and slow connector discovery and repr
         name: "web_search",
         arguments: { query: "stable MCP bridges" },
       }]);
+      assert.match(toolInvocationIds[0]!, /^[0-9a-f-]{36}$/);
+      assert.equal(toolTerminals.length, 1);
+      assert.equal(toolTerminals[0]?.sourceInvocationId, toolInvocationIds[0]);
+      assert.equal((toolTerminals[0]?.terminal as Record<string, unknown>).outcome, "succeeded");
+      assert.equal((toolTerminals[0]?.terminal as Record<string, unknown>).failureClass, null);
+      assert.equal(typeof (toolTerminals[0]?.terminal as Record<string, unknown>).latencyMs, "number");
     } finally {
       stdio.kill("SIGTERM");
       await once(stdio, "exit");

@@ -3,7 +3,12 @@ import { managedProviderAliasForAccessGroup } from "@lemmacomputer/litellm-adapt
 import {
   DeterministicModelRouter,
   RoutingDecisionBindingAuthority,
+  qualifiedReasoningRouteCapabilities,
+  resolvedReasoningEfforts,
+  type AgentReasoningAdapterQualification,
   type ModelRoutingPolicy,
+  type ProductReasoningEffort,
+  type ResolvedReasoningEffort,
   type SignedRoutingBinding,
 } from "@lemmacomputer/model-router";
 import type {
@@ -155,6 +160,12 @@ export const changeRoutingRolloutSchema = z
     confirmation: z.string().optional(),
   })
   .superRefine((value, context) => {
+    if (value.mode !== "disabled")
+      context.addIssue({
+        code: "custom",
+        path: ["mode"],
+        message: "The deferred Auto routing lifecycle is unavailable in the Phase 0.5 release posture",
+      });
     if (
       value.mode === "enabled" &&
       value.confirmation !== "ENABLE AUTO ROUTING"
@@ -190,6 +201,7 @@ export const internalRoutingDecisionSchema = z.strictObject({
   taskBinding: z.string().min(32).max(4096),
   requestId: z.string().min(1).max(256),
   requestedServiceClass: z.enum(["auto", "lite", "balanced", "pro"]),
+  requestedReasoningEffort: z.enum(["auto", "low", "medium", "high"]).optional(),
   boundedSignals: z
     .array(
       z.enum([
@@ -213,6 +225,7 @@ export const internalRoutingDecisionSchema = z.strictObject({
     streaming: z.boolean().optional(),
     contextTokens: z.number().int().nonnegative().optional(),
     outputTokens: z.number().int().nonnegative().optional(),
+    reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
   }),
   expectedUsage: z
     .array(z.strictObject({ unit: usageUnit, quantity: money }))
@@ -264,6 +277,13 @@ export class RoutingAdministrationService {
       createdBy: actor.userId,
       deployments: input.deployments.map((deployment) => ({
         ...deployment,
+        capabilities: {
+          ...deployment.capabilities,
+          reasoning: qualifiedReasoningRouteCapabilities({
+            provider: deployment.provider,
+            providerModel: deployment.providerModel,
+          }),
+        },
         ...(deployment.providerAccountId
           ? { providerAccountId: deployment.providerAccountId }
           : {}),
@@ -364,6 +384,31 @@ const scaled = (value: string) => {
   return match[1] ? -amount : amount;
 };
 
+const reasoningEffortRank: Readonly<Record<ResolvedReasoningEffort, number>> = Object.freeze({
+  low: 0,
+  medium: 1,
+  high: 2,
+});
+
+const phase05ReasoningCeiling = (value: "disabled" | "low" | "medium" | "high" | "max") => (
+  value === "disabled" ? null : value === "max" ? "high" as const : value
+);
+
+const resolveTaskReasoningEffort = (
+  requested: ProductReasoningEffort | undefined,
+  maximum: "disabled" | "low" | "medium" | "high" | "max" | undefined,
+): ResolvedReasoningEffort | undefined => {
+  if (requested === undefined) return undefined;
+  if (maximum === undefined) throw new Error("AI task reasoning policy is missing");
+  const ceiling = phase05ReasoningCeiling(maximum);
+  if (ceiling === null) throw new Error("Reasoning effort is disabled by protected policy");
+  if (requested === "auto") return ceiling;
+  if (reasoningEffortRank[requested] > reasoningEffortRank[ceiling]) {
+    throw new Error("The requested reasoning effort exceeds protected policy");
+  }
+  return requested;
+};
+
 const outputTokenLimit = (
   policy: ModelRoutingPolicy,
   requestedServiceClass: z.infer<
@@ -374,8 +419,7 @@ const outputTokenLimit = (
   const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
   const teamClasses = new Set(policy.team?.allowedServiceClasses ?? policy.identity.allowedServiceClasses);
   const teamDeployments = new Set(policy.team?.allowedDeploymentIds ?? policy.identity.allowedDeploymentIds);
-  const fixedOnly = policy.mode === "disabled"
-    || (policy.mode === "shadow" && requestedServiceClass === "auto");
+  const fixedOnly = requestedServiceClass === "auto" && policy.mode !== "enabled";
   const limits = policy.deployments
     .filter((deployment) =>
       (!fixedOnly || deployment.id === policy.fixedDeploymentId)
@@ -420,6 +464,14 @@ const constrainOutputToPolicy = (
   };
 };
 
+// The chat selector only needs to prove that a route has the base token prices
+// required for a text turn. Real routing resolves the policy again with the
+// request's bounded usage estimate before enforcing price and budget limits.
+const chatTierReadinessUsage: UsageAmount[] = [
+  { unit: "input_uncached_token", quantity: "1" },
+  { unit: "output_token", quantity: "1" },
+];
+
 export class RoutingExecutionService {
   private readonly router: DeterministicModelRouter;
   constructor(
@@ -431,26 +483,162 @@ export class RoutingExecutionService {
   ) {
     this.router = new DeterministicModelRouter(store);
   }
+  async serviceClassOptions(
+    tenantId: string,
+    subjectId: string,
+  ): Promise<Array<{
+    value: "lite" | "balanced" | "pro";
+    available: boolean;
+    reasonCode: "ready" | "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable";
+  }>> {
+    const values = ["lite", "balanced", "pro"] as const;
+    const unavailable = (reasonCode: "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable") => (
+      values.map((value) => ({ value, available: false as const, reasonCode }))
+    );
+    const team = await this.teams.getCurrentDefaultSpendingTeam(tenantId, subjectId);
+    if (!team) return unavailable("policy_denied");
+    const resolved = await this.store.resolveEffectivePolicy(
+      tenantId,
+      team.id,
+      chatTierReadinessUsage,
+    );
+    if (!resolved) return unavailable("route_unavailable");
+    const policy = resolved.policy;
+    const identityClasses = new Set(policy.identity.allowedServiceClasses);
+    const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
+    const teamScope = policy.team ?? policy.identity;
+    const teamClasses = new Set(teamScope.allowedServiceClasses);
+    const teamDeployments = new Set(teamScope.allowedDeploymentIds);
+    const explicitSelectionAllowed = policy.identity.explicitSelectionAllowed
+      && teamScope.explicitSelectionAllowed
+      && policy.identity.forceServiceClass === null
+      && teamScope.forceServiceClass === null;
+    const approvedProviders = new Set(policy.approvedProviders);
+    const budgetEligible = new Set(policy.budgetEligibleDeploymentIds);
+
+    return values.map((value) => {
+      if (!explicitSelectionAllowed || !identityClasses.has(value) || !teamClasses.has(value)) {
+        return { value, available: false, reasonCode: "policy_denied" as const };
+      }
+      const contract = policy.serviceClassPolicies[value];
+      const policyEligible = policy.deployments.filter((deployment) => (
+        deployment.serviceClass === value
+        && identityDeployments.has(deployment.id)
+        && teamDeployments.has(deployment.id)
+        && contract.eligibleDeploymentIds.includes(deployment.id)
+        && deployment.approved
+        && deployment.evaluationPassed
+        && approvedProviders.has(deployment.provider)
+        && (!contract.capabilityFloor.vision || deployment.capabilities.vision)
+        && (!contract.capabilityFloor.tools || deployment.capabilities.tools)
+        && (!contract.capabilityFloor.streaming || deployment.capabilities.streaming)
+        && deployment.capabilities.contextTokens >= contract.capabilityFloor.contextTokens
+        && deployment.capabilities.outputTokens >= contract.capabilityFloor.outputTokens
+        && (!policy.requiredResidency || deployment.capabilities.residency.includes(policy.requiredResidency))
+      ));
+      if (!policyEligible.length) return { value, available: false, reasonCode: "route_unavailable" as const };
+      const priced = policyEligible.filter((deployment) => (
+        deployment.rateCardId
+        && deployment.expectedCost?.currency === policy.billingCurrency
+      ));
+      if (!priced.length) return { value, available: false, reasonCode: "pricing_unavailable" as const };
+      const healthy = priced.filter((deployment) => deployment.healthy);
+      if (!healthy.length) return { value, available: false, reasonCode: "provider_unavailable" as const };
+      if (!healthy.some((deployment) => budgetEligible.has(deployment.id))) {
+        return { value, available: false, reasonCode: "budget_unavailable" as const };
+      }
+      return { value, available: true, reasonCode: "ready" as const };
+    });
+  }
+  async reasoningOptions(
+    tenantId: string,
+    subjectId: string,
+    adapter: AgentReasoningAdapterQualification,
+  ): Promise<Record<
+    "auto" | "lite" | "balanced" | "pro",
+    ResolvedReasoningEffort[]
+  >> {
+    const empty = { auto: [], lite: [], balanced: [], pro: [] } as Record<
+      "auto" | "lite" | "balanced" | "pro",
+      ResolvedReasoningEffort[]
+    >;
+    const team = await this.teams.getCurrentDefaultSpendingTeam(tenantId, subjectId);
+    if (!team) return empty;
+    const resolved = await this.store.resolveEffectivePolicy(tenantId, team.id, [
+      { unit: "request", quantity: "1" },
+    ]);
+    if (!resolved) return empty;
+    const policy = resolved.policy;
+    const identityClasses = new Set(policy.identity.allowedServiceClasses);
+    const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
+    const teamClasses = new Set(policy.team?.allowedServiceClasses ?? policy.identity.allowedServiceClasses);
+    const teamDeployments = new Set(policy.team?.allowedDeploymentIds ?? policy.identity.allowedDeploymentIds);
+    const eligible = policy.deployments.filter((deployment) => (
+      identityClasses.has(deployment.serviceClass)
+      && teamClasses.has(deployment.serviceClass)
+      && identityDeployments.has(deployment.id)
+      && teamDeployments.has(deployment.id)
+      && policy.approvedProviders.includes(deployment.provider)
+      && deployment.approved
+      && deployment.healthy
+      && deployment.evaluationPassed
+      && deployment.capabilities.reasoning !== null
+      && deployment.capabilities.reasoning !== undefined
+    ));
+    const intersection = (deployments: typeof eligible) => deployments.length
+      ? resolvedReasoningEfforts.filter((effort) => (
+          adapter.effortLevels.includes(effort)
+          && deployments.every(
+            (deployment) => deployment.capabilities.reasoning?.effortLevels.includes(effort),
+          )
+        ))
+      : [];
+    const fixed = eligible.filter((deployment) => deployment.id === policy.fixedDeploymentId);
+    return {
+      auto: intersection(fixed),
+      ...Object.fromEntries(["lite", "balanced", "pro"].map((serviceClass) => [
+        serviceClass,
+        intersection(eligible.filter((deployment) => deployment.serviceClass === serviceClass)),
+      ])),
+    } as Record<"auto" | "lite" | "balanced" | "pro", ResolvedReasoningEffort[]>;
+  }
   private persisted(
     prior: Record<string, unknown>,
     status: "created" | "duplicate",
+    requestedReasoningEffort?: ProductReasoningEffort,
+    resolvedReasoningEffort?: ResolvedReasoningEffort,
   ) {
     const decisionId = String(prior.id);
     const tenantId = String(prior.tenant_id);
     const requestId = String(prior.request_id);
     const deploymentId = String(prior.executed_deployment_id);
+    const capabilities = prior.executed_capabilities as {
+      outputTokens?: unknown;
+      reasoning?: { effortLevels?: unknown } | null;
+    } | null;
+    if (
+      resolvedReasoningEffort
+      && (
+        !Array.isArray(capabilities?.reasoning?.effortLevels)
+        || !capabilities.reasoning.effortLevels.includes(resolvedReasoningEffort)
+      )
+    ) {
+      throw new Error("Persisted routing decision does not satisfy the requested reasoning effort");
+    }
     return {
       schemaVersion: 1,
       status,
       decisionId,
       requestedServiceClass: String(prior.requested_service_class),
       selectedServiceClass: String(prior.selected_service_class),
+      ...(requestedReasoningEffort ? { requestedReasoningEffort } : {}),
+      ...(resolvedReasoningEffort ? { resolvedReasoningEffort } : {}),
       reasonCode: String(prior.reason_code),
       executedDeploymentId: deploymentId,
       executedProviderDeployment: String(prior.executed_provider_deployment),
       executedModelGroup: executionModelGroup(tenantId, String(prior.executed_provider_deployment)),
       executedOutputTokenLimit: Number(
-        (prior.executed_capabilities as { outputTokens?: unknown } | null)?.outputTokens,
+        capabilities?.outputTokens,
       ),
       binding: this.bindings.issue({
         tenantId,
@@ -463,22 +651,45 @@ export class RoutingExecutionService {
     };
   }
   async decide(input: z.infer<typeof internalRoutingDecisionSchema>) {
-    const prior = await this.store.decisionByRequest(
-      input.tenantId,
-      input.requestId,
-    );
-    if (prior) return this.persisted(prior, "duplicate");
     const task = this.taskBindings.verify(input.taskBinding);
+    const resolvedReasoningEffort = resolveTaskReasoningEffort(
+      task.requestedReasoningEffort,
+      task.maximumReasoningEffort,
+    );
     if (
       task.tenantId !== input.tenantId ||
       task.subjectId !== input.subjectId ||
       task.workspaceId !== input.workspaceId ||
       task.agentId !== input.agentId ||
-      task.requestedServiceClass !== input.requestedServiceClass
+      task.requestedServiceClass !== input.requestedServiceClass ||
+      task.requestedReasoningEffort !== input.requestedReasoningEffort ||
+      (
+        input.requiredCapabilities.reasoningEffort !== undefined
+        && input.requiredCapabilities.reasoningEffort !== resolvedReasoningEffort
+      )
     )
       throw new Error(
         "AI task binding does not match the authenticated routing identity",
       );
+    const prior = await this.store.decisionByRequest(
+      input.tenantId,
+      input.requestId,
+    );
+    if (prior) return this.persisted(
+      prior,
+      "duplicate",
+      task.requestedReasoningEffort,
+      resolvedReasoningEffort,
+    );
+    const reasoningConstrainedInput = resolvedReasoningEffort
+      ? {
+          ...input,
+          requiredCapabilities: {
+            ...input.requiredCapabilities,
+            reasoningEffort: resolvedReasoningEffort,
+          },
+        }
+      : input;
     const team = await this.teams.getCurrentDefaultSpendingTeam(
       input.tenantId,
       input.subjectId,
@@ -494,8 +705,14 @@ export class RoutingExecutionService {
     );
     if (!resolved)
       throw new Error("Governed routing is not configured for this Team");
-    let constrained = constrainOutputToPolicy(input, resolved.policy);
-    if (constrained.input !== input) {
+    // Phase 0.5 never executes Auto, including for a previously-persisted
+    // rollout that predates this release posture. Explicit Lite/Balanced/Pro
+    // requests still use the pinned policy and immutable route map below.
+    if (input.requestedServiceClass === "auto") {
+      resolved = { ...resolved, policy: { ...resolved.policy, mode: "disabled" } };
+    }
+    let constrained = constrainOutputToPolicy(reasoningConstrainedInput, resolved.policy);
+    if (constrained.input !== reasoningConstrainedInput) {
       resolved = await this.store.resolveEffectivePolicy(
         input.tenantId,
         team.id,
@@ -503,6 +720,9 @@ export class RoutingExecutionService {
       );
       if (!resolved)
         throw new Error("Governed routing is not configured for this Team");
+      if (input.requestedServiceClass === "auto") {
+        resolved = { ...resolved, policy: { ...resolved.policy, mode: "disabled" } };
+      }
       constrained = constrainOutputToPolicy(constrained.input, resolved.policy);
     }
     if (this.budgets && resolved.rollout.mode !== "disabled") {
@@ -556,7 +776,12 @@ export class RoutingExecutionService {
       const concurrent = await this.store.decision(input.tenantId, recorded.id);
       if (!concurrent)
         throw new Error("Persisted routing decision is unavailable");
-      return this.persisted(concurrent, "duplicate");
+      return this.persisted(
+        concurrent,
+        "duplicate",
+        task.requestedReasoningEffort,
+        resolvedReasoningEffort,
+      );
     }
     return {
       schemaVersion: 1,
@@ -564,6 +789,8 @@ export class RoutingExecutionService {
       decisionId: recorded.id,
       requestedServiceClass: decision.requestedServiceClass,
       selectedServiceClass: decision.selectedServiceClass,
+      ...(task.requestedReasoningEffort ? { requestedReasoningEffort: task.requestedReasoningEffort } : {}),
+      ...(resolvedReasoningEffort ? { resolvedReasoningEffort } : {}),
       reasonCode: decision.reasonCode,
       executedDeploymentId: decision.executedDeployment.id,
       executedProviderDeployment: decision.executedDeployment.deployment,

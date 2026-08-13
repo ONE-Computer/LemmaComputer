@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 
 export * from "./authentication.js";
+export * from "./tool-audit.js";
 
 export const workspaceStates = [
   "not_created",
@@ -641,7 +642,7 @@ export const saveSandboxSettingsSchema = z.object({
   profileId: sandboxProfileIdSchema,
   applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).default(["firefox"]),
   modelAlias: sandboxModelAliasSchema.optional(),
-  requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
+  requestedServiceClass: workspaceRequestedServiceClassSchema.default("balanced"),
   agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length).refine(
     (ids) => new Set(ids).size === ids.length,
     "Agent selections must not contain duplicates",
@@ -787,6 +788,10 @@ export const runtimeAgentPolicySchema = z.object({
 }).strict();
 export type RuntimeAgentPolicy = z.infer<typeof runtimeAgentPolicySchema>;
 
+export const workspaceReasoningEffortLevels = ["disabled", "low", "medium", "high", "max"] as const;
+export const workspaceReasoningEffortSchema = z.enum(workspaceReasoningEffortLevels);
+export type WorkspaceReasoningEffort = z.infer<typeof workspaceReasoningEffortSchema>;
+
 export const runtimePolicySchema = z.object({
   schemaVersion: z.literal(1),
   policyVersionId: z.string().min(1),
@@ -805,6 +810,7 @@ export const runtimePolicySchema = z.object({
   modelAlias: z.string().min(1).max(128),
   mcpServer: z.string().min(1).max(128),
   requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
+  maximumReasoningEffort: workspaceReasoningEffortSchema.optional(),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
   mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
   activeMcpServers: z.array(z.string().min(1).max(128)).max(32).optional(),
@@ -970,12 +976,22 @@ export const chatSessionIdSchema = z.string().regex(
   /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
   "Invalid chat session identifier",
 );
+export const chatReasoningEffortLevels = ["auto", "low", "medium", "high"] as const;
+export const chatReasoningEffortSchema = z.enum(chatReasoningEffortLevels);
+export type ChatReasoningEffort = z.infer<typeof chatReasoningEffortSchema>;
+// Phase 0.5 chat is deliberately explicit. Auto remains an internal routing
+// request type for non-chat compatibility and future lifecycle work, but the
+// employee chat boundary accepts only an organization-approved model tier.
+export const chatRequestedServiceClassSchema = z.enum(["lite", "balanced", "pro"]);
+export type ChatRequestedServiceClass = z.infer<typeof chatRequestedServiceClassSchema>;
 export const chatPartIdSchema = z.string().regex(
   /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
   "Invalid chat part identifier",
 );
 export const createChatSessionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
+  requestedServiceClass: chatRequestedServiceClassSchema.default("balanced"),
+  reasoningEffort: chatReasoningEffortSchema.optional(),
 }).strict();
 
 export const chatTurnStateSchema = z.enum(["streaming", "needs_input", "completed", "cancelled", "failed"]);
@@ -1099,11 +1115,9 @@ export const chatUiMessageSchema = z.object({
 }).strict();
 export type ChatUiMessage = z.infer<typeof chatUiMessageSchema>;
 
-export const chatRequestedServiceClassSchema = z.enum(["auto", "lite", "balanced", "pro"]);
-export type ChatRequestedServiceClass = z.infer<typeof chatRequestedServiceClassSchema>;
-
 export const sendChatTurnSchema = z.object({
-  requestedServiceClass: chatRequestedServiceClassSchema.default("auto"),
+  requestedServiceClass: chatRequestedServiceClassSchema.default("balanced"),
+  reasoningEffort: chatReasoningEffortSchema.optional(),
   message: chatUiMessageSchema.superRefine((message, context) => {
     const textParts = message.parts.filter((part) => part.type === "text");
     const fileParts = message.parts.filter((part) => part.type === "file");
@@ -1854,6 +1868,7 @@ export const mcpPolicyRequestSchema = z.strictObject({
   workspaceId: z.uuid(),
   agentId: z.string().min(1).max(128),
   agentInstanceId: z.uuid().nullable().default(null),
+  sourceInvocationId: z.uuid().nullable().default(null),
   policyVersionId: z.string().min(1).max(128).nullable(),
   policyHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   operationId: z.uuid().nullable(),
@@ -1919,9 +1934,6 @@ export const protectedPolicyTemplateVersionIdSchema = z.string().regex(/^pbtv_[a
 export const productReleaseKeyIdSchema = z.string().regex(/^prk_[a-z0-9][a-z0-9_]{2,63}$/);
 export const protectedPolicyConnectorIdSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(128);
 export const protectedPolicyToolIdSchema = z.string().min(1).max(128);
-export const workspaceReasoningEffortLevels = ["disabled", "low", "medium", "high", "max"] as const;
-export const workspaceReasoningEffortSchema = z.enum(workspaceReasoningEffortLevels);
-export type WorkspaceReasoningEffort = z.infer<typeof workspaceReasoningEffortSchema>;
 export const workspaceCapabilityIds = ["ai-assistant", "coding-tools", "m365-read", "m365-write-protected"] as const;
 export const workspaceCapabilityIdSchema = z.enum(workspaceCapabilityIds);
 export type WorkspaceCapabilityId = z.infer<typeof workspaceCapabilityIdSchema>;

@@ -30,6 +30,13 @@ accepts identity only from LiteLLM's authenticated key projection. It carries
 lineage between v1.93 retry/fallback hooks in callback-signed metadata; client
 metadata cannot create a parent or change tenant attribution.
 
+For qualified Claude routes, the admission snapshot also records
+`requested_reasoning_effort` (`auto`, `low`, `medium`, or `high`) and the
+governed `resolved_reasoning_effort` (`low`, `medium`, or `high`). The requested
+value must match the signed task binding. These are routing facts, not hidden
+reasoning content; billable provider-reported reasoning remains the separate
+`reasoning_token` usage unit.
+
 ## Normalized usage units
 
 Usage is stored as allow-listed quantities, not provider response payloads.

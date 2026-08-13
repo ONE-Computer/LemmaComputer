@@ -217,8 +217,9 @@ need host Docker authority.
 
 1. Chat or the managed AI client selects a requested service class. The
    workspace configuration supplies the default; Chat may apply a
-   per-conversation override. Auto, Lite, Balanced, and Pro are product
-   contracts rather than provider model names.
+   per-conversation override. Lite, Balanced, and Pro are product contracts
+   rather than provider model names. `lemmacomputer-auto` is only the internal
+   synthetic gateway transport, not a selectable employee mode.
 2. The root-owned loopback broker restricts paths, removes requester-supplied
    LemmaComputer and LiteLLM routing metadata, and forwards
    `lemmacomputer-auto` with its workspace-and-agent key and signed task binding.

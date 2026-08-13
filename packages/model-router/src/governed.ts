@@ -19,6 +19,255 @@ export type InternalTaskClass = (typeof internalTaskClasses)[number];
 export type RoutingMode = (typeof routingModes)[number];
 export type ManagedRoutingProvider =
   "foundry" | "openai" | "anthropic" | "glm" | "bedrock";
+export const productReasoningEfforts = ["auto", "low", "medium", "high"] as const;
+export const resolvedReasoningEfforts = ["low", "medium", "high"] as const;
+export type ProductReasoningEffort = (typeof productReasoningEfforts)[number];
+export type ResolvedReasoningEffort = (typeof resolvedReasoningEfforts)[number];
+export type QualifiedReasoningCapabilities = {
+  qualificationId: string;
+  providerMechanism: string;
+  thinkingMode: "adaptive" | "budgeted" | "opaque";
+  effortLevels: ResolvedReasoningEffort[];
+  defaultEffort: ResolvedReasoningEffort;
+  interleavedThinking: boolean;
+  reasoningTokenTelemetry: boolean;
+};
+
+type ReasoningRouteReviewBase = {
+  provider: ManagedRoutingProvider;
+  providerModels: readonly string[];
+  providerMechanism: string;
+  effortLevels: readonly ResolvedReasoningEffort[];
+};
+
+export type ReasoningRouteQualificationRegistration = ReasoningRouteReviewBase & {
+  reviewStatus: "qualified";
+  qualificationId: string;
+  thinkingMode: QualifiedReasoningCapabilities["thinkingMode"];
+  defaultEffort: ResolvedReasoningEffort;
+  interleavedThinking: boolean;
+  reasoningTokenTelemetry: boolean;
+};
+
+export type ReasoningRouteDiscovery = ReasoningRouteReviewBase & {
+  reviewStatus: "discovery";
+  discoveryId: string;
+  blockingEvidence: readonly string[];
+};
+
+export type ReasoningRouteReview =
+  | ReasoningRouteQualificationRegistration
+  | ReasoningRouteDiscovery;
+
+export type AgentReasoningAdapterQualification = {
+  qualificationId: string;
+  agentCatalogId: string;
+  clientVersion: string;
+  effortLevels: ResolvedReasoningEffort[];
+  conversationPinned: true;
+  signedTaskBinding: true;
+  providerEffortAuthority: "governed-route";
+};
+
+type AgentReasoningAdapterReviewBase = {
+  agentCatalogId: string;
+  clientVersion: string;
+  effortLevels: readonly ResolvedReasoningEffort[];
+  conversationPinned: true;
+  signedTaskBinding: true;
+  providerEffortAuthority: "governed-route";
+};
+
+export type AgentReasoningAdapterRegistration = AgentReasoningAdapterReviewBase & {
+  reviewStatus: "qualified";
+  qualificationId: string;
+};
+
+export type AgentReasoningAdapterDiscovery = AgentReasoningAdapterReviewBase & {
+  reviewStatus: "discovery";
+  discoveryId: string;
+  blockingEvidence: readonly string[];
+};
+
+export type AgentReasoningAdapterReview =
+  | AgentReasoningAdapterRegistration
+  | AgentReasoningAdapterDiscovery;
+
+export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-effort-route-2026-08-13";
+export const openAiReasoningRouteDiscoveryId = "openai-gpt-5.6-managed-effort-route-discovery-2026-08-13";
+export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
+export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
+export const codexReasoningAdapterDiscoveryId = "codex-cli-0.144.4-governed-effort-discovery-2026-08-13";
+
+const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
+  Object.freeze({
+    reviewStatus: "qualified",
+    qualificationId: anthropicReasoningRouteQualificationId,
+    provider: "anthropic",
+    providerModels: Object.freeze(["claude-sonnet-4-6", "claude-opus-4-8"]),
+    providerMechanism: "anthropic-adaptive-effort",
+    thinkingMode: "adaptive",
+    effortLevels: resolvedReasoningEfforts,
+    defaultEffort: "high",
+    interleavedThinking: true,
+    reasoningTokenTelemetry: true,
+  }),
+  Object.freeze({
+    reviewStatus: "discovery",
+    discoveryId: openAiReasoningRouteDiscoveryId,
+    provider: "openai",
+    providerModels: Object.freeze(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]),
+    providerMechanism: "openai-compatible-reasoning-effort",
+    effortLevels: resolvedReasoningEfforts,
+    blockingEvidence: Object.freeze([
+      "live_reasoning_with_streaming_and_tools",
+      "live_provider_usage_cost_latency_and_cache_evidence",
+      "live_fail_closed_route_mismatch_evidence",
+    ]),
+  }),
+]);
+
+const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterReview[] = Object.freeze([
+  Object.freeze({
+    reviewStatus: "qualified",
+    qualificationId: claudeReasoningAdapterQualificationId,
+    agentCatalogId: "claude-cli",
+    clientVersion: "2.1.215",
+    effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  }),
+  Object.freeze({
+    reviewStatus: "discovery",
+    discoveryId: hermesReasoningAdapterDiscoveryId,
+    agentCatalogId: "hermes-claw",
+    clientVersion: "0.19.0",
+    effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+    blockingEvidence: Object.freeze([
+      "live_reasoning_with_mcp_tools",
+      "live_streaming_and_hidden_reasoning_suppression",
+      "live_usage_cost_latency_and_cache_evidence",
+    ]),
+  }),
+  Object.freeze({
+    reviewStatus: "discovery",
+    discoveryId: codexReasoningAdapterDiscoveryId,
+    agentCatalogId: "codex-cli",
+    clientVersion: "0.144.4",
+    effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+    blockingEvidence: Object.freeze([
+      "live_reasoning_with_mcp_tools",
+      "live_streaming_and_hidden_reasoning_suppression",
+      "live_usage_cost_latency_and_cache_evidence",
+    ]),
+  }),
+]);
+
+/**
+ * Return the code-owned review record for an exact runtime pin.
+ *
+ * Discovery records are deliberately visible to qualification tooling while
+ * remaining ineligible for product controls. This lets an inspected adapter
+ * land without silently claiming that a credentialed provider run occurred.
+ */
+export const agentReasoningAdapterReview = (
+  input: { agentCatalogId: string; clientVersion: string },
+  reviews: readonly AgentReasoningAdapterReview[] = reviewedAgentReasoningAdapters,
+): AgentReasoningAdapterReview | null => {
+  const review = reviews.find((candidate) => (
+    candidate.agentCatalogId === input.agentCatalogId
+    && candidate.clientVersion === input.clientVersion
+  ));
+  if (!review) return null;
+  return {
+    ...review,
+    effortLevels: [...review.effortLevels],
+    ...(review.reviewStatus === "discovery"
+      ? { blockingEvidence: [...review.blockingEvidence] }
+      : {}),
+  } as AgentReasoningAdapterReview;
+};
+
+/**
+ * Resolve a code-owned agent adapter qualification.
+ *
+ * Agent runtimes are registered independently from provider/model routes. A
+ * future adapter can join this registry without adding agent-specific branches
+ * to Control or Web. Unknown catalog IDs and client versions fail closed.
+ */
+export const qualifiedAgentReasoningAdapter = (
+  input: { agentCatalogId: string; clientVersion: string },
+  reviews: readonly AgentReasoningAdapterReview[] = reviewedAgentReasoningAdapters,
+): AgentReasoningAdapterQualification | null => {
+  const registration = agentReasoningAdapterReview(input, reviews);
+  if (!registration || registration.reviewStatus !== "qualified") return null;
+  return {
+    qualificationId: registration.qualificationId,
+    agentCatalogId: registration.agentCatalogId,
+    clientVersion: registration.clientVersion,
+    effortLevels: [...registration.effortLevels],
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  };
+};
+
+/**
+ * Return the code-owned review for an exact provider/model route.
+ *
+ * Discovery routes are available to qualification tooling but remain absent
+ * from persisted route capabilities and Web Chat until promoted by review.
+ */
+export const reasoningRouteReview = (
+  input: { provider: ManagedRoutingProvider; providerModel: string },
+  reviews: readonly ReasoningRouteReview[] = reviewedReasoningRoutes,
+): ReasoningRouteReview | null => {
+  const review = reviews.find((candidate) => (
+    candidate.provider === input.provider
+    && candidate.providerModels.includes(input.providerModel)
+  ));
+  if (!review) return null;
+  return {
+    ...review,
+    providerModels: [...review.providerModels],
+    effortLevels: [...review.effortLevels],
+    ...(review.reviewStatus === "discovery"
+      ? { blockingEvidence: [...review.blockingEvidence] }
+      : {}),
+  } as ReasoningRouteReview;
+};
+
+/**
+ * Product-owned qualification, not provider-name inference.
+ *
+ * Exact provider/model routes join through reviewed registrations without
+ * adding provider branches to Control, Web, or an agent adapter. Unknown
+ * routes deliberately return null. Agent runtime qualification is resolved
+ * independently by `qualifiedAgentReasoningAdapter`.
+ */
+export const qualifiedReasoningRouteCapabilities = (input: {
+  provider: ManagedRoutingProvider;
+  providerModel: string;
+}, reviews: readonly ReasoningRouteReview[] = reviewedReasoningRoutes): QualifiedReasoningCapabilities | null => {
+  const registration = reasoningRouteReview(input, reviews);
+  if (!registration || registration.reviewStatus !== "qualified") return null;
+  return {
+    qualificationId: registration.qualificationId,
+    providerMechanism: registration.providerMechanism,
+    thinkingMode: registration.thinkingMode,
+    effortLevels: [...registration.effortLevels],
+    defaultEffort: registration.defaultEffort,
+    interleavedThinking: registration.interleavedThinking,
+    reasoningTokenTelemetry: registration.reasoningTokenTelemetry,
+  };
+};
 export type RoutingSignal =
   | "short_request"
   | "code_request"
@@ -49,6 +298,7 @@ export type RoutingCapabilities = {
   contextTokens: number;
   outputTokens: number;
   residency: string[];
+  reasoning?: QualifiedReasoningCapabilities | null;
 };
 export type ExactMoney = { amount: string; currency: string };
 export type RoutingDeployment = {
@@ -120,7 +370,7 @@ export type ModelRoutingRequest = {
       RoutingCapabilities,
       "vision" | "tools" | "streaming" | "contextTokens" | "outputTokens"
     >
-  >;
+  > & { reasoningEffort?: ResolvedReasoningEffort };
   unavailableDeploymentIds?: string[];
 };
 export type SessionAffinity = {
@@ -445,6 +695,10 @@ const satisfies = (
     deployment.capabilities.contextTokens &&
   (request.requiredCapabilities.outputTokens ?? 0) <=
     deployment.capabilities.outputTokens &&
+  (!request.requiredCapabilities.reasoningEffort
+    || deployment.capabilities.reasoning?.effortLevels.includes(
+      request.requiredCapabilities.reasoningEffort,
+    ) === true) &&
   (!residency || deployment.capabilities.residency.includes(residency));
 
 export class DeterministicModelRouter {
@@ -487,14 +741,19 @@ export class DeterministicModelRouter {
         "The rollout fixed route is not in this mapping",
       );
     if (
+      requested === "auto" &&
       policy.mode !== "enabled" &&
-      (!fixed.healthy || unavailable.has(fixed.id))
+      (
+        !fixed.healthy
+        || unavailable.has(fixed.id)
+        || !satisfies(fixed, request, policy.requiredResidency)
+      )
     )
       throw new ModelRoutingError(
         "NO_ELIGIBLE_DEPLOYMENT",
-        "The fixed rollout deployment is unavailable; governed routing will not bypass its binding",
+        "The fixed rollout deployment is unavailable or lacks a required capability; governed routing will not bypass its binding",
       );
-    if (policy.mode === "disabled")
+    if (requested === "auto" && policy.mode === "disabled")
       return {
         requestId: request.requestId,
         requestedAlias: "lemmacomputer-auto",
@@ -596,9 +855,12 @@ export class DeterministicModelRouter {
     let selected: RoutingDeployment | undefined;
     const targetCurrency = policy.billingCurrency;
     let availabilityBlocked = false;
-    for (const candidateClass of selectionDenied
+    const candidateClasses = selectionDenied
       ? []
-      : productServiceClasses.slice(classIndex(selectedClass))) {
+      : requested === "auto"
+        ? productServiceClasses.slice(classIndex(selectedClass))
+        : [selectedClass];
+    for (const candidateClass of candidateClasses) {
       if (!scope.allowedServiceClasses.includes(candidateClass)) continue;
       const contract = policy.serviceClassPolicies[candidateClass];
       let classHealthBlocked = false;

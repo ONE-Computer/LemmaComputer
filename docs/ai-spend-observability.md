@@ -6,6 +6,11 @@ ledger. They are available in both `customer-managed` and `hosted`
 deployments. They are separate from personal Settings and employee Activity and
 never read raw provider traces.
 
+The member-scoped counterpart is documented in
+[Personal AI usage overview](./personal-ai-usage.md). It reconciles to this read
+model for the authenticated subject without exposing administrator dimensions
+or controls.
+
 Overview summarizes the current month: provider cost, aggregate matching Team
 budgets, forecast, a 30-day trend, top spending Teams, and the separately
 disclosed AI token-emissions proxy. Spend Details provides date filters,

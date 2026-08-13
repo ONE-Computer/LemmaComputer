@@ -1,13 +1,13 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
 import { organizationWorkspacePolicyConstraintsSchema, protectedPolicySelectionSchema, type EffectiveProtectedWorkspacePolicy } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
-import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
+import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { PostgresProtectedWorkspacePolicyStore } from "@lemmacomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
@@ -16,6 +16,7 @@ import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
+import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
@@ -65,6 +66,7 @@ import {
 } from "./protected-workspace-policy.js";
 
 import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
+import { parsePersonalAiUsageQuery, personalAiUsageReport } from "./personal-ai-usage.js";
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
@@ -144,11 +146,28 @@ const sandboxModels = [
 ] as const;
 
 const workspaceServiceClasses = [
-  { value: "auto", displayName: "Auto (Beta)", description: "Fixed Balanced by default; dynamic selection requires explicit Team enablement." },
   { value: "lite", displayName: "Lite", description: "Fast, economical work." },
   { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
   { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },
 ] as const;
+type ExplicitWorkspaceServiceClass = typeof workspaceServiceClasses[number]["value"];
+const explicitWorkspaceServiceClassValues = new Set<string>(workspaceServiceClasses.map(({ value }) => value));
+const assignedWorkspaceServiceClasses = (document: Record<string, unknown>): ExplicitWorkspaceServiceClass[] => {
+  if (!Array.isArray(document.serviceClasses)) return workspaceServiceClasses.map(({ value }) => value);
+  const assigned = document.serviceClasses.filter(
+    (value): value is ExplicitWorkspaceServiceClass => explicitWorkspaceServiceClassValues.has(String(value)),
+  );
+  if (document.serviceClasses.includes("auto") && !assigned.includes("balanced")) assigned.push("balanced");
+  return assigned;
+};
+const explicitWorkspaceServiceClass = (
+  value: unknown,
+  assigned: ExplicitWorkspaceServiceClass[],
+): ExplicitWorkspaceServiceClass | null => (
+  typeof value === "string" && explicitWorkspaceServiceClassValues.has(value) && assigned.includes(value as ExplicitWorkspaceServiceClass)
+    ? value as ExplicitWorkspaceServiceClass
+    : assigned.includes("balanced") ? "balanced" : assigned[0] ?? null
+);
 
 const sandboxApplications = [
   sandboxApplicationSchema.parse({
@@ -433,6 +452,7 @@ const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeSco
     || /^\/internal\/v1\/agent\/uploads\/[^/]+\/(?:begin|complete|fail)$/.test(path)
   )) return "agent:uploads";
   if (method === "POST" && path === "/internal/v1/agent/deletions") return "agent:deletions";
+  if (method === "POST" && path === "/internal/v1/agent/tool-audit/terminal") return "agent:tool-audit";
   return null;
 };
 
@@ -481,6 +501,7 @@ export function createControlServer(
     agentChatSecret?: string;
     agentChatClient?: AgentChatClient;
     agentInstanceStore?: AgentInstanceStore;
+    toolAuditStore?: ToolAuditStore;
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
     telegramTokenIntake?: {
@@ -627,10 +648,14 @@ export function createControlServer(
     turnId?: string,
     requestedServiceClass: "auto"|"lite"|"balanced"|"pro" = "auto",
     agentInstanceId?: string,
+    requestedReasoningEffort?: "auto"|"low"|"medium"|"high",
+    maximumReasoningEffort?: "disabled"|"low"|"medium"|"high"|"max",
   ) => usageBindings?.issue({
     tenantId: owner.tenantId, subjectId: owner.subjectId, workspaceId, agentId,
     contextKind, taskId, ...(sessionId ? { sessionId } : {}), ...(turnId ? { turnId } : {}),
     ...(agentInstanceId ? { agentInstanceId } : {}),
+    ...(requestedReasoningEffort ? { requestedReasoningEffort } : {}),
+    ...(maximumReasoningEffort ? { maximumReasoningEffort } : {}),
     requestedServiceClass,
   });
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
@@ -638,6 +663,76 @@ export function createControlServer(
   const routingExecution=security.routingStore&&security.teamStore&&usageBindings?new RoutingExecutionService(security.routingStore,security.teamStore,new RoutingDecisionBindingAuthority(security.usageTaskBindingSecret!),usageBindings,security.budgetStore):undefined;
   const routing=security.routingStore?new RoutingAdministrationService(security.routingStore):undefined;
   const requireRouting=()=>{if(!routing)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
+  const chatServiceClassOptionsFor = async (owner: IdentityContext) => routingExecution
+    ? routingExecution.serviceClassOptions(owner.tenantId, owner.subjectId)
+    : [
+        { value: "lite" as const, available: false, reasonCode: "route_unavailable" as const },
+        { value: "balanced" as const, available: true, reasonCode: "ready" as const },
+        { value: "pro" as const, available: false, reasonCode: "route_unavailable" as const },
+      ];
+  const requireChatServiceClass = async (
+    owner: IdentityContext,
+    serviceClass: "lite" | "balanced" | "pro",
+  ) => {
+    const option = (await chatServiceClassOptionsFor(owner)).find((candidate) => candidate.value === serviceClass);
+    if (option?.available) return;
+    const reasonCode: "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable" = option && !option.available
+      ? option.reasonCode === "ready" ? "route_unavailable" : option.reasonCode
+      : "route_unavailable";
+    const failures: Record<typeof reasonCode, readonly [string, string, number, boolean]> = {
+      policy_denied: ["MODEL_TIER_DENIED", "That model tier is not allowed by your organization", 403, false],
+      pricing_unavailable: ["MODEL_TIER_PRICING_UNAVAILABLE", "Pricing is not ready for that model tier", 422, false],
+      provider_unavailable: ["MODEL_TIER_PROVIDER_UNAVAILABLE", "That model tier is temporarily unavailable", 503, true],
+      budget_unavailable: ["MODEL_TIER_BUDGET_UNAVAILABLE", "That model tier is unavailable under the current Team budget", 422, false],
+      route_unavailable: ["MODEL_TIER_ROUTE_UNAVAILABLE", "No ready route is available for that model tier", 503, true],
+    };
+    const failure = failures[reasonCode];
+    throw new LemmaComputerError(failure[0], failure[1], failure[2], failure[3]);
+  };
+  const reasoningEffortsFor = async (
+    owner: IdentityContext,
+    policy: RuntimePolicy,
+    catalogId: string,
+  ) => {
+    const empty = { auto: [], lite: [], balanced: [], pro: [] } as Record<
+      "auto" | "lite" | "balanced" | "pro",
+      Array<"auto" | "low" | "medium" | "high">
+    >;
+    const catalogEntry = ownedAgentCatalog.find((entry) => entry.id === catalogId);
+    const adapter = catalogEntry
+      ? qualifiedAgentReasoningAdapter({
+          agentCatalogId: catalogEntry.id,
+          clientVersion: catalogEntry.clientVersion,
+        })
+      : null;
+    if (!adapter || !routingExecution || !policy.maximumReasoningEffort) return empty;
+    const maximumRank = ({ disabled: 0, low: 1, medium: 2, high: 3, max: 3 } as const)[policy.maximumReasoningEffort];
+    if (maximumRank === 0) return empty;
+    const qualified = await routingExecution.reasoningOptions(owner.tenantId, owner.subjectId, adapter);
+    return Object.fromEntries(Object.entries(empty).map(([serviceClass]) => {
+      const levels = (qualified[serviceClass as keyof typeof qualified] ?? []).filter(
+        (effort) => ({ low: 1, medium: 2, high: 3 } as const)[effort] <= maximumRank,
+      );
+      return [serviceClass, levels.length ? ["auto", ...levels] : []];
+    })) as typeof empty;
+  };
+  const requireReasoningEffort = async (
+    owner: IdentityContext,
+    policy: RuntimePolicy,
+    catalogId: string,
+    serviceClass: "auto" | "lite" | "balanced" | "pro",
+    effort?: "auto" | "low" | "medium" | "high",
+  ) => {
+    if (!effort) return;
+    const options = await reasoningEffortsFor(owner, policy, catalogId);
+    if (!options[serviceClass].includes(effort)) {
+      throw new LemmaComputerError(
+        "MODEL_REASONING_EFFORT_UNAVAILABLE",
+        "That thinking effort is not qualified for the selected organization route",
+        422,
+      );
+    }
+  };
   const channelBroker = security.channelBrokerClient;
   const telegramRawTokenInputMode = security.telegramRawTokenInputMode ?? "legacy";
   const requireSpendObservability = (request: object) => {
@@ -699,6 +794,10 @@ export function createControlServer(
     store,
     operations,
     connections ? (actor, serverName, toolName) => connections.hostedToolPolicy(actor, serverName, toolName) : undefined,
+  ) : undefined;
+  const toolAudit = security.toolAuditStore ? new ToolAuditService(
+    security.toolAuditStore,
+    async (tenantId, serverName) => connections?.auditConnector(tenantId, serverName) ?? null,
   ) : undefined;
   const requireConnections = () => {
     if (!connections) throw new LemmaComputerError("MCP_CONNECTIONS_NOT_CONFIGURED", "MCP connections are not configured", 503, true);
@@ -1053,13 +1152,12 @@ export function createControlServer(
       const governedRoutingAvailable = await governedRoutingAvailableFor(value.tenantId);
       const document = effective.document as Record<string, unknown>;
       const availableAgentIds = assignedAgentIds(document);
-      const availableServiceClasses = Array.isArray(document.serviceClasses)
-        ? document.serviceClasses.filter((item): item is "auto" | "lite" | "balanced" | "pro" => ["auto", "lite", "balanced", "pro"].includes(String(item)))
-        : ["auto", "lite", "balanced", "pro"];
-      const requestedServiceClass = (saved?.requestedServiceClass ?? (typeof document.defaultServiceClass === "string" ? document.defaultServiceClass : "auto")) as "auto" | "lite" | "balanced" | "pro";
-      if (!availableServiceClasses.includes(requestedServiceClass)) {
-        throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "The selected service class is not assigned by the active policy", 403);
-      }
+      const availableServiceClasses = assignedWorkspaceServiceClasses(document);
+      const requestedServiceClass = explicitWorkspaceServiceClass(
+        saved?.requestedServiceClass ?? document.defaultServiceClass,
+        availableServiceClasses,
+      );
+      if (!requestedServiceClass) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "The active policy assigns no Phase 0.5 model tier", 403);
       policy = {
         ...runtimePolicyFor(
           effective,
@@ -1385,7 +1483,28 @@ export function createControlServer(
       if (!workspace) throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "The tool-call identity is not bound to this workspace", 403);
       await agentProcesses.requireActive({ identity: owner, workspace, logicalAgentId: input.agentId, agentInstanceId: input.agentInstanceId });
     }
-    return mcpPolicy.authorize(input, request.id);
+    const decision = await mcpPolicy.authorize(input, request.id);
+    if (toolAudit) await toolAudit.admitMcp(input, decision, request.id);
+    return decision;
+  });
+  app.post("/internal/v1/agent/tool-audit/terminal", async (request, reply) => {
+    if (!toolAudit) throw new LemmaComputerError("TOOL_AUDIT_NOT_CONFIGURED", "Tool compliance auditing is unavailable", 503, true);
+    const actor = agentPrincipals.get(request)!;
+    const agentInstanceId = await requireAgentInstance(request, actor);
+    if (!agentInstanceId) throw new LemmaComputerError("AGENT_INSTANCE_REQUIRED", "Tool calls require an authoritative agent process identity", 403);
+    const body = z.strictObject({
+      sourceInvocationId: z.uuid(),
+      terminal: toolAuditTerminalInputSchema,
+    }).parse(request.body ?? {});
+    const result = await toolAudit.finalizeMcp({
+      tenantId: actor.tenantId,
+      subjectId: actor.subjectId,
+      workspaceId: actor.workspaceId,
+      agentInstanceId,
+      sourceInvocationId: body.sourceInvocationId,
+      ...body.terminal,
+    });
+    return reply.code(result.status === "created" ? 201 : 200).send(result);
   });
   app.post("/internal/v1/workspace-access/authorize", async (request) => {
     const input = z.strictObject({
@@ -1590,6 +1709,9 @@ export function createControlServer(
       throw new LemmaComputerError("AI_USAGE_TASK_BINDING_MISMATCH", "The route preference is not assigned to this workspace agent", 403);
     }
     const agentInstanceId = await requireAgentInstance(request, actor);
+    if (input.requestedServiceClass !== "auto") {
+      await requireChatServiceClass(owner, input.requestedServiceClass);
+    }
     const binding = issueUsageTaskBinding(owner, actor.workspaceId, actor.agentId, "background", input.taskId, undefined, undefined, input.requestedServiceClass, agentInstanceId);
     if (!binding) throw new LemmaComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
     return { binding };
@@ -2179,6 +2301,20 @@ export function createControlServer(
     reply.header("cache-control", "no-store");
     return paginateSpendReport(report, query);
   });
+  app.get("/v1/me/ai-usage", async (request, reply) => {
+    const actor = principal(request);
+    if (!security.spendObservabilityStore) {
+      throw new LemmaComputerError("PERSONAL_AI_USAGE_NOT_CONFIGURED", "Your AI usage overview is unavailable", 503, true);
+    }
+    const range = {
+      ...parsePersonalAiUsageQuery(request.query),
+      userId: actor.userId,
+    };
+    const report = await readSpendReport(actor.tenantId, range);
+    const providers = await security.providerSettingsStore?.listProviderSettings(actor.tenantId) ?? [];
+    reply.header("cache-control", "private, no-store");
+    return { report: personalAiUsageReport(report, providers) };
+  });
   app.post("/v1/admin/spend/cost-coverage/acknowledgements", async (request, reply) => {
     const { actor, store: spendStore } = requireSpendObservability(request);
     const input = parseUnpricedUsageAcknowledgement(request.body);
@@ -2292,6 +2428,13 @@ export function createControlServer(
   app.get("/v1/admin/teams-audit", async (request) => {
     const actor = requirePermission(request, "audit.read");
     return { events: await requireTeams().listAuditEvents(actor.tenantId) };
+  });
+  app.get("/v1/admin/tool-audit", async (request, reply) => {
+    const actor = requirePermission(request, "audit.read");
+    if (!toolAudit) throw new LemmaComputerError("TOOL_AUDIT_NOT_CONFIGURED", "Tool compliance history is unavailable", 503, true);
+    return reply.header("cache-control", "no-store").send(
+      await toolAudit.query(actor.tenantId, request.query as Record<string, unknown>),
+    );
   });
   app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget",async(request)=>{
     const actor=requirePermission(request,"usage.read");return{status:await requireBudgets().get(actor,z.uuid().parse(request.params.teamId))};
@@ -3755,21 +3898,20 @@ export function createControlServer(
     const assignedApplications = assignedApplicationIds(document);
     const availableApplications = sandboxApplications.filter((application) => assignedApplications.includes(application.id));
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
-    const assignedServiceClasses = Array.isArray(document.serviceClasses)
-      ? document.serviceClasses.filter((item): item is "auto" | "lite" | "balanced" | "pro" => workspaceServiceClasses.some((entry) => entry.value === item))
-      : workspaceServiceClasses.map((entry) => entry.value);
+    const assignedServiceClasses = assignedWorkspaceServiceClasses(document);
     const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "lemmacomputer-auto" : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
-    if (!availableProfiles.length || !availableModels.length || !availableAgents.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, or agent", 500);
+    if (!availableProfiles.length || !availableModels.length || !availableAgents.length || !assignedServiceClasses.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, agent, or model tier", 500);
     if (!availableApplications.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const profileId = saved && availableProfiles.some((profile) => profile.id === saved.profileId) ? saved.profileId : availableProfiles[0]!.id;
     const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
     const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
-    const selectedServiceClass = saved?.requestedServiceClass ?? (typeof document.defaultServiceClass === "string" ? document.defaultServiceClass : "auto");
-    const requestedServiceClass = governedRoutingAvailable && assignedServiceClasses.includes(selectedServiceClass as typeof assignedServiceClasses[number])
-      ? selectedServiceClass
-      : assignedServiceClasses[0] ?? "auto";
+    const requestedServiceClass = explicitWorkspaceServiceClass(
+      saved?.requestedServiceClass ?? document.defaultServiceClass,
+      assignedServiceClasses,
+    );
+    if (!requestedServiceClass) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported Phase 0.5 model tier", 500);
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
@@ -3817,7 +3959,7 @@ export function createControlServer(
       availableModels,
       availableServiceClasses: governedRoutingAvailable
         ? workspaceServiceClasses.filter((serviceClass) => assignedServiceClasses.includes(serviceClass.value))
-        : workspaceServiceClasses.slice(0, 1),
+        : workspaceServiceClasses.filter((serviceClass) => serviceClass.value === "balanced" && assignedServiceClasses.includes(serviceClass.value)),
       agentIds: selectedAgentIds,
       availableAgents,
       ...(workspaceEgress ? { securityGroup: workspaceEgress } : {}),
@@ -3838,7 +3980,7 @@ export function createControlServer(
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
     const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
-    const serviceClasses = Array.isArray(document.serviceClasses) ? document.serviceClasses : workspaceServiceClasses.map((entry) => entry.value);
+    const serviceClasses = assignedWorkspaceServiceClasses(document);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : input.modelAlias;
     const agents = Array.isArray(document.agents) ? document.agents : ownedAgentCatalog.map((agent) => agent.id);
@@ -3846,7 +3988,7 @@ export function createControlServer(
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
     if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
     if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
-    if (!serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
+    if (input.requestedServiceClass === "auto" || !serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
     const current = await store.getCurrent(actor.identity, input.grantId);
     if (current && !["not_created", "stopped", "failed"].includes(current.state)) throw new LemmaComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop the workspace before changing its profile or model route", 409, true);
     await store.saveSandboxSettings(actor.identity, {
@@ -4257,7 +4399,9 @@ export function createControlServer(
   });
   app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/agents", async (request, reply) => {
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const assigned = await service.agentChatAgents(identity(request), policy, request.params.workspaceId);
+    const owner = identity(request);
+    const serviceClassOptions = await chatServiceClassOptionsFor(owner);
+    const assigned = await service.agentChatAgents(owner, policy, request.params.workspaceId);
     const running = ["ready", "open"].includes(assigned.state);
     const agents = await Promise.all(assigned.accesses.map(async (access) => {
       if (!running) {
@@ -4275,6 +4419,7 @@ export function createControlServer(
           displayName: access.displayName,
           state: "ready",
           reasonCode: "CHAT_AGENT_READY",
+          reasoningEffortsByServiceClass: await reasoningEffortsFor(owner, policy, access.catalogId),
         };
       } catch (error) {
         if (!(error instanceof LemmaComputerError) || error.code !== "CHAT_RUNTIME_UNAVAILABLE") throw error;
@@ -4286,7 +4431,7 @@ export function createControlServer(
         };
       }
     }));
-    return reply.header("cache-control", "no-store").send({ workspaceId: request.params.workspaceId, agents });
+    return reply.header("cache-control", "no-store").send({ workspaceId: request.params.workspaceId, serviceClassOptions, agents });
   });
   app.get<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/status", async (request, reply) => {
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
@@ -4336,8 +4481,11 @@ export function createControlServer(
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const input = createChatSessionSchema.parse(request.body ?? {});
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
-    const session = await agentChat.createSession(access, input.title);
+    const owner = identity(request);
+    await requireChatServiceClass(owner, input.requestedServiceClass);
+    await requireReasoningEffort(owner, policy, catalogId, input.requestedServiceClass, input.reasoningEffort);
+    const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
+    const session = await agentChat.createSession(access, input.title, input.reasoningEffort);
     return reply.code(201).header("cache-control", "no-store").send({ ...session, agentCatalogId: catalogId });
   });
   app.get<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages", async (request, reply) => {
@@ -4475,6 +4623,15 @@ export function createControlServer(
       throw new LemmaComputerError("CHAT_AGENT_MISMATCH", "The submitted message does not belong to the selected agent", 409);
     }
     const { policy, workspace } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    const owner = identity(request);
+    await requireChatServiceClass(owner, input.requestedServiceClass);
+    await requireReasoningEffort(
+      owner,
+      policy,
+      catalogId,
+      input.requestedServiceClass,
+      input.reasoningEffort,
+    );
     const includesImage = input.message.parts.some(
       (part) => part.type === "file" && part.mediaType.startsWith("image/"),
     );
@@ -4496,7 +4653,6 @@ export function createControlServer(
         );
       }
     }
-    const owner = identity(request);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
     const processLifecycle = await agentProcesses.beginBrowserChat({
       identity: owner,
@@ -4527,9 +4683,11 @@ export function createControlServer(
         const usageTaskBinding = issueUsageTaskBinding(
           owner, request.params.workspaceId, access.agentId, "chat", input.message.id, sessionId,
           undefined, input.requestedServiceClass, agentInstanceId,
+          input.reasoningEffort, policy.maximumReasoningEffort,
         );
         for await (const event of agentChat.streamTurn(
           access, sessionId, input.message, undefined, usageTaskBinding, agentInstanceId,
+          input.reasoningEffort,
         )) {
           if (event.type === "turn-start") {
             await processLifecycle.markRunning(event.turnId);
@@ -4824,6 +4982,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const spendObservabilityStore = PostgresSpendObservabilityStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   const agentInstanceStore = PostgresAgentInstanceStore.fromConnectionString(env.DATABASE_URL);
+  const toolAuditStore = PostgresToolAuditStore.fromConnectionString(env.DATABASE_URL);
+  await toolAuditStore.ensureMonthlyPartitions();
   const productPolicyRelease = await loadProductPolicyRelease();
   const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(
     env.DATABASE_URL,
@@ -5034,8 +5194,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       )
     : undefined;
   await agentInstanceStore.reconcileAbandoned(new Date(Date.now() - 5 * 60_000));
+  await toolAuditStore.reconcileUnconfirmed(new Date(Date.now() - 5 * 60_000));
   const agentInstanceReconciliationTimer = setInterval(() => {
     void agentInstanceStore.reconcileAbandoned(new Date(Date.now() - 5 * 60_000)).catch(() => undefined);
+    void toolAuditStore.reconcileUnconfirmed(new Date(Date.now() - 5 * 60_000)).catch(() => undefined);
   }, 60_000);
   agentInstanceReconciliationTimer.unref();
   const app = createControlServer(
@@ -5089,6 +5251,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       policyBundleAuthority,
       agentChatSecret: env.AGENT_CHAT_SECRET,
       agentInstanceStore,
+      toolAuditStore,
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
       telegramTokenIntake,
@@ -5137,6 +5300,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await spendObservabilityStore.close();
     await identityPolicyStore.close();
     await agentInstanceStore.close();
+    await toolAuditStore.close();
     await protectedWorkspacePolicyStore.close();
     await platformOperatorStore?.close();
   });

@@ -331,51 +331,14 @@ os.chmod(path, 0o644)
 os.chown(path, 0, 0)
 PY
 if agent_enabled claude-desktop; then
-python3 - "$LEMMACOMPUTER_MODEL_ALIAS" "$model_label" "$LEMMACOMPUTER_COWORK_ENABLED" "$claude_code_for_desktop_enabled" <<'PY'
-import json
-import os
-import sys
-
-model, label, cowork_enabled, code_enabled = sys.argv[1:]
-document = {
-    "inferenceProvider": "gateway",
-    "inferenceGatewayBaseUrl": "http://127.0.0.1:4312",
-    "inferenceGatewayApiKey": "lemmacomputer-loopback-broker",
-    "inferenceGatewayAuthScheme": "bearer",
-    "modelDiscoveryEnabled": False,
-    "inferenceModels": [{
-        "name": model,
-        "labelOverride": label,
-        "anthropicFamilyTier": "sonnet",
-        "isFamilyDefault": True,
-    }],
-    "disableDeploymentModeChooser": True,
-    "disableDeepLinkRegistration": True,
-    "chatTabEnabled": True,
-    "chatAdvancedFileAnalysisEnabled": False,
-    "isClaudeCodeForDesktopEnabled": code_enabled == "true",
-    "coworkTabEnabled": cowork_enabled == "true",
-    "secureVmFeaturesEnabled": cowork_enabled == "true",
-    "allowedWorkspaceFolders": ["/home/kasm-user"],
-    "disableBundledSkills": True,
-    "autoModeEnabled": False,
-    "toolSearchEnabled": False,
-    "managedMcpServers": [{
-        "name": "LemmaComputer connectors",
-        "transport": "stdio",
-        "command": "/usr/local/libexec/lemmacomputer-connectors-stdio",
-        "args": [],
-    }],
-    "isLocalDevMcpEnabled": False,
-    "isDesktopExtensionEnabled": False,
-}
-path = "/etc/claude-desktop/managed-settings.json"
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(document, output, separators=(",", ":"))
-    output.write("\n")
-os.chmod(path, 0o644)
-os.chown(path, 0, 0)
-PY
+  /usr/local/libexec/lemmacomputer-claude-config \
+    /etc/claude-desktop/managed-settings.json \
+    "$LEMMACOMPUTER_MODEL_ALIAS" \
+    "$LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS" \
+    "$LEMMACOMPUTER_REQUESTED_SERVICE_CLASS" \
+    "$model_label" \
+    "$LEMMACOMPUTER_COWORK_ENABLED" \
+    "$claude_code_for_desktop_enabled"
 fi
 
 rm -f /etc/claude-desktop/code-model
@@ -490,13 +453,14 @@ fi
 configure_hermes() {
   local home="$1"
   local model="$2"
-  local allowed_tools="$3"
-  local broker_port="$4"
-  local execution_mode="$5"
+  local service_class="$3"
+  local allowed_tools="$4"
+  local broker_port="$5"
+  local execution_mode="$6"
   install -d -o 1000 -g 1000 -m 0700 "$home"
   /opt/lemmacomputer/hermes-venv/bin/python \
     /usr/local/libexec/lemmacomputer-hermes-config \
-    "$home" "$model" "$allowed_tools" "$broker_port" "$execution_mode" \
+    "$home" "$model" "$service_class" "$allowed_tools" "$broker_port" "$execution_mode" \
     /opt/lemmacomputer/hermes-agent/skills
 }
 
@@ -513,11 +477,11 @@ sync_hermes_skills() {
 }
 
 agent_enabled hermes-claw \
-  && configure_hermes /home/kasm-user/.hermes "$LEMMACOMPUTER_HERMES_MODEL_ALIAS" "$LEMMACOMPUTER_HERMES_ALLOWED_TOOLS" 4314 "$LEMMACOMPUTER_EXECUTION_MODE" \
+  && configure_hermes /home/kasm-user/.hermes "$LEMMACOMPUTER_HERMES_MODEL_ALIAS" "$LEMMACOMPUTER_HERMES_REQUESTED_SERVICE_CLASS" "$LEMMACOMPUTER_HERMES_ALLOWED_TOOLS" 4314 "$LEMMACOMPUTER_EXECUTION_MODE" \
   && sync_hermes_skills /home/kasm-user/.hermes \
   && install_agent_skill /home/kasm-user/.hermes
 agent_enabled hermes-desktop \
-  && configure_hermes /home/kasm-user/.hermes-desktop "$LEMMACOMPUTER_HERMES_DESKTOP_MODEL_ALIAS" "$LEMMACOMPUTER_HERMES_DESKTOP_ALLOWED_TOOLS" 4316 "$LEMMACOMPUTER_EXECUTION_MODE" \
+  && configure_hermes /home/kasm-user/.hermes-desktop "$LEMMACOMPUTER_HERMES_DESKTOP_MODEL_ALIAS" "$LEMMACOMPUTER_HERMES_DESKTOP_REQUESTED_SERVICE_CLASS" "$LEMMACOMPUTER_HERMES_DESKTOP_ALLOWED_TOOLS" 4316 "$LEMMACOMPUTER_EXECUTION_MODE" \
   && sync_hermes_skills /home/kasm-user/.hermes-desktop \
   && install_agent_skill /home/kasm-user/.hermes-desktop
 

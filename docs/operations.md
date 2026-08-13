@@ -596,14 +596,14 @@ Expected health endpoints:
 
 | Service | Endpoint |
 | --- | --- |
-| workspace ingress | `http://localhost:4174/__lemmacomputer/healthz` |
+| workspace ingress | `${LEMMACOMPUTER_PUBLIC_WEB_URL}/__lemmacomputer/healthz` |
 | Web, private | `http://web:4173/healthz` |
 | Control, private | `http://control-api:4100/healthz` |
 | controller, private | `http://workspace-controller:4101/healthz` |
 | channel broker, private | `http://channel-broker:4102/healthz` |
 | scheduler worker, private | `http://scheduler-worker:4103/healthz` |
 | OpenVTC, private | `http://openvtc-consent:8788/healthz` |
-| LiteLLM | `http://localhost:4000/health/liveliness` |
+| LiteLLM, private | `http://litellm:4000/health/liveliness` |
 
 Health confirms process readiness, not a successful provider request,
 Microsoft consent, active policy assignment, or a built workspace image.

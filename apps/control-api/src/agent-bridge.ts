@@ -12,6 +12,7 @@ export const agentBridgeScopes = [
   "agent:deletions",
   "agent:renew",
   "agent:instances",
+  "agent:tool-audit",
 ] as const;
 
 export type AgentBridgeScope = typeof agentBridgeScopes[number];

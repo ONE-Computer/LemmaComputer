@@ -82,9 +82,13 @@ export const chatApi = {
     if (cursor) query.set("cursor", cursor);
     return request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions?${query}`);
   },
-  createSession: (workspaceId, catalogId, title) => request(
+  createSession: (workspaceId, catalogId, title, requestedServiceClass = "balanced", reasoningEffort) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`,
-    mutation("POST", title ? { title } : {}),
+    mutation("POST", {
+      ...(title ? { title } : {}),
+      requestedServiceClass,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    }),
   ),
   messages: (workspaceId, catalogId, sessionId) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
@@ -249,6 +253,10 @@ export const authApi = {
 
 export const adminApi = {
   users: () => request("/api/v1/admin/users"),
+  toolAudit: (filters = {}) => request(`/api/v1/admin/tool-audit?${new URLSearchParams(
+    Object.entries(filters).filter(([, value]) => value !== undefined && value !== null && value !== "")
+      .map(([key, value]) => [key, String(value)]),
+  )}`, { cache: "no-store" }),
   memberWorkspaces: () => request("/api/v1/admin/member-workspaces", { cache: "no-store" }),
   commandMemberWorkspace: (userId, workspaceId, action) => retryableMutation(
     `/api/v1/admin/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceId)}/runtime/${encodeURIComponent(action)}`,
@@ -352,4 +360,11 @@ export const adminApi = {
   testProviderSetting: (provider) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/test`, mutation()),
   disableProviderSetting: (provider) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/disable`, mutation()),
   deleteProviderSetting: (provider) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}`, mutation("DELETE")),
+};
+
+export const memberApi = {
+  aiUsage: (filters = {}) => request(`/api/v1/me/ai-usage?${new URLSearchParams(
+    Object.entries(filters).filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [key, String(value)]),
+  )}`, { cache: "no-store" }),
 };

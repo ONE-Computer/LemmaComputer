@@ -76,7 +76,7 @@ test("Team routing schema can narrow but never widen identity policy", () => {
     "new Team routing policies must retain Balanced as the fixed safe default",
   );
 });
-test("production enablement requires both evidence and an explicit typed confirmation", () => {
+test("Phase 0.5 rejects Auto production enablement through the API contract", () => {
   const base = {
     policyVersionId: uuid.policy,
     mappingVersionId: uuid.mapping,
@@ -86,12 +86,22 @@ test("production enablement requires both evidence and an explicit typed confirm
     reason: "Representative evidence passed review",
   };
   assert.equal(changeRoutingRolloutSchema.safeParse(base).success, false);
-  assert.ok(
-    changeRoutingRolloutSchema.safeParse({
-      ...base,
-      confirmation: "ENABLE AUTO ROUTING",
-    }).success,
-  );
+  assert.equal(changeRoutingRolloutSchema.safeParse({
+    ...base,
+    confirmation: "ENABLE AUTO ROUTING",
+  }).success, false);
+  assert.equal(changeRoutingRolloutSchema.safeParse({
+    ...base,
+    mode: "shadow",
+    evidenceReviewId: undefined,
+    confirmation: undefined,
+  }).success, false);
+  assert.equal(changeRoutingRolloutSchema.safeParse({
+    ...base,
+    mode: "disabled",
+    evidenceReviewId: undefined,
+    confirmation: undefined,
+  }).success, true);
   assert.equal(
     changeRoutingRolloutSchema.safeParse({
       ...base,
@@ -171,6 +181,32 @@ test("mapping administration always uses the authenticated tenant", async () => 
     { operation: "read", tenantId: "tenant-a" },
     { operation: "create", tenantId: "tenant-a" },
   ]);
+});
+test("mapping administration derives Claude effort capability instead of trusting an administrator claim", async () => {
+  let captured: Parameters<RoutingStore["createMappingVersion"]>[0] | undefined;
+  const store = {
+    createMappingVersion: async (input: Parameters<RoutingStore["createMappingVersion"]>[0]) => {
+      captured = input;
+      return {};
+    },
+  } as unknown as RoutingStore;
+  const service = new RoutingAdministrationService(store);
+  const base = {
+    capabilities: { vision: true, tools: true, streaming: true, contextTokens: 200000, outputTokens: 64000, residency: ["sg"] },
+    approved: true,
+    evaluationPassed: true,
+  };
+  await service.createMapping({ tenantId: "tenant-a", userId: "admin" }, {
+    revisionNote: "Qualify Claude reasoning capabilities",
+    deployments: [
+      { ...base, serviceClass: "lite", provider: "anthropic", providerModel: "claude-sonnet-4-6", providerDeployment: "anthropic/claude-sonnet-4-6" },
+      { ...base, serviceClass: "balanced", provider: "anthropic", providerModel: "claude-opus-4-8", providerDeployment: "anthropic/claude-opus-4-8" },
+      { ...base, serviceClass: "pro", provider: "bedrock", providerModel: "claude-sonnet-4-5", providerDeployment: "bedrock/converse/claude-sonnet-4-5" },
+    ],
+  });
+  assert.deepEqual(captured?.deployments[0]?.capabilities.reasoning?.effortLevels, ["low", "medium", "high"]);
+  assert.equal(captured?.deployments[1]?.capabilities.reasoning?.defaultEffort, "high");
+  assert.equal(captured?.deployments[2]?.capabilities.reasoning, null);
 });
 test("evidence review metrics are derived by the server", () => {
   assert.ok(

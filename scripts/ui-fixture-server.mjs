@@ -202,14 +202,13 @@ let sandboxSettings = {
   profileId: profile.id,
   applicationIds: ["firefox"],
   modelAlias: "lemmacomputer-auto",
-  requestedServiceClass: "auto",
+  requestedServiceClass: "balanced",
   routePreferenceMigrationRequired: false,
   profile,
   availableProfiles: [profile, disposableProfile],
   availableApplications,
   availableModels: [{ alias: "lemmacomputer-auto", displayName: "Governed routing", provider: "LemmaComputer" }],
   availableServiceClasses: [
-    { value: "auto", displayName: "Auto", description: "LemmaComputer chooses the best eligible tier for each task." },
     { value: "lite", displayName: "Lite", description: "Fast, economical work." },
     { value: "balanced", displayName: "Balanced", description: "Everyday reasoning and tool use." },
     { value: "pro", displayName: "Pro", description: "Highest capability for complex work." },
@@ -222,7 +221,7 @@ let sandboxSettings = {
     applicationIds: ["firefox"],
     agentIds: ["claude-desktop", "hermes-claw"],
     modelAlias: "lemmacomputer-auto",
-    requestedServiceClass: "auto",
+    requestedServiceClass: "balanced",
     egress: null,
   },
   updatedAt: null,
@@ -245,6 +244,60 @@ const operation = {
   requiredApprovalChannel: "openvtc-task-consent",
   receipt: { resultSummary: "The approved file deletion completed." },
 };
+
+const fixtureToolAuditEvents = [{
+  tenantId: session.tenant.id,
+  subjectId: session.user.id,
+  workspaceId,
+  agentId: "agent-alex:claude",
+  agentInstanceId: "11111111-1111-4111-8111-111111111111",
+  context: { kind: "chat", taskId: "quarterly-review", sessionId: "fixture-session-1", turnId: "fixture-turn-1" },
+  sourceSystem: "workspace_broker",
+  sourceInvocationId: "21111111-1111-4111-8111-111111111111",
+  correlationId: "tool-audit-correlation-1",
+  connectorId: "microsoft-365",
+  serverId: "microsoft-365-server",
+  serverName: "lemmacomputer_ms365",
+  toolName: "send-teams-message",
+  policyDecision: "allow",
+  policyCode: "MCP_POLICY_ALLOWED",
+  policyVersionId: "policy-v7",
+  policyHash: digest,
+  governedOperationId: operation.id,
+  targetSummary: { targetType: "recipient", text: "Recipient: Alex Morgan", provenance: "managed_schema", redacted: false },
+  invocationId: "31111111-1111-4111-8111-111111111111",
+  admittedAt: new Date(Date.now() - 640).toISOString(),
+  outcome: "succeeded",
+  latencyMs: 640,
+  failureClass: null,
+  completedAt: now,
+}, {
+  tenantId: session.tenant.id,
+  subjectId: "example-admin",
+  workspaceId,
+  agentId: "agent-admin:hermes",
+  agentInstanceId: "12222222-2222-4222-8222-222222222222",
+  context: { kind: "workspace_native", taskId: null, sessionId: null, turnId: null },
+  sourceSystem: "workspace_broker",
+  sourceInvocationId: "22222222-2222-4222-8222-222222222223",
+  correlationId: "tool-audit-correlation-2",
+  connectorId: "microsoft-365",
+  serverId: "microsoft-365-server",
+  serverName: "lemmacomputer_ms365",
+  toolName: "delete-drive-item",
+  policyDecision: "deny",
+  policyCode: "MCP_TOOL_BLOCKED_BY_POLICY",
+  policyVersionId: "policy-v7",
+  policyHash: digest,
+  governedOperationId: null,
+  targetSummary: { targetType: "file", text: "File: planning-draft.docx", provenance: "managed_schema", redacted: false },
+  invocationId: "32222222-2222-4222-8222-222222222222",
+  admittedAt: new Date(Date.now() - 1_200).toISOString(),
+  outcome: "denied",
+  latencyMs: 0,
+  failureClass: null,
+  completedAt: new Date(Date.now() - 1_200).toISOString(),
+}];
 
 const companionActivity = {
   id: "00000000-0000-4000-8000-000000000010",
@@ -780,12 +833,58 @@ const fixtureSpendReport = (tasks = fixtureSpendTasks, empty = false) => ({
   trend: empty ? null : { previousRange: { from: "2026-05-31T00:00:00.000Z", to: "2026-07-01T00:00:00.000Z" }, costs: [{ currency: "USD", amount: "150" }], providerConfirmedCosts: [], attemptCount: 180, attemptCountDelta: 22, costDeltas: [{ currency: "USD", amount: "23.75" }] },
   tasks: empty ? [] : tasks,
 });
+const personalGroup = (overrides = {}) => ({
+  costs: [{ currency: "USD", amount: "173.75" }],
+  providerConfirmedCosts: [{ currency: "USD", amount: "54" }],
+  usage: { input_uncached_token: "20100", cache_read_token: "8040", cache_write_token: "1608", output_token: "4020", reasoning_token: "1005", image: "2" },
+  attemptCount: 202,
+  eventCount: 203,
+  failedAttemptCount: 0,
+  unknownCostEventCount: 1,
+  incompleteCostEventCount: 0,
+  correctedEventCount: 1,
+  ...overrides,
+});
+const fixturePersonalAiUsageReport = () => ({
+  contractVersion: 1,
+  range: { from: "2026-08-01T00:00:00.000Z", to: "2026-08-13T00:00:00.000Z" },
+  asOf: "2026-08-13T00:00:00.000Z",
+  state: "partial",
+  totals: personalGroup({
+    costs: [{ currency: "EUR", amount: "12" }, { currency: "USD", amount: "173.75" }],
+    delayedAttemptCount: 1,
+  }),
+  costCoverage: {
+    status: "multiple_gaps",
+    unpricedUsage: { activeEventCount: 1, missingPriceEventCount: 1, partialPriceEventCount: 0, acknowledgedEventCount: 0 },
+    delayedReporting: { attemptCount: 1 },
+    failedWithoutUsage: { attemptCount: 0 },
+  },
+  breakdowns: {
+    workspaces: [
+      personalGroup({ workspaceId, attemptCount: 180, costs: [{ currency: "USD", amount: "160" }], usage: { input_uncached_token: "18000", cache_read_token: "7000", cache_write_token: "1400", output_token: "3500", reasoning_token: "900" } }),
+      personalGroup({ workspaceId: sandboxWorkspace.id, attemptCount: 22, eventCount: 22, correctedEventCount: 0, unknownCostEventCount: 0, costs: [{ currency: "EUR", amount: "12" }, { currency: "USD", amount: "13.75" }], providerConfirmedCosts: [], usage: { input_uncached_token: "2100", cache_read_token: "1040", cache_write_token: "208", output_token: "520", reasoning_token: "105", image: "2" } }),
+    ],
+    agents: [
+      personalGroup({ agentId: "agent-alex:hermes", attemptCount: 180, costs: [{ currency: "USD", amount: "160" }], usage: { input_uncached_token: "18000", cache_read_token: "7000", cache_write_token: "1400", output_token: "3500", reasoning_token: "900" } }),
+      personalGroup({ agentId: "agent-alex:research", attemptCount: 22, eventCount: 22, correctedEventCount: 0, unknownCostEventCount: 0, costs: [{ currency: "EUR", amount: "12" }, { currency: "USD", amount: "13.75" }], providerConfirmedCosts: [], usage: { input_uncached_token: "2100", cache_read_token: "1040", cache_write_token: "208", output_token: "520", reasoning_token: "105", image: "2" } }),
+    ],
+  },
+  providerUsage: [
+    { provider: "openai", usage: { input_uncached_token: "16000", cache_read_token: "7000", cache_write_token: "1500", output_token: "3000", reasoning_token: "700" } },
+    { provider: "anthropic", usage: { input_uncached_token: "4100", cache_read_token: "1040", cache_write_token: "108", output_token: "1020", reasoning_token: "305" } },
+  ],
+  servingGridAssumptions: [{ provider: "openai", emissionsRegion: "sg" }],
+  trend: { previousRange: { from: "2026-07-20T00:00:00.000Z", to: "2026-08-01T00:00:00.000Z" }, costs: [{ currency: "USD", amount: "150" }], providerConfirmedCosts: [], attemptCount: 180, attemptCountDelta: 22, costDeltas: [{ currency: "EUR", amount: "12" }, { currency: "USD", amount: "23.75" }] },
+  privacy: { scope: "authenticated_member", description: "Only AI usage attributed to your active organization membership is included.", contentExcluded: true },
+});
 
 const responses = new Map([
   ["GET /v1/auth/session", session],
   ["GET /v1/workspaces/current", workspace],
   ["GET /v1/skills", { skills: reviewedSkills }],
   ["GET /v1/workspaces", { workspaces: [workspace, sandboxWorkspace] }],
+  ["GET /v1/me/ai-usage", { report: fixturePersonalAiUsageReport() }],
   ["GET /v1/sandbox-settings", sandboxSettings],
   ["GET /v1/operations/recent", operation],
   ["GET /v1/operations", { operations: [operation] }],
@@ -931,15 +1030,17 @@ const responses = new Map([
     tokenVersion: 1,
     updatedAt: now,
   }],
-  [`GET /v1/workspaces/${workspaceId}/chat/agents`, { workspaceId, agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }] }],
+  [`GET /v1/workspaces/${workspaceId}/chat/agents`, { workspaceId, serviceClassOptions: [{ value: "lite", available: false, reasonCode: "policy_denied" }, { value: "balanced", available: true, reasonCode: "ready" }, { value: "pro", available: false, reasonCode: "route_unavailable" }], agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }] }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/status`, { workspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [chatSession] }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
-  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }] }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, serviceClassOptions: [{ value: "lite", available: true, reasonCode: "ready" }, { value: "balanced", available: true, reasonCode: "ready" }, { value: "pro", available: true, reasonCode: "ready" }], agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "claude-cli", displayName: "Claude Code", state: "ready", reasonCode: "CHAT_AGENT_READY", reasoningEffortsByServiceClass: { lite: ["auto", "low", "medium", "high"], balanced: ["auto", "low", "medium", "high"], pro: ["auto", "low", "medium", "high"] } }] }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/status`, { workspaceId: productWorkspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [] }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/codex-cli/status`, { workspaceId: productWorkspaceId, catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/codex-cli/sessions`, { sessions: [] }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/claude-cli/status`, { workspaceId: productWorkspaceId, catalogId: "claude-cli", displayName: "Claude Code", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/claude-cli/sessions`, { sessions: [] }],
   ["GET /v1/openvtc/approvers/current", { connected: false, executorDid: "did:key:z6MkFixture", approver: null }],
   ["GET /v1/openvtc/companion/config", { enabled: false, vapidPublicKey: null }],
   ["GET /v1/openvtc/companions", { companions: [] }],
@@ -960,6 +1061,36 @@ const server = http.createServer((request, response) => {
   const key = `${request.method} ${url.pathname}`;
   response.setHeader("content-type", "application/json");
   response.setHeader("cache-control", "no-store");
+  if (key === "GET /v1/admin/tool-audit") {
+    const outcome = url.searchParams.get("outcome");
+    const subjectId = url.searchParams.get("subjectId");
+    const workspaceFilter = url.searchParams.get("workspaceId");
+    const connectorId = url.searchParams.get("connectorId");
+    const toolName = url.searchParams.get("toolName");
+    const agentInstanceId = url.searchParams.get("agentInstanceId");
+    const events = fixtureToolAuditEvents.filter((event) => (
+      (!outcome || event.outcome === outcome)
+      && (!subjectId || event.subjectId === subjectId)
+      && (!workspaceFilter || event.workspaceId === workspaceFilter)
+      && (!connectorId || event.connectorId === connectorId)
+      && (!toolName || event.toolName === toolName)
+      && (!agentInstanceId || event.agentInstanceId === agentInstanceId)
+    ));
+    const summary = [...new Set(events.map((event) => event.outcome))].map((value) => ({
+      outcome: value,
+      count: events.filter((event) => event.outcome === value).length,
+    }));
+    response.end(JSON.stringify({
+      events,
+      nextCursor: null,
+      total: events.length,
+      asOf: now,
+      retainedDetailFrom: events.at(-1)?.completedAt ?? null,
+      detailState: "complete",
+      summary,
+    }));
+    return;
+  }
   if (key === "POST /__test/reset/chat") {
     for (const activeTurn of activeFixtureTurns.values()) {
       if (activeTurn.completionTimer) clearTimeout(activeTurn.completionTimer);
@@ -1278,11 +1409,22 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
-  const createChatSessionMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli)\/sessions$/);
+  const createChatSessionMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli|claude-cli)\/sessions$/);
   if (request.method === "POST" && createChatSessionMatch && [workspaceId, productWorkspaceId].includes(decodeURIComponent(createChatSessionMatch[1]))) {
     const agentCatalogId = decodeURIComponent(createChatSessionMatch[2]);
-    response.statusCode = 201;
-    response.end(JSON.stringify({ ...chatSession, id: `fixture-session-${Date.now()}`, title: null, agentCatalogId }));
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = body ? JSON.parse(body) : {};
+      response.statusCode = 201;
+      response.end(JSON.stringify({
+        ...chatSession,
+        id: `fixture-session-${Date.now()}`,
+        title: input.title ?? null,
+        agentCatalogId,
+        ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      }));
+    });
     return;
   }
   const cancelTurnMatch = url.pathname.match(/^\/v1\/workspaces\/[^/]+\/chat\/agents\/hermes-claw\/sessions\/([^/]+)\/turns\/active$/);
@@ -1330,7 +1472,7 @@ const server = http.createServer((request, response) => {
     response.end();
     return;
   }
-  const sendChatMessageMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli)\/sessions\/([^/]+)\/messages$/);
+  const sendChatMessageMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli|claude-cli)\/sessions\/([^/]+)\/messages$/);
   if (request.method === "POST" && sendChatMessageMatch && [workspaceId, productWorkspaceId].includes(decodeURIComponent(sendChatMessageMatch[1]))) {
     const agentCatalogId = decodeURIComponent(sendChatMessageMatch[2]);
     let body = "";

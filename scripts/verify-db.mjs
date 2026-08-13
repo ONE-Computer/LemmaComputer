@@ -151,6 +151,7 @@ try {
     "--import", "tsx", "--test",
     "tests/activity-events-postgres.test.ts",
     "tests/agent-instances-postgres.test.ts",
+    "tests/tool-audit-postgres.test.ts",
     "tests/teams-postgres.test.ts",
     "tests/team-budgets-postgres.test.ts",
     "tests/schedules-postgres.test.ts",

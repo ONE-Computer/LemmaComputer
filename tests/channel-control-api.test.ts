@@ -390,23 +390,47 @@ test("workspace channel APIs bind an owned credential and policy-check the defau
   }
 });
 
-test("workspace settings authorize governed Auto only when a complete mapping exists", async () => {
-  const store = new MemoryWorkspaceStore();
+test("workspace settings expose only explicit tiers and reject new Auto selections", async () => {
+  const store = Object.assign(new MemoryWorkspaceStore(), {
+    saveSandboxSettings: async () => {
+      throw new Error("A rejected Auto selection must not reach persistence");
+    },
+  });
   const routingStore = {
     latestMappingVersion: async () => ({
       deployments: ["lite", "balanced", "pro"].map((serviceClass) => ({ serviceClass })),
     }),
   } as unknown as RoutingStore;
+  const legacyPolicy = effectivePolicy();
+  legacyPolicy.document.serviceClasses = ["auto", "lite", "pro"];
+  legacyPolicy.document.defaultServiceClass = "auto";
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
-    identityPolicyStore: policyStore(effectivePolicy()),
+    identityPolicyStore: policyStore(legacyPolicy),
     routingStore,
   });
   try {
     const response = await app.inject({ method: "GET", url: "/v1/sandbox-settings?grantId=personal", headers });
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().modelAlias, "lemmacomputer-auto");
-    assert.deepEqual(response.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["auto", "lite", "balanced", "pro"]);
+    assert.equal(response.json().requestedServiceClass, "balanced");
+    assert.deepEqual(response.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite", "balanced", "pro"]);
+
+    const rejected = await app.inject({
+      method: "PUT",
+      url: "/v1/sandbox-settings",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: {
+        grantId: "personal",
+        profileId: response.json().profileId,
+        applicationIds: response.json().applicationIds,
+        modelAlias: response.json().modelAlias,
+        requestedServiceClass: "auto",
+        agentIds: response.json().agentIds,
+      },
+    });
+    assert.equal(rejected.statusCode, 403);
+    assert.equal(rejected.json().error.code, "SERVICE_CLASS_NOT_ASSIGNED");
   } finally {
     await app.close();
   }

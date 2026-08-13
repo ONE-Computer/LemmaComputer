@@ -9,30 +9,68 @@ for the gateway hooks and grant boundary around this decision flow.
 
 ## User-facing contract
 
-Users choose one of four aliases:
+Users choose one of three model modes:
 
-- `Auto` is a Beta capability. A new or unconfigured Team executes its fixed
-  `Balanced` deployment. Dynamic task classification changes live traffic only
-  after a Team completes shadow review and an administrator explicitly enables
-  production routing.
 - `Lite` favors lower-cost work within its capability contract.
 - `Balanced` is the safe default for ambiguous work.
 - `Pro` is reserved for work that needs its stronger capability contract.
 
-Auto, Lite, Balanced, and Pro are product contracts, not provider model names. Administrators can replace the deployment behind a class without changing user workflows.
+Lite, Balanced, and Pro are product contracts, not provider model names.
+Administrators can replace the deployment behind a class without changing user
+workflows. `lemmacomputer-auto` remains an internal synthetic gateway transport
+used to resolve those explicit classes; it is not a selectable employee model
+mode.
+Legacy workspace projections that still contain an `auto` default are rendered
+and executed as `Balanced`; new workspace settings cannot save Auto.
 
 The workspace **Default model mode** is the starting choice for new
 conversations. Chat can override it per conversation without changing the
 workspace configuration. The Web client persists that override in
 browser-local storage keyed by workspace, agent, and conversation, restores it
-when returning to the same conversation, and falls back to Auto if the saved
-value is unsupported. Clearing site data or using another browser starts with
-the workspace default again.
+when returning to the same conversation, and falls back to the explicit
+workspace default if the saved value is unsupported. Clearing site data or
+using another browser starts with the workspace default again.
 
 The default and override affect `requestedServiceClass`; they never expose or
 select a provider model directly. An explicit Lite, Balanced, or Pro request
 skips Auto classification but remains subject to the full eligibility checks
 below.
+
+Managed native clients use the same contract. Claude Desktop receives a managed
+catalogue containing only the `lemmacomputer-lite`,
+`lemmacomputer-balanced`, and `lemmacomputer-pro` product aliases. Hermes uses
+the custom loopback provider's `/v1/models` catalogue and stores the selected
+alias in its normal session configuration. Neither client receives a provider
+model name or credential. On every native inference request, the root-owned
+loopback broker translates the exact product alias into an explicit service
+class, obtains a fresh Control-signed task binding, removes client routing
+metadata, and forwards only the internal synthetic transport alias. Unknown
+`lemmacomputer-*` aliases and unavailable or disallowed service classes fail
+closed.
+
+Web Chat presents the same Lite, Balanced, and Pro labels from Control's live
+service-class options and binds the selection to the conversation. Thinking
+effort is a separate control and does not change the selected model mode.
+
+## Native session and rollout behavior
+
+Claude binds the selected catalogue entry to its native chat request. Start a
+new Claude conversation when changing model mode so the conversation label and
+request history remain unambiguous. Hermes keeps a model-picker or `/model`
+selection within the selected native session; it does not rewrite another
+session's model. The broker holds no mutable model-mode selection: it derives
+the requested class independently from every inference request and obtains a
+new agent-instance-bound task binding. Concurrent users, workspaces, agents,
+and conversations therefore cannot inherit one another's mode through broker
+state.
+
+The Claude managed catalogue and Hermes default configuration are generated
+when the workspace container starts. After deploying this change, rebuild the
+workspace image and stop and restart each running workspace that should receive
+the new native controls. The persistent home is retained; Claude's root-owned
+managed settings are replaced, while Hermes's existing employee skill toggles
+are preserved. Web Chat needs only the ordinary Web and Control deployment
+refresh because its service-class options are already fetched live.
 
 ## Decision flow
 
