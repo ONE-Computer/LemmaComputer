@@ -622,10 +622,44 @@ async def assert_provider_boundary():
     assert "thinking" not in routed_effort
     assert "output_config" not in routed_effort
     assert "thinking" not in routed_effort["litellm_params"]
-    await callback.async_pre_call_deployment_hook(routed_effort, "acompletion")
+    effort_provider = await callback.async_pre_call_deployment_hook(routed_effort, "acompletion")
     effort_admission = next(item for item in authority_calls if item[0] == "attempts/admit")
     assert effort_admission[1]["requestedReasoningEffort"] == "medium"
     assert effort_admission[1]["resolvedReasoningEffort"] == "medium"
+    bridge_reentry = {
+        **effort_provider,
+        "model": "openai/gpt-real",
+        "input": [{"role": "user", "content": "review this plan"}],
+        "litellm_call_id": "route-effort-responses-call",
+        "litellm_params": {
+            **effort_provider["litellm_params"],
+            "model_info": openai_route,
+            "aresponses": True,
+        },
+        "user_api_key_dict": AutoAuth(),
+    }
+    authority_count = len(authority_calls)
+    bridge_provider = await callback.async_pre_call_deployment_hook(
+        bridge_reentry, "acompletion"
+    )
+    assert len(authority_calls) == authority_count
+    assert all(not key.startswith("lemmacomputer_") for key in bridge_provider)
+    ordinary_nested = {
+        **bridge_reentry,
+        "litellm_call_id": "route-effort-ordinary-call",
+        "litellm_params": {
+            key: value
+            for key, value in bridge_reentry["litellm_params"].items()
+            if key != "aresponses"
+        },
+    }
+    try:
+        await callback.async_pre_call_deployment_hook(ordinary_nested, "acompletion")
+    except Exception:
+        pass
+    else:
+        raise AssertionError("ordinary nested call must not reuse the Responses admission")
+    assert len(authority_calls) == authority_count
     authority_calls.clear()
 
     disabled_tool_transport = {
