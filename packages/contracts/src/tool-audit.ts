@@ -202,3 +202,44 @@ export const toolAuditTerminalRecordSchema = toolAuditAdmissionSchema.safeExtend
   }
 });
 export type ToolAuditTerminalRecord = z.infer<typeof toolAuditTerminalRecordSchema>;
+
+export const toolAuditQuerySchema = z.strictObject({
+  from: z.iso.datetime(),
+  to: z.iso.datetime(),
+  subjectId: boundedIdentifier.nullable().default(null),
+  workspaceId: z.uuid().nullable().default(null),
+  agentInstanceId: z.uuid().nullable().default(null),
+  connectorId: boundedIdentifier.nullable().default(null),
+  toolName: boundedIdentifier.nullable().default(null),
+  policyDecision: toolAuditPolicyDecisionSchema.nullable().default(null),
+  outcome: toolAuditTerminalOutcomeSchema.nullable().default(null),
+  cursor: z.string().trim().min(1).max(1_024).nullable().default(null),
+  pageSize: z.number().int().min(1).max(100).default(50),
+}).superRefine((value, context) => {
+  const from = Date.parse(value.from);
+  const to = Date.parse(value.to);
+  if (to <= from) {
+    context.addIssue({ code: "custom", path: ["to"], message: "Audit query end must follow its start" });
+  }
+  if (to - from > 366 * 24 * 60 * 60 * 1_000) {
+    context.addIssue({ code: "custom", path: ["to"], message: "Audit queries are limited to 366 days" });
+  }
+});
+export type ToolAuditQuery = z.infer<typeof toolAuditQuerySchema>;
+
+export const toolAuditSummaryBucketSchema = z.strictObject({
+  outcome: toolAuditTerminalOutcomeSchema,
+  count: z.number().int().nonnegative(),
+});
+export type ToolAuditSummaryBucket = z.infer<typeof toolAuditSummaryBucketSchema>;
+
+export const toolAuditPageSchema = z.strictObject({
+  events: z.array(toolAuditTerminalRecordSchema).max(100),
+  nextCursor: z.string().max(1_024).nullable(),
+  total: z.number().int().nonnegative(),
+  asOf: z.iso.datetime(),
+  retainedDetailFrom: z.iso.datetime().nullable(),
+  detailState: z.enum(["complete", "partial", "rollup_only"]),
+  summary: z.array(toolAuditSummaryBucketSchema).max(toolAuditTerminalOutcomes.length),
+});
+export type ToolAuditPage = z.infer<typeof toolAuditPageSchema>;

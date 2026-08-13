@@ -38,5 +38,8 @@ test("model and connector transports inherit only the wrapper-issued instance id
   assert.match(broker, /ACTIVE_AGENT_INSTANCE_IDS\.add\(instance_id\)/);
   assert.match(broker, /ACTIVE_AGENT_INSTANCE_IDS\.discard\(instance_id\)/);
   assert.match(policyCallback, /"agentInstanceId": _agent_instance_id\(data\)/);
-  assert.match(policyCallback, /"agentInstanceId",[\s\S]*MCP_IDENTITY_CONTEXT_MISSING/);
+  assert.match(policyCallback, /"sourceInvocationId": _source_invocation_id\(data\)/);
+  assert.match(policyCallback, /"agentInstanceId",[\s\S]*"sourceInvocationId",[\s\S]*MCP_IDENTITY_CONTEXT_MISSING/);
+  assert.match(broker, /headers\["x-lemmacomputer-tool-invocation-id"\] = tool_source_invocation_id/);
+  assert.match(broker, /\/internal\/v1\/agent\/tool-audit\/terminal/);
 });

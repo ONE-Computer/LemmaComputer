@@ -648,6 +648,12 @@ export class McpConnectionService {
     }
   }
 
+  async auditConnector(tenantId: string, serverName: string) {
+    const connector = (await this.connectors(tenantId))
+      .find((candidate) => candidate.serverName === serverName);
+    return connector ? { id: connector.id, name: connector.name } : null;
+  }
+
   /**
    * Called only by the gateway egress proxy. The proxy has already resolved
    * every A/AAAA record and rejected private addresses; this method decides

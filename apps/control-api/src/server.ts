@@ -1,13 +1,13 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
 import { organizationWorkspacePolicyConstraintsSchema, protectedPolicySelectionSchema, type EffectiveProtectedWorkspacePolicy } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { PostgresProtectedWorkspacePolicyStore } from "@lemmacomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
@@ -16,6 +16,7 @@ import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
+import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
@@ -433,6 +434,7 @@ const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeSco
     || /^\/internal\/v1\/agent\/uploads\/[^/]+\/(?:begin|complete|fail)$/.test(path)
   )) return "agent:uploads";
   if (method === "POST" && path === "/internal/v1/agent/deletions") return "agent:deletions";
+  if (method === "POST" && path === "/internal/v1/agent/tool-audit/terminal") return "agent:tool-audit";
   return null;
 };
 
@@ -481,6 +483,7 @@ export function createControlServer(
     agentChatSecret?: string;
     agentChatClient?: AgentChatClient;
     agentInstanceStore?: AgentInstanceStore;
+    toolAuditStore?: ToolAuditStore;
     channelBrokerClient?: ChannelBrokerManagementClient;
     channelBrokerInternalToken?: string;
     telegramTokenIntake?: {
@@ -699,6 +702,10 @@ export function createControlServer(
     store,
     operations,
     connections ? (actor, serverName, toolName) => connections.hostedToolPolicy(actor, serverName, toolName) : undefined,
+  ) : undefined;
+  const toolAudit = security.toolAuditStore ? new ToolAuditService(
+    security.toolAuditStore,
+    async (tenantId, serverName) => connections?.auditConnector(tenantId, serverName) ?? null,
   ) : undefined;
   const requireConnections = () => {
     if (!connections) throw new LemmaComputerError("MCP_CONNECTIONS_NOT_CONFIGURED", "MCP connections are not configured", 503, true);
@@ -1385,7 +1392,28 @@ export function createControlServer(
       if (!workspace) throw new LemmaComputerError("AGENT_INSTANCE_INVALID", "The tool-call identity is not bound to this workspace", 403);
       await agentProcesses.requireActive({ identity: owner, workspace, logicalAgentId: input.agentId, agentInstanceId: input.agentInstanceId });
     }
-    return mcpPolicy.authorize(input, request.id);
+    const decision = await mcpPolicy.authorize(input, request.id);
+    if (toolAudit) await toolAudit.admitMcp(input, decision, request.id);
+    return decision;
+  });
+  app.post("/internal/v1/agent/tool-audit/terminal", async (request, reply) => {
+    if (!toolAudit) throw new LemmaComputerError("TOOL_AUDIT_NOT_CONFIGURED", "Tool compliance auditing is unavailable", 503, true);
+    const actor = agentPrincipals.get(request)!;
+    const agentInstanceId = await requireAgentInstance(request, actor);
+    if (!agentInstanceId) throw new LemmaComputerError("AGENT_INSTANCE_REQUIRED", "Tool calls require an authoritative agent process identity", 403);
+    const body = z.strictObject({
+      sourceInvocationId: z.uuid(),
+      terminal: toolAuditTerminalInputSchema,
+    }).parse(request.body ?? {});
+    const result = await toolAudit.finalizeMcp({
+      tenantId: actor.tenantId,
+      subjectId: actor.subjectId,
+      workspaceId: actor.workspaceId,
+      agentInstanceId,
+      sourceInvocationId: body.sourceInvocationId,
+      ...body.terminal,
+    });
+    return reply.code(result.status === "created" ? 201 : 200).send(result);
   });
   app.post("/internal/v1/workspace-access/authorize", async (request) => {
     const input = z.strictObject({
@@ -2292,6 +2320,13 @@ export function createControlServer(
   app.get("/v1/admin/teams-audit", async (request) => {
     const actor = requirePermission(request, "audit.read");
     return { events: await requireTeams().listAuditEvents(actor.tenantId) };
+  });
+  app.get("/v1/admin/tool-audit", async (request, reply) => {
+    const actor = requirePermission(request, "audit.read");
+    if (!toolAudit) throw new LemmaComputerError("TOOL_AUDIT_NOT_CONFIGURED", "Tool compliance history is unavailable", 503, true);
+    return reply.header("cache-control", "no-store").send(
+      await toolAudit.query(actor.tenantId, request.query as Record<string, unknown>),
+    );
   });
   app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/budget",async(request)=>{
     const actor=requirePermission(request,"usage.read");return{status:await requireBudgets().get(actor,z.uuid().parse(request.params.teamId))};
@@ -4824,6 +4859,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const spendObservabilityStore = PostgresSpendObservabilityStore.fromConnectionString(env.DATABASE_URL);
   const identityPolicyStore = PostgresIdentityPolicyStore.fromConnectionString(env.DATABASE_URL);
   const agentInstanceStore = PostgresAgentInstanceStore.fromConnectionString(env.DATABASE_URL);
+  const toolAuditStore = PostgresToolAuditStore.fromConnectionString(env.DATABASE_URL);
+  await toolAuditStore.ensureMonthlyPartitions();
   const productPolicyRelease = await loadProductPolicyRelease();
   const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(
     env.DATABASE_URL,
@@ -5034,8 +5071,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       )
     : undefined;
   await agentInstanceStore.reconcileAbandoned(new Date(Date.now() - 5 * 60_000));
+  await toolAuditStore.reconcileUnconfirmed(new Date(Date.now() - 5 * 60_000));
   const agentInstanceReconciliationTimer = setInterval(() => {
     void agentInstanceStore.reconcileAbandoned(new Date(Date.now() - 5 * 60_000)).catch(() => undefined);
+    void toolAuditStore.reconcileUnconfirmed(new Date(Date.now() - 5 * 60_000)).catch(() => undefined);
   }, 60_000);
   agentInstanceReconciliationTimer.unref();
   const app = createControlServer(
@@ -5089,6 +5128,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       policyBundleAuthority,
       agentChatSecret: env.AGENT_CHAT_SECRET,
       agentInstanceStore,
+      toolAuditStore,
       channelBrokerClient,
       channelBrokerInternalToken: env.CHANNEL_BROKER_INTERNAL_TOKEN,
       telegramTokenIntake,
@@ -5137,6 +5177,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     await spendObservabilityStore.close();
     await identityPolicyStore.close();
     await agentInstanceStore.close();
+    await toolAuditStore.close();
     await protectedWorkspacePolicyStore.close();
     await platformOperatorStore?.close();
   });

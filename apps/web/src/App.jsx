@@ -2724,15 +2724,165 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
   );
 }
 
-function ActivityScreen({ displayName, operations, onOpenOperation }) {
+const toolAuditOutcomeOptions = [
+  { value: "all", label: "All outcomes" },
+  { value: "succeeded", label: "Succeeded" },
+  { value: "denied", label: "Blocked by policy" },
+  { value: "approval_required", label: "Approval required" },
+  { value: "failed", label: "Failed" },
+  { value: "timed_out", label: "Timed out" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "unconfirmed", label: "Completion unconfirmed" },
+];
+const toolAuditRangeOptions = [
+  { value: "1", label: "Last 24 hours" },
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+  { value: "90", label: "Last 90 days" },
+];
+const toolAuditOutcomeLabel = Object.fromEntries(toolAuditOutcomeOptions.slice(1).map((option) => [option.value, option.label]));
+const toolAuditPolicyLabel = { allow: "Allowed", deny: "Blocked", approval_required: "Approval required" };
+
+function ToolActivityView({ users, workspaceMembers, operations, onOpenOperation }) {
+  const emptyFilters = { rangeDays: "7", subjectId: "", workspaceId: "", agentInstanceId: "", connectorId: "", toolName: "", outcome: "all" };
+  const [draft, setDraft] = useState(emptyFilters);
+  const [filters, setFilters] = useState(emptyFilters);
+  const [page, setPage] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+  const queryWindowRef = useRef(null);
+  const memberOptions = [{ value: "", label: "All members" }, ...users.map((user) => ({ value: user.userId, label: user.displayName }))];
+  const workspaceOptions = [{ value: "", label: "All workspaces" }, ...workspaceMembers.flatMap((member) => member.workspaces.map((workspace) => ({
+    value: workspace.id,
+    label: `${workspace.name} · ${member.displayName}`,
+  })))];
+  const memberById = new Map(users.map((user) => [user.userId, user]));
+  const workspaceById = new Map(workspaceMembers.flatMap((member) => member.workspaces.map((workspace) => [workspace.id, workspace])));
+
+  const requestPage = useCallback(async (cursor = null, append = false) => {
+    setLoading(true);
+    setError("");
+    const queryWindow = cursor && queryWindowRef.current
+      ? queryWindowRef.current
+      : (() => {
+        const to = new Date();
+        const value = { from: new Date(to.getTime() - Number(filters.rangeDays) * 24 * 60 * 60 * 1_000), to };
+        queryWindowRef.current = value;
+        return value;
+      })();
+    try {
+      const next = await adminApi.toolAudit({
+        from: queryWindow.from.toISOString(),
+        to: queryWindow.to.toISOString(),
+        pageSize: 50,
+        subjectId: filters.subjectId,
+        workspaceId: filters.workspaceId,
+        agentInstanceId: filters.agentInstanceId.trim(),
+        connectorId: filters.connectorId.trim(),
+        toolName: filters.toolName.trim(),
+        outcome: filters.outcome === "all" ? "" : filters.outcome,
+        cursor,
+      });
+      setPage(next);
+      setEvents((current) => append ? [...current, ...next.events] : next.events);
+      if (!append) setSelectedId("");
+    } catch (caught) {
+      setError(caught.message ?? "Tool activity could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  }, [filters]);
+
+  useEffect(() => { void requestPage(); }, [requestPage]);
+  const selected = events.find((event) => event.invocationId === selectedId);
+  const selectedOperation = selected?.governedOperationId
+    ? operations.find((operation) => operation.id === selected.governedOperationId)
+    : null;
+  const summaryCount = (outcome) => page?.summary?.find((bucket) => bucket.outcome === outcome)?.count ?? 0;
+  const exceptions = ["failed", "timed_out", "cancelled", "unconfirmed"].reduce((total, outcome) => total + summaryCount(outcome), 0);
+
+  return <section className="tool-audit-view" aria-labelledby="tool-activity-heading">
+    <div className="tool-audit-heading">
+      <div><h2 id="tool-activity-heading">Agent tool activity</h2><p>One compliance record for every connector tool call made by an identified workspace agent.</p></div>
+      <button className="secondary-button" type="button" disabled={loading} onClick={() => requestPage()}>{loading ? "Refreshing…" : "Refresh"}</button>
+    </div>
+    <div className="tool-audit-summary" aria-label="Tool activity summary">
+      <div><span>Total calls</span><strong>{page?.total ?? "—"}</strong></div>
+      <div><span>Succeeded</span><strong>{summaryCount("succeeded")}</strong></div>
+      <div><span>Policy stopped</span><strong>{summaryCount("denied") + summaryCount("approval_required")}</strong></div>
+      <div><span>Needs review</span><strong>{exceptions}</strong></div>
+    </div>
+    <details className="tool-audit-filters">
+      <summary>Filters</summary>
+      <div>
+        <label><span>Period</span><SelectMenu value={draft.rangeDays} options={toolAuditRangeOptions} ariaLabel="Tool activity period" onValueChange={(rangeDays) => setDraft({ ...draft, rangeDays })} /></label>
+        {memberOptions.length > 1
+          ? <label><span>Member</span><SelectMenu value={draft.subjectId} options={memberOptions} ariaLabel="Tool activity member" onValueChange={(subjectId) => setDraft({ ...draft, subjectId })} /></label>
+          : <label><span>Member ID</span><input value={draft.subjectId} onChange={(event) => setDraft({ ...draft, subjectId: event.target.value })} /></label>}
+        {workspaceOptions.length > 1
+          ? <label><span>Workspace</span><SelectMenu value={draft.workspaceId} options={workspaceOptions} ariaLabel="Tool activity workspace" onValueChange={(workspaceId) => setDraft({ ...draft, workspaceId })} /></label>
+          : <label><span>Workspace ID</span><input value={draft.workspaceId} onChange={(event) => setDraft({ ...draft, workspaceId: event.target.value })} /></label>}
+        <label><span>Outcome</span><SelectMenu value={draft.outcome} options={toolAuditOutcomeOptions} ariaLabel="Tool activity outcome" onValueChange={(outcome) => setDraft({ ...draft, outcome })} /></label>
+        <label><span>Connector ID</span><input placeholder="microsoft-365" value={draft.connectorId} onChange={(event) => setDraft({ ...draft, connectorId: event.target.value })} /></label>
+        <label><span>Tool name</span><input placeholder="create-calendar-event" value={draft.toolName} onChange={(event) => setDraft({ ...draft, toolName: event.target.value })} /></label>
+        <label><span>Agent instance ID</span><input placeholder="Exact process identity" value={draft.agentInstanceId} onChange={(event) => setDraft({ ...draft, agentInstanceId: event.target.value })} /></label>
+        <div className="tool-audit-filter-actions">
+          <button type="button" onClick={() => { setDraft(emptyFilters); setFilters(emptyFilters); }}>Clear</button>
+          <button className="primary-button compact-button" type="button" onClick={() => setFilters(draft)}>Apply filters</button>
+        </div>
+      </div>
+    </details>
+    {error && <div className="inline-error" role="alert">{error}</div>}
+    {!error && !loading && events.length === 0 && <div className="tool-audit-empty"><strong>No tool calls in this period</strong><span>Activity appears after an identified workspace agent calls a connector tool.</span></div>}
+    {events.length > 0 && <div className="tool-audit-table-wrap"><table className="tool-audit-table">
+      <thead><tr><th>Time</th><th>Member</th><th>Workspace and agent</th><th>Connector and tool</th><th>Decision</th><th>Outcome</th><th>Target</th></tr></thead>
+      <tbody>{events.map((event) => {
+        const member = memberById.get(event.subjectId);
+        const workspace = workspaceById.get(event.workspaceId);
+        return <tr key={event.invocationId} className={selectedId === event.invocationId ? "selected" : ""}>
+          <td data-label="Time"><time dateTime={event.completedAt}>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.completedAt))}</time></td>
+          <td data-label="Member"><strong>{member?.displayName ?? event.subjectId}</strong>{member?.email && <small>{member.email}</small>}</td>
+          <td data-label="Workspace and agent"><strong>{workspace?.name ?? `${event.workspaceId.slice(0, 8)}…`}</strong><small>{event.agentId} · {event.agentInstanceId.slice(0, 8)}…</small></td>
+          <td data-label="Connector and tool"><strong>{event.connectorId}</strong><button type="button" onClick={() => setSelectedId(selectedId === event.invocationId ? "" : event.invocationId)} aria-expanded={selectedId === event.invocationId}>{event.toolName}</button></td>
+          <td data-label="Decision"><span className={`tool-audit-badge ${event.policyDecision}`}>{toolAuditPolicyLabel[event.policyDecision]}</span></td>
+          <td data-label="Outcome"><span className={`tool-audit-badge ${event.outcome}`}>{toolAuditOutcomeLabel[event.outcome]}</span></td>
+          <td data-label="Target">{event.targetSummary.text}</td>
+        </tr>;
+      })}</tbody>
+    </table></div>}
+    {selected && <aside className="tool-audit-detail" aria-label="Tool call evidence">
+      <div><strong>Compliance evidence</strong><button type="button" onClick={() => setSelectedId("")} aria-label="Close tool call evidence"><Dismiss16Regular aria-hidden="true" /></button></div>
+      <dl>
+        <div><dt>Invocation</dt><dd>{selected.invocationId}</dd></div><div><dt>Agent instance</dt><dd>{selected.agentInstanceId}</dd></div>
+        <div><dt>Policy version</dt><dd>{selected.policyVersionId ?? "Not available"}</dd></div><div><dt>Policy code</dt><dd>{selected.policyCode}</dd></div>
+        <div><dt>Latency</dt><dd>{selected.latencyMs.toLocaleString()} ms</dd></div><div><dt>Failure class</dt><dd>{selected.failureClass ?? "None"}</dd></div>
+        <div><dt>Correlation ID</dt><dd>{selected.correlationId}</dd></div><div><dt>Completed</dt><dd>{new Date(selected.completedAt).toLocaleString()}</dd></div>
+      </dl>
+      {selectedOperation && <button className="secondary-button" type="button" onClick={() => onOpenOperation(selectedOperation)}>Open protected action</button>}
+    </aside>}
+    {page?.detailState !== "complete" && <p className="tool-audit-retention-note">Older detail has reached its retention boundary. Summary counts remain available for the selected period.</p>}
+    {page?.nextCursor && <button className="tool-audit-load-more" type="button" disabled={loading} onClick={() => requestPage(page.nextCursor, true)}>{loading ? "Loading…" : "Load more"}</button>}
+  </section>;
+}
+
+function ActivityScreen({ displayName, operations, onOpenOperation, canReadToolAudit, users, workspaceMembers }) {
+  const [tab, setTab] = useState("protected");
   return (
     <div className="secondary-screen">
       <header className="page-heading compact">
-        <p>Protected action history</p>
+        <p>Organization audit</p>
         <h1>Trail</h1>
-        <span>Review protected actions and manage the device that signs your decisions.</span>
+        <span>{tab === "tools" ? "Review connector tool calls made by identified workspace agents." : "Review protected actions and manage the device that signs your decisions."}</span>
       </header>
-      <div className="trail-device">
+      {canReadToolAudit && <nav className="trail-tabs" aria-label="Trail sections">
+        <button type="button" className={tab === "protected" ? "active" : ""} aria-current={tab === "protected" ? "page" : undefined} onClick={() => setTab("protected")}>Protected actions</button>
+        <button type="button" className={tab === "tools" ? "active" : ""} aria-current={tab === "tools" ? "page" : undefined} onClick={() => setTab("tools")}>Tool activity</button>
+      </nav>}
+      {tab === "tools" && canReadToolAudit
+        ? <ToolActivityView users={users} workspaceMembers={workspaceMembers} operations={operations} onOpenOperation={onOpenOperation} />
+        : <><div className="trail-device">
         <ApprovalDeviceCard displayName={displayName} />
         <div className="connection-privacy-note"><ShieldCheckmark24Regular aria-hidden="true" /><p>Approval keys stay encrypted on their enrolled devices. Protected actions are sent to active approval devices and require a local confirmation.</p></div>
       </div>
@@ -2754,7 +2904,7 @@ function ActivityScreen({ displayName, operations, onOpenOperation }) {
           <span className="timeline-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span>
           <span><strong>Workspace access verified</strong><small>Identity and policy checks passed · Today, 8:57 AM</small></span>
         </div>
-      </div>
+      </div></>}
     </div>
   );
 }
@@ -4916,6 +5066,7 @@ export function App() {
   const canManageAnyProvider = hasAnyCapability("provider.manage");
   const canReadUsage = hasCapability("usage.read");
   const canManageUsage = hasCapability("usage.manage");
+  const canReadAudit = hasCapability("audit.read");
   const canOpenAiControlPlane = canReadUsage || canManageUsage || canManageAnyProvider || canManagePolicy;
   const availableAiControlPlaneTabs = aiControlPlaneTabs.filter((tab) => ({
     overview: canReadUsage,
@@ -5332,8 +5483,9 @@ export function App() {
     const organizationWorkspacesOpen = activeNav === "Workspace" && workspaceSection === "organization";
     const workspacePoliciesOpen = activeNav === "Workspace" && workspaceSection === "policies";
     const teamsOpen = activeNav === "AI control plane" && aiControlPlaneView === "teams-budgets";
+    const toolAuditOpen = activeNav === "Trail" && canReadAudit;
     const workspaceAdminOpen = peopleOpen || organizationWorkspacesOpen || workspacePoliciesOpen;
-    if ((!workspaceAdminOpen && !teamsOpen)
+    if ((!workspaceAdminOpen && !teamsOpen && !toolAuditOpen)
       || peopleOpen && !canManageMembers && !canManageRoles && !canManageSettings
       || organizationWorkspacesOpen && !canManageAnyWorkspace
       || workspacePoliciesOpen && !canManagePolicy
@@ -5341,9 +5493,9 @@ export function App() {
     if (workspaceAdminOpen) setAdminLoading(true);
     if (teamsOpen) setAdminTeamsLoading(true);
     Promise.all([
-      (peopleOpen || workspacePoliciesOpen || teamsOpen) && canManageMembers ? adminApi.users() : Promise.resolve({ users: [] }),
+      (peopleOpen || workspacePoliciesOpen || teamsOpen || toolAuditOpen) && canManageMembers ? adminApi.users() : Promise.resolve({ users: [] }),
       peopleOpen && canManageMembers ? adminApi.invitations() : Promise.resolve(null),
-      organizationWorkspacesOpen && canManageAnyWorkspace
+      (organizationWorkspacesOpen || toolAuditOpen) && canManageAnyWorkspace
         ? adminApi.memberWorkspaces()
           .then((value) => ({ ...value, error: null }))
           .catch((error) => ({ members: [], error }))
@@ -5365,7 +5517,7 @@ export function App() {
         if (workspaceAdminOpen) setAdminLoading(false);
         if (teamsOpen) setAdminTeamsLoading(false);
       });
-  }, [activeNav, aiControlPlaneView, settingsView, workspaceSection, session?.user.id, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageAnyWorkspace, canManageUsage]);
+  }, [activeNav, aiControlPlaneView, settingsView, workspaceSection, session?.user.id, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageAnyWorkspace, canManageUsage, canReadAudit]);
 
   useEffect(() => {
     if (activeNav !== "Firewall" || !canManagePolicy) return;
@@ -6821,7 +6973,7 @@ export function App() {
           busySiteId={siteBusyId}
           onDelete={deleteSite}
         />}
-        {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
+        {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} canReadToolAudit={canReadAudit} users={adminUsers} workspaceMembers={adminWorkspaceMembers} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
         {activeNav === "Schedules" && <SchedulesScreen
           schedules={schedules}
           workspaces={homeWorkspaces}

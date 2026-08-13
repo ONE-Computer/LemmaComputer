@@ -226,6 +226,20 @@ def _agent_instance_id(data):
     return None
 
 
+def _source_invocation_id(data):
+    candidates = [data.get("request_headers"), data.get("headers")]
+    proxy_request = data.get("proxy_server_request")
+    if isinstance(proxy_request, dict):
+        candidates.append(proxy_request.get("headers"))
+    for headers in candidates:
+        if not isinstance(headers, dict):
+            continue
+        for name, value in headers.items():
+            if isinstance(name, str) and name.lower() == "x-lemmacomputer-tool-invocation-id" and isinstance(value, str):
+                return value
+    return None
+
+
 def _authorize_workspace_access(metadata):
     workspace_id = metadata.get("lemmacomputer_workspace_id")
     if not isinstance(workspace_id, str) or not workspace_id:
@@ -1413,6 +1427,7 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
             "workspaceId": _optional_string(metadata, "lemmacomputer_workspace_id"),
             "agentId": _optional_string(metadata, "lemmacomputer_agent_id"),
             "agentInstanceId": _agent_instance_id(data),
+            "sourceInvocationId": _source_invocation_id(data),
             "policyVersionId": _optional_string(metadata, "lemmacomputer_policy_version_id"),
             "policyHash": _optional_string(metadata, "lemmacomputer_policy_hash"),
             "operationId": _optional_string(metadata, "lemmacomputer_operation_id"),
@@ -1437,6 +1452,7 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                 "workspaceId",
                 "agentId",
                 "agentInstanceId",
+                "sourceInvocationId",
                 "serverName",
                 "toolName",
                 "arguments",
