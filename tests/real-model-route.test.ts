@@ -23,8 +23,9 @@ test("LiteLLM keeps independent request capacity for live MCP authorization call
 });
 
 test("OpenAI, Anthropic, GLM, and Bedrock routes are database-managed", async () => {
-  const [config, providerSettings, bootstrapPolicy] = await Promise.all([
+  const [config, compose, providerSettings, bootstrapPolicy] = await Promise.all([
     source("config/litellm/config.yaml"),
+    source("compose.yaml"),
     source("packages/litellm-adapter/src/provider-settings.ts"),
     source("packages/workspace-store/src/identity-policy.ts"),
   ]);
@@ -32,7 +33,7 @@ test("OpenAI, Anthropic, GLM, and Bedrock routes are database-managed", async ()
     assert.doesNotMatch(config, new RegExp(`model_name: ${alias}`));
   }
   assert.match(config, /model_list: \[\]/);
-  assert.match(config, /route_all_chat_openai_to_responses: true/);
+  assert.match(compose, /LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES:\s*"true"/);
   assert.doesNotMatch(config, /api_key: os\.environ/);
   assert.match(providerSettings, /managedProviderModels/);
   assert.match(providerSettings, /litellm_credential_name/);
