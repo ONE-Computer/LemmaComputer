@@ -19,17 +19,26 @@ def main() -> None:
         raise SystemExit("invalid Claude model mode")
 
     if transport_model == "lemmacomputer-auto":
+        # Claude Desktop 1.22209.3 rejects gateway model IDs that do not look
+        # Anthropic-owned before it opens Cowork, and exposes its independent
+        # effort control only for exact built-in capability IDs. Its pinned
+        # normalizer removes a trailing release date, so these three distinct
+        # client-adapter IDs all resolve to the qualified sonnet-4-6 UI
+        # capability without selecting an Anthropic provider route. The
+        # loopback broker maps the exact IDs only to provider-neutral
+        # LemmaComputer service classes.
         modes = [
-            ("lemmacomputer-lite", "Lite — organization route", "haiku", "lite"),
-            ("lemmacomputer-balanced", "Balanced — organization route", "sonnet", "balanced"),
-            ("lemmacomputer-pro", "Pro — organization route", "opus", "pro"),
+            ("claude-sonnet-4-6-20260101", "Lite — organization route", "lite"),
+            ("claude-sonnet-4-6-20260102", "Balanced — organization route", "balanced"),
+            ("claude-sonnet-4-6-20260103", "Pro — organization route", "pro"),
         ]
+        modes.sort(key=lambda item: item[2] != default_service_class)
         inference_models = [{
             "name": name,
             "labelOverride": mode_label,
-            "anthropicFamilyTier": family,
+            "anthropicFamilyTier": "sonnet",
             "isFamilyDefault": service_class == default_service_class,
-        } for name, mode_label, family, service_class in modes]
+        } for name, mode_label, service_class in modes]
     else:
         inference_models = [{
             "name": model,

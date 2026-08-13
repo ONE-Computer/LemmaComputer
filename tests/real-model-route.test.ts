@@ -162,9 +162,12 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(entrypoint, /\/etc\/claude-desktop\/managed-settings\.json/);
   assert.match(claudeConfig, /"inferenceGatewayBaseUrl": "http:\/\/127\.0\.0\.1:4312"/);
   assert.doesNotMatch(claudeConfig, /inferenceGatewayBaseUrl[^\n]+4312\/v1/);
-  assert.match(claudeConfig, /\("lemmacomputer-lite", "Lite — organization route", "haiku", "lite"\)/);
-  assert.match(claudeConfig, /\("lemmacomputer-balanced", "Balanced — organization route", "sonnet", "balanced"\)/);
-  assert.match(claudeConfig, /\("lemmacomputer-pro", "Pro — organization route", "opus", "pro"\)/);
+  assert.match(claudeConfig, /\("claude-sonnet-4-6-20260101", "Lite — organization route", "lite"\)/);
+  assert.match(claudeConfig, /\("claude-sonnet-4-6-20260102", "Balanced — organization route", "balanced"\)/);
+  assert.match(claudeConfig, /\("claude-sonnet-4-6-20260103", "Pro — organization route", "pro"\)/);
+  assert.match(proxy, /"claude-sonnet-4-6-20260101": "lite"/);
+  assert.match(proxy, /"claude-sonnet-4-6-20260102": "balanced"/);
+  assert.match(proxy, /"claude-sonnet-4-6-20260103": "pro"/);
   assert.match(claudeConfig, /"isFamilyDefault": service_class == default_service_class/);
   assert.match(claudeConfig, /"disableDeploymentModeChooser": True/);
   assert.match(claudeConfig, /"coworkTabEnabled": cowork_enabled == "true"/);

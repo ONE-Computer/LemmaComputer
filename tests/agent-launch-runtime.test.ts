@@ -34,6 +34,7 @@ test("model and connector transports inherit only the wrapper-issued instance id
   assert.match(broker, /\/internal\/v1\/agent\/instances/);
   assert.match(broker, /self\.headers\.get\("x-lemmacomputer-agent-instance-id"\)/);
   assert.match(entrypoint, /LEMMACOMPUTER_INFER_SINGLE_ACTIVE_AGENT_INSTANCE="\$infer_single_active_agent_instance"/);
+  assert.match(entrypoint, /4312\|4314\|4316\) infer_single_active_agent_instance=1/);
   assert.match(broker, /if len\(ACTIVE_AGENT_INSTANCE_IDS\) != 1:/);
   assert.match(broker, /ACTIVE_AGENT_INSTANCE_IDS\.add\(instance_id\)/);
   assert.match(broker, /ACTIVE_AGENT_INSTANCE_IDS\.discard\(instance_id\)/);

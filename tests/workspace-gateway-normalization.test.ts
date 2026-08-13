@@ -29,7 +29,8 @@ spec = importlib.util.spec_from_file_location("lemmacomputer_gateway_proxy", sys
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 task_binding = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] != "-" else None
-body, requested = module.normalize_inference_body(sys.argv[3].encode(), task_binding)
+request_path = sys.argv[6] if len(sys.argv) > 6 else None
+body, requested = module.normalize_inference_body(sys.argv[3].encode(), task_binding, request_path)
 print(json.dumps({"requested": requested, "body": json.loads(body), "serviceClass": module.native_service_class_for_model(requested)}))
 `;
 
@@ -39,9 +40,9 @@ test("the packaged workspace gateway proxy compiles", () => {
   execFileSync("python3", ["-c", "import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(), filename=sys.argv[1], feature_version=(3, 10))", proxyPath]);
 });
 
-const normalize = (assigned: string, payload: Record<string, unknown>, taskBinding?: string, serviceClass = "balanced") => JSON.parse(execFileSync(
+const normalize = (assigned: string, payload: Record<string, unknown>, taskBinding?: string, serviceClass = "balanced", requestPath?: string) => JSON.parse(execFileSync(
   "python3",
-  ["-c", program, proxyPath, assigned, JSON.stringify(payload), taskBinding ?? "-", serviceClass],
+  ["-c", program, proxyPath, assigned, JSON.stringify(payload), taskBinding ?? "-", serviceClass, requestPath ?? ""],
   { encoding: "utf8" },
 )) as { requested: string; body: Record<string, unknown>; serviceClass: string };
 
@@ -97,6 +98,17 @@ test("native product model aliases select only explicit governed service classes
     });
     assert.equal(normalized.serviceClass, serviceClass);
     assert.equal(normalized.body.model, "lemmacomputer-auto");
+  }
+
+  for (const [model, serviceClass] of [
+    ["claude-sonnet-4-6-20260101", "lite"],
+    ["claude-sonnet-4-6-20260102", "balanced"],
+    ["claude-sonnet-4-6-20260103", "pro"],
+  ] as const) {
+    assert.equal(normalize("lemmacomputer-auto", {
+      model,
+      messages: [{ role: "user", content: "Use this Claude mode." }],
+    }).serviceClass, serviceClass);
   }
 
   const rejected = spawnSync(
@@ -166,12 +178,14 @@ test("the broker strips forged thinking controls and projects only the signed ef
   const binding = taskBinding("balanced", "medium");
   const normalized = normalize("lemmacomputer-auto", {
     model: "claude-sonnet-4-6",
+    think: true,
     thinking: { type: "enabled", budget_tokens: 999999 },
     output_config: { effort: "max" },
     reasoning_effort: "max",
     reasoning: { effort: "xhigh" },
     messages: [{ role: "user", content: "Review this plan." }],
   }, binding);
+  assert.equal("think" in normalized.body, false);
   assert.equal("thinking" in normalized.body, false);
   assert.equal("output_config" in normalized.body, false);
   assert.equal("reasoning_effort" in normalized.body, false);
@@ -181,6 +195,32 @@ test("the broker strips forged thinking controls and projects only the signed ef
     lemmacomputer_requested_service_class: "balanced",
     lemmacomputer_requested_reasoning_effort: "medium",
   });
+});
+
+test("the broker preserves only the safe Chat Completions reasoning opt-out", () => {
+  const chatDisabled = normalize("lemmacomputer-auto", {
+    model: "lemmacomputer-lite",
+    reasoning_effort: "none",
+    think: false,
+    tools: [{ type: "function", function: { name: "lookup" } }],
+    messages: [{ role: "user", content: "Use a tool." }],
+  }, taskBinding("lite"), "lite", "/v1/chat/completions");
+  assert.equal(chatDisabled.body.reasoning_effort, "none");
+  assert.equal("think" in chatDisabled.body, false);
+
+  const enabled = normalize("lemmacomputer-auto", {
+    model: "lemmacomputer-lite",
+    reasoning_effort: "medium",
+    messages: [{ role: "user", content: "Use a tool." }],
+  }, taskBinding("lite"), "lite", "/v1/chat/completions");
+  assert.equal("reasoning_effort" in enabled.body, false);
+
+  const messagesDisabled = normalize("lemmacomputer-auto", {
+    model: "claude-sonnet-4-6",
+    reasoning_effort: "none",
+    messages: [{ role: "user", content: "Hello." }],
+  }, taskBinding("lite"), "lite", "/v1/messages");
+  assert.equal("reasoning_effort" in messagesDisabled.body, false);
 });
 
 const availableBrokerPort = async () => {
@@ -358,12 +398,17 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model: "lemmacomputer-pro",
+        reasoning_effort: "none",
+        think: false,
+        tools: [{ type: "function", function: { name: "lookup" } }],
         messages: [{ role: "user", content: "Use the selected product mode." }],
       }),
     });
     assert.equal(proResponse.status, 200, await proResponse.text());
     assert.equal(bindingRequests, 2);
     assert.equal(received[1]?.body?.model, "lemmacomputer-auto");
+    assert.equal(received[1]?.body?.reasoning_effort, "none");
+    assert.equal("think" in received[1]!.body!, false);
     assert.deepEqual(received[1]?.body?.metadata, {
       lemmacomputer_task_binding: taskBinding("pro"),
       lemmacomputer_requested_service_class: "pro",
