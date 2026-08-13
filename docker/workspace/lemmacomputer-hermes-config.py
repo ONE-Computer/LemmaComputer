@@ -147,9 +147,11 @@ def main() -> None:
             "telegram": [],
         },
         "agent": {
-            # Hermes defaults custom GPT-5 models to medium reasoning, while
-            # its chat-completions transport cannot combine that parameter
-            # with MCP function tools.
+            # The governed loopback broker, not Hermes, owns provider reasoning
+            # fields. Web Chat pins the product effort to the conversation and
+            # carries it in a signed task binding on every turn. Keep Hermes'
+            # mutable global setting disabled so it cannot become a second
+            # effort authority or change prompt behavior mid-conversation.
             "reasoning_effort": False,
         },
         "mcp_servers": {

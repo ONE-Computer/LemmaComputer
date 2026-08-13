@@ -239,10 +239,14 @@ test("reasoning options intersect a registered agent adapter with qualified mode
     agentCatalogId: "future-agent",
     clientVersion: "1.0.0",
   }, [{
+    reviewStatus: "qualified",
     qualificationId: "future-agent-1.0-governed-effort-adapter",
     agentCatalogId: "future-agent",
     clientVersion: "1.0.0",
     effortLevels: ["low", "medium"],
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
   }]);
   assert.ok(adapter);
   const route = {

@@ -33,6 +33,32 @@ export type QualifiedReasoningCapabilities = {
   reasoningTokenTelemetry: boolean;
 };
 
+type ReasoningRouteReviewBase = {
+  provider: ManagedRoutingProvider;
+  providerModels: readonly string[];
+  providerMechanism: string;
+  effortLevels: readonly ResolvedReasoningEffort[];
+};
+
+export type ReasoningRouteQualificationRegistration = ReasoningRouteReviewBase & {
+  reviewStatus: "qualified";
+  qualificationId: string;
+  thinkingMode: QualifiedReasoningCapabilities["thinkingMode"];
+  defaultEffort: ResolvedReasoningEffort;
+  interleavedThinking: boolean;
+  reasoningTokenTelemetry: boolean;
+};
+
+export type ReasoningRouteDiscovery = ReasoningRouteReviewBase & {
+  reviewStatus: "discovery";
+  discoveryId: string;
+  blockingEvidence: readonly string[];
+};
+
+export type ReasoningRouteReview =
+  | ReasoningRouteQualificationRegistration
+  | ReasoningRouteDiscovery;
+
 export type AgentReasoningAdapterQualification = {
   qualificationId: string;
   agentCatalogId: string;
@@ -40,26 +66,134 @@ export type AgentReasoningAdapterQualification = {
   effortLevels: ResolvedReasoningEffort[];
   conversationPinned: true;
   signedTaskBinding: true;
+  providerEffortAuthority: "governed-route";
 };
 
-export type AgentReasoningAdapterRegistration = {
-  qualificationId: string;
+type AgentReasoningAdapterReviewBase = {
   agentCatalogId: string;
   clientVersion: string;
   effortLevels: readonly ResolvedReasoningEffort[];
+  conversationPinned: true;
+  signedTaskBinding: true;
+  providerEffortAuthority: "governed-route";
 };
 
-export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-effort-route-2026-08-13";
-export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
+export type AgentReasoningAdapterRegistration = AgentReasoningAdapterReviewBase & {
+  reviewStatus: "qualified";
+  qualificationId: string;
+};
 
-const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterRegistration[] = Object.freeze([
+export type AgentReasoningAdapterDiscovery = AgentReasoningAdapterReviewBase & {
+  reviewStatus: "discovery";
+  discoveryId: string;
+  blockingEvidence: readonly string[];
+};
+
+export type AgentReasoningAdapterReview =
+  | AgentReasoningAdapterRegistration
+  | AgentReasoningAdapterDiscovery;
+
+export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-effort-route-2026-08-13";
+export const openAiReasoningRouteDiscoveryId = "openai-gpt-5.6-managed-effort-route-discovery-2026-08-13";
+export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
+export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
+export const codexReasoningAdapterDiscoveryId = "codex-cli-0.144.4-governed-effort-discovery-2026-08-13";
+
+const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
   Object.freeze({
+    reviewStatus: "qualified",
+    qualificationId: anthropicReasoningRouteQualificationId,
+    provider: "anthropic",
+    providerModels: Object.freeze(["claude-sonnet-4-6", "claude-opus-4-8"]),
+    providerMechanism: "anthropic-adaptive-effort",
+    thinkingMode: "adaptive",
+    effortLevels: resolvedReasoningEfforts,
+    defaultEffort: "high",
+    interleavedThinking: true,
+    reasoningTokenTelemetry: true,
+  }),
+  Object.freeze({
+    reviewStatus: "discovery",
+    discoveryId: openAiReasoningRouteDiscoveryId,
+    provider: "openai",
+    providerModels: Object.freeze(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]),
+    providerMechanism: "openai-compatible-reasoning-effort",
+    effortLevels: resolvedReasoningEfforts,
+    blockingEvidence: Object.freeze([
+      "live_reasoning_with_streaming_and_tools",
+      "live_provider_usage_cost_latency_and_cache_evidence",
+      "live_fail_closed_route_mismatch_evidence",
+    ]),
+  }),
+]);
+
+const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterReview[] = Object.freeze([
+  Object.freeze({
+    reviewStatus: "qualified",
     qualificationId: claudeReasoningAdapterQualificationId,
     agentCatalogId: "claude-cli",
     clientVersion: "2.1.215",
     effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  }),
+  Object.freeze({
+    reviewStatus: "discovery",
+    discoveryId: hermesReasoningAdapterDiscoveryId,
+    agentCatalogId: "hermes-claw",
+    clientVersion: "0.19.0",
+    effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+    blockingEvidence: Object.freeze([
+      "live_reasoning_with_mcp_tools",
+      "live_streaming_and_hidden_reasoning_suppression",
+      "live_usage_cost_latency_and_cache_evidence",
+    ]),
+  }),
+  Object.freeze({
+    reviewStatus: "discovery",
+    discoveryId: codexReasoningAdapterDiscoveryId,
+    agentCatalogId: "codex-cli",
+    clientVersion: "0.144.4",
+    effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+    blockingEvidence: Object.freeze([
+      "live_reasoning_with_mcp_tools",
+      "live_streaming_and_hidden_reasoning_suppression",
+      "live_usage_cost_latency_and_cache_evidence",
+    ]),
   }),
 ]);
+
+/**
+ * Return the code-owned review record for an exact runtime pin.
+ *
+ * Discovery records are deliberately visible to qualification tooling while
+ * remaining ineligible for product controls. This lets an inspected adapter
+ * land without silently claiming that a credentialed provider run occurred.
+ */
+export const agentReasoningAdapterReview = (
+  input: { agentCatalogId: string; clientVersion: string },
+  reviews: readonly AgentReasoningAdapterReview[] = reviewedAgentReasoningAdapters,
+): AgentReasoningAdapterReview | null => {
+  const review = reviews.find((candidate) => (
+    candidate.agentCatalogId === input.agentCatalogId
+    && candidate.clientVersion === input.clientVersion
+  ));
+  if (!review) return null;
+  return {
+    ...review,
+    effortLevels: [...review.effortLevels],
+    ...(review.reviewStatus === "discovery"
+      ? { blockingEvidence: [...review.blockingEvidence] }
+      : {}),
+  } as AgentReasoningAdapterReview;
+};
 
 /**
  * Resolve a code-owned agent adapter qualification.
@@ -70,13 +204,10 @@ const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterRegistration
  */
 export const qualifiedAgentReasoningAdapter = (
   input: { agentCatalogId: string; clientVersion: string },
-  registrations: readonly AgentReasoningAdapterRegistration[] = reviewedAgentReasoningAdapters,
+  reviews: readonly AgentReasoningAdapterReview[] = reviewedAgentReasoningAdapters,
 ): AgentReasoningAdapterQualification | null => {
-  const registration = registrations.find((candidate) => (
-    candidate.agentCatalogId === input.agentCatalogId
-    && candidate.clientVersion === input.clientVersion
-  ));
-  if (!registration) return null;
+  const registration = agentReasoningAdapterReview(input, reviews);
+  if (!registration || registration.reviewStatus !== "qualified") return null;
   return {
     qualificationId: registration.qualificationId,
     agentCatalogId: registration.agentCatalogId,
@@ -84,33 +215,57 @@ export const qualifiedAgentReasoningAdapter = (
     effortLevels: [...registration.effortLevels],
     conversationPinned: true,
     signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
   };
+};
+
+/**
+ * Return the code-owned review for an exact provider/model route.
+ *
+ * Discovery routes are available to qualification tooling but remain absent
+ * from persisted route capabilities and Web Chat until promoted by review.
+ */
+export const reasoningRouteReview = (
+  input: { provider: ManagedRoutingProvider; providerModel: string },
+  reviews: readonly ReasoningRouteReview[] = reviewedReasoningRoutes,
+): ReasoningRouteReview | null => {
+  const review = reviews.find((candidate) => (
+    candidate.provider === input.provider
+    && candidate.providerModels.includes(input.providerModel)
+  ));
+  if (!review) return null;
+  return {
+    ...review,
+    providerModels: [...review.providerModels],
+    effortLevels: [...review.effortLevels],
+    ...(review.reviewStatus === "discovery"
+      ? { blockingEvidence: [...review.blockingEvidence] }
+      : {}),
+  } as ReasoningRouteReview;
 };
 
 /**
  * Product-owned qualification, not provider-name inference.
  *
- * Only exact direct-Anthropic model routes that were reviewed for the Phase
- * 0.5 wire contract receive effort capabilities. Unknown models and alternate
- * providers deliberately return null. Agent runtime qualification is resolved
+ * Exact provider/model routes join through reviewed registrations without
+ * adding provider branches to Control, Web, or an agent adapter. Unknown
+ * routes deliberately return null. Agent runtime qualification is resolved
  * independently by `qualifiedAgentReasoningAdapter`.
  */
 export const qualifiedReasoningRouteCapabilities = (input: {
   provider: ManagedRoutingProvider;
   providerModel: string;
-}): QualifiedReasoningCapabilities | null => {
-  if (
-    input.provider !== "anthropic"
-    || !["claude-sonnet-4-6", "claude-opus-4-8"].includes(input.providerModel)
-  ) return null;
+}, reviews: readonly ReasoningRouteReview[] = reviewedReasoningRoutes): QualifiedReasoningCapabilities | null => {
+  const registration = reasoningRouteReview(input, reviews);
+  if (!registration || registration.reviewStatus !== "qualified") return null;
   return {
-    qualificationId: anthropicReasoningRouteQualificationId,
-    providerMechanism: "anthropic-adaptive-effort",
-    thinkingMode: "adaptive",
-    effortLevels: [...resolvedReasoningEfforts],
-    defaultEffort: "high",
-    interleavedThinking: true,
-    reasoningTokenTelemetry: true,
+    qualificationId: registration.qualificationId,
+    providerMechanism: registration.providerMechanism,
+    thinkingMode: registration.thinkingMode,
+    effortLevels: [...registration.effortLevels],
+    defaultEffort: registration.defaultEffort,
+    interleavedThinking: registration.interleavedThinking,
+    reasoningTokenTelemetry: registration.reasoningTokenTelemetry,
   };
 };
 export type RoutingSignal =
