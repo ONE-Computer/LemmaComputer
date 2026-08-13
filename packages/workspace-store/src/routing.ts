@@ -1067,7 +1067,6 @@ export class PostgresRoutingStore implements RoutingStore {
            AND admission.resolved_provider=deployment.provider
            AND admission.resolved_model=deployment.provider_model
            AND admission.resolved_deployment_id=deployment.provider_deployment
-           AND admission.policy_version_id=decision.policy_version_id::text
            AND admission.route_mapping_version=decision.mapping_version_id::text
            AND admission.selected_service_class=decision.selected_service_class`,
         [input.tenantId, input.decisionId, input.usageEventId],
