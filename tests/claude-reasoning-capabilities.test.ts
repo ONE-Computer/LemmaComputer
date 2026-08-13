@@ -10,6 +10,7 @@ import {
   qualifiedReasoningRouteCapabilities,
   type AgentReasoningAdapterReview,
   type AgentReasoningAdapterRegistration,
+  type ReasoningRouteQualificationRegistration,
 } from "@lemmacomputer/model-router";
 
 test("reviewed direct Anthropic model routes expose provider effort capabilities", () => {
@@ -38,6 +39,36 @@ test("provider mismatch and unreviewed model routes fail closed", () => {
     provider: "anthropic",
     providerModel: "claude-sonnet-4-5",
   }), null);
+});
+
+test("a future provider route joins through registration without changing Web, Control, or agent adapters", () => {
+  const registrations: readonly ReasoningRouteQualificationRegistration[] = [{
+    qualificationId: "example-provider-reasoning-route-2026-08-13",
+    provider: "openai",
+    providerModels: ["example-reasoning-model"],
+    providerMechanism: "openai-compatible-reasoning-effort",
+    thinkingMode: "opaque",
+    effortLevels: ["low", "medium"],
+    defaultEffort: "medium",
+    interleavedThinking: false,
+    reasoningTokenTelemetry: true,
+  }];
+  assert.deepEqual(qualifiedReasoningRouteCapabilities({
+    provider: "openai",
+    providerModel: "example-reasoning-model",
+  }, registrations), {
+    qualificationId: "example-provider-reasoning-route-2026-08-13",
+    providerMechanism: "openai-compatible-reasoning-effort",
+    thinkingMode: "opaque",
+    effortLevels: ["low", "medium"],
+    defaultEffort: "medium",
+    interleavedThinking: false,
+    reasoningTokenTelemetry: true,
+  });
+  assert.equal(qualifiedReasoningRouteCapabilities({
+    provider: "openai",
+    providerModel: "unreviewed-model",
+  }, registrations), null);
 });
 
 test("the pinned Claude runtime is the first registered reasoning adapter", () => {

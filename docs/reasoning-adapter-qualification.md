@@ -1,8 +1,10 @@
 # Reasoning adapter qualification
 
-LemmaComputer exposes one provider-neutral thinking-effort control. An agent runtime becomes eligible only when its exact client pin has a qualified adapter and the selected organization route separately qualifies the same effort level.
+LemmaComputer exposes one provider-neutral thinking-effort control. An agent runtime becomes eligible only when its exact client pin has a qualified adapter and the selected organization route separately qualifies the same effort level. No runtime requires an Anthropic, OpenAI, or other named provider; it works through the organization's assigned model alias.
 
-The adapter does not own provider reasoning policy. Its job is to preserve the conversation selection, carry Control's signed task binding to the loopback gateway on every turn, stream text and tool lifecycle events, and suppress hidden reasoning content. The gateway removes native reasoning fields supplied by any workspace client; the governed route injects the resolved provider value after policy evaluation.
+`Auto` in this document means only the thinking-effort default that follows the organization's allowed maximum. Employee Web Chat does not expose an Auto model mode: model selection remains the explicit `Lite`, `Balanced`, or `Pro` tier shipped by #68.
+
+The adapter does not own provider reasoning policy. Its job is to preserve the conversation selection, carry Control's signed task binding to the loopback gateway on every turn, stream text and tool lifecycle events, and suppress hidden reasoning content. The gateway removes native reasoning fields supplied by any workspace client; the governed route injects the resolved provider value after policy evaluation. Exact provider/model routes join through a separate code-owned registration, without provider branches in Web, Control, or the runtime adapter.
 
 ## Review states
 
@@ -22,7 +24,7 @@ Changing a record from discovery to qualified is a reviewed product change. Admi
 | Codex CLI | `0.144.4` | Discovery under `codex-cli-0.144.4-governed-effort-discovery-2026-08-13` | Governed route; no Codex-native `effort` is trusted as policy | No selector until the live gates pass |
 | Any other runtime or version | Any | Unreviewed | None | Fail closed |
 
-Hermes and Codex both expose upstream reasoning controls, but that does not make their labels or behavior equivalent to Claude or to one another. LemmaComputer's Low, Medium, and High values are bounded product intents. The separately qualified provider route decides their concrete wire meaning.
+Hermes and Codex both expose upstream reasoning controls, but that does not make their labels or behavior equivalent to Claude or to one another. LemmaComputer's Low, Medium, and High values are bounded product intents. The separately qualified provider route decides their concrete wire meaning. Direct Anthropic is the first existing route registration from #69, not a prerequisite for these adapters or for future route registrations.
 
 ## Shared transport contract
 
@@ -40,7 +42,7 @@ This is why the Codex discovery branch's native `AsyncThread.turn(..., effort=..
 
 ## Promotion gates
 
-Run these gates against the exact runtime version and every route/model combination to be registered. Use an isolated worktree deployment. Add provider credentials through **AI control plane -> Models & providers**; do not place credentials in `.env`, documentation, test output, or evidence artifacts.
+Run these gates against the exact runtime version and a separately qualified route that supports the proposed levels. The adapter evidence remains valid for any other route that satisfies the same signed gateway contract; provider semantics are evidenced by that route's own qualification. Use an isolated worktree deployment. Add any chosen provider credential through **AI control plane -> Models & providers**; do not place credentials in `.env`, documentation, test output, or evidence artifacts.
 
 ### 1. Static and fixture evidence
 

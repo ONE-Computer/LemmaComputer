@@ -1,6 +1,6 @@
 # Governed thinking-effort qualification
 
-This document is the reviewed capability record for LemmaComputer's provider-neutral thinking-effort control and its first qualified agent adapter. The product control is exposed only when both the selected agent runtime and governed model route match reviewed qualifications. Unknown or discovery-only agents, providers, models, or client versions fail closed and do not expose an effort selector. The cross-runtime review states and promotion gates are defined in [Reasoning adapter qualification](reasoning-adapter-qualification.md).
+This document is the reviewed capability record for LemmaComputer's first qualified route and agent adapter; it is not a requirement that other adapters use Anthropic. The product control is exposed only when both the selected agent runtime and governed model route match reviewed qualifications. Unknown or discovery-only agents, providers, models, or client versions fail closed and do not expose an effort selector. The provider-neutral cross-runtime and route-registration contract is defined in [Reasoning adapter qualification](reasoning-adapter-qualification.md).
 
 Route qualification ID: `anthropic-claude-4.6-4.8-effort-route-2026-08-13`
 
@@ -25,6 +25,8 @@ Agent-adapter qualification ID: `claude-cli-2.1.215-governed-effort-adapter-2026
 | Any other runtime or version | Any | None | No reviewed registration; fail closed |
 
 `Auto` is a LemmaComputer product setting, not a provider effort value. Control resolves it to the organization maximum (`low`, `medium`, or `high`) before route selection. The protected maximum `max` is deliberately clipped to product `high`; `xhigh` and `max` are not user-selectable in this phase.
+
+This is Auto **thinking effort**, not Auto **model mode**. Employee Web Chat exposes only the explicit `Lite`, `Balanced`, and `Pro` model tiers from #68.
 
 The qualification is based on Anthropic's current documented contracts for [adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking), [effort](https://platform.claude.com/docs/en/build-with-claude/effort), [extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking), the [Messages API](https://platform.claude.com/docs/en/api/go/messages), and the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code/cli-usage). A provider or Claude Code upgrade must add a new reviewed qualification ID rather than widening the existing match.
 

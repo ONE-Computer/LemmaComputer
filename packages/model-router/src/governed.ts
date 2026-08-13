@@ -33,6 +33,18 @@ export type QualifiedReasoningCapabilities = {
   reasoningTokenTelemetry: boolean;
 };
 
+export type ReasoningRouteQualificationRegistration = {
+  qualificationId: string;
+  provider: ManagedRoutingProvider;
+  providerModels: readonly string[];
+  providerMechanism: string;
+  thinkingMode: QualifiedReasoningCapabilities["thinkingMode"];
+  effortLevels: readonly ResolvedReasoningEffort[];
+  defaultEffort: ResolvedReasoningEffort;
+  interleavedThinking: boolean;
+  reasoningTokenTelemetry: boolean;
+};
+
 export type AgentReasoningAdapterQualification = {
   qualificationId: string;
   agentCatalogId: string;
@@ -71,6 +83,20 @@ export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-
 export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
 export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
 export const codexReasoningAdapterDiscoveryId = "codex-cli-0.144.4-governed-effort-discovery-2026-08-13";
+
+const reviewedReasoningRoutes: readonly ReasoningRouteQualificationRegistration[] = Object.freeze([
+  Object.freeze({
+    qualificationId: anthropicReasoningRouteQualificationId,
+    provider: "anthropic",
+    providerModels: Object.freeze(["claude-sonnet-4-6", "claude-opus-4-8"]),
+    providerMechanism: "anthropic-adaptive-effort",
+    thinkingMode: "adaptive",
+    effortLevels: resolvedReasoningEfforts,
+    defaultEffort: "high",
+    interleavedThinking: true,
+    reasoningTokenTelemetry: true,
+  }),
+]);
 
 const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterReview[] = Object.freeze([
   Object.freeze({
@@ -167,27 +193,28 @@ export const qualifiedAgentReasoningAdapter = (
 /**
  * Product-owned qualification, not provider-name inference.
  *
- * Only exact direct-Anthropic model routes that were reviewed for the Phase
- * 0.5 wire contract receive effort capabilities. Unknown models and alternate
- * providers deliberately return null. Agent runtime qualification is resolved
+ * Exact provider/model routes join through reviewed registrations without
+ * adding provider branches to Control, Web, or an agent adapter. Unknown
+ * routes deliberately return null. Agent runtime qualification is resolved
  * independently by `qualifiedAgentReasoningAdapter`.
  */
 export const qualifiedReasoningRouteCapabilities = (input: {
   provider: ManagedRoutingProvider;
   providerModel: string;
-}): QualifiedReasoningCapabilities | null => {
-  if (
-    input.provider !== "anthropic"
-    || !["claude-sonnet-4-6", "claude-opus-4-8"].includes(input.providerModel)
-  ) return null;
+}, registrations: readonly ReasoningRouteQualificationRegistration[] = reviewedReasoningRoutes): QualifiedReasoningCapabilities | null => {
+  const registration = registrations.find((candidate) => (
+    candidate.provider === input.provider
+    && candidate.providerModels.includes(input.providerModel)
+  ));
+  if (!registration) return null;
   return {
-    qualificationId: anthropicReasoningRouteQualificationId,
-    providerMechanism: "anthropic-adaptive-effort",
-    thinkingMode: "adaptive",
-    effortLevels: [...resolvedReasoningEfforts],
-    defaultEffort: "high",
-    interleavedThinking: true,
-    reasoningTokenTelemetry: true,
+    qualificationId: registration.qualificationId,
+    providerMechanism: registration.providerMechanism,
+    thinkingMode: registration.thinkingMode,
+    effortLevels: [...registration.effortLevels],
+    defaultEffort: registration.defaultEffort,
+    interleavedThinking: registration.interleavedThinking,
+    reasoningTokenTelemetry: registration.reasoningTokenTelemetry,
   };
 };
 export type RoutingSignal =
