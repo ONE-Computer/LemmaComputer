@@ -178,6 +178,7 @@ test("catalog re-entry reconciles only explicit marker transitions and removes s
       headers,
       payload: {
         expectedDocumentHash: pendingReview.json().documentHash,
+        expectedAccessPolicyVersion: pendingReview.json().accessPolicyVersion,
         tools: { create_issue: "allow" },
       },
     });

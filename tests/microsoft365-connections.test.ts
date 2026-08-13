@@ -99,7 +99,7 @@ const saveCurrentConnectorToolPolicy = async (
   tools: Record<string, "allow" | "approval_required" | "deny">,
 ) => {
   const current = await service.connectorToolPolicy(identity, connectorId);
-  return service.saveConnectorToolPolicy(identity, connectorId, tools, current.documentHash);
+  return service.saveConnectorToolPolicy(identity, identity.subjectId, connectorId, tools, current.documentHash, current.accessPolicyVersion, `test-${connectorId}-${current.accessPolicyVersion}`);
 };
 
 const publicConnectorResolver = async () => [{ address: "93.184.216.34", family: 4 as const }];
@@ -516,10 +516,10 @@ test("new hosted connector tools are blocked pending review and persist explicit
   assert.match(initial.tools[0]!.description, /Blocked until an administrator reviews/i);
   assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
 
-  const saved = await service.saveConnectorToolPolicy(alpha, "linear", {
+  const saved = await service.saveConnectorToolPolicy(alpha, alpha.subjectId, "linear", {
     create_issue: "approval_required",
     list_issues: "deny",
-  }, initial.documentHash);
+  }, initial.documentHash, initial.accessPolicyVersion, "save-new-tools");
   assert.deepEqual(saved.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [
     ["create_issue", "approval_required", false],
     ["list_issues", "deny", false],
@@ -556,7 +556,7 @@ test("new hosted connector tools are blocked pending review and persist explicit
   assert.equal(projected.toolPolicies.delete_issue, undefined);
 
   await assert.rejects(
-    () => service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }, changed.documentHash),
+    () => service.saveConnectorToolPolicy(alpha, alpha.subjectId, "linear", { create_issue: "allow" }, changed.documentHash, changed.accessPolicyVersion, "missing-tool-decision"),
     { code: "INVALID_TOOL_POLICY" },
   );
 });
@@ -571,7 +571,7 @@ test("a same-name provider tool change revokes cached projection and rejects a s
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
   const review = await service.connectorToolPolicy(alpha, "linear");
-  await service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }, review.documentHash);
+  await service.saveConnectorToolPolicy(alpha, alpha.subjectId, "linear", { create_issue: "allow" }, review.documentHash, review.accessPolicyVersion, "initial-review");
   const policy: RuntimePolicy = {
     schemaVersion: 1,
     policyVersionId: "policy-v1",
@@ -595,7 +595,7 @@ test("a same-name provider tool change revokes cached projection and rejects a s
   assert.deepEqual(changed.changes, { added: [], changed: ["create_issue"], removed: [] });
   assert.deepEqual(changed.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [["create_issue", "deny", true]]);
   await assert.rejects(
-    () => service.saveConnectorToolPolicy(alpha, "linear", { create_issue: "allow" }, review.documentHash),
+    () => service.saveConnectorToolPolicy(alpha, alpha.subjectId, "linear", { create_issue: "allow" }, review.documentHash, review.accessPolicyVersion, "stale-provider-review"),
     { code: "TOOL_SET_CHANGED_REVIEW_AGAIN" },
   );
   assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
@@ -612,15 +612,26 @@ test("organization connector access policy locks member changes and removes disa
     authorizationOrigin: "http://localhost:3001",
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
-  await saveCurrentConnectorToolPolicy(service, alpha, "linear", {
+  const reviewed = await saveCurrentConnectorToolPolicy(service, alpha, "linear", {
     create_issue: "approval_required",
     list_issues: "deny",
   });
   const locked = await service.updateAccessPolicy(alpha, "admin-alpha", "linear", {
     enabled: true,
     membersCanManage: false,
+    expectedVersion: reviewed.accessPolicyVersion,
+    correlationId: "lock-member-management",
   });
-  assert.equal(locked.membersCanManage, false);
+  assert.equal(locked.connector.membersCanManage, false);
+  await assert.rejects(
+    () => service.updateAccessPolicy(alpha, "admin-alpha", "linear", {
+      enabled: false,
+      membersCanManage: false,
+      expectedVersion: reviewed.accessPolicyVersion,
+      correlationId: "stale-access-policy",
+    }),
+    { code: "CONNECTOR_POLICY_VERSION_CONFLICT" },
+  );
   const memberCatalog = await service.list(alpha);
   const memberLinear = memberCatalog.connections.find((connector) => connector.id === "linear")!;
   assert.equal(memberLinear.canManageConnection, false);
@@ -652,6 +663,8 @@ test("organization connector access policy locks member changes and removes disa
   await service.updateAccessPolicy(alpha, "admin-alpha", "linear", {
     enabled: false,
     membersCanManage: false,
+    expectedVersion: locked.connector.accessPolicyVersion,
+    correlationId: "disable-linear",
   });
   await assert.rejects(() => service.start(alpha, "linear", true), { code: "MCP_CONNECTOR_DISABLED" });
   assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);

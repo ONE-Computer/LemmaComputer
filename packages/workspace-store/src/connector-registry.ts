@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import type { McpToolPolicyDecision } from "@lemmacomputer/contracts";
 
@@ -71,6 +71,50 @@ export type ConnectorToolPolicyReview = {
   toolDefinitionHashes: Record<string, string>;
 };
 
+export type ConnectorPolicyChangeKind = "access_policy" | "tool_policy";
+export type ConnectorPolicyChangeOutcome = "applied" | "conflict";
+export type ConnectorPolicyWorkspaceDeliveryOutcome = "refreshed" | "failed" | "applies_on_next_start";
+
+export type ConnectorPolicyChangeEvent = {
+  id: string;
+  tenantId: string;
+  connectorId: string;
+  actorUserId: string;
+  changeKind: ConnectorPolicyChangeKind;
+  outcome: ConnectorPolicyChangeOutcome;
+  oldVersion: number;
+  newVersion: number;
+  oldPolicyHash: string;
+  newPolicyHash: string;
+  reviewedDefinitionHash: string | null;
+  failureCode: string | null;
+  correlationId: string;
+  occurredAt: Date;
+};
+
+export type ConnectorPolicyWorkspaceDeliveryReceipt = {
+  id: string;
+  tenantId: string;
+  changeEventId: string;
+  workspaceId: string;
+  ownerSubjectId: string;
+  grantId: string;
+  workspaceState: "not_created" | "provisioning" | "ready" | "open" | "restarting" | "stopping" | "stopped" | "failed";
+  outcome: ConnectorPolicyWorkspaceDeliveryOutcome;
+  failureCode: string | null;
+  occurredAt: Date;
+};
+
+export type ConnectorPolicyMutationResult = {
+  connector: ConnectorRegistryRecord;
+  event: ConnectorPolicyChangeEvent;
+};
+
+export type ConnectorPolicyDeliverySnapshot = {
+  event: ConnectorPolicyChangeEvent;
+  receipts: ConnectorPolicyWorkspaceDeliveryReceipt[];
+};
+
 export type ConnectorDiscoveryEgressPermit = {
   id: string;
   tenantId: string;
@@ -111,6 +155,27 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
   saveConnector(record: SaveConnectorRegistryRecord): Promise<ConnectorRegistryRecord>;
   updateAccessPolicy(tenantId: string, connectorId: string, input: { enabled: boolean; membersCanManage: boolean; updatedBy: string }): Promise<ConnectorRegistryRecord | null>;
   updateToolPolicies(tenantId: string, connectorId: string, review: ConnectorToolPolicyReview): Promise<ConnectorRegistryRecord | null>;
+  applyAccessPolicyChange(tenantId: string, connectorId: string, input: {
+    enabled: boolean;
+    membersCanManage: boolean;
+    updatedBy: string;
+    expectedVersion: number;
+    correlationId: string;
+  }): Promise<ConnectorPolicyMutationResult | null>;
+  applyToolPolicyChange(tenantId: string, connectorId: string, input: ConnectorToolPolicyReview & {
+    updatedBy: string;
+    expectedVersion: number;
+    reviewedDefinitionHash: string;
+    correlationId: string;
+  }): Promise<ConnectorPolicyMutationResult | null>;
+  recordToolPolicyConflict(tenantId: string, connectorId: string, input: {
+    actorUserId: string;
+    reviewedDefinitionHash: string;
+    failureCode: string;
+    correlationId: string;
+  }): Promise<ConnectorPolicyChangeEvent | null>;
+  appendPolicyWorkspaceDeliveryReceipts(receipts: Omit<ConnectorPolicyWorkspaceDeliveryReceipt, "id" | "occurredAt">[]): Promise<ConnectorPolicyWorkspaceDeliveryReceipt[]>;
+  latestPolicyDelivery(tenantId: string, connectorId: string): Promise<ConnectorPolicyDeliverySnapshot | null>;
   updateIcon(tenantId: string, connectorId: string, iconDataUrl: string | null): Promise<ConnectorRegistryRecord | null>;
   deleteConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
 }
@@ -123,6 +188,19 @@ const asToolPolicies = (value: unknown): Record<string, McpToolPolicyDecision> =
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value).filter(([, decision]) => validToolPolicy(decision)));
 };
+
+const canonicalObject = (value: Record<string, unknown>) => Object.fromEntries(
+  Object.entries(value).sort(([left], [right]) => left.localeCompare(right)),
+);
+
+export const connectorPolicyDocumentHash = (record: Pick<ConnectorRegistryRecord, "enabled" | "membersCanManage" | "toolPolicies" | "toolDefinitionHashes">) => (
+  createHash("sha256").update(JSON.stringify({
+    enabled: record.enabled,
+    membersCanManage: record.membersCanManage,
+    toolPolicies: canonicalObject(record.toolPolicies),
+    toolDefinitionHashes: canonicalObject(record.toolDefinitionHashes),
+  })).digest("hex")
+);
 
 const isDefinitionHash = (value: unknown): value is string => (
   typeof value === "string" && /^[a-f0-9]{64}$/.test(value)
@@ -244,6 +322,59 @@ const mapConnectionStateRow = (row: Record<string, unknown>): ConnectorConnectio
   expiresAt: row.expires_at ? new Date(String(row.expires_at)) : null,
   updatedAt: new Date(String(row.updated_at)),
 });
+
+const mapPolicyChangeRow = (row: Record<string, unknown>): ConnectorPolicyChangeEvent => ({
+  id: String(row.id),
+  tenantId: String(row.tenant_id),
+  connectorId: String(row.connector_id),
+  actorUserId: String(row.actor_user_id),
+  changeKind: row.change_kind as ConnectorPolicyChangeKind,
+  outcome: row.outcome as ConnectorPolicyChangeOutcome,
+  oldVersion: Number(row.old_version),
+  newVersion: Number(row.new_version),
+  oldPolicyHash: String(row.old_policy_hash),
+  newPolicyHash: String(row.new_policy_hash),
+  reviewedDefinitionHash: typeof row.reviewed_definition_hash === "string" ? row.reviewed_definition_hash : null,
+  failureCode: typeof row.failure_code === "string" ? row.failure_code : null,
+  correlationId: String(row.correlation_id),
+  occurredAt: new Date(String(row.occurred_at)),
+});
+
+const mapPolicyWorkspaceDeliveryRow = (row: Record<string, unknown>): ConnectorPolicyWorkspaceDeliveryReceipt => ({
+  id: String(row.id),
+  tenantId: String(row.tenant_id),
+  changeEventId: String(row.change_event_id),
+  workspaceId: String(row.workspace_id),
+  ownerSubjectId: String(row.owner_subject_id),
+  grantId: String(row.grant_id),
+  workspaceState: row.workspace_state as ConnectorPolicyWorkspaceDeliveryReceipt["workspaceState"],
+  outcome: row.outcome as ConnectorPolicyWorkspaceDeliveryOutcome,
+  failureCode: typeof row.failure_code === "string" ? row.failure_code : null,
+  occurredAt: new Date(String(row.occurred_at)),
+});
+
+const makePolicyChangeEvent = (input: Omit<ConnectorPolicyChangeEvent, "id" | "occurredAt">, occurredAt = new Date()): ConnectorPolicyChangeEvent => ({
+  id: randomUUID(),
+  ...input,
+  occurredAt,
+});
+
+const policyChangeValues = (event: ConnectorPolicyChangeEvent) => [
+  event.id,
+  event.tenantId,
+  event.connectorId,
+  event.actorUserId,
+  event.changeKind,
+  event.outcome,
+  event.oldVersion,
+  event.newVersion,
+  event.oldPolicyHash,
+  event.newPolicyHash,
+  event.reviewedDefinitionHash,
+  event.failureCode,
+  event.correlationId,
+  event.occurredAt,
+];
 
 const values = (record: SaveConnectorRegistryRecord) => [
   record.tenantId,
@@ -393,12 +524,289 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
       `UPDATE connector_registry SET
          tool_policies=$3::jsonb,
          tool_definition_hashes=$4::jsonb,
+         access_policy_version=access_policy_version+1,
+         access_policy_updated_at=now(),
          updated_at=now()
        WHERE tenant_id=$1 AND id=$2
        RETURNING *`,
       [tenantId, connectorId, JSON.stringify(toolPolicies), JSON.stringify(toolDefinitionHashes)],
     );
     return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
+  async applyAccessPolicyChange(tenantId: string, connectorId: string, input: {
+    enabled: boolean;
+    membersCanManage: boolean;
+    updatedBy: string;
+    expectedVersion: number;
+    correlationId: string;
+  }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const currentResult = await client.query(
+        "SELECT * FROM connector_registry WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+        [tenantId, connectorId],
+      );
+      if (!currentResult.rowCount) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const current = mapRow(currentResult.rows[0]);
+      const oldPolicyHash = connectorPolicyDocumentHash(current);
+      if (current.accessPolicyVersion !== input.expectedVersion) {
+        const event = makePolicyChangeEvent({
+          tenantId,
+          connectorId,
+          actorUserId: input.updatedBy,
+          changeKind: "access_policy",
+          outcome: "conflict",
+          oldVersion: current.accessPolicyVersion,
+          newVersion: current.accessPolicyVersion,
+          oldPolicyHash,
+          newPolicyHash: oldPolicyHash,
+          reviewedDefinitionHash: null,
+          failureCode: "CONNECTOR_POLICY_VERSION_CONFLICT",
+          correlationId: input.correlationId,
+        });
+        await client.query(
+          `INSERT INTO connector_policy_change_events (
+             id,tenant_id,connector_id,actor_user_id,change_kind,outcome,old_version,new_version,
+             old_policy_hash,new_policy_hash,reviewed_definition_hash,failure_code,correlation_id,occurred_at
+           ) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          policyChangeValues(event),
+        );
+        await client.query("COMMIT");
+        return { connector: current, event };
+      }
+      const updatedResult = await client.query(
+        `UPDATE connector_registry SET
+           enabled=$3,
+           members_can_manage=$4,
+           access_policy_version=access_policy_version+1,
+           access_policy_updated_by=$5,
+           access_policy_updated_at=now(),
+           updated_at=now()
+         WHERE tenant_id=$1 AND id=$2
+         RETURNING *`,
+        [tenantId, connectorId, input.enabled, input.membersCanManage, input.updatedBy],
+      );
+      const connector = mapRow(updatedResult.rows[0]);
+      const event = makePolicyChangeEvent({
+        tenantId,
+        connectorId,
+        actorUserId: input.updatedBy,
+        changeKind: "access_policy",
+        outcome: "applied",
+        oldVersion: current.accessPolicyVersion,
+        newVersion: connector.accessPolicyVersion,
+        oldPolicyHash,
+        newPolicyHash: connectorPolicyDocumentHash(connector),
+        reviewedDefinitionHash: null,
+        failureCode: null,
+        correlationId: input.correlationId,
+      });
+      await client.query(
+        `INSERT INTO connector_policy_change_events (
+           id,tenant_id,connector_id,actor_user_id,change_kind,outcome,old_version,new_version,
+           old_policy_hash,new_policy_hash,reviewed_definition_hash,failure_code,correlation_id,occurred_at
+         ) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        policyChangeValues(event),
+      );
+      await client.query("COMMIT");
+      return { connector, event };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async applyToolPolicyChange(tenantId: string, connectorId: string, input: ConnectorToolPolicyReview & {
+    updatedBy: string;
+    expectedVersion: number;
+    reviewedDefinitionHash: string;
+    correlationId: string;
+  }) {
+    const { toolPolicies, toolDefinitionHashes } = reviewedToolPolicies(input);
+    if (!isDefinitionHash(input.reviewedDefinitionHash)) throw new Error("Reviewed connector definition hash must be a SHA-256 digest");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const currentResult = await client.query(
+        "SELECT * FROM connector_registry WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+        [tenantId, connectorId],
+      );
+      if (!currentResult.rowCount) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const current = mapRow(currentResult.rows[0]);
+      const oldPolicyHash = connectorPolicyDocumentHash(current);
+      if (current.accessPolicyVersion !== input.expectedVersion) {
+        const event = makePolicyChangeEvent({
+          tenantId,
+          connectorId,
+          actorUserId: input.updatedBy,
+          changeKind: "tool_policy",
+          outcome: "conflict",
+          oldVersion: current.accessPolicyVersion,
+          newVersion: current.accessPolicyVersion,
+          oldPolicyHash,
+          newPolicyHash: oldPolicyHash,
+          reviewedDefinitionHash: input.reviewedDefinitionHash,
+          failureCode: "CONNECTOR_POLICY_VERSION_CONFLICT",
+          correlationId: input.correlationId,
+        });
+        await client.query(
+          `INSERT INTO connector_policy_change_events (
+             id,tenant_id,connector_id,actor_user_id,change_kind,outcome,old_version,new_version,
+             old_policy_hash,new_policy_hash,reviewed_definition_hash,failure_code,correlation_id,occurred_at
+           ) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          policyChangeValues(event),
+        );
+        await client.query("COMMIT");
+        return { connector: current, event };
+      }
+      const updatedResult = await client.query(
+        `UPDATE connector_registry SET
+           tool_policies=$3::jsonb,
+           tool_definition_hashes=$4::jsonb,
+           access_policy_version=access_policy_version+1,
+           access_policy_updated_by=$5,
+           access_policy_updated_at=now(),
+           updated_at=now()
+         WHERE tenant_id=$1 AND id=$2
+         RETURNING *`,
+        [tenantId, connectorId, JSON.stringify(toolPolicies), JSON.stringify(toolDefinitionHashes), input.updatedBy],
+      );
+      const connector = mapRow(updatedResult.rows[0]);
+      const event = makePolicyChangeEvent({
+        tenantId,
+        connectorId,
+        actorUserId: input.updatedBy,
+        changeKind: "tool_policy",
+        outcome: "applied",
+        oldVersion: current.accessPolicyVersion,
+        newVersion: connector.accessPolicyVersion,
+        oldPolicyHash,
+        newPolicyHash: connectorPolicyDocumentHash(connector),
+        reviewedDefinitionHash: input.reviewedDefinitionHash,
+        failureCode: null,
+        correlationId: input.correlationId,
+      });
+      await client.query(
+        `INSERT INTO connector_policy_change_events (
+           id,tenant_id,connector_id,actor_user_id,change_kind,outcome,old_version,new_version,
+           old_policy_hash,new_policy_hash,reviewed_definition_hash,failure_code,correlation_id,occurred_at
+         ) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        policyChangeValues(event),
+      );
+      await client.query("COMMIT");
+      return { connector, event };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async recordToolPolicyConflict(tenantId: string, connectorId: string, input: {
+    actorUserId: string;
+    reviewedDefinitionHash: string;
+    failureCode: string;
+    correlationId: string;
+  }) {
+    if (!isDefinitionHash(input.reviewedDefinitionHash)) throw new Error("Reviewed connector definition hash must be a SHA-256 digest");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const currentResult = await client.query(
+        "SELECT * FROM connector_registry WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+        [tenantId, connectorId],
+      );
+      if (!currentResult.rowCount) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const current = mapRow(currentResult.rows[0]);
+      const policyHash = connectorPolicyDocumentHash(current);
+      const event = makePolicyChangeEvent({
+        tenantId,
+        connectorId,
+        actorUserId: input.actorUserId,
+        changeKind: "tool_policy",
+        outcome: "conflict",
+        oldVersion: current.accessPolicyVersion,
+        newVersion: current.accessPolicyVersion,
+        oldPolicyHash: policyHash,
+        newPolicyHash: policyHash,
+        reviewedDefinitionHash: input.reviewedDefinitionHash,
+        failureCode: input.failureCode,
+        correlationId: input.correlationId,
+      });
+      await client.query(
+        `INSERT INTO connector_policy_change_events (
+           id,tenant_id,connector_id,actor_user_id,change_kind,outcome,old_version,new_version,
+           old_policy_hash,new_policy_hash,reviewed_definition_hash,failure_code,correlation_id,occurred_at
+         ) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        policyChangeValues(event),
+      );
+      await client.query("COMMIT");
+      return event;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async appendPolicyWorkspaceDeliveryReceipts(receipts: Omit<ConnectorPolicyWorkspaceDeliveryReceipt, "id" | "occurredAt">[]) {
+    if (!receipts.length) return [];
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const saved: ConnectorPolicyWorkspaceDeliveryReceipt[] = [];
+      for (const receipt of receipts) {
+        const result = await client.query(
+          `INSERT INTO connector_policy_workspace_delivery_receipts (
+             id,tenant_id,change_event_id,workspace_id,owner_subject_id,grant_id,workspace_state,outcome,failure_code,occurred_at
+           ) VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10)
+           RETURNING *`,
+          [randomUUID(), receipt.tenantId, receipt.changeEventId, receipt.workspaceId, receipt.ownerSubjectId,
+            receipt.grantId, receipt.workspaceState, receipt.outcome, receipt.failureCode, new Date()],
+        );
+        saved.push(mapPolicyWorkspaceDeliveryRow(result.rows[0]));
+      }
+      await client.query("COMMIT");
+      return saved;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async latestPolicyDelivery(tenantId: string, connectorId: string) {
+    const eventResult = await this.pool.query(
+      `SELECT * FROM connector_policy_change_events
+       WHERE tenant_id=$1 AND connector_id=$2 AND outcome='applied'
+       ORDER BY occurred_at DESC,id DESC LIMIT 1`,
+      [tenantId, connectorId],
+    );
+    if (!eventResult.rowCount) return null;
+    const event = mapPolicyChangeRow(eventResult.rows[0]);
+    const receiptsResult = await this.pool.query(
+      `SELECT * FROM connector_policy_workspace_delivery_receipts
+       WHERE tenant_id=$1 AND change_event_id=$2::uuid
+       ORDER BY occurred_at DESC,id DESC`,
+      [tenantId, event.id],
+    );
+    return { event, receipts: receiptsResult.rows.map(mapPolicyWorkspaceDeliveryRow) };
   }
 
   async createDiscoveryEgressPermit(input: CreateConnectorDiscoveryEgressPermitInput) {
@@ -464,6 +872,8 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
   private readonly records = new Map<string, ConnectorRegistryRecord>();
   private readonly connectionStates = new Map<string, ConnectorConnectionStateRecord>();
   private readonly discoveryEgressPermits = new Map<string, ConnectorDiscoveryEgressPermit>();
+  private readonly policyChangeEvents: ConnectorPolicyChangeEvent[] = [];
+  private readonly policyDeliveryReceipts: ConnectorPolicyWorkspaceDeliveryReceipt[] = [];
   private key(tenantId: string, connectorId: string) { return `${tenantId}:${connectorId}`; }
   private connectionStateKey(tenantId: string, subjectId: string, connectorId: string) { return `${tenantId}\u0000${subjectId}\u0000${connectorId}`; }
   private discoveryPermitKey(tenantId: string, permitId: string) { return `${tenantId}\u0000${permitId}`; }
@@ -573,10 +983,181 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       ...record,
       toolPolicies: { ...toolPolicies },
       toolDefinitionHashes: { ...toolDefinitionHashes },
+      accessPolicyVersion: record.accessPolicyVersion + 1,
+      accessPolicyUpdatedAt: new Date(),
       updatedAt: new Date(),
     };
     this.records.set(key, cloneConnectorRecord(saved));
     return cloneConnectorRecord(saved);
+  }
+
+  async applyAccessPolicyChange(tenantId: string, connectorId: string, input: {
+    enabled: boolean;
+    membersCanManage: boolean;
+    updatedBy: string;
+    expectedVersion: number;
+    correlationId: string;
+  }) {
+    const key = this.key(tenantId, connectorId);
+    const current = this.records.get(key);
+    if (!current) return null;
+    const oldPolicyHash = connectorPolicyDocumentHash(current);
+    if (current.accessPolicyVersion !== input.expectedVersion) {
+      const event = makePolicyChangeEvent({
+        tenantId,
+        connectorId,
+        actorUserId: input.updatedBy,
+        changeKind: "access_policy",
+        outcome: "conflict",
+        oldVersion: current.accessPolicyVersion,
+        newVersion: current.accessPolicyVersion,
+        oldPolicyHash,
+        newPolicyHash: oldPolicyHash,
+        reviewedDefinitionHash: null,
+        failureCode: "CONNECTOR_POLICY_VERSION_CONFLICT",
+        correlationId: input.correlationId,
+      });
+      this.policyChangeEvents.push(event);
+      return { connector: cloneConnectorRecord(current), event: { ...event } };
+    }
+    const now = new Date();
+    const connector = {
+      ...current,
+      enabled: input.enabled,
+      membersCanManage: input.membersCanManage,
+      accessPolicyVersion: current.accessPolicyVersion + 1,
+      accessPolicyUpdatedBy: input.updatedBy,
+      accessPolicyUpdatedAt: now,
+      updatedAt: now,
+    };
+    this.records.set(key, cloneConnectorRecord(connector));
+    const event = makePolicyChangeEvent({
+      tenantId,
+      connectorId,
+      actorUserId: input.updatedBy,
+      changeKind: "access_policy",
+      outcome: "applied",
+      oldVersion: current.accessPolicyVersion,
+      newVersion: connector.accessPolicyVersion,
+      oldPolicyHash,
+      newPolicyHash: connectorPolicyDocumentHash(connector),
+      reviewedDefinitionHash: null,
+      failureCode: null,
+      correlationId: input.correlationId,
+    }, now);
+    this.policyChangeEvents.push(event);
+    return { connector: cloneConnectorRecord(connector), event: { ...event } };
+  }
+
+  async applyToolPolicyChange(tenantId: string, connectorId: string, input: ConnectorToolPolicyReview & {
+    updatedBy: string;
+    expectedVersion: number;
+    reviewedDefinitionHash: string;
+    correlationId: string;
+  }) {
+    const { toolPolicies, toolDefinitionHashes } = reviewedToolPolicies(input);
+    if (!isDefinitionHash(input.reviewedDefinitionHash)) throw new Error("Reviewed connector definition hash must be a SHA-256 digest");
+    const key = this.key(tenantId, connectorId);
+    const current = this.records.get(key);
+    if (!current) return null;
+    const oldPolicyHash = connectorPolicyDocumentHash(current);
+    if (current.accessPolicyVersion !== input.expectedVersion) {
+      const event = makePolicyChangeEvent({
+        tenantId,
+        connectorId,
+        actorUserId: input.updatedBy,
+        changeKind: "tool_policy",
+        outcome: "conflict",
+        oldVersion: current.accessPolicyVersion,
+        newVersion: current.accessPolicyVersion,
+        oldPolicyHash,
+        newPolicyHash: oldPolicyHash,
+        reviewedDefinitionHash: input.reviewedDefinitionHash,
+        failureCode: "CONNECTOR_POLICY_VERSION_CONFLICT",
+        correlationId: input.correlationId,
+      });
+      this.policyChangeEvents.push(event);
+      return { connector: cloneConnectorRecord(current), event: { ...event } };
+    }
+    const now = new Date();
+    const connector = {
+      ...current,
+      toolPolicies: { ...toolPolicies },
+      toolDefinitionHashes: { ...toolDefinitionHashes },
+      accessPolicyVersion: current.accessPolicyVersion + 1,
+      accessPolicyUpdatedBy: input.updatedBy,
+      accessPolicyUpdatedAt: now,
+      updatedAt: now,
+    };
+    this.records.set(key, cloneConnectorRecord(connector));
+    const event = makePolicyChangeEvent({
+      tenantId,
+      connectorId,
+      actorUserId: input.updatedBy,
+      changeKind: "tool_policy",
+      outcome: "applied",
+      oldVersion: current.accessPolicyVersion,
+      newVersion: connector.accessPolicyVersion,
+      oldPolicyHash,
+      newPolicyHash: connectorPolicyDocumentHash(connector),
+      reviewedDefinitionHash: input.reviewedDefinitionHash,
+      failureCode: null,
+      correlationId: input.correlationId,
+    }, now);
+    this.policyChangeEvents.push(event);
+    return { connector: cloneConnectorRecord(connector), event: { ...event } };
+  }
+
+  async recordToolPolicyConflict(tenantId: string, connectorId: string, input: {
+    actorUserId: string;
+    reviewedDefinitionHash: string;
+    failureCode: string;
+    correlationId: string;
+  }) {
+    if (!isDefinitionHash(input.reviewedDefinitionHash)) throw new Error("Reviewed connector definition hash must be a SHA-256 digest");
+    const current = this.records.get(this.key(tenantId, connectorId));
+    if (!current) return null;
+    const policyHash = connectorPolicyDocumentHash(current);
+    const event = makePolicyChangeEvent({
+      tenantId,
+      connectorId,
+      actorUserId: input.actorUserId,
+      changeKind: "tool_policy",
+      outcome: "conflict",
+      oldVersion: current.accessPolicyVersion,
+      newVersion: current.accessPolicyVersion,
+      oldPolicyHash: policyHash,
+      newPolicyHash: policyHash,
+      reviewedDefinitionHash: input.reviewedDefinitionHash,
+      failureCode: input.failureCode,
+      correlationId: input.correlationId,
+    });
+    this.policyChangeEvents.push(event);
+    return { ...event };
+  }
+
+  async appendPolicyWorkspaceDeliveryReceipts(receipts: Omit<ConnectorPolicyWorkspaceDeliveryReceipt, "id" | "occurredAt">[]) {
+    const saved = receipts.map((receipt) => ({ id: randomUUID(), ...receipt, occurredAt: new Date() }));
+    for (const receipt of saved) {
+      const event = this.policyChangeEvents.find((candidate) => candidate.id === receipt.changeEventId && candidate.tenantId === receipt.tenantId);
+      if (!event) throw new Error("Connector policy change event does not exist for tenant");
+      this.policyDeliveryReceipts.push(receipt);
+    }
+    return saved.map((receipt) => ({ ...receipt }));
+  }
+
+  async latestPolicyDelivery(tenantId: string, connectorId: string) {
+    const event = this.policyChangeEvents
+      .filter((candidate) => candidate.tenantId === tenantId && candidate.connectorId === connectorId && candidate.outcome === "applied")
+      .sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime() || right.id.localeCompare(left.id))[0];
+    if (!event) return null;
+    return {
+      event: { ...event },
+      receipts: this.policyDeliveryReceipts
+        .filter((receipt) => receipt.tenantId === tenantId && receipt.changeEventId === event.id)
+        .sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime() || right.id.localeCompare(left.id))
+        .map((receipt) => ({ ...receipt })),
+    };
   }
 
   async createDiscoveryEgressPermit(input: CreateConnectorDiscoveryEgressPermitInput) {

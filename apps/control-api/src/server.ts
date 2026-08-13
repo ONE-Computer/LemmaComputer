@@ -1113,39 +1113,86 @@ export function createControlServer(
   const refreshOwnedWorkspaceConnectionGrants = async (value: SessionPrincipal) => {
     const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;
     const workspaces = await store.listCurrent(value.identity);
-    const results = await Promise.allSettled(workspaces.map(async (workspace) => {
-      const { policy } = await policyForGrant(value, effective, workspace.grantId);
+    const receipts = await Promise.all(workspaces.map(async (workspace) => {
+      if (["not_created", "stopped", "failed"].includes(workspace.state)) {
+        return {
+          workspaceId: workspace.id,
+          ownerSubjectId: value.userId,
+          grantId: workspace.grantId,
+          workspaceState: workspace.state,
+          outcome: "applies_on_next_start" as const,
+          failureCode: null,
+        };
+      }
+      let policy: RuntimePolicy | null = null;
       try {
-        return await service.refreshPolicyGrant(value.identity, policy, workspace.grantId);
+        ({ policy } = await policyForGrant(value, effective, workspace.grantId));
+        const refreshed = await service.refreshPolicyGrant(value.identity, policy, workspace.grantId);
+        return {
+          workspaceId: workspace.id,
+          ownerSubjectId: value.userId,
+          grantId: workspace.grantId,
+          workspaceState: workspace.state,
+          outcome: refreshed ? "refreshed" as const : "failed" as const,
+          failureCode: refreshed ? null : "CONNECTOR_GRANT_REFRESH_NOT_CONFIRMED",
+        };
       } catch (error) {
         // A connector/model gateway refresh failure must fail closed at the
         // gateway without revoking unrelated workspace-to-Control capabilities
         // such as Sites, governed uploads, or operation status.
-        await service.revokeGatewayGrants(workspace.id, policy).catch(() => undefined);
-        throw error;
+        if (policy) await service.revokeGatewayGrants(workspace.id, policy).catch(() => undefined);
+        return {
+          workspaceId: workspace.id,
+          ownerSubjectId: value.userId,
+          grantId: workspace.grantId,
+          workspaceState: workspace.state,
+          outcome: "failed" as const,
+          failureCode: error instanceof LemmaComputerError ? error.code : "CONNECTOR_GRANT_REFRESH_FAILED",
+        };
       }
     }));
     return {
-      refreshed: results.filter((result) => result.status === "fulfilled" && result.value).length,
-      failed: results.filter((result) => result.status === "rejected").length,
+      refreshed: receipts.filter((receipt) => receipt.outcome === "refreshed").length,
+      failed: receipts.filter((receipt) => receipt.outcome === "failed").length,
+      appliesOnNextStart: receipts.filter((receipt) => receipt.outcome === "applies_on_next_start").length,
+      receipts,
     };
   };
-  const refreshTenantWorkspaceConnectionGrants = async (tenantId: string) => {
-    if (!security.identityPolicyStore) return { refreshed: 0, failed: 0 };
+  const refreshTenantWorkspaceConnectionGrants = async (tenantId: string, changeEventId?: string) => {
+    if (!security.identityPolicyStore) return { refreshed: 0, failed: 0, appliesOnNextStart: 0, members: [] };
     const users = await security.identityPolicyStore.listUsers(tenantId);
     const results = await Promise.allSettled(users.map(async (user) => {
-      if (user.status === "disabled") return { refreshed: 0, failed: 0 };
+      if (user.status === "disabled") return { user, refreshed: 0, failed: 0, appliesOnNextStart: 0, receipts: [] };
       const owner = await security.identityPolicyStore!.getPrincipal(user.userId);
-      if (!owner || owner.tenantId !== tenantId) return { refreshed: 0, failed: 0 };
-      return refreshOwnedWorkspaceConnectionGrants(owner);
+      if (!owner || owner.tenantId !== tenantId) return { user, refreshed: 0, failed: 0, appliesOnNextStart: 0, receipts: [] };
+      return { user, ...(await refreshOwnedWorkspaceConnectionGrants(owner)) };
     }));
-    return results.reduce((summary, result) => {
-      if (result.status === "rejected") return { ...summary, failed: summary.failed + 1 };
-      return {
-        refreshed: summary.refreshed + result.value.refreshed,
-        failed: summary.failed + result.value.failed,
-      };
-    }, { refreshed: 0, failed: 0 });
+    const fulfilled = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const rawReceipts = fulfilled.flatMap((result) => result.receipts);
+    if (changeEventId && security.connectorRegistryStore && rawReceipts.length) {
+      await security.connectorRegistryStore.appendPolicyWorkspaceDeliveryReceipts(rawReceipts.map((receipt) => ({
+        tenantId,
+        changeEventId,
+        ...receipt,
+      })));
+    }
+    return {
+      refreshed: fulfilled.reduce((sum, result) => sum + result.refreshed, 0),
+      failed: fulfilled.reduce((sum, result) => sum + result.failed, 0) + results.filter((result) => result.status === "rejected").length,
+      appliesOnNextStart: fulfilled.reduce((sum, result) => sum + result.appliesOnNextStart, 0),
+      members: fulfilled.filter((result) => result.receipts.length).map((result) => ({
+        userId: result.user.userId,
+        displayName: result.user.displayName,
+        email: result.user.email,
+        workspaces: result.receipts.map((receipt) => ({
+          workspaceId: receipt.workspaceId,
+          grantId: receipt.grantId,
+          state: receipt.workspaceState,
+          delivery: receipt.outcome,
+          failureCode: receipt.failureCode,
+        })),
+      })),
+    };
   };
   const usesManagedProvider = (policy: RuntimePolicy, provider: ManagedProviderName) => (
     [policy.modelAlias, ...(policy.agents?.map((agent) => agent.modelAlias) ?? [])]
@@ -3189,10 +3236,10 @@ export function createControlServer(
     const expected = Object.keys(m365CapabilityDefinitions).sort();
     if (Object.keys(input.tools).sort().join("\0") !== expected.join("\0")) throw new LemmaComputerError("INVALID_TOOL_POLICY", "A decision is required for every assigned Microsoft 365 tool", 400);
     const savedPolicy = await security.identityPolicyStore.updateMvpToolPolicy({ tenantId: actor.tenantId, updatedBy: actor.userId, tools: input.tools });
-    const workspaceGrants = await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
+    const delivery = await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
     return {
       ...savedPolicy,
-      workspaceGrants,
+      workspaceGrants: { refreshed: delivery.refreshed, failed: delivery.failed },
     };
   });
   app.get("/v1/admin/provider-settings", async (request) => {
@@ -3289,8 +3336,8 @@ export function createControlServer(
     }
     const [protectedOverview, users] = await Promise.all([
       requireProtectedWorkspacePolicy().overview(actor.tenantId),
-      connectorId === "microsoft-365"
-        ? security.identityPolicyStore!.listUsers(actor.tenantId)
+      security.identityPolicyStore
+        ? security.identityPolicyStore.listUsers(actor.tenantId)
         : Promise.resolve([]),
     ]);
     const organizationPolicy = protectedOverview.organizationPolicyVersions[0] ?? null;
@@ -3326,7 +3373,18 @@ export function createControlServer(
       } : {}),
       reviewMode: connectorId === "microsoft-365" ? "product_owned" : "provider_definition_hash",
     });
-    return { policy: resolveEffectiveConnectorPolicy({
+    const latestDelivery = await security.connectorRegistryStore?.latestPolicyDelivery(actor.tenantId, connectorId) ?? null;
+    const usersById = new Map(users.map((user) => [user.userId, user]));
+    const deliveryByMember = new Map<string, typeof latestDelivery extends null ? never : NonNullable<typeof latestDelivery>["receipts"]>();
+    const observedDeliveryWorkspaces = new Set<string>();
+    for (const receipt of latestDelivery?.receipts ?? []) {
+      if (observedDeliveryWorkspaces.has(receipt.workspaceId)) continue;
+      observedDeliveryWorkspaces.add(receipt.workspaceId);
+      const current = deliveryByMember.get(receipt.ownerSubjectId) ?? [];
+      current.push(receipt);
+      deliveryByMember.set(receipt.ownerSubjectId, current);
+    }
+    const policy = resolveEffectiveConnectorPolicy({
       baseline: {
         templateVersionId: protectedOverview.baseline.templateVersionId,
         version: protectedOverview.baseline.version,
@@ -3341,7 +3399,45 @@ export function createControlServer(
       } : null,
       ...(policyApplication ? { policyApplication } : {}),
       ...snapshot,
-    }) };
+    });
+    return {
+      policy: {
+        ...policy,
+        delivery: latestDelivery ? {
+          changeEventId: latestDelivery.event.id,
+          policyVersion: latestDelivery.event.newVersion,
+          changedAt: latestDelivery.event.occurredAt.toISOString(),
+          changedBy: latestDelivery.event.actorUserId,
+          members: [...deliveryByMember.values()].map((receipts) => {
+            const first = receipts[0]!;
+            const user = usersById.get(first.ownerSubjectId);
+            return {
+              userId: first.ownerSubjectId,
+              displayName: user?.displayName ?? "Former member",
+              email: user?.email ?? null,
+              workspaces: receipts.map((receipt) => ({
+                workspaceId: receipt.workspaceId,
+                grantId: receipt.grantId,
+                state: receipt.workspaceState,
+                delivery: receipt.outcome,
+                failureCode: receipt.failureCode,
+              })),
+            };
+          }),
+        } : null,
+      },
+    };
+  });
+  app.post<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/policy-delivery/retry", async (request) => {
+    const connectorId = request.params.connectorId;
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: connectorId });
+    const latest = await security.connectorRegistryStore?.latestPolicyDelivery(actor.tenantId, connectorId) ?? null;
+    if (!latest) {
+      throw new LemmaComputerError("CONNECTOR_POLICY_DELIVERY_NOT_FOUND", "Save the connector policy before retrying workspace delivery.", 409);
+    }
+    return {
+      workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId, latest.event.id),
+    };
   });
   app.post("/v1/admin/connectors/discover", async (request) => {
     const actor = requirePermission(request, "provider.manage");
@@ -3365,25 +3461,35 @@ export function createControlServer(
     const input = saveHostedConnectorToolPolicySchema.parse(request.body ?? {});
     const saved = await requireConnections().saveConnectorToolPolicy(
       actor.identity,
+      actor.userId,
       request.params.connectorId,
       input.tools,
       input.expectedDocumentHash,
+      input.expectedAccessPolicyVersion,
+      randomUUID(),
     );
-    return { ...saved, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
+    return {
+      ...saved,
+      workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId, saved.policyChange.id),
+    };
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/access-policy", async (request) => {
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
     const input = z.strictObject({
       enabled: z.boolean(),
       membersCanManage: z.boolean(),
+      expectedVersion: z.number().int().positive(),
     }).parse(request.body ?? {});
-    const connector = await requireConnections().updateAccessPolicy(
+    const saved = await requireConnections().updateAccessPolicy(
       actor.identity,
       actor.userId,
       request.params.connectorId,
-      input,
+      { ...input, correlationId: randomUUID() },
     );
-    return { connector, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
+    return {
+      ...saved,
+      workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId, saved.policyChange.id),
+    };
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/icon", async (request) => {
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });

@@ -2215,6 +2215,7 @@ export const saveMcpToolPolicySchema = z.strictObject({
  */
 export const saveHostedConnectorToolPolicySchema = z.strictObject({
   expectedDocumentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  expectedAccessPolicyVersion: z.number().int().positive(),
   tools: z.record(z.string().min(1).max(128), mcpToolPolicyDecisionSchema),
 });
 

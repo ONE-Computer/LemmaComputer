@@ -3116,7 +3116,7 @@ const connectorReviewStateLabel = {
   removed: "No longer provided",
 };
 
-function ConnectorEffectivePolicyCard({ policy, loading, error }) {
+function ConnectorEffectivePolicyCard({ policy, loading, error, deliveryBusy, onRetryDelivery }) {
   if (loading && !policy) return <section className="connector-effective-policy-card loading" aria-live="polite">Loading effective connector policy…</section>;
   if (error && !policy) return <section className="connector-effective-policy-card error" role="alert"><strong>Effective policy unavailable</strong><span>{error}</span></section>;
   if (!policy) return null;
@@ -3133,6 +3133,10 @@ function ConnectorEffectivePolicyCard({ policy, loading, error }) {
             ? "There are no active members to evaluate."
             : "This connector uses one organization connector policy rather than member policy versions.";
   const reviewRequired = policy.tools.filter((tool) => ["awaiting_review", "not_checked"].includes(tool.reviewState)).length;
+  const deliveryWorkspaces = policy.delivery?.members.flatMap((member) => member.workspaces.map((workspace) => ({ ...workspace, member }))) ?? [];
+  const failedDeliveries = deliveryWorkspaces.filter((workspace) => workspace.delivery === "failed").length;
+  const refreshedDeliveries = deliveryWorkspaces.filter((workspace) => workspace.delivery === "refreshed").length;
+  const nextStartDeliveries = deliveryWorkspaces.filter((workspace) => workspace.delivery === "applies_on_next_start").length;
   return (
     <section className="connector-effective-policy-card" aria-labelledby={`connector-effective-policy-${policy.connector.id}`}>
       <div className="connector-effective-policy-heading">
@@ -3155,12 +3159,27 @@ function ConnectorEffectivePolicyCard({ policy, loading, error }) {
           <span role="cell" data-label="Controlling sources"><small>{tool.sources.map((source) => `${connectorPolicySourceLabel[source.kind]} v${source.version}: ${connectorPolicyDecisionLabel[source.decision]}`).join(" · ")}</small></span>
         </div>)}
       </div>
+      <section className="connector-policy-delivery" aria-labelledby={`connector-policy-delivery-${policy.connector.id}`}>
+        <div className="connector-policy-delivery-heading">
+          <div><h3 id={`connector-policy-delivery-${policy.connector.id}`}>Workspace delivery</h3><p>{policy.delivery ? `Policy v${policy.delivery.policyVersion} · last attempted ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(policy.delivery.changedAt))}` : "No connector policy delivery has been recorded yet."}</p></div>
+          {failedDeliveries > 0 && <button className="secondary-button compact-button" type="button" disabled={deliveryBusy} onClick={() => onRetryDelivery(policy.connector.id)}>{deliveryBusy ? "Retrying delivery" : "Retry failed delivery"}</button>}
+        </div>
+        {policy.delivery && <>
+          <p className="connector-policy-delivery-summary"><strong>{refreshedDeliveries} refreshed</strong><span>{nextStartDeliveries} apply on next start</span>{failedDeliveries > 0 && <span className="failed">{failedDeliveries} need retry</span>}</p>
+          <div className="connector-policy-delivery-members">
+            {policy.delivery.members.map((member) => <div key={member.userId}>
+              <span><strong>{member.displayName}</strong>{member.email && <small>{member.email}</small>}</span>
+              <ul>{member.workspaces.map((workspace) => <li key={workspace.workspaceId}><code>{workspace.grantId}</code><span className={`connector-delivery-state ${workspace.delivery}`}>{workspace.delivery === "refreshed" ? "Refreshed" : workspace.delivery === "applies_on_next_start" ? "Applies on next start" : "Retry needed"}</span></li>)}</ul>
+            </div>)}
+          </div>
+        </>}
+      </section>
       <div className={`connector-effective-remediation${policy.remediation.required ? " action" : ""}`} role="status">
         <Info24Regular aria-hidden="true" />
         <div>
           <strong>{policy.remediation.required ? "Remediation required" : "No policy remediation required"}</strong>
           <span>{reviewRequired ? `${reviewRequired} tool ${reviewRequired === 1 ? "definition is" : "definitions are"} blocked pending review. ` : ""}{applicationMessage}</span>
-          <small>Workspace grant delivery is not persisted in this view. Saving a policy attempts a live grant refresh and reports failures immediately. A connector policy change itself does not require a workspace restart.</small>
+          <small>Saving a policy records each workspace delivery attempt. Failed live refreshes remain unavailable until delivery succeeds. Stopped workspaces receive the policy when they next start; a connector policy change does not require a restart.</small>
         </div>
       </div>
     </section>
@@ -3184,12 +3203,12 @@ function ConnectorAccessPolicyCard({ connector, busy, onSave }) {
       </div>
       <label><input type="checkbox" checked={enabled} disabled={busy} onChange={(event) => setEnabled(event.target.checked)} /><span><strong>Connector enabled</strong><small>Assigned workspaces may use approved tools from this service.</small></span></label>
       <label><input type="checkbox" checked={membersCanManage} disabled={busy || !enabled} onChange={(event) => setMembersCanManage(event.target.checked)} /><span><strong>Members can manage connections</strong><small>Members may connect and disconnect their own work account.</small></span></label>
-      <button className="primary-button compact-button" type="button" disabled={busy || !dirty} onClick={() => onSave(connector.id, { enabled, membersCanManage })}>{busy ? "Saving policy" : "Save access policy"}</button>
+      <button className="primary-button compact-button" type="button" disabled={busy || !dirty} onClick={() => onSave(connector.id, { enabled, membersCanManage, expectedVersion: connector.accessPolicyVersion })}>{busy ? "Saving policy" : "Save access policy"}</button>
     </section>
   );
 }
 
-function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect, onAccessPolicySave, displayName, canManageConnector, canManagePolicy, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError }) {
+function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDisconnect, onAccessPolicySave, displayName, canManageConnector, canManagePolicy, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, deliveryBusy, onRetryDelivery }) {
   const connected = connection?.state === "connected";
   const expired = connection?.state === "expired";
   const organizationDisabled = connection?.enabled === false;
@@ -3216,6 +3235,7 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
         <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
         {canManagePolicy && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
       </nav>
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connector was not updated</strong>{error}</span></div>}
 
       {activeTab === "tools" && canManagePolicy ? (
         <ToolPolicyEditor mcpPolicy={mcpPolicy} loading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />
@@ -3238,7 +3258,7 @@ function Microsoft365Detail({ connection, loading, busy, onConnect, onDisconnect
               )}
             </div>
           </section>
-          {canManageConnector && <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} />}
+          {canManageConnector && <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} />}
           {canManageConnector && <ConnectorAccessPolicyCard connector={connection} busy={busy} onSave={onAccessPolicySave} />}
         </div>
       )}
@@ -3298,7 +3318,7 @@ function ConnectorRemovalCard({ connector, busy, onRemove }) {
   );
 }
 
-function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemove, onBack, canManageConnector, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError }) {
+function HostedConnectorDetail({ connector, loading, busy, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemove, onBack, canManageConnector, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, deliveryBusy, onRetryDelivery }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
   const activation = activationFor(connector);
@@ -3340,6 +3360,7 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
         <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
         {canManageConnector && connected && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Tools &amp; approvals</button>}
       </nav>
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connector was not updated</strong>{error}</span></div>}
 
       {activeTab === "tools" && canManageConnector && connected ? (
         <ToolPolicyEditor mcpPolicy={mcpPolicy} loading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} />
@@ -3380,7 +3401,7 @@ function HostedConnectorDetail({ connector, loading, busy, onConnect, onDisconne
             )}
           </div>
         </section>
-        {canManageConnector && <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} />}
+        {canManageConnector && <ConnectorEffectivePolicyCard policy={effectivePolicy} loading={effectivePolicyLoading} error={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} />}
         {canManageConnector && <ConnectorAccessPolicyCard connector={connector} busy={busy} onSave={onAccessPolicySave} />}
         <div className="connector-policy-note">
           <Info24Regular aria-hidden="true" />
@@ -3653,15 +3674,15 @@ function AddConnectorDialog({ onCreated, onClose }) {
   );
 }
 
-function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, canAddConnector, canManagePolicy, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError }) {
+function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, canAddConnector, canManagePolicy, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, onRetryDelivery }) {
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
-      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === microsoft.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} />;
+      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} error={error} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === microsoft.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={busyConnectorId === microsoft.id} onRetryDelivery={onRetryDelivery} />;
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
-      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} canManageConnector={Boolean(selected.canAdministerConnector)} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === selected.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} />;
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} error={error} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} canManageConnector={Boolean(selected.canAdministerConnector)} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === selected.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={busyConnectorId === selected.id} onRetryDelivery={onRetryDelivery} />;
     }
   }
   return (
@@ -5707,6 +5728,24 @@ export function App() {
     }
   };
 
+  const retryConnectorPolicyDelivery = async (connectorId) => {
+    setConnectionBusy(connectorId);
+    setConnectionError("");
+    try {
+      const result = await adminApi.retryConnectorPolicyDelivery(connectorId);
+      setConnectorEffectivePolicyRefresh((current) => current + 1);
+      const failures = result.workspaceGrants?.failed ?? 0;
+      const refreshed = result.workspaceGrants?.refreshed ?? 0;
+      setToast(failures
+        ? `Delivery retried. ${refreshed} workspace ${refreshed === 1 ? "grant was" : "grants were"} refreshed; ${failures} still need attention.`
+        : `Connector policy delivered to ${refreshed} running ${refreshed === 1 ? "workspace" : "workspaces"}.`);
+    } catch (error) {
+      setConnectionError(error.message);
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
   const removeMcpConnector = async (connector) => {
     if (!await requestConfirmation({
       title: `Remove ${connector.name}?`,
@@ -6535,10 +6574,11 @@ export function App() {
   const saveMcpPolicy = async () => {
     if (!mcpPolicy) return;
     setMcpPolicySaving(true);
+    if (mcpPolicy.connectorId) setConnectionError("");
     try {
       const decisions = Object.fromEntries(mcpPolicy.tools.map((tool) => [tool.name, tool.decision]));
       if (mcpPolicy.connectorId) {
-        const refreshed = await adminApi.saveConnectorToolPolicy(mcpPolicy.connectorId, decisions, mcpPolicy.documentHash);
+        const refreshed = await adminApi.saveConnectorToolPolicy(mcpPolicy.connectorId, decisions, mcpPolicy.documentHash, mcpPolicy.accessPolicyVersion);
         setMcpPolicy(refreshed);
         setConnectorEffectivePolicyRefresh((current) => current + 1);
         if (refreshed.workspaceGrants?.failed) {
@@ -6558,7 +6598,10 @@ export function App() {
       setToast(saved.workspaceGrants?.failed
         ? `Microsoft 365 tool policy version ${saved.version} is saved. ${saved.workspaceGrants.failed} workspace grant refreshes failed; those tools remain unavailable until a refresh succeeds.`
         : `Microsoft 365 tool policy version ${saved.version} is active for new calls${saved.workspaceGrants?.refreshed ? ` in ${saved.workspaceGrants.refreshed} running workspace` : ""}.`);
-    } catch (error) { showApiError(error); }
+    } catch (error) {
+      if (mcpPolicy.connectorId) setConnectionError(error.message);
+      else showApiError(error);
+    }
     finally { setMcpPolicySaving(false); }
   };
   const logout = async () => {
@@ -6798,6 +6841,7 @@ export function App() {
             effectivePolicy={connectorEffectivePolicy}
             effectivePolicyLoading={connectorEffectivePolicyLoading}
             effectivePolicyError={connectorEffectivePolicyError}
+            onRetryDelivery={retryConnectorPolicyDelivery}
           />
         )}
         {activeNav === "Firewall" && canManagePolicy && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
