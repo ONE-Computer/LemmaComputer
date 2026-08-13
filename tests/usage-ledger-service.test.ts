@@ -117,6 +117,37 @@ test("binding identity mismatches fail before Team resolution or admission", asy
   assert.equal(ledger.admissions.length, 0);
 });
 
+test("signed requested and governed resolved reasoning efforts are retained on the usage admission", async () => {
+  const ledger = new FakeLedger();
+  const teams = new FakeTeams();
+  const bindings = new UsageTaskBindingAuthority(taskSecret, () => new Date("2026-07-31T10:00:00.000Z"));
+  const service = new UsageLedgerService(ledger as unknown as PostgresUsageLedgerStore, teams as unknown as TeamStore, bindings);
+  const taskBinding = bindings.issue({
+    tenantId: "acme",
+    subjectId: "alex",
+    workspaceId: "workspace-1",
+    agentId: "agent-1",
+    contextKind: "chat",
+    taskId: "message-reasoning",
+    requestedReasoningEffort: "auto",
+    maximumReasoningEffort: "medium",
+  });
+
+  await service.admit(admission({
+    sourceAttemptId: "call-reasoning",
+    taskBinding,
+    requestedReasoningEffort: "auto",
+    resolvedReasoningEffort: "medium",
+  }));
+
+  assert.equal(ledger.admissions[0]?.requestedReasoningEffort, "auto");
+  assert.equal(ledger.admissions[0]?.resolvedReasoningEffort, "medium");
+  await assert.rejects(
+    () => service.admit(admission({ sourceAttemptId: "call-forged", taskBinding, requestedReasoningEffort: "high" })),
+    /does not match/,
+  );
+});
+
 test("unbound task identity is deterministic across a lost admission response replay", async () => {
   const ledger = new FakeLedger();
   const teams = new FakeTeams();

@@ -745,6 +745,9 @@ def _routing_payload(kwargs):
     requested_class = request_metadata.get("lemmacomputer_requested_service_class", "auto")
     if requested_class not in ("auto", "lite", "balanced", "pro"):
         raise RuntimeError("Governed routing service class is invalid")
+    requested_reasoning_effort = request_metadata.get("lemmacomputer_requested_reasoning_effort")
+    if requested_reasoning_effort is not None and requested_reasoning_effort not in ("auto", "low", "medium", "high"):
+        raise RuntimeError("Governed routing reasoning effort is invalid")
     workspace_id = trusted.get("lemmacomputer_workspace_id")
     agent_id = trusted.get("lemmacomputer_agent_id")
     if not isinstance(workspace_id, str) or not workspace_id or not isinstance(agent_id, str) or not agent_id:
@@ -772,6 +775,8 @@ def _routing_payload(kwargs):
             {"unit": "output_token", "quantity": str(maximum_output)},
         ],
     }
+    if requested_reasoning_effort is not None:
+        payload["requestedReasoningEffort"] = requested_reasoning_effort
     unavailable = _unavailable_deployment_ids(tenant_id)
     if unavailable:
         payload["unavailableDeploymentIds"] = unavailable
@@ -1192,10 +1197,26 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                 or not isinstance(result.get("binding"), dict)
                 or not isinstance(result.get("executedOutputTokenLimit"), int)
                 or result["executedOutputTokenLimit"] <= 0
+                or (
+                    payload.get("requestedReasoningEffort") is not None
+                    and (
+                        result.get("requestedReasoningEffort") != payload["requestedReasoningEffort"]
+                        or result.get("resolvedReasoningEffort") not in ("low", "medium", "high")
+                    )
+                )
             ):
                 raise RuntimeError("Governed routing authority returned a malformed decision")
             _set_routing_state(kwargs, result)
             kwargs["model"] = result["executedModelGroup"]
+            for name in ("thinking", "output_config", "reasoning", "reasoning_effort"):
+                kwargs.pop(name, None)
+            resolved_reasoning_effort = result.get("resolvedReasoningEffort")
+            if resolved_reasoning_effort is not None:
+                if resolved_reasoning_effort not in ("low", "medium", "high"):
+                    raise RuntimeError("Governed routing authority returned an invalid reasoning effort")
+                # LiteLLM maps this trusted provider-neutral field to Anthropic's
+                # adaptive thinking plus output_config.effort wire contract.
+                kwargs["reasoning_effort"] = resolved_reasoning_effort
             output_limit = result["executedOutputTokenLimit"]
             for name in ("max_tokens", "max_output_tokens"):
                 requested = kwargs.get(name)
@@ -1203,6 +1224,10 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                     kwargs[name] = output_limit
             params = kwargs.get("litellm_params")
             if isinstance(params, dict):
+                for name in ("thinking", "output_config", "reasoning", "reasoning_effort"):
+                    params.pop(name, None)
+                if resolved_reasoning_effort is not None:
+                    params["reasoning_effort"] = resolved_reasoning_effort
                 for name in ("max_tokens", "max_output_tokens"):
                     requested = params.get(name)
                     if isinstance(requested, (int, float)) and requested > output_limit:
@@ -1267,6 +1292,10 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                 payload["requestedServiceClass"] = routing_state["requestedServiceClass"]
                 payload["selectedServiceClass"] = routing_state["selectedServiceClass"]
                 payload["routeMappingVersion"] = routing_state["binding"]["mappingVersionId"]
+                if routing_state.get("requestedReasoningEffort"):
+                    payload["requestedReasoningEffort"] = routing_state["requestedReasoningEffort"]
+                if routing_state.get("resolvedReasoningEffort"):
+                    payload["resolvedReasoningEffort"] = routing_state["resolvedReasoningEffort"]
             result = await asyncio.to_thread(_usage_request, "attempts/admit", payload)
         except urllib.error.HTTPError as error:
             status = error.code if error.code in (403, 409, 429) else 503

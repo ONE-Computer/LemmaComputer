@@ -989,11 +989,13 @@ const responses = new Map([
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/status`, { workspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [chatSession] }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
-  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }] }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "claude-cli", displayName: "Claude Code", state: "ready", reasonCode: "CHAT_AGENT_READY", reasoningEffortsByServiceClass: { auto: ["auto", "low", "medium", "high"], lite: ["auto", "low", "medium", "high"], balanced: ["auto", "low", "medium", "high"], pro: ["auto", "low", "medium", "high"] } }] }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/status`, { workspaceId: productWorkspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [] }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/codex-cli/status`, { workspaceId: productWorkspaceId, catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/codex-cli/sessions`, { sessions: [] }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/claude-cli/status`, { workspaceId: productWorkspaceId, catalogId: "claude-cli", displayName: "Claude Code", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/claude-cli/sessions`, { sessions: [] }],
   ["GET /v1/openvtc/approvers/current", { connected: false, executorDid: "did:key:z6MkFixture", approver: null }],
   ["GET /v1/openvtc/companion/config", { enabled: false, vapidPublicKey: null }],
   ["GET /v1/openvtc/companions", { companions: [] }],
@@ -1362,11 +1364,22 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
-  const createChatSessionMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli)\/sessions$/);
+  const createChatSessionMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli|claude-cli)\/sessions$/);
   if (request.method === "POST" && createChatSessionMatch && [workspaceId, productWorkspaceId].includes(decodeURIComponent(createChatSessionMatch[1]))) {
     const agentCatalogId = decodeURIComponent(createChatSessionMatch[2]);
-    response.statusCode = 201;
-    response.end(JSON.stringify({ ...chatSession, id: `fixture-session-${Date.now()}`, title: null, agentCatalogId }));
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = body ? JSON.parse(body) : {};
+      response.statusCode = 201;
+      response.end(JSON.stringify({
+        ...chatSession,
+        id: `fixture-session-${Date.now()}`,
+        title: input.title ?? null,
+        agentCatalogId,
+        ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      }));
+    });
     return;
   }
   const cancelTurnMatch = url.pathname.match(/^\/v1\/workspaces\/[^/]+\/chat\/agents\/hermes-claw\/sessions\/([^/]+)\/turns\/active$/);
@@ -1414,7 +1427,7 @@ const server = http.createServer((request, response) => {
     response.end();
     return;
   }
-  const sendChatMessageMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli)\/sessions\/([^/]+)\/messages$/);
+  const sendChatMessageMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/agents\/(hermes-claw|codex-cli|claude-cli)\/sessions\/([^/]+)\/messages$/);
   if (request.method === "POST" && sendChatMessageMatch && [workspaceId, productWorkspaceId].includes(decodeURIComponent(sendChatMessageMatch[1]))) {
     const agentCatalogId = decodeURIComponent(sendChatMessageMatch[2]);
     let body = "";

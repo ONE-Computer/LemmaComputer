@@ -49,6 +49,8 @@ test("Hermes session titles stay in the LemmaComputer adapter so duplicate user 
   assert.match(adapter, /nextCursor/);
   assert.match(adapter, /NEEDS_INPUT_MARKER = "\[LEMMACOMPUTER_NEEDS_INPUT\]"/);
   assert.match(adapter, /terminal_state = "needs_input"/);
+  assert.match(adapter, /"reasoningEffort": reasoning_effort/);
+  assert.match(adapter, /item\.get\("reasoningEffort"\) != reasoning_effort/);
   assert.equal(chatTurnStateSchema.safeParse("needs_input").success, true);
 });
 
@@ -416,6 +418,7 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
         undefined,
         undefined,
         "22222222-2222-4222-8222-222222222222",
+        catalogId === "claude-cli" ? "medium" : undefined,
       )) events.push(event);
       assert.deepEqual(events.map((event) => event.type), [
         "turn-start", "tool", "tool", "text-delta", "turn-finish",
@@ -442,6 +445,7 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
         body: {
           message: { ...message, metadata: { ...message.metadata, agentCatalogId: "claude-cli" } },
           agentInstanceId: "22222222-2222-4222-8222-222222222222",
+          reasoningEffort: "medium",
         },
       },
       {

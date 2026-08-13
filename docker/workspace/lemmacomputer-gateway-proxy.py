@@ -173,6 +173,19 @@ def task_service_class(task_binding: str) -> str:
     return requested
 
 
+def task_reasoning_effort(task_binding: str) -> str | None:
+    try:
+        encoded = task_binding.split(".", 1)[0]
+        padding = "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded + padding))
+        requested = payload.get("requestedReasoningEffort")
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
+        raise ValueError("invalid AI task binding payload") from None
+    if requested is not None and requested not in {"auto", "low", "medium", "high"}:
+        raise ValueError("invalid AI task binding reasoning effort")
+    return requested
+
+
 def issue_task_binding(agent_instance_id: str | None) -> str:
     payload = json.dumps({"requestedServiceClass": DEFAULT_SERVICE_CLASS, "taskId": f"workspace-native:{uuid.uuid4()}"}, separators=(",", ":")).encode()
     control_path = CONTROL.path.rstrip("/")
@@ -222,6 +235,11 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
             isinstance(name, str) and name.startswith("lemmacomputer_")
         ):
             request.pop(name, None)
+    # The workspace client is not a reasoning-policy authority. Strip every
+    # provider spelling before the signed task binding is resolved against the
+    # concrete route by Control and the LiteLLM policy callback.
+    for name in ("thinking", "output_config", "reasoning_effort", "reasoning"):
+        request.pop(name, None)
     metadata = request.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
     internal_metadata = {
@@ -236,6 +254,9 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
     if task_binding is not None:
         metadata["lemmacomputer_task_binding"] = task_binding
         metadata["lemmacomputer_requested_service_class"] = task_service_class(task_binding)
+        reasoning_effort = task_reasoning_effort(task_binding)
+        if reasoning_effort is not None:
+            metadata["lemmacomputer_requested_reasoning_effort"] = reasoning_effort
     request["metadata"] = metadata
     request["model"] = MODEL_ALIAS
     # Claude Desktop probes a configured gateway model with a one-token "."

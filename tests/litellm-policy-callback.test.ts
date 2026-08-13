@@ -538,6 +538,10 @@ def usage_authority(path, payload):
             "requestedServiceClass": "auto",
             "selectedServiceClass": "balanced",
             "executedOutputTokenLimit": 8192,
+            **({
+                "requestedReasoningEffort": payload["requestedReasoningEffort"],
+                "resolvedReasoningEffort": "medium",
+            } if payload.get("requestedReasoningEffort") else {}),
             "binding": {"requestId": "request-ceiling", "mappingVersionId": "mapping-real"},
         }
     if path == "attempts/admit":
@@ -587,6 +591,39 @@ async def assert_provider_boundary():
     assert routed_transport["model"] == "lemmacomputer-openai-balanced"
     assert routed_transport["max_tokens"] == 8192
     assert routed_transport["litellm_params"]["max_tokens"] == 8192
+    authority_calls.clear()
+
+    effort_transport = {
+        "model": "lemmacomputer-auto",
+        "messages": [{"role": "user", "content": "review this plan"}],
+        "thinking": {"type": "enabled", "budget_tokens": 999999},
+        "output_config": {"effort": "max"},
+        "reasoning_effort": "max",
+        "litellm_params": {
+            "model_info": {**openai_route, "access_groups": ["ocp-tenant-real-balanced"]},
+            "reasoning_effort": "max",
+            "thinking": {"type": "enabled", "budget_tokens": 999999},
+        },
+        "litellm_call_id": "route-effort-call",
+        "metadata": {
+            "lemmacomputer_task_binding": "signed." + "e" * 64,
+            "lemmacomputer_requested_reasoning_effort": "medium",
+        },
+    }
+    routed_effort = await callback.async_pre_call_hook(
+        AutoAuth(), None, effort_transport, "acompletion"
+    )
+    assert authority_calls[-1][0] == "routing/decide"
+    assert authority_calls[-1][1]["requestedReasoningEffort"] == "medium"
+    assert routed_effort["reasoning_effort"] == "medium"
+    assert routed_effort["litellm_params"]["reasoning_effort"] == "medium"
+    assert "thinking" not in routed_effort
+    assert "output_config" not in routed_effort
+    assert "thinking" not in routed_effort["litellm_params"]
+    await callback.async_pre_call_deployment_hook(routed_effort, "acompletion")
+    effort_admission = next(item for item in authority_calls if item[0] == "attempts/admit")
+    assert effort_admission[1]["requestedReasoningEffort"] == "medium"
+    assert effort_admission[1]["resolvedReasoningEffort"] == "medium"
     authority_calls.clear()
 
     probe = {

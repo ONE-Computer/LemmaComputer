@@ -1,5 +1,11 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { LemmaComputerError } from "@lemmacomputer/contracts";
+import {
+  LemmaComputerError,
+  chatReasoningEffortSchema,
+  workspaceReasoningEffortSchema,
+  type ChatReasoningEffort,
+  type WorkspaceReasoningEffort,
+} from "@lemmacomputer/contracts";
 import {
   AllowUsageAttemptAdmission,
   type AttemptAdmissionInput,
@@ -36,6 +42,8 @@ export const internalUsageAdmissionSchema = z.object({
   taskBinding:z.string().min(32).max(4096).optional(), policyVersionId:optionalBoundedId,
   policyHash:z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), requestedAlias:boundedId,
   requestedServiceClass:serviceClass.nullable().optional(), selectedServiceClass:serviceClass.exclude(["auto"]).nullable().optional(),
+  requestedReasoningEffort:chatReasoningEffortSchema.nullable().optional(),
+  resolvedReasoningEffort:chatReasoningEffortSchema.exclude(["auto"]).nullable().optional(),
   routeMappingVersion:optionalBoundedId, attemptKind:z.enum(["inference","router","classifier","embedding","retry","fallback"]),
   parentAttemptId:z.uuid().nullable().optional(), resolvedProvider:boundedId, providerAccountId:boundedId,
   resolvedModel:z.string().trim().min(1).max(300), resolvedDeploymentId:boundedId,
@@ -110,12 +118,16 @@ export type UsageTaskBinding = {
   contextKind:UsageTaskContextKind; taskId:string; sessionId?:string; turnId?:string;
   agentInstanceId?:string;
   requestedServiceClass?:"auto"|"lite"|"balanced"|"pro";
+  requestedReasoningEffort?:ChatReasoningEffort;
+  maximumReasoningEffort?:WorkspaceReasoningEffort;
   issuedAt:string; expiresAt:string;
 };
 const taskBindingSchema = z.object({
   schemaVersion:z.literal(1),tenantId:boundedId,subjectId:boundedId,workspaceId:boundedId,agentId:boundedId,
   contextKind:z.enum(["chat","channel","schedule","background"]),taskId:boundedId,sessionId:boundedId.optional(),turnId:boundedId.optional(),agentInstanceId:z.uuid().optional(),
   requestedServiceClass:serviceClass.default("auto"),
+  requestedReasoningEffort:chatReasoningEffortSchema.optional(),
+  maximumReasoningEffort:workspaceReasoningEffortSchema.optional(),
   issuedAt:z.iso.datetime(),expiresAt:z.iso.datetime(),
 }).strict();
 
@@ -160,6 +172,7 @@ export class UsageLedgerService {
     if (binding && (
       binding.tenantId !== input.tenantId || binding.subjectId !== input.subjectId
       || binding.workspaceId !== input.workspaceId || binding.agentId !== input.agentId
+      || binding.requestedReasoningEffort !== (input.requestedReasoningEffort ?? undefined)
     )) throw new LemmaComputerError("AI_USAGE_TASK_BINDING_MISMATCH","AI task binding does not match the authenticated gateway identity",403);
     const attempt: AttemptAdmissionSemanticInput = {
       tenantId:input.tenantId,sourceSystem:input.sourceSystem,sourceAttemptId:input.sourceAttemptId,subjectId:input.subjectId,
@@ -170,6 +183,8 @@ export class UsageLedgerService {
       ...(input.policyVersionId?{policyVersionId:input.policyVersionId}:{}),...(input.policyHash?{policyHash:input.policyHash}:{}),
       requestedAlias:input.requestedAlias,...(input.requestedServiceClass?{requestedServiceClass:input.requestedServiceClass}:{}),
       ...(input.selectedServiceClass?{selectedServiceClass:input.selectedServiceClass}:{}),...(input.routeMappingVersion?{routeMappingVersion:input.routeMappingVersion}:{}),
+      ...(input.requestedReasoningEffort?{requestedReasoningEffort:input.requestedReasoningEffort}:{}),
+      ...(input.resolvedReasoningEffort?{resolvedReasoningEffort:input.resolvedReasoningEffort}:{}),
       attemptKind:input.attemptKind,...(input.parentAttemptId?{parentAttemptId:input.parentAttemptId}:{}),resolvedProvider:input.resolvedProvider,
       providerAccountId:input.providerAccountId,resolvedModel:input.resolvedModel,resolvedDeploymentId:input.resolvedDeploymentId,
       ...(input.region?{region:input.region}:{}),...(input.providerServiceTier?{providerServiceTier:input.providerServiceTier}:{}),

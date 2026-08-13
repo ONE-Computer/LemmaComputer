@@ -82,9 +82,13 @@ export const chatApi = {
     if (cursor) query.set("cursor", cursor);
     return request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions?${query}`);
   },
-  createSession: (workspaceId, catalogId, title) => request(
+  createSession: (workspaceId, catalogId, title, requestedServiceClass = "auto", reasoningEffort) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`,
-    mutation("POST", title ? { title } : {}),
+    mutation("POST", {
+      ...(title ? { title } : {}),
+      requestedServiceClass,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    }),
   ),
   messages: (workspaceId, catalogId, sessionId) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/messages`,

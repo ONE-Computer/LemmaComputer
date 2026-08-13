@@ -19,6 +19,100 @@ export type InternalTaskClass = (typeof internalTaskClasses)[number];
 export type RoutingMode = (typeof routingModes)[number];
 export type ManagedRoutingProvider =
   "foundry" | "openai" | "anthropic" | "glm" | "bedrock";
+export const productReasoningEfforts = ["auto", "low", "medium", "high"] as const;
+export const resolvedReasoningEfforts = ["low", "medium", "high"] as const;
+export type ProductReasoningEffort = (typeof productReasoningEfforts)[number];
+export type ResolvedReasoningEffort = (typeof resolvedReasoningEfforts)[number];
+export type QualifiedReasoningCapabilities = {
+  qualificationId: string;
+  providerMechanism: string;
+  thinkingMode: "adaptive" | "budgeted" | "opaque";
+  effortLevels: ResolvedReasoningEffort[];
+  defaultEffort: ResolvedReasoningEffort;
+  interleavedThinking: boolean;
+  reasoningTokenTelemetry: boolean;
+};
+
+export type AgentReasoningAdapterQualification = {
+  qualificationId: string;
+  agentCatalogId: string;
+  clientVersion: string;
+  effortLevels: ResolvedReasoningEffort[];
+  conversationPinned: true;
+  signedTaskBinding: true;
+};
+
+export type AgentReasoningAdapterRegistration = {
+  qualificationId: string;
+  agentCatalogId: string;
+  clientVersion: string;
+  effortLevels: readonly ResolvedReasoningEffort[];
+};
+
+export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-effort-route-2026-08-13";
+export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
+
+const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterRegistration[] = Object.freeze([
+  Object.freeze({
+    qualificationId: claudeReasoningAdapterQualificationId,
+    agentCatalogId: "claude-cli",
+    clientVersion: "2.1.215",
+    effortLevels: resolvedReasoningEfforts,
+  }),
+]);
+
+/**
+ * Resolve a code-owned agent adapter qualification.
+ *
+ * Agent runtimes are registered independently from provider/model routes. A
+ * future adapter can join this registry without adding agent-specific branches
+ * to Control or Web. Unknown catalog IDs and client versions fail closed.
+ */
+export const qualifiedAgentReasoningAdapter = (
+  input: { agentCatalogId: string; clientVersion: string },
+  registrations: readonly AgentReasoningAdapterRegistration[] = reviewedAgentReasoningAdapters,
+): AgentReasoningAdapterQualification | null => {
+  const registration = registrations.find((candidate) => (
+    candidate.agentCatalogId === input.agentCatalogId
+    && candidate.clientVersion === input.clientVersion
+  ));
+  if (!registration) return null;
+  return {
+    qualificationId: registration.qualificationId,
+    agentCatalogId: registration.agentCatalogId,
+    clientVersion: registration.clientVersion,
+    effortLevels: [...registration.effortLevels],
+    conversationPinned: true,
+    signedTaskBinding: true,
+  };
+};
+
+/**
+ * Product-owned qualification, not provider-name inference.
+ *
+ * Only exact direct-Anthropic model routes that were reviewed for the Phase
+ * 0.5 wire contract receive effort capabilities. Unknown models and alternate
+ * providers deliberately return null. Agent runtime qualification is resolved
+ * independently by `qualifiedAgentReasoningAdapter`.
+ */
+export const qualifiedReasoningRouteCapabilities = (input: {
+  provider: ManagedRoutingProvider;
+  providerModel: string;
+}): QualifiedReasoningCapabilities | null => {
+  if (
+    input.provider !== "anthropic"
+    || !["claude-sonnet-4-6", "claude-opus-4-8"].includes(input.providerModel)
+  ) return null;
+  return {
+    qualificationId: anthropicReasoningRouteQualificationId,
+    providerMechanism: "anthropic-adaptive-effort",
+    thinkingMode: "adaptive",
+    effortLevels: [...resolvedReasoningEfforts],
+    defaultEffort: "high",
+    interleavedThinking: true,
+    reasoningTokenTelemetry: true,
+  };
+};
 export type RoutingSignal =
   | "short_request"
   | "code_request"
@@ -49,6 +143,7 @@ export type RoutingCapabilities = {
   contextTokens: number;
   outputTokens: number;
   residency: string[];
+  reasoning?: QualifiedReasoningCapabilities | null;
 };
 export type ExactMoney = { amount: string; currency: string };
 export type RoutingDeployment = {
@@ -120,7 +215,7 @@ export type ModelRoutingRequest = {
       RoutingCapabilities,
       "vision" | "tools" | "streaming" | "contextTokens" | "outputTokens"
     >
-  >;
+  > & { reasoningEffort?: ResolvedReasoningEffort };
   unavailableDeploymentIds?: string[];
 };
 export type SessionAffinity = {
@@ -445,6 +540,10 @@ const satisfies = (
     deployment.capabilities.contextTokens &&
   (request.requiredCapabilities.outputTokens ?? 0) <=
     deployment.capabilities.outputTokens &&
+  (!request.requiredCapabilities.reasoningEffort
+    || deployment.capabilities.reasoning?.effortLevels.includes(
+      request.requiredCapabilities.reasoningEffort,
+    ) === true) &&
   (!residency || deployment.capabilities.residency.includes(residency));
 
 export class DeterministicModelRouter {
@@ -488,11 +587,15 @@ export class DeterministicModelRouter {
       );
     if (
       policy.mode !== "enabled" &&
-      (!fixed.healthy || unavailable.has(fixed.id))
+      (
+        !fixed.healthy
+        || unavailable.has(fixed.id)
+        || !satisfies(fixed, request, policy.requiredResidency)
+      )
     )
       throw new ModelRoutingError(
         "NO_ELIGIBLE_DEPLOYMENT",
-        "The fixed rollout deployment is unavailable; governed routing will not bypass its binding",
+        "The fixed rollout deployment is unavailable or lacks a required capability; governed routing will not bypass its binding",
       );
     if (policy.mode === "disabled")
       return {

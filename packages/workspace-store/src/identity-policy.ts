@@ -222,6 +222,9 @@ export const runtimePolicyFor = (
     },
     modelAlias,
     mcpServer,
+    ...(typeof document.maximumReasoningEffort === "string"
+      ? { maximumReasoningEffort: document.maximumReasoningEffort }
+      : {}),
     allowedTools: tools,
     toolPolicies,
   });
