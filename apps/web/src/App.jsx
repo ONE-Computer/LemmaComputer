@@ -30,12 +30,14 @@ import { Info24Regular } from "@fluentui/react-icons/svg/info";
 import { Eye24Regular } from "@fluentui/react-icons/svg/eye";
 import { EyeOff24Regular } from "@fluentui/react-icons/svg/eye-off";
 import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
+import { LeafThree24Regular } from "@fluentui/react-icons/svg/leaf-three";
 import { PlugConnected24Regular } from "@fluentui/react-icons/svg/plug-connected";
 import { Settings24Regular } from "@fluentui/react-icons/svg/settings";
 import { SignOut24Regular } from "@fluentui/react-icons/svg/sign-out";
 import { Search24Regular } from "@fluentui/react-icons/svg/search";
 import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, authApi, adminApi, chatApi, scheduleApi, siteApi, skillApi } from "./workspace-api.js";
 import { SpendDashboard } from "./SpendDashboard.jsx";
+import { PersonalAiOverview } from "./PersonalAiOverview.jsx";
 import { UsageDataHealth } from "./UsageDataHealth.jsx";
 import { RoutingAdmin } from "./RoutingAdmin.jsx";
 import { AiControlPlane, aiControlPlaneTabs } from "./AiControlPlane.jsx";
@@ -93,6 +95,7 @@ const navByView = Object.freeze({
   firewall: "Firewall",
   connections: "Connectors",
   settings: "Settings",
+  "ai-usage": "AI usage",
   "ai-control-plane": "AI control plane",
 });
 const viewByNav = Object.freeze(Object.fromEntries(
@@ -6978,6 +6981,8 @@ export function App() {
                 <span><strong>{session.user.displayName}</strong><small>{session.user.email}</small></span>
               </div>
               <div className="sidebar-account-menu-actions">
+                <button type="button" onClick={() => selectNav("AI usage")}><LeafThree24Regular aria-hidden="true" /><span>My AI usage</span><ChevronRight16Regular aria-hidden="true" /></button>
+                <span className="sidebar-menu-divider" aria-hidden="true" />
                 {canOpenAiControlPlane && <>
                   <span className="sidebar-menu-section-label">Organization</span>
                   <button className="sidebar-control-plane-link" type="button" onClick={() => selectAiControlPlaneView("overview")}><Bot24Regular aria-hidden="true" /><span>AI control plane</span><ChevronRight16Regular aria-hidden="true" /></button>
@@ -7124,6 +7129,7 @@ export function App() {
           />
         )}
         {activeNav === "Firewall" && canManagePolicy && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
+        {activeNav === "AI usage" && <PersonalAiOverview workspaces={homeWorkspaces} />}
         {activeNav === "AI control plane" && canOpenAiControlPlane && (
           <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView} tabs={availableAiControlPlaneTabs}>
             {aiControlPlaneView === "overview" && canReadUsage && <AiControlPlaneOverview

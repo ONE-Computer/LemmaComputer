@@ -361,3 +361,10 @@ export const adminApi = {
   disableProviderSetting: (provider) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/disable`, mutation()),
   deleteProviderSetting: (provider) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}`, mutation("DELETE")),
 };
+
+export const memberApi = {
+  aiUsage: (filters = {}) => request(`/api/v1/me/ai-usage?${new URLSearchParams(
+    Object.entries(filters).filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [key, String(value)]),
+  )}`, { cache: "no-store" }),
+};

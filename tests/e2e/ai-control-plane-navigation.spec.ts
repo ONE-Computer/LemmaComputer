@@ -123,9 +123,10 @@ test("employee cannot discover or deep-link the administrator control plane", as
   });
   await page.goto("/?view=ai-control-plane");
   await expect(page).toHaveURL("/");
-  await expect(page.getByRole("heading", { name: "Your workspaces" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Workspace", exact: true })).toBeVisible();
   await page.locator(".sidebar-profile").click();
   const accountMenu = page.getByRole("group", { name: "Account menu" });
   await expect(accountMenu.getByRole("button", { name: "AI control plane" })).toHaveCount(0);
+  await expect(accountMenu.getByRole("button", { name: "My AI usage" })).toBeVisible();
   await expect(accountMenu.getByRole("button", { name: "Settings" })).toBeVisible();
 });
