@@ -645,6 +645,32 @@ export function createControlServer(
   const routingExecution=security.routingStore&&security.teamStore&&usageBindings?new RoutingExecutionService(security.routingStore,security.teamStore,new RoutingDecisionBindingAuthority(security.usageTaskBindingSecret!),usageBindings,security.budgetStore):undefined;
   const routing=security.routingStore?new RoutingAdministrationService(security.routingStore):undefined;
   const requireRouting=()=>{if(!routing)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
+  const chatServiceClassOptionsFor = async (owner: IdentityContext) => routingExecution
+    ? routingExecution.serviceClassOptions(owner.tenantId, owner.subjectId)
+    : [
+        { value: "lite" as const, available: false, reasonCode: "route_unavailable" as const },
+        { value: "balanced" as const, available: true, reasonCode: "ready" as const },
+        { value: "pro" as const, available: false, reasonCode: "route_unavailable" as const },
+      ];
+  const requireChatServiceClass = async (
+    owner: IdentityContext,
+    serviceClass: "lite" | "balanced" | "pro",
+  ) => {
+    const option = (await chatServiceClassOptionsFor(owner)).find((candidate) => candidate.value === serviceClass);
+    if (option?.available) return;
+    const reasonCode: "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable" = option && !option.available
+      ? option.reasonCode === "ready" ? "route_unavailable" : option.reasonCode
+      : "route_unavailable";
+    const failures: Record<typeof reasonCode, readonly [string, string, number, boolean]> = {
+      policy_denied: ["MODEL_TIER_DENIED", "That model tier is not allowed by your organization", 403, false],
+      pricing_unavailable: ["MODEL_TIER_PRICING_UNAVAILABLE", "Pricing is not ready for that model tier", 422, false],
+      provider_unavailable: ["MODEL_TIER_PROVIDER_UNAVAILABLE", "That model tier is temporarily unavailable", 503, true],
+      budget_unavailable: ["MODEL_TIER_BUDGET_UNAVAILABLE", "That model tier is unavailable under the current Team budget", 422, false],
+      route_unavailable: ["MODEL_TIER_ROUTE_UNAVAILABLE", "No ready route is available for that model tier", 503, true],
+    };
+    const failure = failures[reasonCode];
+    throw new LemmaComputerError(failure[0], failure[1], failure[2], failure[3]);
+  };
   const reasoningEffortsFor = async (
     owner: IdentityContext,
     policy: RuntimePolicy,
@@ -4341,6 +4367,7 @@ export function createControlServer(
   app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/agents", async (request, reply) => {
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const owner = identity(request);
+    const serviceClassOptions = await chatServiceClassOptionsFor(owner);
     const assigned = await service.agentChatAgents(owner, policy, request.params.workspaceId);
     const running = ["ready", "open"].includes(assigned.state);
     const agents = await Promise.all(assigned.accesses.map(async (access) => {
@@ -4371,7 +4398,7 @@ export function createControlServer(
         };
       }
     }));
-    return reply.header("cache-control", "no-store").send({ workspaceId: request.params.workspaceId, agents });
+    return reply.header("cache-control", "no-store").send({ workspaceId: request.params.workspaceId, serviceClassOptions, agents });
   });
   app.get<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/status", async (request, reply) => {
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
@@ -4422,6 +4449,7 @@ export function createControlServer(
     const input = createChatSessionSchema.parse(request.body ?? {});
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const owner = identity(request);
+    await requireChatServiceClass(owner, input.requestedServiceClass);
     await requireReasoningEffort(owner, policy, catalogId, input.requestedServiceClass, input.reasoningEffort);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
     const session = await agentChat.createSession(access, input.title, input.reasoningEffort);
@@ -4563,6 +4591,7 @@ export function createControlServer(
     }
     const { policy, workspace } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const owner = identity(request);
+    await requireChatServiceClass(owner, input.requestedServiceClass);
     await requireReasoningEffort(
       owner,
       policy,

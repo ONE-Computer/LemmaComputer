@@ -16,7 +16,7 @@ import {
 import { ModalDialog, SelectMenu } from "./ui.jsx";
 import "./RoutingAdmin.css";
 
-const serviceClassLabels = { auto: "Auto · Beta", lite: "Lite", balanced: "Balanced", pro: "Pro" };
+const serviceClassLabels = { lite: "Lite", balanced: "Balanced", pro: "Pro" };
 const serviceClassDescriptions = {
   lite: "Fast, economical work",
   balanced: "Everyday reasoning and tool use",
@@ -198,7 +198,7 @@ function PricingEditor({ editor, busy, onChange, onClose, onCreate }) {
     && editor.prices.output_token !== "";
   return <ModalDialog
     title={`New ${serviceClassLabels[editor.deployment.serviceClass]} price version`}
-    description="Create immutable pricing evidence for this provider deployment and attach it to a local mapping draft. This does not change a current Team rollout."
+    description="Create immutable pricing evidence for this provider deployment and attach it to a local mapping draft. This does not change a current Team policy."
     eyebrow="Rate card"
     labelledBy="route-pricing-title"
     onClose={busy ? () => undefined : onClose}
@@ -216,7 +216,7 @@ function PricingEditor({ editor, busy, onChange, onClose, onCreate }) {
       <label className="modal-field"><span>Effective from</span><input aria-label="Price effective from" type="datetime-local" value={editor.effectiveFrom} disabled={busy} onChange={(event) => onChange({ ...editor, effectiveFrom: event.target.value })} /></label>
       <label className="modal-field route-price-reason"><span>Approval reason</span><textarea aria-label="Price approval reason" value={editor.overrideReason} disabled={busy} onChange={(event) => onChange({ ...editor, overrideReason: event.target.value })} /></label>
     </div>
-    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>The new record is staged in a local mapping draft. Publish that mapping version separately for policy and shadow evaluation.</span></div>
+    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>The new record is staged in a local mapping draft. Publish that mapping version separately before a Team policy can adopt it.</span></div>
     <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !canCreate} onClick={onCreate}>{busy ? "Creating…" : "Create price record"}</button></div>
   </ModalDialog>;
 }
@@ -267,7 +267,7 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
       })}
     </div>
     {!valid && <div className="route-editor-validation" role="status" aria-live="polite"><Info20Regular aria-hidden="true" /><span>{!revisionValid ? revisionLength ? `Add ${remainingRevisionCharacters} more character${remainingRevisionCharacters === 1 ? "" : "s"} to the revision note to save this draft.` : `Add a revision note of at least ${minimumRevisionLength} characters to save this draft.` : "Select a valid provider deployment for Lite, Balanced, and Pro."}</span></div>}
-    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Publishing creates a version for policy and shadow evaluation. It does not activate or repoint any current Team rollout.</span></div>
+    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Publishing creates an immutable version for Team policy adoption. It does not activate or repoint any current Team route.</span></div>
     <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !valid} onClick={onSave}>Save local draft</button></div>
   </ModalDialog>;
 }
@@ -281,7 +281,6 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
   const [teams, setTeams] = useState([]);
   const [teamId, setTeamId] = useState("");
   const [settings, setSettings] = useState(null);
-  const [report, setReport] = useState(null);
   const [rateCards, setRateCards] = useState([]);
   const [mapping, setMapping] = useState(null);
   const [draft, setDraft] = useState(() => readRouteDraft(draftScope));
@@ -291,12 +290,6 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [enableOpen, setEnableOpen] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewNote, setReviewNote] = useState("");
-  const [reviewPassed, setReviewPassed] = useState(false);
-  const [detail, setDetail] = useState(null);
   const [priceEditor, setPriceEditor] = useState(null);
   const [mappingEditor, setMappingEditor] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -315,25 +308,9 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
     ? "Local draft"
     : !mapping?.id
       ? "Not configured"
-      : currentMappingRollout?.mode === "enabled"
+      : currentMappingRollout || settings?.policy?.mappingVersionId === mapping.id
         ? "Active for selected Team"
-        : currentMappingRollout?.mode === "shadow"
-          ? "Shadow evaluation"
-          : currentMappingRollout?.mode === "disabled"
-            ? "Fixed route active"
-            : settings?.policy?.mappingVersionId === mapping.id
-              ? "Ready for shadow"
-              : "Published · not active";
-  const autoPolicyStatus = settings?.rollout?.mode === "enabled"
-    ? { label: "Policy active", className: "healthy", icon: CheckmarkCircle20Regular }
-    : settings?.rollout?.mode === "shadow"
-      ? { label: "Shadow evaluation", className: "unknown", icon: Info20Regular }
-      : settings?.rollout?.mode === "disabled"
-        ? { label: "Fixed route active", className: "healthy", icon: CheckmarkCircle20Regular }
-        : settings?.policy
-          ? { label: "Ready for shadow", className: "unknown", icon: Info20Regular }
-          : { label: "Policy not configured", className: "unknown", icon: Info20Regular };
-  const AutoPolicyStatusIcon = autoPolicyStatus.icon;
+        : "Published · not active";
 
   useEffect(() => {
     Promise.all([adminApi.teams(false), adminApi.rateCards(), adminApi.latestRoutingMapping(), adminApi.providerSettings()])
@@ -352,9 +329,8 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
     if (!id) return;
     setError("");
     try {
-      const [current, shadow] = await Promise.all([adminApi.routingSettings(id), adminApi.routingShadowReport(id)]);
+      const current = await adminApi.routingSettings(id);
       setSettings(current);
-      setReport(shadow);
       setClasses(current.policy?.team?.allowedServiceClasses ?? current.policy?.identity.allowedServiceClasses ?? []);
     } catch (caught) {
       setError(caught.message);
@@ -393,42 +369,8 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
   }), "Team route eligibility saved.");
   const setupTeamRollout = () => run(
     () => adminApi.saveRoutingPolicy(teamId, createInitialTeamPolicy(mapping, cardById)),
-    `${selectedTeam?.displayName ?? "Team"} can use Auto (Beta) now through its fixed Balanced route. Shadow evaluation is optional.`,
+    `${selectedTeam?.displayName ?? "Team"} can choose its allowed model tiers. Balanced remains the safe fallback.`,
   );
-  const rollout = (mode, confirmation) => run(() => {
-    const fixedDeploymentId = settings.rollout?.fixedDeploymentId
-      ?? settings.deployments.find((deployment) => deployment.serviceClass === "balanced")?.id
-      ?? settings.deployments[0]?.id;
-    if (!fixedDeploymentId) throw new Error("Choose a valid fixed fallback deployment before starting rollout.");
-    return adminApi.changeRoutingRollout(teamId, {
-      policyVersionId: settings.policy.id,
-      mappingVersionId: settings.policy.mappingVersionId,
-      mode,
-      fixedDeploymentId,
-      ...(mode === "enabled" && settings.review?.id ? { evidenceReviewId: settings.review.id } : {}),
-      reason: mode === "shadow" ? "Administrator started bounded shadow evaluation" : "Administrator reviewed evidence and enabled governed Auto routing",
-      ...(confirmation ? { confirmation } : {}),
-    });
-  }, mode === "shadow" ? "Shadow evaluation started for this Team." : "");
-  const enable = async () => {
-    if (await rollout("enabled", "ENABLE AUTO ROUTING")) {
-      setEnableOpen(false);
-      setConfirmed(false);
-      setNotice("Auto (Beta) production routing enabled for this Team.");
-    }
-  };
-  const kill = () => run(() => adminApi.routingKillSwitch(teamId, { reason: "Administrator activated the immediate routing kill switch" }), "Kill switch activated. The prior fixed route is restored.");
-  const review = async () => {
-    if (await run(() => adminApi.saveRoutingReview(teamId, { evaluationPassed: reviewPassed, reviewNote }), "Evidence review recorded.")) {
-      setReviewOpen(false);
-      setReviewNote("");
-      setReviewPassed(false);
-    }
-  };
-  const openDecision = async (id) => {
-    setError("");
-    try { setDetail(await adminApi.routingDecision(id)); } catch (caught) { setError(caught.message); }
-  };
   const draftableDeployments = () => {
     const source = mappedDeployments.length ? mappedDeployments : ["lite", "balanced", "pro"].map((serviceClass, index) => ({
       ...providerDeployments[Math.min(index, providerDeployments.length - 1)],
@@ -499,7 +441,7 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
       setDraft(null);
       clearRouteDraft(draftScope);
       setPublishOpen(false);
-      setNotice("Published for policy/shadow evaluation; current Team rollouts are unchanged.");
+      setNotice("Published for Team policy adoption; current Team routes are unchanged.");
     } catch (caught) {
       setError(caught.message);
     } finally {
@@ -574,15 +516,15 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
         <button className="primary-button" type="button" disabled={busy || !draft} onClick={() => setPublishOpen(true)}>Publish mapping version</button>
       </div>
     </header>
-    <div className="route-api-boundary" role="note"><Info20Regular aria-hidden="true" /><span><strong>Publishing is non-activating.</strong> A new immutable mapping becomes available for policy and shadow evaluation; current Team rollouts stay pinned until separately reviewed.</span></div>
+    <div className="route-api-boundary" role="note"><Info20Regular aria-hidden="true" /><span><strong>Publishing is non-activating.</strong> A new immutable mapping becomes available for Team policy adoption; current Team routes stay pinned until separately saved.</span></div>
     {error && <div className="workspace-error" role="alert"><span><strong>Model routes unavailable</strong>{error}</span></div>}
     {notice && <div className="route-success" role="status"><CheckmarkCircle20Regular aria-hidden="true" /><span>{notice}</span></div>}
 
     <section className="route-summary-grid" aria-label="Route summary">
-      <article><span>Employee aliases</span><strong>4</strong><small>Auto (Beta), Lite, Balanced, Pro</small></article>
+      <article><span>Model tiers</span><strong>3</strong><small>Lite, Balanced, Pro</small></article>
       <article><span>Concrete deployments</span><strong>{mappedDeployments.length}</strong><small>Across {new Set(mappedDeployments.map((item) => item.provider)).size} providers</small></article>
       <article className={pricingGapCount ? "has-gap" : ""}><span>Pricing coverage</span><strong>{mappedDeployments.length ? `${mappedDeployments.length - pricingGapCount}/${mappedDeployments.length}` : "—"}</strong><small>{pricingGapCount ? `${pricingGapCount} route${pricingGapCount === 1 ? "" : "s"} need attention` : "All token buckets covered"}</small></article>
-      <article><span>Selected Team rollout</span><strong className={`routing-mode ${settings?.rollout?.mode ?? "disabled"}`}>{settings?.rollout?.mode ?? "not configured"}</strong><small>Team-specific, mapping remains shared</small></article>
+      <article><span>Selected Team policy</span><strong>{settings?.policy ? "Configured" : "Not configured"}</strong><small>Balanced remains the safe fallback</small></article>
     </section>
 
     <section className="route-table-card" aria-labelledby="route-map-heading">
@@ -591,7 +533,6 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
         <table className="route-table">
           <thead><tr><th>Alias</th><th>Provider deployment</th><th>Capabilities</th><th>Health</th><th>Token prices / 1M</th><th>Pricing</th><th><span className="sr-only">Actions</span></th></tr></thead>
           <tbody>
-            {!!mappedDeployments.length && <tr className="route-auto-row"><td><span className="route-alias auto">Auto · Beta</span><small>Fixed Balanced by default</small></td><td><strong>Fixed Balanced unless this Team is explicitly enabled</strong><small>Shadow mode records a hypothetical Lite, Balanced, or Pro choice without changing live traffic</small></td><td><small className="route-capability-copy">Inherits the executed route</small></td><td><span className={`route-health ${autoPolicyStatus.className}`}><AutoPolicyStatusIcon aria-hidden="true" />{autoPolicyStatus.label}</span></td><td><span className="route-auto-pricing">Uses the executed tier’s pinned price</span></td><td><span className="route-coverage complete"><CheckmarkCircle20Regular aria-hidden="true" />Inherited</span></td><td><button type="button" className="route-text-button" disabled={busy || !mappedDeployments.length} onClick={openMappingEditor}>Edit mapping</button></td></tr>}
             {mappedDeployments.map((deployment) => {
               const card = cardById.get(deployment.rateCardId);
               const coverage = pricingCoverage(card);
@@ -612,33 +553,19 @@ function ModelRoutesAdmin({ onBack, draftScope }) {
     </section>
 
     <section className="route-team-card" aria-labelledby="route-team-heading">
-      <div className="route-section-heading"><div><p>Team rollout</p><h2 id="route-team-heading">Eligibility and controlled release</h2><span>The deployment map is shared. Eligibility, evidence, and rollout are scoped to the selected Team.</span></div><label className="route-team-picker"><span>Team</span><SelectMenu ariaLabel="Routing Team" value={teamId} options={teams.map((team) => ({ value: team.id, label: team.displayName }))} disabled={busy} onValueChange={setTeamId} /></label></div>
+      <div className="route-section-heading"><div><p>Team policy</p><h2 id="route-team-heading">Model-tier eligibility</h2><span>The deployment map is shared. Each Team policy decides which ready tiers its members may choose.</span></div><label className="route-team-picker"><span>Team</span><SelectMenu ariaLabel="Routing Team" value={teamId} options={teams.map((team) => ({ value: team.id, label: team.displayName }))} disabled={busy} onValueChange={setTeamId} /></label></div>
       {settings?.policy ? <>
         <div className="routing-class-grid">{["lite", "balanced", "pro"].map((item) => <label key={item}><input aria-label={serviceClassLabels[item]} type="checkbox" checked={classes.includes(item)} disabled={busy || !settings.policy.identity.allowedServiceClasses.includes(item)} onChange={(event) => setClasses((current) => event.target.checked ? [...current, item] : current.filter((value) => value !== item))} /><strong>{serviceClassLabels[item]}</strong><span>{serviceClassDescriptions[item]}</span></label>)}</div>
-        <div className="route-rollout-footer"><button className="secondary-button" type="button" disabled={busy || !classes.length} onClick={savePolicy}>Save Team policy</button><div className="routing-actions"><button className="secondary-button" type="button" disabled={busy || !report?.sampleSize} onClick={() => setReviewOpen(true)}>Review Auto (Beta) evidence</button><button className="secondary-button" type="button" disabled={busy || settings?.rollout?.mode === "shadow"} onClick={() => rollout("shadow")}>Start Auto (Beta) shadow mode</button><button className="primary-button" type="button" disabled={busy || !settings?.review?.evaluationPassed} onClick={() => setEnableOpen(true)}>Enable Auto (Beta) routing</button><button className="connection-quiet-button danger-button" type="button" disabled={busy || !settings?.rollout || settings.rollout.mode === "disabled"} onClick={kill}>Activate kill switch</button></div></div>
-        {!settings?.review?.evaluationPassed && <p className="route-helper">{settings?.rollout?.mode === "shadow" ? "Collect representative requests, then review the Auto (Beta) shadow evidence before enabling dynamic production routing." : "Start Auto (Beta) shadow mode to collect evidence before enabling dynamic production routing."}</p>}
+        <div className="route-rollout-footer"><button className="secondary-button" type="button" disabled={busy || !classes.length} onClick={savePolicy}>Save Team policy</button></div>
+        <p className="route-helper">Members see only allowed tiers with a ready provider route and approved pricing. Balanced is used when no retained explicit choice is valid.</p>
       </> : <div className="route-team-setup">
         <Info20Regular aria-hidden="true" />
-        <div><strong>Set up routing for {selectedTeam?.displayName ?? "this Team"}</strong><span>Start with a safe fixed Balanced route so Auto works immediately. Shadow evaluation is optional and only needed before dynamic model selection.</span>{publishedPricingGapCount > 0 && <small>Complete pricing for all published routes before setup.</small>}</div>
-        <button className="primary-button" type="button" disabled={busy || !mapping?.id || (mapping.deployments?.length ?? 0) < 3 || publishedPricingGapCount > 0} onClick={setupTeamRollout}>{busy ? "Setting up…" : "Set up Team rollout"}</button>
+        <div><strong>Set up model tiers for {selectedTeam?.displayName ?? "this Team"}</strong><span>Allow explicit Lite, Balanced, and Pro choices while keeping Balanced as the safe fallback.</span>{publishedPricingGapCount > 0 && <small>Complete pricing for all published routes before setup.</small>}</div>
+        <button className="primary-button" type="button" disabled={busy || !mapping?.id || (mapping.deployments?.length ?? 0) < 3 || publishedPricingGapCount > 0} onClick={setupTeamRollout}>{busy ? "Setting up…" : "Set up Team policy"}</button>
       </div>}
     </section>
 
-    <section className="route-evidence-card" aria-labelledby="routing-evidence-heading">
-      <div className="route-section-heading"><div><p>Shadow evidence</p><h2 id="routing-evidence-heading">Enablement report</h2></div><small>{report?.sampleSize ? `${report.sampleSize} observed requests` : "No observations yet"}</small></div>
-      <div className="routing-metrics"><div><span>Estimated savings</span><strong>{money(report?.estimatedSavings, report?.currency)}</strong></div><div><span>Fallback rate</span><strong>{Number(report?.fallbackRate ?? 0).toLocaleString(undefined, { style: "percent", maximumFractionDigits: 1 })}</strong></div><div><span>Error rate</span><strong>{Number(report?.errorRate ?? 0).toLocaleString(undefined, { style: "percent", maximumFractionDigits: 1 })}</strong></div><div><span>Regret / override</span><strong>{Number(report?.regretRate ?? 0).toLocaleString(undefined, { style: "percent", maximumFractionDigits: 1 })}</strong></div><div><span>Router overhead</span><strong>{Number(report?.routerOverheadMs ?? 0).toFixed(2)} ms</strong></div></div>
-      <div className="routing-decisions" role="region" aria-label="Recent routing decisions">{report?.decisions?.map((item) => {
-        const routeFact = item.shadow
-          ? `Hypothetical ${serviceClassLabels[item.selectedServiceClass] ?? item.selectedServiceClass} → Executed ${serviceClassLabels[item.executedServiceClass] ?? item.executedServiceClass}`
-          : `Executed ${serviceClassLabels[item.executedServiceClass] ?? item.executedServiceClass}`;
-        return <button type="button" key={item.id} onClick={() => openDecision(item.id)}><span>{routeFact}</span><strong>{item.reasonCode.replaceAll("_", " ")}</strong><small>{money(item.expectedCost, item.currency)} · {item.outcome ?? "outcome pending"}</small></button>;
-      })}</div>
-    </section>
-
     {mappingEditor && <MappingEditor editor={mappingEditor} inventory={providerDeployments} rateCards={rateCards} busy={busy} onChange={setMappingEditor} onClose={() => setMappingEditor(null)} onSave={saveMappingDraft} />}
-    {publishOpen && <ModalDialog title="Publish mapping version?" description="This creates an immutable mapping version for policy and shadow evaluation. Current Team policies and rollouts remain pinned to their existing mapping." eyebrow="Model routes" labelledBy="route-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span><strong>No automatic activation.</strong> Review and adoption happen through each Team’s controlled policy and rollout workflow.</span></div><div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button type="button" className="primary-button" disabled={busy} onClick={publishMapping}>{busy ? "Publishing…" : "Publish mapping version"}</button></div></ModalDialog>}
-    {enableOpen && <ModalDialog title="Enable Auto (Beta) routing?" description="Auto (Beta) will replace the fixed Balanced route for this Team. The reviewed mapping and policy stay pinned, and the kill switch remains available." eyebrow="Controlled rollout" labelledBy="route-enable-title" onClose={busy ? () => undefined : () => setEnableOpen(false)}><label className="route-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I reviewed the Auto (Beta) shadow evidence and understand this changes the executed deployment.</label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setEnableOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={!confirmed || busy} onClick={enable}>Enable Auto (Beta) routing</button></div></ModalDialog>}
-    {reviewOpen && <ModalDialog title="Record Auto (Beta) review" description="This immutable review records the current shadow sample and rollout thresholds. It does not enable live dynamic routing." eyebrow="Shadow evidence" labelledBy="route-review-title" onClose={busy ? () => undefined : () => setReviewOpen(false)}><label className="modal-field"><span>Review note</span><textarea aria-label="Routing review note" value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} /></label><label className="route-confirm"><input type="checkbox" checked={reviewPassed} onChange={(event) => setReviewPassed(event.target.checked)} /> Auto (Beta) evidence passed the configured evaluation threshold.</label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setReviewOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || reviewNote.trim().length < 8} onClick={review}>Record review</button></div></ModalDialog>}
-    {detail && <ModalDialog title="Routing decision" description="The provider deployment and immutable evidence used for this governed request." eyebrow="Administrator evidence" labelledBy="route-decision-title" onClose={() => setDetail(null)}><dl className="route-decision-list"><div><dt>Selected class</dt><dd>{serviceClassLabels[detail.selected_service_class] ?? detail.selected_service_class}</dd></div><div><dt>Reason</dt><dd>{String(detail.reason_code).replaceAll("_", " ")}</dd></div><div><dt>Executed provider</dt><dd>{detail.executed_provider}</dd></div><div><dt>Provider model</dt><dd>{detail.executed_model}</dd></div><div><dt>Deployment</dt><dd>{detail.executed_provider_deployment}</dd></div><div><dt>Mapping version</dt><dd>{detail.mapping_version_id}</dd></div><div><dt>Rate card</dt><dd>{detail.rate_card_id}</dd></div></dl><h3>Candidate evidence</h3><ul className="route-candidates">{detail.candidates?.map((item) => <li key={`${item.ordinal}-${item.deployment_id}`}>{item.provider_deployment}: {item.eligibility}{item.reason_code ? ` (${item.reason_code})` : ""}</li>)}</ul><div className="modal-actions"><button className="primary-button" type="button" onClick={() => setDetail(null)}>Close details</button></div></ModalDialog>}
+    {publishOpen && <ModalDialog title="Publish mapping version?" description="This creates an immutable mapping version for Team policy adoption. Current Team policies stay pinned to their existing mapping." eyebrow="Model routes" labelledBy="route-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span><strong>No automatic activation.</strong> Adoption happens only when an administrator separately saves a Team policy.</span></div><div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button type="button" className="primary-button" disabled={busy} onClick={publishMapping}>{busy ? "Publishing…" : "Publish mapping version"}</button></div></ModalDialog>}
   </div>;
 }

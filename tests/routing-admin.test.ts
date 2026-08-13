@@ -76,7 +76,7 @@ test("Team routing schema can narrow but never widen identity policy", () => {
     "new Team routing policies must retain Balanced as the fixed safe default",
   );
 });
-test("production enablement requires both evidence and an explicit typed confirmation", () => {
+test("Phase 0.5 rejects Auto production enablement through the API contract", () => {
   const base = {
     policyVersionId: uuid.policy,
     mappingVersionId: uuid.mapping,
@@ -86,12 +86,22 @@ test("production enablement requires both evidence and an explicit typed confirm
     reason: "Representative evidence passed review",
   };
   assert.equal(changeRoutingRolloutSchema.safeParse(base).success, false);
-  assert.ok(
-    changeRoutingRolloutSchema.safeParse({
-      ...base,
-      confirmation: "ENABLE AUTO ROUTING",
-    }).success,
-  );
+  assert.equal(changeRoutingRolloutSchema.safeParse({
+    ...base,
+    confirmation: "ENABLE AUTO ROUTING",
+  }).success, false);
+  assert.equal(changeRoutingRolloutSchema.safeParse({
+    ...base,
+    mode: "shadow",
+    evidenceReviewId: undefined,
+    confirmation: undefined,
+  }).success, false);
+  assert.equal(changeRoutingRolloutSchema.safeParse({
+    ...base,
+    mode: "disabled",
+    evidenceReviewId: undefined,
+    confirmation: undefined,
+  }).success, true);
   assert.equal(
     changeRoutingRolloutSchema.safeParse({
       ...base,
