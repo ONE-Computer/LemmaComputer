@@ -1,5 +1,6 @@
 .ai-control-plane {
   display: grid;
+  min-width: 0;
   gap: 0;
 }
 
@@ -52,11 +53,17 @@
   gap: 4px;
   overflow-x: auto;
   border-bottom: 1px solid var(--line);
-  scrollbar-width: none;
+  scrollbar-color: #9aaec3 transparent;
+  scrollbar-width: thin;
 }
 
 .ai-control-plane-tabs::-webkit-scrollbar {
-  display: none;
+  height: 6px;
+}
+
+.ai-control-plane-tabs::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #9aaec3;
 }
 
 .ai-control-plane-tabs button {
@@ -151,18 +158,19 @@
   }
 
   .ai-control-plane-tabs {
-    margin-right: -20px;
+    margin-right: 0;
     padding-right: 20px;
   }
 
   .ai-control-plane-tabs button {
     min-height: 44px;
-    padding-inline: 11px;
+    padding-inline: 6px;
+    font-size: 13px;
   }
 
   .ai-control-plane-tabs button::after {
-    right: 11px;
-    left: 11px;
+    right: 6px;
+    left: 6px;
   }
 
   .ai-control-plane-content {
@@ -171,6 +179,21 @@
 
   .ai-control-plane-placeholder {
     padding: 22px;
+  }
+}
+
+@media (max-width: 430px) {
+  .ai-control-plane-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow-x: visible;
+    padding-right: 0;
+  }
+
+  .ai-control-plane-tabs button {
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.2;
   }
 }
 

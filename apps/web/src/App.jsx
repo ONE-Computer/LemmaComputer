@@ -908,7 +908,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
   }[mode];
   return (
     <main className="signin-screen">
-      <section className="signin-card">
+      <section className={`signin-card${mode === "signin" ? " signin-card-with-methods" : ""}`}>
         <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
         <p>{invited ? "Organization invitation" : "Your managed work computer"}</p>
         <h1>{invited ? `Join ${invitationContext?.organizationDisplayName ?? "your organization"}` : title}</h1>
@@ -934,10 +934,12 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
             {mode === "company-sso" && <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Back to all sign-in options</button>}
             {mode === "two-factor" && <button className="signin-back-button" type="button" onClick={() => setUseBackupCode((current) => !current)}>{useBackupCode ? "Use authenticator code" : "Use a backup code"}</button>}
             {(mode === "signin" || (invited && mode === "signup")) && ((capabilities?.passkey && !invited) || capabilities?.socialProviders?.length || capabilities?.companySso) && <div className="signin-method-divider"><span>or</span></div>}
-            {mode === "signin" && capabilities?.companySso && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => changeMode("company-sso")}>Continue with company SSO</button>}
-            {mode === "signin" && capabilities?.passkey && !invited && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={signInWithPasskey}>Sign in with a passkey</button>}
-            {(mode === "signin" || invited) && capabilities?.socialProviders?.includes("google") && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => startSocialSignIn("google")}>Continue with Google</button>}
-            {(mode === "signin" || invited) && capabilities?.socialProviders?.includes("microsoft") && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => startSocialSignIn("microsoft")}>Continue with Microsoft</button>}
+            {(mode === "signin" || (invited && capabilities?.socialProviders?.length)) && <div className="signin-method-grid">
+              {mode === "signin" && capabilities?.companySso && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => changeMode("company-sso")}>Continue with company SSO</button>}
+              {mode === "signin" && capabilities?.passkey && !invited && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={signInWithPasskey}>Sign in with a passkey</button>}
+              {(mode === "signin" || invited) && capabilities?.socialProviders?.includes("google") && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => startSocialSignIn("google")}>Continue with Google</button>}
+              {(mode === "signin" || invited) && capabilities?.socialProviders?.includes("microsoft") && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => startSocialSignIn("microsoft")}>Continue with Microsoft</button>}
+            </div>}
           </>
       </section>
     </main>

@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-08-13T13:53:38.156Z",
-  "baseUrl": "http://127.0.0.1:24371",
+  "generatedAt": "2026-08-13T15:23:38.353Z",
+  "baseUrl": "http://127.0.0.1:24471",
   "measurements": [
     {
-      "name": "02-organization-workspaces-1366x650.png",
-      "route": "/?view=home&section=organization",
+      "name": "01-my-workspaces-1366x650.png",
+      "route": "/?view=home",
       "viewport": {
         "width": 1366,
         "height": 650
@@ -16,7 +16,7 @@
       "innerHeight": 650,
       "devicePixelRatio": 1,
       "documentScrollWidth": 1366,
-      "documentScrollHeight": 894,
+      "documentScrollHeight": 1284,
       "bodyScrollWidth": 1366,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -29,14 +29,14 @@
       },
       "activeElement": {
         "tag": "body",
-        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerOrganization administrationWorks",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerYour workspaceWorkspaceCreate an",
         "rect": {
           "x": 0,
           "y": 0,
           "width": 1366,
-          "height": 893.875,
+          "height": 1284.484375,
           "right": 1366,
-          "bottom": 893.875
+          "bottom": 1284.484375
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -54,407 +54,138 @@
         "x": 336,
         "y": 0,
         "width": 1030,
-        "height": 893.875,
+        "height": 1284.484375,
         "right": 1366,
-        "bottom": 893.875
+        "bottom": 1284.484375
+      },
+      "dialogs": [],
+      "primaryActions": [
+        {
+          "label": "Create workspace",
+          "rect": {
+            "x": 1037.703125,
+            "y": 112.484375,
+            "width": 260,
+            "height": 62,
+            "right": 1297.703125,
+            "bottom": 174.484375
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 431.296875,
+            "y": 537.484375,
+            "width": 187,
+            "height": 46,
+            "right": 618.296875,
+            "bottom": 583.484375
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Start workspace",
+          "rect": {
+            "x": 431.296875,
+            "y": 826.484375,
+            "width": 183,
+            "height": 46,
+            "right": 614.296875,
+            "bottom": 872.484375
+          },
+          "fullyVisible": false
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 431.296875,
+            "y": 1143.484375,
+            "width": 187,
+            "height": 46,
+            "right": 618.296875,
+            "bottom": 1189.484375
+          },
+          "fullyVisible": false
+        }
+      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "02-organization-workspaces-1366x650.png",
+      "route": "/?view=home&section=organization",
+      "viewport": {
+        "width": 1366,
+        "height": 650
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "Workspace",
+      "innerWidth": 1366,
+      "innerHeight": 650,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1366,
+      "documentScrollHeight": 1337,
+      "bodyScrollWidth": 1366,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerOrganization administrationWorks",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1366,
+          "height": 1336.875,
+          "right": 1366,
+          "bottom": 1336.875
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 650,
+        "right": 336,
+        "bottom": 650
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1030,
+        "height": 1336.875,
+        "right": 1366,
+        "bottom": 1336.875
       },
       "dialogs": [],
       "primaryActions": [
         {
           "label": "Start",
           "rect": {
-            "x": 1236.296875,
-            "y": 659.375,
-            "width": 165,
+            "x": 648.140625,
+            "y": 920.875,
+            "width": 405.703125,
             "height": 34,
-            "right": 1401.296875,
-            "bottom": 693.375
+            "right": 1053.84375,
+            "bottom": 954.875
           },
           "fullyVisible": false
         }
       ],
-      "outOfBounds": [
-        {
-          "tag": "span",
-          "className": "",
-          "label": "Actions",
-          "rect": {
-            "x": 1236.296875,
-            "y": 502.375,
-            "width": 165,
-            "height": 14,
-            "right": 1401.296875,
-            "bottom": 516.375
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "section",
-          "className": "member-workspace-row",
-          "label": "Personal workspace for Example User",
-          "rect": {
-            "x": 405.296875,
-            "y": 531.875,
-            "width": 1014,
-            "height": 98,
-            "right": 1419.296875,
-            "bottom": 629.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "member-workspace-actions",
-          "label": "RestartStopTerminate runtime",
-          "rect": {
-            "x": 1236.296875,
-            "y": 543.875,
-            "width": 165,
-            "height": 73,
-            "right": 1401.296875,
-            "bottom": 616.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "",
-          "label": "RestartStop",
-          "rect": {
-            "x": 1236.296875,
-            "y": 543.875,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 577.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Stop",
-          "rect": {
-            "x": 1322.296875,
-            "y": 543.875,
-            "width": 79,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 577.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "connection-quiet-button danger-button",
-          "label": "Terminate runtime",
-          "rect": {
-            "x": 1236.296875,
-            "y": 582.875,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 616.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "section",
-          "className": "member-workspace-row",
-          "label": "Sandbox Research for Example User",
-          "rect": {
-            "x": 405.296875,
-            "y": 629.875,
-            "width": 1014,
-            "height": 94,
-            "right": 1419.296875,
-            "bottom": 723.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "member-workspace-actions",
-          "label": "Start",
-          "rect": {
-            "x": 1236.296875,
-            "y": 659.375,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 693.375
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "primary-button",
-          "label": "Start",
-          "rect": {
-            "x": 1236.296875,
-            "y": 659.375,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 693.375
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "section",
-          "className": "member-workspace-row",
-          "label": "Personal workspace for Example Admin",
-          "rect": {
-            "x": 405.296875,
-            "y": 723.875,
-            "width": 1014,
-            "height": 97,
-            "right": 1419.296875,
-            "bottom": 820.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "member-workspace-actions",
-          "label": "RestartStopTerminate runtime",
-          "rect": {
-            "x": 1236.296875,
-            "y": 735.875,
-            "width": 165,
-            "height": 73,
-            "right": 1401.296875,
-            "bottom": 808.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "",
-          "label": "RestartStop",
-          "rect": {
-            "x": 1236.296875,
-            "y": 735.875,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 769.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Stop",
-          "rect": {
-            "x": 1322.296875,
-            "y": 735.875,
-            "width": 79,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 769.875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "connection-quiet-button danger-button",
-          "label": "Terminate runtime",
-          "rect": {
-            "x": 1236.296875,
-            "y": 774.875,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 808.875
-          },
-          "overflowX": "visible"
-        }
-      ],
-      "clippedInteractives": [
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Restart",
-          "rect": {
-            "x": 1236.296875,
-            "y": 543.875,
-            "width": 79,
-            "height": 34,
-            "right": 1315.296875,
-            "bottom": 577.875
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 404.296875,
-              "y": 401.484375,
-              "width": 893.40625,
-              "height": 420.390625,
-              "right": 1297.703125,
-              "bottom": 821.875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Stop",
-          "rect": {
-            "x": 1322.296875,
-            "y": 543.875,
-            "width": 79,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 577.875
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 404.296875,
-              "y": 401.484375,
-              "width": 893.40625,
-              "height": 420.390625,
-              "right": 1297.703125,
-              "bottom": 821.875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "connection-quiet-button danger-button",
-          "label": "Terminate runtime",
-          "rect": {
-            "x": 1236.296875,
-            "y": 582.875,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 616.875
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 404.296875,
-              "y": 401.484375,
-              "width": 893.40625,
-              "height": 420.390625,
-              "right": 1297.703125,
-              "bottom": 821.875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "primary-button",
-          "label": "Start",
-          "rect": {
-            "x": 1236.296875,
-            "y": 659.375,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 693.375
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 404.296875,
-              "y": 401.484375,
-              "width": 893.40625,
-              "height": 420.390625,
-              "right": 1297.703125,
-              "bottom": 821.875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Restart",
-          "rect": {
-            "x": 1236.296875,
-            "y": 735.875,
-            "width": 79,
-            "height": 34,
-            "right": 1315.296875,
-            "bottom": 769.875
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 404.296875,
-              "y": 401.484375,
-              "width": 893.40625,
-              "height": 420.390625,
-              "right": 1297.703125,
-              "bottom": 821.875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Stop",
-          "rect": {
-            "x": 1322.296875,
-            "y": 735.875,
-            "width": 79,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 769.875
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 404.296875,
-              "y": 401.484375,
-              "width": 893.40625,
-              "height": 420.390625,
-              "right": 1297.703125,
-              "bottom": 821.875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "connection-quiet-button danger-button",
-          "label": "Terminate runtime",
-          "rect": {
-            "x": 1236.296875,
-            "y": 774.875,
-            "width": 165,
-            "height": 34,
-            "right": 1401.296875,
-            "bottom": 808.875
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 404.296875,
-              "y": 401.484375,
-              "width": 893.40625,
-              "height": 420.390625,
-              "right": 1297.703125,
-              "bottom": 821.875
-            },
-            "overflowX": "hidden"
-          }
-        }
-      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
       "scrollContainers": []
     },
     {
@@ -757,20 +488,20 @@
       "scrollContainers": []
     },
     {
-      "name": "08-firewall-1366x650.png",
-      "route": "/?view=firewall",
+      "name": "07-chat-1366x650.png",
+      "route": "/?view=chat&chat=fixture-session-1",
       "viewport": {
         "width": 1366,
         "height": 650
       },
       "state": "default",
       "title": "LemmaComputer",
-      "heading": "Egress firewall",
+      "heading": "",
       "innerWidth": 1366,
       "innerHeight": 650,
       "devicePixelRatio": 1,
       "documentScrollWidth": 1366,
-      "documentScrollHeight": 682,
+      "documentScrollHeight": 650,
       "bodyScrollWidth": 1366,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -783,14 +514,14 @@
       },
       "activeElement": {
         "tag": "body",
-        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerNetwork controlEgress firewallCr",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatRecentQuarterly planningExample UserLemmaComputerActivity",
         "rect": {
           "x": 0,
           "y": 0,
           "width": 1366,
-          "height": 682.328125,
+          "height": 650,
           "right": 1366,
-          "bottom": 682.328125
+          "bottom": 650
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -808,9 +539,84 @@
         "x": 336,
         "y": 0,
         "width": 1030,
-        "height": 682.328125,
+        "height": 650,
         "right": 1366,
-        "bottom": 682.328125
+        "bottom": 650
+      },
+      "dialogs": [],
+      "primaryActions": [],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": [
+        {
+          "tag": "div",
+          "className": "sidebar-chat-history",
+          "clientWidth": 280,
+          "scrollWidth": 280,
+          "clientHeight": 18,
+          "scrollHeight": 92,
+          "scrollLeft": 0,
+          "scrollTop": 0,
+          "overflowX": "auto",
+          "overflowY": "auto"
+        }
+      ]
+    },
+    {
+      "name": "08-firewall-1366x650.png",
+      "route": "/?view=firewall",
+      "viewport": {
+        "width": 1366,
+        "height": 650
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "Egress firewall",
+      "innerWidth": 1366,
+      "innerHeight": 650,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1366,
+      "documentScrollHeight": 785,
+      "bodyScrollWidth": 1366,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerNetwork controlEgress firewallCr",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1366,
+          "height": 785.328125,
+          "right": 1366,
+          "bottom": 785.328125
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 650,
+        "right": 336,
+        "bottom": 650
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1030,
+        "height": 785.328125,
+        "right": 1366,
+        "bottom": 785.328125
       },
       "dialogs": [],
       "primaryActions": [
@@ -828,60 +634,7 @@
         }
       ],
       "outOfBounds": [],
-      "clippedInteractives": [
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Manage group",
-          "rect": {
-            "x": 1180.296875,
-            "y": 442.328125,
-            "width": 154,
-            "height": 38,
-            "right": 1334.296875,
-            "bottom": 480.328125
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "firewall-security-groups",
-            "rect": {
-              "x": 404.296875,
-              "y": 228.484375,
-              "width": 893.40625,
-              "height": 381.84375,
-              "right": 1297.703125,
-              "bottom": 610.328125
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Manage group",
-          "rect": {
-            "x": 1180.296875,
-            "y": 542.328125,
-            "width": 154,
-            "height": 38,
-            "right": 1334.296875,
-            "bottom": 580.328125
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "firewall-security-groups",
-            "rect": {
-              "x": 404.296875,
-              "y": 228.484375,
-              "width": 893.40625,
-              "height": 381.84375,
-              "right": 1297.703125,
-              "bottom": 610.328125
-            },
-            "overflowX": "hidden"
-          }
-        }
-      ],
+      "clippedInteractives": [],
       "scrollContainers": []
     },
     {
@@ -1627,7 +1380,7 @@
       "innerHeight": 730,
       "devicePixelRatio": 1,
       "documentScrollWidth": 1470,
-      "documentScrollHeight": 897,
+      "documentScrollHeight": 1340,
       "bodyScrollWidth": 1470,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -1645,9 +1398,9 @@
           "x": 0,
           "y": 0,
           "width": 1470,
-          "height": 897.140625,
+          "height": 1340.140625,
           "right": 1470,
-          "bottom": 897.140625
+          "bottom": 1340.140625
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -1665,158 +1418,27 @@
         "x": 336,
         "y": 0,
         "width": 1134,
-        "height": 897.140625,
+        "height": 1340.140625,
         "right": 1470,
-        "bottom": 897.140625
+        "bottom": 1340.140625
       },
       "dialogs": [],
       "primaryActions": [
         {
           "label": "Start",
           "rect": {
-            "x": 1240,
-            "y": 662.640625,
-            "width": 165,
+            "x": 676,
+            "y": 924.140625,
+            "width": 454,
             "height": 34,
-            "right": 1405,
-            "bottom": 696.640625
+            "right": 1130,
+            "bottom": 958.140625
           },
-          "fullyVisible": true
+          "fullyVisible": false
         }
       ],
       "outOfBounds": [],
-      "clippedInteractives": [
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Stop",
-          "rect": {
-            "x": 1326,
-            "y": 547.140625,
-            "width": 79,
-            "height": 34,
-            "right": 1405,
-            "bottom": 581.140625
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 408,
-              "y": 404.75,
-              "width": 990,
-              "height": 420.390625,
-              "right": 1398,
-              "bottom": 825.140625
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "connection-quiet-button danger-button",
-          "label": "Terminate runtime",
-          "rect": {
-            "x": 1240,
-            "y": 586.140625,
-            "width": 165,
-            "height": 34,
-            "right": 1405,
-            "bottom": 620.140625
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 408,
-              "y": 404.75,
-              "width": 990,
-              "height": 420.390625,
-              "right": 1398,
-              "bottom": 825.140625
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "primary-button",
-          "label": "Start",
-          "rect": {
-            "x": 1240,
-            "y": 662.640625,
-            "width": 165,
-            "height": 34,
-            "right": 1405,
-            "bottom": 696.640625
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 408,
-              "y": 404.75,
-              "width": 990,
-              "height": 420.390625,
-              "right": 1398,
-              "bottom": 825.140625
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button",
-          "label": "Stop",
-          "rect": {
-            "x": 1326,
-            "y": 739.140625,
-            "width": 79,
-            "height": 34,
-            "right": 1405,
-            "bottom": 773.140625
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 408,
-              "y": 404.75,
-              "width": 990,
-              "height": 420.390625,
-              "right": 1398,
-              "bottom": 825.140625
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "connection-quiet-button danger-button",
-          "label": "Terminate runtime",
-          "rect": {
-            "x": 1240,
-            "y": 778.140625,
-            "width": 165,
-            "height": 34,
-            "right": 1405,
-            "bottom": 812.140625
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "member-workspace-table",
-            "rect": {
-              "x": 408,
-              "y": 404.75,
-              "width": 990,
-              "height": 420.390625,
-              "right": 1398,
-              "bottom": 825.140625
-            },
-            "overflowX": "hidden"
-          }
-        }
-      ],
+      "clippedInteractives": [],
       "scrollContainers": []
     },
     {
@@ -2082,7 +1704,7 @@
       "innerHeight": 900,
       "devicePixelRatio": 1,
       "documentScrollWidth": 720,
-      "documentScrollHeight": 1751,
+      "documentScrollHeight": 2115,
       "bodyScrollWidth": 720,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -2100,9 +1722,9 @@
           "x": 0,
           "y": 0,
           "width": 720,
-          "height": 1751.34375,
+          "height": 2115.34375,
           "right": 720,
-          "bottom": 1751.34375
+          "bottom": 2115.34375
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -2120,9 +1742,9 @@
         "x": 0,
         "y": 0,
         "width": 720,
-        "height": 1751.34375,
+        "height": 2115.34375,
         "right": 720,
-        "bottom": 1751.34375
+        "bottom": 2115.34375
       },
       "dialogs": [],
       "primaryActions": [
@@ -2140,60 +1762,7 @@
         }
       ],
       "outOfBounds": [],
-      "clippedInteractives": [
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Assign policy",
-          "rect": {
-            "x": 631,
-            "y": 1469.84375,
-            "width": 84,
-            "height": 20,
-            "right": 715,
-            "bottom": 1489.84375
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "workspace-policy-member-table",
-            "rect": {
-              "x": 28,
-              "y": 1399.34375,
-              "width": 664,
-              "height": 188,
-              "right": 692,
-              "bottom": 1587.34375
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Assign policy",
-          "rect": {
-            "x": 631,
-            "y": 1541.84375,
-            "width": 84,
-            "height": 20,
-            "right": 715,
-            "bottom": 1561.84375
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "workspace-policy-member-table",
-            "rect": {
-              "x": 28,
-              "y": 1399.34375,
-              "width": 664,
-              "height": 188,
-              "right": 692,
-              "bottom": 1587.34375
-            },
-            "overflowX": "hidden"
-          }
-        }
-      ],
+      "clippedInteractives": [],
       "scrollContainers": []
     },
     {
@@ -2285,7 +1854,7 @@
       "innerHeight": 900,
       "devicePixelRatio": 1,
       "documentScrollWidth": 720,
-      "documentScrollHeight": 2172,
+      "documentScrollHeight": 2411,
       "bodyScrollWidth": 720,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -2303,9 +1872,9 @@
           "x": 0,
           "y": 0,
           "width": 720,
-          "height": 2172.03125,
+          "height": 2411.03125,
           "right": 720,
-          "bottom": 2172.03125
+          "bottom": 2411.03125
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -2323,9 +1892,9 @@
         "x": 0,
         "y": 0,
         "width": 720,
-        "height": 2172.03125,
+        "height": 2411.03125,
         "right": 720,
-        "bottom": 2172.03125
+        "bottom": 2411.03125
       },
       "dialogs": [],
       "primaryActions": [
@@ -2345,11 +1914,11 @@
           "label": "Add connection",
           "rect": {
             "x": 407,
-            "y": 1559.046875,
+            "y": 1798.046875,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 1615.046875
+            "bottom": 1854.046875
           },
           "fullyVisible": false
         },
@@ -2357,247 +1926,17 @@
           "label": "Create custom role",
           "rect": {
             "x": 407,
-            "y": 1850.640625,
+            "y": 2089.640625,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 1906.640625
+            "bottom": 2145.640625
           },
           "fullyVisible": false
         }
       ],
-      "outOfBounds": [
-        {
-          "tag": "div",
-          "className": "admin-user-actions",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 1014.046875,
-            "width": 170,
-            "height": 40,
-            "right": 755,
-            "bottom": 1054.046875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 1014.046875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1054.046875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "admin-user-actions",
-          "label": "Transfer ownershipSign out sessionsSuspendRemove access",
-          "rect": {
-            "x": 585,
-            "y": 1102.546875,
-            "width": 170,
-            "height": 184,
-            "right": 755,
-            "bottom": 1286.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Transfer ownership",
-          "rect": {
-            "x": 585,
-            "y": 1102.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1142.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 1150.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1190.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action danger-button",
-          "label": "Suspend",
-          "rect": {
-            "x": 585,
-            "y": 1198.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1238.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action danger-button",
-          "label": "Remove access",
-          "rect": {
-            "x": 585,
-            "y": 1246.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1286.546875
-          },
-          "overflowX": "visible"
-        }
-      ],
-      "clippedInteractives": [
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 1014.046875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1054.046875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 902.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 1304.546875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Transfer ownership",
-          "rect": {
-            "x": 585,
-            "y": 1102.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1142.546875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 902.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 1304.546875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 1150.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1190.546875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 902.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 1304.546875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action danger-button",
-          "label": "Suspend",
-          "rect": {
-            "x": 585,
-            "y": 1198.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1238.546875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 902.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 1304.546875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action danger-button",
-          "label": "Remove access",
-          "rect": {
-            "x": 585,
-            "y": 1246.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 1286.546875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 902.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 1304.546875
-            },
-            "overflowX": "hidden"
-          }
-        }
-      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
       "scrollContainers": []
     },
     {
@@ -2673,20 +2012,7 @@
       ],
       "outOfBounds": [],
       "clippedInteractives": [],
-      "scrollContainers": [
-        {
-          "tag": "nav",
-          "className": "ai-control-plane-tabs",
-          "clientWidth": 684,
-          "scrollWidth": 710,
-          "clientHeight": 44,
-          "scrollHeight": 45,
-          "scrollLeft": 0,
-          "scrollTop": 0,
-          "overflowX": "auto",
-          "overflowY": "auto"
-        }
-      ]
+      "scrollContainers": []
     },
     {
       "name": "23-people-access-390x844.png",
@@ -2800,10 +2126,10 @@
       "innerWidth": 390,
       "innerHeight": 844,
       "devicePixelRatio": 1,
-      "documentScrollWidth": 959,
-      "documentScrollHeight": 2417,
-      "bodyScrollWidth": 959,
-      "horizontalOverflow": true,
+      "documentScrollWidth": 390,
+      "documentScrollHeight": 2465,
+      "bodyScrollWidth": 390,
+      "horizontalOverflow": false,
       "bodyOverflowX": "visible",
       "bodyOverflowY": "visible",
       "scrollPosition": {
@@ -2819,9 +2145,9 @@
           "x": 0,
           "y": 0,
           "width": 390,
-          "height": 2416.671875,
+          "height": 2464.671875,
           "right": 390,
-          "bottom": 2416.671875
+          "bottom": 2464.671875
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -2839,9 +2165,9 @@
         "x": 0,
         "y": 0,
         "width": 390,
-        "height": 2416.671875,
+        "height": 2464.671875,
         "right": 390,
-        "bottom": 2416.671875
+        "bottom": 2464.671875
       },
       "dialogs": [],
       "primaryActions": [
@@ -2849,69 +2175,27 @@
           "label": "Publish mapping version",
           "rect": {
             "x": 200,
-            "y": 525.96875,
+            "y": 573.96875,
             "width": 171,
             "height": 62,
             "right": 371,
-            "bottom": 587.96875
+            "bottom": 635.96875
           },
           "fullyVisible": true
         }
       ],
       "outOfBounds": [
         {
-          "tag": "button",
-          "className": "",
-          "label": "Pricing",
-          "rect": {
-            "x": 388,
-            "y": 257.140625,
-            "width": 71,
-            "height": 44,
-            "right": 459,
-            "bottom": 301.140625
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Teams & budgets",
-          "rect": {
-            "x": 463,
-            "y": 257.140625,
-            "width": 141,
-            "height": 44,
-            "right": 604,
-            "bottom": 301.140625
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Data health",
-          "rect": {
-            "x": 608,
-            "y": 257.140625,
-            "width": 100,
-            "height": 44,
-            "right": 708,
-            "bottom": 301.140625
-          },
-          "overflowX": "visible"
-        },
-        {
           "tag": "table",
           "className": "route-table",
           "label": "AliasProvider deploymentCapabilitiesHealthToken prices / 1MPricingActionsLiteFast, economical workAzure AI Foundry · private/lunafoundry/lun",
           "rect": {
             "x": 20,
-            "y": 1406.109375,
+            "y": 1454.109375,
             "width": 1040,
             "height": 302.0625,
             "right": 1060,
-            "bottom": 1708.171875
+            "bottom": 1756.171875
           },
           "overflowX": "visible"
         },
@@ -2921,11 +2205,11 @@
           "label": "AliasProvider deploymentCapabilitiesHealthToken prices / 1MPricingActions",
           "rect": {
             "x": 20,
-            "y": 1406.109375,
+            "y": 1454.109375,
             "width": 1040,
             "height": 36.5,
             "right": 1060,
-            "bottom": 1442.609375
+            "bottom": 1490.609375
           },
           "overflowX": "visible"
         },
@@ -2935,11 +2219,11 @@
           "label": "AliasProvider deploymentCapabilitiesHealthToken prices / 1MPricingActions",
           "rect": {
             "x": 20,
-            "y": 1406.109375,
+            "y": 1454.109375,
             "width": 1040,
             "height": 36.5,
             "right": 1060,
-            "bottom": 1442.609375
+            "bottom": 1490.609375
           },
           "overflowX": "visible"
         },
@@ -2949,11 +2233,11 @@
           "label": "Capabilities",
           "rect": {
             "x": 355,
-            "y": 1406.109375,
+            "y": 1454.109375,
             "width": 150,
             "height": 36.5,
             "right": 505,
-            "bottom": 1442.609375
+            "bottom": 1490.609375
           },
           "overflowX": "visible"
         },
@@ -2963,11 +2247,11 @@
           "label": "Health",
           "rect": {
             "x": 505,
-            "y": 1406.109375,
+            "y": 1454.109375,
             "width": 109,
             "height": 36.5,
             "right": 614,
-            "bottom": 1442.609375
+            "bottom": 1490.609375
           },
           "overflowX": "visible"
         },
@@ -2977,11 +2261,11 @@
           "label": "Token prices / 1M",
           "rect": {
             "x": 614,
-            "y": 1406.109375,
+            "y": 1454.109375,
             "width": 243,
             "height": 36.5,
             "right": 857,
-            "bottom": 1442.609375
+            "bottom": 1490.609375
           },
           "overflowX": "visible"
         },
@@ -2991,11 +2275,11 @@
           "label": "Pricing",
           "rect": {
             "x": 857,
-            "y": 1406.109375,
+            "y": 1454.109375,
             "width": 93,
             "height": 36.5,
             "right": 950,
-            "bottom": 1442.609375
+            "bottom": 1490.609375
           },
           "overflowX": "visible"
         },
@@ -3005,11 +2289,11 @@
           "label": "Actions",
           "rect": {
             "x": 950,
-            "y": 1406.109375,
+            "y": 1454.109375,
             "width": 110,
             "height": 36.5,
             "right": 1060,
-            "bottom": 1442.609375
+            "bottom": 1490.609375
           },
           "overflowX": "visible"
         },
@@ -3019,11 +2303,11 @@
           "label": "Actions",
           "rect": {
             "x": 958,
-            "y": 1423.109375,
+            "y": 1471.109375,
             "width": 1,
             "height": 1,
             "right": 959,
-            "bottom": 1424.109375
+            "bottom": 1472.109375
           },
           "overflowX": "hidden"
         },
@@ -3033,11 +2317,11 @@
           "label": "LiteFast, economical workAzure AI Foundry · private/lunafoundry/lunaStreamingNot reportedInput$0.350Output$1.80Cache read$0.080Cache write$0",
           "rect": {
             "x": 20,
-            "y": 1442.609375,
+            "y": 1490.609375,
             "width": 1040,
             "height": 265.5625,
             "right": 1060,
-            "bottom": 1708.171875
+            "bottom": 1756.171875
           },
           "overflowX": "visible"
         },
@@ -3047,11 +2331,11 @@
           "label": "LiteFast, economical workAzure AI Foundry · private/lunafoundry/lunaStreamingNot reportedInput$0.350Output$1.80Cache read$0.080Cache write$0",
           "rect": {
             "x": 20,
-            "y": 1442.609375,
+            "y": 1490.609375,
             "width": 1040,
             "height": 88.6875,
             "right": 1060,
-            "bottom": 1531.296875
+            "bottom": 1579.296875
           },
           "overflowX": "visible"
         },
@@ -3061,11 +2345,11 @@
           "label": "Streaming",
           "rect": {
             "x": 355,
-            "y": 1442.609375,
+            "y": 1490.609375,
             "width": 150,
             "height": 88.6875,
             "right": 505,
-            "bottom": 1531.296875
+            "bottom": 1579.296875
           },
           "overflowX": "visible"
         },
@@ -3075,11 +2359,11 @@
           "label": "Streaming",
           "rect": {
             "x": 364,
-            "y": 1481.53125,
+            "y": 1529.53125,
             "width": 132,
             "height": 14.84375,
             "right": 496,
-            "bottom": 1496.375
+            "bottom": 1544.375
           },
           "overflowX": "visible"
         },
@@ -3089,11 +2373,11 @@
           "label": "Not reported",
           "rect": {
             "x": 505,
-            "y": 1442.609375,
+            "y": 1490.609375,
             "width": 109,
             "height": 88.6875,
             "right": 614,
-            "bottom": 1531.296875
+            "bottom": 1579.296875
           },
           "overflowX": "visible"
         },
@@ -3103,11 +2387,11 @@
           "label": "Not reported",
           "rect": {
             "x": 514,
-            "y": 1476.953125,
+            "y": 1524.953125,
             "width": 91,
             "height": 17,
             "right": 605,
-            "bottom": 1493.953125
+            "bottom": 1541.953125
           },
           "overflowX": "visible"
         },
@@ -3117,11 +2401,11 @@
           "label": "",
           "rect": {
             "x": 514,
-            "y": 1476.953125,
+            "y": 1524.953125,
             "width": 17,
             "height": 17,
             "right": 531,
-            "bottom": 1493.953125
+            "bottom": 1541.953125
           },
           "overflowX": "hidden"
         },
@@ -3131,11 +2415,11 @@
           "label": "",
           "rect": {
             "x": 515.7000122070312,
-            "y": 1478.653076171875,
+            "y": 1526.653076171875,
             "width": 13.5999755859375,
             "height": 13.60009765625,
             "right": 529.2999877929688,
-            "bottom": 1492.253173828125
+            "bottom": 1540.253173828125
           },
           "overflowX": "visible"
         },
@@ -3145,11 +2429,11 @@
           "label": "Input$0.350Output$1.80Cache read$0.080Cache write$0.450",
           "rect": {
             "x": 614,
-            "y": 1442.609375,
+            "y": 1490.609375,
             "width": 243,
             "height": 88.6875,
             "right": 857,
-            "bottom": 1531.296875
+            "bottom": 1579.296875
           },
           "overflowX": "visible"
         },
@@ -3159,11 +2443,11 @@
           "label": "Input$0.350Output$1.80Cache read$0.080Cache write$0.450",
           "rect": {
             "x": 623,
-            "y": 1472.453125,
+            "y": 1520.453125,
             "width": 225,
             "height": 29,
             "right": 848,
-            "bottom": 1501.453125
+            "bottom": 1549.453125
           },
           "overflowX": "visible"
         },
@@ -3173,11 +2457,11 @@
           "label": "Input$0.350",
           "rect": {
             "x": 623,
-            "y": 1472.453125,
+            "y": 1520.453125,
             "width": 50.25,
             "height": 29,
             "right": 673.25,
-            "bottom": 1501.453125
+            "bottom": 1549.453125
           },
           "overflowX": "visible"
         },
@@ -3187,11 +2471,11 @@
           "label": "Input",
           "rect": {
             "x": 623,
-            "y": 1472.453125,
+            "y": 1520.453125,
             "width": 50.25,
             "height": 11,
             "right": 673.25,
-            "bottom": 1483.453125
+            "bottom": 1531.453125
           },
           "overflowX": "visible"
         },
@@ -3201,11 +2485,11 @@
           "label": "$0.350",
           "rect": {
             "x": 623,
-            "y": 1486.453125,
+            "y": 1534.453125,
             "width": 50.25,
             "height": 15,
             "right": 673.25,
-            "bottom": 1501.453125
+            "bottom": 1549.453125
           },
           "overflowX": "visible"
         },
@@ -3215,11 +2499,11 @@
           "label": "Output$1.80",
           "rect": {
             "x": 681.25,
-            "y": 1472.453125,
+            "y": 1520.453125,
             "width": 50.25,
             "height": 29,
             "right": 731.5,
-            "bottom": 1501.453125
+            "bottom": 1549.453125
           },
           "overflowX": "visible"
         },
@@ -3229,11 +2513,11 @@
           "label": "Output",
           "rect": {
             "x": 681.25,
-            "y": 1472.453125,
+            "y": 1520.453125,
             "width": 50.25,
             "height": 11,
             "right": 731.5,
-            "bottom": 1483.453125
+            "bottom": 1531.453125
           },
           "overflowX": "visible"
         },
@@ -3243,11 +2527,11 @@
           "label": "$1.80",
           "rect": {
             "x": 681.25,
-            "y": 1486.453125,
+            "y": 1534.453125,
             "width": 50.25,
             "height": 15,
             "right": 731.5,
-            "bottom": 1501.453125
+            "bottom": 1549.453125
           },
           "overflowX": "visible"
         },
@@ -3257,11 +2541,11 @@
           "label": "Cache read$0.080",
           "rect": {
             "x": 739.5,
-            "y": 1472.453125,
+            "y": 1520.453125,
             "width": 50.25,
             "height": 29,
             "right": 789.75,
-            "bottom": 1501.453125
+            "bottom": 1549.453125
           },
           "overflowX": "visible"
         },
@@ -3271,29 +2555,59 @@
           "label": "Cache read",
           "rect": {
             "x": 739.5,
-            "y": 1472.453125,
+            "y": 1520.453125,
             "width": 50.25,
             "height": 11,
             "right": 789.75,
-            "bottom": 1483.453125
+            "bottom": 1531.453125
+          },
+          "overflowX": "visible"
+        },
+        {
+          "tag": "span",
+          "className": "",
+          "label": "$0.080",
+          "rect": {
+            "x": 739.5,
+            "y": 1534.453125,
+            "width": 50.25,
+            "height": 15,
+            "right": 789.75,
+            "bottom": 1549.453125
+          },
+          "overflowX": "visible"
+        },
+        {
+          "tag": "span",
+          "className": "",
+          "label": "Cache write$0.450",
+          "rect": {
+            "x": 797.75,
+            "y": 1520.453125,
+            "width": 50.25,
+            "height": 29,
+            "right": 848,
+            "bottom": 1549.453125
+          },
+          "overflowX": "visible"
+        },
+        {
+          "tag": "small",
+          "className": "",
+          "label": "Cache write",
+          "rect": {
+            "x": 797.75,
+            "y": 1520.453125,
+            "width": 50.25,
+            "height": 11,
+            "right": 848,
+            "bottom": 1531.453125
           },
           "overflowX": "visible"
         }
       ],
       "clippedInteractives": [],
       "scrollContainers": [
-        {
-          "tag": "nav",
-          "className": "ai-control-plane-tabs",
-          "clientWidth": 372,
-          "scrollWidth": 709,
-          "clientHeight": 44,
-          "scrollHeight": 45,
-          "scrollLeft": 0,
-          "scrollTop": 0,
-          "overflowX": "auto",
-          "overflowY": "auto"
-        },
         {
           "tag": "div",
           "className": "route-table-scroll",
@@ -3384,6 +2698,884 @@
       "scrollContainers": []
     },
     {
+      "name": "42-my-workspaces-1470x730.png",
+      "route": "/?view=home",
+      "viewport": {
+        "width": 1470,
+        "height": 730
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "Workspace",
+      "innerWidth": 1470,
+      "innerHeight": 730,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1470,
+      "documentScrollHeight": 1288,
+      "bodyScrollWidth": 1470,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerYour workspaceWorkspaceCreate an",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1470,
+          "height": 1287.75,
+          "right": 1470,
+          "bottom": 1287.75
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 730,
+        "right": 336,
+        "bottom": 730
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1134,
+        "height": 1287.75,
+        "right": 1470,
+        "bottom": 1287.75
+      },
+      "dialogs": [],
+      "primaryActions": [
+        {
+          "label": "Create workspace",
+          "rect": {
+            "x": 1138,
+            "y": 115.75,
+            "width": 260,
+            "height": 62,
+            "right": 1398,
+            "bottom": 177.75
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 435,
+            "y": 540.75,
+            "width": 187,
+            "height": 46,
+            "right": 622,
+            "bottom": 586.75
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Start workspace",
+          "rect": {
+            "x": 435,
+            "y": 829.75,
+            "width": 183,
+            "height": 46,
+            "right": 618,
+            "bottom": 875.75
+          },
+          "fullyVisible": false
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 435,
+            "y": 1146.75,
+            "width": 187,
+            "height": 46,
+            "right": 622,
+            "bottom": 1192.75
+          },
+          "fullyVisible": false
+        }
+      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "43-my-workspaces-1440x800.png",
+      "route": "/?view=home",
+      "viewport": {
+        "width": 1440,
+        "height": 800
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "Workspace",
+      "innerWidth": 1440,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1440,
+      "documentScrollHeight": 1287,
+      "bodyScrollWidth": 1440,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerYour workspaceWorkspaceCreate an",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 1287.203125,
+          "right": 1440,
+          "bottom": 1287.203125
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 800,
+        "right": 336,
+        "bottom": 800
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1104,
+        "height": 1287.203125,
+        "right": 1440,
+        "bottom": 1287.203125
+      },
+      "dialogs": [],
+      "primaryActions": [
+        {
+          "label": "Create workspace",
+          "rect": {
+            "x": 1108,
+            "y": 115.203125,
+            "width": 260,
+            "height": 62,
+            "right": 1368,
+            "bottom": 177.203125
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 435,
+            "y": 540.203125,
+            "width": 187,
+            "height": 46,
+            "right": 622,
+            "bottom": 586.203125
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Start workspace",
+          "rect": {
+            "x": 435,
+            "y": 829.203125,
+            "width": 183,
+            "height": 46,
+            "right": 618,
+            "bottom": 875.203125
+          },
+          "fullyVisible": false
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 435,
+            "y": 1146.203125,
+            "width": 187,
+            "height": 46,
+            "right": 622,
+            "bottom": 1192.203125
+          },
+          "fullyVisible": false
+        }
+      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "44-my-workspaces-1920x900.png",
+      "route": "/?view=home",
+      "viewport": {
+        "width": 1920,
+        "height": 900
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "Workspace",
+      "innerWidth": 1920,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1920,
+      "documentScrollHeight": 1232,
+      "bodyScrollWidth": 1920,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerYour workspaceWorkspaceCreate an",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1231.75,
+          "right": 1920,
+          "bottom": 1231.75
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 900,
+        "right": 336,
+        "bottom": 900
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1584,
+        "height": 1231.75,
+        "right": 1920,
+        "bottom": 1231.75
+      },
+      "dialogs": [],
+      "primaryActions": [
+        {
+          "label": "Create workspace",
+          "rect": {
+            "x": 1516,
+            "y": 115.75,
+            "width": 260,
+            "height": 62,
+            "right": 1776,
+            "bottom": 177.75
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 507,
+            "y": 512.75,
+            "width": 187,
+            "height": 46,
+            "right": 694,
+            "bottom": 558.75
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Start workspace",
+          "rect": {
+            "x": 507,
+            "y": 801.75,
+            "width": 183,
+            "height": 46,
+            "right": 690,
+            "bottom": 847.75
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 507,
+            "y": 1090.75,
+            "width": 187,
+            "height": 46,
+            "right": 694,
+            "bottom": 1136.75
+          },
+          "fullyVisible": false
+        }
+      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "45-my-workspaces-720x900.png",
+      "route": "/?view=home",
+      "viewport": {
+        "width": 720,
+        "height": 900
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "Workspace",
+      "innerWidth": 720,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 720,
+      "documentScrollHeight": 1564,
+      "bodyScrollWidth": 720,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerYour workspaceWorkspaceCreate an",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 720,
+          "height": 1564.1875,
+          "right": 720,
+          "bottom": 1564.1875
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": -292,
+        "y": 0,
+        "width": 292,
+        "height": 900,
+        "right": 0,
+        "bottom": 900
+      },
+      "main": {
+        "x": 0,
+        "y": 0,
+        "width": 720,
+        "height": 1564.1875,
+        "right": 720,
+        "bottom": 1564.1875
+      },
+      "dialogs": [],
+      "primaryActions": [
+        {
+          "label": "Create workspace",
+          "rect": {
+            "x": 432,
+            "y": 162.546875,
+            "width": 260,
+            "height": 62,
+            "right": 692,
+            "bottom": 224.546875
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 55,
+            "y": 616.09375,
+            "width": 187,
+            "height": 46,
+            "right": 242,
+            "bottom": 662.09375
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Start workspace",
+          "rect": {
+            "x": 55,
+            "y": 1019.640625,
+            "width": 183,
+            "height": 46,
+            "right": 238,
+            "bottom": 1065.640625
+          },
+          "fullyVisible": false
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 55,
+            "y": 1365.1875,
+            "width": 187,
+            "height": 46,
+            "right": 242,
+            "bottom": 1411.1875
+          },
+          "fullyVisible": false
+        }
+      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "46-my-workspaces-390x844.png",
+      "route": "/?view=home",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "Workspace",
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 390,
+      "documentScrollHeight": 2347,
+      "bodyScrollWidth": 390,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerYour workspaceWorkspaceCreate an",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 2346.75,
+          "right": 390,
+          "bottom": 2346.75
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": -292,
+        "y": 0,
+        "width": 292,
+        "height": 844,
+        "right": 0,
+        "bottom": 844
+      },
+      "main": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 2346.75,
+        "right": 390,
+        "bottom": 2346.75
+      },
+      "dialogs": [],
+      "primaryActions": [
+        {
+          "label": "Create workspace",
+          "rect": {
+            "x": 19,
+            "y": 218.46875,
+            "width": 352,
+            "height": 56,
+            "right": 371,
+            "bottom": 274.46875
+          },
+          "fullyVisible": true
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 40,
+            "y": 851.5625,
+            "width": 310,
+            "height": 46,
+            "right": 350,
+            "bottom": 897.5625
+          },
+          "fullyVisible": false
+        },
+        {
+          "label": "Start workspace",
+          "rect": {
+            "x": 40,
+            "y": 1490.65625,
+            "width": 310,
+            "height": 46,
+            "right": 350,
+            "bottom": 1536.65625
+          },
+          "fullyVisible": false
+        },
+        {
+          "label": "Open workspace",
+          "rect": {
+            "x": 40,
+            "y": 2129.75,
+            "width": 310,
+            "height": 46,
+            "right": 350,
+            "bottom": 2175.75
+          },
+          "fullyVisible": false
+        }
+      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "47-chat-1470x730.png",
+      "route": "/?view=chat&chat=fixture-session-1",
+      "viewport": {
+        "width": 1470,
+        "height": 730
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "",
+      "innerWidth": 1470,
+      "innerHeight": 730,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1470,
+      "documentScrollHeight": 730,
+      "bodyScrollWidth": 1470,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatRecentQuarterly planningExample UserLemmaComputerActivity",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1470,
+          "height": 730,
+          "right": 1470,
+          "bottom": 730
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 730,
+        "right": 336,
+        "bottom": 730
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1134,
+        "height": 730,
+        "right": 1470,
+        "bottom": 730
+      },
+      "dialogs": [],
+      "primaryActions": [],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": [
+        {
+          "tag": "div",
+          "className": "sidebar-chat-history",
+          "clientWidth": 280,
+          "scrollWidth": 280,
+          "clientHeight": 68,
+          "scrollHeight": 92,
+          "scrollLeft": 0,
+          "scrollTop": 0,
+          "overflowX": "auto",
+          "overflowY": "auto"
+        }
+      ]
+    },
+    {
+      "name": "48-chat-1440x800.png",
+      "route": "/?view=chat&chat=fixture-session-1",
+      "viewport": {
+        "width": 1440,
+        "height": 800
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "",
+      "innerWidth": 1440,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1440,
+      "documentScrollHeight": 800,
+      "bodyScrollWidth": 1440,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatRecentQuarterly planningExample UserLemmaComputerActivity",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 800,
+          "right": 1440,
+          "bottom": 800
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 800,
+        "right": 336,
+        "bottom": 800
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1104,
+        "height": 800,
+        "right": 1440,
+        "bottom": 800
+      },
+      "dialogs": [],
+      "primaryActions": [],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "49-chat-1920x900.png",
+      "route": "/?view=chat&chat=fixture-session-1",
+      "viewport": {
+        "width": 1920,
+        "height": 900
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "",
+      "innerWidth": 1920,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1920,
+      "documentScrollHeight": 900,
+      "bodyScrollWidth": 1920,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatRecentQuarterly planningExample UserLemmaComputerActivity",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 900,
+          "right": 1920,
+          "bottom": 900
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 900,
+        "right": 336,
+        "bottom": 900
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1584,
+        "height": 900,
+        "right": 1920,
+        "bottom": 900
+      },
+      "dialogs": [],
+      "primaryActions": [],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "50-chat-720x900.png",
+      "route": "/?view=chat&chat=fixture-session-1",
+      "viewport": {
+        "width": 720,
+        "height": 900
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "",
+      "innerWidth": 720,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 720,
+      "documentScrollHeight": 924,
+      "bodyScrollWidth": 720,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatRecentQuarterly planningExample UserLemmaComputerActivity",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 720,
+          "height": 924,
+          "right": 720,
+          "bottom": 924
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": -292,
+        "y": 0,
+        "width": 292,
+        "height": 900,
+        "right": 0,
+        "bottom": 900
+      },
+      "main": {
+        "x": 0,
+        "y": 0,
+        "width": 720,
+        "height": 924,
+        "right": 720,
+        "bottom": 924
+      },
+      "dialogs": [],
+      "primaryActions": [],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "51-chat-390x844.png",
+      "route": "/?view=chat&chat=fixture-session-1",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "state": "default",
+      "title": "LemmaComputer",
+      "heading": "",
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 390,
+      "documentScrollHeight": 868,
+      "bodyScrollWidth": 390,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatRecentQuarterly planningExample UserLemmaComputerActivity",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 868,
+          "right": 390,
+          "bottom": 868
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": {
+        "x": -292,
+        "y": 0,
+        "width": 292,
+        "height": 844,
+        "right": 0,
+        "bottom": 844
+      },
+      "main": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 868,
+        "right": 390,
+        "bottom": 868
+      },
+      "dialogs": [],
+      "primaryActions": [],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
       "name": "28-mobile-navigation-390x844.png",
       "route": "/?view=connections",
       "viewport": {
@@ -3412,11 +3604,11 @@
         "tag": "button",
         "label": "Workspace",
         "rect": {
-          "x": 19.108516693115234,
+          "x": 19.108654022216797,
           "y": 119,
-          "width": 251,
+          "width": 250.99998474121094,
           "height": 58,
-          "right": 270.10851669311523,
+          "right": 270.10863876342773,
           "bottom": 177
         },
         "outlineStyle": "solid",
@@ -3424,11 +3616,11 @@
         "outlineColor": "color(srgb 0.184314 0.439216 0.788235 / 0.55)"
       },
       "sidebar": {
-        "x": -0.8914827108383179,
+        "x": -0.8913454413414001,
         "y": 0,
         "width": 292,
         "height": 844,
-        "right": 291.1085172891617,
+        "right": 291.1086545586586,
         "bottom": 844
       },
       "main": {
@@ -3472,7 +3664,7 @@
       "innerHeight": 900,
       "devicePixelRatio": 1,
       "documentScrollWidth": 720,
-      "documentScrollHeight": 1751,
+      "documentScrollHeight": 2115,
       "bodyScrollWidth": 720,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -3510,9 +3702,9 @@
         "x": 0,
         "y": -824,
         "width": 720,
-        "height": 1751.34375,
+        "height": 2115.34375,
         "right": 720,
-        "bottom": 927.34375
+        "bottom": 1291.34375
       },
       "dialogs": [
         {
@@ -3557,60 +3749,7 @@
         }
       ],
       "outOfBounds": [],
-      "clippedInteractives": [
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Assign policy",
-          "rect": {
-            "x": 631,
-            "y": 645.84375,
-            "width": 84,
-            "height": 20,
-            "right": 715,
-            "bottom": 665.84375
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "workspace-policy-member-table",
-            "rect": {
-              "x": 28,
-              "y": 575.34375,
-              "width": 664,
-              "height": 188,
-              "right": 692,
-              "bottom": 763.34375
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Assign policy",
-          "rect": {
-            "x": 631,
-            "y": 717.84375,
-            "width": 84,
-            "height": 20,
-            "right": 715,
-            "bottom": 737.84375
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "workspace-policy-member-table",
-            "rect": {
-              "x": 28,
-              "y": 575.34375,
-              "width": 664,
-              "height": 188,
-              "right": 692,
-              "bottom": 763.34375
-            },
-            "overflowX": "hidden"
-          }
-        }
-      ],
+      "clippedInteractives": [],
       "scrollContainers": []
     },
     {
@@ -3842,6 +3981,198 @@
       "scrollContainers": []
     },
     {
+      "name": "52-activity-1366x650.png",
+      "route": "/?view=chat&chat=fixture-session-1",
+      "viewport": {
+        "width": 1366,
+        "height": 650
+      },
+      "state": "activity-open",
+      "title": "LemmaComputer",
+      "heading": "Activity",
+      "innerWidth": 1366,
+      "innerHeight": 650,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1366,
+      "documentScrollHeight": 650,
+      "bodyScrollWidth": 1366,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "button",
+        "label": "Close Activity",
+        "rect": {
+          "x": 1308,
+          "y": 24,
+          "width": 36,
+          "height": 36,
+          "right": 1344,
+          "bottom": 60
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(91, 104, 119)"
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 336,
+        "height": 650,
+        "right": 336,
+        "bottom": 650
+      },
+      "main": {
+        "x": 336,
+        "y": 0,
+        "width": 1030,
+        "height": 650,
+        "right": 1366,
+        "bottom": 650
+      },
+      "dialogs": [
+        {
+          "label": "chat-activity-title",
+          "rect": {
+            "x": 946,
+            "y": 0,
+            "width": 420,
+            "height": 650,
+            "right": 1366,
+            "bottom": 650
+          },
+          "clientHeight": 650,
+          "scrollHeight": 650,
+          "overflowY": "visible"
+        }
+      ],
+      "primaryActions": [],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": [
+        {
+          "tag": "div",
+          "className": "sidebar-chat-history",
+          "clientWidth": 280,
+          "scrollWidth": 280,
+          "clientHeight": 18,
+          "scrollHeight": 92,
+          "scrollLeft": 0,
+          "scrollTop": 0,
+          "overflowX": "auto",
+          "overflowY": "auto"
+        },
+        {
+          "tag": "div",
+          "className": "activity-timeline-wrap",
+          "clientWidth": 419,
+          "scrollWidth": 419,
+          "clientHeight": 450,
+          "scrollHeight": 1105,
+          "scrollLeft": 0,
+          "scrollTop": 0,
+          "overflowX": "auto",
+          "overflowY": "auto"
+        }
+      ]
+    },
+    {
+      "name": "53-activity-390x844.png",
+      "route": "/?view=chat&chat=fixture-session-1",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "state": "activity-open",
+      "title": "LemmaComputer",
+      "heading": "Activity",
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 390,
+      "documentScrollHeight": 868,
+      "bodyScrollWidth": 390,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "button",
+        "label": "Close Activity",
+        "rect": {
+          "x": 336,
+          "y": 20,
+          "width": 36,
+          "height": 36,
+          "right": 372,
+          "bottom": 56
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(91, 104, 119)"
+      },
+      "sidebar": {
+        "x": -292,
+        "y": 0,
+        "width": 292,
+        "height": 844,
+        "right": 0,
+        "bottom": 844
+      },
+      "main": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 868,
+        "right": 390,
+        "bottom": 868
+      },
+      "dialogs": [
+        {
+          "label": "chat-activity-title",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 844,
+            "right": 390,
+            "bottom": 844
+          },
+          "clientHeight": 844,
+          "scrollHeight": 844,
+          "overflowY": "visible"
+        }
+      ],
+      "primaryActions": [],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": [
+        {
+          "tag": "div",
+          "className": "activity-timeline-wrap",
+          "clientWidth": 390,
+          "scrollWidth": 390,
+          "clientHeight": 648,
+          "scrollHeight": 1138,
+          "scrollLeft": 0,
+          "scrollTop": 0,
+          "overflowX": "auto",
+          "overflowY": "auto"
+        }
+      ]
+    },
+    {
       "name": "32-organization-workspaces-200-percent-zoom.png",
       "route": "/?view=home&section=organization",
       "viewport": {
@@ -3939,7 +4270,7 @@
       "innerHeight": 650,
       "devicePixelRatio": 1,
       "documentScrollWidth": 1366,
-      "documentScrollHeight": 997,
+      "documentScrollHeight": 650,
       "bodyScrollWidth": 1366,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -3957,9 +4288,9 @@
           "x": 0,
           "y": 0,
           "width": 1366,
-          "height": 996.796875,
+          "height": 650,
           "right": 1366,
-          "bottom": 996.796875
+          "bottom": 650
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -3970,21 +4301,21 @@
         "x": 0,
         "y": 0,
         "width": 1366,
-        "height": 996.796875,
+        "height": 650,
         "right": 1366,
-        "bottom": 996.796875
+        "bottom": 650
       },
       "dialogs": [],
       "primaryActions": [
         {
           "label": "Sign in",
           "rect": {
-            "x": 472,
-            "y": 554.796875,
-            "width": 422,
+            "x": 406,
+            "y": 368.1875,
+            "width": 554,
             "height": 62,
-            "right": 894,
-            "bottom": 616.796875
+            "right": 960,
+            "bottom": 430.1875
           },
           "fullyVisible": true
         }
@@ -4007,7 +4338,7 @@
       "innerHeight": 844,
       "devicePixelRatio": 1,
       "documentScrollWidth": 390,
-      "documentScrollHeight": 894,
+      "documentScrollHeight": 884,
       "bodyScrollWidth": 390,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -4025,9 +4356,9 @@
           "x": 0,
           "y": 0,
           "width": 390,
-          "height": 893.59375,
+          "height": 883.59375,
           "right": 390,
-          "bottom": 893.59375
+          "bottom": 883.59375
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -4038,9 +4369,9 @@
         "x": 0,
         "y": 0,
         "width": 390,
-        "height": 893.59375,
+        "height": 883.59375,
         "right": 390,
-        "bottom": 893.59375
+        "bottom": 883.59375
       },
       "dialogs": [],
       "primaryActions": [
@@ -4053,6 +4384,142 @@
             "height": 56,
             "right": 349,
             "bottom": 547.59375
+          },
+          "fullyVisible": true
+        }
+      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "54-sign-up-1366x650.png",
+      "route": "/",
+      "viewport": {
+        "width": 1366,
+        "height": 650
+      },
+      "state": "unauthenticated-sign-up",
+      "title": "LemmaComputer",
+      "heading": "Create your account",
+      "innerWidth": 1366,
+      "innerHeight": 650,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 1366,
+      "documentScrollHeight": 650,
+      "bodyScrollWidth": 1366,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "LemmaComputerYour managed work computerCreate your accountCreate your identity first. Organization access is assigned separately.Full nameWo",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1366,
+          "height": 650,
+          "right": 1366,
+          "bottom": 650
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": null,
+      "main": {
+        "x": 0,
+        "y": 0,
+        "width": 1366,
+        "height": 650,
+        "right": 1366,
+        "bottom": 650
+      },
+      "dialogs": [],
+      "primaryActions": [
+        {
+          "label": "Create account",
+          "rect": {
+            "x": 456,
+            "y": 465.375,
+            "width": 454,
+            "height": 62,
+            "right": 910,
+            "bottom": 527.375
+          },
+          "fullyVisible": true
+        }
+      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
+      "scrollContainers": []
+    },
+    {
+      "name": "55-sign-up-390x844.png",
+      "route": "/",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "state": "unauthenticated-sign-up",
+      "title": "LemmaComputer",
+      "heading": "Create your account",
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "documentScrollWidth": 390,
+      "documentScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "horizontalOverflow": false,
+      "bodyOverflowX": "visible",
+      "bodyOverflowY": "visible",
+      "scrollPosition": {
+        "x": 0,
+        "y": 0,
+        "visualViewportOffsetLeft": 0,
+        "visualViewportOffsetTop": 0
+      },
+      "activeElement": {
+        "tag": "body",
+        "label": "LemmaComputerYour managed work computerCreate your accountCreate your identity first. Organization access is assigned separately.Full nameWo",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "right": 390,
+          "bottom": 844
+        },
+        "outlineStyle": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(17, 24, 39)"
+      },
+      "sidebar": null,
+      "main": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 844,
+        "right": 390,
+        "bottom": 844
+      },
+      "dialogs": [],
+      "primaryActions": [
+        {
+          "label": "Create account",
+          "rect": {
+            "x": 41,
+            "y": 638.796875,
+            "width": 308,
+            "height": 56,
+            "right": 349,
+            "bottom": 694.796875
           },
           "fullyVisible": true
         }
@@ -4075,14 +4542,14 @@
       "innerHeight": 900,
       "devicePixelRatio": 1,
       "documentScrollWidth": 720,
-      "documentScrollHeight": 2172,
+      "documentScrollHeight": 2411,
       "bodyScrollWidth": 720,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
       "bodyOverflowY": "visible",
       "scrollPosition": {
         "x": 0,
-        "y": 584,
+        "y": 670,
         "visualViewportOffsetLeft": 0,
         "visualViewportOffsetTop": 0
       },
@@ -4091,11 +4558,11 @@
         "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerBack to SettingsOrganization adm",
         "rect": {
           "x": 0,
-          "y": -584,
+          "y": -670,
           "width": 720,
-          "height": 2172.03125,
+          "height": 2411.03125,
           "right": 720,
-          "bottom": 1588.03125
+          "bottom": 1741.03125
         },
         "outlineStyle": "none",
         "outlineWidth": "3px",
@@ -4111,11 +4578,11 @@
       },
       "main": {
         "x": 0,
-        "y": -584,
+        "y": -670,
         "width": 720,
-        "height": 2172.03125,
+        "height": 2411.03125,
         "right": 720,
-        "bottom": 1588.03125
+        "bottom": 1741.03125
       },
       "dialogs": [],
       "primaryActions": [
@@ -4123,23 +4590,23 @@
           "label": "Invite person",
           "rect": {
             "x": 407,
-            "y": 13.796875,
+            "y": -72.203125,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 69.796875
+            "bottom": -16.203125
           },
-          "fullyVisible": true
+          "fullyVisible": false
         },
         {
           "label": "Add connection",
           "rect": {
             "x": 407,
-            "y": 975.046875,
+            "y": 1128.046875,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 1031.046875
+            "bottom": 1184.046875
           },
           "fullyVisible": false
         },
@@ -4147,255 +4614,16 @@
           "label": "Create custom role",
           "rect": {
             "x": 407,
-            "y": 1266.640625,
+            "y": 1419.640625,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 1322.640625
+            "bottom": 1475.640625
           },
           "fullyVisible": false
         }
       ],
-      "outOfBounds": [
-        {
-          "tag": "div",
-          "className": "admin-section-heading",
-          "label": "PeopleOrganization members2",
-          "rect": {
-            "x": -45,
-            "y": 319.546875,
-            "width": 662,
-            "height": 79,
-            "right": 617,
-            "bottom": 398.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "",
-          "label": "PeopleOrganization members",
-          "rect": {
-            "x": -21,
-            "y": 339.546875,
-            "width": 221,
-            "height": 42,
-            "right": 200,
-            "bottom": 381.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "p",
-          "className": "",
-          "label": "People",
-          "rect": {
-            "x": -21,
-            "y": 339.546875,
-            "width": 221,
-            "height": 15,
-            "right": 200,
-            "bottom": 354.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "h2",
-          "className": "",
-          "label": "Organization members",
-          "rect": {
-            "x": -21,
-            "y": 357.546875,
-            "width": 221,
-            "height": 24,
-            "right": 200,
-            "bottom": 381.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "admin-user-list",
-          "label": "Organization users",
-          "rect": {
-            "x": -45,
-            "y": 398.546875,
-            "width": 662,
-            "height": 321,
-            "right": 617,
-            "bottom": 719.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "article",
-          "className": "",
-          "label": "Example Useruser@example.testOwnerSign out sessions",
-          "rect": {
-            "x": -17,
-            "y": 398.546875,
-            "width": 606,
-            "height": 104,
-            "right": 589,
-            "bottom": 502.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "admin-user-copy",
-          "label": "Example Useruser@example.testOwner",
-          "rect": {
-            "x": -17,
-            "y": 416.546875,
-            "width": 220,
-            "height": 67,
-            "right": 203,
-            "bottom": 483.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "strong",
-          "className": "",
-          "label": "Example User",
-          "rect": {
-            "x": -17,
-            "y": 416.546875,
-            "width": 220,
-            "height": 20,
-            "right": 203,
-            "bottom": 436.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "small",
-          "className": "",
-          "label": "user@example.test",
-          "rect": {
-            "x": -17,
-            "y": 441.546875,
-            "width": 220,
-            "height": 16,
-            "right": 203,
-            "bottom": 457.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "admin-user-badges",
-          "label": "Owner",
-          "rect": {
-            "x": -17,
-            "y": 462.546875,
-            "width": 220,
-            "height": 21,
-            "right": 203,
-            "bottom": 483.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "span",
-          "className": "",
-          "label": "Owner",
-          "rect": {
-            "x": -17,
-            "y": 462.546875,
-            "width": 54,
-            "height": 21,
-            "right": 37,
-            "bottom": 483.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "article",
-          "className": "",
-          "label": "Example Adminadmin@example.testMemberOrganization roleMemberTransfer ownershipSign out sessionsSuspendRemove access",
-          "rect": {
-            "x": -17,
-            "y": 502.546875,
-            "width": 606,
-            "height": 217,
-            "right": 589,
-            "bottom": 719.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "admin-user-copy",
-          "label": "Example Adminadmin@example.testMember",
-          "rect": {
-            "x": -17,
-            "y": 577.046875,
-            "width": 220,
-            "height": 67,
-            "right": 203,
-            "bottom": 644.046875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "strong",
-          "className": "",
-          "label": "Example Admin",
-          "rect": {
-            "x": -17,
-            "y": 577.046875,
-            "width": 220,
-            "height": 20,
-            "right": 203,
-            "bottom": 597.046875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "small",
-          "className": "",
-          "label": "admin@example.test",
-          "rect": {
-            "x": -17,
-            "y": 602.046875,
-            "width": 220,
-            "height": 16,
-            "right": 203,
-            "bottom": 618.046875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "admin-user-badges",
-          "label": "Member",
-          "rect": {
-            "x": -17,
-            "y": 623.046875,
-            "width": 220,
-            "height": 21,
-            "right": 203,
-            "bottom": 644.046875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "span",
-          "className": "",
-          "label": "Member",
-          "rect": {
-            "x": -17,
-            "y": 623.046875,
-            "width": 64,
-            "height": 21,
-            "right": 47,
-            "bottom": 644.046875
-          },
-          "overflowX": "visible"
-        }
-      ],
+      "outOfBounds": [],
       "clippedInteractives": [],
       "scrollContainers": []
     },
@@ -4412,15 +4640,15 @@
       "innerWidth": 390,
       "innerHeight": 844,
       "devicePixelRatio": 1,
-      "documentScrollWidth": 959,
-      "documentScrollHeight": 2417,
-      "bodyScrollWidth": 959,
-      "horizontalOverflow": true,
+      "documentScrollWidth": 390,
+      "documentScrollHeight": 2465,
+      "bodyScrollWidth": 390,
+      "horizontalOverflow": false,
       "bodyOverflowX": "visible",
       "bodyOverflowY": "visible",
       "scrollPosition": {
         "x": 0,
-        "y": 1135,
+        "y": 1183,
         "visualViewportOffsetLeft": 0,
         "visualViewportOffsetTop": 0
       },
@@ -4429,9 +4657,9 @@
         "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerOrganizationAI control planeUnde",
         "rect": {
           "x": 0,
-          "y": -1135,
+          "y": -1183,
           "width": 390,
-          "height": 2416.671875,
+          "height": 2464.671875,
           "right": 390,
           "bottom": 1281.671875
         },
@@ -4449,9 +4677,9 @@
       },
       "main": {
         "x": 0,
-        "y": -1135,
+        "y": -1183,
         "width": 390,
-        "height": 2416.671875,
+        "height": 2464.671875,
         "right": 390,
         "bottom": 1281.671875
       },
@@ -4471,48 +4699,6 @@
         }
       ],
       "outOfBounds": [
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Pricing",
-          "rect": {
-            "x": 388,
-            "y": -877.859375,
-            "width": 71,
-            "height": 44,
-            "right": 459,
-            "bottom": -833.859375
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Teams & budgets",
-          "rect": {
-            "x": 463,
-            "y": -877.859375,
-            "width": 141,
-            "height": 44,
-            "right": 604,
-            "bottom": -833.859375
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Data health",
-          "rect": {
-            "x": 608,
-            "y": -877.859375,
-            "width": 100,
-            "height": 44,
-            "right": 708,
-            "bottom": -833.859375
-          },
-          "overflowX": "visible"
-        },
         {
           "tag": "table",
           "className": "route-table",
@@ -4890,22 +5076,52 @@
             "bottom": 348.453125
           },
           "overflowX": "visible"
+        },
+        {
+          "tag": "span",
+          "className": "",
+          "label": "$0.080",
+          "rect": {
+            "x": 739.5,
+            "y": 351.453125,
+            "width": 50.25,
+            "height": 15,
+            "right": 789.75,
+            "bottom": 366.453125
+          },
+          "overflowX": "visible"
+        },
+        {
+          "tag": "span",
+          "className": "",
+          "label": "Cache write$0.450",
+          "rect": {
+            "x": 797.75,
+            "y": 337.453125,
+            "width": 50.25,
+            "height": 29,
+            "right": 848,
+            "bottom": 366.453125
+          },
+          "overflowX": "visible"
+        },
+        {
+          "tag": "small",
+          "className": "",
+          "label": "Cache write",
+          "rect": {
+            "x": 797.75,
+            "y": 337.453125,
+            "width": 50.25,
+            "height": 11,
+            "right": 848,
+            "bottom": 348.453125
+          },
+          "overflowX": "visible"
         }
       ],
       "clippedInteractives": [],
       "scrollContainers": [
-        {
-          "tag": "nav",
-          "className": "ai-control-plane-tabs",
-          "clientWidth": 372,
-          "scrollWidth": 709,
-          "clientHeight": 44,
-          "scrollHeight": 45,
-          "scrollLeft": 0,
-          "scrollTop": 0,
-          "overflowX": "auto",
-          "overflowY": "auto"
-        },
         {
           "tag": "div",
           "className": "route-table-scroll",
@@ -4934,14 +5150,14 @@
       "innerHeight": 900,
       "devicePixelRatio": 1,
       "documentScrollWidth": 720,
-      "documentScrollHeight": 2172,
+      "documentScrollHeight": 2411,
       "bodyScrollWidth": 720,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
       "bodyOverflowY": "visible",
       "scrollPosition": {
         "x": 0,
-        "y": 584,
+        "y": 670,
         "visualViewportOffsetLeft": 0,
         "visualViewportOffsetTop": 0
       },
@@ -4949,12 +5165,12 @@
         "tag": "button",
         "label": "Sign out sessions",
         "rect": {
-          "x": 585,
-          "y": 430.046875,
-          "width": 180,
+          "x": 57,
+          "y": 429.546875,
+          "width": 606,
           "height": 40,
-          "right": 765,
-          "bottom": 470.046875
+          "right": 663,
+          "bottom": 469.546875
         },
         "outlineStyle": "solid",
         "outlineWidth": "3px",
@@ -4970,11 +5186,11 @@
       },
       "main": {
         "x": 0,
-        "y": -584,
+        "y": -670,
         "width": 720,
-        "height": 2172.03125,
+        "height": 2411.03125,
         "right": 720,
-        "bottom": 1588.03125
+        "bottom": 1741.03125
       },
       "dialogs": [],
       "primaryActions": [
@@ -4982,23 +5198,23 @@
           "label": "Invite person",
           "rect": {
             "x": 407,
-            "y": 13.796875,
+            "y": -72.203125,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 69.796875
+            "bottom": -16.203125
           },
-          "fullyVisible": true
+          "fullyVisible": false
         },
         {
           "label": "Add connection",
           "rect": {
             "x": 407,
-            "y": 975.046875,
+            "y": 1128.046875,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 1031.046875
+            "bottom": 1184.046875
           },
           "fullyVisible": false
         },
@@ -5006,247 +5222,17 @@
           "label": "Create custom role",
           "rect": {
             "x": 407,
-            "y": 1266.640625,
+            "y": 1419.640625,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 1322.640625
+            "bottom": 1475.640625
           },
           "fullyVisible": false
         }
       ],
-      "outOfBounds": [
-        {
-          "tag": "div",
-          "className": "admin-user-actions",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 430.046875,
-            "width": 170,
-            "height": 40,
-            "right": 755,
-            "bottom": 470.046875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 430.046875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 470.046875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "div",
-          "className": "admin-user-actions",
-          "label": "Transfer ownershipSign out sessionsSuspendRemove access",
-          "rect": {
-            "x": 585,
-            "y": 518.546875,
-            "width": 170,
-            "height": 184,
-            "right": 755,
-            "bottom": 702.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Transfer ownership",
-          "rect": {
-            "x": 585,
-            "y": 518.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 558.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 566.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 606.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action danger-button",
-          "label": "Suspend",
-          "rect": {
-            "x": 585,
-            "y": 614.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 654.546875
-          },
-          "overflowX": "visible"
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action danger-button",
-          "label": "Remove access",
-          "rect": {
-            "x": 585,
-            "y": 662.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 702.546875
-          },
-          "overflowX": "visible"
-        }
-      ],
-      "clippedInteractives": [
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 430.046875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 470.046875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 318.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 720.546875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Transfer ownership",
-          "rect": {
-            "x": 585,
-            "y": 518.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 558.546875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 318.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 720.546875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action",
-          "label": "Sign out sessions",
-          "rect": {
-            "x": 585,
-            "y": 566.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 606.546875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 318.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 720.546875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action danger-button",
-          "label": "Suspend",
-          "rect": {
-            "x": 585,
-            "y": 614.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 654.546875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 318.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 720.546875
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "secondary-button admin-row-action danger-button",
-          "label": "Remove access",
-          "rect": {
-            "x": 585,
-            "y": 662.546875,
-            "width": 180,
-            "height": 40,
-            "right": 765,
-            "bottom": 702.546875
-          },
-          "clippedBy": {
-            "tag": "section",
-            "className": "admin-member-section",
-            "rect": {
-              "x": 28,
-              "y": 318.546875,
-              "width": 664,
-              "height": 402,
-              "right": 692,
-              "bottom": 720.546875
-            },
-            "overflowX": "hidden"
-          }
-        }
-      ],
+      "outOfBounds": [],
+      "clippedInteractives": [],
       "scrollContainers": []
     },
     {
@@ -5360,9 +5346,9 @@
           "right": 765.296875,
           "bottom": 304.484375
         },
-        "outlineStyle": "none",
-        "outlineWidth": "3px",
-        "outlineColor": "rgb(63, 74, 88)"
+        "outlineStyle": "solid",
+        "outlineWidth": "2px",
+        "outlineColor": "rgb(47, 112, 201)"
       },
       "sidebar": {
         "x": 0,
@@ -5472,20 +5458,7 @@
       ],
       "outOfBounds": [],
       "clippedInteractives": [],
-      "scrollContainers": [
-        {
-          "tag": "nav",
-          "className": "ai-control-plane-tabs",
-          "clientWidth": 684,
-          "scrollWidth": 710,
-          "clientHeight": 44,
-          "scrollHeight": 45,
-          "scrollLeft": 0,
-          "scrollTop": 0,
-          "overflowX": "auto",
-          "overflowY": "auto"
-        }
-      ]
+      "scrollContainers": []
     },
     {
       "name": "41-policy-assign-focus-720x900.png",
@@ -5501,7 +5474,7 @@
       "innerHeight": 900,
       "devicePixelRatio": 1,
       "documentScrollWidth": 720,
-      "documentScrollHeight": 1751,
+      "documentScrollHeight": 2115,
       "bodyScrollWidth": 720,
       "horizontalOverflow": false,
       "bodyOverflowX": "visible",
@@ -5516,12 +5489,12 @@
         "tag": "button",
         "label": "Assign policy",
         "rect": {
-          "x": 631,
-          "y": 645.84375,
+          "x": 46,
+          "y": 797.34375,
           "width": 84,
-          "height": 20,
-          "right": 715,
-          "bottom": 665.84375
+          "height": 36,
+          "right": 130,
+          "bottom": 833.34375
         },
         "outlineStyle": "solid",
         "outlineWidth": "3px",
@@ -5539,9 +5512,9 @@
         "x": 0,
         "y": -824,
         "width": 720,
-        "height": 1751.34375,
+        "height": 2115.34375,
         "right": 720,
-        "bottom": 927.34375
+        "bottom": 1291.34375
       },
       "dialogs": [],
       "primaryActions": [
@@ -5559,60 +5532,7 @@
         }
       ],
       "outOfBounds": [],
-      "clippedInteractives": [
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Assign policy",
-          "rect": {
-            "x": 631,
-            "y": 645.84375,
-            "width": 84,
-            "height": 20,
-            "right": 715,
-            "bottom": 665.84375
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "workspace-policy-member-table",
-            "rect": {
-              "x": 28,
-              "y": 575.34375,
-              "width": 664,
-              "height": 188,
-              "right": 692,
-              "bottom": 763.34375
-            },
-            "overflowX": "hidden"
-          }
-        },
-        {
-          "tag": "button",
-          "className": "",
-          "label": "Assign policy",
-          "rect": {
-            "x": 631,
-            "y": 717.84375,
-            "width": 84,
-            "height": 20,
-            "right": 715,
-            "bottom": 737.84375
-          },
-          "clippedBy": {
-            "tag": "div",
-            "className": "workspace-policy-member-table",
-            "rect": {
-              "x": 28,
-              "y": 575.34375,
-              "width": 664,
-              "height": 188,
-              "right": 692,
-              "bottom": 763.34375
-            },
-            "overflowX": "hidden"
-          }
-        }
-      ],
+      "clippedInteractives": [],
       "scrollContainers": []
     }
   ],
@@ -6627,9 +6547,9 @@
           },
           "fullyVisible": true,
           "focusIndicator": {
-            "outlineStyle": "none",
-            "outlineWidth": "3px",
-            "outlineColor": "rgb(63, 74, 88)",
+            "outlineStyle": "solid",
+            "outlineWidth": "2px",
+            "outlineColor": "rgb(47, 112, 201)",
             "outlineOffset": "-2px"
           }
         },
@@ -6647,9 +6567,9 @@
           },
           "fullyVisible": true,
           "focusIndicator": {
-            "outlineStyle": "none",
-            "outlineWidth": "3px",
-            "outlineColor": "rgb(63, 74, 88)",
+            "outlineStyle": "solid",
+            "outlineWidth": "2px",
+            "outlineColor": "rgb(47, 112, 201)",
             "outlineOffset": "-2px"
           }
         },
@@ -6667,9 +6587,9 @@
           },
           "fullyVisible": true,
           "focusIndicator": {
-            "outlineStyle": "none",
-            "outlineWidth": "3px",
-            "outlineColor": "rgb(17, 24, 39)",
+            "outlineStyle": "solid",
+            "outlineWidth": "2px",
+            "outlineColor": "rgb(47, 112, 201)",
             "outlineOffset": "-2px"
           }
         },
@@ -7007,9 +6927,9 @@
           },
           "fullyVisible": true,
           "focusIndicator": {
-            "outlineStyle": "none",
-            "outlineWidth": "3px",
-            "outlineColor": "rgb(63, 74, 88)",
+            "outlineStyle": "solid",
+            "outlineWidth": "2px",
+            "outlineColor": "rgb(47, 112, 201)",
             "outlineOffset": "-2px"
           }
         },
@@ -7027,9 +6947,9 @@
           },
           "fullyVisible": true,
           "focusIndicator": {
-            "outlineStyle": "none",
-            "outlineWidth": "3px",
-            "outlineColor": "rgb(63, 74, 88)",
+            "outlineStyle": "solid",
+            "outlineWidth": "2px",
+            "outlineColor": "rgb(47, 112, 201)",
             "outlineOffset": "-2px"
           }
         },
@@ -7047,9 +6967,9 @@
           },
           "fullyVisible": true,
           "focusIndicator": {
-            "outlineStyle": "none",
-            "outlineWidth": "3px",
-            "outlineColor": "rgb(17, 24, 39)",
+            "outlineStyle": "solid",
+            "outlineWidth": "2px",
+            "outlineColor": "rgb(47, 112, 201)",
             "outlineOffset": "-2px"
           }
         },
@@ -7347,14 +7267,14 @@
           "role": null,
           "label": "Sign out sessions",
           "rect": {
-            "x": 585,
-            "y": 430.046875,
-            "width": 180,
+            "x": 57,
+            "y": 429.546875,
+            "width": 606,
             "height": 40,
-            "right": 765,
-            "bottom": 470.046875
+            "right": 663,
+            "bottom": 469.546875
           },
-          "fullyVisible": false,
+          "fullyVisible": true,
           "focusIndicator": {
             "outlineStyle": "solid",
             "outlineWidth": "3px",
@@ -7367,12 +7287,12 @@
           "role": "combobox",
           "label": "Organization role for Example Admin",
           "rect": {
-            "x": 301,
-            "y": 602.546875,
-            "width": 260,
+            "x": 57,
+            "y": 615.546875,
+            "width": 280,
             "height": 36,
-            "right": 561,
-            "bottom": 638.546875
+            "right": 337,
+            "bottom": 651.546875
           },
           "fullyVisible": true,
           "focusIndicator": {
@@ -7387,14 +7307,14 @@
           "role": null,
           "label": "Transfer ownership",
           "rect": {
-            "x": 585,
-            "y": 518.546875,
-            "width": 180,
+            "x": 57,
+            "y": 665.546875,
+            "width": 606,
             "height": 40,
-            "right": 765,
-            "bottom": 558.546875
+            "right": 663,
+            "bottom": 705.546875
           },
-          "fullyVisible": false,
+          "fullyVisible": true,
           "focusIndicator": {
             "outlineStyle": "solid",
             "outlineWidth": "3px",
@@ -7407,14 +7327,14 @@
           "role": null,
           "label": "Sign out sessions",
           "rect": {
-            "x": 585,
-            "y": 566.546875,
-            "width": 180,
+            "x": 57,
+            "y": 713.546875,
+            "width": 606,
             "height": 40,
-            "right": 765,
-            "bottom": 606.546875
+            "right": 663,
+            "bottom": 753.546875
           },
-          "fullyVisible": false,
+          "fullyVisible": true,
           "focusIndicator": {
             "outlineStyle": "solid",
             "outlineWidth": "3px",
@@ -7427,14 +7347,14 @@
           "role": null,
           "label": "Suspend",
           "rect": {
-            "x": 585,
-            "y": 614.546875,
-            "width": 180,
+            "x": 57,
+            "y": 761.546875,
+            "width": 606,
             "height": 40,
-            "right": 765,
-            "bottom": 654.546875
+            "right": 663,
+            "bottom": 801.546875
           },
-          "fullyVisible": false,
+          "fullyVisible": true,
           "focusIndicator": {
             "outlineStyle": "solid",
             "outlineWidth": "3px",
@@ -7447,14 +7367,14 @@
           "role": null,
           "label": "Remove access",
           "rect": {
-            "x": 585,
-            "y": 662.546875,
-            "width": 180,
+            "x": 57,
+            "y": 809.546875,
+            "width": 606,
             "height": 40,
-            "right": 765,
-            "bottom": 702.546875
+            "right": 663,
+            "bottom": 849.546875
           },
-          "fullyVisible": false,
+          "fullyVisible": true,
           "focusIndicator": {
             "outlineStyle": "solid",
             "outlineWidth": "3px",
@@ -7468,11 +7388,11 @@
           "label": "Initiate organization closure",
           "rect": {
             "x": 407,
-            "y": 796.296875,
+            "y": 422.296875,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 852.296875
+            "bottom": 478.296875
           },
           "fullyVisible": true,
           "focusIndicator": {
@@ -7488,11 +7408,11 @@
           "label": "Add connection",
           "rect": {
             "x": 407,
-            "y": 422.046875,
+            "y": 601.046875,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 478.046875
+            "bottom": 657.046875
           },
           "fullyVisible": true,
           "focusIndicator": {
@@ -7508,11 +7428,11 @@
           "label": "Create custom role",
           "rect": {
             "x": 407,
-            "y": 713.640625,
+            "y": 843.640625,
             "width": 260,
             "height": 56,
             "right": 667,
-            "bottom": 769.640625
+            "bottom": 899.640625
           },
           "fullyVisible": true,
           "focusIndicator": {
@@ -7528,11 +7448,11 @@
           "label": "Skip to main contentLemmaComputerWorkspaceSchedulesSitesTrailFirewallConnectorsChatExample UserLemmaComputerBack to Sett",
           "rect": {
             "x": 0,
-            "y": -1137,
+            "y": -1246,
             "width": 720,
-            "height": 2172.03125,
+            "height": 2411.03125,
             "right": 720,
-            "bottom": 1035.03125
+            "bottom": 1165.03125
           },
           "fullyVisible": false,
           "focusIndicator": {
@@ -7647,14 +7567,14 @@
           "role": null,
           "label": "Sign out sessions",
           "rect": {
-            "x": 585,
-            "y": 430.046875,
-            "width": 180,
+            "x": 57,
+            "y": 429.546875,
+            "width": 606,
             "height": 40,
-            "right": 765,
-            "bottom": 470.046875
+            "right": 663,
+            "bottom": 469.546875
           },
-          "fullyVisible": false,
+          "fullyVisible": true,
           "focusIndicator": {
             "outlineStyle": "solid",
             "outlineWidth": "3px",
@@ -7667,12 +7587,12 @@
           "role": "combobox",
           "label": "Organization role for Example Admin",
           "rect": {
-            "x": 301,
-            "y": 602.546875,
-            "width": 260,
+            "x": 57,
+            "y": 615.546875,
+            "width": 280,
             "height": 36,
-            "right": 561,
-            "bottom": 638.546875
+            "right": 337,
+            "bottom": 651.546875
           },
           "fullyVisible": true,
           "focusIndicator": {
@@ -7687,14 +7607,14 @@
           "role": null,
           "label": "Transfer ownership",
           "rect": {
-            "x": 585,
-            "y": 518.546875,
-            "width": 180,
+            "x": 57,
+            "y": 665.546875,
+            "width": 606,
             "height": 40,
-            "right": 765,
-            "bottom": 558.546875
+            "right": 663,
+            "bottom": 705.546875
           },
-          "fullyVisible": false,
+          "fullyVisible": true,
           "focusIndicator": {
             "outlineStyle": "solid",
             "outlineWidth": "3px",
@@ -7707,14 +7627,14 @@
           "role": null,
           "label": "Sign out sessions",
           "rect": {
-            "x": 585,
-            "y": 566.546875,
-            "width": 180,
+            "x": 57,
+            "y": 713.546875,
+            "width": 606,
             "height": 40,
-            "right": 765,
-            "bottom": 606.546875
+            "right": 663,
+            "bottom": 753.546875
           },
-          "fullyVisible": false,
+          "fullyVisible": true,
           "focusIndicator": {
             "outlineStyle": "solid",
             "outlineWidth": "3px",
@@ -7778,9 +7698,9 @@
           "rect": {
             "x": 28,
             "y": 241.890625,
-            "width": 87,
+            "width": 73,
             "height": 44,
-            "right": 115,
+            "right": 101,
             "bottom": 285.890625
           },
           "fullyVisible": true,
@@ -7796,11 +7716,11 @@
           "role": null,
           "label": "Models & providers",
           "rect": {
-            "x": 119,
+            "x": 105,
             "y": 241.890625,
-            "width": 157,
+            "width": 133,
             "height": 44,
-            "right": 276,
+            "right": 238,
             "bottom": 285.890625
           },
           "fullyVisible": true,
@@ -7816,11 +7736,11 @@
           "role": null,
           "label": "Model routes",
           "rect": {
-            "x": 280,
+            "x": 242,
             "y": 241.890625,
-            "width": 114,
+            "width": 95,
             "height": 44,
-            "right": 394,
+            "right": 337,
             "bottom": 285.890625
           },
           "fullyVisible": true,
@@ -7836,11 +7756,11 @@
           "role": null,
           "label": "Pricing",
           "rect": {
-            "x": 398,
+            "x": 341,
             "y": 241.890625,
-            "width": 71,
+            "width": 55,
             "height": 44,
-            "right": 469,
+            "right": 396,
             "bottom": 285.890625
           },
           "fullyVisible": true,
@@ -7856,11 +7776,11 @@
           "role": null,
           "label": "Teams & budgets",
           "rect": {
-            "x": 473,
+            "x": 400,
             "y": 241.890625,
-            "width": 141,
+            "width": 121,
             "height": 44,
-            "right": 614,
+            "right": 521,
             "bottom": 285.890625
           },
           "fullyVisible": true,
@@ -7876,11 +7796,11 @@
           "role": null,
           "label": "Data health",
           "rect": {
-            "x": 618,
+            "x": 525,
             "y": 241.890625,
-            "width": 100,
+            "width": 82,
             "height": 44,
-            "right": 718,
+            "right": 607,
             "bottom": 285.890625
           },
           "fullyVisible": true,

@@ -168,6 +168,44 @@ test("provider-neutral customer sign-in exposes configured methods and safe acco
   });
 });
 
+test("sign-in and sign-up actions remain reachable on a compact laptop viewport", async ({ page }) => {
+  await page.unroute("**/api/v1/auth/customer-capabilities");
+  await page.route("**/api/v1/auth/customer-capabilities", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      emailPassword: true,
+      passkey: true,
+      socialProviders: ["google", "microsoft"],
+      companySso: true,
+    }),
+  }));
+  await page.setViewportSize({ width: 1366, height: 650 });
+  await page.goto("/");
+
+  for (const label of [
+    "Sign in",
+    "Continue with company SSO",
+    "Sign in with a passkey",
+    "Continue with Google",
+    "Continue with Microsoft",
+  ]) {
+    const button = page.getByRole("button", { name: label, exact: true });
+    await expect(button).toBeVisible();
+    const box = await button.boundingBox();
+    expect(box, `${label} should have layout bounds`).not.toBeNull();
+    expect((box?.y ?? 0) + (box?.height ?? 0), `${label} should be above the fold`).toBeLessThanOrEqual(650);
+  }
+
+  await expect(page.locator(".signin-method-grid")).toHaveCSS("grid-template-columns", /\d+px \d+px/);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(650);
+
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create account", exact: true })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Back to sign in" })).toBeInViewport();
+});
+
 test("an authenticated provider identity can recover when its email still needs verification", async ({ page }) => {
   let verificationRequest = null;
   await page.route("**/api/v1/auth/customer/get-session", (route) => route.fulfill({

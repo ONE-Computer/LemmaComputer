@@ -16,11 +16,13 @@ const viewports = {
 };
 
 const captures = [
+  ["01-my-workspaces-1366x650.png", "/?view=home", viewports.compact],
   ["02-organization-workspaces-1366x650.png", "/?view=home&section=organization", viewports.compact],
   ["03-workspace-policies-1366x650.png", "/?view=home&section=policies", viewports.compact],
   ["04-schedules-1366x650.png", "/?view=schedules", viewports.compact],
   ["05-sites-1366x650.png", "/?view=sites", viewports.compact],
   ["06-connectors-1366x650.png", "/?view=connections", viewports.compact],
+  ["07-chat-1366x650.png", "/?view=chat&chat=fixture-session-1", viewports.compact],
   ["08-firewall-1366x650.png", "/?view=firewall", viewports.compact],
   ["09-settings-1366x650.png", "/?view=settings", viewports.compact],
   ["10-people-access-1366x650.png", "/?view=settings&section=people", viewports.compact],
@@ -39,6 +41,16 @@ const captures = [
   ["23-people-access-390x844.png", "/?view=settings&section=people", viewports.mobile],
   ["24-ai-routing-390x844.png", "/?view=ai-control-plane&section=model-routes", viewports.mobile],
   ["25-connectors-390x844.png", "/?view=connections", viewports.mobile],
+  ["42-my-workspaces-1470x730.png", "/?view=home", viewports.retina],
+  ["43-my-workspaces-1440x800.png", "/?view=home", viewports.laptop],
+  ["44-my-workspaces-1920x900.png", "/?view=home", viewports.monitor],
+  ["45-my-workspaces-720x900.png", "/?view=home", viewports.narrow],
+  ["46-my-workspaces-390x844.png", "/?view=home", viewports.mobile],
+  ["47-chat-1470x730.png", "/?view=chat&chat=fixture-session-1", viewports.retina],
+  ["48-chat-1440x800.png", "/?view=chat&chat=fixture-session-1", viewports.laptop],
+  ["49-chat-1920x900.png", "/?view=chat&chat=fixture-session-1", viewports.monitor],
+  ["50-chat-720x900.png", "/?view=chat&chat=fixture-session-1", viewports.narrow],
+  ["51-chat-390x844.png", "/?view=chat&chat=fixture-session-1", viewports.mobile],
 ];
 
 const waitForStableProduct = async (page) => {
@@ -86,12 +98,14 @@ const measure = async (page, name, route, viewport, state = "default") => page.e
     const elementRect = element.getBoundingClientRect();
     let ancestor = element.parentElement;
     let hasHorizontalScrollOwner = false;
+    let escapesOuterClipping = getComputedStyle(element).position === "fixed";
     while (ancestor && ancestor !== document.body) {
       const style = getComputedStyle(ancestor);
+      if (style.position === "fixed") escapesOuterClipping = true;
       if ([style.overflowX, style.overflow].some((value) => ["auto", "scroll"].includes(value)) && ancestor.scrollWidth > ancestor.clientWidth + 1) {
         hasHorizontalScrollOwner = true;
       }
-      if ([style.overflowX, style.overflow].some((value) => ["hidden", "clip"].includes(value))) {
+      if (!escapesOuterClipping && [style.overflowX, style.overflow].some((value) => ["hidden", "clip"].includes(value))) {
         const ancestorRect = ancestor.getBoundingClientRect();
         if (elementRect.left < ancestorRect.left - 1 || elementRect.right > ancestorRect.right + 1) {
           if (hasHorizontalScrollOwner) return [];
@@ -306,6 +320,21 @@ await page.getByRole("dialog").waitFor();
 await screenshot(page, "31-restart-dialog-390x844.png");
 measurements.push(await measure(page, "31-restart-dialog-390x844.png", "/?view=home&section=organization", viewports.mobile, "restart-dialog-open"));
 
+for (const [name, viewport] of [
+  ["52-activity-1366x650.png", viewports.compact],
+  ["53-activity-390x844.png", viewports.mobile],
+]) {
+  await visit(page, "/?view=chat&chat=fixture-session-1", viewport);
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const activityDialog = page.getByRole("dialog", { name: "Activity" });
+  await activityDialog.waitFor();
+  await activityDialog.evaluate(async (element) => {
+    await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished));
+  });
+  await screenshot(page, name);
+  measurements.push(await measure(page, name, "/?view=chat&chat=fixture-session-1", viewport, "activity-open"));
+}
+
 const zoomContext = await browser.newContext({
   colorScheme: "light",
   locale: "en-US",
@@ -338,6 +367,18 @@ for (const [name, viewport] of [
   await authPage.waitForTimeout(250);
   await screenshot(authPage, name);
   measurements.push(await measure(authPage, name, "/", viewport, "unauthenticated-sign-in"));
+}
+for (const [name, viewport] of [
+  ["54-sign-up-1366x650.png", viewports.compact],
+  ["55-sign-up-390x844.png", viewports.mobile],
+]) {
+  await authPage.setViewportSize(viewport);
+  await authPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await authPage.getByRole("button", { name: "Create account" }).click();
+  await authPage.getByRole("heading", { name: "Create your account" }).waitFor();
+  await authPage.waitForTimeout(250);
+  await screenshot(authPage, name);
+  measurements.push(await measure(authPage, name, "/", viewport, "unauthenticated-sign-up"));
 }
 await authContext.close();
 

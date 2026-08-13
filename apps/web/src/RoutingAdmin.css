@@ -1,5 +1,6 @@
 .routing-admin-screen {
   display: grid;
+  min-width: 0;
   gap: 24px;
   color: #172334;
 }
@@ -154,6 +155,7 @@
 .route-team-card,
 .route-evidence-card {
   display: grid;
+  min-width: 0;
   gap: 20px;
   border: 1px solid #dde3e8;
   border-radius: 14px;
@@ -225,7 +227,10 @@
 
 .route-table-scroll {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
+  contain: paint;
   border-top: 1px solid #e4e8ec;
 }
 
