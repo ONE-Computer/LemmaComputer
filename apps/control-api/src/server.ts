@@ -1709,6 +1709,9 @@ export function createControlServer(
       throw new LemmaComputerError("AI_USAGE_TASK_BINDING_MISMATCH", "The route preference is not assigned to this workspace agent", 403);
     }
     const agentInstanceId = await requireAgentInstance(request, actor);
+    if (input.requestedServiceClass !== "auto") {
+      await requireChatServiceClass(owner, input.requestedServiceClass);
+    }
     const binding = issueUsageTaskBinding(owner, actor.workspaceId, actor.agentId, "background", input.taskId, undefined, undefined, input.requestedServiceClass, agentInstanceId);
     if (!binding) throw new LemmaComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
     return { binding };

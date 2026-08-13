@@ -38,7 +38,8 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
   const configure = () => execute("python3", [
     configurator,
     home,
-    "lemmacomputer-glm",
+    "lemmacomputer-auto",
+    "balanced",
     "allowed-tool",
     "4314",
     "disposable-open",
@@ -49,11 +50,29 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
 
   await configure();
   const first = JSON.parse(await readFile(path.join(home, "config.yaml"), "utf8"));
+  assert.equal(first.model.default, "lemmacomputer-balanced");
+  assert.equal(first.model.provider, "custom");
   assert.deepEqual(first.mcp_servers.lemmacomputer_connectors.env, {
     LEMMACOMPUTER_CONNECTORS_BROKER: "http://127.0.0.1:4314",
     LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS: "60",
     LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE: path.join(home, ".lemmacomputer-connectors-recovery.json"),
   });
+
+  const legacyHome = path.join(temporary, "legacy-profile");
+  await execute("python3", [
+    configurator,
+    legacyHome,
+    "lemmacomputer-auto",
+    "auto",
+    "allowed-tool",
+    "4314",
+    "disposable-open",
+    bundle,
+  ], {
+    env: { ...process.env, PYTHONPATH: modules },
+  });
+  const legacy = JSON.parse(await readFile(path.join(legacyHome, "config.yaml"), "utf8"));
+  assert.equal(legacy.model.default, "lemmacomputer-balanced", "legacy Auto workspace defaults migrate safely to Balanced");
   assert.deepEqual(first.skills.disabled, ["teams-meeting-pipeline"]);
   for (const skill of [...officeSkills, "make-a-site"]) {
     assert.ok(!first.skills.disabled.includes(skill));

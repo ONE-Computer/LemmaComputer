@@ -39,22 +39,18 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Balanced/ })).toBeVisible();
 
   await page.getByRole("button", { name: /Hermes Agent CLI · Product · Balanced/ }).click();
-  await choose(page, "Choose chat agent", "Codex CLI");
-  await expect(page.getByRole("button", { name: /Codex CLI · Product · Balanced/ })).toBeVisible();
-
-  await page.getByRole("button", { name: /Codex CLI · Product · Balanced/ }).click();
   await page.getByRole("combobox", { name: "Choose model mode" }).click();
   await expect(page.getByRole("option", { name: /Auto/ })).toHaveCount(0);
   await page.getByRole("option", { name: "Pro · highest capability" }).click();
-  await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).click();
   await page.screenshot({ path: "test-results/chat-explicit-model-tiers.png", fullPage: true });
 
-  const composer = page.getByPlaceholder("Message Codex CLI");
+  const composer = page.getByPlaceholder("Message Hermes Agent CLI");
   await composer.fill("Line one\nLine two\nLine three\nLine four");
   const [rowBox, actionsBox, contextBox, sendBox] = await Promise.all([
     page.locator(".companion-chat-composer-row").boundingBox(),
     page.getByRole("button", { name: "Chat actions" }).boundingBox(),
-    page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).boundingBox(),
+    page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).boundingBox(),
     page.getByRole("button", { name: "Send message" }).boundingBox(),
   ]);
   expect(rowBox).not.toBeNull();
@@ -68,16 +64,16 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await composer.fill("Prepare the launch analysis with the selected context.");
   const sent = page.waitForRequest((request) => (
     request.method() === "POST"
-    && request.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/codex-cli/`)
+    && request.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/`)
     && request.url().endsWith("/messages")
   ));
   await page.getByRole("button", { name: "Send message" }).click();
   const request = await sent;
   const payload = request.postDataJSON();
   expect(payload.requestedServiceClass).toBe("pro");
-  expect(payload.message.metadata.agentCatalogId).toBe("codex-cli");
+  expect(payload.message.metadata.agentCatalogId).toBe("hermes-claw");
 
-  await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).click();
   await expect(page.getByRole("combobox", { name: "Choose workspace" })).toBeDisabled();
   await expect(page.getByRole("combobox", { name: "Choose chat agent" })).toBeDisabled();
   await expect(page.getByRole("combobox", { name: "Choose model mode" })).toBeDisabled();
@@ -86,14 +82,14 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await expect(page.getByRole("combobox", { name: "Choose model mode" })).toHaveText("Pro · highest capability");
 
   await page.reload();
-  await expect(page.getByRole("button", { name: /Codex CLI · Product · Pro/ })).toBeVisible();
-  await page.getByRole("button", { name: /Codex CLI · Product · Pro/ }).click();
+  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ })).toBeVisible();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).click();
   await expect(page.getByRole("combobox", { name: "Choose model mode" })).toHaveText("Pro · highest capability");
 
   await composer.fill("Continue with the same model mode.");
   const sentAgain = page.waitForRequest((nextRequest) => (
     nextRequest.method() === "POST"
-    && nextRequest.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/codex-cli/`)
+    && nextRequest.url().includes(`/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/`)
     && nextRequest.url().endsWith("/messages")
   ));
   await page.getByRole("button", { name: "Send message" }).click();

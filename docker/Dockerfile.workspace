@@ -225,6 +225,7 @@ COPY docker/workspace/lemmacomputer-connectors-stdio.py /usr/local/libexec/lemma
 COPY --chmod=0644 docker/workspace/lemmacomputer_work_trace.py /usr/local/libexec/lemmacomputer_work_trace.py
 COPY docker/workspace/lemmacomputer-agent-chat.py /usr/local/libexec/lemmacomputer-agent-chat
 COPY docker/workspace/lemmacomputer-hermes-config.py /usr/local/libexec/lemmacomputer-hermes-config
+COPY docker/workspace/lemmacomputer-claude-config.py /usr/local/libexec/lemmacomputer-claude-config
 COPY docker/workspace/lemmacomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/lemmacomputer-kasm-clipboard.js
 COPY docker/workspace/lemmacomputer-workspace-entrypoint.sh /usr/local/sbin/lemmacomputer-workspace-entrypoint
 COPY docker/workspace/claude-desktop.desktop /usr/local/share/lemmacomputer/applications/lemmacomputer-claude-desktop.desktop
@@ -251,6 +252,7 @@ RUN chmod 0755 \
       /usr/local/libexec/lemmacomputer-connectors-stdio \
       /usr/local/libexec/lemmacomputer-agent-chat \
       /usr/local/libexec/lemmacomputer-hermes-config \
+      /usr/local/libexec/lemmacomputer-claude-config \
       /usr/local/libexec/lemmacomputer-libreoffice \
       /usr/local/sbin/lemmacomputer-workspace-entrypoint \
       /usr/local/bin/lemmacomputer-claude-desktop \

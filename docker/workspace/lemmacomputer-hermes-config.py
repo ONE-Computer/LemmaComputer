@@ -88,17 +88,19 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 7:
+    if len(sys.argv) != 8:
         raise SystemExit(
-            "usage: lemmacomputer-hermes-config HOME MODEL ALLOWED_TOOLS "
+            "usage: lemmacomputer-hermes-config HOME MODEL SERVICE_CLASS ALLOWED_TOOLS "
             "BROKER_PORT EXECUTION_MODE BUNDLED_SKILLS"
         )
 
-    home_raw, model, allowed_tools, broker_port, execution_mode, bundled_raw = sys.argv[1:]
+    home_raw, model, service_class, allowed_tools, broker_port, execution_mode, bundled_raw = sys.argv[1:]
     if execution_mode not in {"managed", "disposable-open"}:
         raise SystemExit("invalid execution mode")
-    if not model or not allowed_tools or not broker_port.isdigit():
+    if not model or service_class not in {"auto", "lite", "balanced", "pro"} or not allowed_tools or not broker_port.isdigit():
         raise SystemExit("invalid Hermes profile configuration")
+    service_class = "balanced" if service_class == "auto" else service_class
+    selected_model = f"lemmacomputer-{service_class}" if model == "lemmacomputer-auto" else model
 
     home = Path(home_raw)
     bundled_root = Path(bundled_raw)
@@ -133,7 +135,7 @@ def main() -> None:
 
     document: dict[str, Any] = {
         "model": {
-            "default": model,
+            "default": selected_model,
             "provider": "custom",
             "base_url": f"http://127.0.0.1:{broker_port}/v1",
             "api_key": "lemmacomputer-loopback-broker",

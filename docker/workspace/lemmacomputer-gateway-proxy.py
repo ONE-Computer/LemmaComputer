@@ -23,8 +23,12 @@ from urllib.parse import urlencode, urlsplit
 
 UPSTREAM = urlsplit(os.environ["LEMMACOMPUTER_GATEWAY_UPSTREAM"])
 CREDENTIAL = os.environ["LEMMACOMPUTER_GATEWAY_CREDENTIAL"]
-MODEL_ALIAS = os.environ.get("LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS", os.environ["LEMMACOMPUTER_MODEL_ALIAS"])
-DEFAULT_SERVICE_CLASS = os.environ.get("LEMMACOMPUTER_REQUESTED_SERVICE_CLASS", "auto")
+CLIENT_MODEL_ALIAS = os.environ["LEMMACOMPUTER_MODEL_ALIAS"]
+MODEL_ALIAS = os.environ.get("LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS", CLIENT_MODEL_ALIAS)
+CONFIGURED_SERVICE_CLASS = os.environ.get("LEMMACOMPUTER_REQUESTED_SERVICE_CLASS", "auto")
+# Auto is no longer an employee-facing workspace mode. Preserve old workspace
+# projections safely by treating their legacy default as Balanced.
+DEFAULT_SERVICE_CLASS = "balanced" if CONFIGURED_SERVICE_CLASS == "auto" else CONFIGURED_SERVICE_CLASS
 CONTROL = urlsplit(os.environ["LEMMACOMPUTER_CONTROL_UPSTREAM"])
 AGENT_BRIDGE_TOKEN = os.environ["LEMMACOMPUTER_AGENT_BRIDGE_TOKEN"]
 LISTEN_PORT = int(os.environ.get("LEMMACOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
@@ -52,6 +56,11 @@ AGENT_BRIDGE_LOCK = threading.RLock()
 AGENT_BRIDGE_TERMINAL_CODE: str | None = None
 ACTIVE_AGENT_INSTANCE_LOCK = threading.RLock()
 ACTIVE_AGENT_INSTANCE_IDS: set[str] = set()
+NATIVE_MODEL_MODES = {
+    "lemmacomputer-lite": "lite",
+    "lemmacomputer-balanced": "balanced",
+    "lemmacomputer-pro": "pro",
+}
 
 
 class AgentBridgeTerminalError(RuntimeError):
@@ -59,7 +68,8 @@ class AgentBridgeTerminalError(RuntimeError):
 
 if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CREDENTIAL) < 24
         or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or not AGENT_BRIDGE_TOKEN_PATTERN.fullmatch(AGENT_BRIDGE_TOKEN)
-        or not MODEL_ALIAS_PATTERN.fullmatch(MODEL_ALIAS) or DEFAULT_SERVICE_CLASS not in {"auto", "lite", "balanced", "pro"}
+        or not MODEL_ALIAS_PATTERN.fullmatch(CLIENT_MODEL_ALIAS) or not MODEL_ALIAS_PATTERN.fullmatch(MODEL_ALIAS)
+        or DEFAULT_SERVICE_CLASS not in {"lite", "balanced", "pro"}
         or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}):
     raise SystemExit("invalid gateway broker configuration")
 
@@ -186,8 +196,27 @@ def task_reasoning_effort(task_binding: str) -> str | None:
     return requested
 
 
-def issue_task_binding(agent_instance_id: str | None) -> str:
-    payload = json.dumps({"requestedServiceClass": DEFAULT_SERVICE_CLASS, "taskId": f"workspace-native:{uuid.uuid4()}"}, separators=(",", ":")).encode()
+def native_service_class_for_model(requested_model: str) -> str:
+    selected = NATIVE_MODEL_MODES.get(requested_model)
+    if selected is not None:
+        return selected
+    # Native runtimes make internal helper requests with their own model names.
+    # Those requests retain the workspace default; only LemmaComputer's exact
+    # product aliases can request a different class.
+    if requested_model.startswith("lemmacomputer-") and requested_model not in {
+        CLIENT_MODEL_ALIAS,
+        MODEL_ALIAS,
+        "lemmacomputer-auto",
+        "lemmacomputer-assistant",
+    }:
+        raise ValueError("model mode is not assigned")
+    return DEFAULT_SERVICE_CLASS
+
+
+def issue_task_binding(agent_instance_id: str | None, requested_service_class: str) -> str:
+    if requested_service_class not in {"lite", "balanced", "pro"}:
+        raise ValueError("native model mode must be explicit")
+    payload = json.dumps({"requestedServiceClass": requested_service_class, "taskId": f"workspace-native:{uuid.uuid4()}"}, separators=(",", ":")).encode()
     control_path = CONTROL.path.rstrip("/")
     path = f"{control_path}/internal/v1/agent/usage-bindings"
     target = CONTROL._replace(path=path, query="", fragment="").geturl()
@@ -657,6 +686,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def forward(self) -> None:
         path = self.path.split("?", 1)[0]
+        if path == "/v1/models" and self.command == "GET" and MODEL_ALIAS == "lemmacomputer-auto":
+            self.send_json(200, {
+                "object": "list",
+                "data": [
+                    {"id": model, "object": "model", "owned_by": "organization"}
+                    for model in NATIVE_MODEL_MODES
+                ],
+            })
+            return
         is_tool_call = path == "/mcp-rest/tools/call"
         operation_prefix = "/lemmacomputer/operations/"
         is_operation = path.startswith(operation_prefix) and len(path) > len(operation_prefix)
@@ -688,9 +726,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 task_binding = self.headers.get("x-lemmacomputer-ai-task-binding")
                 if task_binding is None and MODEL_ALIAS == "lemmacomputer-auto":
+                    requested_document = json.loads(body)
+                    requested_model = requested_document.get("model") if isinstance(requested_document, dict) else None
+                    if not isinstance(requested_model, str) or not requested_model.strip():
+                        raise ValueError("inference model is required")
                     task_binding = issue_task_binding(request_agent_instance_id(
                         self.headers.get("x-lemmacomputer-agent-instance-id")
-                    ))
+                    ), native_service_class_for_model(requested_model))
                 if task_binding is not None and (
                     not 32 <= len(task_binding) <= 4096
                     or not TASK_BINDING_PATTERN.fullmatch(task_binding)
