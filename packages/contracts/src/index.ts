@@ -979,7 +979,10 @@ export const chatSessionIdSchema = z.string().regex(
 export const chatReasoningEffortLevels = ["auto", "low", "medium", "high"] as const;
 export const chatReasoningEffortSchema = z.enum(chatReasoningEffortLevels);
 export type ChatReasoningEffort = z.infer<typeof chatReasoningEffortSchema>;
-export const chatRequestedServiceClassSchema = z.enum(["auto", "lite", "balanced", "pro"]);
+// Phase 0.5 chat is deliberately explicit. Auto remains an internal routing
+// request type for non-chat compatibility and future lifecycle work, but the
+// employee chat boundary accepts only an organization-approved model tier.
+export const chatRequestedServiceClassSchema = z.enum(["lite", "balanced", "pro"]);
 export type ChatRequestedServiceClass = z.infer<typeof chatRequestedServiceClassSchema>;
 export const chatPartIdSchema = z.string().regex(
   /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,
@@ -987,7 +990,7 @@ export const chatPartIdSchema = z.string().regex(
 );
 export const createChatSessionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
-  requestedServiceClass: chatRequestedServiceClassSchema.default("auto"),
+  requestedServiceClass: chatRequestedServiceClassSchema.default("balanced"),
   reasoningEffort: chatReasoningEffortSchema.optional(),
 }).strict();
 
@@ -1113,7 +1116,7 @@ export const chatUiMessageSchema = z.object({
 export type ChatUiMessage = z.infer<typeof chatUiMessageSchema>;
 
 export const sendChatTurnSchema = z.object({
-  requestedServiceClass: chatRequestedServiceClassSchema.default("auto"),
+  requestedServiceClass: chatRequestedServiceClassSchema.default("balanced"),
   reasoningEffort: chatReasoningEffortSchema.optional(),
   message: chatUiMessageSchema.superRefine((message, context) => {
     const textParts = message.parts.filter((part) => part.type === "text");

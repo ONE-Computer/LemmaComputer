@@ -322,7 +322,7 @@ test("explicit service classes execute their mapped deployment while Auto remain
   assert.equal(pro.reasonCode, "explicit_service_class");
   assert.equal(pro.shadow, false);
 });
-test("enabled executes selection and disabled keeps the emergency fixed route", async () => {
+test("disabled keeps Auto fixed but executes an explicit route-ready tier", async () => {
   assert.equal(
     (
       await new DeterministicModelRouter().route(
@@ -339,7 +339,21 @@ test("enabled executes selection and disabled keeps the emergency fixed route", 
         policy({ mode: "disabled" }),
       )
     ).executedDeployment.id,
-    "balanced",
+    "pro",
+  );
+});
+
+test("explicit tier execution does not silently escalate to another tier", async () => {
+  const router = new DeterministicModelRouter();
+  await assert.rejects(
+    router.route(
+      request({ requestedServiceClass: "lite" }),
+      policy({
+        mode: "disabled",
+        deployments: deployments.map((item) => item.serviceClass === "lite" ? { ...item, healthy: false } : item),
+      }),
+    ),
+    errorCode("NO_ELIGIBLE_DEPLOYMENT"),
   );
 });
 test("shadow and disabled preserve the fixed route without an eligible hypothetical candidate", async () => {

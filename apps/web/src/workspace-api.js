@@ -82,7 +82,7 @@ export const chatApi = {
     if (cursor) query.set("cursor", cursor);
     return request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions?${query}`);
   },
-  createSession: (workspaceId, catalogId, title, requestedServiceClass = "auto", reasoningEffort) => request(
+  createSession: (workspaceId, catalogId, title, requestedServiceClass = "balanced", reasoningEffort) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`,
     mutation("POST", {
       ...(title ? { title } : {}),

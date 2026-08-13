@@ -586,6 +586,7 @@ export class DeterministicModelRouter {
         "The rollout fixed route is not in this mapping",
       );
     if (
+      requested === "auto" &&
       policy.mode !== "enabled" &&
       (
         !fixed.healthy
@@ -597,7 +598,7 @@ export class DeterministicModelRouter {
         "NO_ELIGIBLE_DEPLOYMENT",
         "The fixed rollout deployment is unavailable or lacks a required capability; governed routing will not bypass its binding",
       );
-    if (policy.mode === "disabled")
+    if (requested === "auto" && policy.mode === "disabled")
       return {
         requestId: request.requestId,
         requestedAlias: "lemmacomputer-auto",
@@ -699,9 +700,12 @@ export class DeterministicModelRouter {
     let selected: RoutingDeployment | undefined;
     const targetCurrency = policy.billingCurrency;
     let availabilityBlocked = false;
-    for (const candidateClass of selectionDenied
+    const candidateClasses = selectionDenied
       ? []
-      : productServiceClasses.slice(classIndex(selectedClass))) {
+      : requested === "auto"
+        ? productServiceClasses.slice(classIndex(selectedClass))
+        : [selectedClass];
+    for (const candidateClass of candidateClasses) {
       if (!scope.allowedServiceClasses.includes(candidateClass)) continue;
       const contract = policy.serviceClassPolicies[candidateClass];
       let classHealthBlocked = false;

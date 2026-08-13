@@ -160,6 +160,12 @@ export const changeRoutingRolloutSchema = z
     confirmation: z.string().optional(),
   })
   .superRefine((value, context) => {
+    if (value.mode !== "disabled")
+      context.addIssue({
+        code: "custom",
+        path: ["mode"],
+        message: "The deferred Auto routing lifecycle is unavailable in the Phase 0.5 release posture",
+      });
     if (
       value.mode === "enabled" &&
       value.confirmation !== "ENABLE AUTO ROUTING"
@@ -413,8 +419,7 @@ const outputTokenLimit = (
   const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
   const teamClasses = new Set(policy.team?.allowedServiceClasses ?? policy.identity.allowedServiceClasses);
   const teamDeployments = new Set(policy.team?.allowedDeploymentIds ?? policy.identity.allowedDeploymentIds);
-  const fixedOnly = policy.mode === "disabled"
-    || (policy.mode === "shadow" && requestedServiceClass === "auto");
+  const fixedOnly = requestedServiceClass === "auto" && policy.mode !== "enabled";
   const limits = policy.deployments
     .filter((deployment) =>
       (!fixedOnly || deployment.id === policy.fixedDeploymentId)
@@ -469,6 +474,71 @@ export class RoutingExecutionService {
     private readonly budgets?: Pick<TeamBudgetStore, "getBudgetStatus">,
   ) {
     this.router = new DeterministicModelRouter(store);
+  }
+  async serviceClassOptions(
+    tenantId: string,
+    subjectId: string,
+  ): Promise<Array<{
+    value: "lite" | "balanced" | "pro";
+    available: boolean;
+    reasonCode: "ready" | "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable";
+  }>> {
+    const values = ["lite", "balanced", "pro"] as const;
+    const unavailable = (reasonCode: "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable") => (
+      values.map((value) => ({ value, available: false as const, reasonCode }))
+    );
+    const team = await this.teams.getCurrentDefaultSpendingTeam(tenantId, subjectId);
+    if (!team) return unavailable("policy_denied");
+    const resolved = await this.store.resolveEffectivePolicy(tenantId, team.id, [
+      { unit: "request", quantity: "1" },
+    ]);
+    if (!resolved) return unavailable("route_unavailable");
+    const policy = resolved.policy;
+    const identityClasses = new Set(policy.identity.allowedServiceClasses);
+    const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
+    const teamScope = policy.team ?? policy.identity;
+    const teamClasses = new Set(teamScope.allowedServiceClasses);
+    const teamDeployments = new Set(teamScope.allowedDeploymentIds);
+    const explicitSelectionAllowed = policy.identity.explicitSelectionAllowed
+      && teamScope.explicitSelectionAllowed
+      && policy.identity.forceServiceClass === null
+      && teamScope.forceServiceClass === null;
+    const approvedProviders = new Set(policy.approvedProviders);
+    const budgetEligible = new Set(policy.budgetEligibleDeploymentIds);
+
+    return values.map((value) => {
+      if (!explicitSelectionAllowed || !identityClasses.has(value) || !teamClasses.has(value)) {
+        return { value, available: false, reasonCode: "policy_denied" as const };
+      }
+      const contract = policy.serviceClassPolicies[value];
+      const policyEligible = policy.deployments.filter((deployment) => (
+        deployment.serviceClass === value
+        && identityDeployments.has(deployment.id)
+        && teamDeployments.has(deployment.id)
+        && contract.eligibleDeploymentIds.includes(deployment.id)
+        && deployment.approved
+        && deployment.evaluationPassed
+        && approvedProviders.has(deployment.provider)
+        && (!contract.capabilityFloor.vision || deployment.capabilities.vision)
+        && (!contract.capabilityFloor.tools || deployment.capabilities.tools)
+        && (!contract.capabilityFloor.streaming || deployment.capabilities.streaming)
+        && deployment.capabilities.contextTokens >= contract.capabilityFloor.contextTokens
+        && deployment.capabilities.outputTokens >= contract.capabilityFloor.outputTokens
+        && (!policy.requiredResidency || deployment.capabilities.residency.includes(policy.requiredResidency))
+      ));
+      if (!policyEligible.length) return { value, available: false, reasonCode: "route_unavailable" as const };
+      const priced = policyEligible.filter((deployment) => (
+        deployment.rateCardId
+        && deployment.expectedCost?.currency === policy.billingCurrency
+      ));
+      if (!priced.length) return { value, available: false, reasonCode: "pricing_unavailable" as const };
+      const healthy = priced.filter((deployment) => deployment.healthy);
+      if (!healthy.length) return { value, available: false, reasonCode: "provider_unavailable" as const };
+      if (!healthy.some((deployment) => budgetEligible.has(deployment.id))) {
+        return { value, available: false, reasonCode: "budget_unavailable" as const };
+      }
+      return { value, available: true, reasonCode: "ready" as const };
+    });
   }
   async reasoningOptions(
     tenantId: string,
@@ -625,6 +695,12 @@ export class RoutingExecutionService {
     );
     if (!resolved)
       throw new Error("Governed routing is not configured for this Team");
+    // Phase 0.5 never executes Auto, including for a previously-persisted
+    // rollout that predates this release posture. Explicit Lite/Balanced/Pro
+    // requests still use the pinned policy and immutable route map below.
+    if (input.requestedServiceClass === "auto") {
+      resolved = { ...resolved, policy: { ...resolved.policy, mode: "disabled" } };
+    }
     let constrained = constrainOutputToPolicy(reasoningConstrainedInput, resolved.policy);
     if (constrained.input !== reasoningConstrainedInput) {
       resolved = await this.store.resolveEffectivePolicy(
@@ -634,6 +710,9 @@ export class RoutingExecutionService {
       );
       if (!resolved)
         throw new Error("Governed routing is not configured for this Team");
+      if (input.requestedServiceClass === "auto") {
+        resolved = { ...resolved, policy: { ...resolved.policy, mode: "disabled" } };
+      }
       constrained = constrainOutputToPolicy(constrained.input, resolved.policy);
     }
     if (this.budgets && resolved.rollout.mode !== "disabled") {

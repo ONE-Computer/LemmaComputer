@@ -106,13 +106,19 @@ const chatAttachmentMaxBytes = 8 * 1024 * 1024;
 const chatAttachmentMaxTotalBytes = 16 * 1024 * 1024;
 const restoredChatTurnMaxAgeMs = 16 * 60 * 1000;
 const chatServiceClassOptions = [
-  { value: "auto", label: "Auto (Beta) · Balanced unless Team-enabled" },
   { value: "lite", label: "Lite · lowest cost" },
   { value: "balanced", label: "Balanced · everyday work" },
   { value: "pro", label: "Pro · highest capability" },
 ];
 const chatServiceClassLabel = Object.fromEntries(chatServiceClassOptions.map((item) => [item.value, item.label.split(" · ")[0]]));
 const chatServiceClassValues = new Set(chatServiceClassOptions.map((item) => item.value));
+const chatServiceClassUnavailableCopy = {
+  policy_denied: "is not allowed by your organization",
+  pricing_unavailable: "is waiting for approved pricing",
+  provider_unavailable: "is temporarily unavailable",
+  budget_unavailable: "is unavailable under the current Team budget",
+  route_unavailable: "does not have a ready route",
+};
 const chatReasoningEffortLabel = {
   auto: "Auto",
   low: "Low",
@@ -2963,9 +2969,9 @@ const writePreference = (key, value) => {
 };
 
 const readChatServiceClassPreference = (workspaceId, agentId, sessionId) => {
-  if (!workspaceId || !agentId || !sessionId) return "auto";
+  if (!workspaceId || !agentId || !sessionId) return "balanced";
   const value = readPreference(chatServiceClassPreferenceKey(workspaceId, agentId, sessionId));
-  return chatServiceClassValues.has(value) ? value : "auto";
+  return chatServiceClassValues.has(value) ? value : "balanced";
 };
 
 const workspaceConfigurationStatus = (state) => ({
@@ -4025,6 +4031,7 @@ function ChatConversation({
   agentName,
   supportsVision,
   requestedServiceClass,
+  requestedServiceClassAvailable,
   reasoningEffort,
   onTurnBusyChange,
   sessionId,
@@ -4251,7 +4258,7 @@ function ChatConversation({
   const submit = async (event) => {
     event.preventDefault();
     const text = input.trim();
-    if ((!text && !attachments.length) || turnBusy || attachmentBusy) return;
+    if ((!text && !attachments.length) || turnBusy || attachmentBusy || !requestedServiceClassAvailable) return;
     clearError();
     let sessionId = sessionRef.current;
     if (!sessionId) {
@@ -4546,7 +4553,7 @@ function ChatConversation({
             {turnBusy ? (
               <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
-              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
+              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
             )}
           </div>
         ) : (
@@ -4565,7 +4572,7 @@ function ChatConversation({
             {turnBusy ? (
               <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
-              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
+              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
             )}
           </>
         )}
@@ -4609,6 +4616,7 @@ export function ChatScreen({
   onRunningSessionIdsChange,
 }) {
   const [agents, setAgents] = useState([]);
+  const [serviceClassAvailability, setServiceClassAvailability] = useState([]);
   const [activeAgentId, setActiveAgentId] = useState("");
   const [status, setStatus] = useState("loading");
   const [reasonCode, setReasonCode] = useState("");
@@ -4627,11 +4635,11 @@ export function ChatScreen({
   const activeThread = threads.find((thread) => thread.id === activeThreadId) ?? null;
   const selectedSessionId = activeThread?.sessionId ?? "";
   const contextBusy = Object.values(threadBusy).some(Boolean);
-  const serviceClassFor = (thread) => threadServiceClasses[thread.id] ?? "auto";
+  const serviceClassFor = (thread) => threadServiceClasses[thread.id] ?? "balanced";
   const reasoningEffortFor = (thread) => threadReasoningEfforts[thread.id]
     ?? sessions.find((session) => session.id === thread.sessionId)?.reasoningEffort
     ?? "auto";
-  const activeRequestedServiceClass = activeThread ? serviceClassFor(activeThread) : "auto";
+  const activeRequestedServiceClass = activeThread ? serviceClassFor(activeThread) : "balanced";
   const activeReasoningEffort = activeThread ? reasoningEffortFor(activeThread) : "auto";
 
   useEffect(() => {
@@ -4641,10 +4649,16 @@ export function ChatScreen({
       activeAgentId,
       selectedSessionId,
     );
-    setThreadServiceClasses((current) => current[activeThreadId] === restored
+    const ready = serviceClassAvailability.filter((option) => option.available).map((option) => option.value);
+    const selected = ready.includes(restored)
+      ? restored
+      : ready.includes("balanced")
+        ? "balanced"
+        : ready[0] ?? "balanced";
+    setThreadServiceClasses((current) => current[activeThreadId] === selected
       ? current
-      : { ...current, [activeThreadId]: restored });
-  }, [workspace?.id, activeAgentId, activeThreadId, selectedSessionId]);
+      : { ...current, [activeThreadId]: selected });
+  }, [workspace?.id, activeAgentId, activeThreadId, selectedSessionId, serviceClassAvailability]);
 
   const publishHistoryMetadata = (nextCursor = sessionNextCursor, loading = sessionLoadingMore) => {
     onHistoryMetadataChange?.({ hasMore: Boolean(nextCursor), loading });
@@ -4698,7 +4712,7 @@ export function ChatScreen({
 
   const registerThreadSession = (threadId, sessionId) => {
     setThreads((current) => current.map((thread) => thread.id === threadId ? { ...thread, sessionId } : thread));
-    const serviceClass = threadServiceClasses[threadId] ?? "auto";
+    const serviceClass = threadServiceClasses[threadId] ?? "balanced";
     if (workspace?.id && activeAgentId) {
       writePreference(chatServiceClassPreferenceKey(workspace.id, activeAgentId, sessionId), serviceClass);
     }
@@ -4720,6 +4734,7 @@ export function ChatScreen({
     setSessionNextCursor(null);
     onHistoryMetadataChange?.({ hasMore: false, loading: false });
     setAgents([]);
+    setServiceClassAvailability([]);
     setActiveAgentId("");
     setThreads([]);
     setActiveThreadId("");
@@ -4736,6 +4751,7 @@ export function ChatScreen({
       .then((result) => {
         if (!active) return;
         const nextAgents = result.agents ?? [];
+        setServiceClassAvailability(result.serviceClassOptions ?? []);
         setAgents(nextAgents);
         if (nextAgents.length === 0) {
           setStatus("unavailable");
@@ -4835,6 +4851,14 @@ export function ChatScreen({
     value: agent.catalogId,
     label: agent.displayName,
   }));
+  const readyServiceClassValues = new Set(
+    serviceClassAvailability.filter((option) => option.available).map((option) => option.value),
+  );
+  const readyServiceClassOptions = chatServiceClassOptions.filter((option) => readyServiceClassValues.has(option.value));
+  const unavailableServiceClassCopy = serviceClassAvailability
+    .filter((option) => !option.available)
+    .map((option) => `${chatServiceClassLabel[option.value]} ${chatServiceClassUnavailableCopy[option.reasonCode] ?? "is unavailable"}.`)
+    .join(" ");
   const selectAgent = (catalogId) => {
     if (catalogId === activeAgentId) return;
     onSessionChange("");
@@ -4842,7 +4866,7 @@ export function ChatScreen({
     onAgentChange?.(workspace?.id, catalogId);
   };
   const selectRequestedServiceClass = (serviceClass) => {
-    if (!activeThread) return;
+    if (!activeThread || !readyServiceClassValues.has(serviceClass)) return;
     setThreadServiceClasses((current) => ({ ...current, [activeThread.id]: serviceClass }));
     const qualified = activeAgent?.reasoningEffortsByServiceClass?.[serviceClass] ?? [];
     if (!qualified.includes(activeReasoningEffort)) {
@@ -4890,8 +4914,9 @@ export function ChatScreen({
           onValueChange={selectRequestedServiceClass}
           disabled={contextBusy}
           ariaLabel="Choose model mode"
-          options={chatServiceClassOptions}
+          options={readyServiceClassOptions.length ? readyServiceClassOptions : [{ value: "balanced", label: "Balanced · no ready route", disabled: true }]}
         />
+        {unavailableServiceClassCopy && <small className="chat-model-availability" role="status">{unavailableServiceClassCopy}</small>}
       </div>
       {activeReasoningEfforts.length > 0 && <div className="chat-agent-selector" title={selectedSessionId ? "Thinking effort stays fixed for this conversation to preserve prompt caching." : undefined}>
         <span className="chat-agent-selector-label">Thinking</span>
@@ -4977,6 +5002,7 @@ export function ChatScreen({
               agentName={agentName}
               supportsVision={workspace.modelRoute?.capabilities?.vision === true}
               requestedServiceClass={requestedServiceClass}
+              requestedServiceClassAvailable={readyServiceClassValues.has(requestedServiceClass)}
               reasoningEffort={qualifiedEfforts.includes(reasoningEffort) ? reasoningEffort : undefined}
               onTurnBusyChange={(busy) => changeThreadBusy(thread.id, busy)}
               sessionId={thread.sessionId}
