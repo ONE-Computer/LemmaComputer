@@ -209,7 +209,7 @@ test("top-level navigation is URL-backed and follows browser history", async () 
   assert.match(app, /searchParams\.set\("view", viewByNav\[name\]\)/);
 });
 
-test("Trail owns approval-device management while Connections stays focused on service setup", async () => {
+test("Trail owns approval-device management while Connectors stays focused on service setup", async () => {
   const app = await source("apps/web/src/App.jsx");
   const activityScreen = app.slice(app.indexOf("function ActivityScreen"), app.indexOf("const pendingApplications"));
   const connectionsScreen = app.slice(app.indexOf("function ConnectionsScreen"), app.indexOf("function ChatScreen"));
@@ -226,7 +226,7 @@ test("Trail owns approval-device management while Connections stays focused on s
   assert.doesNotMatch(app, /Replace with this browser|Each account uses one active approval device/);
 });
 
-test("Connections stays employee-facing and uses spacing instead of decorative rules", async () => {
+test("Connectors stays employee-facing and uses spacing instead of decorative rules", async () => {
   const [app, styles] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/styles.css"),
@@ -387,7 +387,7 @@ test("administration keeps identity in People and access while workspace operati
   assert.match(app, /Current organization policy/);
   assert.match(app, /Baseline only/);
   assert.match(app, /Version \$\{latest\.version\} is the latest policy available to assign/);
-  assert.match(app, /Tool permissions are managed in Connections/);
+  assert.match(app, /Review tool permissions in Connectors/);
   assert.match(app, /Save as new version/);
   assert.doesNotMatch(app, /Create organization policy/);
   assert.doesNotMatch(app.slice(app.indexOf("function AdminScreen"), app.indexOf("function CredentialsScreen")), /MemberWorkspaceConsole|ProtectedWorkspacePolicySection|Manage \{workspaceName\(workspace\)\}/);
@@ -475,7 +475,7 @@ test("Chat is last in navigation, with recent threads in the sidebar and a focus
   ]);
   const primaryNav = app.slice(app.indexOf('<nav aria-label="Primary navigation">'), app.indexOf("</nav>", app.indexOf('<nav aria-label="Primary navigation">')));
   const chatScreen = app.slice(app.indexOf("function ChatConversation"), app.indexOf("export function App"));
-  assert.ok(primaryNav.indexOf('label="Chat"') > primaryNav.indexOf('label="Connections"'));
+  assert.ok(primaryNav.indexOf('label="Chat"') > primaryNav.indexOf('label="Connectors"'));
   assert.match(primaryNav, /sidebar-chat-history/);
   assert.match(primaryNav, /Recent chat threads/);
   assert.match(primaryNav, /aria-label="Start a new chat"/);
@@ -628,12 +628,12 @@ test("Select controls use the shared accessible menu instead of browser-native d
   assert.match(await source("apps/web/src/styles.css"), /@media \(max-width: 1180px\)[\s\S]*?\.firewall-page-heading[\s\S]*?flex-direction: column/);
 });
 
-test("Connections refreshes safely on navigation, history, detail return, and OAuth return", async () => {
+test("Connectors refreshes safely on navigation, history, detail return, and OAuth return", async () => {
   const [app, api] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/workspace-api.js"),
   ]);
-  const refreshEffect = app.slice(app.indexOf('if (!session || activeNav !== "Connections")'), app.indexOf('if (!session || activeNav !== "Settings"'));
+  const refreshEffect = app.slice(app.indexOf('if (!session || activeNav !== "Connectors")'), app.indexOf('if (!session || activeNav !== "Settings"'));
   const popState = app.slice(app.indexOf("const onPopState"), app.indexOf('window.addEventListener("popstate"'));
   const selectNav = app.slice(app.indexOf("const selectNav"), app.indexOf("const saveSchedule"));
   const oauthReturn = app.slice(app.indexOf('if (params.get("view") !== "connections")'), app.indexOf('params.delete("m365")'));

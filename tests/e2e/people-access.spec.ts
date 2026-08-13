@@ -39,7 +39,7 @@ test("organization administrator invites a person and manages member access", as
   await expect(page.getByRole("heading", { name: "Policy controls" })).toBeVisible();
   await expect(page.getByText("Claude Desktop", { exact: true })).toBeVisible();
   await expect(page.getByText("Firefox ESR", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tool permissions are managed in Connections" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Review tool permissions in Connectors" })).toBeVisible();
   await page.screenshot({ path: "test-results/workspace-policy-baseline-reviewed.png", fullPage: true });
 
   await page.getByRole("button", { name: "View baseline" }).click();
@@ -1007,7 +1007,7 @@ test("scoped provider administrator sees only server-granted provider and connec
   await expect(page.getByRole("heading", { name: "Provider settings" })).toBeVisible();
   await expect(page.getByText("OpenAI", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Connections" }).click();
+  await page.getByRole("button", { name: "Connectors" }).click();
   const linear = page.locator(".connector-catalog-card").filter({ hasText: "Linear" });
   await linear.getByRole("button", { name: "Manage" }).click();
   await expect(page.getByRole("heading", { name: "Connector access" })).toHaveCount(0);
