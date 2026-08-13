@@ -290,9 +290,14 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       assert.equal(request.headers["x-lemmacomputer-agent-instance-id"], agentInstanceId);
       const bindingRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       assert.ok(["lite", "balanced", "pro"].includes(bindingRequest.requestedServiceClass));
+      assert.ok(bindingRequest.requestedReasoningEffort === undefined
+        || ["low", "medium", "high"].includes(bindingRequest.requestedReasoningEffort));
       assert.match(bindingRequest.taskId, /^workspace-native:/);
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ binding: taskBinding(bindingRequest.requestedServiceClass) }));
+      response.end(JSON.stringify({ binding: taskBinding(
+        bindingRequest.requestedServiceClass,
+        bindingRequest.requestedReasoningEffort,
+      ) }));
       return;
     }
     received.push({
@@ -413,6 +418,25 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       lemmacomputer_task_binding: taskBinding("pro"),
       lemmacomputer_requested_service_class: "pro",
     });
+    const balancedResponse = await fetch(`http://127.0.0.1:${brokerPort}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "lemmacomputer-balanced",
+        reasoning_effort: "medium",
+        tools: [{ type: "function", function: { name: "lookup" } }],
+        messages: [{ role: "user", content: "Use Balanced with governed reasoning." }],
+      }),
+    });
+    assert.equal(balancedResponse.status, 200, await balancedResponse.text());
+    assert.equal(bindingRequests, 3);
+    assert.equal(received[2]?.body?.model, "lemmacomputer-auto");
+    assert.equal("reasoning_effort" in received[2]!.body!, false);
+    assert.deepEqual(received[2]?.body?.metadata, {
+      lemmacomputer_task_binding: taskBinding("balanced", "medium"),
+      lemmacomputer_requested_service_class: "balanced",
+      lemmacomputer_requested_reasoning_effort: "medium",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.match(stderr, /normalized model "<nonstandard>"/);
     assert.doesNotMatch(stderr, /secret-value/);
@@ -428,7 +452,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       body: JSON.stringify({ model: "client-default", max_tokens: 1, messages: [] }),
     });
     assert.equal(afterEnd.status, 400, "headerless inference fails closed after the process identity ends");
-    assert.equal(bindingRequests, 2);
+    assert.equal(bindingRequests, 3);
   } finally {
     child.kill("SIGTERM");
     await once(child, "exit");

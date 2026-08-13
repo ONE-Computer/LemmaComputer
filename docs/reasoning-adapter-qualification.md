@@ -20,13 +20,14 @@ Changing a record from discovery to qualified is a reviewed product change. Admi
 | Runtime | Exact pin | Review state | Provider-effort authority | Product behavior |
 | --- | --- | --- | --- | --- |
 | Claude CLI | `2.1.215` | Qualified under `claude-cli-2.1.215-governed-effort-adapter-2026-08-13` | Governed route from signed task binding | Eligible for Auto, Low, Medium, and High when the route and organization policy also allow them |
-| Hermes Agent CLI | `0.19.0` from tag `v2026.7.20`, upstream commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a` | Discovery under `hermes-claw-0.19.0-governed-effort-discovery-2026-08-13` | Governed route; Hermes global `reasoning_effort` remains disabled | No selector until the live gates pass |
+| Hermes Agent CLI | `0.19.0` from tag `v2026.7.20`, upstream commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a` | Qualified under `hermes-claw-0.19.0-governed-effort-adapter-2026-08-13` | Governed route from signed task binding | Its native model menu offers Lite, Balanced, and Pro; its native effort menu offers Low, Medium, and High |
+| Hermes Desktop | `0.17.0` | Qualified under `hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13` | Governed route from signed task binding | The patched native effort menu hides unsupported Minimal, Extra High, Max, and Ultra values on LemmaComputer routes |
 | Codex CLI | `0.144.4` | Discovery under `codex-cli-0.144.4-governed-effort-discovery-2026-08-13` | Governed route; no Codex-native `effort` is trusted as policy | No selector until the live gates pass |
 | Any other runtime or version | Any | Unreviewed | None | Fail closed |
 
 Hermes and Codex both expose upstream reasoning controls, but that does not make their labels or behavior equivalent to Claude or to one another. LemmaComputer's Low, Medium, and High values are bounded product intents. The separately qualified provider route decides their concrete wire meaning. Direct Anthropic is the first existing route registration from #69, not a prerequisite for these adapters or for future route registrations.
 
-The managed OpenAI models `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` are route discoveries under `openai-gpt-5.6-managed-effort-route-discovery-2026-08-13`. They remain ineligible for product thinking controls until the credentialed route gates below pass. Recording them as discoveries lets the qualification tooling recognize the exact intended routes without treating their configured presence as proof.
+The managed OpenAI models `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` use the qualified `openai-gpt-5.6-responses-effort-route-2026-08-13` route. LiteLLM translates OpenAI Chat Completions requests to the Responses API before the governed callback injects signed effort, because OpenAI rejects function tools plus reasoning effort on the legacy Chat Completions transport. This translation is an upstream LiteLLM capability, not a Hermes-specific provider adapter.
 
 ## Shared transport contract
 
@@ -36,11 +37,11 @@ Every qualifying runtime must prove the same boundary:
 2. Control intersects the agent review, exact route capability, effective organization policy, and maximum effort.
 3. Control signs the requested effort and ceiling into the per-turn AI task binding.
 4. The runtime adapter carries that binding request-locally to the loopback gateway before the first model call and on every resumed turn.
-5. The gateway strips `thinking`, `output_config`, `reasoning`, and enabled `reasoning_effort` values supplied by the runtime. It may preserve the exact non-escalating `reasoning_effort: none` opt-out on Chat Completions so an unqualified runtime can use function tools without a reasoning-model provider default.
+5. A native client may submit Low, Medium, or High as product intent. Control validates the exact adapter, service class route, and organization ceiling before signing that intent. The gateway then strips `thinking`, `output_config`, `reasoning`, and the client's raw `reasoning_effort`; only the signed task binding crosses into provider routing. The exact non-escalating `reasoning_effort: none` opt-out remains safe for requests that do not enable governed reasoning.
 6. The route authority injects only the resolved qualified value and records requested and resolved effort in usage evidence.
 7. The adapter projects allow-listed text, tool, progress, source, and terminal events. It never emits or persists hidden reasoning text.
 
-This is why the Codex discovery branch's native `AsyncThread.turn(..., effort=...)` experiment is not copied into the shared implementation. It would create a second, client-side effort setting even though the gateway must discard that setting. Codex continues to carry the signed binding in its model-provider headers; Hermes carries the same binding through its request-local API-server override. Hermes's mutable global reasoning setting remains disabled.
+This is why the Codex discovery branch's native `AsyncThread.turn(..., effort=...)` experiment is not copied into the shared implementation. It would create a second, client-side effort authority even though the gateway must discard that raw provider field. Hermes's native selection is accepted only as a request for Control to validate and sign; the signed binding remains the sole provider-effort authority.
 
 ## Promotion gates
 

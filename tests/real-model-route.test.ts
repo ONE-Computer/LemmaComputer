@@ -32,6 +32,7 @@ test("OpenAI, Anthropic, GLM, and Bedrock routes are database-managed", async ()
     assert.doesNotMatch(config, new RegExp(`model_name: ${alias}`));
   }
   assert.match(config, /model_list: \[\]/);
+  assert.match(config, /route_all_chat_openai_to_responses: true/);
   assert.doesNotMatch(config, /api_key: os\.environ/);
   assert.match(providerSettings, /managedProviderModels/);
   assert.match(providerSettings, /litellm_credential_name/);

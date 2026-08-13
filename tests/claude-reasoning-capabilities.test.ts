@@ -5,8 +5,9 @@ import {
   anthropicReasoningRouteQualificationId,
   claudeReasoningAdapterQualificationId,
   codexReasoningAdapterDiscoveryId,
-  hermesReasoningAdapterDiscoveryId,
-  openAiReasoningRouteDiscoveryId,
+  hermesDesktopReasoningAdapterQualificationId,
+  hermesReasoningAdapterQualificationId,
+  openAiReasoningRouteQualificationId,
   qualifiedAgentReasoningAdapter,
   qualifiedReasoningRouteCapabilities,
   reasoningRouteReview,
@@ -74,26 +75,33 @@ test("a future provider route joins through registration without changing Web, C
   }, registrations), null);
 });
 
-test("managed OpenAI reasoning routes remain discovery-only before live qualification", () => {
+test("managed OpenAI reasoning routes use the qualified Responses transport", () => {
   for (const providerModel of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
     assert.deepEqual(reasoningRouteReview({ provider: "openai", providerModel }), {
-      reviewStatus: "discovery",
-      discoveryId: openAiReasoningRouteDiscoveryId,
+      reviewStatus: "qualified",
+      qualificationId: openAiReasoningRouteQualificationId,
       provider: "openai",
       providerModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
-      providerMechanism: "openai-compatible-reasoning-effort",
+      providerMechanism: "openai-responses-reasoning-effort",
+      thinkingMode: "opaque",
       effortLevels: ["low", "medium", "high"],
-      blockingEvidence: [
-        "live_reasoning_with_streaming_and_tools",
-        "live_provider_usage_cost_latency_and_cache_evidence",
-        "live_fail_closed_route_mismatch_evidence",
-      ],
+      defaultEffort: "medium",
+      interleavedThinking: false,
+      reasoningTokenTelemetry: false,
     });
-    assert.equal(qualifiedReasoningRouteCapabilities({ provider: "openai", providerModel }), null);
+    assert.deepEqual(qualifiedReasoningRouteCapabilities({ provider: "openai", providerModel }), {
+      qualificationId: openAiReasoningRouteQualificationId,
+      providerMechanism: "openai-responses-reasoning-effort",
+      thinkingMode: "opaque",
+      effortLevels: ["low", "medium", "high"],
+      defaultEffort: "medium",
+      interleavedThinking: false,
+      reasoningTokenTelemetry: false,
+    });
   }
 });
 
-test("the pinned Claude runtime is the first registered reasoning adapter", () => {
+test("the pinned Claude and Hermes runtimes expose exact qualified adapters", () => {
   assert.deepEqual(qualifiedAgentReasoningAdapter({
     agentCatalogId: "claude-cli",
     clientVersion: "2.1.215",
@@ -110,36 +118,42 @@ test("the pinned Claude runtime is the first registered reasoning adapter", () =
     agentCatalogId: "claude-cli",
     clientVersion: "2.1.216",
   }), null);
-  assert.equal(qualifiedAgentReasoningAdapter({
-    agentCatalogId: "hermes-claw",
-    clientVersion: "0.19.0",
-  }), null);
-  assert.equal(qualifiedAgentReasoningAdapter({
-    agentCatalogId: "codex-cli",
-    clientVersion: "0.144.4",
-  }), null);
-});
-
-test("Hermes and Codex discoveries remain inspectable but fail closed before live qualification", () => {
-  const expectedBlockingEvidence = [
-    "live_reasoning_with_mcp_tools",
-    "live_streaming_and_hidden_reasoning_suppression",
-    "live_usage_cost_latency_and_cache_evidence",
-  ];
-  assert.deepEqual(agentReasoningAdapterReview({
+  assert.deepEqual(qualifiedAgentReasoningAdapter({
     agentCatalogId: "hermes-claw",
     clientVersion: "0.19.0",
   }), {
-    reviewStatus: "discovery",
-    discoveryId: hermesReasoningAdapterDiscoveryId,
+    qualificationId: hermesReasoningAdapterQualificationId,
     agentCatalogId: "hermes-claw",
     clientVersion: "0.19.0",
     effortLevels: ["low", "medium", "high"],
     conversationPinned: true,
     signedTaskBinding: true,
     providerEffortAuthority: "governed-route",
-    blockingEvidence: expectedBlockingEvidence,
   });
+  assert.deepEqual(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "hermes-desktop",
+    clientVersion: "0.17.0",
+  }), {
+    qualificationId: hermesDesktopReasoningAdapterQualificationId,
+    agentCatalogId: "hermes-desktop",
+    clientVersion: "0.17.0",
+    effortLevels: ["low", "medium", "high"],
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  });
+  assert.equal(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "codex-cli",
+    clientVersion: "0.144.4",
+  }), null);
+});
+
+test("Codex discovery remains inspectable but fails closed before live qualification", () => {
+  const expectedBlockingEvidence = [
+    "live_reasoning_with_mcp_tools",
+    "live_streaming_and_hidden_reasoning_suppression",
+    "live_usage_cost_latency_and_cache_evidence",
+  ];
   assert.deepEqual(agentReasoningAdapterReview({
     agentCatalogId: "codex-cli",
     clientVersion: "0.144.4",

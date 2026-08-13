@@ -98,6 +98,12 @@ general_settings:
 
 litellm_settings:
   callbacks: lemmacomputer_policy_callback.proxy_handler_instance
+  # OpenAI's Chat Completions endpoint rejects function tools together with
+  # reasoning_effort. Let pinned LiteLLM perform its provider-agnostic Chat ->
+  # Responses translation before the governed callback injects signed effort.
+  # This is OpenAI-only; Anthropic and other providers retain their native wire
+  # protocols.
+  route_all_chat_openai_to_responses: true
   drop_params: true
   set_verbose: false
   turn_off_message_logging: true
