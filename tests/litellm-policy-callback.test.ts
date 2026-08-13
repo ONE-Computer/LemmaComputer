@@ -553,9 +553,11 @@ def usage_authority(path, payload):
             "schemaVersion": 1,
             "status": "created",
             "eventId": "event-boundary",
-            "providerCost": "0.000078",
+            "providerCost": None,
             "currency": "USD",
         }
+    if path == "routing/observations":
+        return {"schemaVersion": 1, "status": "created"}
     raise AssertionError(f"unexpected usage authority call: {path}")
 
 callback_type.async_pre_call_deployment_hook.__globals__["_usage_request"] = usage_authority
@@ -796,6 +798,16 @@ async def assert_provider_boundary():
         "requestId": "request-auto",
         "deploymentId": "routing-deployment-balanced",
     }
+    await callback.async_log_success_event(
+        auto_provider,
+        {"usage": {"prompt_tokens": 8, "completion_tokens": 3}},
+        None,
+        None,
+    )
+    observation_call = next(item for item in authority_calls if item[0] == "routing/observations")
+    assert observation_call[1]["decisionId"] == "decision-auto"
+    assert "actualCost" not in observation_call[1]
+    assert "currency" not in observation_call[1]
 
 asyncio.run(assert_provider_boundary())
 `;

@@ -1165,10 +1165,13 @@ async def _record_routing_observation(kwargs, event_result, completion_payload, 
         "decisionId": state["routingDecisionId"],
         "usageEventId": event_id,
         "outcome": "success" if completion_payload["outcome"] == "success" else "error",
-        "actualCost": event_result.get("providerCost"),
-        "currency": event_result.get("currency"),
         "latencyMs": completion_payload.get("latencyMs"),
     }
+    provider_cost = event_result.get("providerCost")
+    currency = event_result.get("currency")
+    if provider_cost is not None and currency is not None:
+        observation["actualCost"] = provider_cost
+        observation["currency"] = currency
     health_status = _deployment_health_status(response_obj, completion_payload["outcome"])
     if health_status:
         observation["deploymentHealth"] = health_status
