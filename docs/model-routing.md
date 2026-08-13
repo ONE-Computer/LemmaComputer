@@ -37,11 +37,12 @@ skips Auto classification but remains subject to the full eligibility checks
 below.
 
 Managed native clients use the same contract. Claude Desktop's pinned client
-rejects gateway IDs that are not Anthropic-shaped, so its managed catalogue
-uses the client-adapter aliases `lemmacomputer-claude-haiku-lite`,
-`lemmacomputer-claude-sonnet-balanced`, and
-`lemmacomputer-claude-opus-pro` with the employee-facing labels Lite,
-Balanced, and Pro. Those names do not select the concrete provider model.
+rejects gateway IDs that are not Anthropic-shaped and exposes its effort menu
+only for model IDs with a built-in capability record. Its managed catalogue
+therefore uses three distinct dated `claude-sonnet-4-6-*` client-adapter IDs
+that the pinned client normalizes to the same effort-capable UI contract, with
+the employee-facing labels Lite, Balanced, and Pro. These compatibility IDs do
+not select the concrete provider model.
 Hermes uses the provider-neutral `lemmacomputer-lite`,
 `lemmacomputer-balanced`, and `lemmacomputer-pro` entries returned by the
 custom loopback provider's `/v1/models` catalogue and stores the selected alias
@@ -49,7 +50,8 @@ in its normal session configuration. Neither client receives a provider
 credential. On every native inference request, the root-owned
 loopback broker translates the exact product alias into an explicit service
 class, obtains a fresh Control-signed task binding, removes client routing
-metadata, and forwards only the internal synthetic transport alias. Unknown
+and native reasoning metadata (including Hermes's `think` flag), and forwards
+only the internal synthetic transport alias. Unknown
 `lemmacomputer-*` aliases and unavailable or disallowed service classes fail
 closed.
 

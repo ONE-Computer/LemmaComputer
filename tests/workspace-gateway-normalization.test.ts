@@ -100,9 +100,9 @@ test("native product model aliases select only explicit governed service classes
   }
 
   for (const [model, serviceClass] of [
-    ["lemmacomputer-claude-haiku-lite", "lite"],
-    ["lemmacomputer-claude-sonnet-balanced", "balanced"],
-    ["lemmacomputer-claude-opus-pro", "pro"],
+    ["claude-sonnet-4-6-20260101", "lite"],
+    ["claude-sonnet-4-6-20260102", "balanced"],
+    ["claude-sonnet-4-6-20260103", "pro"],
   ] as const) {
     assert.equal(normalize("lemmacomputer-auto", {
       model,
@@ -177,12 +177,14 @@ test("the broker strips forged thinking controls and projects only the signed ef
   const binding = taskBinding("balanced", "medium");
   const normalized = normalize("lemmacomputer-auto", {
     model: "claude-sonnet-4-6",
+    think: true,
     thinking: { type: "enabled", budget_tokens: 999999 },
     output_config: { effort: "max" },
     reasoning_effort: "max",
     reasoning: { effort: "xhigh" },
     messages: [{ role: "user", content: "Review this plan." }],
   }, binding);
+  assert.equal("think" in normalized.body, false);
   assert.equal("thinking" in normalized.body, false);
   assert.equal("output_config" in normalized.body, false);
   assert.equal("reasoning_effort" in normalized.body, false);

@@ -62,9 +62,9 @@ NATIVE_MODEL_MODES = {
     "lemmacomputer-pro": "pro",
 }
 CLAUDE_NATIVE_MODEL_MODES = {
-    "lemmacomputer-claude-haiku-lite": "lite",
-    "lemmacomputer-claude-sonnet-balanced": "balanced",
-    "lemmacomputer-claude-opus-pro": "pro",
+    "claude-sonnet-4-6-20260101": "lite",
+    "claude-sonnet-4-6-20260102": "balanced",
+    "claude-sonnet-4-6-20260103": "pro",
 }
 
 
@@ -272,7 +272,7 @@ def normalize_inference_body(body: bytes, task_binding: str | None = None) -> tu
     # The workspace client is not a reasoning-policy authority. Strip every
     # provider spelling before the signed task binding is resolved against the
     # concrete route by Control and the LiteLLM policy callback.
-    for name in ("thinking", "output_config", "reasoning_effort", "reasoning"):
+    for name in ("think", "thinking", "output_config", "reasoning_effort", "reasoning"):
         request.pop(name, None)
     metadata = request.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}

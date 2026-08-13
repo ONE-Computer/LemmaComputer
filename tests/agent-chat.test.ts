@@ -232,7 +232,7 @@ test("every reasoning-capable runtime delegates provider effort to the signed go
   assert.match(hermesConfig, /"reasoning_effort": False/);
   assert.match(
     gateway,
-    /for name in \("thinking", "output_config", "reasoning_effort", "reasoning"\):[\s\S]*request\.pop\(name, None\)/,
+    /for name in \("think", "thinking", "output_config", "reasoning_effort", "reasoning"\):[\s\S]*request\.pop\(name, None\)/,
   );
   assert.match(gateway, /metadata\["lemmacomputer_requested_reasoning_effort"\] = reasoning_effort/);
 });
