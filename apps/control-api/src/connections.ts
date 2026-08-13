@@ -389,13 +389,20 @@ export class McpConnectionService {
     identity: IdentityContext,
     updatedBy: string,
     connectorId: string,
-    input: { enabled: boolean; membersCanManage: boolean },
+    input: { enabled: boolean; membersCanManage: boolean; expectedVersion: number; correlationId: string },
   ) {
     await this.connector(identity.tenantId, connectorId);
-    const saved = await this.registry.updateAccessPolicy(identity.tenantId, connectorId, { ...input, updatedBy });
+    const saved = await this.registry.applyAccessPolicyChange(identity.tenantId, connectorId, { ...input, updatedBy });
     if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    if (saved.event.outcome === "conflict") {
+      throw new LemmaComputerError(
+        "CONNECTOR_POLICY_VERSION_CONFLICT",
+        "This connector policy changed while you were editing it. Refresh and review the latest version before saving again.",
+        409,
+      );
+    }
     this.invalidateTenantProjection(identity.tenantId);
-    return this.publicConnector(saved);
+    return { connector: this.publicConnector(saved.connector), policyChange: saved.event };
   }
 
   async discoverConnector(identity: IdentityContext, input: CreateConnectorInput) {
@@ -554,6 +561,7 @@ export class McpConnectionService {
       connectorId: connector.id,
       connectorName: connector.name,
       serverName: connector.serverName,
+      accessPolicyVersion: connector.accessPolicyVersion,
       documentHash: toolsetDocumentHash(discoveredTools),
       changes: {
         added: addedTools.sort(),
@@ -566,12 +574,21 @@ export class McpConnectionService {
 
   async saveConnectorToolPolicy(
     identity: IdentityContext,
+    updatedBy: string,
     connectorId: string,
     tools: Record<string, McpToolPolicyDecision>,
     expectedDocumentHash: string,
+    expectedAccessPolicyVersion: number,
+    correlationId: string,
   ) {
     const current = await this.connectorToolPolicy(identity, connectorId);
     if (current.documentHash !== expectedDocumentHash) {
+      await this.registry.recordToolPolicyConflict(identity.tenantId, connectorId, {
+        actorUserId: updatedBy,
+        reviewedDefinitionHash: current.documentHash,
+        failureCode: "TOOL_SET_CHANGED_REVIEW_AGAIN",
+        correlationId,
+      });
       throw new LemmaComputerError(
         "TOOL_SET_CHANGED_REVIEW_AGAIN",
         `${current.connectorName} changed while it was being reviewed. Refresh the tool list and review it again.`,
@@ -583,10 +600,24 @@ export class McpConnectionService {
       throw new LemmaComputerError("INVALID_TOOL_POLICY", `A decision is required for every ${current.connectorName} tool`, 400);
     }
     const toolDefinitionHashes = Object.fromEntries(current.tools.map((tool) => [tool.name, tool.definitionHash]));
-    const saved = await this.registry.updateToolPolicies(identity.tenantId, connectorId, { toolPolicies: tools, toolDefinitionHashes });
+    const saved = await this.registry.applyToolPolicyChange(identity.tenantId, connectorId, {
+      toolPolicies: tools,
+      toolDefinitionHashes,
+      updatedBy,
+      expectedVersion: expectedAccessPolicyVersion,
+      reviewedDefinitionHash: expectedDocumentHash,
+      correlationId,
+    });
     if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    if (saved.event.outcome === "conflict") {
+      throw new LemmaComputerError(
+        "CONNECTOR_POLICY_VERSION_CONFLICT",
+        "This connector policy changed while you were editing it. Refresh and review the latest version before saving again.",
+        409,
+      );
+    }
     this.invalidateTenantProjection(identity.tenantId);
-    return this.connectorToolPolicy(identity, connectorId);
+    return { ...(await this.connectorToolPolicy(identity, connectorId)), policyChange: saved.event };
   }
 
   async hostedToolPolicy(identity: IdentityContext, serverName: string, toolName: string) {

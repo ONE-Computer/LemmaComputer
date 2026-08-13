@@ -58,7 +58,7 @@ const policy = {
   connectorId: connector.id,
   connectorName: connector.name,
   serverName: connector.serverName,
-  version: 1,
+  accessPolicyVersion: 1,
   documentHash,
   changes: {
     added: ["export-report"],
@@ -171,6 +171,26 @@ const effectivePolicy = {
     workspaceGrantRefresh: { status: "not_observed", trigger: "automatic_after_policy_save" },
     restartRequired: false,
   },
+  delivery: {
+    changeEventId: "2b37cc2b-e2c3-4d48-a30e-1d4dfda64d88",
+    policyVersion: 3,
+    changedAt: "2026-08-13T01:15:00.000Z",
+    changedBy: "admin-owner",
+    members: [
+      {
+        userId: "jane",
+        displayName: "Jane Tan",
+        email: "jane@example.test",
+        workspaces: [{ workspaceId: "d877e406-ab44-43ef-8fbc-e1afe09ff27e", grantId: "personal", state: "ready", delivery: "failed", failureCode: "CONNECTOR_GRANT_REFRESH_FAILED" }],
+      },
+      {
+        userId: "mike",
+        displayName: "Mike Lee",
+        email: "mike@example.test",
+        workspaces: [{ workspaceId: "a5982e38-8a52-4611-9644-d1a80d3e6982", grantId: "research", state: "stopped", delivery: "applies_on_next_start", failureCode: null }],
+      },
+    ],
+  },
 };
 
 test("custom connector tools stay blocked until the administrator reviews and saves their exact definition", async ({ page }) => {
@@ -182,6 +202,7 @@ test("custom connector tools stay blocked until the administrator reviews and sa
     if (route.request().method() === "PUT") {
       const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       assert.equal(body.expectedDocumentHash, documentHash);
+      assert.equal(body.expectedAccessPolicyVersion, 1);
       assert.deepEqual(body.tools, {
         "export-report": "deny",
         "search-reports": "deny",
@@ -234,6 +255,33 @@ test("administrators can remove a customer-added connector from Connections", as
   await expect(page.getByText("Reports")).toHaveCount(0);
 });
 
+test("a stale tool-policy save fails visibly instead of overwriting a newer version", async ({ page }) => {
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [connector] }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports/tool-policy", async (route) => {
+    if (route.request().method() === "PUT") {
+      const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      assert.equal(body.expectedAccessPolicyVersion, 1);
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({
+        code: "CONNECTOR_POLICY_VERSION_CONFLICT",
+        message: "This connector policy changed while you were editing it. Refresh and review the latest version before saving again.",
+      }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(policy) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connections" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await page.getByRole("button", { name: "Tools & approvals" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
+
+  await expect(page.getByText("This connector policy changed while you were editing it. Refresh and review the latest version before saving again.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save changes" })).toBeEnabled();
+});
+
 test("Exa appears as an available built-in connector in the Search category", async ({ page }) => {
   await page.route("**/api/v1/connections", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [exaConnector] }) });
@@ -251,6 +299,7 @@ test("Exa appears as an available built-in connector in the Search category", as
 });
 
 test("administrators can read member controls, mixed tool decisions, drift, and honest remediation state", async ({ page }) => {
+  let deliveryRetries = 0;
   await page.route("**/api/v1/connections", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({
       connections: [{ ...connector, membersCanManage: false }],
@@ -258,6 +307,10 @@ test("administrators can read member controls, mixed tool decisions, drift, and 
   });
   await page.route("**/api/v1/admin/connectors/reports/effective-policy", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy: effectivePolicy }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports/policy-delivery/retry", async (route) => {
+    deliveryRetries += 1;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ workspaceGrants: { refreshed: 1, failed: 0, appliesOnNextStart: 1, members: [] } }) });
   });
 
   await page.goto("/");
@@ -274,8 +327,14 @@ test("administrators can read member controls, mixed tool decisions, drift, and 
   await expect(tools.getByRole("row").filter({ hasText: "Delete report" })).toContainText("Blocked");
   await expect(tools.getByRole("row").filter({ hasText: "Upload report" })).toContainText("Review required");
   await expect(effective.getByText("1 of 3 active members need the current policy version.", { exact: true })).toBeVisible();
-  await expect(effective.getByText(/Workspace grant delivery is not persisted in this view/)).toBeVisible();
-  await expect(effective.getByText(/does not require a workspace restart/)).toBeVisible();
+  await expect(effective.getByRole("region", { name: "Workspace delivery" })).toContainText("Jane Tan");
+  await expect(effective.getByRole("region", { name: "Workspace delivery" })).toContainText("personal");
+  await expect(effective.getByRole("region", { name: "Workspace delivery" })).toContainText("Retry needed");
+  await expect(effective.getByRole("region", { name: "Workspace delivery" })).toContainText("Applies on next start");
+  await effective.getByRole("button", { name: "Retry failed delivery" }).click();
+  await expect.poll(() => deliveryRetries).toBe(1);
+  await expect(effective.getByText(/records each workspace delivery attempt/)).toBeVisible();
+  await expect(effective.getByText(/does not require a restart/)).toBeVisible();
 
   await page.setViewportSize({ width: 600, height: 900 });
   await expect(tools.locator(".connector-effective-tool-heading")).toBeHidden();

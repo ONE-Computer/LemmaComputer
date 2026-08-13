@@ -143,6 +143,7 @@ const policyMember = (userId: string, policy: EffectivePolicy | null, status: "a
 
 const appFor = async (actor: SessionPrincipal, users: AdminUserSummary[] = []) => {
   const registry = new MemoryConnectorRegistryStore();
+  const workspaceStore = new MemoryWorkspaceStore();
   await registry.saveConnector(connector("acme", "reports"));
   await registry.saveConnector(connector("foreign", "foreign-reports"));
   await registry.saveConnectionState({
@@ -166,9 +167,26 @@ const appFor = async (actor: SessionPrincipal, users: AdminUserSummary[] = []) =
   const identityPolicyStore = {
     listUsers: async (tenantId: string) => tenantId === actor.tenantId ? users : [],
     getEffectivePolicy: async () => null,
+    getPrincipal: async (userId: string) => {
+      const user = users.find((candidate) => candidate.userId === userId && candidate.status === "active");
+      return user ? {
+        ...owner,
+        userId: user.userId,
+        email: user.email,
+        displayName: user.displayName,
+        identity: { ...owner.identity, subjectId: user.userId },
+      } : null;
+    },
   } as unknown as IdentityPolicyStore;
+  for (const user of users.filter((candidate) => candidate.status === "active")) {
+    await workspaceStore.createOrGet(
+      { tenantId: actor.tenantId, subjectId: user.userId, audience: "lemmacomputer-control" },
+      "personal",
+      `fixture-${user.userId}`,
+    );
+  }
   return createControlServer(
-    new MemoryWorkspaceStore(),
+    workspaceStore,
     {} as ControllerClient,
     proxyToken,
     gateway,
@@ -183,6 +201,45 @@ const appFor = async (actor: SessionPrincipal, users: AdminUserSummary[] = []) =
     },
   );
 };
+
+test("policy saves persist named workspace delivery evidence and inactive workspaces apply on next start", async () => {
+  const app = await appFor(owner, [policyMember("jane", null)]);
+  try {
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/connectors/reports/access-policy",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { enabled: true, membersCanManage: false, expectedVersion: 1 },
+    });
+    assert.equal(saved.statusCode, 200);
+    assert.equal(saved.json().policyChange.outcome, "applied");
+    assert.deepEqual(saved.json().workspaceGrants.members, [{
+      userId: "jane",
+      displayName: "jane",
+      email: "jane@example.test",
+      workspaces: [{
+        workspaceId: saved.json().workspaceGrants.members[0].workspaces[0].workspaceId,
+        grantId: "personal",
+        state: "not_created",
+        delivery: "applies_on_next_start",
+        failureCode: null,
+      }],
+    }]);
+
+    const effective = await app.inject({
+      method: "GET",
+      url: "/v1/admin/connectors/reports/effective-policy",
+      headers,
+    });
+    assert.equal(effective.statusCode, 200);
+    assert.equal(effective.json().policy.delivery.policyVersion, 2);
+    assert.equal(effective.json().policy.delivery.members[0].displayName, "jane");
+    assert.equal(effective.json().policy.delivery.members[0].workspaces[0].delivery, "applies_on_next_start");
+    assert.equal(effective.json().policy.remediation.restartRequired, false);
+  } finally {
+    await app.close();
+  }
+});
 
 test("the provider-scoped endpoint returns only safe effective-policy metadata and fails changed tools closed", async () => {
   const app = await appFor(owner);
