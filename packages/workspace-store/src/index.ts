@@ -457,6 +457,7 @@ export interface ActivityStore {
 export interface WorkspaceStore {
   getCurrent(identity: IdentityContext, grantId: string): Promise<WorkspaceRecord | null>;
   listCurrent(identity: IdentityContext): Promise<WorkspaceRecord[]>;
+  listTenantCurrent(tenantId: string): Promise<WorkspaceRecord[]>;
   getOwned(identity: IdentityContext, workspaceId: string): Promise<WorkspaceRecord | null>;
   authorizeWorkspaceAccess(input: IdentityContext & { workspaceId: string; accessGeneration: number }, allowedStates?: WorkspaceState[]): Promise<boolean>;
   createOrGet(identity: IdentityContext, grantId: string, idempotencyKey: string): Promise<WorkspaceRecord>;
@@ -904,6 +905,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     const result = await this.pool.query(
       "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 ORDER BY created_at DESC,id ASC",
       [identity.tenantId, identity.subjectId],
+    );
+    return result.rows.map(mapRow);
+  }
+
+  async listTenantCurrent(tenantId: string) {
+    const result = await this.pool.query(
+      "SELECT * FROM workspaces WHERE tenant_id=$1 ORDER BY created_at DESC,id ASC",
+      [tenantId],
     );
     return result.rows.map(mapRow);
   }
@@ -2327,6 +2336,11 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async listCurrent(identity: IdentityContext) {
     return [...this.records.values()]
       .filter((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId)
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
+  }
+  async listTenantCurrent(tenantId: string) {
+    return [...this.records.values()]
+      .filter((item) => item.tenantId === tenantId)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
   }
   async getOwned(identity: IdentityContext, workspaceId: string) {

@@ -20,6 +20,65 @@ const managedWorkspace = (id: string, name: string, state = "ready") => ({
   createdAt: "2026-08-11T01:00:00.000Z",
 });
 
+test("organization owner can view and rename the organization", async ({ page }) => {
+  let organizationName = "Example Organization";
+  let renamePayload: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "example-owner", displayName: "Example Owner", email: "owner@example.test" },
+      tenant: { id: "acme", displayName: organizationName },
+      roles: ["owner", "administrator"],
+      capabilities: [
+        "organization.read",
+        "organization.manage_members",
+        "organization.manage_roles",
+        "organization.manage_settings",
+      ],
+      resourceCapabilities: [],
+    }),
+  }));
+  await page.route("**/api/v1/admin/organization", async (route) => {
+    renamePayload = route.request().postDataJSON();
+    organizationName = String(renamePayload?.displayName);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ organization: { id: "acme", displayName: organizationName } }),
+    });
+  });
+
+  await page.goto("/?view=settings&section=people");
+  await expect(page.getByRole("heading", { name: "Example Organization" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit organization name" }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit organization name" });
+  await dialog.getByLabel("Organization name").fill("Northwind Research");
+  await dialog.getByRole("button", { name: "Save name" }).click();
+
+  await expect(page.getByRole("heading", { name: "Northwind Research" })).toBeVisible();
+  await expect(page.getByText("Organization name updated to Northwind Research.")).toBeVisible();
+  expect(renamePayload).toEqual({ displayName: "Northwind Research" });
+});
+
+test("organization administrator can view but cannot rename the organization", async ({ page }) => {
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "example-admin", displayName: "Example Admin", email: "admin@example.test" },
+      tenant: { id: "acme", displayName: "Example Organization" },
+      roles: ["admin", "administrator"],
+      capabilities: ["organization.read", "organization.manage_settings"],
+      resourceCapabilities: [],
+    }),
+  }));
+
+  await page.goto("/?view=settings&section=people");
+  await expect(page.getByRole("heading", { name: "Example Organization" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit organization name" })).toHaveCount(0);
+});
+
 test("organization administrator invites a person and manages member access", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1024 });
   await page.goto("/?view=settings");
@@ -39,7 +98,7 @@ test("organization administrator invites a person and manages member access", as
   await expect(page.getByRole("heading", { name: "Policy controls" })).toBeVisible();
   await expect(page.getByText("Claude Desktop", { exact: true })).toBeVisible();
   await expect(page.getByText("Firefox ESR", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tool permissions are managed in Connections" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Review tool permissions in Connectors" })).toBeVisible();
   await page.screenshot({ path: "test-results/workspace-policy-baseline-reviewed.png", fullPage: true });
 
   await page.getByRole("button", { name: "View baseline" }).click();
@@ -71,7 +130,7 @@ test("organization administrator invites a person and manages member access", as
 
   await page.goto("/?view=settings&section=people");
 
-  const sectionActions = ["Invite person", "Initiate organization closure", "Add connection", "Create custom role"];
+  const sectionActions = ["Edit organization name", "Invite person", "Initiate organization closure", "Add connection", "Create custom role"];
   for (const name of sectionActions) {
     const box = await page.getByRole("button", { name, exact: true }).boundingBox();
     expect(box?.width).toBeCloseTo(260, 0);
@@ -1007,9 +1066,11 @@ test("scoped provider administrator sees only server-granted provider and connec
   await expect(page.getByRole("heading", { name: "Provider settings" })).toBeVisible();
   await expect(page.getByText("OpenAI", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Connections" }).click();
+  await page.getByRole("button", { name: "Connectors" }).click();
   const linear = page.locator(".connector-catalog-card").filter({ hasText: "Linear" });
   await linear.getByRole("button", { name: "Manage" }).click();
-  await expect(page.getByRole("heading", { name: "Member connection policy" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tools & approvals" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connector access" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Policy" })).toBeVisible();
+  await page.getByRole("button", { name: "Policy" }).click();
+  await expect(page.getByRole("heading", { name: "Connector access" })).toBeVisible();
 });

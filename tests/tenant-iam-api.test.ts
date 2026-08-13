@@ -150,6 +150,10 @@ class FakeTenantIamStore {
     return { revokedSessions: 1 };
   }
   async unassignOrganizationRole(input: Record<string, unknown>) { this.calls.push({ method: "unassign", ...input }); return { revokedSessions: 1 }; }
+  async updateOrganizationDisplayName(input: Record<string, unknown>) {
+    this.calls.push({ method: "rename", ...input });
+    return { id: String(input.organizationId), displayName: String(input.displayName) };
+  }
 }
 
 const appFor = (actor: SessionPrincipal, store: FakeTenantIamStore) => createControlServer(
@@ -289,6 +293,55 @@ test("organization settings authority is not a super-admin shortcut", async () =
     }
   } finally {
     await app.close();
+  }
+});
+
+test("only the active organization owner can rename the current organization", async () => {
+  const store = new FakeTenantIamStore();
+  const ownerApp = appFor(owner, store);
+  try {
+    const renamed = await ownerApp.inject({
+      method: "PATCH",
+      url: "/v1/admin/organization",
+      headers,
+      payload: { displayName: "  Northwind   Research  " },
+    });
+    assert.equal(renamed.statusCode, 200);
+    assert.deepEqual(renamed.json(), {
+      organization: { id: "acme", displayName: "Northwind Research" },
+    });
+    const renameCall = store.calls.find((call) => call.method === "rename")!;
+    assert.equal(renameCall.organizationId, "acme");
+    assert.equal(renameCall.updatedBy, "iam-owner");
+    assert.equal(renameCall.displayName, "Northwind Research");
+    assert.ok(renameCall.now instanceof Date);
+
+    const invalid = await ownerApp.inject({
+      method: "PATCH",
+      url: "/v1/admin/organization",
+      headers,
+      payload: { displayName: "x" },
+    });
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(store.calls.filter((call) => call.method === "rename").length, 1);
+  } finally {
+    await ownerApp.close();
+  }
+
+  const delegatedStore = new FakeTenantIamStore();
+  const delegatedApp = appFor(settingsOnlyAdministrator, delegatedStore);
+  try {
+    const denied = await delegatedApp.inject({
+      method: "PATCH",
+      url: "/v1/admin/organization",
+      headers,
+      payload: { displayName: "Forbidden Rename" },
+    });
+    assert.equal(denied.statusCode, 403);
+    assert.equal(denied.json().error.code, "ORGANIZATION_OWNER_REQUIRED");
+    assert.equal(delegatedStore.calls.length, 0);
+  } finally {
+    await delegatedApp.close();
   }
 });
 

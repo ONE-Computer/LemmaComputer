@@ -16,6 +16,7 @@ import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
+import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
 import { EntraAuthenticationService, ExternalIdAuthenticationService, testPrincipalFromHeaders } from "./auth.js";
@@ -1112,39 +1113,86 @@ export function createControlServer(
   const refreshOwnedWorkspaceConnectionGrants = async (value: SessionPrincipal) => {
     const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;
     const workspaces = await store.listCurrent(value.identity);
-    const results = await Promise.allSettled(workspaces.map(async (workspace) => {
-      const { policy } = await policyForGrant(value, effective, workspace.grantId);
+    const receipts = await Promise.all(workspaces.map(async (workspace) => {
+      if (["not_created", "stopped", "failed"].includes(workspace.state)) {
+        return {
+          workspaceId: workspace.id,
+          ownerSubjectId: value.userId,
+          grantId: workspace.grantId,
+          workspaceState: workspace.state,
+          outcome: "applies_on_next_start" as const,
+          failureCode: null,
+        };
+      }
+      let policy: RuntimePolicy | null = null;
       try {
-        return await service.refreshPolicyGrant(value.identity, policy, workspace.grantId);
+        ({ policy } = await policyForGrant(value, effective, workspace.grantId));
+        const refreshed = await service.refreshPolicyGrant(value.identity, policy, workspace.grantId);
+        return {
+          workspaceId: workspace.id,
+          ownerSubjectId: value.userId,
+          grantId: workspace.grantId,
+          workspaceState: workspace.state,
+          outcome: refreshed ? "refreshed" as const : "failed" as const,
+          failureCode: refreshed ? null : "CONNECTOR_GRANT_REFRESH_NOT_CONFIRMED",
+        };
       } catch (error) {
         // A connector/model gateway refresh failure must fail closed at the
         // gateway without revoking unrelated workspace-to-Control capabilities
         // such as Sites, governed uploads, or operation status.
-        await service.revokeGatewayGrants(workspace.id, policy).catch(() => undefined);
-        throw error;
+        if (policy) await service.revokeGatewayGrants(workspace.id, policy).catch(() => undefined);
+        return {
+          workspaceId: workspace.id,
+          ownerSubjectId: value.userId,
+          grantId: workspace.grantId,
+          workspaceState: workspace.state,
+          outcome: "failed" as const,
+          failureCode: error instanceof LemmaComputerError ? error.code : "CONNECTOR_GRANT_REFRESH_FAILED",
+        };
       }
     }));
     return {
-      refreshed: results.filter((result) => result.status === "fulfilled" && result.value).length,
-      failed: results.filter((result) => result.status === "rejected").length,
+      refreshed: receipts.filter((receipt) => receipt.outcome === "refreshed").length,
+      failed: receipts.filter((receipt) => receipt.outcome === "failed").length,
+      appliesOnNextStart: receipts.filter((receipt) => receipt.outcome === "applies_on_next_start").length,
+      receipts,
     };
   };
-  const refreshTenantWorkspaceConnectionGrants = async (tenantId: string) => {
-    if (!security.identityPolicyStore) return { refreshed: 0, failed: 0 };
+  const refreshTenantWorkspaceConnectionGrants = async (tenantId: string, changeEventId?: string) => {
+    if (!security.identityPolicyStore) return { refreshed: 0, failed: 0, appliesOnNextStart: 0, members: [] };
     const users = await security.identityPolicyStore.listUsers(tenantId);
     const results = await Promise.allSettled(users.map(async (user) => {
-      if (user.status === "disabled") return { refreshed: 0, failed: 0 };
+      if (user.status === "disabled") return { user, refreshed: 0, failed: 0, appliesOnNextStart: 0, receipts: [] };
       const owner = await security.identityPolicyStore!.getPrincipal(user.userId);
-      if (!owner || owner.tenantId !== tenantId) return { refreshed: 0, failed: 0 };
-      return refreshOwnedWorkspaceConnectionGrants(owner);
+      if (!owner || owner.tenantId !== tenantId) return { user, refreshed: 0, failed: 0, appliesOnNextStart: 0, receipts: [] };
+      return { user, ...(await refreshOwnedWorkspaceConnectionGrants(owner)) };
     }));
-    return results.reduce((summary, result) => {
-      if (result.status === "rejected") return { ...summary, failed: summary.failed + 1 };
-      return {
-        refreshed: summary.refreshed + result.value.refreshed,
-        failed: summary.failed + result.value.failed,
-      };
-    }, { refreshed: 0, failed: 0 });
+    const fulfilled = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const rawReceipts = fulfilled.flatMap((result) => result.receipts);
+    if (changeEventId && security.connectorRegistryStore && rawReceipts.length) {
+      await security.connectorRegistryStore.appendPolicyWorkspaceDeliveryReceipts(rawReceipts.map((receipt) => ({
+        tenantId,
+        changeEventId,
+        ...receipt,
+      })));
+    }
+    return {
+      refreshed: fulfilled.reduce((sum, result) => sum + result.refreshed, 0),
+      failed: fulfilled.reduce((sum, result) => sum + result.failed, 0) + results.filter((result) => result.status === "rejected").length,
+      appliesOnNextStart: fulfilled.reduce((sum, result) => sum + result.appliesOnNextStart, 0),
+      members: fulfilled.filter((result) => result.receipts.length).map((result) => ({
+        userId: result.user.userId,
+        displayName: result.user.displayName,
+        email: result.user.email,
+        workspaces: result.receipts.map((receipt) => ({
+          workspaceId: receipt.workspaceId,
+          grantId: receipt.grantId,
+          state: receipt.workspaceState,
+          delivery: receipt.outcome,
+          failureCode: receipt.failureCode,
+        })),
+      })),
+    };
   };
   const usesManagedProvider = (policy: RuntimePolicy, provider: ManagedProviderName) => (
     [policy.modelAlias, ...(policy.agents?.map((agent) => agent.modelAlias) ?? [])]
@@ -2688,6 +2736,37 @@ export function createControlServer(
       actor.userId,
     );
   });
+  app.patch<{ Body: { displayName: string } }>("/v1/admin/organization", async (request) => {
+    const actor = requirePermission(request, "organization.manage_settings");
+    if (actor.role !== "owner") {
+      throw new LemmaComputerError(
+        "ORGANIZATION_OWNER_REQUIRED",
+        "Only the active organization owner can rename the organization",
+        403,
+      );
+    }
+    const organizationStore = security.identityPolicyStore;
+    if (!organizationStore?.updateOrganizationDisplayName) {
+      throw new LemmaComputerError(
+        "ORGANIZATION_SETTINGS_NOT_CONFIGURED",
+        "Organization settings are unavailable",
+        503,
+        true,
+      );
+    }
+    const input = z.strictObject({
+      displayName: z.string()
+        .transform((value) => value.trim().replace(/\s+/g, " "))
+        .pipe(z.string().min(2).max(100)),
+    }).parse(request.body ?? {});
+    const organization = await organizationStore.updateOrganizationDisplayName({
+      organizationId: actor.tenantId,
+      updatedBy: actor.userId,
+      displayName: input.displayName,
+      now: new Date(),
+    });
+    return { organization };
+  });
   app.post<{ Body: { targetMembershipId: string } }>("/v1/admin/organization/ownership-transfer", async (request) => {
     const actor = requirePermission(request, "organization.transfer_ownership");
     if (actor.role !== "owner") {
@@ -3146,19 +3225,53 @@ export function createControlServer(
     const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
-    const effective = users.map((user) => user.effectivePolicy).find(Boolean) ?? null;
+    const workspaceOwners = new Set((await store.listTenantCurrent(actor.tenantId)).map((workspace) => workspace.subjectId));
+    const policyAuthority = resolveConnectorPolicyApplication(users.map((user) => ({
+      userId: user.userId,
+      status: user.status,
+      policy: user.effectivePolicy ? {
+        policyVersionId: user.effectivePolicy.policyVersionId,
+        version: user.effectivePolicy.version,
+        documentHash: user.effectivePolicy.documentHash,
+      } : null,
+    })));
+    const policyApplication = resolveConnectorPolicyApplication(users
+      .filter((user) => workspaceOwners.has(user.userId))
+      .map((user) => ({
+        userId: user.userId,
+        status: user.status,
+        policy: user.effectivePolicy ? {
+          policyVersionId: user.effectivePolicy.policyVersionId,
+          version: user.effectivePolicy.version,
+          documentHash: user.effectivePolicy.documentHash,
+        } : null,
+      })), {
+        currentVersion: policyAuthority.currentVersion,
+        conflict: policyAuthority.state === "conflict",
+      });
+    // A unique version/hash makes every matching assignment content-equivalent.
+    // Sorting by user id is only a deterministic way to obtain that verified
+    // document; it never decides which member's version becomes current.
+    const effective = policyAuthority.currentVersion
+      ? users
+          .filter((user) => user.effectivePolicy
+            && user.effectivePolicy.version === policyAuthority.currentVersion!.version
+            && user.effectivePolicy.documentHash === policyAuthority.currentVersion!.documentHash)
+          .sort((left, right) => left.userId.localeCompare(right.userId))[0]?.effectivePolicy ?? null
+      : null;
     const runtime = effective ? runtimePolicyFor(effective) : null;
     return {
       serverName: "lemmacomputer_ms365",
       version: effective?.version ?? 1,
       documentHash: effective?.documentHash ?? "0".repeat(64),
+      policyApplication,
       tools: Object.entries(m365CapabilityDefinitions).map(([name, definition]) => ({
         name,
         displayName: definition.displayName,
         description: definition.description,
         service: definition.service,
         risk: definition.risk,
-        decision: runtime?.toolPolicies[name] ?? definition.mode,
+        decision: runtime?.toolPolicies[name] ?? (policyAuthority.state === "empty" ? definition.mode : "deny"),
       })),
     };
   });
@@ -3169,10 +3282,10 @@ export function createControlServer(
     const expected = Object.keys(m365CapabilityDefinitions).sort();
     if (Object.keys(input.tools).sort().join("\0") !== expected.join("\0")) throw new LemmaComputerError("INVALID_TOOL_POLICY", "A decision is required for every assigned Microsoft 365 tool", 400);
     const savedPolicy = await security.identityPolicyStore.updateMvpToolPolicy({ tenantId: actor.tenantId, updatedBy: actor.userId, tools: input.tools });
-    const workspaceGrants = await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
+    const delivery = await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
     return {
       ...savedPolicy,
-      workspaceGrants,
+      workspaceGrants: { refreshed: delivery.refreshed, failed: delivery.failed },
     };
   });
   app.get("/v1/admin/provider-settings", async (request) => {
@@ -3261,6 +3374,156 @@ export function createControlServer(
       resourceId: connector.id,
     })) };
   });
+  app.get<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/effective-policy", async (request) => {
+    const connectorId = request.params.connectorId;
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: connectorId });
+    if (connectorId === "microsoft-365" && !security.identityPolicyStore) {
+      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
+    }
+    const [protectedOverview, users] = await Promise.all([
+      requireProtectedWorkspacePolicy().overview(actor.tenantId),
+      security.identityPolicyStore
+        ? security.identityPolicyStore.listUsers(actor.tenantId)
+        : Promise.resolve([]),
+    ]);
+    const currentWorkspaces = await store.listTenantCurrent(actor.tenantId);
+    const currentWorkspacesById = new Map(currentWorkspaces.map((workspace) => [workspace.id, workspace]));
+    const workspaceOwners = new Set(currentWorkspaces.map((workspace) => workspace.subjectId));
+    const organizationPolicy = protectedOverview.organizationPolicyVersions[0] ?? null;
+    const policyAuthority = connectorId === "microsoft-365"
+      ? resolveConnectorPolicyApplication(users.map((user) => ({
+          userId: user.userId,
+          status: user.status,
+          policy: user.effectivePolicy ? {
+            policyVersionId: user.effectivePolicy.policyVersionId,
+            version: user.effectivePolicy.version,
+            documentHash: user.effectivePolicy.documentHash,
+          } : null,
+        })))
+      : undefined;
+    const policyApplication = connectorId === "microsoft-365"
+      ? resolveConnectorPolicyApplication(users
+          .filter((user) => workspaceOwners.has(user.userId))
+          .map((user) => ({
+            userId: user.userId,
+            status: user.status,
+            policy: user.effectivePolicy ? {
+              policyVersionId: user.effectivePolicy.policyVersionId,
+              version: user.effectivePolicy.version,
+              documentHash: user.effectivePolicy.documentHash,
+            } : null,
+          })), {
+            currentVersion: policyAuthority?.currentVersion ?? null,
+            conflict: policyAuthority?.state === "conflict",
+          })
+      : undefined;
+    const effective = policyAuthority?.currentVersion
+      ? users
+          .filter((user) => user.effectivePolicy
+            && user.effectivePolicy.version === policyAuthority.currentVersion!.version
+            && user.effectivePolicy.documentHash === policyAuthority.currentVersion!.documentHash)
+          .sort((left, right) => left.userId.localeCompare(right.userId))[0]?.effectivePolicy ?? null
+      : null;
+    const runtime = effective ? runtimePolicyFor(effective) : null;
+    const configuredToolPolicies = connectorId === "microsoft-365"
+      ? Object.fromEntries(Object.entries(m365CapabilityDefinitions).map(([name, definition]) => [
+          name,
+          runtime?.toolPolicies[name] ?? (policyAuthority?.state === "empty" ? definition.mode : "deny"),
+        ]))
+      : undefined;
+    const snapshot = await requireConnections().connectorPolicyAdministrationSnapshot(actor.identity, connectorId, {
+      configuredToolPolicies,
+      ...(connectorId === "microsoft-365" ? {
+        toolDisplayNames: Object.fromEntries(Object.entries(m365CapabilityDefinitions).map(([name, definition]) => [name, definition.displayName])),
+      } : {}),
+      reviewMode: connectorId === "microsoft-365" ? "product_owned" : "provider_definition_hash",
+    });
+    const latestDelivery = await security.connectorRegistryStore?.latestPolicyDelivery(actor.tenantId, connectorId) ?? null;
+    const usersById = new Map(users.map((user) => [user.userId, user]));
+    const deliveryByMember = new Map<string, Array<{
+      workspaceId: string;
+      ownerSubjectId: string;
+      grantId: string;
+      workspaceState: WorkspaceState;
+      outcome: "refreshed" | "failed" | "applies_on_next_start" | "applied_on_start";
+      failureCode: string | null;
+    }>>();
+    const observedDeliveryWorkspaces = new Set<string>();
+    for (const receipt of latestDelivery?.receipts ?? []) {
+      if (observedDeliveryWorkspaces.has(receipt.workspaceId)) continue;
+      observedDeliveryWorkspaces.add(receipt.workspaceId);
+      const currentWorkspace = currentWorkspacesById.get(receipt.workspaceId);
+      if (!currentWorkspace) continue;
+      const current = deliveryByMember.get(receipt.ownerSubjectId) ?? [];
+      current.push({
+        workspaceId: receipt.workspaceId,
+        ownerSubjectId: receipt.ownerSubjectId,
+        grantId: receipt.grantId,
+        workspaceState: currentWorkspace.state,
+        outcome: receipt.outcome === "applies_on_next_start"
+          && ["ready", "open"].includes(currentWorkspace.state)
+          && currentWorkspace.updatedAt >= receipt.occurredAt
+          ? "applied_on_start"
+          : receipt.outcome,
+        failureCode: receipt.failureCode,
+      });
+      deliveryByMember.set(receipt.ownerSubjectId, current);
+    }
+    const policy = resolveEffectiveConnectorPolicy({
+      baseline: {
+        templateVersionId: protectedOverview.baseline.templateVersionId,
+        version: protectedOverview.baseline.version,
+        documentHash: protectedOverview.baseline.documentHash,
+        connectors: protectedOverview.baseline.constraints.connectors,
+      },
+      organizationPolicy: organizationPolicy ? {
+        policyVersionId: organizationPolicy.policyVersionId,
+        version: organizationPolicy.version,
+        documentHash: organizationPolicy.documentHash,
+        connectors: organizationPolicy.constraints.connectors,
+      } : null,
+      ...(policyApplication ? { policyApplication } : {}),
+      ...snapshot,
+    });
+    return {
+      policy: {
+        ...policy,
+        delivery: latestDelivery ? {
+          changeEventId: latestDelivery.event.id,
+          policyVersion: latestDelivery.event.newVersion,
+          changedAt: latestDelivery.event.occurredAt.toISOString(),
+          changedBy: latestDelivery.event.actorUserId,
+          members: [...deliveryByMember.values()].map((receipts) => {
+            const first = receipts[0]!;
+            const user = usersById.get(first.ownerSubjectId);
+            return {
+              userId: first.ownerSubjectId,
+              displayName: user?.displayName ?? "Former member",
+              email: user?.email ?? null,
+              workspaces: receipts.map((receipt) => ({
+                workspaceId: receipt.workspaceId,
+                grantId: receipt.grantId,
+                state: receipt.workspaceState,
+                delivery: receipt.outcome,
+                failureCode: receipt.failureCode,
+              })),
+            };
+          }),
+        } : null,
+      },
+    };
+  });
+  app.post<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/policy-delivery/retry", async (request) => {
+    const connectorId = request.params.connectorId;
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: connectorId });
+    const latest = await security.connectorRegistryStore?.latestPolicyDelivery(actor.tenantId, connectorId) ?? null;
+    if (!latest) {
+      throw new LemmaComputerError("CONNECTOR_POLICY_DELIVERY_NOT_FOUND", "Save the connector policy before retrying workspace delivery.", 409);
+    }
+    return {
+      workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId, latest.event.id),
+    };
+  });
   app.post("/v1/admin/connectors/discover", async (request) => {
     const actor = requirePermission(request, "provider.manage");
     return requireConnections().discoverConnector(actor.identity, createConnectorSchema.parse(request.body ?? {}));
@@ -3283,25 +3546,35 @@ export function createControlServer(
     const input = saveHostedConnectorToolPolicySchema.parse(request.body ?? {});
     const saved = await requireConnections().saveConnectorToolPolicy(
       actor.identity,
+      actor.userId,
       request.params.connectorId,
       input.tools,
       input.expectedDocumentHash,
+      input.expectedAccessPolicyVersion,
+      randomUUID(),
     );
-    return { ...saved, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
+    return {
+      ...saved,
+      workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId, saved.policyChange.id),
+    };
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/access-policy", async (request) => {
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
     const input = z.strictObject({
       enabled: z.boolean(),
       membersCanManage: z.boolean(),
+      expectedVersion: z.number().int().positive(),
     }).parse(request.body ?? {});
-    const connector = await requireConnections().updateAccessPolicy(
+    const saved = await requireConnections().updateAccessPolicy(
       actor.identity,
       actor.userId,
       request.params.connectorId,
-      input,
+      { ...input, correlationId: randomUUID() },
     );
-    return { connector, workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId) };
+    return {
+      ...saved,
+      workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId, saved.policyChange.id),
+    };
   });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/icon", async (request) => {
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });

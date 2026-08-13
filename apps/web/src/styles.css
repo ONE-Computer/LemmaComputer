@@ -3919,7 +3919,7 @@ textarea:focus-visible,
 
 .connector-access-policy-card {
   display: grid;
-  grid-template-columns: minmax(240px, 1.4fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) minmax(180px, 1fr);
   align-items: center;
   gap: 22px;
   margin-top: 16px;
@@ -3939,6 +3939,88 @@ textarea:focus-visible,
 .connector-access-policy-card > label span { display: grid; gap: 3px; }
 .connector-access-policy-card > label strong { font-size: 13px; }
 .connector-access-policy-card > label small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.connector-access-policy-card > button { grid-column: 1 / -1; justify-self: end; }
+
+.connector-policy-administration { padding-top: 28px; }
+.connector-policy-administration-heading { max-width: 780px; }
+.connector-policy-administration-heading p,
+.connector-policy-administration-heading h2,
+.connector-policy-administration-heading span { margin: 0; }
+.connector-policy-administration-heading p { color: #5e6874; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.connector-policy-administration-heading h2 { margin: 6px 0 8px; color: #142135; font-size: 24px; letter-spacing: -.02em; }
+.connector-policy-administration-heading span { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.connector-policy-administration .connector-tool-policy { margin-top: 16px; }
+
+.connector-effective-policy-card {
+  margin-top: 16px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+.connector-effective-policy-card.loading,
+.connector-effective-policy-card.error { color: var(--muted); font-size: 13px; }
+.connector-effective-policy-card.error { display: grid; gap: 4px; color: #792d29; }
+.connector-effective-policy-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.connector-effective-policy-heading p,
+.connector-effective-policy-heading h2 { margin: 0; }
+.connector-effective-policy-heading p { color: #5e6874; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.connector-effective-policy-heading h2 { margin-top: 4px; color: #1d2c40; font-size: 18px; }
+.connector-effective-access,
+.connector-tool-decision { color: #30455e; font-size: 12px; font-weight: 700; }
+.connector-effective-access { padding: 5px 9px; border-radius: 999px; background: #edf2f7; }
+.connector-effective-access.allow,
+.connector-tool-decision.allow { color: #14633d; }
+.connector-effective-access.allow { background: #e8f6ee; }
+.connector-effective-access.deny,
+.connector-tool-decision.deny { color: #8a302b; }
+.connector-effective-access.deny { background: #faeceb; }
+.connector-tool-decision.approval_required { color: #785d12; }
+.connector-effective-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.connector-effective-summary > div { padding: 14px; border: 1px solid #e7ebef; border-radius: 7px; background: #fafbfc; }
+.connector-effective-summary dt { color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .03em; }
+.connector-effective-summary dd { display: grid; gap: 4px; margin: 7px 0 0; color: #24364b; font-size: 13px; font-weight: 700; }
+.connector-effective-summary small { color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.45; }
+.connector-effective-summary button { justify-self: start; margin-top: 3px; padding: 0; border: 0; background: transparent; color: var(--blue); font: inherit; font-size: 11px; cursor: pointer; }
+.connector-effective-summary button:hover { text-decoration: underline; }
+.connector-effective-tools { overflow: hidden; border: 1px solid #e1e6eb; border-radius: 7px; }
+.connector-effective-tool-heading,
+.connector-effective-tool-row { display: grid; grid-template-columns: minmax(170px, 1.1fr) minmax(130px, .8fr) minmax(150px, .9fr) minmax(260px, 1.7fr); gap: 18px; padding: 12px 14px; }
+.connector-effective-tool-heading { color: #617083; background: #f5f7f9; font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.connector-effective-tool-row { align-items: start; color: #304155; font-size: 12px; }
+.connector-effective-tool-row + .connector-effective-tool-row { border-top: 1px solid #edf0f3; }
+.connector-effective-tool-row > span { display: grid; gap: 4px; min-width: 0; }
+.connector-effective-tool-row code { overflow: hidden; color: #718095; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.connector-effective-tool-row small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.connector-policy-delivery { margin-top: 16px; padding: 16px; border: 1px solid #e1e6eb; border-radius: 7px; background: #fafbfc; }
+.connector-policy-delivery-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.connector-policy-delivery-heading h3,
+.connector-policy-delivery-heading p { margin: 0; }
+.connector-policy-delivery-heading h3 { color: #26384d; font-size: 14px; }
+.connector-policy-delivery-heading p { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.connector-policy-delivery-summary { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; color: #536276; font-size: 11px; }
+.connector-policy-delivery-summary strong { color: #14633d; }
+.connector-policy-delivery-summary .failed { color: #8a302b; font-weight: 700; }
+.connector-policy-delivery-members { display: grid; gap: 8px; }
+.connector-policy-delivery-members > div { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(0, 1.8fr); gap: 16px; padding-top: 10px; border-top: 1px solid #e8ecef; }
+.connector-policy-delivery-members > div > span { display: grid; gap: 2px; color: #2b3c50; font-size: 12px; }
+.connector-policy-delivery-members small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; }
+.connector-policy-delivery-members ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.connector-policy-delivery-members li { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #546275; font-size: 11px; }
+.connector-policy-delivery-members code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connector-delivery-state { flex: none; font-weight: 700; }
+.connector-delivery-state.refreshed,
+.connector-delivery-state.applied_on_start { color: #14633d; }
+.connector-delivery-state.failed { color: #8a302b; }
+.connector-delivery-state.applies_on_next_start { color: #785d12; }
+.connector-effective-remediation { display: flex; gap: 11px; margin-top: 16px; padding: 14px; border-radius: 7px; background: #f2f6fa; color: #28445e; }
+.connector-effective-remediation.action { background: #fff7e7; color: #705414; }
+.connector-effective-remediation svg { flex: 0 0 auto; width: 19px; height: 19px; }
+.connector-effective-remediation > div { display: grid; gap: 4px; }
+.connector-effective-remediation strong { font-size: 12px; }
+.connector-effective-remediation span,
+.connector-effective-remediation small { font-size: 11px; line-height: 1.5; }
+.connector-effective-remediation small { color: var(--muted); }
 
 .add-connector-app-credentials {
   margin-top: 18px;
@@ -5411,6 +5493,16 @@ textarea:focus-visible,
   .connector-removal-card { align-items: flex-start; flex-direction: column; }
   .connector-removal-card .danger-button { width: 100%; }
   .connector-access-policy-card { grid-template-columns: 1fr; align-items: stretch; }
+  .connector-access-policy-card > button { width: 100%; }
+  .connector-effective-policy-card { padding: 18px; }
+  .connector-effective-policy-heading { align-items: flex-start; flex-direction: column; }
+  .connector-effective-summary { grid-template-columns: 1fr; }
+  .connector-effective-tool-heading { display: none; }
+  .connector-effective-tool-row { grid-template-columns: 1fr; gap: 13px; padding: 16px; }
+  .connector-effective-tool-row > [data-label]::before { color: #68727d; content: attr(data-label); font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .connector-policy-delivery-heading { align-items: stretch; flex-direction: column; }
+  .connector-policy-delivery-heading button { width: 100%; }
+  .connector-policy-delivery-members > div { grid-template-columns: 1fr; gap: 8px; }
 
   .workspace-overview-heading {
     align-items: start;
@@ -6434,10 +6526,14 @@ textarea:focus-visible,
   padding: 0 18px;
   border-bottom: 1px solid #e2e2df;
 }
+.tool-policy-list label.with-effective-policy { grid-template-columns: minmax(0, 1.15fr) minmax(190px, .85fr) 210px; }
 .tool-policy-list label:last-child { border-bottom: 0; }
 .tool-policy-list label > span { display: grid; gap: 5px; }
 .tool-policy-list small { color: #68727d; }
 .tool-policy-list code { width: fit-content; color: #39536e; font-size: 12px; }
+.tool-policy-effective { align-content: center; padding-left: 18px; border-left: 1px solid #e6e9ec; }
+.tool-policy-effective > small { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.tool-policy-effective > span { color: #68727d; font-size: 10px; line-height: 1.45; }
 .tool-definition-preview { margin-top: 4px; color: #39536e; font-size: 12px; }
 .tool-definition-preview summary { width: fit-content; cursor: pointer; color: #24568f; }
 .tool-definition-preview pre { max-height: 220px; max-width: 100%; margin: 7px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #33485d; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
@@ -6569,7 +6665,9 @@ textarea:focus-visible,
   .tool-policy-card { padding: 22px 18px; }
   .tool-policy-heading,
   .tool-policy-actions { align-items: stretch; flex-direction: column; }
-  .tool-policy-list label { grid-template-columns: 1fr; gap: 14px; padding: 20px 0; }
+  .tool-policy-list label,
+  .tool-policy-list label.with-effective-policy { grid-template-columns: 1fr; gap: 14px; padding: 20px 0; }
+  .tool-policy-effective { padding: 12px 0 0; border-top: 1px solid #e6e9ec; border-left: 0; }
   .connector-detail-header { grid-template-columns: 58px minmax(0, 1fr); }
   .connector-detail-header .connection-logo { width: 54px; height: 54px; }
   .connector-detail-header > .connection-status { grid-column: 2; width: fit-content; }

@@ -163,6 +163,35 @@ test("organization onboarding is atomic, replay-safe, profile-aware, and creates
       now: customerManaged.now,
     }))?.membershipId, first.membership.id);
 
+    const renamed = await store.updateOrganizationDisplayName({
+      organizationId: first.organization.id,
+      updatedBy: createdOwnerUserId,
+      displayName: "Renamed Customer Organization",
+      now: new Date("2026-08-09T02:05:00.000Z"),
+    });
+    assert.deepEqual(renamed, {
+      id: first.organization.id,
+      displayName: "Renamed Customer Organization",
+    });
+    const renamedProjection = await pool.query(
+      `SELECT organization.display_name AS organization_display_name,
+         tenant.display_name AS tenant_display_name,audit.detail
+       FROM organizations organization
+       JOIN tenants tenant ON tenant.id=organization.id
+       JOIN organization_lifecycle_audit_events audit
+         ON audit.organization_id=organization.id AND audit.event_type='organization.renamed'
+       WHERE organization.id=$1`,
+      [first.organization.id],
+    );
+    assert.deepEqual(renamedProjection.rows, [{
+      organization_display_name: "Renamed Customer Organization",
+      tenant_display_name: "Renamed Customer Organization",
+      detail: {
+        previousDisplayName: "Customer Managed",
+        displayName: "Renamed Customer Organization",
+      },
+    }]);
+
     const firstOwner = await pool.query(
       "SELECT subject_user_id FROM organization_memberships WHERE id=$1",
       [first.membership.id],
@@ -186,6 +215,12 @@ test("organization onboarding is atomic, replay-safe, profile-aware, and creates
        ) VALUES ($1,$2,$3,$4,'active','member',$5,$5)`,
       [targetMembershipId, first.organization.id, targetAccountUserId, targetUserId, firstOwner.rows[0].subject_user_id],
     );
+    await assert.rejects(() => store.updateOrganizationDisplayName({
+      organizationId: first.organization.id,
+      updatedBy: targetUserId,
+      displayName: "Forbidden Member Rename",
+      now: new Date("2026-08-09T02:06:00.000Z"),
+    }), { code: "ORGANIZATION_OWNER_REQUIRED" });
     await assert.rejects(() => store.transferOrganizationOwnership({
       organizationId: first.organization.id,
       currentOwnerUserId: firstOwner.rows[0].subject_user_id,
