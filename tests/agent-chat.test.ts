@@ -213,6 +213,30 @@ test("trusted browser chat identities reach each vendor's per-turn execution bou
   assert.match(adapter, /codex = AsyncCodex\(codex_config\(\)\)/);
 });
 
+test("every reasoning-capable runtime delegates provider effort to the signed governed route", async () => {
+  const [adapter, gateway, hermesConfig] = await Promise.all([
+    readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8"),
+    readFile(new URL("../docker/workspace/lemmacomputer-gateway-proxy.py", import.meta.url), "utf8"),
+    readFile(new URL("../docker/workspace/lemmacomputer-hermes-config.py", import.meta.url), "utf8"),
+  ]);
+  const claude = adapter.slice(adapter.indexOf("async def claude_vendor_events"), adapter.indexOf("async def codex_vendor_events"));
+  const codex = adapter.slice(adapter.indexOf("def codex_config"), adapter.indexOf("async def hermes_vendor_events"));
+  const hermes = adapter.slice(adapter.indexOf("async def hermes_vendor_events"), adapter.indexOf("def vendor_events"));
+
+  assert.match(claude, /ANTHROPIC_CUSTOM_HEADERS.*x-lemmacomputer-ai-task-binding/s);
+  assert.match(codex, /"http_headers": \{[\s\S]*"x-lemmacomputer-ai-task-binding": usage_task_binding/);
+  assert.match(hermes, /"x-lemmacomputer-ai-task-binding": usage_task_binding/);
+  assert.doesNotMatch(codex, /\beffort\s*=/);
+  assert.doesNotMatch(codex, /item\/reasoning\/textDelta/);
+  assert.doesNotMatch(hermes, /reasoning\.available/);
+  assert.match(hermesConfig, /"reasoning_effort": False/);
+  assert.match(
+    gateway,
+    /for name in \("thinking", "output_config", "reasoning_effort", "reasoning"\):[\s\S]*request\.pop\(name, None\)/,
+  );
+  assert.match(gateway, /metadata\["lemmacomputer_requested_reasoning_effort"\] = reasoning_effort/);
+});
+
 test("agent turns receive a fresh trusted timezone context and require clarification without one", async () => {
   const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
   assert.match(adapter, /CONFIGURED_TIME_ZONE = os\.environ\.get\("LEMMACOMPUTER_TIME_ZONE", ""\)\.strip\(\)/);

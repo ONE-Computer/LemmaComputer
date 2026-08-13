@@ -1,6 +1,6 @@
 # Governed thinking-effort qualification
 
-This document is the reviewed capability record for LemmaComputer's provider-neutral thinking-effort control and its first agent adapter. The product control is exposed only when both the selected agent runtime and governed model route match reviewed qualifications. Unknown agents, providers, models, or client versions fail closed and do not expose an effort selector.
+This document is the reviewed capability record for LemmaComputer's provider-neutral thinking-effort control and its first qualified agent adapter. The product control is exposed only when both the selected agent runtime and governed model route match reviewed qualifications. Unknown or discovery-only agents, providers, models, or client versions fail closed and do not expose an effort selector. The cross-runtime review states and promotion gates are defined in [Reasoning adapter qualification](reasoning-adapter-qualification.md).
 
 Route qualification ID: `anthropic-claude-4.6-4.8-effort-route-2026-08-13`
 
@@ -20,8 +20,8 @@ Agent-adapter qualification ID: `claude-cli-2.1.215-governed-effort-adapter-2026
 | Agent runtime | Pinned version | Product levels | Status |
 | --- | --- | --- | --- |
 | Claude CLI | `2.1.215` | Auto, Low, Medium, High | Qualified for signed, conversation-pinned propagation |
-| Hermes Agent CLI | `0.19.0` | None | Adapter and MCP/tool compatibility not yet qualified; fail closed |
-| Codex CLI | `0.144.4` | None | Adapter not yet qualified; fail closed |
+| Hermes Agent CLI | `0.19.0` | None | Discovery recorded; credentialed reasoning-plus-tool evidence remains incomplete; fail closed |
+| Codex CLI | `0.144.4` | None | Discovery recorded; credentialed reasoning-plus-tool evidence remains incomplete; fail closed |
 | Any other runtime or version | Any | None | No reviewed registration; fail closed |
 
 `Auto` is a LemmaComputer product setting, not a provider effort value. Control resolves it to the organization maximum (`low`, `medium`, or `high`) before route selection. The protected maximum `max` is deliberately clipped to product `high`; `xhigh` and `max` are not user-selectable in this phase.
@@ -39,7 +39,7 @@ The qualification is based on Anthropic's current documented contracts for [adap
 
 ## Adapter extension contract
 
-Adding an agent does not add a new Web or Control conditional. It adds a reviewed adapter registration containing the exact catalog ID, pinned runtime version, and supported product levels, plus runtime qualification evidence. Provider/model route qualifications remain separate because an agent transport and a model route can support different subsets. A level is exposed only when both sides include it.
+Adding an agent does not add a new Web or Control conditional. Exact runtime pins may first land as discovery records, which remain ineligible for product controls. Promotion adds a reviewed qualified registration containing the exact catalog ID, pinned runtime version, supported product levels, and completed runtime evidence. Provider/model route qualifications remain separate because an agent transport and a model route can support different subsets. A level is exposed only when both sides include it.
 
 `Auto`, `Low`, `Medium`, and `High` are stable LemmaComputer product intents, not claims that different providers use identical token budgets or reasoning semantics. Each adapter or route may translate or narrow them. No adapter may expose hidden thinking content.
 
