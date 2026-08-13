@@ -523,13 +523,17 @@ def _request_usage_context_and_strip_reserved(kwargs, source_attempt_id=None):
     return task_binding, parent_attempt_id
 
 
+def _is_internal_responses_conversion(kwargs, call_type):
+    call_type_value = str(getattr(call_type, "value", call_type) or "").lower()
+    return "response" in call_type_value or _nested_parameter(kwargs, "aresponses") is True
+
+
 def _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
     """Accept a signed same attempt or LiteLLM's internal Responses conversion."""
     if not isinstance(source_attempt_id, str) or not source_attempt_id:
         return False
     route_provider = route.get("lemmacomputer_provider") if isinstance(route, dict) else None
-    call_type_value = str(getattr(call_type, "value", call_type) or "").lower()
-    internal_responses_conversion = "response" in call_type_value
+    internal_responses_conversion = _is_internal_responses_conversion(kwargs, call_type)
     for metadata in _metadata_dicts(kwargs):
         chain = _verified_usage_chain(metadata.get(USAGE_CHAIN_KEY))
         state = metadata.get(USAGE_STATE_KEY)
@@ -1165,10 +1169,13 @@ async def _record_routing_observation(kwargs, event_result, completion_payload, 
         "decisionId": state["routingDecisionId"],
         "usageEventId": event_id,
         "outcome": "success" if completion_payload["outcome"] == "success" else "error",
-        "actualCost": event_result.get("providerCost"),
-        "currency": event_result.get("currency"),
         "latencyMs": completion_payload.get("latencyMs"),
     }
+    provider_cost = event_result.get("providerCost")
+    currency = event_result.get("currency")
+    if provider_cost is not None and currency is not None:
+        observation["actualCost"] = provider_cost
+        observation["currency"] = currency
     health_status = _deployment_health_status(response_obj, completion_payload["outcome"])
     if health_status:
         observation["deploymentHealth"] = health_status
@@ -1264,6 +1271,14 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
             )
         route = _model_info(kwargs)
         try:
+            source_attempt_id = _source_attempt_id(kwargs, route) if route else None
+            # LiteLLM's Chat Completions -> Responses bridge invokes this hook
+            # again as `acompletion`, but marks the nested call with
+            # `aresponses=true`. Reuse only the callback-signed admission for
+            # the exact provider/deployment already verified on the outer
+            # call; otherwise continue through the normal fail-closed path.
+            if _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
+                return _provider_request(kwargs)
             trusted = _trusted_key_metadata(kwargs)
             if trusted.get("lemmacomputer_policy_model_alias") == "lemmacomputer-auto":
                 if not routing_state:
@@ -1282,9 +1297,6 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                 await asyncio.to_thread(_usage_request, "routing/verify", {
                     "binding": routing_state.get("binding"), "actual": actual,
                 })
-            source_attempt_id = _source_attempt_id(kwargs, route) if route else None
-            if _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
-                return _provider_request(kwargs)
             task_binding, parent_attempt_id = _request_usage_context_and_strip_reserved(
                 kwargs, source_attempt_id
             )

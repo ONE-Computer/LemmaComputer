@@ -114,6 +114,11 @@ services:
     env_file:
       - path: .runtime-env/litellm.env
         format: raw
+    environment:
+      # OpenAI rejects function tools plus reasoning effort on legacy Chat
+      # Completions. Enable pinned LiteLLM's built-in OpenAI-only Responses
+      # bridge before workers import the LiteLLM module.
+      LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES: "true"
     networks:
       - gateway-private
       - mcp-client-private

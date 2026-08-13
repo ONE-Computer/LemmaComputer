@@ -56,9 +56,11 @@ export const reasoningAdapterEvidenceSchema = z.strictObject({
   recordedAt: z.string().datetime({ offset: true }),
   sourceCommit: gitCommitSchema,
   runtime: z.strictObject({
+    reviewState: z.enum(["candidate", "qualified"]),
     agentCatalogId: identifierSchema,
     clientVersion: identifierSchema,
-    discoveryId: identifierSchema,
+    discoveryId: identifierSchema.optional(),
+    qualificationId: identifierSchema.optional(),
     proposedEffortLevels: z.array(effortSchema).min(1).max(3),
   }),
   route: z.strictObject({
@@ -130,6 +132,12 @@ export const reasoningAdapterEvidenceSchema = z.strictObject({
   if (value.route.reviewState === "qualified" && value.route.discoveryId) {
     context.addIssue({ code: "custom", path: ["route", "discoveryId"], message: "A qualified route must use only its qualification ID" });
   }
+  if (value.runtime.reviewState === "candidate" && (!value.runtime.discoveryId || value.runtime.qualificationId)) {
+    context.addIssue({ code: "custom", path: ["runtime"], message: "A candidate runtime must use only its reviewed discovery ID" });
+  }
+  if (value.runtime.reviewState === "qualified" && (!value.runtime.qualificationId || value.runtime.discoveryId)) {
+    context.addIssue({ code: "custom", path: ["runtime"], message: "A qualified runtime must use only its qualification ID" });
+  }
   const resumed = value.levels.find((level) => level.conversationId === value.resume.conversationId);
   if (!resumed || resumed.requestedEffort !== value.resume.requestedEffort || resumed.resolvedEffort !== value.resume.resolvedEffort) {
     context.addIssue({ code: "custom", path: ["resume"], message: "Resume evidence must retain one observed conversation effort" });
@@ -183,8 +191,14 @@ export const validateReasoningAdapterEvidence = (
     agentCatalogId: evidence.runtime.agentCatalogId,
     clientVersion: evidence.runtime.clientVersion,
   });
-  if (!review || review.reviewStatus !== "discovery") fail("RUNTIME_DISCOVERY_NOT_FOUND");
-  if (review.discoveryId !== evidence.runtime.discoveryId) fail("RUNTIME_DISCOVERY_MISMATCH");
+  if (!review) fail("RUNTIME_REVIEW_NOT_FOUND");
+  if (evidence.runtime.reviewState === "candidate") {
+    if (review.reviewStatus !== "discovery") fail("RUNTIME_REVIEW_STATE_MISMATCH");
+    if (review.discoveryId !== evidence.runtime.discoveryId) fail("RUNTIME_DISCOVERY_MISMATCH");
+  } else {
+    if (review.reviewStatus !== "qualified") fail("RUNTIME_REVIEW_STATE_MISMATCH");
+    if (review.qualificationId !== evidence.runtime.qualificationId) fail("RUNTIME_QUALIFICATION_MISMATCH");
+  }
   if (evidence.runtime.proposedEffortLevels.some((effort) => !review.effortLevels.includes(effort))) {
     fail("RUNTIME_EFFORT_NOT_REVIEWED");
   }

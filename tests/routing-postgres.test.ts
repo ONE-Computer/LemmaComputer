@@ -374,7 +374,10 @@ test(
         taskId: "task",
         taskBindingProvenance: "explicit_signed",
         contextKind: "chat",
-        policyVersionId: policy,
+        // Usage admission records the workspace authorization policy, while
+        // the routing decision records its independently versioned routing
+        // policy. Their IDs are intentionally different authorities.
+        policyVersionId: randomUUID(),
         requestedAlias: "lemmacomputer-auto",
         requestedServiceClass: "auto",
         selectedServiceClass: "lite",

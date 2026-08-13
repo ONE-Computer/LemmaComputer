@@ -1700,6 +1700,7 @@ export function createControlServer(
     if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const input = z.strictObject({
       requestedServiceClass: z.enum(["auto", "lite", "balanced", "pro"]),
+      requestedReasoningEffort: z.enum(["low", "medium", "high"]).optional(),
       taskId: z.string().min(1).max(256),
     }).parse(request.body ?? {});
     const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
@@ -1712,7 +1713,39 @@ export function createControlServer(
     if (input.requestedServiceClass !== "auto") {
       await requireChatServiceClass(owner, input.requestedServiceClass);
     }
-    const binding = issueUsageTaskBinding(owner, actor.workspaceId, actor.agentId, "background", input.taskId, undefined, undefined, input.requestedServiceClass, agentInstanceId);
+    const assigned = policy.agents?.find((candidate) => candidate.agentId === actor.agentId);
+    const catalogId = assigned?.catalogId ?? ({
+      "claude-desktop-managed-v1": "claude-desktop",
+      "claude-cli-managed-v1": "claude-cli",
+      "codex-cli-managed-v1": "codex-cli",
+      "hermes-desktop-managed-v1": "hermes-desktop",
+      "hermes-claw-managed-v1": "hermes-claw",
+    } as const)[policy.agentProfile as Exclude<typeof policy.agentProfile, "lemmacomputer-default-agent">];
+    if (input.requestedReasoningEffort) {
+      if (!catalogId) {
+        throw new LemmaComputerError("MODEL_REASONING_EFFORT_UNAVAILABLE", "This agent has no qualified thinking-effort adapter", 422);
+      }
+      await requireReasoningEffort(
+        owner,
+        policy,
+        catalogId,
+        input.requestedServiceClass,
+        input.requestedReasoningEffort,
+      );
+    }
+    const binding = issueUsageTaskBinding(
+      owner,
+      actor.workspaceId,
+      actor.agentId,
+      "background",
+      input.taskId,
+      undefined,
+      undefined,
+      input.requestedServiceClass,
+      agentInstanceId,
+      input.requestedReasoningEffort,
+      policy.maximumReasoningEffort,
+    );
     if (!binding) throw new LemmaComputerError("AI_USAGE_NOT_CONFIGURED", "AI usage governance is unavailable", 503, true);
     return { binding };
   });

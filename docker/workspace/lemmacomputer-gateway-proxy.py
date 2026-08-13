@@ -218,10 +218,38 @@ def native_service_class_for_model(requested_model: str) -> str:
     return DEFAULT_SERVICE_CLASS
 
 
-def issue_task_binding(agent_instance_id: str | None, requested_service_class: str) -> str:
+def native_reasoning_effort(request: dict) -> str | None:
+    """Return the product effort requested by an untrusted native client.
+
+    The value is only intent. Control still validates the exact agent adapter,
+    route, and organization ceiling before signing it into a task binding.
+    """
+    requested = request.get("reasoning_effort")
+    if requested in (None, False, "", "none"):
+        return None
+    if requested not in {"low", "medium", "high"}:
+        raise ValueError("reasoning effort is not assigned; choose low, medium, or high")
+    return requested
+
+
+def issue_task_binding(
+    agent_instance_id: str | None,
+    requested_service_class: str,
+    requested_reasoning_effort: str | None = None,
+) -> str:
     if requested_service_class not in {"lite", "balanced", "pro"}:
         raise ValueError("native model mode must be explicit")
-    payload = json.dumps({"requestedServiceClass": requested_service_class, "taskId": f"workspace-native:{uuid.uuid4()}"}, separators=(",", ":")).encode()
+    if requested_reasoning_effort is not None and requested_reasoning_effort not in {"low", "medium", "high"}:
+        raise ValueError("native reasoning effort is not assigned")
+    payload = json.dumps({
+        "requestedServiceClass": requested_service_class,
+        "taskId": f"workspace-native:{uuid.uuid4()}",
+        **(
+            {"requestedReasoningEffort": requested_reasoning_effort}
+            if requested_reasoning_effort is not None
+            else {}
+        ),
+    }, separators=(",", ":")).encode()
     control_path = CONTROL.path.rstrip("/")
     path = f"{control_path}/internal/v1/agent/usage-bindings"
     target = CONTROL._replace(path=path, query="", fragment="").geturl()
@@ -751,7 +779,7 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("inference model is required")
                     task_binding = issue_task_binding(request_agent_instance_id(
                         self.headers.get("x-lemmacomputer-agent-instance-id")
-                    ), native_service_class_for_model(requested_model))
+                    ), native_service_class_for_model(requested_model), native_reasoning_effort(requested_document))
                 if task_binding is not None and (
                     not 32 <= len(task_binding) <= 4096
                     or not TASK_BINDING_PATTERN.fullmatch(task_binding)

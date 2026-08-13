@@ -10,9 +10,10 @@ const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url)
 const execFileAsync = promisify(execFile);
 
 test("the pinned Hermes runtime forwards each AI usage binding without shared state", async () => {
-  const [dockerfile, patch, chatAdapter] = await Promise.all([
+  const [dockerfile, patch, desktopPatch, chatAdapter] = await Promise.all([
     source("docker/Dockerfile.workspace"),
     source("docker/workspace/hermes-agent-lemmacomputer.patch"),
+    source("docker/workspace/hermes-desktop-governed-effort.patch"),
     source("docker/workspace/lemmacomputer-agent-chat.py"),
   ]);
   assert.match(dockerfile, /HERMES_AGENT_TAG=v2026\.7\.20/);
@@ -21,6 +22,12 @@ test("the pinned Hermes runtime forwards each AI usage binding without shared st
     dockerfile,
     /patch --batch --forward --fuzz=0 -d \/opt\/lemmacomputer\/hermes-agent -p1 < \/tmp\/hermes-agent-lemmacomputer\.patch/,
   );
+  assert.match(
+    dockerfile,
+    /patch --batch --forward --fuzz=0 -d \/src -p1 < \/tmp\/hermes-desktop-governed-effort\.patch/,
+  );
+  assert.match(desktopPatch, /\['low', 'medium', 'high'\]/);
+  assert.match(desktopPatch, /provider === 'custom' && model\.startsWith\('lemmacomputer-'\)/);
 
   const additions = patch
     .split("\n")

@@ -9,14 +9,16 @@ ARG HERMES_AGENT_SHA256=285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa016
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
-    && apt-get install -y --no-install-recommends build-essential ca-certificates curl git python3 \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl git patch python3 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+COPY docker/workspace/hermes-desktop-governed-effort.patch /tmp/hermes-desktop-governed-effort.patch
 RUN curl -fsSLo /tmp/hermes-agent.tar.gz \
       "https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_AGENT_TAG}.tar.gz" \
     && echo "${HERMES_AGENT_SHA256}  /tmp/hermes-agent.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/hermes-agent.tar.gz -C /src --strip-components=1 \
+    && patch --batch --forward --fuzz=0 -d /src -p1 < /tmp/hermes-desktop-governed-effort.patch \
     && npm ci \
     && npm run pack --workspace apps/desktop \
     && test -x /src/apps/desktop/release/linux-unpacked/Hermes

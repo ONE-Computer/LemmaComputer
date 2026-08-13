@@ -644,9 +644,10 @@ export const withOpenWorkspaceProfile = (document: OwnedJson): OwnedJson | null 
   };
 };
 
-export const mvpPolicyDocument = (
+const createMvpPolicyDocument = (
   revisionNote = "Initial MVP policy",
   modelAliases: readonly string[] = mvpDefaultModelAliases,
+  includeReasoningCeiling = true,
 ) => ({
   schemaVersion: 1,
   revisionNote,
@@ -655,6 +656,7 @@ export const mvpPolicyDocument = (
   agentProfile: "claude-desktop-managed-v1",
   agents: [...mvpAgentIds],
   defaultAgents: [...mvpDefaultAgentIds],
+  ...(includeReasoningCeiling ? { maximumReasoningEffort: "max" } : {}),
   applications: [...mvpApplicationIds],
   defaultApplications: [...mvpDefaultApplicationIds],
   // The demo bootstrap uses only routes managed by Provider settings.
@@ -676,11 +678,18 @@ export const mvpPolicyDocument = (
   },
 }) satisfies OwnedJson;
 
+export const mvpPolicyDocument = (
+  revisionNote = "Initial MVP policy",
+  modelAliases: readonly string[] = mvpDefaultModelAliases,
+) => createMvpPolicyDocument(revisionNote, modelAliases);
+
 // Only exact historic defaults are upgraded. Customer-created policy versions
 // remain opt-in and are never broadened by the demo adoption path.
 const historicMvpPolicyDocuments = () => [
-  ...historicMvpDefaultModelAliasSets.map((aliases) => mvpPolicyDocument("Initial MVP policy", aliases)),
-  mvpPolicyDocument("Enabled Bedrock for the historic default MVP policy", historicMvpDefaultModelAliasSets[2]),
+  ...historicMvpDefaultModelAliasSets.map((aliases) => createMvpPolicyDocument("Initial MVP policy", aliases, false)),
+  createMvpPolicyDocument("Initial MVP policy", mvpDefaultModelAliases, false),
+  createMvpPolicyDocument("Enabled Bedrock for the historic default MVP policy", historicMvpDefaultModelAliasSets[2], false),
+  createMvpPolicyDocument("Enabled managed GLM and Bedrock for the demo default policy", mvpDefaultModelAliases, false),
 ];
 
 const stableJson = (value: OwnedJson): string => {

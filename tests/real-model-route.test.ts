@@ -23,8 +23,9 @@ test("LiteLLM keeps independent request capacity for live MCP authorization call
 });
 
 test("OpenAI, Anthropic, GLM, and Bedrock routes are database-managed", async () => {
-  const [config, providerSettings, bootstrapPolicy] = await Promise.all([
+  const [config, compose, providerSettings, bootstrapPolicy] = await Promise.all([
     source("config/litellm/config.yaml"),
+    source("compose.yaml"),
     source("packages/litellm-adapter/src/provider-settings.ts"),
     source("packages/workspace-store/src/identity-policy.ts"),
   ]);
@@ -32,6 +33,7 @@ test("OpenAI, Anthropic, GLM, and Bedrock routes are database-managed", async ()
     assert.doesNotMatch(config, new RegExp(`model_name: ${alias}`));
   }
   assert.match(config, /model_list: \[\]/);
+  assert.match(compose, /LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES:\s*"true"/);
   assert.doesNotMatch(config, /api_key: os\.environ/);
   assert.match(providerSettings, /managedProviderModels/);
   assert.match(providerSettings, /litellm_credential_name/);
@@ -52,7 +54,8 @@ test("managed Claude Desktop accepts the organization auto route", async () => {
 });
 
 test("historic demo defaults gain GLM and Bedrock while customer policy remains unchanged", async () => {
-  const historic = mvpPolicyDocument("Initial MVP policy", ["lemmacomputer-claude", "lemmacomputer-openai"]);
+  const currentShape = mvpPolicyDocument("Initial MVP policy", ["lemmacomputer-claude", "lemmacomputer-openai"]);
+  const { maximumReasoningEffort: _legacyMissingCeiling, ...historic } = currentShape;
   const upgraded = upgradeHistoricMvpPolicyDocument(historic);
   assert.ok(upgraded && typeof upgraded === "object" && !Array.isArray(upgraded));
   assert.deepEqual((upgraded as Record<string, unknown>).modelAliases, [
@@ -61,6 +64,20 @@ test("historic demo defaults gain GLM and Bedrock while customer policy remains 
     "lemmacomputer-glm",
     "lemmacomputer-bedrock",
   ]);
+  assert.equal((upgraded as Record<string, unknown>).maximumReasoningEffort, "max");
+  const currentLegacyShape = mvpPolicyDocument(
+    "Initial MVP policy",
+  );
+  const {
+    maximumReasoningEffort: _currentLegacyMissingCeiling,
+    ...currentLegacy
+  } = currentLegacyShape;
+  const upgradedCurrentLegacy = upgradeHistoricMvpPolicyDocument(currentLegacy);
+  assert.ok(upgradedCurrentLegacy && typeof upgradedCurrentLegacy === "object" && !Array.isArray(upgradedCurrentLegacy));
+  assert.equal(
+    (upgradedCurrentLegacy as Record<string, unknown>).maximumReasoningEffort,
+    "max",
+  );
   assert.equal(
     upgradeHistoricMvpPolicyDocument({ ...historic, revisionNote: "Customer-restricted model policy" }),
     null,

@@ -95,8 +95,11 @@ export type AgentReasoningAdapterReview =
 
 export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-effort-route-2026-08-13";
 export const openAiReasoningRouteDiscoveryId = "openai-gpt-5.6-managed-effort-route-discovery-2026-08-13";
+export const openAiReasoningRouteQualificationId = "openai-gpt-5.6-responses-effort-route-2026-08-13";
 export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
 export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
+export const hermesReasoningAdapterQualificationId = "hermes-claw-0.19.0-governed-effort-adapter-2026-08-13";
+export const hermesDesktopReasoningAdapterQualificationId = "hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13";
 export const codexReasoningAdapterDiscoveryId = "codex-cli-0.144.4-governed-effort-discovery-2026-08-13";
 
 const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
@@ -113,17 +116,16 @@ const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
     reasoningTokenTelemetry: true,
   }),
   Object.freeze({
-    reviewStatus: "discovery",
-    discoveryId: openAiReasoningRouteDiscoveryId,
+    reviewStatus: "qualified",
+    qualificationId: openAiReasoningRouteQualificationId,
     provider: "openai",
     providerModels: Object.freeze(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]),
-    providerMechanism: "openai-compatible-reasoning-effort",
+    providerMechanism: "openai-responses-reasoning-effort",
+    thinkingMode: "opaque",
     effortLevels: resolvedReasoningEfforts,
-    blockingEvidence: Object.freeze([
-      "live_reasoning_with_streaming_and_tools",
-      "live_provider_usage_cost_latency_and_cache_evidence",
-      "live_fail_closed_route_mismatch_evidence",
-    ]),
+    defaultEffort: "medium",
+    interleavedThinking: false,
+    reasoningTokenTelemetry: false,
   }),
 ]);
 
@@ -139,19 +141,24 @@ const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterReview[] = O
     providerEffortAuthority: "governed-route",
   }),
   Object.freeze({
-    reviewStatus: "discovery",
-    discoveryId: hermesReasoningAdapterDiscoveryId,
+    reviewStatus: "qualified",
+    qualificationId: hermesReasoningAdapterQualificationId,
     agentCatalogId: "hermes-claw",
     clientVersion: "0.19.0",
     effortLevels: resolvedReasoningEfforts,
     conversationPinned: true,
     signedTaskBinding: true,
     providerEffortAuthority: "governed-route",
-    blockingEvidence: Object.freeze([
-      "live_reasoning_with_mcp_tools",
-      "live_streaming_and_hidden_reasoning_suppression",
-      "live_usage_cost_latency_and_cache_evidence",
-    ]),
+  }),
+  Object.freeze({
+    reviewStatus: "qualified",
+    qualificationId: hermesDesktopReasoningAdapterQualificationId,
+    agentCatalogId: "hermes-desktop",
+    clientVersion: "0.17.0",
+    effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
   }),
   Object.freeze({
     reviewStatus: "discovery",
@@ -229,9 +236,17 @@ export const reasoningRouteReview = (
   input: { provider: ManagedRoutingProvider; providerModel: string },
   reviews: readonly ReasoningRouteReview[] = reviewedReasoningRoutes,
 ): ReasoningRouteReview | null => {
+  // Managed-provider inventory uses LiteLLM's canonical `provider/model`
+  // spelling, while qualification registrations intentionally store the
+  // provider-neutral upstream model ID. Strip only the already-validated
+  // provider's exact prefix; other prefixes and arbitrary model aliases must
+  // continue to fail closed.
+  const providerModel = input.providerModel.startsWith(`${input.provider}/`)
+    ? input.providerModel.slice(input.provider.length + 1)
+    : input.providerModel;
   const review = reviews.find((candidate) => (
     candidate.provider === input.provider
-    && candidate.providerModels.includes(input.providerModel)
+    && candidate.providerModels.includes(providerModel)
   ));
   if (!review) return null;
   return {

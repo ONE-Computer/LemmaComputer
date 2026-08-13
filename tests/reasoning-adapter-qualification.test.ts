@@ -30,15 +30,15 @@ const completeEvidence = () => ({
   recordedAt: "2026-08-13T18:00:00+08:00",
   sourceCommit,
   runtime: {
+    reviewState: "qualified",
     agentCatalogId: "hermes-claw",
     clientVersion: "0.19.0",
-    discoveryId: "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13",
+    qualificationId: "hermes-claw-0.19.0-governed-effort-adapter-2026-08-13",
     proposedEffortLevels: ["low", "medium", "high"],
   },
   route: {
-    reviewState: "candidate",
-    discoveryId: "openai-gpt-5.6-managed-effort-route-discovery-2026-08-13",
-    qualificationId: "openai-example-reasoning-route-2026-08-13",
+    reviewState: "qualified",
+    qualificationId: "openai-gpt-5.6-responses-effort-route-2026-08-13",
     provider: "openai",
     providerModel: "gpt-5.6-terra",
     deploymentId: "deployment-balanced-v1",
@@ -106,16 +106,16 @@ test("qualification rejects fake promotion metadata, stale commits, raw fields, 
   assert.throws(
     () => validateReasoningAdapterEvidence({
       ...completeEvidence(),
-      runtime: { ...completeEvidence().runtime, discoveryId: "invented-discovery" },
+      runtime: { ...completeEvidence().runtime, qualificationId: "invented-qualification" },
     }),
-    { code: "RUNTIME_DISCOVERY_MISMATCH" },
+    { code: "RUNTIME_QUALIFICATION_MISMATCH" },
   );
   assert.throws(
     () => validateReasoningAdapterEvidence({
       ...completeEvidence(),
-      route: { ...completeEvidence().route, discoveryId: "invented-route-discovery" },
+      route: { ...completeEvidence().route, qualificationId: "invented-route-qualification" },
     }),
-    { code: "ROUTE_DISCOVERY_MISMATCH" },
+    { code: "ROUTE_QUALIFICATION_MISMATCH" },
   );
   assert.throws(
     () => validateReasoningAdapterEvidence(completeEvidence(), { expectedSourceCommit: "2".repeat(40) }),
@@ -136,9 +136,11 @@ test("qualification accepts the Codex discovery through the same contract", () =
   evidence.qualificationId = "codex-cli-0.144.4-openai-route-live-2026-08-13";
   evidence.runtime = {
     ...evidence.runtime,
+    reviewState: "candidate",
     agentCatalogId: "codex-cli",
     clientVersion: "0.144.4",
     discoveryId: "codex-cli-0.144.4-governed-effort-discovery-2026-08-13",
+    qualificationId: undefined,
   };
   assert.equal(validateReasoningAdapterEvidence(evidence).runtime.agentCatalogId, "codex-cli");
 });

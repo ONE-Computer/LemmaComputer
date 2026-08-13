@@ -1,0 +1,25 @@
+--- a/apps/desktop/src/app/shell/model-edit-submenu.tsx
++++ b/apps/desktop/src/app/shell/model-edit-submenu.tsx
+@@ -111,6 +111,13 @@
+   const activeSessionId = useStore(view.$runtimeId)
+   const touchesPrimary = view.kind === 'primary'
+ 
++  // LemmaComputer exposes one provider-neutral effort contract. The broker
++  // validates these values with Control and LiteLLM translates them to the
++  // selected provider; Hermes-only levels must not imply unsupported choices.
++  const effortOptions = provider === 'custom' && model.startsWith('lemmacomputer-')
++    ? EFFORT_OPTIONS.filter(option => ['low', 'medium', 'high'].includes(option.value))
++    : EFFORT_OPTIONS
++
+   const effortValue = normalizeEffort(effort)
+   const thinkingOn = isThinkingEnabled(effort)
+ 
+@@ -240,7 +247,7 @@
+               <DropdownMenuSeparator className="mx-0" />
+               <DropdownMenuLabel className={dropdownMenuSectionLabel}>{copy.effort}</DropdownMenuLabel>
+               <DropdownMenuRadioGroup onValueChange={value => void patchReasoning(value)} value={effortValue}>
+-                {EFFORT_OPTIONS.map(option => (
++                {effortOptions.map(option => (
+                   <DropdownMenuRadioItem
+                     className={dropdownMenuRow}
+                     key={option.value}

@@ -182,7 +182,7 @@ test("mapping administration always uses the authenticated tenant", async () => 
     { operation: "create", tenantId: "tenant-a" },
   ]);
 });
-test("mapping administration derives Claude effort capability instead of trusting an administrator claim", async () => {
+test("mapping administration derives effort capability from canonical managed-provider models", async () => {
   let captured: Parameters<RoutingStore["createMappingVersion"]>[0] | undefined;
   const store = {
     createMappingVersion: async (input: Parameters<RoutingStore["createMappingVersion"]>[0]) => {
@@ -199,13 +199,13 @@ test("mapping administration derives Claude effort capability instead of trustin
   await service.createMapping({ tenantId: "tenant-a", userId: "admin" }, {
     revisionNote: "Qualify Claude reasoning capabilities",
     deployments: [
-      { ...base, serviceClass: "lite", provider: "anthropic", providerModel: "claude-sonnet-4-6", providerDeployment: "anthropic/claude-sonnet-4-6" },
-      { ...base, serviceClass: "balanced", provider: "anthropic", providerModel: "claude-opus-4-8", providerDeployment: "anthropic/claude-opus-4-8" },
+      { ...base, serviceClass: "lite", provider: "anthropic", providerModel: "anthropic/claude-sonnet-4-6", providerDeployment: "anthropic/claude-sonnet-4-6" },
+      { ...base, serviceClass: "balanced", provider: "openai", providerModel: "openai/gpt-5.6-terra", providerDeployment: "openai/gpt-5.6-terra" },
       { ...base, serviceClass: "pro", provider: "bedrock", providerModel: "claude-sonnet-4-5", providerDeployment: "bedrock/converse/claude-sonnet-4-5" },
     ],
   });
   assert.deepEqual(captured?.deployments[0]?.capabilities.reasoning?.effortLevels, ["low", "medium", "high"]);
-  assert.equal(captured?.deployments[1]?.capabilities.reasoning?.defaultEffort, "high");
+  assert.equal(captured?.deployments[1]?.capabilities.reasoning?.providerMechanism, "openai-responses-reasoning-effort");
   assert.equal(captured?.deployments[2]?.capabilities.reasoning, null);
 });
 test("evidence review metrics are derived by the server", () => {
