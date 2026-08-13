@@ -1010,6 +1010,8 @@ test("scoped provider administrator sees only server-granted provider and connec
   await page.getByRole("button", { name: "Connections" }).click();
   const linear = page.locator(".connector-catalog-card").filter({ hasText: "Linear" });
   await linear.getByRole("button", { name: "Manage" }).click();
-  await expect(page.getByRole("heading", { name: "Member connection policy" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tools & approvals" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connector access" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Policy" })).toBeVisible();
+  await page.getByRole("button", { name: "Policy" }).click();
+  await expect(page.getByRole("heading", { name: "Connector access" })).toBeVisible();
 });

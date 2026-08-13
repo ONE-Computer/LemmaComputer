@@ -244,7 +244,7 @@ test("Connections stays employee-facing and uses spacing instead of decorative r
   assert.match(connections, /Connection setup is automatic\. No provider credentials are needed\./);
   assert.doesNotMatch(connections, /<details className="add-connector-app-credentials"/);
   assert.doesNotMatch(addConnector, /connector-services|connector-scopes|Requested scopes/);
-  assert.match(connections, /Tools &amp; approvals/);
+  assert.match(connections, />Policy<\/button>/);
   assert.match(connections, /connector-\$\{selected\.id\}-tools/);
 });
 
