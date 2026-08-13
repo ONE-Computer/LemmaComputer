@@ -19,10 +19,14 @@ def main() -> None:
         raise SystemExit("invalid Claude model mode")
 
     if transport_model == "lemmacomputer-auto":
+        # Claude Desktop 1.22209.3 rejects gateway model IDs that do not look
+        # Anthropic-owned before it opens Cowork. Keep these client-adapter
+        # aliases Claude-shaped while the loopback broker maps them only to
+        # provider-neutral LemmaComputer service classes.
         modes = [
-            ("lemmacomputer-lite", "Lite — organization route", "haiku", "lite"),
-            ("lemmacomputer-balanced", "Balanced — organization route", "sonnet", "balanced"),
-            ("lemmacomputer-pro", "Pro — organization route", "opus", "pro"),
+            ("lemmacomputer-claude-haiku-lite", "Lite — organization route", "haiku", "lite"),
+            ("lemmacomputer-claude-sonnet-balanced", "Balanced — organization route", "sonnet", "balanced"),
+            ("lemmacomputer-claude-opus-pro", "Pro — organization route", "opus", "pro"),
         ]
         inference_models = [{
             "name": name,

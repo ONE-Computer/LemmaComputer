@@ -36,12 +36,17 @@ select a provider model directly. An explicit Lite, Balanced, or Pro request
 skips Auto classification but remains subject to the full eligibility checks
 below.
 
-Managed native clients use the same contract. Claude Desktop receives a managed
-catalogue containing only the `lemmacomputer-lite`,
-`lemmacomputer-balanced`, and `lemmacomputer-pro` product aliases. Hermes uses
-the custom loopback provider's `/v1/models` catalogue and stores the selected
-alias in its normal session configuration. Neither client receives a provider
-model name or credential. On every native inference request, the root-owned
+Managed native clients use the same contract. Claude Desktop's pinned client
+rejects gateway IDs that are not Anthropic-shaped, so its managed catalogue
+uses the client-adapter aliases `lemmacomputer-claude-haiku-lite`,
+`lemmacomputer-claude-sonnet-balanced`, and
+`lemmacomputer-claude-opus-pro` with the employee-facing labels Lite,
+Balanced, and Pro. Those names do not select the concrete provider model.
+Hermes uses the provider-neutral `lemmacomputer-lite`,
+`lemmacomputer-balanced`, and `lemmacomputer-pro` entries returned by the
+custom loopback provider's `/v1/models` catalogue and stores the selected alias
+in its normal session configuration. Neither client receives a provider
+credential. On every native inference request, the root-owned
 loopback broker translates the exact product alias into an explicit service
 class, obtains a fresh Control-signed task binding, removes client routing
 metadata, and forwards only the internal synthetic transport alias. Unknown
@@ -62,7 +67,9 @@ session's model. The broker holds no mutable model-mode selection: it derives
 the requested class independently from every inference request and obtains a
 new agent-instance-bound task binding. Concurrent users, workspaces, agents,
 and conversations therefore cannot inherit one another's mode through broker
-state.
+state. Claude and Hermes native requests that cannot attach the process header
+may use their dedicated broker's active identity only when exactly one
+Control-verified process is running; zero or multiple processes fail closed.
 
 The Claude managed catalogue and Hermes default configuration are generated
 when the workspace container starts. After deploying this change, rebuild the

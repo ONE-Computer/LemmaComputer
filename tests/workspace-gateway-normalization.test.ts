@@ -99,6 +99,17 @@ test("native product model aliases select only explicit governed service classes
     assert.equal(normalized.body.model, "lemmacomputer-auto");
   }
 
+  for (const [model, serviceClass] of [
+    ["lemmacomputer-claude-haiku-lite", "lite"],
+    ["lemmacomputer-claude-sonnet-balanced", "balanced"],
+    ["lemmacomputer-claude-opus-pro", "pro"],
+  ] as const) {
+    assert.equal(normalize("lemmacomputer-auto", {
+      model,
+      messages: [{ role: "user", content: "Use this Claude mode." }],
+    }).serviceClass, serviceClass);
+  }
+
   const rejected = spawnSync(
     "python3",
     ["-c", program, proxyPath, "lemmacomputer-auto", JSON.stringify({ model: "lemmacomputer-ultimate", messages: [] })],

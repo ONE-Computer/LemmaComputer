@@ -61,6 +61,11 @@ NATIVE_MODEL_MODES = {
     "lemmacomputer-balanced": "balanced",
     "lemmacomputer-pro": "pro",
 }
+CLAUDE_NATIVE_MODEL_MODES = {
+    "lemmacomputer-claude-haiku-lite": "lite",
+    "lemmacomputer-claude-sonnet-balanced": "balanced",
+    "lemmacomputer-claude-opus-pro": "pro",
+}
 
 
 class AgentBridgeTerminalError(RuntimeError):
@@ -197,7 +202,7 @@ def task_reasoning_effort(task_binding: str) -> str | None:
 
 
 def native_service_class_for_model(requested_model: str) -> str:
-    selected = NATIVE_MODEL_MODES.get(requested_model)
+    selected = NATIVE_MODEL_MODES.get(requested_model) or CLAUDE_NATIVE_MODEL_MODES.get(requested_model)
     if selected is not None:
         return selected
     # Native runtimes make internal helper requests with their own model names.

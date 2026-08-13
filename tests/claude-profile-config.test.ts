@@ -29,14 +29,15 @@ test("Claude receives exactly the three governed product modes with one explicit
 
   const managed = await configure("pro");
   assert.deepEqual(managed.inferenceModels, [
-    { name: "lemmacomputer-lite", labelOverride: "Lite — organization route", anthropicFamilyTier: "haiku", isFamilyDefault: false },
-    { name: "lemmacomputer-balanced", labelOverride: "Balanced — organization route", anthropicFamilyTier: "sonnet", isFamilyDefault: false },
-    { name: "lemmacomputer-pro", labelOverride: "Pro — organization route", anthropicFamilyTier: "opus", isFamilyDefault: true },
+    { name: "lemmacomputer-claude-haiku-lite", labelOverride: "Lite — organization route", anthropicFamilyTier: "haiku", isFamilyDefault: false },
+    { name: "lemmacomputer-claude-sonnet-balanced", labelOverride: "Balanced — organization route", anthropicFamilyTier: "sonnet", isFamilyDefault: false },
+    { name: "lemmacomputer-claude-opus-pro", labelOverride: "Pro — organization route", anthropicFamilyTier: "opus", isFamilyDefault: true },
   ]);
+  assert.ok(managed.inferenceModels.every((model: { name: string }) => model.name.includes("claude")), "pinned Claude rejects gateway IDs that are not Anthropic-shaped");
   assert.equal(managed.modelDiscoveryEnabled, false);
   assert.equal(managed.inferenceGatewayBaseUrl, "http://127.0.0.1:4312");
   assert.equal(managed.autoModeEnabled, false);
 
   const legacy = await configure("auto");
-  assert.equal(legacy.inferenceModels.find((model: { isFamilyDefault: boolean }) => model.isFamilyDefault)?.name, "lemmacomputer-balanced");
+  assert.equal(legacy.inferenceModels.find((model: { isFamilyDefault: boolean }) => model.isFamilyDefault)?.name, "lemmacomputer-claude-sonnet-balanced");
 });

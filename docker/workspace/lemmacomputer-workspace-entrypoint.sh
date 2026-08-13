@@ -584,11 +584,14 @@ start_agent_broker() {
   local model_variable="${prefix}_MODEL_ALIAS"
   local transport_model_variable="${prefix}_TRANSPORT_MODEL_ALIAS"
   local service_class_variable="${prefix}_REQUESTED_SERVICE_CLASS"
-  # Claude Desktop does not consistently forward ANTHROPIC_CUSTOM_HEADERS
-  # from its Linux Cowork runtime. Its catalogue-scoped loopback broker may
-  # therefore recover the identity only when exactly one Control-verified
-  # interactive process is active. Other catalogue brokers stay header-only.
-  [[ "$port" == 4312 ]] && infer_single_active_agent_instance=1
+  # Claude Desktop and Hermes do not consistently attach the wrapper-issued
+  # process header to native inference requests. Their catalogue-scoped
+  # brokers may therefore recover identity only when exactly one
+  # Control-verified interactive process is active. CLI brokers stay
+  # header-only.
+  case "$port" in
+    4312|4314|4316) infer_single_active_agent_instance=1 ;;
+  esac
   env -i \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     LEMMACOMPUTER_GATEWAY_UPSTREAM="${!upstream_variable}" \
