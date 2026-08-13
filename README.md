@@ -109,14 +109,14 @@ paths and identifies which decisions remain authoritative in Control.
 
 | Service | Responsibility | Exposure |
 | --- | --- | --- |
-| `workspace-ingress` | Serves the product origin and exchanges short-lived workspace launch links for scoped sessions | `127.0.0.1:4174` |
+| `workspace-ingress` | Serves the product origin and exchanges short-lived workspace launch links for scoped sessions | Loopback on the configured Web port |
 | `web` | Static React application and authenticated reverse proxy to Control | Private |
 | `control-api` | Identity, policy, lifecycle orchestration, grants, governance, audit, and connection APIs | Private |
 | `db-migrate` | One-shot, checksummed Control-database migration job that must complete before Control starts | Private/job |
 | `workspace-controller` | Provisions Kasm workspaces through local Docker or the Kasm Developer API | Private |
-| `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, and MCP dispatch | `127.0.0.1:4000` |
+| `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, and MCP dispatch | Private |
 | `litellm-admin-proxy` | Dedicated Control-to-LiteLLM administration transport; requires mTLS in hosted deployments | Private |
-| `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | OAuth bridge on `127.0.0.1:4311` |
+| `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | Private; callbacks use workspace ingress |
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |
 | `scheduler-worker` | Claims due schedules and dispatches them through Control without decrypting prompts | Private |
@@ -127,7 +127,14 @@ paths and identifies which decisions remain authoritative in Control.
 The technical [Service reference](docs/services.md) describes each process,
 interface, state owner, health contract, and extension seam.
 
-## Run locally
+## Run the full stack locally
+
+For a fresh clone, contributor machine, or coding agent, begin with the
+[development workflow](docs/development-workflow.md). It separates ordinary
+source development from production deployment: no development stack runs from
+`main`; every task gets an isolated `worktree`-profile stack that still permits
+multiple organizations. The guide contains the exact commands and separates
+generated `.env` values from task-specific human credentials.
 
 The reference deployment requires Linux on `amd64`, Docker Engine with Docker
 Compose v2.30.0 or later, and Node.js 22 or later. Its current strict
@@ -141,9 +148,9 @@ stack binds browser-facing ports to loopback and is intended for development or
 evaluation.
 
 ```bash
-npm ci
-npm run env:init
-# Edit the generated .env with required deployment and authentication values.
+# From the initialized task worktree, edit .env with the required deployment
+# and authentication values. worktree:init has already installed dependencies
+# and generated isolated local secrets.
 npm run env:check
 npm run image:workspace
 npm run compose:config
@@ -161,16 +168,15 @@ shown by the corresponding setup flow. Company SSO, Microsoft social login, and
 Microsoft 365 connector consent are separate registrations and grants. The
 [local deployment runbook](docs/local-deployment.md) lists the required
 environment values, optional provider settings, commands, and readiness checks
-in setup order. Open [http://localhost:4174](http://localhost:4174) after the
-stack is healthy.
+in setup order. For development, open the worktree URL printed by
+`npm run worktree:init` after the stack is healthy.
 
 ## Development
 
-```bash
-npm ci
-npm run build
-npm test
-```
+Create and initialize a task worktree using the
+[development workflow](docs/development-workflow.md), then use the focused
+commands below as needed. Do not develop directly in the primary `main`
+checkout.
 
 Useful focused processes:
 
