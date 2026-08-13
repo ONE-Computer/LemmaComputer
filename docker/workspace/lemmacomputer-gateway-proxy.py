@@ -10,6 +10,7 @@ import http.client
 import json
 import os
 import re
+import socket
 import sys
 import threading
 import time
@@ -39,6 +40,8 @@ MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 TERMINAL_AGENT_BRIDGE_CODES = {"AGENT_BRIDGE_GRANT_REVOKED", "AGENT_BRIDGE_GRANT_EXPIRED"}
 MCP_DISCOVERY_TIMEOUT_SECONDS = 5
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
+MAX_MCP_TOOL_BODY_BYTES = 6 * 1024 * 1024
+MAX_MCP_TOOL_RESPONSE_BYTES = 64 * 1024 * 1024
 CLAUDE_GATEWAY_HEALTH_PROBE_MIN_TOKENS = 16
 LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
 UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
@@ -274,6 +277,24 @@ def control_json_request(path: str, body: dict | None = None, agent_instance_id:
     if not isinstance(value, dict):
         raise ValueError("invalid Control response")
     return value
+
+
+def record_tool_terminal(
+    source_invocation_id: str,
+    agent_instance_id: str,
+    started_at: float,
+    outcome: str,
+    failure_class: str | None,
+) -> None:
+    latency_ms = min(7 * 24 * 60 * 60 * 1000, max(0, int((time.monotonic() - started_at) * 1000)))
+    control_json_request("/internal/v1/agent/tool-audit/terminal", {
+        "sourceInvocationId": source_invocation_id,
+        "terminal": {
+            "outcome": outcome,
+            "latencyMs": latency_ms,
+            "failureClass": failure_class,
+        },
+    }, agent_instance_id)
 
 
 def mcp_discovery_plan() -> tuple[list[str], str]:
@@ -615,6 +636,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def forward(self) -> None:
         path = self.path.split("?", 1)[0]
+        is_tool_call = path == "/mcp-rest/tools/call"
         operation_prefix = "/lemmacomputer/operations/"
         is_operation = path.startswith(operation_prefix) and len(path) > len(operation_prefix)
         if path not in ALLOWED_PATHS and not is_operation:
@@ -630,6 +652,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in INFERENCE_PATHS and (length <= 0 or length > MAX_INFERENCE_BODY_BYTES):
             self.send_json(413, {"error": "invalid inference request body size"})
+            return
+        if is_tool_call and (self.command != "POST" or length <= 0 or length > MAX_MCP_TOOL_BODY_BYTES):
+            self.send_json(413 if length > MAX_MCP_TOOL_BODY_BYTES else 400, {"error": "invalid MCP tool request"})
             return
         body = self.rfile.read(length) if length else None
         if path in INFERENCE_PATHS:
@@ -667,8 +692,27 @@ class Handler(BaseHTTPRequestHandler):
             if key.lower() not in HOP_BY_HOP | {
                 "host", "authorization", "x-api-key", "content-length",
                 "x-lemmacomputer-ai-task-binding", "x-litellm-call-id",
+                "x-lemmacomputer-tool-invocation-id",
             }
         }
+        tool_agent_instance_id = None
+        tool_source_invocation_id = None
+        tool_started_at = None
+        tool_terminal_outcome_observed = False
+        if is_tool_call:
+            try:
+                tool_agent_instance_id = request_agent_instance_id(
+                    self.headers.get("x-lemmacomputer-agent-instance-id")
+                )
+                if tool_agent_instance_id is None:
+                    raise ValueError("tool calls require an agent process identity")
+            except ValueError as error:
+                self.send_json(403, {"error": str(error)})
+                return
+            tool_source_invocation_id = str(uuid.uuid4())
+            tool_started_at = time.monotonic()
+            headers["x-lemmacomputer-agent-instance-id"] = tool_agent_instance_id
+            headers["x-lemmacomputer-tool-invocation-id"] = tool_source_invocation_id
         target = CONTROL if is_operation else UPSTREAM
         try:
             headers["authorization"] = f"Bearer {agent_bridge_token() if is_operation else CREDENTIAL}"
@@ -684,6 +728,46 @@ class Handler(BaseHTTPRequestHandler):
                              if is_operation else f"{target.path.rstrip('/')}{self.path}")
             connection.request(self.command, upstream_path, body=body, headers=headers)
             response = connection.getresponse()
+            if is_tool_call:
+                response_body = response.read(MAX_MCP_TOOL_RESPONSE_BYTES + 1)
+                if len(response_body) > MAX_MCP_TOOL_RESPONSE_BYTES:
+                    tool_terminal_outcome_observed = True
+                    try:
+                        record_tool_terminal(
+                            tool_source_invocation_id, tool_agent_instance_id, tool_started_at,
+                            "failed", "MCP_TOOL_RESPONSE_TOO_LARGE",
+                        )
+                    except (AgentBridgeTerminalError, OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+                        self.log_message("tool audit terminal delivery failed class=%s", type(error).__name__)
+                    self.send_json(502, {"error": "connector tool response exceeded the workspace limit"})
+                    return
+                # Once the complete upstream response is known, a later client
+                # disconnect cannot change the tool's terminal outcome. If the
+                # Control delivery below fails, reconciliation records the
+                # admission as unconfirmed instead of misclassifying it.
+                tool_terminal_outcome_observed = True
+                if response.status not in {403, 409}:
+                    outcome = "succeeded"
+                    failure_class = None
+                    if response.status < 200 or response.status >= 300:
+                        outcome = "failed"
+                        failure_class = f"MCP_UPSTREAM_HTTP_{response.status}"
+                    else:
+                        try:
+                            result = json.loads(response_body)
+                            if isinstance(result, dict) and result.get("isError") is True:
+                                outcome = "failed"
+                                failure_class = "MCP_TOOL_RESULT_ERROR"
+                        except (UnicodeDecodeError, json.JSONDecodeError):
+                            outcome = "failed"
+                            failure_class = "MCP_TOOL_RESULT_INVALID"
+                    try:
+                        record_tool_terminal(
+                            tool_source_invocation_id, tool_agent_instance_id, tool_started_at,
+                            outcome, failure_class,
+                        )
+                    except (AgentBridgeTerminalError, OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+                        self.log_message("tool audit terminal delivery failed class=%s", type(error).__name__)
             self.send_response(response.status)
             for key, value in response.getheaders():
                 if key.lower() not in HOP_BY_HOP:
@@ -692,11 +776,43 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             # read1 returns the next available buffered bytes instead of waiting
             # for a large fixed-size read, preserving Anthropic SSE streaming.
-            while chunk := response.read1(16 * 1024):
-                self.wfile.write(chunk)
+            if is_tool_call:
+                self.wfile.write(response_body)
                 self.wfile.flush()
+            else:
+                while chunk := response.read1(16 * 1024):
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
             self.close_connection = True
+        except (socket.timeout, TimeoutError):
+            if is_tool_call and not tool_terminal_outcome_observed and tool_source_invocation_id and tool_agent_instance_id and tool_started_at is not None:
+                try:
+                    record_tool_terminal(
+                        tool_source_invocation_id, tool_agent_instance_id, tool_started_at,
+                        "timed_out", "MCP_UPSTREAM_TIMEOUT",
+                    )
+                except (AgentBridgeTerminalError, OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+                    self.log_message("tool audit terminal delivery failed class=%s", type(error).__name__)
+            if not self.wfile.closed:
+                self.send_error(504, "governed gateway timed out")
+        except (BrokenPipeError, ConnectionResetError):
+            if is_tool_call and not tool_terminal_outcome_observed and tool_source_invocation_id and tool_agent_instance_id and tool_started_at is not None:
+                try:
+                    record_tool_terminal(
+                        tool_source_invocation_id, tool_agent_instance_id, tool_started_at,
+                        "cancelled", "MCP_CLIENT_DISCONNECTED",
+                    )
+                except (AgentBridgeTerminalError, OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+                    self.log_message("tool audit terminal delivery failed class=%s", type(error).__name__)
         except (OSError, http.client.HTTPException):
+            if is_tool_call and not tool_terminal_outcome_observed and tool_source_invocation_id and tool_agent_instance_id and tool_started_at is not None:
+                try:
+                    record_tool_terminal(
+                        tool_source_invocation_id, tool_agent_instance_id, tool_started_at,
+                        "failed", "MCP_UPSTREAM_UNAVAILABLE",
+                    )
+                except (AgentBridgeTerminalError, OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+                    self.log_message("tool audit terminal delivery failed class=%s", type(error).__name__)
             if not self.wfile.closed:
                 self.send_error(502, "governed gateway unavailable")
         finally:

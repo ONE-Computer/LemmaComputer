@@ -318,14 +318,24 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
 });
 
 test("the workspace broker isolates failed and slow connector discovery and represents zero connected servers safely", async () => {
+  const agentInstanceId = "33333333-3333-4333-8333-333333333333";
   let activeServers = ["lemmacomputer_ms365", "lemmacomputer_slow", "lemmacomputer_exa"];
   let projectionHash = "a".repeat(64);
   const discoveryRequests: string[] = [];
   const toolCalls: Array<Record<string, unknown>> = [];
+  const toolInvocationIds: string[] = [];
+  const toolTerminals: Array<Record<string, unknown>> = [];
   const upstream = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     response.setHeader("content-type", "application/json");
+    if (request.url === "/internal/v1/agent/tool-audit/terminal") {
+      assert.equal(request.headers["x-lemmacomputer-agent-instance-id"], agentInstanceId);
+      toolTerminals.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.statusCode = 201;
+      response.end(JSON.stringify({ status: "created" }));
+      return;
+    }
     if (request.url === "/internal/v1/agent/mcp-discovery-plan") {
       response.end(JSON.stringify({ servers: activeServers, projectionHash }));
       return;
@@ -355,6 +365,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
     }
     if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
       toolCalls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      toolInvocationIds.push(String(request.headers["x-lemmacomputer-tool-invocation-id"]));
       response.end(JSON.stringify({ content: [{ type: "text", text: "Exa result" }] }));
       return;
     }
@@ -419,6 +430,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
         ...process.env,
         LEMMACOMPUTER_CONNECTORS_BROKER: `http://127.0.0.1:${brokerPort}`,
         LEMMACOMPUTER_CONNECTOR_REFRESH_SECONDS: "60",
+        LEMMACOMPUTER_AGENT_INSTANCE_ID: agentInstanceId,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -450,6 +462,12 @@ test("the workspace broker isolates failed and slow connector discovery and repr
         name: "web_search",
         arguments: { query: "stable MCP bridges" },
       }]);
+      assert.match(toolInvocationIds[0]!, /^[0-9a-f-]{36}$/);
+      assert.equal(toolTerminals.length, 1);
+      assert.equal(toolTerminals[0]?.sourceInvocationId, toolInvocationIds[0]);
+      assert.equal((toolTerminals[0]?.terminal as Record<string, unknown>).outcome, "succeeded");
+      assert.equal((toolTerminals[0]?.terminal as Record<string, unknown>).failureClass, null);
+      assert.equal(typeof (toolTerminals[0]?.terminal as Record<string, unknown>).latencyMs, "number");
     } finally {
       stdio.kill("SIGTERM");
       await once(stdio, "exit");

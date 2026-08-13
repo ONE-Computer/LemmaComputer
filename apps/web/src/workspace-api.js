@@ -249,6 +249,10 @@ export const authApi = {
 
 export const adminApi = {
   users: () => request("/api/v1/admin/users"),
+  toolAudit: (filters = {}) => request(`/api/v1/admin/tool-audit?${new URLSearchParams(
+    Object.entries(filters).filter(([, value]) => value !== undefined && value !== null && value !== "")
+      .map(([key, value]) => [key, String(value)]),
+  )}`, { cache: "no-store" }),
   memberWorkspaces: () => request("/api/v1/admin/member-workspaces", { cache: "no-store" }),
   commandMemberWorkspace: (userId, workspaceId, action) => retryableMutation(
     `/api/v1/admin/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceId)}/runtime/${encodeURIComponent(action)}`,

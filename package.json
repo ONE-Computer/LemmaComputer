@@ -27,6 +27,8 @@
     "qualify:better-auth": "npm run qualify:better-auth -w @lemmacomputer/control-api",
     "qualify:auto-routing": "docker run --rm --entrypoint python --mount type=bind,src=./scripts/qualify-litellm-auto-routing.py,dst=/qualification.py,readonly ghcr.io/berriai/litellm:v1.94.0@sha256:65d84a2282137b4dc73bbe184650a7c807177c533e4223b3bfbc87963fe3fabe /qualification.py",
     "qualify:governed-routing": "docker run --rm --entrypoint python --mount type=bind,src=./scripts/qualify-litellm-governed-routing.py,dst=/qualification.py,readonly --mount type=bind,src=./integrations/litellm/lemmacomputer_policy_callback.py,dst=/callback.py,readonly ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e /qualification.py",
+    "qualify:mcp-audit-hooks": "docker run --rm --entrypoint python --mount type=bind,src=./scripts/qualify-litellm-mcp-audit-hooks.py,dst=/qualification.py,readonly ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e /qualification.py",
+    "qualify:tool-audit-volume": "node scripts/qualify-tool-audit-volume.mjs",
     "env:init": "node scripts/initialize-env.mjs",
     "env:example": "node scripts/render-env-example.mjs --check",
     "env:qualification:example": "node scripts/render-env-example.mjs --qualification --check",

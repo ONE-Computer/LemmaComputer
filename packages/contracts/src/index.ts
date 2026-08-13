@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 
 export * from "./authentication.js";
+export * from "./tool-audit.js";
 
 export const workspaceStates = [
   "not_created",
@@ -1854,6 +1855,7 @@ export const mcpPolicyRequestSchema = z.strictObject({
   workspaceId: z.uuid(),
   agentId: z.string().min(1).max(128),
   agentInstanceId: z.uuid().nullable().default(null),
+  sourceInvocationId: z.uuid().nullable().default(null),
   policyVersionId: z.string().min(1).max(128).nullable(),
   policyHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   operationId: z.uuid().nullable(),
