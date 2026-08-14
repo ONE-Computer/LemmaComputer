@@ -125,8 +125,8 @@ const profile = {
 const disposableProfile = {
   id: "disposable-open-v1",
   version: 1,
-  displayName: "Disposable open workspace",
-  description: "A flexible workspace with local coding tools and public web access inside the isolated Kasm boundary.",
+  displayName: "Internet workspace",
+  description: "A flexible workspace with local coding tools and public internet access inside the isolated workspace boundary.",
   executionMode: "disposable-open",
   egressMode: "full-web",
   dataGuidance: "Non-sensitive work only. Delete permanently removes the workspace.",
@@ -438,18 +438,34 @@ const fixtureScheduleRuns = new Map([[fixtureSchedules[0].id, [{
 
 let egressSecurityGroups = [{
   schemaVersion: 1,
-  id: "egv_fixture_default_v1",
-  securityGroupId: "esg_fixture_default",
+  id: "egv_fixture_managed_default_v1",
+  securityGroupId: "esg_fixture_managed_default",
   tenantId: session.tenant.id,
   version: 1,
-  name: "Default security group",
-  description: "The built-in network policy attached to new workspaces.",
+  name: "Managed workspace default",
+  description: "The built-in deny-by-default policy inherited by Managed workspaces.",
+  defaultAction: "deny",
+  rules: [],
+  documentHash: digest,
+  createdBy: session.user.id,
+  createdAt: now,
+  isDefault: true,
+  defaultFor: "managed",
+}, {
+  schemaVersion: 1,
+  id: "egv_fixture_internet_default_v1",
+  securityGroupId: "esg_fixture_internet_default",
+  tenantId: session.tenant.id,
+  version: 1,
+  name: "Internet workspace default",
+  description: "The built-in public-web policy inherited by Internet workspaces.",
   defaultAction: "allow-public-http-https",
   rules: [],
   documentHash: digest,
   createdBy: session.user.id,
   createdAt: now,
   isDefault: true,
+  defaultFor: "internet",
 }, {
   schemaVersion: 1,
   id: "egv_fixture_agent_updates_v1",
@@ -469,8 +485,12 @@ let egressSecurityGroups = [{
   createdAt: now,
   isDefault: false,
 }];
+const inheritedEgressGroup = (profileId) => ({
+  ...egressSecurityGroups.find((group) => group.defaultFor === (profileId === "disposable-open-v1" ? "internet" : "managed")),
+  assignmentSource: "workspace-type",
+});
 
-const firewallWorkspaces = (group) => [
+const firewallWorkspaces = () => [
   {
     id: workspace.id,
     grantId: workspace.grantId,
@@ -478,7 +498,7 @@ const firewallWorkspaces = (group) => [
     profileId: workspace.profile.id,
     executionMode: "managed",
     egressMode: "restricted",
-    egress: { ...group, schemaVersion: 2, mode: "restricted" },
+    egress: { ...inheritedEgressGroup("claude-desktop-standard-v1"), schemaVersion: 2, mode: "restricted" },
   },
   {
     id: sandboxWorkspace.id,
@@ -488,11 +508,9 @@ const firewallWorkspaces = (group) => [
     executionMode: "disposable-open",
     egressMode: "full-web",
     egress: {
-      ...group,
+      ...inheritedEgressGroup("disposable-open-v1"),
       schemaVersion: 2,
       mode: "full-web",
-      defaultAction: "allow-public-http-https",
-      rules: group.rules.filter((rule) => rule.action === "deny"),
     },
   },
 ];
@@ -508,7 +526,7 @@ let adminUsers = [
     role: "owner",
     roles: session.roles,
     effectivePolicy: { version: 7, documentHash: digest, egressSecurityGroup: egressSecurityGroups[0] },
-    workspaces: firewallWorkspaces(egressSecurityGroups[0]),
+    workspaces: firewallWorkspaces(),
   },
   {
     userId: "example-admin",
@@ -521,7 +539,7 @@ let adminUsers = [
     roles: ["employee"],
     effectivePolicy: { version: 7, documentHash: digest, egressSecurityGroup: egressSecurityGroups[0] },
     workspaces: [{
-      ...firewallWorkspaces(egressSecurityGroups[0])[0],
+      ...firewallWorkspaces()[0],
       id: "fixture-example-workspace",
     }],
   },
@@ -548,6 +566,10 @@ const memberWorkspaceInventory = () => adminUsers.map((user) => ({
       reasonCode: null,
     },
     profile: { id: item.profileId, executionMode: item.executionMode },
+    networkAccess: {
+      mode: item.egressMode,
+      securityGroup: item.egress ? { id: item.egress.id, name: item.egress.name, version: item.egress.version, isDefault: Boolean(item.egress.isDefault), assignmentSource: item.egress.assignmentSource ?? "workspace-type", defaultFor: item.egress.defaultFor ?? null } : null,
+    },
     policyAssignment: { authority: "runtime_policy", version: user.effectivePolicy.version, hash: user.effectivePolicy.documentHash },
     lastActivityAt: null,
     lastTransitionAt: now,
@@ -1342,7 +1364,7 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({
       ...sandboxSettings,
       grantId: url.searchParams.get("grantId") ?? "personal",
-      securityGroup: sandboxSettings.securityGroup ?? egressSecurityGroups.find((group) => group.isDefault),
+      securityGroup: sandboxSettings.securityGroup ?? inheritedEgressGroup(sandboxSettings.profileId),
       availableSecurityGroups: egressSecurityGroups,
     }));
     return;
@@ -1974,7 +1996,7 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({
       ...sandboxSettings,
       grantId: url.searchParams.get("grantId") ?? "personal",
-      securityGroup: sandboxSettings.securityGroup ?? egressSecurityGroups.find((group) => group.isDefault),
+      securityGroup: sandboxSettings.securityGroup ?? inheritedEgressGroup(sandboxSettings.profileId),
       availableSecurityGroups: egressSecurityGroups,
     }));
     return;
@@ -1984,7 +2006,7 @@ const server = http.createServer((request, response) => {
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
       const configuration = JSON.parse(body);
-      sandboxSettings = { ...sandboxSettings, configuration, ...configuration, updatedAt: new Date().toISOString() };
+      sandboxSettings = { ...sandboxSettings, configuration, ...configuration, profile: configuration.profileId === disposableProfile.id ? disposableProfile : profile, updatedAt: new Date().toISOString() };
       response.end(JSON.stringify(sandboxSettings));
     });
     return;
@@ -1995,9 +2017,15 @@ const server = http.createServer((request, response) => {
     request.on("end", () => {
       const input = JSON.parse(body);
       const group = egressSecurityGroups.find((candidate) => candidate.id === input.securityGroupVersionId);
-      sandboxSettings = { ...sandboxSettings, securityGroup: group };
-      response.end(JSON.stringify(group));
+      const assigned = { ...group, assignmentSource: "custom" };
+      sandboxSettings = { ...sandboxSettings, securityGroup: assigned };
+      response.end(JSON.stringify(assigned));
     });
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/admin\/users\/[^/]+\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
+    sandboxSettings = { ...sandboxSettings, securityGroup: undefined };
+    response.end(JSON.stringify(inheritedEgressGroup(sandboxSettings.profileId)));
     return;
   }
   if (key === "GET /v1/admin/egress-security-groups") {
@@ -2034,9 +2062,15 @@ const server = http.createServer((request, response) => {
     request.on("end", () => {
       const input = JSON.parse(body);
       const group = egressSecurityGroups.find((candidate) => candidate.id === input.securityGroupVersionId);
-      sandboxSettings = { ...sandboxSettings, securityGroup: group };
-      response.end(JSON.stringify(group));
+      const assigned = { ...group, assignmentSource: "custom" };
+      sandboxSettings = { ...sandboxSettings, securityGroup: assigned };
+      response.end(JSON.stringify(assigned));
     });
+    return;
+  }
+  if (request.method === "DELETE" && /^\/v1\/admin\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
+    sandboxSettings = { ...sandboxSettings, securityGroup: undefined };
+    response.end(JSON.stringify(inheritedEgressGroup(sandboxSettings.profileId)));
     return;
   }
   const payload = responses.get(key);

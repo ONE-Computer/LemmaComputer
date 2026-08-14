@@ -122,8 +122,8 @@ const sandboxProfiles = [
   sandboxProfileSchema.parse({
     id: "disposable-open-v1",
     version: 1,
-    displayName: "Disposable open workspace",
-    description: "A flexible workspace with local coding tools and public web access inside the isolated Kasm boundary.",
+    displayName: "Internet workspace",
+    description: "A flexible workspace with local coding tools and public internet access inside the isolated workspace boundary.",
     executionMode: "disposable-open",
     egressMode: "full-web",
     dataGuidance: "Non-sensitive work only. Downloads and installed tools are untrusted; Delete permanently removes the workspace.",
@@ -1156,17 +1156,41 @@ export function createControlServer(
       createdBy: selected?.createdBy ?? effective?.assignedBy ?? value.userId,
       createdAt: selected?.createdAt ?? effective?.assignedAt ?? new Date(0).toISOString(),
       ...(selected?.isDefault === undefined ? {} : { isDefault: selected.isDefault }),
+      ...(selected?.defaultFor === undefined ? {} : { defaultFor: selected.defaultFor }),
+      ...(selected?.assignmentSource === undefined ? {} : { assignmentSource: selected.assignmentSource }),
     });
   };
-  const workspaceEgressFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string) => restrictWorkspaceEgress(
+  const workspaceEgressFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string, profileId: SandboxProfileId) => restrictWorkspaceEgress(
     value,
     effective,
     await security.identityPolicyStore?.getWorkspaceEgressSecurityGroup?.({
       tenantId: value.tenantId,
       subjectId: value.userId,
       grantId,
-    }) ?? effective?.egressSecurityGroup ?? null,
+      profileId,
+    }) ?? null,
   );
+  const requiredEgressDefaultActionForProfile = (profileId: SandboxProfileId) => (
+    profileId === "disposable-open-v1" ? "allow-public-http-https" as const : "deny" as const
+  );
+  const assertEgressGroupMatchesProfile = (group: EgressSecurityGroupVersion, profileId: SandboxProfileId) => {
+    if (group.defaultAction === requiredEgressDefaultActionForProfile(profileId)) return;
+    throw new LemmaComputerError(
+      "EGRESS_SECURITY_GROUP_INCOMPATIBLE",
+      profileId === "disposable-open-v1"
+        ? "Internet workspaces require a public-web security group"
+        : "Managed workspaces require a deny-by-default security group",
+      409,
+    );
+  };
+  const workspaceProfileIdFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string): Promise<SandboxProfileId> => {
+    const saved = await store.getSandboxSettings?.(value.identity, grantId);
+    const document = effective?.document as Record<string, unknown> | undefined;
+    return (saved?.profileId
+      ?? (Array.isArray(document?.workspaceProfiles) ? document.workspaceProfiles.find((candidate) => sandboxProfiles.some((profile) => profile.id === candidate)) : undefined)
+      ?? document?.workspaceProfile
+      ?? testRuntimePolicy.workspaceProfile) as SandboxProfileId;
+  };
   const governedRoutingAvailableFor = async (tenantId: string) => {
     const routeMapping = await security.routingStore?.latestMappingVersion(tenantId);
     return ["lite", "balanced", "pro"].every((serviceClass) => (
@@ -1177,9 +1201,13 @@ export function createControlServer(
     let policy = testRuntimePolicy;
     if (effective) {
       const saved = await store.getSandboxSettings?.(value.identity, grantId);
-      const workspaceEgress = await workspaceEgressFor(value, effective, grantId);
       const governedRoutingAvailable = await governedRoutingAvailableFor(value.tenantId);
       const document = effective.document as Record<string, unknown>;
+      const profileId = (saved?.profileId
+        ?? (Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles.find((candidate) => sandboxProfiles.some((profile) => profile.id === candidate)) : undefined)
+        ?? document.workspaceProfile
+        ?? testRuntimePolicy.workspaceProfile) as SandboxProfileId;
+      const workspaceEgress = await workspaceEgressFor(value, effective, grantId, profileId);
       const availableAgentIds = assignedAgentIds(document);
       const availableServiceClasses = assignedWorkspaceServiceClasses(document);
       const requestedServiceClass = explicitWorkspaceServiceClass(
@@ -1191,7 +1219,7 @@ export function createControlServer(
         ...runtimePolicyFor(
           effective,
           saved?.modelAlias,
-          saved?.profileId,
+          profileId,
           saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
           saved?.applicationIds ?? defaultApplicationIds(document),
           workspaceEgress,
@@ -2548,11 +2576,16 @@ export function createControlServer(
           ...user,
           workspaces: await Promise.all(workspaces.map(async (workspace) => {
             const settings = await store.getSandboxSettings?.(targetIdentity, workspace.grantId);
+            const userDocument = user.effectivePolicy?.document as Record<string, unknown> | undefined;
+            const profileId = (settings?.profileId
+              ?? (Array.isArray(userDocument?.workspaceProfiles) ? userDocument.workspaceProfiles.find((candidate) => sandboxProfiles.some((profile) => profile.id === candidate)) : undefined)
+              ?? userDocument?.workspaceProfile
+              ?? testRuntimePolicy.workspaceProfile) as SandboxProfileId;
             const workspaceEgress = await workspaceEgressFor({
               ...actor,
               userId: user.userId,
               identity: targetIdentity,
-            }, user.effectivePolicy, workspace.grantId);
+            }, user.effectivePolicy, workspace.grantId, profileId);
             const runtime = user.effectivePolicy
               ? runtimePolicyFor(
                   user.effectivePolicy,
@@ -2593,6 +2626,10 @@ export function createControlServer(
         subjectId: user.userId,
         audience: "lemmacomputer-control",
       });
+      const targetPrincipal = { ...actor, userId: user.userId, identity: targetIdentity };
+      const targetEffective = user.effectivePolicy && organizationPolicy
+        ? constrainEffectivePolicy(user.effectivePolicy, organizationPolicy)
+        : user.effectivePolicy;
       const authorized = (await store.listCurrent(targetIdentity)).filter((workspace) => (
         allowsPermission(actor, "workspace.manage", { type: "workspace", resourceId: workspace.id })
       ));
@@ -2605,6 +2642,10 @@ export function createControlServer(
           ?? (Array.isArray(document?.workspaceProfiles) ? document.workspaceProfiles.find((value): value is string => typeof value === "string") : undefined)
           ?? (typeof document?.workspaceProfile === "string" ? document.workspaceProfile : null);
         const executionMode = configuredProfile === "disposable-open-v1" ? "disposable-open" : configuredProfile ? "managed" : null;
+        const workspaceEgress = await workspaceEgressFor(targetPrincipal, targetEffective, workspace.grantId, (configuredProfile ?? testRuntimePolicy.workspaceProfile) as SandboxProfileId);
+        const egressMode = workspaceEgress
+          ? workspaceEgress.defaultAction === "allow-public-http-https" ? "full-web" : "restricted"
+          : executionMode === "disposable-open" ? "full-web" : "restricted";
         const health = workspace.state === "failed"
           ? "needs_attention"
           : ["provisioning", "restarting", "stopping"].includes(workspace.state)
@@ -2623,6 +2664,17 @@ export function createControlServer(
             reasonCode: workspace.failureCode,
           },
           profile: configuredProfile ? { id: configuredProfile, executionMode } : null,
+          networkAccess: {
+            mode: egressMode,
+            securityGroup: workspaceEgress ? {
+              id: workspaceEgress.id,
+              name: workspaceEgress.name,
+              version: workspaceEgress.version,
+              isDefault: workspaceEgress.isDefault ?? false,
+              assignmentSource: workspaceEgress.assignmentSource ?? "workspace-type",
+              defaultFor: workspaceEgress.defaultFor ?? null,
+            } : null,
+          },
           policyAssignment: organizationPolicy ? {
             authority: "organization_policy",
             version: organizationPolicy.version,
@@ -3330,6 +3382,37 @@ export function createControlServer(
     const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const input = saveEgressSecurityGroupSchema.parse(request.body ?? {});
+    const currentVersions = await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId);
+    const currentGroup = input.securityGroupId
+      ? currentVersions.find((candidate) => candidate.securityGroupId === input.securityGroupId)
+      : undefined;
+    const nextDefaultAction = currentGroup?.defaultFor === "managed"
+      ? "deny" as const
+      : currentGroup?.defaultFor === "internet"
+        ? "allow-public-http-https" as const
+        : input.defaultAction;
+    if (input.securityGroupId) {
+      const currentAssignments = await security.identityPolicyStore.listWorkspaceEgressSecurityGroupAssignments?.({
+        tenantId: actor.tenantId,
+        securityGroupId: input.securityGroupId,
+      }) ?? [];
+      for (const assignment of currentAssignments) {
+        const targetIdentity = identityContextSchema.parse({
+          tenantId: actor.tenantId,
+          subjectId: assignment.subjectId,
+          audience: "lemmacomputer-control",
+        });
+        const settings = await store.getSandboxSettings?.(targetIdentity, assignment.grantId);
+        const profileId = settings?.profileId ?? "claude-desktop-standard-v1";
+        if (nextDefaultAction !== requiredEgressDefaultActionForProfile(profileId)) {
+          throw new LemmaComputerError(
+            "EGRESS_SECURITY_GROUP_IN_USE",
+            "Change the workspaces using this security group before changing its default behavior",
+            409,
+          );
+        }
+      }
+    }
     const saved = await security.identityPolicyStore.saveEgressSecurityGroup({
       tenantId: actor.tenantId,
       updatedBy: actor.userId,
@@ -3363,6 +3446,15 @@ export function createControlServer(
     if (!security.identityPolicyStore?.assignWorkspaceEgressSecurityGroup) {
       throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
     }
+    const effective = await security.identityPolicyStore.getEffectivePolicy(actor.userId);
+    const profileId = await workspaceProfileIdFor(actor, effective, grantId);
+    const versions = await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId);
+    const selectedVersion = versions.find((candidate) => candidate.id === input.securityGroupVersionId);
+    const selectedGroup = selectedVersion
+      ? versions.find((candidate) => candidate.securityGroupId === selectedVersion.securityGroupId) ?? selectedVersion
+      : undefined;
+    if (!selectedGroup) throw new LemmaComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group not found", 404);
+    assertEgressGroupMatchesProfile(selectedGroup, profileId);
     const assigned = await security.identityPolicyStore.assignWorkspaceEgressSecurityGroup({
       tenantId: actor.tenantId,
       subjectId: actor.userId,
@@ -3370,12 +3462,32 @@ export function createControlServer(
       assignedBy: actor.userId,
       securityGroupVersionId: input.securityGroupVersionId,
     });
-    const effective = await security.identityPolicyStore.getEffectivePolicy(actor.userId);
     if (effective) {
       const { policy } = await policyForGrant(actor, effective, grantId);
       await service.refreshEgressPolicy(actor.identity, policy, grantId);
     }
     return assigned;
+  });
+  app.delete<{ Params: { grantId: string } }>("/v1/admin/workspaces/:grantId/egress-security-group", async (request) => {
+    const actor = principal(request);
+    const grantId = z.string().min(1).max(128).parse(request.params.grantId);
+    await requireWorkspaceGrantPermission(request, "policy.manage", actor.identity, grantId);
+    if (!security.identityPolicyStore?.clearWorkspaceEgressSecurityGroup) {
+      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
+    }
+    await security.identityPolicyStore.clearWorkspaceEgressSecurityGroup({
+      tenantId: actor.tenantId,
+      subjectId: actor.userId,
+      grantId,
+    });
+    const effective = await security.identityPolicyStore.getEffectivePolicy(actor.userId);
+    const profileId = await workspaceProfileIdFor(actor, effective, grantId);
+    const inherited = await workspaceEgressFor(actor, effective, grantId, profileId);
+    if (effective) {
+      const { policy } = await policyForGrant(actor, effective, grantId);
+      await service.refreshEgressPolicy(actor.identity, policy, grantId);
+    }
+    return inherited;
   });
   app.get("/v1/admin/mcp-policy", async (request) => {
     const actor = requirePermission(request, "policy.manage");
@@ -3922,7 +4034,7 @@ export function createControlServer(
     const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
-    const workspaceEgress = await workspaceEgressFor(actor, effective, grantId);
+    const workspaceEgress = await workspaceEgressFor(actor, effective, grantId, profileId);
     const runtime = effective
       ? runtimePolicyFor(
           effective,
@@ -3997,6 +4109,24 @@ export function createControlServer(
     if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
     if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
     if (input.requestedServiceClass === "auto" || !serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
+    const previousSettings = await store.getSandboxSettings?.(actor.identity, input.grantId);
+    const previousProfileId = previousSettings?.profileId ?? input.profileId;
+    const previousEgress = await security.identityPolicyStore?.getWorkspaceEgressSecurityGroup?.({
+      tenantId: actor.tenantId,
+      subjectId: actor.userId,
+      grantId: input.grantId,
+      profileId: previousProfileId,
+    });
+    const changingProfileWithCustomNetworkAccess = previousSettings?.profileId !== undefined
+      && previousSettings.profileId !== input.profileId
+      && previousEgress?.assignmentSource === "custom";
+    if (changingProfileWithCustomNetworkAccess && !includeAdministratorOptions) {
+      throw new LemmaComputerError(
+        "NETWORK_ACCESS_ADMIN_REQUIRED",
+        "An administrator must reset the custom network access before changing this workspace type",
+        403,
+      );
+    }
     const current = await store.getCurrent(actor.identity, input.grantId);
     if (current && !["not_created", "stopped", "failed"].includes(current.state)) throw new LemmaComputerError("WORKSPACE_MUST_BE_STOPPED", "Stop the workspace before changing its profile or model route", 409, true);
     await store.saveSandboxSettings(actor.identity, {
@@ -4007,6 +4137,13 @@ export function createControlServer(
       requestedServiceClass: input.requestedServiceClass,
       agentIds: input.agentIds,
     });
+    if (changingProfileWithCustomNetworkAccess) {
+      await security.identityPolicyStore?.clearWorkspaceEgressSecurityGroup?.({
+        tenantId: actor.tenantId,
+        subjectId: actor.userId,
+        grantId: input.grantId,
+      });
+    }
     return sandboxSettingsFor(actor, effective, input.grantId, includeAdministratorOptions);
   };
   const administratorTarget = async (actor: SessionPrincipal, userId: string) => {
@@ -4236,6 +4373,14 @@ export function createControlServer(
         throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
       }
       const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+      const profileId = await workspaceProfileIdFor(targetPrincipal, target.effectivePolicy, grantId);
+      const versions = await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId);
+      const selectedVersion = versions.find((candidate) => candidate.id === input.securityGroupVersionId);
+      const selectedGroup = selectedVersion
+        ? versions.find((candidate) => candidate.securityGroupId === selectedVersion.securityGroupId) ?? selectedVersion
+        : undefined;
+      if (!selectedGroup) throw new LemmaComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group not found", 404);
+      assertEgressGroupMatchesProfile(selectedGroup, profileId);
       const assigned = await security.identityPolicyStore.assignWorkspaceEgressSecurityGroup({
         tenantId: actor.tenantId,
         subjectId: target.userId,
@@ -4248,6 +4393,31 @@ export function createControlServer(
         await service.refreshEgressPolicy(targetPrincipal.identity, policy, grantId);
       }
       return assigned;
+    },
+  );
+  app.delete<{ Params: { userId: string; grantId: string } }>(
+    "/v1/admin/users/:userId/workspaces/:grantId/egress-security-group",
+    async (request) => {
+      const actor = principal(request);
+      const grantId = z.string().min(1).max(128).parse(request.params.grantId);
+      const targetIdentity = identityContextSchema.parse({ tenantId: actor.tenantId, subjectId: request.params.userId, audience: "lemmacomputer-control" });
+      await requireWorkspaceGrantPermission(request, "policy.manage", targetIdentity, grantId);
+      if (!security.identityPolicyStore?.clearWorkspaceEgressSecurityGroup) {
+        throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
+      }
+      const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+      await security.identityPolicyStore.clearWorkspaceEgressSecurityGroup({
+        tenantId: actor.tenantId,
+        subjectId: target.userId,
+        grantId,
+      });
+      const profileId = await workspaceProfileIdFor(targetPrincipal, target.effectivePolicy, grantId);
+      const inherited = await workspaceEgressFor(targetPrincipal, target.effectivePolicy, grantId, profileId);
+      if (target.effectivePolicy) {
+        const { policy } = await policyForGrant(targetPrincipal, target.effectivePolicy, grantId);
+        await service.refreshEgressPolicy(targetPrincipal.identity, policy, grantId);
+      }
+      return inherited;
     },
   );
   app.get<{ Querystring: { grantId?: string } }>("/v1/sandbox-settings", async (request) => {

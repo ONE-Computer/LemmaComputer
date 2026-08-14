@@ -99,7 +99,7 @@ const navByView = Object.freeze({
   sites: "Sites",
   chat: "Chat",
   trail: "Trail",
-  firewall: "Firewall",
+  firewall: "Network access",
   connections: "Connectors",
   settings: "Settings",
   "ai-usage": "AI usage",
@@ -439,7 +439,7 @@ function WorkspaceAssignment({ label, icon: Icon, children, detail }) {
   );
 }
 
-function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, policyUsers }) {
+function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, canManageNetworkAccess, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, onWorkspaceNetworkChanged, policyUsers, onGuardrailsSaved }) {
   const organizationSection = section === "organization" && canManageAnyWorkspace;
   const policySection = section === "policies" && canManagePolicy;
   return (
@@ -451,7 +451,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
           <span>{organizationSection
             ? "Monitor and manage member workspace runtimes. Workspace contents remain private to each member."
             : policySection
-              ? "Optionally set organization-wide limits for workspace creation and use."
+              ? "Set organization-wide workspace choices and review where they apply."
               : "Create and manage the workspaces available to you."}</span>
         </div>
         {!organizationSection && !policySection && canCreateWorkspace && <button className="primary-button create-workspace-button" type="button" onClick={onCreate}>
@@ -462,11 +462,11 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
       {(canManageAnyWorkspace || canManagePolicy) && <nav className="workspace-page-tabs" aria-label="Workspace sections">
         <button type="button" className={section === "mine" ? "active" : ""} aria-current={section === "mine" ? "page" : undefined} onClick={() => onSectionChange("mine")}>My workspaces</button>
         {canManageAnyWorkspace && <button type="button" className={organizationSection ? "active" : ""} aria-current={organizationSection ? "page" : undefined} onClick={() => onSectionChange("organization")}>Organization workspaces</button>}
-        {canManagePolicy && <button type="button" className={policySection ? "active" : ""} aria-current={policySection ? "page" : undefined} onClick={() => onSectionChange("policies")}>Workspace policies</button>}
+        {canManagePolicy && <button type="button" className={policySection ? "active" : ""} aria-current={policySection ? "page" : undefined} onClick={() => onSectionChange("policies")}>Workspace guardrails</button>}
       </nav>}
 
-      {organizationSection ? <MemberWorkspaceConsole members={workspaceMembers} loading={adminLoading} error={workspaceError} busyWorkspaceId={workspaceBusyId} onCommand={onWorkspaceCommand} />
-        : policySection ? <ProtectedWorkspacePolicySection users={policyUsers} />
+      {organizationSection ? <MemberWorkspaceConsole members={workspaceMembers} loading={adminLoading} error={workspaceError} busyWorkspaceId={workspaceBusyId} onCommand={onWorkspaceCommand} canManageNetworkAccess={canManageNetworkAccess} onNetworkChanged={onWorkspaceNetworkChanged} />
+        : policySection ? <ProtectedWorkspacePolicySection users={policyUsers} workspaceMembers={workspaceMembers} onReviewWorkspaces={canManageAnyWorkspace ? () => onSectionChange("organization") : undefined} onSaved={onGuardrailsSaved} />
           : <>
 
       {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong>{apiError}</span></div>}
@@ -496,7 +496,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
                   <span className={`workspace-card-icon${busy ? " busy" : ""}`}><Laptop24Regular aria-hidden="true" /></span>
                   <div className="workspace-card-title">
                     <h2 id={titleId}>{workspaceName(workspace)}</h2>
-                    <p>{workspace.profile?.executionMode === "disposable-open" ? "Disposable open · non-sensitive work" : workspace.grantId === "personal" ? "Personal managed workspace" : "Managed workspace"}</p>
+                    <p>{workspace.profile?.executionMode === "disposable-open" ? "Internet workspace · non-sensitive work" : workspace.grantId === "personal" ? "Personal managed workspace" : "Managed workspace"}</p>
                   </div>
                   <span className={`workspace-state state-${workspace.state}`}>{workspaceStatus(workspace.state)}</span>
                 </header>
@@ -1308,6 +1308,7 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
       name: selected.name,
       description: selected.description,
       defaultAction: selected.defaultAction,
+      defaultFor: selected.defaultFor,
       rules: selected.rules,
     });
   }, [selected?.id]);
@@ -1321,7 +1322,8 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
 
   const save = async () => {
     if (!draft) return;
-    const saved = await onSave(draft);
+    const { defaultFor: _defaultFor, ...document } = draft;
+    const saved = await onSave(document);
     if (saved) onClose();
   };
 
@@ -1329,16 +1331,16 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
     <ModalDialog
       className="firewall-editor-modal"
       title={draft?.securityGroupId ? `Manage ${draft.name}` : "Create security group"}
-      description="A security group is a reusable collection of Allow and Deny rules. Saved changes apply live to every workspace using the group."
+      description={draft?.defaultFor ? `This built-in group is inherited by ${draft.defaultFor === "managed" ? "Managed" : "Internet"} workspaces. Its baseline behavior is fixed; destination rules remain editable.` : "A security group is a reusable collection of Allow and Deny rules. Saved changes apply live to every workspace using the group."}
       eyebrow="Egress firewall"
       labelledBy="firewall-editor-title"
       onClose={saving ? () => undefined : onClose}
     >
       {draft && <div className="firewall-editor">
         <div className="firewall-editor-fields">
-          <label><span>Name</span><input name="security-group-name" placeholder="Approved agent updates" value={draft.name} disabled={saving} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-          <label><span>Description</span><input name="security-group-description" placeholder="What this group controls" value={draft.description} disabled={saving} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
-          <label className="firewall-editor-default-action"><span>Default behavior</span><SelectMenu value={draft.defaultAction} disabled={saving} onValueChange={(value) => setDraft({ ...draft, defaultAction: value })} ariaLabel="Default security group behavior" options={[{ value: "deny", label: "Deny unmatched destinations" }, { value: "allow-public-http-https", label: "Allow public HTTP and HTTPS" }]} /></label>
+          <label><span>Name</span><input name="security-group-name" placeholder="Approved agent updates" value={draft.name} disabled={saving || Boolean(draft.defaultFor)} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+          <label><span>Description</span><input name="security-group-description" placeholder="What this group controls" value={draft.description} disabled={saving || Boolean(draft.defaultFor)} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+          <label className="firewall-editor-default-action"><span>Default behavior</span><SelectMenu value={draft.defaultAction} disabled={saving || Boolean(draft.defaultFor)} onValueChange={(value) => setDraft({ ...draft, defaultAction: value })} ariaLabel="Default security group behavior" options={[{ value: "deny", label: "Deny unmatched destinations" }, { value: "allow-public-http-https", label: "Allow public HTTP and HTTPS" }]} /></label>
         </div>
         <div className="firewall-editor-rule-heading">
           <div><h3>Rules</h3><p>Rules are evaluated for every workspace using this group. A matching Deny rule takes precedence.</p></div>
@@ -1949,8 +1951,8 @@ const protectedPolicyAgentNames = {
   "hermes-claw": "Hermes Agent",
 };
 const protectedPolicyProfileNames = {
-  "claude-desktop-standard-v1": "Standard managed workspace",
-  "disposable-open-v1": "Disposable open workspace",
+  "claude-desktop-standard-v1": "Managed workspace",
+  "disposable-open-v1": "Internet workspace",
 };
 const protectedPolicyServiceClassNames = { lite: "Lite", balanced: "Balanced", pro: "Pro" };
 const protectedPolicyReasoningOptions = ["disabled", "low", "medium", "high", "max"];
@@ -1987,7 +1989,7 @@ function ProtectedPolicyResourceEditor({ legend, description, values, labels, se
   </fieldset>;
 }
 
-function ProtectedWorkspacePolicySection({ users }) {
+function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWorkspaces, onSaved }) {
   const [overview, setOverview] = useState(null);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [editor, setEditor] = useState(null);
@@ -2008,8 +2010,8 @@ function ProtectedWorkspacePolicySection({ users }) {
     });
     return () => { active = false; };
   }, []);
-  if (!overview && error) return <section className="workspace-policy-admin"><div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace policy needs attention</strong>{error}</span></div></section>;
-  if (!overview) return <section className="workspace-policy-admin"><p className="admin-empty-state" role="status">Loading workspace policy…</p></section>;
+  if (!overview && error) return <section className="workspace-policy-admin"><div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace guardrails need attention</strong>{error}</span></div></section>;
+  if (!overview) return <section className="workspace-policy-admin"><p className="admin-empty-state" role="status">Loading workspace guardrails…</p></section>;
 
   const { catalog } = overview;
   const available = catalog.constraints;
@@ -2022,7 +2024,6 @@ function ProtectedWorkspacePolicySection({ users }) {
     applications: protectedPolicyEffectiveValues(available.applications, existingPolicy.applications),
     serviceClasses: protectedPolicyEffectiveValues(available.serviceClasses, existingPolicy.serviceClasses),
     maximumReasoningEffort: existingPolicy.maximumReasoningEffort ?? available.maximumReasoningEffort,
-    maximumEgressMode: existingPolicy.maximumEgressMode ?? available.maximumEgressMode,
     clipboard: {
       localToWorkspace: existingPolicy.clipboard?.localToWorkspace ?? available.clipboard.localToWorkspace,
       workspaceToLocal: existingPolicy.clipboard?.workspaceToLocal ?? available.clipboard.workspaceToLocal,
@@ -2037,7 +2038,6 @@ function ProtectedWorkspacePolicySection({ users }) {
     applications: [...effective.applications],
     serviceClasses: [...assignableServiceClasses],
     maximumReasoningEffort: effective.maximumReasoningEffort,
-    maximumEgressMode: effective.maximumEgressMode,
     clipboardLocalToWorkspace: effective.clipboard.localToWorkspace,
     clipboardWorkspaceToLocal: effective.clipboard.workspaceToLocal,
     clipboardMaxKb: Math.max(1, Math.round(effective.clipboard.maxBytes / 1024)),
@@ -2048,11 +2048,12 @@ function ProtectedWorkspacePolicySection({ users }) {
     setError("");
     try {
       const constraints = protectedOrganizationConstraintsFromEditor({ catalog: available, existingPolicy, editor });
-      await adminApi.createProtectedOrganizationPolicyVersion(constraints, editor.revisionNote.trim());
+      const result = await adminApi.createProtectedOrganizationPolicyVersion(constraints, editor.revisionNote.trim());
       await load();
       setEditor(null);
+      onSaved?.(result.version);
     } catch (saveError) {
-      setError(saveError.message ?? "The organization policy version could not be saved.");
+      setError(saveError.message ?? "The workspace guardrails could not be saved.");
     } finally {
       setSavingPolicy(false);
     }
@@ -2064,52 +2065,85 @@ function ProtectedWorkspacePolicySection({ users }) {
     && editor.serviceClasses.length > 0
     && editor.revisionNote.trim().length >= 3;
   const versionCreator = (version) => users.find((user) => user.userId === version.createdBy)?.displayName ?? "Organization administrator";
+  const activeMemberCount = workspaceMembers.filter((member) => member.membershipStatus === "active").length
+    || users.filter((user) => user.membershipStatus === "active").length;
+  const affectedWorkspaces = workspaceMembers.flatMap((member) => member.workspaces.map((workspace) => ({ member, workspace })));
+  const workspaceType = (workspace) => protectedPolicyProfileNames[workspace.profile?.id] ?? "Managed workspace";
+  const networkAccess = (workspace) => workspace.networkAccess?.mode === "full-web" ? "Public internet" : workspace.networkAccess?.mode === "restricted" ? "Approved destinations" : "Review workspace";
+  const editorBlocker = !editor ? "" : editor.workspaceProfiles.length === 0
+    ? "Select at least one workspace type."
+    : editor.agents.length === 0
+      ? "Select at least one agent."
+      : editor.applications.length === 0
+        ? "Select at least one application."
+        : editor.serviceClasses.length === 0
+          ? "Select at least one service level."
+          : editor.revisionNote.trim().length < 3
+            ? "Add a change summary of at least 3 characters."
+            : "";
 
   return <section className="workspace-policy-admin" aria-labelledby="protected-workspace-policy-heading">
     <header className="workspace-policy-heading">
-      <div><div className="workspace-policy-title-line"><h2 id="protected-workspace-policy-heading">{latest ? "Current organization policy" : "No organization policy"}</h2><span>{latest ? `v${latest.version}` : "All options available"}</span></div>
-        <p>{latest
-          ? `Version ${latest.version} is active across the organization.`
-          : "This organization has no policy restrictions. Members may choose from every supported workspace option."}</p></div>
-      <button className="primary-button workspace-policy-primary-action" type="button" onClick={openEditor}>{latest ? "Edit organization policy" : <><Add24Regular aria-hidden="true" />Set organization policy</>}</button>
+      <div><div className="workspace-policy-title-line"><h2 id="protected-workspace-policy-heading">Workspace guardrails</h2><span>{latest ? `v${latest.version}` : "Default"}</span></div>
+        <p>{activeMemberCount > 0 ? `Applies to all ${activeMemberCount} active ${activeMemberCount === 1 ? "member" : "members"}.` : "Applies organization-wide to every active member."}</p></div>
+      <button className="primary-button workspace-policy-primary-action" type="button" onClick={openEditor}>{latest ? "Edit guardrails" : <><Add24Regular aria-hidden="true" />Set guardrails</>}</button>
     </header>
-    {error && <div className="workspace-policy-error connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The workspace policy was not updated</strong>{error}</span></div>}
+    {error && <div className="workspace-policy-error connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The workspace guardrails were not updated</strong>{error}</span></div>}
+
+    <div className="workspace-policy-impact-summary" aria-label="Guardrail impact">
+      <strong>{affectedWorkspaces.length} {affectedWorkspaces.length === 1 ? "workspace" : "workspaces"}</strong>
+      <span>{activeMemberCount} active {activeMemberCount === 1 ? "member" : "members"}</span>
+      <span>{latest ? `Guardrails v${latest.version} active` : "Product defaults active"}</span>
+    </div>
 
     <div className="workspace-policy-overview">
       <section className="workspace-policy-controls" aria-labelledby="workspace-policy-controls-heading">
-        <h3 id="workspace-policy-controls-heading">Policy controls</h3>
-        <ProtectedPolicyControlGroup icon={Bot24Regular} title="Agents" lines={protectedPolicyList(effective.agents, protectedPolicyAgentNames)} />
-        <ProtectedPolicyControlGroup icon={Apps24Regular} title="Applications" lines={protectedPolicyList(effective.applications, applicationNames)} />
-        <ProtectedPolicyControlGroup icon={Info24Regular} title="Service and thinking" lines={[`Maximum thinking: ${protectedPolicyReasoningName(effective.maximumReasoningEffort)}`, `Service levels: ${protectedPolicyList(assignableServiceClasses, protectedPolicyServiceClassNames).join(", ")}`]} />
-        <ProtectedPolicyControlGroup icon={ShieldCheckmark24Regular} title="Advanced organization security" lines={[protectedPolicyList(assignableWorkspaceProfiles, protectedPolicyProfileNames).join(", "), effective.maximumEgressMode === "restricted" ? "Restricted internet access" : "Full web access permitted", protectedPolicyClipboardSummary(effective.clipboard)]} />
+        <h3 id="workspace-policy-controls-heading">Effective guardrails</h3>
+        <ProtectedPolicyControlGroup icon={Apps24Regular} title="Workspace types" lines={[protectedPolicyList(assignableWorkspaceProfiles, protectedPolicyProfileNames).join(", "), `Service levels: ${protectedPolicyList(assignableServiceClasses, protectedPolicyServiceClassNames).join(", ")}`]} />
+        <ProtectedPolicyControlGroup icon={Bot24Regular} title="Agents and applications" lines={[`Agents: ${protectedPolicyList(effective.agents, protectedPolicyAgentNames).join(", ")}`, `Applications: ${protectedPolicyList(effective.applications, applicationNames).join(", ")}`]} />
+        <ProtectedPolicyControlGroup icon={Info24Regular} title="AI usage" lines={[`Maximum thinking: ${protectedPolicyReasoningName(effective.maximumReasoningEffort)}`]} />
+        <ProtectedPolicyControlGroup icon={ShieldCheckmark24Regular} title="Network access" lines={["Managed and Internet workspaces inherit matching defaults", "Custom security groups are assigned only when a workspace needs an exception"]} />
+        <ProtectedPolicyControlGroup icon={Document24Regular} title="Data transfer" lines={[protectedPolicyClipboardSummary(effective.clipboard)]} />
       </section>
       <aside className="workspace-policy-context">
-        <section><div className="workspace-policy-context-title"><Clock24Regular aria-hidden="true" /><strong>Policy state</strong></div>{latest ? <><p><strong>Organization policy v{latest.version}</strong></p><p>{latest.revisionNote}</p><p>Saved {protectedPolicyDate(latest.createdAt)} by {versionCreator(latest)}.</p></> : <><p><strong>No organization policy</strong></p><p>All supported workspace options are available by default.</p></>}<p>When an administrator saves a policy, it applies organization-wide and every edit creates a new immutable version.</p></section>
+        <section><div className="workspace-policy-context-title"><CheckmarkCircle24Regular aria-hidden="true" /><strong>Guardrail state</strong></div><p><strong>{latest ? `Current · v${latest.version}` : "Current · Product defaults"}</strong></p><p>{latest ? "The latest guardrails apply to every active member and workspace." : "All supported workspace options are available until an administrator saves guardrails."}</p></section>
+        {latest && <section><div className="workspace-policy-context-title"><Document24Regular aria-hidden="true" /><strong>Change summary</strong></div><p>{latest.revisionNote}</p><p>Saved {protectedPolicyDate(latest.createdAt)} by {versionCreator(latest)}.</p></section>}
       </aside>
     </div>
 
+    <section className="workspace-policy-members" aria-labelledby="affected-workspaces-heading">
+      <div><div className="workspace-policy-member-heading"><div><h3 id="affected-workspaces-heading">Affected workspaces</h3><p>Every workspace follows this organization-wide guardrail version. Each workspace inherits its type default unless an administrator assigns a compatible custom security group.</p></div>{onReviewWorkspaces && <button type="button" onClick={onReviewWorkspaces}>View all organization workspaces</button>}</div></div>
+      {affectedWorkspaces.length === 0 ? <p className="admin-empty-state">No organization workspaces have been created yet.</p> : <div className="workspace-policy-member-table" role="table" aria-label="Workspaces affected by guardrails">
+        <div className="workspace-policy-member-header" role="row"><span role="columnheader">Owner</span><span role="columnheader">Workspace</span><span role="columnheader">Type</span><span role="columnheader">Network access</span><span role="columnheader">Guardrails</span></div>
+        {affectedWorkspaces.slice(0, 5).map(({ member, workspace }) => <div className="workspace-policy-member-row" role="row" key={workspace.id}>
+          <div className="workspace-policy-member-copy" role="cell"><strong>{member.displayName}</strong><small>{member.email}</small></div>
+          <strong role="cell" data-label="Workspace">{workspace.name}</strong><span role="cell" data-label="Type">{workspaceType(workspace)}</span><span role="cell" data-label="Network access">{networkAccess(workspace)}</span><span className="workspace-policy-state current" role="cell" data-label="Guardrails">{latest ? `v${latest.version} current` : "Defaults current"}</span>
+        </div>)}
+      </div>}
+    </section>
+
     <details className="workspace-policy-history">
-      <summary><span><Clock24Regular aria-hidden="true" /><strong>Version history</strong><small>{organizationVersions.length ? `${organizationVersions.length} immutable organization ${organizationVersions.length === 1 ? "version" : "versions"}` : "No organization policy versions yet."}</small></span><ChevronDown16Regular aria-hidden="true" /></summary>
+      <summary><span><Clock24Regular aria-hidden="true" /><strong>History</strong><small>{organizationVersions.length ? `${organizationVersions.length} immutable guardrail ${organizationVersions.length === 1 ? "version" : "versions"}` : "No guardrail versions yet."}</small></span><ChevronDown16Regular aria-hidden="true" /></summary>
       {organizationVersions.length > 0 && <div className="workspace-policy-history-list">{organizationVersions.map((version) => <article key={version.policyVersionId}><strong>v{version.version}{version === latest ? " · Current" : ""}</strong><span>{version.revisionNote}</span><small>{versionCreator(version)} · {protectedPolicyDate(version.createdAt)}</small></article>)}</div>}
     </details>
 
-    {editor && <ModalDialog className="workspace-policy-editor-modal" title={latest ? "Edit organization policy" : "Set organization policy"} description="Choose the workspace options available across this organization. Saving creates a new immutable version that applies to every member." eyebrow={latest ? `Current organization version ${latest.version}` : "No current policy"} labelledBy="workspace-policy-editor-title" onClose={savingPolicy ? () => undefined : () => { setEditor(null); setError(""); }}>
+    {editor && <ModalDialog className="workspace-policy-editor-modal" title={latest ? "Edit workspace guardrails" : "Set workspace guardrails"} description="Choose the workspace options available across this organization. Saving creates a new immutable version for every member and workspace." eyebrow={latest ? `Current guardrails v${latest.version}` : "Product defaults active"} labelledBy="workspace-policy-editor-title" onClose={savingPolicy ? () => undefined : () => { setEditor(null); setError(""); }}>
       <div className="workspace-policy-editor-body">
+        <ProtectedPolicyResourceEditor legend="Workspace types" description="Choose the environment and data-handling mode members may use. Network security groups are managed separately per workspace." values={protectedPolicyAllowed(available.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
         <ProtectedPolicyResourceEditor legend="Agents" description="Choose the approved agent experiences members may select." values={protectedPolicyAllowed(available.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} />
         <ProtectedPolicyResourceEditor legend="Applications" description="Members remain free to choose from these approved workspace applications." values={protectedPolicyAllowed(available.applications)} labels={applicationNames} selected={editor.applications} onChange={(applications) => setEditor({ ...editor, applications })} />
-        <ProtectedPolicyResourceEditor legend="Workspace access" description="Choose the workspace access modes members may select." values={protectedPolicyAllowed(available.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
         <ProtectedPolicyResourceEditor legend="Service levels" description="Choose the Lite, Balanced, and Pro service levels members may request." values={protectedPolicyAllowed(available.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value))} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
-        <fieldset className="workspace-policy-editor-group workspace-policy-editor-limits"><legend>Advanced organization security</legend><p>Set organization-wide ceilings for thinking, internet access, and text clipboard transfer.</p><div className="workspace-policy-limit-grid">
+        <fieldset className="workspace-policy-editor-group workspace-policy-editor-limits"><legend>AI usage and data transfer</legend><p>Set organization-wide ceilings for thinking and text clipboard transfer.</p><div className="workspace-policy-limit-grid">
           <label><span>Maximum thinking</span><SelectMenu value={editor.maximumReasoningEffort} ariaLabel="Maximum thinking level" options={protectedPolicyReasoningOptions.filter((value) => protectedPolicyReasoningOptions.indexOf(value) <= protectedPolicyReasoningOptions.indexOf(available.maximumReasoningEffort)).map((value) => ({ value, label: protectedPolicyReasoningName(value) }))} onValueChange={(maximumReasoningEffort) => setEditor({ ...editor, maximumReasoningEffort })} /></label>
-          <label><span>Internet access ceiling</span><SelectMenu value={editor.maximumEgressMode} ariaLabel="Internet access ceiling" options={[{ value: "restricted", label: "Restricted" }, ...(available.maximumEgressMode === "full-web" ? [{ value: "full-web", label: "Full web" }] : [])]} onValueChange={(maximumEgressMode) => setEditor({ ...editor, maximumEgressMode })} /></label>
           <label><span>Clipboard limit (KB)</span><input type="number" min="1" max={Math.round(available.clipboard.maxBytes / 1024)} value={editor.clipboardMaxKb} onChange={(event) => setEditor({ ...editor, clipboardMaxKb: Number(event.target.value) })} /></label>
           <label className="workspace-policy-switch"><input type="checkbox" checked={editor.clipboardLocalToWorkspace} onChange={(event) => setEditor({ ...editor, clipboardLocalToWorkspace: event.target.checked })} /><span><strong>Copy into workspace</strong><small>Allow local clipboard content to enter the workspace.</small></span></label>
           <label className="workspace-policy-switch"><input type="checkbox" checked={editor.clipboardWorkspaceToLocal} onChange={(event) => setEditor({ ...editor, clipboardWorkspaceToLocal: event.target.checked })} /><span><strong>Copy out of workspace</strong><small>Allow workspace clipboard content to return locally.</small></span></label>
         </div></fieldset>
-        <label className="workspace-policy-revision-note"><span>Change summary</span><textarea rows="3" maxLength="240" placeholder="Explain why this version is being created" value={editor.revisionNote} onChange={(event) => setEditor({ ...editor, revisionNote: event.target.value })} /><small>This note appears in immutable version history.</small></label>
+        <label className="workspace-policy-revision-note"><span>Change summary</span><textarea rows="3" required minLength="3" maxLength="240" aria-describedby="guardrail-change-summary-help" placeholder="Explain why this version is being created" value={editor.revisionNote} onChange={(event) => setEditor({ ...editor, revisionNote: event.target.value })} /><small id="guardrail-change-summary-help">Required. This note appears in immutable version history.</small></label>
       </div>
       {error && <div className="workspace-policy-modal-error" role="alert">{error}</div>}
-      <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={savePolicy}>{savingPolicy ? "Saving version" : latest ? "Save as new version" : "Save organization policy"}</button></div>
+      {editorBlocker && <p className="workspace-policy-save-guidance" role="status">{editorBlocker}</p>}
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={savePolicy}>{savingPolicy ? "Saving guardrails" : latest ? "Save as new version" : "Save guardrails"}</button></div>
     </ModalDialog>}
 
   </section>;
@@ -2125,9 +2159,91 @@ const workspaceAdminDate = (value) => value
   ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
   : "No agent activity yet";
 
-function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCommand }) {
+function WorkspaceNetworkAccessDialog({ member, workspace, onClose, onSaved }) {
+  const [settings, setSettings] = useState(null);
+  const [selection, setSelection] = useState("inherit");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    adminApi.sandboxSettings(member.userId, workspace.grantId)
+      .then((value) => {
+        if (!active) return;
+        setSettings(value);
+        setSelection(value.securityGroup?.assignmentSource === "custom" ? value.securityGroup.id : "inherit");
+        setError("");
+      })
+      .catch((requestError) => active && setError(requestError.message))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [member.userId, workspace.grantId]);
+
+  const internetWorkspace = settings?.profile?.executionMode === "disposable-open";
+  const requiredAction = internetWorkspace ? "allow-public-http-https" : "deny";
+  const inherited = settings?.availableSecurityGroups?.find((group) => group.defaultFor === (internetWorkspace ? "internet" : "managed"));
+  const customGroups = settings?.availableSecurityGroups
+    ?.filter((group, index, all) => !group.defaultFor
+      && group.defaultAction === requiredAction
+      && all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index) ?? [];
+  const selectedGroup = selection === "inherit"
+    ? inherited ?? settings?.securityGroup
+    : customGroups.find((group) => group.id === selection);
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      if (selection === "inherit") await adminApi.clearUserWorkspaceEgressSecurityGroup(member.userId, workspace.grantId);
+      else await adminApi.assignUserWorkspaceEgressSecurityGroup(member.userId, workspace.grantId, selection);
+      await onSaved();
+      onClose();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <ModalDialog
+    className="workspace-network-access-modal"
+    title={`Network access for ${workspace.name}`}
+    description={`Choose whether ${member.displayName}’s workspace inherits its type default or uses a compatible custom security group.`}
+    eyebrow="Organization workspace"
+    labelledBy="workspace-network-access-title"
+    onClose={saving ? () => undefined : onClose}
+  >
+    {loading ? <p className="sandbox-loading" role="status">Loading network access…</p> : settings && <div className="workspace-network-access-editor">
+      <div className="workspace-network-access-summary">
+        <span><strong>{settings.profile.displayName}</strong><small>{internetWorkspace ? "Public internet baseline" : "Approved destinations baseline"}</small></span>
+        <span><strong>{selectedGroup?.name ?? "Workspace type default"}</strong><small>{selection === "inherit" ? "Inherited from workspace type" : "Custom workspace override"}</small></span>
+      </div>
+      <label><span>Security group</span><SelectMenu
+        value={selection}
+        disabled={saving}
+        onValueChange={setSelection}
+        ariaLabel="Workspace network security group"
+        options={[
+          { value: "inherit", label: `Inherit from ${settings.profile.displayName}` },
+          ...customGroups.map((group) => ({ value: group.id, label: group.name })),
+        ]}
+      /></label>
+      <p className="workspace-network-access-help">{internetWorkspace
+        ? "Only public-web groups are compatible with an Internet workspace. Private and reserved destinations remain blocked."
+        : "Only deny-by-default groups are compatible with a Managed workspace."}</p>
+      {error && <div className="workspace-policy-modal-error" role="alert">{error}</div>}
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="button" disabled={saving} onClick={save}>{saving ? "Saving access" : "Save network access"}</button></div>
+    </div>}
+    {!loading && !settings && error && <div className="workspace-policy-modal-error" role="alert">{error}</div>}
+  </ModalDialog>;
+}
+
+function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCommand, canManageNetworkAccess, onNetworkChanged }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [networkEditor, setNetworkEditor] = useState(null);
   const total = members.reduce((count, member) => count + member.workspaceCount, 0);
   const normalizedSearch = search.trim().toLowerCase();
   const statusMatches = (workspace) => statusFilter === "all"
@@ -2151,7 +2267,7 @@ function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCo
     ) : <div className="member-workspace-table" role="table" aria-label="Organization workspaces">
       <div className="member-workspace-summary"><strong>{members.length} {members.length === 1 ? "member" : "members"}</strong><strong>{total} {total === 1 ? "workspace" : "workspaces"}</strong><small>Administrators can manage runtime state but cannot open member workspaces or view their content.</small></div>
       <div className="member-workspace-table-header" role="row">
-        <span role="columnheader">Member</span><span role="columnheader">Workspace</span><span role="columnheader">Status</span><span role="columnheader">Health</span><span role="columnheader">Profile</span><span role="columnheader">Policy version</span><span role="columnheader">Last agent activity</span><span role="columnheader">Actions</span>
+        <span role="columnheader">Member</span><span role="columnheader">Workspace</span><span role="columnheader">Status</span><span role="columnheader">Health</span><span role="columnheader">Network access</span><span role="columnheader">Guardrails</span><span role="columnheader">Last agent activity</span><span role="columnheader">Actions</span>
       </div>
       {filteredMembers.length === 0 ? <p className="admin-empty-state">No workspaces match these filters.</p> : <div className="member-workspace-members">{filteredMembers.map((member) => member.workspaces.length === 0
         ? <div className="member-workspace-row empty" role="row" key={member.userId}>
@@ -2166,10 +2282,11 @@ function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCo
           <div className="member-workspace-name" role="cell" data-label="Workspace"><strong>{workspace.name}</strong></div>
           <div role="cell" data-label="Status"><span className={`workspace-state state-${workspace.state}`}>{workspaceStatus(workspace.state)}</span></div>
           <div className={`member-workspace-health ${workspace.health.status}`} role="cell" data-label="Health">{workspace.health.status === "healthy" && <CheckmarkCircle24Regular aria-hidden="true" />}<span>{workspaceHealthLabel[workspace.health.status] ?? "Unknown"}</span></div>
-          <div className="member-workspace-profile" role="cell" data-label="Profile">{workspace.profile?.id ?? "Unavailable"}</div>
-          <div role="cell" data-label="Policy version">{workspace.policyAssignment ? `Policy v${workspace.policyAssignment.version}` : "Not assigned"}</div>
+          <div className="member-workspace-profile" role="cell" data-label="Network access"><strong>{workspace.networkAccess?.mode === "full-web" ? "Public internet" : "Approved destinations"}</strong><small>{workspace.networkAccess?.securityGroup?.assignmentSource === "custom" ? "Custom settings" : "Inherited from type"}</small></div>
+          <div role="cell" data-label="Guardrails">{workspace.policyAssignment ? `v${workspace.policyAssignment.version} current` : "Defaults current"}</div>
           <div className="member-workspace-activity" role="cell" data-label="Last agent activity">{workspaceAdminDate(workspace.lastActivityAt)}</div>
           <div className="member-workspace-actions" role="cell" data-label="Actions">
+            {canManageNetworkAccess && <button className="secondary-button" type="button" disabled={busy} onClick={() => setNetworkEditor({ member, workspace })}>Manage access</button>}
             {!running && <button className="primary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "start")}>Start</button>}
             {running && <><div><button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "restart")}>Restart</button><button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "stop")}>Stop</button></div><button className="connection-quiet-button danger-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "terminate_runtime")}>Terminate runtime</button></>}
             {busy && <small role="status">Updating…</small>}
@@ -2177,6 +2294,7 @@ function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCo
         </section>;
       }))}</div>}
     </div>}
+    {networkEditor && <WorkspaceNetworkAccessDialog member={networkEditor.member} workspace={networkEditor.workspace} onClose={() => setNetworkEditor(null)} onSaved={onNetworkChanged} />}
   </section>;
 }
 
@@ -2577,9 +2695,9 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
     <div className="secondary-screen firewall-screen">
       <header className="page-heading firewall-page-heading">
         <div>
-          <p>Network control</p>
-          <h1>Egress firewall</h1>
-          <span>Create and manage reusable security groups with Allow and Deny rules.</span>
+          <p>Organization security</p>
+          <h1>Network access</h1>
+          <span>Managed and Internet workspaces inherit their matching built-in defaults. Create reusable security groups here only when a workspace needs an exception.</span>
         </div>
         <div className="firewall-page-actions">
           <button className="primary-button" type="button" onClick={() => setEditor({ securityGroupId: null, createNew: true })}><Add24Regular aria-hidden="true" />Create security group</button>
@@ -2591,7 +2709,7 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
           <div>
             <p>Rule collections</p>
             <h2 id="firewall-security-groups-heading">Security groups</h2>
-            <span>Default applies to new workspaces. Rule changes apply live.</span>
+            <span>Built-in defaults follow workspace type. Custom groups are attached to individual workspaces, and rule changes apply live.</span>
           </div>
           <strong>{latestVersions.length} {latestVersions.length === 1 ? "group" : "groups"}</strong>
         </div>
@@ -2612,7 +2730,7 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
                 <div className="firewall-security-group-copy">
                   <button type="button" onClick={() => setEditor({ securityGroupId: group.securityGroupId, createNew: false })}>{group.name}</button>
                   <small>{group.description}</small>
-                  {group.isDefault && <span className="firewall-default-badge">Default</span>}
+                  {group.defaultFor && <span className="firewall-default-badge">{group.defaultFor === "managed" ? "Managed default" : "Internet default"}</span>}
                 </div>
                 <div className="firewall-security-group-rules" aria-label={`${allowCount} Allow and ${denyCount} Deny rules`}>
                   <span className="allow"><strong>{allowCount}</strong> Allow</span>
@@ -2620,7 +2738,7 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
                 </div>
                 <div className="firewall-security-group-baseline">
                   <strong>{group.defaultAction === "allow-public-http-https" ? "Allow public web" : "Deny unmatched"}</strong>
-                  <small>{group.isDefault ? "Built-in default" : "Deny rules take precedence"}</small>
+                  <small>{group.defaultFor ? "Inherited by workspace type" : "Deny rules take precedence"}</small>
                 </div>
                 <span className="firewall-security-group-version">Revision {group.version}</span>
                 <button className="secondary-button" type="button" onClick={() => setEditor({ securityGroupId: group.securityGroupId, createNew: false })}>Manage group</button>
@@ -2885,7 +3003,7 @@ const explicitWorkspaceServiceClass = (value, options) => (
     : options.some((option) => option.value === "balanced") ? "balanced" : options[0]?.value ?? "balanced"
 );
 
-function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, onAssignSecurityGroup, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
+function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState("");
@@ -2905,7 +3023,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
     setModelAlias(settings.modelAlias);
     setRequestedServiceClass(explicitWorkspaceServiceClass(settings.requestedServiceClass, explicitWorkspaceServiceClassOptions(settings)));
     setAgentIds(settings.agentIds);
-    setSecurityGroupVersionId(settings.securityGroup?.id ?? settings.availableSecurityGroups?.find((group) => group.isDefault)?.id ?? "");
+    setSecurityGroupVersionId(settings.securityGroup?.assignmentSource === "custom" ? settings.securityGroup.id : "inherit");
   }, [creatingWorkspace, settings?.profileId, settings?.availableProfiles, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
 
   const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedWorkspace?.state);
@@ -2917,7 +3035,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
     || modelAlias !== settings.modelAlias
     || requestedServiceClass !== settings.requestedServiceClass
     || agentIds.join(",") !== settings.agentIds.join(",")
-    || (creatingWorkspace && securityGroupVersionId !== (settings.securityGroup?.id ?? ""))
+    || securityGroupVersionId !== (settings.securityGroup?.assignmentSource === "custom" ? settings.securityGroup.id : "inherit")
   );
   const toggleApplication = (applicationId) => setApplicationIds((current) => (
     current.includes(applicationId) ? current.filter((id) => id !== applicationId) : [...current, applicationId]
@@ -2931,6 +3049,15 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const selectableProfiles = settings?.availableProfiles.filter((profile) => profile.id !== "kasm-persistent-standard" || (!creatingWorkspace && profile.id === settings.profileId)) ?? [];
   const openProfileAvailable = selectableProfiles.some((profile) => profile.executionMode === "disposable-open");
   const supportedProfileSelected = selectableProfiles.some((profile) => profile.id === profileId);
+  const requiredNetworkAction = disposableOpen ? "allow-public-http-https" : "deny";
+  const inheritedSecurityGroup = settings?.availableSecurityGroups?.find((group) => group.defaultFor === (disposableOpen ? "internet" : "managed"));
+  const compatibleSecurityGroups = settings?.availableSecurityGroups
+    ?.filter((group, index, all) => !group.defaultFor
+      && group.defaultAction === requiredNetworkAction
+      && all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index) ?? [];
+  const selectedSecurityGroup = securityGroupVersionId === "inherit"
+    ? inheritedSecurityGroup ?? settings?.securityGroup
+    : compatibleSecurityGroups.find((group) => group.id === securityGroupVersionId);
 
   return (
     <div className="secondary-screen sandbox-screen sandbox-detail-screen">
@@ -2945,14 +3072,19 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       </header>
       {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong>{error}</span></div>}
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
-        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, requestedServiceClass, agentIds, securityGroupVersionId }); }}>
+        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>{openProfileAvailable ? "Choose an organization-managed workspace or an open workspace for non-sensitive work. This does not choose your AI agent." : "Your organization currently allows managed workspace access. This does not choose your AI agent."}</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>{openProfileAvailable ? "Choose a managed workspace for organization work or an Internet workspace for non-sensitive work. This does not choose your AI agent." : "Your organization currently allows managed workspace access. This does not choose your AI agent."}</p></span></div>
             <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{selectableProfiles.map((profile) => {
               const selected = profile.id === profileId;
               const open = profile.executionMode === "disposable-open";
               return <label className={`workspace-profile-option${selected ? " selected" : ""}${open ? " open-profile" : ""}`} key={profile.id}>
-                <input type="radio" name="workspace-profile" value={profile.id} checked={selected} onChange={() => setProfileId(profile.id)} />
+                <input type="radio" name="workspace-profile" value={profile.id} checked={selected} onChange={() => {
+                  setProfileId(profile.id);
+                  const expectedAction = open ? "allow-public-http-https" : "deny";
+                  const selectedGroup = settings.availableSecurityGroups?.find((group) => group.id === securityGroupVersionId);
+                  if (selectedGroup && selectedGroup.defaultAction !== expectedAction) setSecurityGroupVersionId("inherit");
+                }} />
                 <span className="profile-radio" aria-hidden="true" />
                 <span className="workspace-profile-copy">
                   <span className="workspace-profile-title"><strong>{profile.displayName}</strong><em>{open ? "Non-sensitive work only" : "Organization managed"}</em></span>
@@ -3004,26 +3136,28 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
           </section>
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Security</h2><p>Choose the security group for this workspace. Group and rule changes apply live without restarting.</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Network access</h2><p>{canManageFirewall ? "Assign the network security group for this workspace. Changes apply live without restarting." : "Network access is managed by your organization. You can review the effective access below."}</p></span></div>
             <div className="sandbox-security-card">
               <div>
-                <strong>Security group</strong>
-                <span>{settings.securityGroup?.name ?? "Default security group"}</span>
-                <small>{settings.securityGroup ? `Revision ${settings.securityGroup.version} · ` : ""}{settings.securityGroup?.defaultAction === "allow-public-http-https" ? "Public HTTP and HTTPS are allowed by default; matching Deny rules block exceptions." : "Unmatched destinations are denied; matching Allow rules grant exceptions."}</small>
+                <strong>{canManageFirewall ? "Security group" : "Access scope"}</strong>
+                <span>{canManageFirewall ? selectedSecurityGroup?.name ?? "Workspace type default" : settings.securityGroup?.defaultAction === "allow-public-http-https" ? "Public internet" : "Approved destinations"}</span>
+                <small>{canManageFirewall
+                  ? securityGroupVersionId === "inherit"
+                    ? `Inherited from ${selectedProfile?.displayName ?? "workspace type"}`
+                    : `Custom override · Revision ${selectedSecurityGroup?.version ?? "current"}`
+                  : settings.securityGroup?.assignmentSource === "custom" ? "A custom security group is assigned by your organization." : `Inherited from ${selectedProfile?.displayName ?? "workspace type"}.`}</small>
               </div>
-              {canManageFirewall && settings.availableSecurityGroups?.length ? <label className="workspace-security-group-select">
+              {canManageFirewall ? <label className="workspace-security-group-select">
                 <span className="sr-only">Security group</span>
                 <SelectMenu
                   value={securityGroupVersionId}
                   disabled={saving}
-                  onValueChange={(value) => {
-                    setSecurityGroupVersionId(value);
-                    if (!creatingWorkspace) onAssignSecurityGroup(settings.grantId, value);
-                  }}
+                  onValueChange={setSecurityGroupVersionId}
                   ariaLabel="Security group"
-                  options={settings.availableSecurityGroups
-                    .filter((group, index, all) => all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index)
-                    .map((group) => ({ value: group.id, label: `${group.name}${group.isDefault ? " · Default" : ""}` }))}
+                  options={[
+                    { value: "inherit", label: `Inherit from ${selectedProfile?.displayName ?? "workspace type"}` },
+                    ...compatibleSecurityGroups.map((group) => ({ value: group.id, label: group.name })),
+                  ]}
                 />
               </label> : null}
             </div>
@@ -5059,6 +5193,7 @@ export function App() {
   const canManageRoles = hasCapability("organization.manage_roles");
   const canManageSettings = hasCapability("organization.manage_settings");
   const canManagePolicy = hasCapability("policy.manage");
+  const canManageNetworkAccess = canManagePolicy;
   const canManageAnyWorkspace = hasAnyCapability("workspace.manage");
   const canManageAnyProvider = hasAnyCapability("provider.manage");
   const canReadUsage = hasCapability("usage.read");
@@ -5456,14 +5591,14 @@ export function App() {
   }, [session?.user.id]);
 
   useEffect(() => {
-    const allowed = activeNav === "Firewall" ? canManagePolicy : activeNav === "AI control plane" ? canOpenAiControlPlane : true;
-    if (!session || allowed || !["Firewall", "AI control plane"].includes(activeNav)) return;
+    const allowed = activeNav === "Network access" ? canManageNetworkAccess : activeNav === "AI control plane" ? canOpenAiControlPlane : true;
+    if (!session || allowed || !["Network access", "AI control plane"].includes(activeNav)) return;
     setActiveNav("Workspace");
     const url = new URL(window.location.href);
     url.searchParams.delete("view");
     url.searchParams.delete("section");
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
-  }, [activeNav, session?.user.id, canManagePolicy, canOpenAiControlPlane]);
+  }, [activeNav, session?.user.id, canManageNetworkAccess, canOpenAiControlPlane]);
 
   useEffect(() => {
     if (activeNav !== "AI control plane" || !canOpenAiControlPlane) return;
@@ -5492,7 +5627,7 @@ export function App() {
     Promise.all([
       (peopleOpen || workspacePoliciesOpen || teamsOpen || toolAuditOpen) && canManageMembers ? adminApi.users() : Promise.resolve({ users: [] }),
       peopleOpen && canManageMembers ? adminApi.invitations() : Promise.resolve(null),
-      (organizationWorkspacesOpen || toolAuditOpen) && canManageAnyWorkspace
+      (organizationWorkspacesOpen || workspacePoliciesOpen || toolAuditOpen) && canManageAnyWorkspace
         ? adminApi.memberWorkspaces()
           .then((value) => ({ ...value, error: null }))
           .catch((error) => ({ members: [], error }))
@@ -5517,13 +5652,13 @@ export function App() {
   }, [activeNav, aiControlPlaneView, settingsView, workspaceSection, session?.user.id, canManageMembers, canManageRoles, canManageSettings, canManagePolicy, canManageAnyWorkspace, canManageUsage, canReadAudit]);
 
   useEffect(() => {
-    if (activeNav !== "Firewall" || !canManagePolicy) return;
+    if (activeNav !== "Network access" || !canManageNetworkAccess) return;
     setAdminLoading(true);
     adminApi.egressSecurityGroups()
       .then((egress) => setEgressVersions(egress.securityGroups))
       .catch(showApiError)
       .finally(() => setAdminLoading(false));
-  }, [activeNav, session?.user.id, canManagePolicy]);
+  }, [activeNav, session?.user.id, canManageNetworkAccess]);
 
   useEffect(() => {
     if (activeNav !== "Connectors" || !connectionsView.endsWith("-tools")) return;
@@ -6171,10 +6306,12 @@ export function App() {
     setSandboxError("");
     try {
       const { securityGroupVersionId, ...sandboxConfiguration } = configuration;
-      if (securityGroupVersionId && securityGroupVersionId !== sandboxSettings?.securityGroup?.id) {
+      await sandboxApi.save(sandboxConfiguration);
+      if (securityGroupVersionId === "inherit" && sandboxSettings?.securityGroup?.assignmentSource === "custom") {
+        await adminApi.clearWorkspaceEgressSecurityGroup(configuration.grantId);
+      } else if (securityGroupVersionId && securityGroupVersionId !== "inherit" && securityGroupVersionId !== sandboxSettings?.securityGroup?.id) {
         await adminApi.assignWorkspaceEgressSecurityGroup(configuration.grantId, securityGroupVersionId);
       }
-      await sandboxApi.save(sandboxConfiguration);
       const creatingWorkspace = !homeWorkspaces.some((item) => item.grantId === configuration.grantId);
       if (creatingWorkspace) {
         const created = await workspaceApi.create(configuration.grantId);
@@ -6193,21 +6330,6 @@ export function App() {
       }
     } catch (error) {
       setSandboxError(error.message);
-    } finally {
-      setSandboxSaving(false);
-    }
-  };
-
-  const assignWorkspaceSecurityGroup = async (grantId, securityGroupVersionId) => {
-    setSandboxSaving(true);
-    setSandboxError("");
-    try {
-      const assigned = await adminApi.assignWorkspaceEgressSecurityGroup(grantId, securityGroupVersionId);
-      setSandboxSettings(await sandboxApi.settings(grantId));
-      setToast(`${assigned.name} is now active. No workspace restart was needed.`);
-    } catch (error) {
-      setSandboxError(error.message);
-      setSandboxSettings(await sandboxApi.settings(grantId).catch(() => sandboxSettings));
     } finally {
       setSandboxSaving(false);
     }
@@ -6877,7 +6999,7 @@ export function App() {
           <NavButton active={activeNav === "Schedules"} icon={Calendar24Regular} label="Schedules" onClick={() => selectNav("Schedules")} />
           <NavButton active={activeNav === "Sites"} icon={activeNav === "Sites" ? Apps24Filled : Apps24Regular} label="Sites" onClick={() => selectNav("Sites")} />
           <NavButton active={activeNav === "Trail"} icon={Clock24Regular} label="Trail" onClick={() => selectNav("Trail")} />
-          {canManagePolicy && <NavButton active={activeNav === "Firewall"} icon={ShieldCheckmark24Regular} label="Firewall" onClick={() => selectNav("Firewall")} />}
+          {canManageNetworkAccess && <NavButton active={activeNav === "Network access"} icon={ShieldCheckmark24Regular} label="Network access" onClick={() => selectNav("Network access")} />}
           <NavButton active={activeNav === "Connectors"} icon={PlugConnected24Regular} label="Connectors" onClick={() => selectNav("Connectors")} />
           <NavButton active={activeNav === "Chat"} icon={Bot24Regular} label="Chat" onClick={() => selectNav("Chat")} />
           {activeNav === "Chat" && <div className="sidebar-chat-history" aria-label="Recent chat threads">
@@ -6944,6 +7066,7 @@ export function App() {
             canManageWorkspace={(workspaceId) => hasScopedCapability("workspace.manage", "workspace", workspaceId) || hasScopedCapability("workspace.manage_own", "workspace", workspaceId)}
             canManageAnyWorkspace={canManageAnyWorkspace}
             canManagePolicy={canManagePolicy}
+            canManageNetworkAccess={canManageNetworkAccess}
             onSectionChange={selectWorkspaceSection}
             onOpen={openWorkspace}
             onRestart={restartWorkspace}
@@ -6956,7 +7079,9 @@ export function App() {
             workspaceError={adminWorkspaceError}
             workspaceBusyId={adminWorkspaceBusyId}
             onWorkspaceCommand={commandAdminWorkspace}
+            onWorkspaceNetworkChanged={async () => { await refreshAdminWorkspaceMembers(); setToast("Workspace network access updated."); }}
             policyUsers={adminUsers}
+            onGuardrailsSaved={(version) => setToast(`Workspace guardrails v${version.version} saved and active across the organization.`)}
           />
         )}
         {activeNav === "Sites" && <SitesScreen
@@ -7015,7 +7140,6 @@ export function App() {
           selectedGrantId={selectedSandboxGrantId}
           onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); setTelegramConnection(null); setTelegramError(""); }}
           onSave={saveWorkspaceSettings}
-          onAssignSecurityGroup={assignWorkspaceSecurityGroup}
           canManageFirewall={Boolean(homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId)?.id
             && hasScopedCapability("policy.manage", "workspace", homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId)?.id))}
           telegram={telegramConnection}
@@ -7056,7 +7180,7 @@ export function App() {
             onReviewWorkspacePolicies={() => selectWorkspaceSection("policies")}
           />
         )}
-        {activeNav === "Firewall" && canManagePolicy && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
+        {activeNav === "Network access" && canManageNetworkAccess && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
         {activeNav === "AI usage" && <PersonalAiOverview workspaces={homeWorkspaces} />}
         {activeNav === "AI control plane" && canOpenAiControlPlane && (
           <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView} tabs={availableAiControlPlaneTabs}>

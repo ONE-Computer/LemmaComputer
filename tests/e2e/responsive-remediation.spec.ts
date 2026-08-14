@@ -60,7 +60,7 @@ test("mobile dense data stays inside explicit scroll owners and exposes every AI
 test("Workspace focus and Chat composer remain visible at responsive breakpoints", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 650 });
   await page.goto("/?view=home&section=policies");
-  const workspaceTab = page.getByRole("button", { name: "Organization workspaces" });
+  const workspaceTab = page.getByRole("button", { name: "Organization workspaces", exact: true });
   await workspaceTab.focus();
   await expect.poll(() => workspaceTab.evaluate((element) => {
     const style = getComputedStyle(element);

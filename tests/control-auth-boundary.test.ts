@@ -465,6 +465,15 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     createdBy: "alpha",
     createdAt: new Date().toISOString(),
   };
+  const internetFirewallVersion: EgressSecurityGroupVersion = {
+    ...firewallVersion,
+    id: "egv_acme_public_web_v1",
+    securityGroupId: "esg_acme_public_web",
+    name: "Internet workspace access",
+    description: "Public HTTP and HTTPS for non-sensitive work.",
+    defaultAction: "allow-public-http-https",
+    rules: [],
+  };
   effectivePolicy.egressSecurityGroup = firewallVersion;
   effectivePolicy.document = {
     schemaVersion: 1,
@@ -613,16 +622,17 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       document.mcp.servers.lemmacomputer_ms365.toolPolicies = tools;
       return { id: "version-2", version: 2, documentHash: "b".repeat(64) };
     },
-    listEgressSecurityGroups: async () => [firewallVersion],
+    listEgressSecurityGroups: async () => [firewallVersion, internetFirewallVersion],
     saveEgressSecurityGroup: async (input: { name: string; description: string; rules: EgressSecurityGroupVersion["rules"] }) => {
       firewallVersion = { ...firewallVersion, version: 2, id: "egv_acme_updates_v2", name: input.name, description: input.description, rules: input.rules, documentHash: "f".repeat(64) };
       return firewallVersion;
     },
     getWorkspaceEgressSecurityGroup: async ({ grantId }: { grantId: string }) => grantId === openWorkspace.grantId
-      ? { ...firewallVersion, defaultAction: "allow-public-http-https" as const }
+      ? internetFirewallVersion
       : firewallVersion,
     assignWorkspaceEgressSecurityGroup: async ({ subjectId, securityGroupVersionId }: { subjectId: string; securityGroupVersionId: string }) => {
       assignedWorkspaceSubject = subjectId;
+      if (securityGroupVersionId === internetFirewallVersion.id) return internetFirewallVersion;
       firewallVersion = { ...firewallVersion, id: securityGroupVersionId };
       return firewallVersion;
     },
@@ -904,7 +914,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       method: "POST",
       url: "/v1/admin/users/beta/workspaces/personal/egress-security-group",
       headers: { ...headers, "content-type": "application/json" },
-      payload: { securityGroupVersionId: "egv_acme_updates_v2" },
+      payload: { securityGroupVersionId: internetFirewallVersion.id },
     });
     assert.equal(betaFirewall.statusCode, 200);
     assert.equal(assignedWorkspaceSubject, "beta");

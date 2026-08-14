@@ -23,7 +23,10 @@ export const protectedOrganizationConstraintsFromEditor = ({ catalog, existingPo
   applications: resourceConstraint(catalog.applications, editor.applications),
   serviceClasses: resourceConstraint(catalog.serviceClasses, editor.serviceClasses),
   maximumReasoningEffort: editor.maximumReasoningEffort,
-  maximumEgressMode: editor.maximumEgressMode,
+  // Keep the internal organization ceiling compatible with the workspace
+  // types on offer instead of exposing a second internet-access control. The
+  // effective per-workspace access remains owned by its security group.
+  maximumEgressMode: editor.workspaceProfiles.includes("disposable-open-v1") ? "full-web" : "restricted",
   clipboard: {
     localToWorkspace: editor.clipboardLocalToWorkspace,
     workspaceToLocal: editor.clipboardWorkspaceToLocal,

@@ -467,6 +467,8 @@ export const egressSecurityGroupVersionSchema = z.object({
   createdBy: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
   isDefault: z.boolean().optional(),
+  defaultFor: z.enum(["managed", "internet"]).optional(),
+  assignmentSource: z.enum(["workspace-type", "custom"]).optional(),
 }).strict();
 export type EgressSecurityGroupVersion = z.infer<typeof egressSecurityGroupVersionSchema>;
 
