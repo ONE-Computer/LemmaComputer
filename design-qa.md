@@ -1,56 +1,47 @@
 **Comparison target**
 
-- Source defect evidence:
-  - Account flyout: `/home/mike/.codex/attachments/ceb9dabc-39da-4a2a-af03-b91bb8dfebf4/codex-clipboard-e1d1bd04-e4cd-49e3-9467-c07e51c69146.png` (2004 x 2208 px).
-  - People and access: `/home/mike/.codex/attachments/f17e7fd0-92eb-4ca7-97a3-8ab2bc4e25ae/codex-clipboard-ae5e4715-1fd7-461a-b818-415bce06e1f6.png` (4712 x 1878 px).
-  - Credentials: `/home/mike/.codex/attachments/5bb2c63b-140f-4f7e-8b4a-2a63d4390ac9/codex-clipboard-f0424e14-2f79-4ea4-8c04-312f31b0dfcb.png` (5038 x 1934 px).
+- Source visual truth: `/home/mike/.codex/attachments/d9a9999b-2604-4740-9db7-ad67bd00383b/codex-clipboard-045a0d90-6918-4f0f-ba5f-92740a96e32a.png` (4980 x 1958 px), showing the unwanted left-anchored Settings frame.
 - Browser-rendered implementation:
-  - `/tmp/lemmacomputer-density-followup/account-menu-1470x730.png`.
-  - `/tmp/lemmacomputer-density-followup/people-1470x730.png`.
-  - `/tmp/lemmacomputer-density-followup/credentials-1470x730.png`.
-- Full-view comparison evidence:
-  - `/tmp/lemmacomputer-density-followup/account-menu-comparison.png`.
-  - `/tmp/lemmacomputer-density-followup/people-comparison.png`.
-  - `/tmp/lemmacomputer-density-followup/credentials-comparison.png`.
-- Focused alignment evidence: `/tmp/lemmacomputer-density-followup/secondary-alignment-comparison.png`.
-- Implementation viewport: 1470 x 730 CSS px, device scale factor 1, light theme, authenticated organization administrator.
-- Normalization: the supplied screenshots are defect captures from different display crops rather than one pixel-fidelity mock. Each source was aspect-fit and padded to 1470 x 730 before being paired with the corresponding implementation. Exact geometry was therefore judged from the two implementation routes captured at the same viewport; source comparisons were used to confirm that the reported defects were removed.
+  - `/tmp/lemmacomputer-density-correction/settings-centered-1920x900.png` (1920 x 900 px).
+  - `/tmp/lemmacomputer-density-correction/credentials-centered-1920x900.png` (1920 x 900 px).
+  - `/tmp/lemmacomputer-density-correction/people-centered-1920x900.png` (1920 x 1622 px full-page capture).
+- Full-view source/implementation comparison: `/tmp/lemmacomputer-density-correction/settings-centered-comparison.png` (3840 x 900 px).
+- Focused cross-route comparison: `/tmp/lemmacomputer-density-correction/secondary-centered-comparison.png` (3840 x 900 px), pairing the first 900px of Credentials and People and access.
+- Implementation viewport: 1920 x 900 CSS px, device scale factor 1, light theme, authenticated organization administrator.
+- Normalization: the 4980 x 1958 source was aspect-fit and padded to 1920 x 900 before pairing with the 1920 x 900 implementation. The source is defect evidence rather than a target for fixture copy or literal scale.
 
 **Findings**
 
-- No actionable P0, P1, or P2 visual differences remain after the shell correction.
-- Fonts and typography: the existing Inter hierarchy and compact 13–14px shell labels are preserved. The 316px account flyout keeps “My AI usage” and “AI control plane” on one line and leaves the profile name and email readable without the source capture's aggressive truncation.
-- Spacing and layout rhythm: the sidebar is now 216px—slightly wider while retaining 36px navigation rows. The flyout extends 100px beyond the sidebar over the main canvas. Credentials and People and access both begin at x=254px at 1470 x 730, including the “Back to Settings” control, heading, divider, and card column.
-- Colors and visual tokens: the warm shell, navy actions, pale blue surfaces, neutral borders, and account-card elevation remain unchanged. The higher stacking order is functional rather than decorative.
-- Image quality and assets: these screens use the existing LemmaComputer wordmark and Fluent icons; no raster imagery, generated assets, placeholder graphics, custom SVGs, or CSS drawings were introduced.
-- Copy and content: navigation, profile, Settings, Credentials, and People and access copy is unchanged. The improvement comes from available width and shared alignment rather than rewriting labels to fit.
-- Interaction and accessibility: the account trigger still exposes `aria-expanded` and `aria-controls`; the flyout remains keyboard focusable, fits the viewport with owned vertical scrolling, and stays within the mobile drawer at the mobile breakpoint. Browser checks found no console errors or document overflow in the revised desktop states.
+- No actionable P0, P1, or P2 visual differences remain after restoring centered alignment.
+- Fonts and typography: the existing Inter hierarchy, compact headings, and 13–14px shell labels remain unchanged. No new wrapping or truncation was introduced.
+- Spacing and layout rhythm: every secondary route uses the same 1440px maximum frame, centered within the main canvas. At 1920px, the left and right outer insets are equal; Settings, Credentials, and People and access use the same page column and Back to Settings coordinate.
+- Colors and visual tokens: no color, elevation, border, radius, or semantic-state token changed.
+- Image quality and assets: the screens retain the LemmaComputer wordmark and Fluent icons; no raster assets, placeholders, custom SVGs, or CSS drawings were introduced.
+- Copy and content: all route copy is unchanged.
+- Interaction and accessibility: the account flyout remains a 316px viewport-bounded overlay; desktop centering does not change mobile drawer behavior, keyboard operation, focus behavior, or scroll ownership. The focused Playwright pass found no document overflow or console errors.
 
 **Accepted differences**
 
-- The source captures use different viewport sizes and organization fixture data, so literal pixel scale and content values are not comparable. The implementation was evaluated against the requested shell behavior and against itself at one controlled viewport.
-- Home and Workspace retain a centered wide overview frame. The new left-anchored 1440px frame is specific to secondary pages, where cross-route alignment matters most.
+- The reference uses different fixture data and an ultra-wide cropped display. It is used to establish the alignment defect, while the corrected geometry is verified at a controlled 1920 x 900 viewport.
+- Pages shorter than the viewport naturally leave vertical whitespace; this is unrelated to the corrected horizontal frame.
 
 **Comparison history**
 
-1. The source account capture showed a P1 usability defect: the menu inherited the 196px sidebar width, wrapping action labels and truncating identity text.
-2. The source Settings captures showed a P2 consistency defect: People and access used a 1240px centered route cap while Credentials used 1040px, shifting their back controls and headings to different x-coordinates.
-3. Fixed the shell by widening the sidebar to 216px, giving the account flyout an independent 316px width and z-index 60, and allowing it to overflow over the main canvas.
-4. Fixed secondary-page alignment with one left-anchored 1440px frame and removed route-local width caps from Credentials, provider settings, and People and access.
-5. Post-fix screenshots and `secondary-alignment-comparison.png` show one stable left anchor, readable flyout labels, no clipping, and no horizontal overflow.
+1. The earlier shell pass correctly standardized secondary pages at 1440px but incorrectly set `margin: 0`, anchoring the frame to the left edge of the main canvas. This was a P1 composition regression on wide screens.
+2. Restored `margin: 0 auto` while retaining the shared 1440px width token and all route-cap removals.
+3. Fresh Settings, Credentials, and People captures show a common centered frame. The full-view and focused combined comparisons show no remaining alignment mismatch.
 
 **Implementation Checklist**
 
-- [x] Slightly widen the compact desktop sidebar.
-- [x] Let the account flyout escape the sidebar width and stack above page content.
-- [x] Constrain the flyout to the viewport and retain the mobile drawer behavior.
-- [x] Standardize secondary-page width and left alignment.
-- [x] Remove conflicting route-local page caps.
-- [x] Verify account interaction, Settings route alignment, overflow, and browser console output at 1470 x 730.
-- [x] Pass the full browser suite (103/103) and the repository quick gate (726 tests: 694 passed, 32 skipped).
+- [x] Preserve one shared, wider 1440px secondary-page width.
+- [x] Center that frame within the post-sidebar main canvas.
+- [x] Keep every Settings subsection on the same frame and Back to Settings coordinate.
+- [x] Preserve the wider account flyout and mobile drawer behavior.
+- [x] Pass static shell checks (37/37) and focused responsive Playwright checks (5/5).
+- [x] Pass the complete browser suite (103/103) and repository quick gate (726 tests: 694 passed, 32 skipped).
 
 **Follow-up Polish**
 
-- No P3 follow-up is required for this increment.
+- No P3 follow-up is required for this correction.
 
 final result: passed

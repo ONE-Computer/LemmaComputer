@@ -296,7 +296,7 @@ test("the consent-task schema is repaired additively for existing installations"
 test("desktop pages share the wider workspace content cap", async () => {
   const styles = await source("apps/web/src/styles.css");
   assert.match(styles, /--desktop-secondary-page-width: 1440px/);
-  assert.match(styles, /\.secondary-screen\s*\{\s*width: min\(100%, var\(--desktop-secondary-page-width\)\);\s*margin: 0;/);
+  assert.match(styles, /\.secondary-screen\s*\{\s*width: min\(100%, var\(--desktop-secondary-page-width\)\);\s*margin: 0 auto;/);
   assert.doesNotMatch(styles, /\.credentials-screen,\s*\.provider-settings-screen\s*\{\s*max-width:/);
   assert.doesNotMatch(styles, /\.admin-screen\s*\{[^}]*max-width:/s);
 });
@@ -321,7 +321,7 @@ test("desktop pages begin at one shared top-bar offset without compact-page padd
   const styles = await source("apps/web/src/styles.css");
   assert.match(styles, /\.topbar\s*\{\s*display: flex;\s*min-height: 24px/);
   assert.match(styles, /\.home-screen\s*\{[\s\S]*?margin: 0 auto/);
-  assert.match(styles, /\.secondary-screen\s*\{[\s\S]*?margin: 0/);
+  assert.match(styles, /\.secondary-screen\s*\{[\s\S]*?margin: 0 auto/);
   assert.doesNotMatch(styles, /\.page-heading\.compact\s*\{\s*padding-top:/);
   assert.match(styles, /@media \(max-width: 880px\) \{[\s\S]*?\.home-screen,\s*\.secondary-screen\s*\{\s*margin-top: 32px/);
 });

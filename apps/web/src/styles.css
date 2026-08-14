@@ -1570,7 +1570,7 @@ textarea:focus-visible,
 
 .secondary-screen {
   width: min(100%, var(--desktop-secondary-page-width));
-  margin: 0;
+  margin: 0 auto;
   padding: 0 var(--desktop-page-gutter) 40px;
 }
 

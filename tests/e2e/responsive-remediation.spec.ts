@@ -133,14 +133,22 @@ test("account menu floats beyond the sidebar and settings subsections share one 
   await expect(accountMenu.getByRole("button", { name: "My AI usage" }).locator("span")).toHaveCSS("white-space", "nowrap");
   expect(await accountMenu.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 
+  await page.setViewportSize({ width: 1920, height: 900 });
   await page.goto("/?view=settings&section=credentials");
   const credentialsBackX = (await page.getByRole("button", { name: "Back to Settings" }).boundingBox())?.x;
+  const [mainBox, secondaryBox] = await Promise.all([
+    page.locator(".main-content").boundingBox(),
+    page.locator(".secondary-screen").boundingBox(),
+  ]);
   await page.goto("/?view=settings&section=people");
   const peopleBackX = (await page.getByRole("button", { name: "Back to Settings" }).boundingBox())?.x;
   expect(credentialsBackX).toBeDefined();
   expect(peopleBackX).toBeDefined();
   expect(Math.abs((credentialsBackX ?? 0) - (peopleBackX ?? 0))).toBeLessThanOrEqual(1);
-  expect(peopleBackX ?? Infinity).toBeLessThanOrEqual(260);
+  const leftInset = (secondaryBox?.x ?? 0) - (mainBox?.x ?? 0);
+  const rightInset = ((mainBox?.x ?? 0) + (mainBox?.width ?? 0)) - ((secondaryBox?.x ?? 0) + (secondaryBox?.width ?? 0));
+  expect(Math.abs(leftInset - rightInset)).toBeLessThanOrEqual(1);
+  expect(secondaryBox?.width).toBe(1440);
   await expectNoDocumentOverflow(page);
   expect(consoleErrors).toEqual([]);
 });
