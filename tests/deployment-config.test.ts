@@ -82,6 +82,7 @@ const validHostedEnvironment = () => {
     LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64: pemBase64("PRIVATE KEY"),
     LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST: "workspace.example.test",
     LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST: "10.0.1.10",
+    LEMMACOMPUTER_WORKSPACE_NODE_RELAY_NETWORK: "workspace-relay-private",
     LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK: "workspace-app-private",
     LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL: "https://gateway.internal.example.test",
     LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL: "https://control.internal.example.test",

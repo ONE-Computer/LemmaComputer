@@ -318,6 +318,7 @@ test("remote Docker/KasmVNC nodes fail closed without private TLS relay configur
     nodeId: "workspace-node-test",
     publicHost: "workspace.internal.example.test",
     relayBindHost: "10.0.1.10",
+    relayNetwork: "workspace-relay-private",
     relayTlsCertificate: "test-certificate",
     relayTlsKey: "test-private-key",
     applicationNetwork: "workspace-app-private",
@@ -333,6 +334,71 @@ test("remote Docker/KasmVNC nodes fail closed without private TLS relay configur
       .ensureRemoteApplicationRelay("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", "gateway", "http://litellm:4000", 4000, "workspace-network"),
     (error: unknown) => error instanceof Error && "code" in error && error.code === "WORKSPACE_NODE_REMOTE_UPSTREAM_INSECURE",
   );
+});
+
+test("remote desktop relay publishes from a private ingress network and reaches only its workspace upstream", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-remote-relay-"));
+  const socketPath = join(directory, "docker.sock");
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const path = request.url?.replace(/^\/v1\.47/, "") ?? "";
+    requests.push({ method: request.method ?? "", path, body });
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path.includes("/json")) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+    if (request.method === "POST" && path.startsWith("/containers/create")) {
+      response.statusCode = 201;
+      response.end(JSON.stringify({ Id: "relay-id" }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new DockerKasmVncAdapter({
+      socketPath,
+      topology: "remote",
+      nodeId: "workspace-node-test",
+      publicHost: "workspace.internal.example.test",
+      relayBindHost: "10.0.1.10",
+      relayNetwork: "workspace-relay-private",
+      relayTlsCertificate: "test-certificate",
+      relayTlsKey: "test-private-key",
+      applicationNetwork: "workspace-app-private",
+      image: "sha256:pinned-workspace",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "unused-on-remote-nodes",
+      gatewayContainer: "unused-on-remote-nodes",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "hosted",
+    });
+    await (adapter as unknown as {
+      ensureRelay: (workspaceId: string, sandboxName: string, sandboxId: string, port: number, workspaceNetwork: string) => Promise<void>;
+    }).ensureRelay(
+      "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+      "lemmacomputer-sandbox-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+      "sandbox-id",
+      16_920,
+      "lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+    );
+    const created = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create"))!;
+    const host = created.body.HostConfig as Record<string, unknown>;
+    assert.equal(host.NetworkMode, "workspace-relay-private");
+    assert.deepEqual(host.PortBindings, { "16920/tcp": [{ HostIp: "10.0.1.10", HostPort: "16920" }] });
+    assert.ok(requests.some((item) => (
+      item.path === "/networks/lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508/connect"
+      && item.body.Container === "relay-id"
+    )));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("local Kasm creates a hardened internal network and reconciles governed service attachments", async () => {
@@ -860,4 +926,25 @@ test("local Kasm surfaces allowlisted exit-78 diagnostics before cleanup", async
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("local Kasm allowlists bounded entrypoint validation without exposing arbitrary logs", () => {
+  const adapter = new DockerKasmVncAdapter({
+    image: "sha256:pinned-workspace",
+    networkPrefix: "lemmacomputer-workspace",
+    controlNetwork: "lemmacomputer-control",
+    gatewayContainer: "lemmacomputer-litellm",
+    relayImage: "sha256:pinned-relay",
+    installationKind: "customer-managed",
+  });
+  const diagnostic = (adapter as unknown as { safeStartupDiagnostic: (logs: string) => string | undefined })
+    .safeStartupDiagnostic.bind(adapter);
+  for (const message of [
+    "unrecognized agent selection",
+    "managed workspaces require restricted egress",
+    "Cowork requires the virtualization device at /dev/kvm",
+    "Hermes Agent CLI MODEL_ALIAS is invalid",
+    "persistent crontab has unsafe ownership, mode, or size",
+  ]) assert.equal(diagnostic(`prefix\n${message}\nsuffix`), message);
+  assert.equal(diagnostic("provider secret=do-not-surface"), undefined);
 });

@@ -159,6 +159,66 @@ test("disposable-open projects attached deny rules as full-web exceptions", () =
   ]);
 });
 
+test("managed profile narrows an attached full-web security group instead of changing execution mode", () => {
+  const effective: EffectivePolicy = {
+    assignmentId: "assignment-managed-full-web", policyBundleId: "bundle-1", policyVersionId: "version-managed-full-web", version: 7,
+    documentHash: "4".repeat(64), assignedBy: "admin-1", assignedAt: "2026-07-26T00:00:00.000Z",
+    agentId: "agent-managed", vendorUserId: "oc-user-1",
+    document: {
+      schemaVersion: 1,
+      workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
+      agents: ["hermes-claw"],
+      modelAliases: ["lemmacomputer-openai"],
+      networkProfile: "controlled-egress-v1",
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
+    },
+    egressSecurityGroup: {
+      schemaVersion: 1,
+      id: "egv_managed_full_web_v1",
+      securityGroupId: "esg_managed_full_web",
+      tenantId: "acme",
+      version: 1,
+      name: "Default public web",
+      description: "Public web with an explicitly approved managed destination.",
+      defaultAction: "allow-public-http-https",
+      rules: [
+        {
+          id: "approved-updates",
+          action: "allow",
+          protocol: "https",
+          host: "updates.example.com",
+          includeSubdomains: false,
+          port: 443,
+          purpose: "Managed workspace updates",
+        },
+        {
+          id: "blocked-downloads",
+          action: "deny",
+          protocol: "https",
+          host: "downloads.example.com",
+          includeSubdomains: true,
+          port: 443,
+          purpose: "Untrusted downloads",
+        },
+      ],
+      documentHash: "5".repeat(64),
+      createdBy: "admin-1",
+      createdAt: "2026-07-26T00:00:00.000Z",
+    },
+  };
+
+  const managed = runtimePolicyFor(effective, undefined, "claude-desktop-standard-v1");
+
+  assert.equal(managed.executionMode, "managed");
+  assert.equal(managed.egressMode, "restricted");
+  assert.equal(managed.egress?.mode, "restricted");
+  assert.equal(managed.egress?.defaultAction, "deny");
+  assert.deepEqual(managed.egress?.rules.map((rule) => [rule.id, rule.action]), [
+    ["approved-updates", "allow"],
+  ]);
+  assert.notEqual(managed.egress?.documentHash, effective.egressSecurityGroup?.documentHash);
+});
+
 test("an assigned sandbox selection can narrow a multi-model policy but cannot broaden it", () => {
   const effective: EffectivePolicy = {
     assignmentId: "assignment-2", policyBundleId: "bundle-1", policyVersionId: "version-2", version: 2,

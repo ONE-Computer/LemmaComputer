@@ -133,7 +133,7 @@ test("a new organization has no policy ceiling and its administrator can create 
     ]);
     assert.deepEqual(settings.json().availableApplications.map((application: { id: string }) => application.id), ["firefox", "google-chrome"]);
     assert.deepEqual(settings.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite", "balanced", "pro"]);
-    assert.equal(settings.json().manifest.sandbox.egressMode, "full-web");
+    assert.equal(settings.json().manifest.sandbox.egressMode, "restricted");
     assert.equal(settings.json().securityGroup.defaultAction, "allow-public-http-https");
     assert.equal(settings.json().securityGroup.id, fullWebFallback.id);
     assert.equal(settings.json().securityGroup.documentHash, fullWebFallback.documentHash);
@@ -148,16 +148,16 @@ test("a new organization has no policy ceiling and its administrator can create 
     });
     assert.equal(created.statusCode, 201);
     assert.equal(created.json().state, "ready");
-    assert.equal(createdPolicy?.egressMode, "full-web");
-    assert.equal(createdPolicy?.egress?.defaultAction, "allow-public-http-https");
-    assert.equal(createdEgressProxy?.expectedGrant.egressMode, "full-web");
+    assert.equal(createdPolicy?.egressMode, "restricted");
+    assert.equal(createdPolicy?.egress?.defaultAction, "deny");
+    assert.equal(createdEgressProxy?.expectedGrant.egressMode, "restricted");
     assert.equal(createdEgressProxy?.expectedGrant.securityGroupVersionId, fullWebFallback.id);
 
     const lookupsBeforeCurrent = egressLookups;
     const currentAfterCreate = await app.inject({ method: "GET", url: "/v1/workspaces/current", headers });
     assert.equal(currentAfterCreate.statusCode, 200);
     assert.ok(egressLookups > lookupsBeforeCurrent, "an existing workspace still evaluates its current runtime policy");
-    assert.equal(currentAfterCreate.json().profile.egressMode, "full-web");
+    assert.equal(currentAfterCreate.json().profile.egressMode, "restricted");
   } finally {
     await app.close();
   }

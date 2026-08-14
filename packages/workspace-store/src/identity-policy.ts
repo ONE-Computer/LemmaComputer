@@ -169,9 +169,12 @@ export const runtimePolicyFor = (
   const attachedEgress = workspaceEgressSecurityGroup === undefined
     ? policy.egressSecurityGroup
     : workspaceEgressSecurityGroup;
-  const fullWebEgress = attachedEgress
-    ? attachedEgress.defaultAction === "allow-public-http-https"
-    : executionMode === "disposable-open";
+  // The selected workspace profile is the execution boundary. A security
+  // group may narrow that boundary, but must never change a managed workspace
+  // into a full-web workspace (or a disposable-open workspace into a managed
+  // one). Otherwise Control projects a combination that the workspace
+  // entrypoint correctly rejects before startup.
+  const fullWebEgress = executionMode === "disposable-open";
   const egressMode = fullWebEgress ? "full-web" as const : "restricted" as const;
   const egress = fullWebEgress
     ? {
@@ -196,9 +199,15 @@ export const runtimePolicyFor = (
         version: attachedEgress.version,
         name: attachedEgress.name,
         description: attachedEgress.description,
-        defaultAction: attachedEgress.defaultAction,
-        rules: attachedEgress.rules,
-        documentHash: attachedEgress.documentHash,
+        defaultAction: "deny" as const,
+        rules: attachedEgress.defaultAction === "allow-public-http-https"
+          ? attachedEgress.rules.filter((rule) => rule.action === "allow")
+          : attachedEgress.rules,
+        documentHash: attachedEgress.defaultAction === "allow-public-http-https"
+          ? createHash("sha256")
+              .update(`lemmacomputer-restricted-egress-v2\0${policy.documentHash}\0${attachedEgress.documentHash}`)
+              .digest("hex")
+          : attachedEgress.documentHash,
       } : undefined;
   return runtimePolicySchema.parse({
     schemaVersion: 1,

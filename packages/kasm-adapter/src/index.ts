@@ -232,6 +232,7 @@ type DockerKasmVncConfig = {
   egressNetwork?: string;
   publicHost?: string;
   relayBindHost?: string;
+  relayNetwork?: string;
   relayTlsCertificate?: string;
   relayTlsKey?: string;
   applicationNetwork?: string;
@@ -262,10 +263,10 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
     }
     this.nodeId = config.nodeId ?? "workspace-node";
     this.topology = config.topology ?? "colocated";
-    if (this.topology === "remote" && (!config.publicHost || !config.relayBindHost || !config.relayTlsCertificate || !config.relayTlsKey || !config.applicationNetwork)) {
+    if (this.topology === "remote" && (!config.publicHost || !config.relayBindHost || !config.relayNetwork || !config.relayTlsCertificate || !config.relayTlsKey || !config.applicationNetwork)) {
       throw new LemmaComputerError(
         "WORKSPACE_NODE_REMOTE_CONFIGURATION_INCOMPLETE",
-        "Remote workspace nodes require a private advertised host, relay bind address, relay TLS identity, and application network",
+        "Remote workspace nodes require a private advertised host, relay bind address, relay ingress network, relay TLS identity, and application network",
         503,
       );
     }
@@ -1051,7 +1052,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
   private async ensureRelay(workspaceId: string, sandboxName: string, sandboxId: string, port: number, workspaceNetwork: string) {
     const relayName = relayNameForWorkspace(workspaceId);
     const configurationDigest = createHash("sha256")
-      .update(canonicalJson({ topology: this.topology, sandboxId, port, certificate: this.config.relayTlsCertificate ?? "", image: this.config.relayImage }), "utf8")
+      .update(canonicalJson({ topology: this.topology, sandboxId, port, relayNetwork: this.config.relayNetwork ?? "", certificate: this.config.relayTlsCertificate ?? "", image: this.config.relayImage }), "utf8")
       .digest("hex");
     const existing = await this.inspectByName(relayName);
     if (existing?.running && existing.configurationDigest === configurationDigest) return;
@@ -1078,7 +1079,11 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
         "com.lemmacomputer.relay-configuration-digest": configurationDigest,
       },
       HostConfig: {
-        NetworkMode: this.topology === "remote" ? workspaceNetwork : this.config.controlNetwork,
+        // A remote relay needs one ingress-facing network so Docker can
+        // publish its private node port, plus the internal workspace network
+        // for the only permitted upstream. Publishing a port from an
+        // internal-only network is silently ineffective on Docker.
+        NetworkMode: this.topology === "remote" ? this.config.relayNetwork! : this.config.controlNetwork,
         RestartPolicy: { Name: "unless-stopped" },
         PortBindings: { [`${port}/tcp`]: [{ HostIp: this.topology === "remote" ? this.config.relayBindHost! : "127.0.0.1", HostPort: String(port) }] },
         ReadonlyRootfs: true,
@@ -1093,7 +1098,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
     const relayId = textValue(created, "Id");
     if (!relayId) throw new LemmaComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return a relay identifier", 502);
     await this.request("POST", `/containers/${relayId}/start`);
-    if (this.topology === "colocated") await this.connectContainer(workspaceNetwork, relayId);
+    await this.connectContainer(workspaceNetwork, relayId);
   }
 
   private async ensureEgressProxy(input: SandboxEgressPolicyUpdateInput, workspaceNetwork: string, replace = false) {
@@ -1269,13 +1274,22 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
 
   private safeStartupDiagnostic(logs: string) {
     const patterns = [
+      /invalid execution mode/,
+      /disposable-open requires full-web egress/,
+      /managed workspaces require restricted egress/,
+      /(?:invalid|unrecognized|duplicate) agent selection/,
+      /(?:invalid|unrecognized|duplicate) application selection/,
+      /Cowork requires the virtualization device at \/dev\/(?:kvm|vhost-vsock)/,
       /Cowork cannot access \/dev\/(?:kvm|vhost-vsock) as kasm-user/,
       /Cowork cannot create an AF_VSOCK socket/,
       /Cowork requires the Claude Desktop agent/,
       /invalid Cowork capability setting/,
       /(?:Claude Desktop|Claude CLI|Codex CLI|Hermes Agent CLI|Hermes Agent Desktop) (?:GATEWAY_UPSTREAM|GATEWAY_CREDENTIAL|MODEL_ALIAS|CONTROL_UPSTREAM|AGENT_BRIDGE_TOKEN|ALLOWED_TOOLS) is required/,
+      /(?:Claude Desktop|Claude CLI|Codex CLI|Hermes Agent CLI|Hermes Agent Desktop) MODEL_ALIAS is invalid/,
       /(?:Hermes sandbox API|Claude Chat API|Codex Chat API) configuration is required/,
       /invalid clipboard (?:policy boolean|size policy)/,
+      /unrecognized Claude model assignment/,
+      /persistent crontab (?:has unsafe ownership, mode, or size|contains unsupported control characters)/,
       /Kasm profile initialization failed/,
     ];
     for (const pattern of patterns) {
