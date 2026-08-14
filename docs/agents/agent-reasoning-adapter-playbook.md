@@ -93,7 +93,7 @@ Claude required two distinct adaptations.
 
 Claude Desktop validates gateway model identifiers against its built-in model
 catalog before enabling some native capabilities. The managed configuration in
-[`lemmacomputer-claude-config.py`](../docker/workspace/lemmacomputer-claude-config.py)
+[`lemmacomputer-claude-config.py`](../../docker/workspace/lemmacomputer-claude-config.py)
 therefore projects three exact, Anthropic-shaped client identifiers with the
 labels `Lite`, `Balanced`, and `Pro`. Their trailing release dates are adapter
 identifiers only. The root-owned loopback broker maps them to provider-neutral
@@ -128,11 +128,11 @@ not directly implement LemmaComputer's governed contract.
 ### Model and effort presentation
 
 The generated Hermes profile in
-[`lemmacomputer-hermes-config.py`](../docker/workspace/lemmacomputer-hermes-config.py)
+[`lemmacomputer-hermes-config.py`](../../docker/workspace/lemmacomputer-hermes-config.py)
 points its custom provider at a root-owned loopback broker and chooses one of
 `lemmacomputer-lite`, `lemmacomputer-balanced`, or `lemmacomputer-pro`.
 The Desktop patch in
-[`hermes-desktop-governed-effort.patch`](../docker/workspace/hermes-desktop-governed-effort.patch)
+[`hermes-desktop-governed-effort.patch`](../../docker/workspace/hermes-desktop-governed-effort.patch)
 narrows upstream Minimal, Low, Medium, High, Extra High, Max, and Ultra choices
 to the qualified product values Low, Medium, and High on LemmaComputer routes.
 
@@ -172,7 +172,7 @@ remain true:
 
 An ordinary changed call, unsigned call, provider mismatch, or deployment
 mismatch still fails closed. The implementation is in
-[`lemmacomputer_policy_callback.py`](../integrations/litellm/lemmacomputer_policy_callback.py).
+[`lemmacomputer_policy_callback.py`](../../integrations/litellm/lemmacomputer_policy_callback.py).
 
 ## What failed, and what each failure taught us
 

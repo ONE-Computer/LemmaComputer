@@ -29,7 +29,7 @@ test("customer-managed authentication registers and reuses a passkey without a h
 
   await securityDialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByRole("heading", { name: "Sign in to LemmaComputer" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
   await expect(page.getByText("passkey@example.test")).toBeVisible();

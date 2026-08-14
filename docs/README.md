@@ -1,68 +1,155 @@
 # LemmaComputer documentation
 
-- [Architecture and trust model](architecture.md) explains the system
-  boundaries, policy projection, credential custody, workspace network,
-  governed routing and accounting, and the protected-operation protocol.
-- [LiteLLM gateway architecture](litellm-gateway-architecture.md) traces the
-  private administrator API, workspace data path, provider lifecycle,
-  synthetic Auto routing, MCP/OAuth grants, protected execution, budgets, and
-  failure behavior while separating gateway duties from Control authority.
-- [MCP networking, egress, and OAuth callbacks](mcp-networking.md) separates
-  outbound model/MCP traffic from the browser callback path and defines the
-  proxy, SSRF, redirect, provider-registration, and production acceptance
-  boundaries.
-- [Cloud deployment guides](deployment/README.md) map those logical trust
-  boundaries to provider-specific infrastructure, beginning with the
-  [AWS deployment architecture](deployment/aws-deployment.md).
-- [AI control plane](ai-control-plane.md) maps the administrator product
-  surface to provider, routing, pricing, Team, budget, usage-health, spend, and
-  emissions authorities.
-- [Service reference](services.md) documents every long-running, one-shot, and
-  dynamic runtime component, its interfaces, dependencies, state, and
-  extension seam.
-- [Development workflow](development-workflow.md) is the canonical fresh-clone
-  entry point for people and coding agents. It defines host support,
-  environment and Compose file ownership, isolated worktrees, local gates, and
-  controlled promotion.
-- [Database migrations](database-migrations.md) defines the ledger, legacy baseline, expand/migrate/contract policy, and tests.
-- [Teams and cost allocation](teams-and-cost-allocation.md) defines Team membership, default spending assignment, cost-center references, and the access-control boundary.
-- [AI usage and cost ledger](ai-usage-ledger.md) defines governed-attempt attribution, normalized provider units, immutable pricing snapshots, reconciliation, privacy, and callback operations.
-- [Reasoning adapter qualification](reasoning-adapter-qualification.md) defines discovery versus qualified runtime adapters, signed route authority, and the live promotion gates for Claude, Hermes, Codex, and future agents.
-- [Agent model and reasoning adapter playbook](agent-reasoning-adapter-playbook.md) explains what LiteLLM translates, what LemmaComputer must still govern, the Claude and Hermes implementation differences, the failures encountered, and the faster qualification path for future agents.
-- [Pinned provider-rate catalogue](pinned-rate-catalogue.md) defines the local, hashed pricing evidence used to materialize exact deployment rate cards without egress.
-- [Team spend budgets](team-budgets.md) defines period limits, conservative reservations, hard and soft enforcement, overrides, and reconciliation.
-- [AI spend observability](ai-spend-observability.md) explains administrator totals, allocation, token categories, price basis, exports, and missing-data states.
-- [AI token operational-emissions estimate](ai-token-emissions.md) documents
-  the disclosed token-energy proxy, regional grid factors, coverage, and
-  reporting limitations.
-- [Governed model routing](model-routing.md) defines stable service classes, deployment rate-card costing, decision evidence, and safe rollout operations.
-- [Activity event protocol](activity-events.md) and [Activity panel](activity-panel.md)
-  define the sanitized employee-visible work trace and its replay/streaming UI.
-- [Demo release runbook](demo-release.md) keeps the demo environment pinned, backed up, and separate from development.
-- [ADR 0001](adr/0001-local-release-gates.md) records why enforcement is local
-  and hosted/customer-managed profiles share one codebase.
-- [Customer authentication architecture](authentication-architecture.md)
-  defines the accepted Better Auth boundary, authentication database,
-  hosted/customer-managed topology, enterprise SSO integration, product
-  authorization handoff, security baseline, and migration sequence.
-- [ADR 0004](adr/0004-better-auth-adoption-and-qualification.md) fixes the
-  provider-neutral principal/session contracts, threat model, database and
-  recovery operations, exact Better Auth pins, and downstream qualification
-  evidence required by issue #51.
-- [Local deployment and Microsoft integration setup](local-deployment.md) is
-  the agent-oriented runbook for preparing `.env`, configuring customer
-  authentication and optional Microsoft integrations, building the workspace
-  image, starting Compose, and verifying the stack.
-- [Transitional hosted Microsoft Entra External ID adapter](hosted-external-id.md)
-  documents the legacy hosted adapter and its real-tenant qualification. It is
-  not the current universal customer-authentication architecture.
-- [Extending LemmaComputer](extending.md) is the implementation guide for adding
-  model routes, MCP connectors, tools, agents, applications, sandbox drivers,
-  channels, and schema migrations.
-- [Configuration and operations](operations.md) covers the reference Compose
-  topology, environment variables, startup, health, persistence, backup,
-  rotation, and production deployment concerns.
-- [Security policy](SECURITY.md) explains private vulnerability reporting and
-  the highest-impact trust boundaries.
+Documentation is grouped by what you are trying to do. If you are new, read in
+the order below: run it, understand how it is built, then go deep on a feature.
 
-Start with the root [README](../README.md) for the shortest runnable path.
+| Group | Contents |
+| --- | --- |
+| [Architecture](#architecture) | How the system is built, and why it is split the way it is |
+| [Guides](#guides) | Running, developing, deploying, migrating, extending |
+| [Product](#product) | Feature-level specifications and their authorities |
+| [Agent runtimes](#agent-runtimes) | Qualifying agent and reasoning adapters |
+| [Reference](#reference) | Per-process reference and legacy adapters |
+| [Decisions](#decisions) | Architecture decision records |
+| [Reports](#reports) | Point-in-time audits and benchmarks |
+
+## Start here
+
+1. The root [README](../README.md) has the shortest runnable path — a Quick
+   start that brings the stack up from a clean clone.
+2. [Architecture and trust model](architecture/overview.md) explains what you
+   just started.
+3. [Why LemmaComputer runs as many processes](architecture/service-boundaries.md)
+   answers the most common question about the design.
+4. [Development workflow](guides/development-workflow.md) is the required setup
+   path once you intend to *change* the product.
+
+## Architecture
+
+How the system is built and why. Read `overview.md` first.
+
+- [Architecture and trust model](architecture/overview.md) — system boundaries,
+  policy projection, credential custody, workspace network, governed routing and
+  accounting, the protected-operation protocol, and the Compose network matrix.
+- [Why LemmaComputer runs as many processes](architecture/service-boundaries.md)
+  — what each process boundary buys, which are load-bearing trust boundaries,
+  which are only deployment units, and the rule for adding a new one.
+- [Customer authentication architecture](architecture/authentication.md) — the
+  accepted Better Auth boundary, authentication database, hosted and
+  customer-managed topology, enterprise SSO, product authorization handoff, and
+  migration sequence.
+- [LiteLLM gateway architecture](architecture/litellm-gateway.md) — the private
+  administrator API, workspace data path, provider lifecycle, synthetic Auto
+  routing, MCP and OAuth grants, protected execution, and budgets, separating
+  gateway duties from Control authority.
+- [MCP networking, egress, and OAuth callbacks](architecture/mcp-networking.md) —
+  outbound model and MCP traffic versus the browser callback path, and the proxy,
+  SSRF, redirect, and provider-registration boundaries.
+- [Tenant isolation matrix](architecture/tenant-isolation-matrix.md) — where
+  tenant scoping is enforced for every persisted and cached record.
+- [Agent instance identity](architecture/agent-instance-identity.md) — how a
+  running agent is identified and bound to policy.
+- [Organization RBAC](architecture/organization-rbac.md) — roles, permissions,
+  and the membership authorization boundary.
+
+## Guides
+
+Task-oriented instructions.
+
+- [Development workflow](guides/development-workflow.md) — the entry point for
+  anyone who will change the product: host support, environment and Compose file
+  ownership, isolated worktrees, local gates, and controlled promotion.
+- [Local deployment and Microsoft integration setup](guides/local-deployment.md)
+  — the runbook for the transitional Entra and Microsoft 365 integration path.
+- [Deployment profiles](guides/deployment-profiles.md) — what `customer-managed`,
+  `hosted`, and `worktree` change, and the capability contract between them.
+- [Configuration and operations](guides/operations.md) — reference Compose
+  topology, environment variables, startup, health, persistence, backup,
+  rotation, and production concerns.
+- [Database migrations](guides/database-migrations.md) — the ledger, legacy
+  baseline, expand/migrate/contract policy, and tests.
+- [Extending LemmaComputer](guides/extending.md) — adding model routes, MCP
+  connectors, tools, agents, applications, sandbox drivers, channels, and schema
+  migrations.
+- [Demo release runbook](guides/demo-release.md) — keeping the demo environment
+  pinned, backed up, and separate from development.
+- [Cloud deployment guides](guides/deployment/README.md) — mapping the logical
+  trust boundaries to provider infrastructure, beginning with the
+  [AWS deployment architecture](guides/deployment/aws-deployment.md).
+
+## Product
+
+Feature-level specifications and the authority that owns each decision.
+
+- [AI control plane](product/ai-control-plane.md) — the administrator surface
+  mapped to provider, routing, pricing, Team, budget, usage-health, spend, and
+  emissions authorities.
+- [Governed model routing](product/model-routing.md) — stable service classes,
+  deployment rate-card costing, decision evidence, and safe rollout operations.
+- [AI usage and cost ledger](product/ai-usage-ledger.md) — governed-attempt
+  attribution, normalized provider units, immutable pricing snapshots,
+  reconciliation, privacy, and callback operations.
+- [AI spend observability](product/ai-spend-observability.md) — administrator
+  totals, allocation, token categories, price basis, exports, and missing-data
+  states.
+- [Team spend budgets](product/team-budgets.md) — period limits, conservative
+  reservations, hard and soft enforcement, overrides, and reconciliation.
+- [Teams and cost allocation](product/teams-and-cost-allocation.md) — Team
+  membership, default spending assignment, cost-center references, and the
+  access-control boundary.
+- [Pinned provider-rate catalogue](product/pinned-rate-catalogue.md) — the local,
+  hashed pricing evidence used to materialize exact rate cards without egress.
+- [AI token operational-emissions estimate](product/ai-token-emissions.md) — the
+  disclosed token-energy proxy, regional grid factors, coverage, and limitations.
+- [Personal AI usage](product/personal-ai-usage.md) — the member-facing view of
+  their own usage.
+- [Activity event protocol](product/activity-events.md) and
+  [Activity panel](product/activity-panel.md) — the sanitized employee-visible
+  work trace and its replay and streaming UI.
+- [Tool-call audit ledger](product/tool-call-audit-ledger.md) — the record of
+  admitted and terminal tool operations.
+
+## Agent runtimes
+
+- [Reasoning adapter qualification](agents/reasoning-adapter-qualification.md) —
+  discovery versus qualified runtime adapters, signed route authority, and the
+  live promotion gates for Claude, Hermes, Codex, and future agents.
+- [Agent model and reasoning adapter playbook](agents/agent-reasoning-adapter-playbook.md)
+  — what LiteLLM translates, what LemmaComputer must still govern, the Claude and
+  Hermes implementation differences, and the faster path for future agents.
+- [Claude reasoning effort](agents/claude-reasoning-effort.md) — the governed
+  effort control and its transport.
+
+## Reference
+
+- [Service reference](reference/services.md) — every long-running, one-shot, and
+  dynamic runtime component, its interfaces, dependencies, state, health
+  contract, and extension seam.
+- [Transitional hosted Microsoft Entra External ID adapter](reference/hosted-external-id.md)
+  — the legacy hosted adapter and its real-tenant qualification. It is not the
+  current universal customer-authentication architecture.
+
+## Decisions
+
+- [ADR 0001 — local release gates](adr/0001-local-release-gates.md): why
+  enforcement is local and both profiles share one codebase.
+- [ADR 0002 — simplified integration and demo tags](adr/0002-simplified-integration-and-demo-tags.md)
+- [ADR 0003 — deployment profile capability contract](adr/0003-deployment-profile-capability-contract.md)
+- [ADR 0004 — Better Auth adoption and qualification](adr/0004-better-auth-adoption-and-qualification.md):
+  provider-neutral principal and session contracts, threat model, database and
+  recovery operations, exact pins, and downstream qualification evidence.
+
+## Reports
+
+Point-in-time evidence. These describe a state of the system on a date, not a
+current contract.
+
+- [Responsive UX and accessibility audit](reports/responsive-ux-accessibility-audit.md)
+- [Workspace performance benchmark](reports/workspace-performance-benchmark.md)
+- [Workspace policy design QA](reports/design-qa-workspace-policy.md)
+- [Settings frame design QA](reports/design-qa-settings-frame.md)
+
+## Security
+
+- [Security policy](SECURITY.md) — private vulnerability reporting and the
+  highest-impact trust boundaries.

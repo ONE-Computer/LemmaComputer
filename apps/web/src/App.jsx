@@ -886,21 +886,21 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
         <span>Use the company sign-in configured by your organization. This invitation already fixes your email and organization role.</span>
         {(error || invitationError || formError) && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sign-in was not completed</strong>{error || invitationError || formError}</span></div>}
         <label className="signin-locked-identity">Invited work email<input aria-label="Invited work email" type="email" readOnly value={invitationContext.email} /></label>
-        <button className="primary-button signin-button" type="button" disabled={busy || invitationBusy} onClick={() => startCompanySso(invitationContext.email)}>{busy || invitationBusy ? "Please wait…" : "Continue with company SSO"}</button>
+        <button className="primary-button signin-button" type="button" disabled={busy || invitationBusy} onClick={() => startCompanySso(invitationContext.email)}>{busy || invitationBusy ? "Please wait…" : "Continue with SSO"}</button>
       </section>
     </main>;
   }
   const title = {
-    signin: "Sign in to LemmaComputer",
-    signup: "Create your account",
+    signin: "Sign in",
+    signup: "Create account",
     recovery: "Reset your password",
     reset: "Choose a new password",
     "two-factor": "Verify it’s you",
-    "company-sso": "Sign in with company SSO",
+    "company-sso": "Sign in with SSO",
   }[mode];
   const description = {
-    signin: "Use a secure method configured for your organization.",
-    signup: "Create your identity first. Organization access is assigned separately.",
+    signin: "",
+    signup: "Use your work email to create an account.",
     recovery: "Enter your email and we’ll send a secure, time-limited reset link.",
     reset: "Use at least 12 characters for your new password.",
     "two-factor": useBackupCode ? "Enter one unused backup code." : "Enter the current code from your authenticator app.",
@@ -910,11 +910,11 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     <main className="signin-screen">
       <section className={`signin-card${mode === "signin" ? " signin-card-with-methods" : ""}`}>
         <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
-        <p>{invited ? "Organization invitation" : "Your managed work computer"}</p>
+        {invited && <p>Organization invitation</p>}
         <h1>{invited ? `Join ${invitationContext?.organizationDisplayName ?? "your organization"}` : title}</h1>
-        <span>{invited
+        {(invited || description) && <span>{invited
           ? `Create a LemmaComputer account or use an existing account. The organization and role fixed by this invitation cannot be changed by a sign-in provider.`
-          : description}</span>
+          : description}</span>}
         {(error || invitationError || formError) && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sign-in was not completed</strong>{error || invitationError || formError}</span></div>}
         <>
             {status && <div className="signin-status" role="status">{status}</div>}
@@ -924,18 +924,18 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
               {mode === "company-sso" && <label>Company work email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>}
               {["signin", "signup", "reset"].includes(mode) && <label>Password<input type="password" minLength={12} maxLength={128} autoComplete={mode === "signin" ? "current-password" : "new-password"} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>}
               {mode === "two-factor" && <label>{useBackupCode ? "Backup code" : "Authenticator code"}<input inputMode={useBackupCode ? "text" : "numeric"} autoComplete="one-time-code" required value={verificationCode} onChange={(event) => setVerificationCode(event.target.value)} /></label>}
-              <button className="primary-button signin-button" type="submit" onClick={mode === "company-sso" ? (event) => { event.preventDefault(); startCompanySso(); } : undefined} disabled={busy || invitationBusy}>{busy || invitationBusy ? "Please wait…" : ({ signin: "Sign in", signup: "Create account", recovery: "Send reset link", reset: "Reset password", "two-factor": "Verify", "company-sso": "Continue to company sign-in" }[mode])}</button>
+              <button className="primary-button signin-button" type="submit" onClick={mode === "company-sso" ? (event) => { event.preventDefault(); startCompanySso(); } : undefined} disabled={busy || invitationBusy}>{busy || invitationBusy ? "Please wait…" : ({ signin: "Sign in", signup: "Create account", recovery: "Send reset link", reset: "Reset password", "two-factor": "Verify", "company-sso": "Continue" }[mode])}</button>
             </form>
             {!invited && mode === "signup" && verificationRecipient && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={resendVerification}>Resend verification email</button>}
             {mode === "signin" && <div className="signin-secondary-actions"><button type="button" onClick={() => changeMode("recovery")}>Forgot password?</button>{!invited && <button type="button" onClick={() => changeMode("signup")}>Create account</button>}</div>}
             {invited && mode === "signin" && <button className="signin-back-button" type="button" onClick={() => changeMode("signup")}>Create a new account</button>}
             {invited && mode === "signup" && <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>I already have an account</button>}
             {!invited && ["signup", "recovery", "reset"].includes(mode) && <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Back to sign in</button>}
-            {mode === "company-sso" && <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Back to all sign-in options</button>}
+            {mode === "company-sso" && <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Back to sign-in options</button>}
             {mode === "two-factor" && <button className="signin-back-button" type="button" onClick={() => setUseBackupCode((current) => !current)}>{useBackupCode ? "Use authenticator code" : "Use a backup code"}</button>}
             {(mode === "signin" || (invited && mode === "signup")) && ((capabilities?.passkey && !invited) || capabilities?.socialProviders?.length || capabilities?.companySso) && <div className="signin-method-divider"><span>or</span></div>}
             {(mode === "signin" || (invited && capabilities?.socialProviders?.length)) && <div className="signin-method-grid">
-              {mode === "signin" && capabilities?.companySso && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => changeMode("company-sso")}>Continue with company SSO</button>}
+              {mode === "signin" && capabilities?.companySso && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => changeMode("company-sso")}>Continue with SSO</button>}
               {mode === "signin" && capabilities?.passkey && !invited && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={signInWithPasskey}>Sign in with a passkey</button>}
               {(mode === "signin" || invited) && capabilities?.socialProviders?.includes("google") && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => startSocialSignIn("google")}>Continue with Google</button>}
               {(mode === "signin" || invited) && capabilities?.socialProviders?.includes("microsoft") && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={() => startSocialSignIn("microsoft")}>Continue with Microsoft</button>}

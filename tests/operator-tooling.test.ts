@@ -3,6 +3,7 @@ import { createPrivateKey, createPublicKey } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  applyInstallationProfile,
   environmentParity,
   initializeEnvironment,
   mergeEnvironment,
@@ -12,6 +13,7 @@ import {
   runComposeDown,
   runtimeContainerFilters,
 } from "../scripts/compose-down.mjs";
+import { validateDeploymentEnvironment } from "../scripts/deployment-config.mjs";
 
 test("environment updates preserve values, map renamed keys, initialize missing keys, and retain extras", () => {
   const template = [
@@ -82,6 +84,23 @@ test("environment initialization creates separate Telegram grant and envelope ke
   assert.equal(publicKey("LEMMACOMPUTER_TELEGRAM_INTAKE_GRANT_PUBLIC_KEY_B64").asymmetricKeyType, "ed25519");
   assert.equal(privateKey("LEMMACOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64").asymmetricKeyType, "rsa");
   assert.equal(publicKey("LEMMACOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64").asymmetricKeyType, "rsa");
+});
+
+test("an initialized worktree-profile environment starts without a Microsoft Entra tenant", async () => {
+  const template = await readFile(new URL("../.env.example", import.meta.url), "utf8");
+  const initialized = initializeEnvironment(template, "Etc/UTC");
+  const environmentOf = (contents: string) => Object.fromEntries(parseEnvironment(contents).values);
+
+  const evaluation = environmentOf(applyInstallationProfile(initialized, "worktree"));
+  assert.equal(evaluation.LEMMACOMPUTER_INSTALLATION_KIND, "worktree");
+  assert.doesNotThrow(() => validateDeploymentEnvironment(evaluation, { strict: true }));
+
+  // The canonical default is unchanged and still requires real Entra values
+  // before Compose renders, so evaluation cannot silently weaken a deployment.
+  assert.throws(
+    () => validateDeploymentEnvironment(environmentOf(initialized), { strict: true }),
+    /ENTRA_TENANT_ID/,
+  );
 });
 
 test("compose shutdown refuses to bypass managed workspace lifecycle", () => {

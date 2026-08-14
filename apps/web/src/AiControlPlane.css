@@ -8,8 +8,8 @@
   display: flex;
   align-items: end;
   justify-content: space-between;
-  gap: 32px;
-  padding-bottom: 24px;
+  gap: 20px;
+  padding-bottom: 18px;
 }
 
 .ai-control-plane-header p,
@@ -33,7 +33,7 @@
 
 .ai-control-plane-header h1 {
   color: var(--navy);
-  font-size: clamp(30px, 3vw, 42px);
+  font-size: var(--desktop-page-title-size);
   font-weight: 660;
   letter-spacing: -.035em;
   line-height: 1.08;
@@ -44,8 +44,8 @@
   max-width: 760px;
   margin-top: 10px;
   color: var(--muted);
-  font-size: 15px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 .ai-control-plane-tabs {
@@ -69,8 +69,8 @@
 .ai-control-plane-tabs button {
   position: relative;
   flex: 0 0 auto;
-  min-height: 46px;
-  padding: 0 14px;
+  min-height: var(--desktop-control-height);
+  padding: 0 12px;
   border: 0;
   background: transparent;
   color: #5d6671;
@@ -114,7 +114,7 @@
 .ai-control-plane-content {
   min-width: 0;
   overflow-x: hidden;
-  padding-top: 28px;
+  padding-top: 18px;
 }
 
 .ai-control-plane-content > .secondary-screen {

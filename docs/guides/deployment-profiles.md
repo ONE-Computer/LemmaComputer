@@ -25,7 +25,7 @@ does not grant product authority. Both production profiles use the same Better
 Auth customer contract. Better Auth proves authentication; server-resolved
 LemmaComputer account, membership, active organization, permission, and resource
 scope decide product access. The transitional adapters remain only during the
-bounded replacement sequence in [ADR 0004](adr/0004-better-auth-adoption-and-qualification.md).
+bounded replacement sequence in [ADR 0004](../adr/0004-better-auth-adoption-and-qualification.md).
 
 The workspace row separates runtime from placement. `hosted` forbids Docker
 authority on an application/control host and requires the Lemma-owned

@@ -227,7 +227,7 @@ root-owned processes, and not written into the user profile.
 
 **Extension seam:** adding an application or agent requires coordinated changes
 to the contract catalog, image, entrypoint allowlist, policy projection, UI
-catalog, and tests. See [Adding a sandbox application or agent](extending.md#add-a-sandbox-application-or-agent).
+catalog, and tests. See [Adding a sandbox application or agent](../guides/extending.md#add-a-sandbox-application-or-agent).
 
 ## Egress proxy
 
@@ -315,7 +315,7 @@ The gateway's administrator, workspace data, browser OAuth, and callback
 interfaces use different credentials and trust boundaries. Control is the
 routing, policy, approval, budget, and accounting authority; LiteLLM is the
 credential custodian and execution point. See [LiteLLM gateway
-architecture](litellm-gateway-architecture.md) for the complete topology,
+architecture](../architecture/litellm-gateway.md) for the complete topology,
 state-ownership table, grant lifecycles, sequences, and failure behavior.
 
 **Extension seam:** adding a managed provider requires the contract model

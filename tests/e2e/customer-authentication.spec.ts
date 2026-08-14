@@ -102,12 +102,12 @@ test("company SSO uses a dedicated email-discovery step", async ({ page }) => {
 
   await page.goto("/");
   const origin = new URL(page.url()).origin;
-  await page.getByRole("button", { name: "Continue with company SSO" }).click();
-  await expect(page.getByRole("heading", { name: "Sign in with company SSO" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue with SSO" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in with SSO" })).toBeVisible();
   await expect(page.getByLabel("Company work email")).toBeVisible();
   await expect(page.getByLabel("Password")).toHaveCount(0);
   await page.getByLabel("Company work email").fill("person@EXAMPLE.com");
-  await page.getByRole("button", { name: "Continue to company sign-in" }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   await expect(page).toHaveURL(`${origin}/company-idp-started`);
   expect(companySsoRequest).toEqual({ email: "person@EXAMPLE.com", returnPath: "/" });
@@ -130,7 +130,7 @@ test("provider-neutral customer sign-in exposes configured methods and safe acco
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Sign in to LemmaComputer" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await expect(page.getByLabel("Work email")).toBeVisible();
   await expect(page.getByLabel("Password")).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
@@ -139,7 +139,7 @@ test("provider-neutral customer sign-in exposes configured methods and safe acco
   await expect(page.getByRole("button", { name: "Continue with Microsoft" })).toBeVisible();
 
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create account" })).toBeVisible();
   await page.getByLabel("Full name").fill("Alex Morgan");
   await page.getByLabel("Work email").fill("alex@example.test");
   await page.getByLabel("Password").fill("correct horse battery staple");
@@ -183,9 +183,15 @@ test("sign-in and sign-up actions remain reachable on a compact laptop viewport"
   await page.setViewportSize({ width: 1366, height: 650 });
   await page.goto("/");
 
+  await expect(page.getByText("Your managed work computer", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Use a secure method configured for your organization.", { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.getByRole("heading", { name: "Sign in", exact: true }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeLessThanOrEqual(30);
+  await expect.poll(() => page.getByLabel("Work email").evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(40);
+  await expect.poll(() => page.getByRole("button", { name: "Sign in", exact: true }).evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(40);
+
   for (const label of [
     "Sign in",
-    "Continue with company SSO",
+    "Continue with SSO",
     "Sign in with a passkey",
     "Continue with Google",
     "Continue with Microsoft",
@@ -201,7 +207,7 @@ test("sign-in and sign-up actions remain reachable on a compact laptop viewport"
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(650);
 
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create account" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create account", exact: true })).toBeInViewport();
   await expect(page.getByRole("button", { name: "Back to sign in" })).toBeInViewport();
 });
@@ -231,6 +237,7 @@ test("an authenticated provider identity can recover when its email still needs 
   });
 
   await page.goto("/");
+  const origin = new URL(page.url()).origin;
 
   await expect(page.getByRole("heading", { name: "Verify your email" })).toBeVisible();
   await expect(page.getByText("Signed in as microsoft-user@example.test")).toBeVisible();
@@ -238,7 +245,7 @@ test("an authenticated provider identity can recover when its email still needs 
   await expect(page.getByRole("status")).toContainText("Verification email sent");
   expect(verificationRequest).toEqual({
     email: "microsoft-user@example.test",
-    callbackURL: "http://127.0.0.1:24965/",
+    callbackURL: `${origin}/`,
   });
 });
 

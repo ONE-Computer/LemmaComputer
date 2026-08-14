@@ -98,6 +98,13 @@ export function initializeEnvironment(template, timeZone) {
   return contents;
 }
 
+export function applyInstallationProfile(contents, profile) {
+  const key = "LEMMACOMPUTER_INSTALLATION_KIND";
+  const expression = new RegExp(`^${key}=.*$`, "m");
+  if (!expression.test(contents)) throw new Error(`${key} is missing from .env.example`);
+  return contents.replace(expression, `${key}=${profile}`);
+}
+
 export function environmentParity(template, current) {
   const templateEnvironment = parseEnvironment(template);
   const currentEnvironment = parseEnvironment(current);

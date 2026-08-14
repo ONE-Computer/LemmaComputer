@@ -86,7 +86,7 @@ test("the tenant isolation manifest owns every persisted authentication and cont
 });
 
 test("the reviewed isolation matrix explains the two-database authority boundary", async () => {
-  const matrix = await read("docs/tenant-isolation-matrix.md");
+  const matrix = await read("docs/architecture/tenant-isolation-matrix.md");
   assert.match(matrix, /# Tenant and authentication isolation matrix/);
   assert.match(matrix, /Better Auth proves who authenticated/);
   assert.match(matrix, /LemmaComputer decides which organization and resources/);

@@ -1,11 +1,13 @@
 # Local deployment and Microsoft integration setup
 
-This is an integration-specific supplement, not the starting point for normal
-local development. A coding agent must first follow the
-[local development workflow](development-workflow.md), keep the stack in its
-task worktree, and retain `LEMMACOMPUTER_INSTALLATION_KIND=worktree`. Use this
-page when the task specifically requires the transitional customer-managed
-Entra or Microsoft 365 integration path.
+**Who this is for:** someone wiring up the transitional customer-managed Entra
+or Microsoft 365 integration. This is an integration-specific supplement, not a
+starting point.
+
+To simply run LemmaComputer, use the Quick start in the [README](../../README.md).
+To change the product, follow the
+[local development workflow](development-workflow.md) first, keep the stack in
+its task worktree, and retain `LEMMACOMPUTER_INSTALLATION_KIND=worktree`.
 
 This page uses the dedicated evaluation checkout's default URL in a few
 examples. In a task worktree, use the exact

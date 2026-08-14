@@ -35,7 +35,7 @@ found. It does not invent a zero-cost claim.
 ## Operational-emissions proxy
 
 The carbon figure is the `operational-token-v1` derived dashboard proxy
-documented in [AI token operational-emissions estimate](./ai-token-emissions.md).
+documented in [AI token operational-emissions estimate](ai-token-emissions.md).
 The method uses accounted text tokens and each provider's selected serving-grid
 assumption. The overview discloses the token coverage percentage, the selected
 grid assumptions, unsupported usage units, method boundary, and method-unavailable

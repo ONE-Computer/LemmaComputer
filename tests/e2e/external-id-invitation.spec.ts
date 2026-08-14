@@ -105,7 +105,7 @@ test("a company SSO invitation locks the invited identity and presents one clear
   await expect(page.getByRole("button", { name: "Create account", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Continue with Microsoft" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Continue with company SSO" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue with SSO" })).toBeVisible();
   expect(fixture.counts()).toEqual({ contextRequests: 1, acceptanceRequests: 1 });
   expect(page.url()).not.toContain(invitationToken);
 });

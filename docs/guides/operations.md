@@ -245,7 +245,7 @@ OAuth requests use the separate `remote-mcp-egress-proxy`. The strict MCP
 client cannot inherit `NO_PROXY`, and the remote proxy resolves and validates
 every connection again, pins the approved IP, checks TLS SNI, and independently
 authorizes redirected destinations. See [MCP networking, egress, and OAuth
-callbacks](mcp-networking.md) for the complete path.
+callbacks](../architecture/mcp-networking.md) for the complete path.
 
 For a hosted deployment, the platform/network owner must put every exact HTTPS
 origin used by the MCP and OAuth flow—endpoint, protected-resource and
@@ -335,7 +335,7 @@ Built-in connectors cannot be deleted through the administration API.
 For the boundary between Control's provider lifecycle, LiteLLM's encrypted
 credential and dynamic route records, workspace virtual keys, governed Auto,
 and MCP grants, see [LiteLLM gateway
-architecture](litellm-gateway-architecture.md).
+architecture](../architecture/litellm-gateway.md).
 
 OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock are configured by an organization administrator in
 **AI control plane → Models & providers**, not in `.env`. Control passes the

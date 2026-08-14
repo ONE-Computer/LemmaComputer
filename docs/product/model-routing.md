@@ -4,7 +4,7 @@ LemmaComputer exposes stable service classes while keeping provider deployments 
 
 LiteLLM carries the synthetic transport alias and executes the signed concrete
 route, but it does not own the Auto classifier or service-class policy. See
-[LiteLLM gateway architecture](litellm-gateway-architecture.md#governed-model-request-and-auto-switching)
+[LiteLLM gateway architecture](../architecture/litellm-gateway.md#governed-model-request-and-auto-switching)
 for the gateway hooks and grant boundary around this decision flow.
 
 ## User-facing contract
