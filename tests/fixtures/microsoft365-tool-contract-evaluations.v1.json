@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "agents": ["claude", "codex", "hermes"],
+  "cases": [
+    {
+      "id": "calendar-today-read",
+      "prompt": "Show my calendar today in Singapore time.",
+      "expectedSequence": ["get-calendar-view"],
+      "requiredArguments": ["startDateTime", "endDateTime", "timezone"],
+      "forbiddenArguments": ["filter", "search", "orderby", "skip", "count", "fetchAllPages"]
+    },
+    {
+      "id": "mail-read-then-reply",
+      "prompt": "Read the latest email, then prepare a reply to its sender.",
+      "expectedSequence": ["list-mail-messages", "get-mail-message", "reply-mail-message"],
+      "requiredArguments": ["messageId", "body", "lemmacomputerAudit"],
+      "forbiddenArguments": ["filter", "search", "orderby", "headers", "path"]
+    },
+    {
+      "id": "onedrive-resolve-then-delete",
+      "prompt": "Delete the uniquely matched planning-draft.docx from OneDrive.",
+      "expectedSequence": ["list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file"],
+      "requiredArguments": ["driveId", "driveItemId", "resourceName", "If-Match", "lemmacomputerAudit"],
+      "forbiddenArguments": ["filter", "orderby", "path", "headers", "fetchAllPages"]
+    },
+    {
+      "id": "teams-resolve-then-post",
+      "prompt": "Post the approved update to the selected project channel.",
+      "expectedSequence": ["list-joined-teams", "list-team-channels", "send-channel-message"],
+      "requiredArguments": ["teamId", "channelId", "body", "lemmacomputerAudit"],
+      "forbiddenArguments": ["filter", "search", "orderby", "path", "headers"]
+    }
+  ]
+}

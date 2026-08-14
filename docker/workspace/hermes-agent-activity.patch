@@ -1,0 +1,13 @@
+diff --git a/gateway/platforms/api_server.py b/gateway/platforms/api_server.py
+index 4123ef2..548b708 100644
+--- a/gateway/platforms/api_server.py
++++ b/gateway/platforms/api_server.py
+@@ -2657,6 +2657,7 @@ class APIServerAdapter(BasePlatformAdapter):
+                 _enqueue("tool.progress", {"message_id": message_id, "tool_name": tool_name or "_thinking", "delta": preview or ""})
+             elif event_type in {"tool.started", "tool.completed", "tool.failed"}:
+-                event_name = event_type.replace("tool.", "tool.")
++                from lemmacomputer_hermes_mcp_identity import tool_activity_event
++                event_name = tool_activity_event(event_type, kwargs.get("is_error"))
+                 _enqueue(event_name, {"message_id": message_id, "tool_name": tool_name, "preview": preview, "args": args})
+ 
+         async def _run_and_signal() -> None:

@@ -209,10 +209,27 @@ def _request_decision(payload):
         "schemaHash",
         "operationId",
     }
-    if not isinstance(result, dict) or set(result) != required or result.get("schemaVersion") != 1:
+    if (
+        not isinstance(result, dict)
+        or set(result) not in (required, required | {"problem"})
+        or result.get("schemaVersion") != 1
+    ):
         raise RuntimeError("MCP policy authority returned a malformed decision")
     if result.get("decision") not in ("allow", "deny", "approval_required"):
         raise RuntimeError("MCP policy authority returned an unknown decision")
+    problem = result.get("problem")
+    if problem is not None and (
+        not isinstance(problem, dict)
+        or set(problem) != {"category", "field", "message", "retryable"}
+        or problem.get("category") not in {
+            "invalid_argument", "unsupported_option", "authentication_failure", "policy_denial",
+            "provider_rejection", "timeout", "unknown_failure",
+        }
+        or not isinstance(problem.get("message"), str)
+        or not isinstance(problem.get("retryable"), bool)
+        or (problem.get("field") is not None and not isinstance(problem.get("field"), str))
+    ):
+        raise RuntimeError("MCP policy authority returned an invalid problem detail")
     return result
 
 
@@ -1609,7 +1626,10 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                     "operation_id": decision["operationId"],
                 },
             )
-        raise HTTPException(status_code=403, detail={"error": decision["code"]})
+        detail = {"error": decision["code"]}
+        if isinstance(decision.get("problem"), dict):
+            detail.update(decision["problem"])
+        raise HTTPException(status_code=403, detail=detail)
 
 
 proxy_handler_instance = LemmaComputerMcpPolicyCallback(turn_off_message_logging=True)

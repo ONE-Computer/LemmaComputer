@@ -15,12 +15,6 @@ import type { GovernedOperationService } from "./operations.js";
 
 const boundedListArguments = z.strictObject({
   top: z.number().int().min(1).max(25).optional(),
-  skip: z.number().int().min(0).max(1000).optional(),
-  select: z.string().trim().min(1).max(256).optional(),
-  filter: z.string().trim().min(1).max(512).optional(),
-  search: z.string().trim().min(1).max(256).optional(),
-  orderby: z.string().trim().min(1).max(128).optional(),
-  count: z.boolean().optional(),
 });
 const listDrivesArguments = boundedListArguments.extend({
   top: z.number().int().min(2).max(25).optional(),
@@ -46,7 +40,6 @@ const uploadDriveItemId = id.refine(
   (value) => !/^(?:\/?items\/|\/?drives\/|https?:\/\/)/i.test(value) && !value.endsWith("/content"),
   "driveItemId must be an item ID or drive-relative path selector without Graph endpoint wrappers",
 );
-const body = z.record(z.string().min(1).max(128), z.json());
 const noArguments = z.strictObject({});
 const teamsMessageBody = z.strictObject({
   body: z.strictObject({
@@ -87,10 +80,91 @@ const canonicalizeOperationAudit = (
   };
 };
 const withId = (key: string) => z.strictObject({ [key]: id });
-const withBody = z.strictObject({ body });
-const withIdAndBody = (key: string) => z.strictObject({ [key]: id, body });
-const withTwoIds = (first: string, second: string) => z.strictObject({ [first]: id, [second]: id });
-const withTwoIdsAndBody = (first: string, second: string) => z.strictObject({ [first]: id, [second]: id, body });
+
+const emailAddress = z.strictObject({
+  emailAddress: z.strictObject({
+    address: z.email(),
+    name: z.string().trim().min(1).max(256).optional(),
+  }),
+});
+const itemBody = z.strictObject({
+  contentType: z.enum(["text", "html"]),
+  content: z.string().trim().min(1).max(100_000),
+});
+const mailMessageFields = {
+  subject: z.string().trim().min(1).max(998).optional(),
+  body: itemBody.optional(),
+  toRecipients: z.array(emailAddress).max(100).optional(),
+  ccRecipients: z.array(emailAddress).max(100).optional(),
+  bccRecipients: z.array(emailAddress).max(100).optional(),
+  importance: z.enum(["low", "normal", "high"]).optional(),
+};
+const draftMailBody = z.strictObject(mailMessageFields).refine(
+  (value) => value.subject !== undefined && value.body !== undefined,
+  "subject and body are required",
+);
+const mailPatchBody = z.strictObject(mailMessageFields).refine(
+  (value) => Object.values(value).some((candidate) => candidate !== undefined),
+  "at least one editable mail field is required",
+);
+const sendMailBody = z.strictObject({
+  Message: z.strictObject(mailMessageFields).refine(
+    (value) => value.subject !== undefined && value.body !== undefined && Boolean(value.toRecipients?.length),
+    "subject, body, and at least one toRecipient are required",
+  ),
+  SaveToSentItems: z.boolean().optional(),
+});
+const commentBody = z.strictObject({ Comment: z.string().trim().min(1).max(100_000) });
+const forwardBody = z.strictObject({
+  ToRecipients: z.array(emailAddress).min(1).max(100),
+  Comment: z.string().max(100_000).optional(),
+});
+const dateTimeZone = z.strictObject({
+  dateTime: z.string().trim().min(1).max(64),
+  timeZone: z.string().trim().min(1).max(64),
+});
+const calendarEventFields = {
+  subject: z.string().trim().min(1).max(998).optional(),
+  start: dateTimeZone.optional(),
+  end: dateTimeZone.optional(),
+  body: itemBody.optional(),
+  location: z.strictObject({ displayName: z.string().trim().min(1).max(512) }).optional(),
+  attendees: z.array(z.strictObject({
+    emailAddress: emailAddress.shape.emailAddress,
+    type: z.enum(["required", "optional", "resource"]),
+  })).max(100).optional(),
+  isAllDay: z.boolean().optional(),
+  isOnlineMeeting: z.boolean().optional(),
+  isReminderOn: z.boolean().optional(),
+  reminderMinutesBeforeStart: z.number().int().min(0).max(40_320).optional(),
+  importance: z.enum(["low", "normal", "high"]).optional(),
+  sensitivity: z.enum(["normal", "personal", "private", "confidential"]).optional(),
+  showAs: z.enum(["free", "tentative", "busy", "oof", "workingElsewhere", "unknown"]).optional(),
+};
+const createCalendarEventBody = z.strictObject(calendarEventFields).refine(
+  (value) => value.subject !== undefined && value.start !== undefined && value.end !== undefined,
+  "subject, start, and end are required",
+);
+const updateCalendarEventBody = z.strictObject(calendarEventFields).refine(
+  (value) => Object.values(value).some((candidate) => candidate !== undefined),
+  "at least one editable calendar field is required",
+);
+const createFolderBody = z.strictObject({
+  name: z.string().trim().min(1).max(255),
+  folder: z.strictObject({}),
+  "@microsoft.graph.conflictBehavior": z.enum(["fail", "replace", "rename"]).optional(),
+});
+const moveDriveItemBody = z.strictObject({
+  name: z.string().trim().min(1).max(255).optional(),
+  parentReference: z.strictObject({ id }).optional(),
+}).refine(
+  (value) => value.name !== undefined || value.parentReference !== undefined,
+  "name or parentReference is required",
+);
+const copyDriveItemBody = z.strictObject({
+  name: z.string().trim().min(1).max(255).optional(),
+  parentReference: z.strictObject({ driveId: id.optional(), id }),
+});
 
 const boundedDriveSearchArguments = z.strictObject({
   driveId: z.string().trim().min(1).max(512),
@@ -185,31 +259,31 @@ const toolSchemas: Record<keyof typeof m365ToolCatalog, z.ZodType<Record<string,
   "list-mail-folders": boundedListArguments,
   "list-mail-messages": boundedListArguments,
   "get-mail-message": withId("messageId"),
-  "create-draft-email": withBody,
-  "update-mail-message": withIdAndBody("messageId"),
+  "create-draft-email": z.strictObject({ body: draftMailBody }),
+  "update-mail-message": z.strictObject({ messageId: id, body: mailPatchBody }),
   "delete-mail-message": z.strictObject({ messageId: id, "If-Match": id.optional() }),
-  "move-mail-message": withIdAndBody("messageId"),
-  "send-mail": withBody,
+  "move-mail-message": z.strictObject({ messageId: id, body: z.strictObject({ DestinationId: id }) }),
+  "send-mail": z.strictObject({ body: sendMailBody }),
   "send-draft-message": withId("messageId"),
-  "reply-mail-message": withIdAndBody("messageId"),
-  "reply-all-mail-message": withIdAndBody("messageId"),
-  "forward-mail-message": withIdAndBody("messageId"),
+  "reply-mail-message": z.strictObject({ messageId: id, body: commentBody }),
+  "reply-all-mail-message": z.strictObject({ messageId: id, body: commentBody }),
+  "forward-mail-message": z.strictObject({ messageId: id, body: forwardBody }),
   "list-calendars": boundedListArguments,
   "list-calendar-events": boundedListArguments.extend({ timezone: z.string().trim().min(1).max(64).optional() }),
   "get-calendar-view": calendarViewArguments,
-  "get-calendar-event": withId("eventId"),
-  "create-calendar-event": withBody,
-  "update-calendar-event": withIdAndBody("eventId"),
+  "get-calendar-event": z.strictObject({ eventId: id, timezone: z.string().trim().min(1).max(64).optional() }),
+  "create-calendar-event": z.strictObject({ body: createCalendarEventBody }),
+  "update-calendar-event": z.strictObject({ eventId: id, body: updateCalendarEventBody }),
   "delete-calendar-event": z.strictObject({ eventId: id, "If-Match": id.optional() }),
   "list-drives": listDrivesArguments,
   "get-drive-root-item": withId("driveId"),
   "list-folder-files": boundedListArguments.extend({ driveId: id, driveItemId: id }),
   "search-onedrive-files": boundedDriveSearchArguments,
   "get-drive-item": driveItemMetadataArguments,
-  "create-onedrive-folder": withTwoIdsAndBody("driveId", "driveItemId"),
+  "create-onedrive-folder": z.strictObject({ driveId: id, driveItemId: id, body: createFolderBody }),
   "upload-file-content": z.strictObject({ driveId: id, driveItemId: uploadDriveItemId, body: z.string().min(1).max(5_600_000) }),
-  "move-rename-onedrive-item": withTwoIdsAndBody("driveId", "driveItemId"),
-  "copy-drive-item": withTwoIdsAndBody("driveId", "driveItemId"),
+  "move-rename-onedrive-item": z.strictObject({ driveId: id, driveItemId: id, body: moveDriveItemBody }),
+  "copy-drive-item": z.strictObject({ driveId: id, driveItemId: id, body: copyDriveItemBody }),
   "delete-onedrive-file": deleteRequestArguments,
   "list-chats": boundedListArguments,
   "list-chat-messages": boundedListArguments.extend({ chatId: id }),
@@ -221,6 +295,32 @@ const toolSchemas: Record<keyof typeof m365ToolCatalog, z.ZodType<Record<string,
   "send-channel-message": z.strictObject({ teamId: id, channelId: id, body: teamsMessageBody }),
   "reply-to-channel-message": z.strictObject({ teamId: id, channelId: id, chatMessageId: id, body: teamsMessageBody }),
 };
+
+const withoutJsonSchemaDialect = (schema: Record<string, unknown>): Record<string, unknown> => {
+  const { $schema: _dialect, ...contract } = schema;
+  return contract;
+};
+
+export const m365ControlInputSchemas = Object.fromEntries(
+  Object.entries(m365ToolCatalog).map(([name, metadata]) => {
+    const schema = withoutJsonSchemaDialect(z.toJSONSchema(toolSchemas[name as keyof typeof m365ToolCatalog]));
+    if (metadata.risk === "read") return [name, schema];
+    const properties = schema.properties && typeof schema.properties === "object"
+      ? schema.properties as Record<string, unknown>
+      : {};
+    const required = Array.isArray(schema.required)
+      ? schema.required.filter((field): field is string => typeof field === "string")
+      : [];
+    return [name, {
+      ...schema,
+      properties: {
+        ...properties,
+        lemmacomputerAudit: withoutJsonSchemaDialect(z.toJSONSchema(operationAuditContext)),
+      },
+      required: [...required, "lemmacomputerAudit"],
+    }];
+  }),
+) as Record<keyof typeof m365ToolCatalog, Record<string, unknown>>;
 
 const displayNames: Record<keyof typeof m365ToolCatalog, string> = {
   "list-mail-folders": "List mail folders", "list-mail-messages": "List email messages", "get-mail-message": "Read email message",
@@ -266,7 +366,11 @@ export const m365LiteLlmServerId = createHash("sha256")
   .digest("hex")
   .slice(0, 32);
 
-const denied = (code: string, capability?: CapabilityDefinition): McpPolicyDecision => ({
+const denied = (
+  code: string,
+  capability?: CapabilityDefinition,
+  problem?: McpPolicyDecision["problem"],
+): McpPolicyDecision => ({
   schemaVersion: 1,
   decision: "deny",
   code,
@@ -274,7 +378,24 @@ const denied = (code: string, capability?: CapabilityDefinition): McpPolicyDecis
   schemaId: capability?.schemaId ?? null,
   schemaHash: capability?.schemaHash ?? null,
   operationId: null,
+  ...(problem ? { problem } : {}),
 });
+
+const invalidArguments = (error: unknown, capability: CapabilityDefinition): McpPolicyDecision => {
+  const issue = error instanceof z.ZodError ? error.issues[0] : undefined;
+  const unsupported = issue?.code === "unrecognized_keys";
+  const field = issue?.path[0]
+    ?? (unsupported && "keys" in issue && Array.isArray(issue.keys) ? issue.keys[0] : undefined);
+  const safeField = typeof field === "string" || typeof field === "number" ? String(field).slice(0, 128) : null;
+  return denied("MCP_ARGUMENTS_OUT_OF_POLICY", capability, {
+    category: unsupported ? "unsupported_option" : "invalid_argument",
+    field: safeField,
+    message: safeField
+      ? `${unsupported ? "Unsupported" : "Invalid"} field '${safeField}'. Use the published tool schema and omit raw Graph syntax.`
+      : "The tool arguments do not match the published contract. Use only the documented fields and value types.",
+    retryable: false,
+  });
+};
 
 export class McpPolicyService {
   constructor(
@@ -364,8 +485,8 @@ export class McpPolicyService {
         ? Object.fromEntries(Object.entries(request.arguments).filter(([key]) => !["confirm", "excludeResponse"].includes(key)))
         : request.arguments;
       canonicalArguments = canonicalizeOperationAudit(request.toolName, capability.parse(policyArguments));
-    } catch {
-      return denied("MCP_ARGUMENTS_OUT_OF_POLICY", capability);
+    } catch (error) {
+      return invalidArguments(error, capability);
     }
 
     const policyDecision = runtime.toolPolicies[request.toolName];

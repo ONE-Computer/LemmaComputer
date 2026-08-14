@@ -13,6 +13,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 
 BROKER = os.environ.get("LEMMACOMPUTER_CONNECTORS_BROKER", "http://127.0.0.1:4312")
@@ -101,12 +102,6 @@ TEAMS_TOOL_DESCRIPTIONS = {
 
 BOUNDED_LIST_INPUT_PROPERTIES = {
     "top": {"type": "integer", "minimum": 1, "maximum": 25},
-    "skip": {"type": "integer", "minimum": 0, "maximum": 1000},
-    "select": {"type": "string", "minLength": 1, "maxLength": 256},
-    "filter": {"type": "string", "minLength": 1, "maxLength": 512},
-    "search": {"type": "string", "minLength": 1, "maxLength": 256},
-    "orderby": {"type": "string", "minLength": 1, "maxLength": 128},
-    "count": {"type": "boolean"},
 }
 CALENDAR_VIEW_INPUT_SCHEMA = {
     "type": "object",
@@ -129,12 +124,6 @@ LIST_DRIVES_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
         "top": {"type": "integer", "minimum": 2, "maximum": 25},
-        "skip": {"type": "integer", "minimum": 0, "maximum": 1000},
-        "select": {"type": "string", "minLength": 1, "maxLength": 256},
-        "filter": {"type": "string", "minLength": 1, "maxLength": 512},
-        "search": {"type": "string", "minLength": 1, "maxLength": 256},
-        "orderby": {"type": "string", "minLength": 1, "maxLength": 128},
-        "count": {"type": "boolean"},
     },
     "additionalProperties": False,
 }
@@ -383,6 +372,14 @@ CURATED_WRITE_INPUT_SCHEMAS = {
         "type": "object", "properties": {"messageId": {"type": "string"}, "body": MAIL_PATCH_SCHEMA},
         "required": ["messageId", "body"], "additionalProperties": False,
     },
+    "delete-mail-message": {
+        "type": "object",
+        "properties": {
+            "messageId": {"type": "string", "minLength": 1, "maxLength": 512},
+            "If-Match": {"type": "string", "minLength": 1, "maxLength": 512},
+        },
+        "required": ["messageId"], "additionalProperties": False,
+    },
     "move-mail-message": {
         "type": "object",
         "properties": {
@@ -411,6 +408,11 @@ CURATED_WRITE_INPUT_SCHEMAS = {
             },
         },
         "required": ["body"], "additionalProperties": False,
+    },
+    "send-draft-message": {
+        "type": "object",
+        "properties": {"messageId": {"type": "string", "minLength": 1, "maxLength": 512}},
+        "required": ["messageId"], "additionalProperties": False,
     },
     "reply-mail-message": {
         "type": "object",
@@ -458,6 +460,14 @@ CURATED_WRITE_INPUT_SCHEMAS = {
         "type": "object",
         "properties": {"eventId": {"type": "string"}, "body": UPDATE_CALENDAR_EVENT_BODY_SCHEMA},
         "required": ["eventId", "body"], "additionalProperties": False,
+    },
+    "delete-calendar-event": {
+        "type": "object",
+        "properties": {
+            "eventId": {"type": "string", "minLength": 1, "maxLength": 512},
+            "If-Match": {"type": "string", "minLength": 1, "maxLength": 512},
+        },
+        "required": ["eventId"], "additionalProperties": False,
     },
     "create-onedrive-folder": {
         "type": "object",
@@ -540,12 +550,153 @@ CURATED_WRITE_DESCRIPTIONS = {
     **TEAMS_TOOL_DESCRIPTIONS,
 }
 
+MS365_CONTRACT_VERSION = 1
+OPAQUE_ID = {"type": "string", "minLength": 1, "maxLength": 512}
 
-def request_json(path: str, body: dict | None = None) -> dict:
+
+def strict_input(properties: dict | None = None, required: list[str] | None = None) -> dict:
+    return {
+        "type": "object",
+        "properties": properties or {},
+        **({"required": required} if required else {}),
+        "additionalProperties": False,
+    }
+
+
+def identified_input(*identifiers: str, extra: dict | None = None) -> dict:
+    properties = {
+        identifier: {
+            **OPAQUE_ID,
+            "description": f"Opaque {identifier} returned by the corresponding Microsoft 365 discovery tool.",
+        }
+        for identifier in identifiers
+    }
+    properties.update(extra or {})
+    return strict_input(properties, list(identifiers))
+
+
+MS365_READ_INPUT_SCHEMAS = {
+    "list-mail-folders": strict_input(dict(BOUNDED_LIST_INPUT_PROPERTIES)),
+    "list-mail-messages": strict_input(dict(BOUNDED_LIST_INPUT_PROPERTIES)),
+    "get-mail-message": identified_input("messageId"),
+    "list-calendars": strict_input(dict(BOUNDED_LIST_INPUT_PROPERTIES)),
+    "list-calendar-events": LIST_CALENDAR_EVENTS_INPUT_SCHEMA,
+    "get-calendar-view": CALENDAR_VIEW_INPUT_SCHEMA,
+    "get-calendar-event": identified_input("eventId", extra={
+        "timezone": {"type": "string", "minLength": 1, "maxLength": 64},
+    }),
+    "list-drives": LIST_DRIVES_INPUT_SCHEMA,
+    "get-drive-root-item": identified_input("driveId"),
+    "list-folder-files": identified_input("driveId", "driveItemId", extra=dict(BOUNDED_LIST_INPUT_PROPERTIES)),
+    "search-onedrive-files": SEARCH_ONEDRIVE_INPUT_SCHEMA,
+    "get-drive-item": strict_input({
+        "driveId": OPAQUE_ID,
+        "driveItemId": OPAQUE_ID,
+        "includeHeaders": {"type": "boolean", "const": True},
+        "select": {"type": "string", "const": "id,name,eTag,parentReference"},
+    }, ["driveId", "driveItemId", "includeHeaders", "select"]),
+    "list-chats": strict_input(dict(BOUNDED_LIST_INPUT_PROPERTIES)),
+    "list-chat-messages": identified_input("chatId", extra=dict(BOUNDED_LIST_INPUT_PROPERTIES)),
+    "list-joined-teams": NO_ARGUMENTS_INPUT_SCHEMA,
+    "list-team-channels": identified_input("teamId", extra=dict(BOUNDED_LIST_INPUT_PROPERTIES)),
+    "list-channel-messages": identified_input("teamId", "channelId", extra=dict(BOUNDED_LIST_INPUT_PROPERTIES)),
+}
+
+MS365_WRITE_INPUT_SCHEMAS = {
+    **CURATED_WRITE_INPUT_SCHEMAS,
+    "upload-file-content": UPLOAD_ONEDRIVE_INPUT_SCHEMA,
+    "delete-onedrive-file": DELETE_ONEDRIVE_INPUT_SCHEMA,
+}
+
+MS365_INPUT_SCHEMAS = {**MS365_READ_INPUT_SCHEMAS, **MS365_WRITE_INPUT_SCHEMAS}
+
+MS365_READ_DESCRIPTIONS = {
+    "list-mail-folders": "List Outlook mail folders. Use a returned folder id when a later mail action requires one. top is the only qualified paging control.",
+    "list-mail-messages": "List recent Outlook messages. Use a returned message id with get-mail-message before replying, forwarding, moving, or deleting. Raw Graph filter and search expressions are not supported.",
+    "get-mail-message": "Read one Outlook message by the opaque messageId returned by list-mail-messages.",
+    "list-calendars": "List the signed-in user's Outlook calendars. Use get-calendar-view for occurrences in a time window.",
+    "list-calendar-events": "List Outlook calendar event series. This does not expand recurring occurrences; use get-calendar-view for today or upcoming events.",
+    "get-calendar-view": CALENDAR_VIEW_DESCRIPTION,
+    "get-calendar-event": "Read one Outlook event by eventId. timezone may request a qualified IANA response timezone.",
+    "list-drives": LIST_DRIVES_DESCRIPTION,
+    "get-drive-root-item": "Read the root item of one OneDrive or SharePoint drive using a driveId returned by list-drives.",
+    "list-folder-files": "List the direct children of one OneDrive folder using resolved driveId and driveItemId values. top is the only qualified paging control.",
+    "search-onedrive-files": SEARCH_ONEDRIVE_DESCRIPTION,
+    "get-drive-item": "Read bounded identity and version metadata for one OneDrive item. Use the exact constant select and includeHeaders=true before a protected mutation.",
+    "list-chats": "List recent Microsoft Teams chats. Use a returned chatId to read messages or send a protected reply.",
+    "list-chat-messages": "Read recent messages from one Teams chat using a chatId returned by list-chats.",
+    "list-joined-teams": LIST_JOINED_TEAMS_DESCRIPTION,
+    "list-team-channels": "List channels in one joined Microsoft Team using a teamId returned by list-joined-teams.",
+    "list-channel-messages": "Read recent messages from one Teams channel using resolved teamId and channelId values.",
+}
+
+MS365_TOOL_DESCRIPTIONS = {
+    **MS365_READ_DESCRIPTIONS,
+    **CURATED_WRITE_DESCRIPTIONS,
+    "upload-file-content": UPLOAD_ONEDRIVE_DESCRIPTION,
+    "delete-onedrive-file": DELETE_ONEDRIVE_DESCRIPTION,
+}
+
+# The full contract is deliberately enumerable. If the product grants a new
+# Softeria tool but this map has not been reviewed, discovery omits it and the
+# workspace fails closed instead of inheriting the upstream open schema.
+if set(MS365_INPUT_SCHEMAS) != set(MS365_TOOL_DESCRIPTIONS):
+    raise RuntimeError("Microsoft 365 contract profiles are incomplete")
+
+
+def effective_ms365_input_schema(tool_name: str) -> dict:
+    input_schema = json.loads(json.dumps(MS365_INPUT_SCHEMAS[tool_name]))
+    if tool_name not in WRITE_TOOLS:
+        return input_schema
+    properties = input_schema.get("properties")
+    if isinstance(properties, dict):
+        properties.pop("confirm", None)
+        properties.pop("excludeResponse", None)
+        properties.pop("includeHeaders", None)
+        properties["lemmacomputerAudit"] = AUDIT_CONTEXT_SCHEMA
+    required = input_schema.get("required")
+    if isinstance(required, list):
+        required = [item for item in required if item not in {"confirm", "excludeResponse", "includeHeaders"}]
+        if tool_name == "delete-onedrive-file":
+            required = list(dict.fromkeys(required + ["If-Match"]))
+        input_schema["required"] = list(dict.fromkeys(required + ["lemmacomputerAudit"]))
+    input_schema["additionalProperties"] = False
+    return input_schema
+
+
+def canonical_agent_instance_id(raw: object) -> str:
+    if not isinstance(raw, str):
+        raise ValueError("agent process identity must be a UUID string")
+    try:
+        parsed = uuid.UUID(raw)
+    except ValueError as error:
+        raise ValueError("agent process identity must be a canonical UUIDv4") from error
+    if parsed.version != 4 or str(parsed) != raw:
+        raise ValueError("agent process identity must be a canonical UUIDv4")
+    return raw
+
+
+def request_agent_instance_id(params: dict) -> str | None:
+    metadata = params.get("_meta")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValueError("MCP request metadata must be an object")
+    lemmacomputer = metadata.get("lemmacomputer") if isinstance(metadata, dict) else None
+    if lemmacomputer is not None:
+        if not isinstance(lemmacomputer, dict) or set(lemmacomputer) != {"agentInstanceId"}:
+            raise ValueError("LemmaComputer MCP request metadata is malformed")
+        return canonical_agent_instance_id(lemmacomputer.get("agentInstanceId"))
+    fallback = os.environ.get("LEMMACOMPUTER_AGENT_INSTANCE_ID", "")
+    return canonical_agent_instance_id(fallback) if fallback else None
+
+
+def request_json(path: str, body: dict | None = None, agent_instance_id: str | None = None) -> dict:
     headers = {} if body is None else {"content-type": "application/json"}
-    agent_instance_id = os.environ.get("LEMMACOMPUTER_AGENT_INSTANCE_ID", "")
-    if agent_instance_id:
-        headers["x-lemmacomputer-agent-instance-id"] = agent_instance_id
+    resolved_agent_instance_id = agent_instance_id
+    if resolved_agent_instance_id is None:
+        fallback = os.environ.get("LEMMACOMPUTER_AGENT_INSTANCE_ID", "")
+        resolved_agent_instance_id = canonical_agent_instance_id(fallback) if fallback else None
+    if resolved_agent_instance_id:
+        headers["x-lemmacomputer-agent-instance-id"] = resolved_agent_instance_id
     request = urllib.request.Request(
         f"{BROKER}{path}",
         data=None if body is None else json.dumps(body, separators=(",", ":")).encode("utf-8"),
@@ -744,7 +895,16 @@ def discover_tools() -> list[dict]:
     for raw in valid_tools:
         upstream_name = raw["name"]
         mcp_info = raw.get("mcp_info") if isinstance(raw.get("mcp_info"), dict) else {}
-        server_label = str(mcp_info.get("server_name") or mcp_info.get("server_id") or "connector")
+        server_name = str(mcp_info.get("server_name") or "")
+        is_microsoft365 = server_name == "lemmacomputer_ms365"
+        if is_microsoft365 and upstream_name not in MS365_INPUT_SCHEMAS:
+            print(
+                f"lemmacomputer-connectors-contract: omitted unqualified Microsoft 365 tool {upstream_name}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        server_label = str(server_name or mcp_info.get("server_id") or "connector")
         server_label = re.sub(r"[^A-Za-z0-9_-]+", "_", server_label).strip("_").lower()
         if server_label.startswith("lemmacomputer_"):
             server_label = server_label.removeprefix("lemmacomputer_")
@@ -761,55 +921,18 @@ def discover_tools() -> list[dict]:
         used_names.add(visible_name)
         selected = dict(raw)
         selected["_lemmacomputer_upstream_name"] = upstream_name
-        TOOLS[visible_name] = selected
         input_schema = raw.get("inputSchema", raw.get("input_schema", {"type": "object"}))
-        if upstream_name == "get-calendar-view":
-            input_schema = CALENDAR_VIEW_INPUT_SCHEMA
-        elif upstream_name == "list-calendar-events":
-            input_schema = LIST_CALENDAR_EVENTS_INPUT_SCHEMA
-        elif upstream_name == "list-drives":
-            input_schema = LIST_DRIVES_INPUT_SCHEMA
-        elif upstream_name == "search-onedrive-files":
-            input_schema = SEARCH_ONEDRIVE_INPUT_SCHEMA
-        elif upstream_name == "upload-file-content":
-            input_schema = UPLOAD_ONEDRIVE_INPUT_SCHEMA
-        elif upstream_name == "delete-onedrive-file":
-            input_schema = DELETE_ONEDRIVE_INPUT_SCHEMA
-        elif upstream_name == "list-joined-teams":
-            input_schema = NO_ARGUMENTS_INPUT_SCHEMA
-        elif upstream_name in CURATED_WRITE_INPUT_SCHEMAS:
-            input_schema = CURATED_WRITE_INPUT_SCHEMAS[upstream_name]
-        if upstream_name in WRITE_TOOLS and isinstance(input_schema, dict):
-            # Connector execution flags are Control-owned. Do not advertise
-            # them as agent inputs; Control adds them only after approval.
-            input_schema = json.loads(json.dumps(input_schema))
-            properties = input_schema.get("properties")
-            if isinstance(properties, dict):
-                properties.pop("confirm", None)
-                properties.pop("excludeResponse", None)
-                properties.pop("includeHeaders", None)
-                properties["lemmacomputerAudit"] = AUDIT_CONTEXT_SCHEMA
-            required = input_schema.get("required")
-            if isinstance(required, list):
-                required = [item for item in required if item not in {"confirm", "excludeResponse", "includeHeaders"}]
-                if upstream_name == "delete-onedrive-file":
-                    required = list(dict.fromkeys(required + ["If-Match"]))
-                required = list(dict.fromkeys(required + ["lemmacomputerAudit"]))
-                input_schema["required"] = required
-            input_schema["additionalProperties"] = False
+        if is_microsoft365:
+            input_schema = effective_ms365_input_schema(upstream_name)
+        selected["_lemmacomputer_input_schema"] = input_schema
+        selected["_lemmacomputer_contract_version"] = MS365_CONTRACT_VERSION if is_microsoft365 else None
+        TOOLS[visible_name] = selected
         result.append({
             "name": visible_name,
-            "description": (
-                DELETE_ONEDRIVE_DESCRIPTION if upstream_name == "delete-onedrive-file"
-                else CALENDAR_VIEW_DESCRIPTION if upstream_name == "get-calendar-view"
-                else LIST_DRIVES_DESCRIPTION if upstream_name == "list-drives"
-                else SEARCH_ONEDRIVE_DESCRIPTION if upstream_name == "search-onedrive-files"
-                else UPLOAD_ONEDRIVE_DESCRIPTION if upstream_name == "upload-file-content"
-                else LIST_JOINED_TEAMS_DESCRIPTION if upstream_name == "list-joined-teams"
-                else CURATED_WRITE_DESCRIPTIONS[upstream_name] if upstream_name in CURATED_WRITE_DESCRIPTIONS
-                else raw.get("description", f"{server_label} tool governed by LemmaComputer policy.")
-            ),
+            "description": MS365_TOOL_DESCRIPTIONS[upstream_name] if is_microsoft365
+                else raw.get("description", f"{server_label} tool governed by LemmaComputer policy."),
             "inputSchema": input_schema,
+            **({"_meta": {"lemmacomputer": {"contractVersion": MS365_CONTRACT_VERSION}}} if is_microsoft365 else {}),
         })
     TOOLS[WAIT_TOOL_NAME] = {"name": WAIT_TOOL_NAME, "lemmacomputer_local": True}
     result.append({
@@ -906,16 +1029,16 @@ def start_tool_change_monitor() -> None:
     ).start()
 
 
-def wait_for_operation(identifier: str, timeout_seconds: int = 75) -> dict:
+def wait_for_operation(identifier: str, agent_instance_id: str | None, timeout_seconds: int = 75) -> dict:
     deadline = time.monotonic() + timeout_seconds
     operation: dict = {"id": identifier, "state": "approval_required"}
     while time.monotonic() < deadline:
-        operation = request_json(f"/lemmacomputer/operations/{identifier}")
+        operation = request_json(f"/lemmacomputer/operations/{identifier}", agent_instance_id=agent_instance_id)
         state = operation.get("state")
         if state in {"succeeded", "denied", "failed", "expired"}:
             return operation
         if state == "approved" and identifier in LOCAL_UPLOADS:
-            request_json("/lemmacomputer/uploads/start", {"operationId": identifier})
+            request_json("/lemmacomputer/uploads/start", {"operationId": identifier}, agent_instance_id)
         time.sleep(1)
     return operation
 
@@ -945,11 +1068,41 @@ def operation_result(operation: dict, identifier: str) -> dict:
             "The requested change did not complete. Do not describe this result as rejected, denied, or not approved.",
             identifier,
             state,
+            category="provider_rejection",
+            retryable=False,
         )
-    return error_result(f"The governed action was {state}. No further tool execution occurred.", identifier, state)
+    return error_result(
+        f"The governed action was {state}. No further tool execution occurred.",
+        identifier,
+        state,
+        category="policy_denial" if state in {"denied", "expired"} else "unknown_failure",
+        retryable=state not in {"denied", "expired"},
+    )
 
 
-def call_tool(name: str, arguments: dict) -> dict:
+def validate_contract_arguments(selected: dict, arguments: dict) -> dict | None:
+    schema = selected.get("_lemmacomputer_input_schema")
+    if not isinstance(schema, dict) or schema.get("additionalProperties") is not False:
+        return None
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    unsupported = sorted(key for key in arguments if key not in properties)
+    if unsupported:
+        field = unsupported[0]
+        safe_field = bounded_failure_field(field)
+        return error_result(
+            (
+                f"Unsupported field '{safe_field}'. Use only the fields in the published Microsoft 365 tool contract; raw Graph filter, search, order, path, and header syntax is not accepted."
+                if safe_field
+                else "An unsupported field was omitted. Use only the fields in the published Microsoft 365 tool contract; raw Graph filter, search, order, path, and header syntax is not accepted."
+            ),
+            category="unsupported_option",
+            field=safe_field,
+            retryable=False,
+        )
+    return None
+
+
+def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) -> dict:
     selected = TOOLS.get(name)
     if selected is None:
         discover_tools()
@@ -957,11 +1110,20 @@ def call_tool(name: str, arguments: dict) -> dict:
     if name == WAIT_TOOL_NAME:
         identifier = arguments.get("operationId")
         if not isinstance(identifier, str) or not identifier:
-            return error_result("A governed operationId is required.")
-        return operation_result(wait_for_operation(identifier), identifier)
+            return error_result(
+                "A governed operationId is required.",
+                category="invalid_argument",
+                field="operationId",
+                retryable=False,
+            )
+        return operation_result(wait_for_operation(identifier, agent_instance_id), identifier)
     server_id = (selected or {}).get("mcp_info", {}).get("server_id")
     if not isinstance(server_id, str):
-        return error_result("That tool is not assigned to this workspace.")
+        return error_result(
+            "That tool is not assigned to this workspace.",
+            category="policy_denial",
+            retryable=False,
+        )
     upstream_name = (selected or {}).get("_lemmacomputer_upstream_name", name)
     if upstream_name in WRITE_TOOLS:
         # Connector execution flags are never accepted from the model. The
@@ -970,14 +1132,31 @@ def call_tool(name: str, arguments: dict) -> dict:
         # approval, or denied before the connector can execute it.
         arguments = {key: value for key, value in arguments.items() if key not in {"confirm", "excludeResponse", "includeHeaders"}}
         arguments["confirm"] = True
+    contract_arguments = {key: value for key, value in arguments.items() if key != "confirm"}
+    contract_error = validate_contract_arguments(selected or {}, contract_arguments)
+    if contract_error:
+        return contract_error
     if upstream_name == "upload-file-content":
         try:
             arguments["driveItemId"] = normalize_upload_drive_item_id(arguments.get("driveItemId"))
-            local_upload = prepare_upload_body(arguments)
         except ValueError as error:
             return error_result(
                 f"The OneDrive upload was not submitted: {error}. "
-                "Use an opaque item ID, root:/file.txt:, or root:/folder/file.txt: as driveItemId."
+                "Use an opaque item ID, root:/file.txt:, or root:/folder/file.txt: as driveItemId.",
+                category="invalid_argument",
+                field="driveItemId",
+                retryable=False,
+            )
+        try:
+            local_upload = prepare_upload_body(arguments)
+        except ValueError as error:
+            detail = str(error)
+            field = "localFilePath" if "localFilePath" in detail else "body" if "body" in detail else None
+            return error_result(
+                f"The OneDrive upload was not submitted: {detail}.",
+                category="invalid_argument",
+                field=field,
+                retryable=False,
             )
         if local_upload:
             try:
@@ -985,11 +1164,15 @@ def call_tool(name: str, arguments: dict) -> dict:
                     "driveId": arguments["driveId"],
                     "driveItemId": arguments["driveItemId"],
                     "localFilePath": arguments["localFilePath"],
-                })
+                }, agent_instance_id)
                 operation = response.get("operation") if isinstance(response.get("operation"), dict) else {}
                 identifier = operation.get("id")
                 if not isinstance(identifier, str):
-                    return error_result("LemmaComputer did not create a governed resumable upload.")
+                    return error_result(
+                        "LemmaComputer did not create a governed resumable upload.",
+                        category="unknown_failure",
+                        retryable=True,
+                    )
                 LOCAL_UPLOADS[identifier] = {
                     "driveId": arguments["driveId"],
                     "driveItemId": arguments["driveItemId"],
@@ -1003,13 +1186,21 @@ def call_tool(name: str, arguments: dict) -> dict:
                     "_meta": {"lemmacomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
                 }
             except (OSError, ValueError, urllib.error.URLError):
-                return error_result("The governed resumable upload service is unavailable.")
+                return error_result(
+                    "The governed resumable upload service is unavailable.",
+                    category="unknown_failure",
+                    retryable=True,
+                )
     if upstream_name == "delete-onedrive-file":
         if (not isinstance(arguments.get("resourceName"), str)
                 or not arguments["resourceName"].strip()
                 or not isinstance(arguments.get("If-Match"), str)
                 or not arguments["If-Match"].strip()):
-            return error_result(DELETE_ONEDRIVE_MISSING_METADATA)
+            return error_result(
+                DELETE_ONEDRIVE_MISSING_METADATA,
+                category="invalid_argument",
+                retryable=False,
+            )
         arguments["If-Match"] = normalize_graph_etag(arguments["If-Match"])
         try:
             response = request_json("/lemmacomputer/deletions", {
@@ -1017,11 +1208,15 @@ def call_tool(name: str, arguments: dict) -> dict:
                 "driveItemId": arguments["driveItemId"],
                 "resourceName": arguments["resourceName"].strip(),
                 "If-Match": arguments["If-Match"],
-            })
+            }, agent_instance_id)
             operation = response.get("operation") if isinstance(response.get("operation"), dict) else {}
             identifier = operation.get("id")
             if not isinstance(identifier, str):
-                return error_result("LemmaComputer did not create a governed OneDrive deletion.")
+                return error_result(
+                    "LemmaComputer did not create a governed OneDrive deletion.",
+                    category="unknown_failure",
+                    retryable=True,
+                )
             if operation.get("state") == "succeeded":
                 return operation_result(operation, identifier)
             return {
@@ -1030,15 +1225,30 @@ def call_tool(name: str, arguments: dict) -> dict:
                 "_meta": {"lemmacomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
             }
         except (OSError, ValueError, KeyError, urllib.error.URLError):
-            return error_result("The governed OneDrive deletion service is unavailable.")
+            return error_result(
+                "The governed OneDrive deletion service is unavailable.",
+                category="unknown_failure",
+                retryable=True,
+            )
     try:
         response = request_json("/mcp-rest/tools/call", {
             "server_id": server_id,
             "name": upstream_name,
             "arguments": arguments,
-        })
+        }, agent_instance_id)
         if not isinstance(response.get("content"), list):
-            return error_result("The connected service returned an invalid tool result.")
+            return error_result(
+                "The connected service returned an invalid tool result.",
+                category="unknown_failure",
+                retryable=True,
+            )
+        if response.get("isError") is True:
+            failure = upstream_m365_failure(response)
+            return error_result(
+                failure["message"],
+                category=failure["category"],
+                retryable=failure["retryable"],
+            )
         return omit_nulls(response)
     except urllib.error.HTTPError as error:
         try:
@@ -1047,8 +1257,43 @@ def call_tool(name: str, arguments: dict) -> dict:
             payload = {}
         identifier = operation_id(payload)
         if error.code != 409 or not identifier:
-            message = nested_error(payload) or f"LemmaComputer rejected the tool call (HTTP {error.code})."
-            return error_result(message)
+            problem = nested_problem(payload)
+            if problem:
+                return error_result(
+                    problem["message"],
+                    category=problem["category"],
+                    field=problem.get("field"),
+                    retryable=problem["retryable"],
+                )
+            code = nested_error(payload)
+            message = (
+                f"LemmaComputer rejected the tool call with safe code {code}."
+                if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", code)
+                else f"LemmaComputer rejected the tool call (HTTP {error.code})."
+            )
+            if error.code == 401:
+                category, retryable = "authentication_failure", False
+            elif error.code == 403:
+                category, retryable = "policy_denial", False
+            elif error.code in {408, 425, 429}:
+                category, retryable = "provider_rejection", True
+            elif error.code >= 500:
+                category, retryable = "unknown_failure", True
+            else:
+                category, retryable = "provider_rejection", False
+            return error_result(message, category=category, retryable=retryable)
+    except TimeoutError:
+        return error_result(
+            "Microsoft 365 did not respond before the bounded connector timeout.",
+            category="timeout",
+            retryable=True,
+        )
+    except urllib.error.URLError:
+        return error_result(
+            "The Microsoft 365 connector is temporarily unavailable.",
+            category="unknown_failure",
+            retryable=True,
+        )
 
     return {
         "content": [{"type": "text", "text": f"Signed approval is required for operation {identifier}. The action has not run. Call {WAIT_TOOL_NAME} now with this operationId and keep calling it while approval remains pending. Do not retry the original destructive tool."}],
@@ -1069,10 +1314,128 @@ def nested_error(value: object) -> str | None:
     return None
 
 
-def error_result(message: str, identifier: str | None = None, state: str | None = None) -> dict:
+def nested_problem(value: object) -> dict | None:
+    if isinstance(value, dict):
+        category = value.get("category")
+        message = value.get("message")
+        field = value.get("field")
+        retryable = value.get("retryable")
+        if (
+            category in {
+                "invalid_argument", "unsupported_option", "authentication_failure", "policy_denial",
+                "provider_rejection", "timeout", "unknown_failure",
+            }
+            and isinstance(message, str) and 1 <= len(message) <= 320
+            and (field is None or isinstance(field, str) and 1 <= len(field) <= 128)
+            and isinstance(retryable, bool)
+        ):
+            return {"category": category, "message": message, "field": field, "retryable": retryable}
+        for child in value.values():
+            found = nested_problem(child)
+            if found:
+                return found
+    if isinstance(value, list):
+        for child in value:
+            found = nested_problem(child)
+            if found:
+                return found
+    return None
+
+
+def upstream_m365_failure(response: dict) -> dict:
+    """Classify only pinned Softeria error wrappers without exposing Graph text."""
+
+    error_message = None
+    for item in response.get("content", []):
+        if not isinstance(item, dict) or item.get("type") != "text" or not isinstance(item.get("text"), str):
+            continue
+        try:
+            payload = json.loads(item["text"])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+            error_message = payload["error"]
+            break
+    if error_message is None:
+        return {
+            "category": "unknown_failure",
+            "message": "Microsoft 365 could not complete the request. Retry once; if it fails again, reconnect the Microsoft 365 account or verify the resolved resource IDs.",
+            "retryable": True,
+        }
+    wrapped = re.match(r"^Error in tool [A-Za-z0-9_-]+: (.+)$", error_message, re.DOTALL)
+    if wrapped:
+        error_message = wrapped.group(1)
+    if error_message == "No access token available" or error_message.startswith("Failed to acquire token for account "):
+        return {
+            "category": "authentication_failure",
+            "message": "The Microsoft 365 sign-in is no longer usable. Reconnect the Microsoft 365 account, then retry the request.",
+            "retryable": False,
+        }
+    matched = re.match(r"^Microsoft Graph API (?:scope )?error: ([1-5][0-9]{2})(?:\s|$)", error_message)
+    if matched:
+        status = int(matched.group(1))
+        if status in {401, 403}:
+            return {
+                "category": "authentication_failure",
+                "message": "Microsoft 365 authentication or consent is no longer sufficient. Reconnect the account and review its granted permissions.",
+                "retryable": False,
+            }
+        if status == 408:
+            return {
+                "category": "timeout",
+                "message": "Microsoft 365 did not respond before the bounded request timeout. Retry once.",
+                "retryable": True,
+            }
+        if status in {425, 429} or status >= 500:
+            return {
+                "category": "provider_rejection",
+                "message": "Microsoft 365 is temporarily unable to complete the request. Retry once after a short delay.",
+                "retryable": True,
+            }
+        return {
+            "category": "provider_rejection",
+            "message": "Microsoft 365 rejected the request. Check the published tool fields and resolved resource IDs before retrying.",
+            "retryable": False,
+        }
+    return {
+        "category": "unknown_failure",
+        "message": "Microsoft 365 could not complete the request. Retry once; if it fails again, reconnect the Microsoft 365 account or verify the resolved resource IDs.",
+        "retryable": True,
+    }
+
+
+def bounded_failure_field(value: object) -> str | None:
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", value):
+        return value
+    return None
+
+
+def bounded_failure_message(message: str) -> str:
+    if 1 <= len(message) <= 320:
+        return message
+    return "The connector request failed. Review the published tool contract and retry only when the error is marked retryable."
+
+
+def error_result(
+    message: str,
+    identifier: str | None = None,
+    state: str | None = None,
+    category: str = "unknown_failure",
+    field: str | None = None,
+    retryable: bool | None = None,
+) -> dict:
+    if retryable is None:
+        retryable = category in {"timeout", "unknown_failure"}
     result = {"content": [{"type": "text", "text": message}], "isError": True}
+    metadata = {"failure": {
+        "category": category,
+        "field": bounded_failure_field(field),
+        "message": bounded_failure_message(message),
+        "retryable": retryable,
+    }}
     if identifier:
-        result["_meta"] = {"lemmacomputer": {"operationId": identifier, "state": state}}
+        metadata.update({"operationId": identifier, "state": state})
+    result["_meta"] = {"lemmacomputer": metadata}
     return result
 
 
@@ -1083,9 +1446,9 @@ def respond(identifier: object, result: dict | None = None, error: dict | None =
         print(json.dumps(document, separators=(",", ":")), flush=True)
 
 
-def execute_tool_call(identifier: object, name: str, arguments: dict) -> None:
+def execute_tool_call(identifier: object, name: str, arguments: dict, agent_instance_id: str | None) -> None:
     try:
-        respond(identifier, call_tool(name, arguments))
+        respond(identifier, call_tool(name, arguments, agent_instance_id))
     except Exception as error:  # Tool failures must not terminate the managed connector.
         print(f"lemmacomputer-connectors: {type(error).__name__}", file=sys.stderr, flush=True)
         respond(identifier, error={
@@ -1118,13 +1481,22 @@ def handle(message: dict) -> None:
             arguments = params.get("arguments", {})
             if not isinstance(name, str) or not isinstance(arguments, dict):
                 raise ValueError("invalid tool call")
+            try:
+                agent_instance_id = request_agent_instance_id(params)
+            except ValueError as error:
+                respond(identifier, error_result(
+                    f"The connector call was rejected: {error}.",
+                    category="authentication_failure",
+                    field="_meta.lemmacomputer.agentInstanceId",
+                ))
+                return
             # A governed operation may wait for a human decision. Keep the
             # JSON-RPC input loop available for MCP pings while that call is
             # pending; otherwise Hermes declares the healthy stdio bridge dead
             # and orphans the operation before its approved result can return.
             threading.Thread(
                 target=execute_tool_call,
-                args=(identifier, name, arguments),
+                args=(identifier, name, arguments, agent_instance_id),
                 daemon=True,
                 name=f"lemmacomputer-connectors-call-{identifier}",
             ).start()
@@ -1133,6 +1505,20 @@ def handle(message: dict) -> None:
     except Exception as error:  # MCP must report failures without terminating the managed connector.
         print(f"lemmacomputer-connectors: {type(error).__name__}", file=sys.stderr, flush=True)
         respond(identifier, error={"code": -32603, "message": "The governed connector bridge is unavailable."})
+
+
+if os.environ.get("LEMMACOMPUTER_PRINT_MS365_CONTRACTS") == "1":
+    print(json.dumps({
+        "version": MS365_CONTRACT_VERSION,
+        "tools": {
+            name: {
+                "description": MS365_TOOL_DESCRIPTIONS[name],
+                "inputSchema": effective_ms365_input_schema(name),
+            }
+            for name in sorted(MS365_INPUT_SCHEMAS)
+        },
+    }, sort_keys=True, separators=(",", ":")))
+    raise SystemExit(0)
 
 
 for line in sys.stdin:

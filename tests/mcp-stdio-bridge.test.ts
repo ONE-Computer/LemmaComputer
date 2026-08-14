@@ -7,6 +7,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
+import { m365ToolCatalog } from "@lemmacomputer/contracts";
 
 test("the workspace MCP bridge notifies Hermes when a connector changes its tool surface", async (context) => {
   let listReads = 0;
@@ -657,10 +658,16 @@ test("Claude Desktop receives an actionable retry when a protected delete omits 
 
   const deadline = Date.now() + 5_000;
   while (responses.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-  const result = responses[1]?.result as { isError: boolean; content: Array<{ text: string }> };
+  const result = responses[1]?.result as {
+    isError: boolean;
+    content: Array<{ text: string }>;
+    _meta: { lemmacomputer: { failure: { message: string; retryable: boolean } } };
+  };
   assert.equal(result.isError, true);
   assert.match(result.content[0]?.text ?? "", /Call get-drive-item/);
   assert.match(result.content[0]?.text ?? "", /Do not use Cowork or local-filesystem deletion permission/);
+  assert.ok(result._meta.lemmacomputer.failure.message.length <= 320);
+  assert.equal(result._meta.lemmacomputer.failure.retryable, false);
   assert.equal(toolCalls, 0);
 });
 
@@ -1129,4 +1136,350 @@ test("Microsoft 365 and Linear tools are always connector-prefixed and retain up
     { server_id: "microsoft365-id", name: "list-calendars", arguments: {} },
     { server_id: "linear-id", name: "list_issues", arguments: { limit: 10 } },
   ]);
+});
+
+test("every product-enabled Microsoft 365 tool has one strict effective contract and unknown tools fail closed", async (context) => {
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({
+        tools: [...Object.keys(m365ToolCatalog), "new-unreviewed-graph-tool"].map((name) => ({
+          name,
+          description: "Broad upstream schema",
+          inputSchema: { type: "object", additionalProperties: true },
+          mcp_info: { server_id: "microsoft365-id", server_name: "lemmacomputer_ms365" },
+        })),
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const responses: Array<Record<string, unknown>> = [];
+  createInterface({ input: child.stdout }).on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const deadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const tools = (responses.find((response) => response.id === 1)?.result as {
+    tools: Array<{ name: string; description: string; inputSchema: { additionalProperties?: boolean }; _meta?: Record<string, unknown> }>;
+  }).tools.filter((tool) => tool.name !== "wait-for-governed-operation");
+  assert.equal(tools.length, Object.keys(m365ToolCatalog).length);
+  assert.deepEqual(
+    tools.map((tool) => tool.name).sort(),
+    Object.keys(m365ToolCatalog).map((name) => `microsoft365__${name}`).sort(),
+  );
+  assert.equal(tools.some((tool) => tool.name.includes("new-unreviewed")), false);
+  for (const tool of tools) {
+    assert.equal(tool.inputSchema.additionalProperties, false, `${tool.name} must be strict`);
+    assert.doesNotMatch(tool.description, /Broad upstream schema/);
+    assert.deepEqual(tool._meta, { lemmacomputer: { contractVersion: 1 } });
+  }
+});
+
+test("calendar today uses one canonical call and raw Graph expressions never reach the provider", async (context) => {
+  const calls: Array<Record<string, unknown>> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [{
+        name: "get-calendar-view",
+        description: "Use filter/search/orderby",
+        inputSchema: {
+          type: "object",
+          properties: { filter: { type: "string" }, search: { type: "string" }, orderby: { type: "string" } },
+          additionalProperties: true,
+        },
+        mcp_info: { server_id: "microsoft365-id", server_name: "lemmacomputer_ms365" },
+      }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      calls.push(payload);
+      if (payload.arguments?.top === 2) {
+        response.end(JSON.stringify({
+          content: [{ type: "text", text: "raw provider token=must-not-cross" }],
+          isError: true,
+        }));
+        return;
+      }
+      if (payload.arguments?.top === 3) {
+        response.statusCode = 400;
+        response.end(JSON.stringify({ problem: {
+          category: "invalid_argument",
+          field: "top",
+          message: "The requested result limit is outside the reviewed contract.",
+          retryable: false,
+        } }));
+        return;
+      }
+      const graphErrors: Record<number, string> = {
+        8: "Error in tool get-calendar-view: Microsoft Graph API error: 401 Unauthorized - raw token detail must not cross",
+        9: "Error in tool get-calendar-view: Microsoft Graph API error: 429 Too Many Requests - raw throttle detail must not cross",
+        10: "Error in tool get-calendar-view: Microsoft Graph API error: 400 Bad Request - raw OData detail must not cross",
+        11: "Error in tool get-calendar-view: No access token available",
+      };
+      if (graphErrors[payload.arguments?.top]) {
+        response.end(JSON.stringify({
+          content: [{ type: "text", text: JSON.stringify({ error: graphErrors[payload.arguments.top] }) }],
+          isError: true,
+        }));
+        return;
+      }
+      response.end(JSON.stringify({ content: [{ type: "text", text: "one event" }], isError: false }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const responses: Array<Record<string, unknown>> = [];
+  createInterface({ input: child.stdout }).on("line", (line) => responses.push(JSON.parse(line)));
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const advertised = (responses.find((response) => response.id === 1)?.result as {
+    tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
+  }).tools.find((tool) => tool.name === "microsoft365__get-calendar-view")!;
+  assert.deepEqual(Object.keys(advertised.inputSchema.properties).sort(), ["endDateTime", "startDateTime", "timezone", "top"]);
+  assert.equal("filter" in advertised.inputSchema.properties, false);
+  assert.equal("search" in advertised.inputSchema.properties, false);
+  assert.equal("orderby" in advertised.inputSchema.properties, false);
+
+  const baseArguments = {
+    startDateTime: "2026-08-14T00:00:00+08:00",
+    endDateTime: "2026-08-15T00:00:00+08:00",
+    timezone: "Asia/Singapore",
+  };
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 2, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: { ...baseArguments, filter: "subject eq 'x'" } },
+  })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 3, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: { ...baseArguments, search: " " } },
+  })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 4, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: baseArguments },
+  })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 5, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: { ...baseArguments, top: 2 } },
+  })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 6, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: { ...baseArguments, top: 3 } },
+  })}\n`);
+  const unsafeField = `secret!${"x".repeat(200)}`;
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 7, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: { ...baseArguments, [unsafeField]: "sensitive" } },
+  })}\n`);
+  for (const [id, top] of [[8, 8], [9, 9], [10, 10], [11, 11]] as const) {
+    child.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0", id, method: "tools/call",
+      params: { name: "microsoft365__get-calendar-view", arguments: { ...baseArguments, top } },
+    })}\n`);
+  }
+  const callDeadline = Date.now() + 5_000;
+  while (responses.filter((response) => [2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(response.id as number)).length < 10 && Date.now() < callDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  for (const id of [2, 3]) {
+    const result = responses.find((response) => response.id === id)?.result as {
+      isError: boolean; _meta: { lemmacomputer: { failure: {
+        category: string; field: string; message: string; retryable: boolean;
+      } } };
+    };
+    assert.equal(result.isError, true);
+    assert.equal(result._meta.lemmacomputer.failure.category, "unsupported_option");
+    assert.equal(result._meta.lemmacomputer.failure.retryable, false);
+    assert.match(result._meta.lemmacomputer.failure.message, /Unsupported field/);
+  }
+  assert.equal((responses.find((response) => response.id === 4)?.result as { isError: boolean }).isError, false);
+  const upstreamFailure = (responses.find((response) => response.id === 5)?.result as {
+    isError: boolean; content: Array<{ text: string }>; _meta: { lemmacomputer: { failure: {
+      category: string; field: string | null; message: string; retryable: boolean;
+    } } };
+  });
+  assert.equal(upstreamFailure.isError, true);
+  assert.deepEqual(upstreamFailure._meta.lemmacomputer.failure, {
+    category: "unknown_failure",
+    field: null,
+    message: "Microsoft 365 could not complete the request. Retry once; if it fails again, reconnect the Microsoft 365 account or verify the resolved resource IDs.",
+    retryable: true,
+  });
+  assert.doesNotMatch(upstreamFailure.content[0]?.text ?? "", /must-not-cross/);
+  const controlledFailure = (responses.find((response) => response.id === 6)?.result as {
+    _meta: { lemmacomputer: { failure: Record<string, unknown> } };
+  })._meta.lemmacomputer.failure;
+  assert.deepEqual(controlledFailure, {
+    category: "invalid_argument",
+    field: "top",
+    message: "The requested result limit is outside the reviewed contract.",
+    retryable: false,
+  });
+  const boundedFailure = (responses.find((response) => response.id === 7)?.result as {
+    content: Array<{ text: string }>;
+    _meta: { lemmacomputer: { failure: { field: string | null; message: string } } };
+  });
+  assert.equal(boundedFailure._meta.lemmacomputer.failure.field, null);
+  assert.ok(boundedFailure._meta.lemmacomputer.failure.message.length <= 320);
+  assert.doesNotMatch(boundedFailure.content[0]?.text ?? "", /secret!/);
+  const classifiedFailures = Object.fromEntries([8, 9, 10, 11].map((id) => [id, (
+    responses.find((response) => response.id === id)?.result as {
+      content: Array<{ text: string }>;
+      _meta: { lemmacomputer: { failure: Record<string, unknown> } };
+    }
+  )]));
+  assert.deepEqual(classifiedFailures[8]._meta.lemmacomputer.failure, {
+    category: "authentication_failure",
+    field: null,
+    message: "Microsoft 365 authentication or consent is no longer sufficient. Reconnect the account and review its granted permissions.",
+    retryable: false,
+  });
+  assert.deepEqual(classifiedFailures[9]._meta.lemmacomputer.failure, {
+    category: "provider_rejection",
+    field: null,
+    message: "Microsoft 365 is temporarily unable to complete the request. Retry once after a short delay.",
+    retryable: true,
+  });
+  assert.deepEqual(classifiedFailures[10]._meta.lemmacomputer.failure, {
+    category: "provider_rejection",
+    field: null,
+    message: "Microsoft 365 rejected the request. Check the published tool fields and resolved resource IDs before retrying.",
+    retryable: false,
+  });
+  assert.deepEqual(classifiedFailures[11]._meta.lemmacomputer.failure, {
+    category: "authentication_failure",
+    field: null,
+    message: "The Microsoft 365 sign-in is no longer usable. Reconnect the Microsoft 365 account, then retry the request.",
+    retryable: false,
+  });
+  for (const result of Object.values(classifiedFailures)) {
+    assert.doesNotMatch(result.content[0]?.text ?? "", /raw .* detail/);
+  }
+  const callsByTop = [...calls].sort((left, right) => {
+    const leftTop = Number((left.arguments as Record<string, unknown>).top ?? 0);
+    const rightTop = Number((right.arguments as Record<string, unknown>).top ?? 0);
+    return leftTop - rightTop;
+  });
+  assert.deepEqual(callsByTop, [
+    { server_id: "microsoft365-id", name: "get-calendar-view", arguments: baseArguments },
+    { server_id: "microsoft365-id", name: "get-calendar-view", arguments: { ...baseArguments, top: 2 } },
+    { server_id: "microsoft365-id", name: "get-calendar-view", arguments: { ...baseArguments, top: 3 } },
+    { server_id: "microsoft365-id", name: "get-calendar-view", arguments: { ...baseArguments, top: 8 } },
+    { server_id: "microsoft365-id", name: "get-calendar-view", arguments: { ...baseArguments, top: 9 } },
+    { server_id: "microsoft365-id", name: "get-calendar-view", arguments: { ...baseArguments, top: 10 } },
+    { server_id: "microsoft365-id", name: "get-calendar-view", arguments: { ...baseArguments, top: 11 } },
+  ]);
+});
+
+test("request-local agent identities are validated and cannot leak between concurrent connector calls", async (context) => {
+  const calls: Array<{ arguments: Record<string, unknown>; agentInstanceId?: string }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [{
+        name: "list-calendars",
+        inputSchema: { type: "object" },
+        mcp_info: { server_id: "microsoft365-id", server_name: "lemmacomputer_ms365" },
+      }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      calls.push({
+        arguments: payload.arguments,
+        agentInstanceId: request.headers["x-lemmacomputer-agent-instance-id"] as string | undefined,
+      });
+      await new Promise((resolve) => setTimeout(resolve,
+        request.headers["x-lemmacomputer-agent-instance-id"] === "11111111-1111-4111-8111-111111111111" ? 40 : 5));
+      response.end(JSON.stringify({ content: [{ type: "text", text: "ok" }], isError: false }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const responses: Array<Record<string, unknown>> = [];
+  createInterface({ input: child.stdout }).on("line", (line) => responses.push(JSON.parse(line)));
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const first = "11111111-1111-4111-8111-111111111111";
+  const second = "22222222-2222-4222-8222-222222222222";
+  for (const [id, agentInstanceId] of [[2, first], [3, second]] as const) {
+    child.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0", id, method: "tools/call",
+      params: {
+        name: "microsoft365__list-calendars",
+        arguments: {},
+        _meta: { lemmacomputer: { agentInstanceId } },
+      },
+    })}\n`);
+  }
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 4, method: "tools/call",
+    params: {
+      name: "microsoft365__list-calendars",
+      arguments: {},
+      _meta: { lemmacomputer: { agentInstanceId: "NOT-A-UUID" } },
+    },
+  })}\n`);
+  const deadline = Date.now() + 5_000;
+  while (responses.filter((response) => [2, 3, 4].includes(response.id as number)).length < 3 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.deepEqual(calls.map((call) => call.agentInstanceId).sort(), [first, second].sort());
+  assert.equal(calls.length, 2, "malformed identity metadata must fail before the broker");
+  const invalid = responses.find((response) => response.id === 4)?.result as {
+    isError: boolean; _meta: { lemmacomputer: { failure: {
+      category: string; field: string; message: string; retryable: boolean;
+    } } };
+  };
+  assert.equal(invalid.isError, true);
+  assert.deepEqual(invalid._meta.lemmacomputer.failure, {
+    category: "authentication_failure",
+    field: "_meta.lemmacomputer.agentInstanceId",
+    message: "The connector call was rejected: agent process identity must be a canonical UUIDv4.",
+    retryable: false,
+  });
 });

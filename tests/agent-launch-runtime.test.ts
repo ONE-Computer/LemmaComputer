@@ -29,7 +29,9 @@ test("model and connector transports inherit only the wrapper-issued instance id
   const broker = source("docker/workspace/lemmacomputer-gateway-proxy.py");
   const policyCallback = source("integrations/litellm/lemmacomputer_policy_callback.py");
   assert.match(entrypoint, /env_http_headers = \{ "x-lemmacomputer-agent-instance-id" = "LEMMACOMPUTER_AGENT_INSTANCE_ID" \}/);
-  assert.match(connectors, /headers\["x-lemmacomputer-agent-instance-id"\] = agent_instance_id/);
+  assert.match(connectors, /params\.get\("_meta"\)/);
+  assert.match(connectors, /canonical_agent_instance_id\(lemmacomputer\.get\("agentInstanceId"\)\)/);
+  assert.match(connectors, /headers\["x-lemmacomputer-agent-instance-id"\] = resolved_agent_instance_id/);
   assert.match(broker, /AGENT_INSTANCE_PATTERN/);
   assert.match(broker, /\/internal\/v1\/agent\/instances/);
   assert.match(broker, /self\.headers\.get\("x-lemmacomputer-agent-instance-id"\)/);

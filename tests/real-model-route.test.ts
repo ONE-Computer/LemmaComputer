@@ -156,7 +156,7 @@ test("human-facing audit context is approval-bound but never forwarded to a conn
   assert.match(bridge, /AUDIT_CONTEXT_SCHEMA/);
   assert.match(bridge, /"recipient", "chat", "channel"/);
   assert.match(bridge, /targetType chat/);
-  assert.match(bridge, /required = list\(dict\.fromkeys\(required \+ \["lemmacomputerAudit"\]\)\)/);
+  assert.match(bridge, /input_schema\["required"\] = list\(dict\.fromkeys\(required \+ \["lemmacomputerAudit"\]\)\)/);
 });
 
 test("Claude Desktop is pinned and receives managed gateway policy rather than provider credentials", async () => {
