@@ -57,6 +57,13 @@ import { ActivityPanel, ActivityToggle } from "./ActivityPanel.jsx";
 import { providerModelCapabilityLabels } from "./provider-inventory.js";
 import { customerPasskeyApi } from "./customer-auth-client.js";
 import { reconcileWorkspaceInventory, replaceWorkspaceInInventory } from "./workspace-inventory.js";
+import {
+  protectedOrganizationConstraintsFromEditor,
+  protectedPolicyAllowed,
+  protectedPolicyAssignableProfileIds,
+  protectedPolicyAssignableServiceClasses,
+  protectedPolicyEffectiveValues,
+} from "./protected-policy-editor.js";
 
 const busyStates = new Set(["loading", "provisioning", "restarting", "stopping"]);
 const providerTitle = (provider) => ({
@@ -469,7 +476,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
       ) : workspaces.length === 0 ? (
         <section className="workspace-overview-empty">
           <Laptop48Regular aria-hidden="true" />
-          <div><h2>No workspaces yet</h2><p>Create a workspace to choose its applications, agents, model, and policy.</p></div>
+          <div><h2>No workspaces yet</h2><p>Create a workspace to choose its access mode, applications, agents, and service level.</p></div>
         </section>
       ) : (
         <section className="workspace-overview-list" aria-label="Your workspaces">
@@ -1943,19 +1950,13 @@ const protectedPolicyAgentNames = {
 };
 const protectedPolicyProfileNames = {
   "claude-desktop-standard-v1": "Standard managed workspace",
-  "kasm-persistent-standard": "Persistent Ubuntu workspace",
   "disposable-open-v1": "Disposable open workspace",
 };
 const protectedPolicyConnectorNames = { "microsoft-365": "Microsoft 365" };
-const protectedPolicyServiceClassNames = { auto: "Auto (Beta)", lite: "Lite", balanced: "Balanced", pro: "Pro" };
+const protectedPolicyServiceClassNames = { lite: "Lite", balanced: "Balanced", pro: "Pro" };
+const protectedPolicyServiceClassName = (value) => value === "auto" ? "Balanced (legacy assignment)" : protectedPolicyServiceClassNames[value] ?? value;
 const protectedPolicyReasoningOptions = ["disabled", "low", "medium", "high", "max"];
 const protectedPolicyReasoningName = (value) => value === "disabled" ? "Off" : `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
-const protectedPolicyAllowed = (constraint) => constraint.allow.filter((value) => !constraint.deny.includes(value));
-const protectedPolicyEffectiveValues = (baseline, overlay) => {
-  const ceiling = protectedPolicyAllowed(baseline);
-  const selected = overlay?.allow ? ceiling.filter((value) => overlay.allow.includes(value)) : ceiling;
-  return selected.filter((value) => !overlay?.deny?.includes(value));
-};
 const protectedPolicyDate = (value) => new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 const protectedPolicyList = (values, labels) => values.map((value) => labels[value] ?? value);
 const protectedPolicyClipboardSummary = (clipboard) => {
@@ -2043,23 +2044,23 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
       maxBytes: Math.min(baseline.constraints.clipboard.maxBytes, overlay.clipboard?.maxBytes ?? baseline.constraints.clipboard.maxBytes),
     },
   };
+  const assignableWorkspaceProfiles = effective.workspaceProfiles.filter((value) => protectedPolicyAssignableProfileIds.has(value));
+  const assignableServiceClasses = effective.serviceClasses.filter((value) => protectedPolicyAssignableServiceClasses.has(value));
   const selection = {
-    workspaceProfile: effective.workspaceProfiles.includes("kasm-persistent-standard") ? "kasm-persistent-standard" : effective.workspaceProfiles[0],
+    workspaceProfile: assignableWorkspaceProfiles.includes("claude-desktop-standard-v1") ? "claude-desktop-standard-v1" : assignableWorkspaceProfiles[0],
     agentIds: effective.agents,
     applicationIds: effective.applications,
     modelAlias: effective.modelAliases.includes("lemmacomputer-auto") ? "lemmacomputer-auto" : effective.modelAliases[0],
-    serviceClass: effective.serviceClasses.includes("balanced") ? "balanced" : effective.serviceClasses[0],
+    serviceClass: assignableServiceClasses.includes("balanced") ? "balanced" : assignableServiceClasses[0],
     reasoningEffort: effective.maximumReasoningEffort,
     egressMode: effective.maximumEgressMode,
     connectorIds: effective.connectors,
   };
   const openEditor = () => setEditor({
-    workspaceProfiles: [...effective.workspaceProfiles],
+    workspaceProfiles: [...assignableWorkspaceProfiles],
     agents: [...effective.agents],
     applications: [...effective.applications],
-    modelAliases: [...effective.modelAliases],
-    serviceClasses: [...effective.serviceClasses],
-    connectors: [...effective.connectors],
+    serviceClasses: [...assignableServiceClasses],
     maximumReasoningEffort: effective.maximumReasoningEffort,
     maximumEgressMode: effective.maximumEgressMode,
     clipboardLocalToWorkspace: effective.clipboard.localToWorkspace,
@@ -2067,34 +2068,11 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
     clipboardMaxKb: Math.max(1, Math.round(effective.clipboard.maxBytes / 1024)),
     revisionNote: "",
   });
-  const resourceConstraint = (baselineConstraint, selected) => {
-    const ceiling = protectedPolicyAllowed(baselineConstraint);
-    return { allow: selected, deny: ceiling.filter((value) => !selected.includes(value)) };
-  };
   const savePolicy = async () => {
     setSavingPolicy(true);
     setError("");
     try {
-      const constraints = {
-        ...overlay,
-        workspaceProfiles: resourceConstraint(baseline.constraints.workspaceProfiles, editor.workspaceProfiles),
-        agents: resourceConstraint(baseline.constraints.agents, editor.agents),
-        applications: resourceConstraint(baseline.constraints.applications, editor.applications),
-        modelAliases: resourceConstraint(baseline.constraints.modelAliases, editor.modelAliases),
-        serviceClasses: resourceConstraint(baseline.constraints.serviceClasses, editor.serviceClasses),
-        maximumReasoningEffort: editor.maximumReasoningEffort,
-        maximumEgressMode: editor.maximumEgressMode,
-        clipboard: {
-          localToWorkspace: editor.clipboardLocalToWorkspace,
-          workspaceToLocal: editor.clipboardWorkspaceToLocal,
-          maxBytes: Math.min(baseline.constraints.clipboard.maxBytes, Math.max(1, editor.clipboardMaxKb) * 1024),
-        },
-        connectors: {
-          allow: editor.connectors,
-          deny: protectedPolicyAllowed(baseline.constraints.connectors).filter((value) => !editor.connectors.includes(value)),
-          toolPolicies: overlay.connectors?.toolPolicies ?? {},
-        },
-      };
+      const constraints = protectedOrganizationConstraintsFromEditor({ baseline: baseline.constraints, overlay, editor });
       await adminApi.createProtectedOrganizationPolicyVersion(constraints, editor.revisionNote.trim());
       await load();
       setEditor(null);
@@ -2135,7 +2113,6 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
     && editor.workspaceProfiles.length > 0
     && editor.agents.length > 0
     && editor.applications.length > 0
-    && editor.modelAliases.length > 0
     && editor.serviceClasses.length > 0
     && editor.revisionNote.trim().length >= 3;
   const versionCreator = (version) => users.find((user) => user.userId === version.createdBy)?.displayName ?? "Organization administrator";
@@ -2155,9 +2132,9 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
         <h3 id="workspace-policy-controls-heading">Policy controls</h3>
         <ProtectedPolicyControlGroup icon={Bot24Regular} title="Agents" lines={protectedPolicyList(effective.agents, protectedPolicyAgentNames)} />
         <ProtectedPolicyControlGroup icon={Apps24Regular} title="Applications" lines={protectedPolicyList(effective.applications, applicationNames)} />
-        <ProtectedPolicyControlGroup icon={PlugConnected24Regular} title="Connector access" lines={effective.connectors.length ? protectedPolicyList(effective.connectors, protectedPolicyConnectorNames) : ["No connectors available"]} action={<button type="button" onClick={onConfigureConnections}>Review tool permissions in Connectors</button>} />
-        <ProtectedPolicyControlGroup icon={Info24Regular} title="Models and thinking" lines={[`${effective.modelAliases.length} approved model ${effective.modelAliases.length === 1 ? "route" : "routes"}`, `Maximum thinking: ${protectedPolicyReasoningName(effective.maximumReasoningEffort)}`, `Service levels: ${protectedPolicyList(effective.serviceClasses, protectedPolicyServiceClassNames).join(", ")}`]} />
-        <ProtectedPolicyControlGroup icon={ShieldCheckmark24Regular} title="Workspace security" lines={[protectedPolicyList(effective.workspaceProfiles, protectedPolicyProfileNames).join(", "), effective.maximumEgressMode === "restricted" ? "Restricted internet access" : "Full web access permitted", protectedPolicyClipboardSummary(effective.clipboard)]} />
+        <ProtectedPolicyControlGroup icon={PlugConnected24Regular} title="Organization connector ceiling" lines={effective.connectors.length ? [...protectedPolicyList(effective.connectors, protectedPolicyConnectorNames).map((connector) => `${connector} may be enabled`), "Enablement and tool permissions are managed in Connectors"] : ["No connectors may be enabled", "Enablement and tool permissions are managed in Connectors"]} action={<button type="button" onClick={onConfigureConnections}>Open Connectors policy</button>} />
+        <ProtectedPolicyControlGroup icon={Info24Regular} title="Service and thinking" lines={[`Maximum thinking: ${protectedPolicyReasoningName(effective.maximumReasoningEffort)}`, `Service levels: ${protectedPolicyList(assignableServiceClasses, protectedPolicyServiceClassNames).join(", ")}`]} />
+        <ProtectedPolicyControlGroup icon={ShieldCheckmark24Regular} title="Advanced organization security" lines={[protectedPolicyList(assignableWorkspaceProfiles, protectedPolicyProfileNames).join(", "), effective.maximumEgressMode === "restricted" ? "Restricted internet access" : "Full web access permitted", protectedPolicyClipboardSummary(effective.clipboard)]} />
       </section>
       <aside className="workspace-policy-context">
         <section><div className="workspace-policy-context-title"><ShieldCheckmark24Regular aria-hidden="true" /><strong>Locked baseline</strong></div><h3>Office worker baseline <span>v{baseline.version}</span></h3><p>Published by LemmaComputer release {baseline.release.releaseId}. This is the maximum configuration and cannot be edited or weakened.</p><button type="button" onClick={() => setBaselineOpen(true)}>View baseline</button></section>
@@ -2202,13 +2179,11 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
 
     {editor && <ModalDialog className="workspace-policy-editor-modal" title={latest ? "Edit organization policy" : "Set organization policy"} description="Start from the Office worker baseline and add stricter organization limits. You cannot enable anything blocked by LemmaComputer." eyebrow={latest ? `Current organization version ${latest.version}` : "Baseline only"} labelledBy="workspace-policy-editor-title" onClose={savingPolicy ? () => undefined : () => { setEditor(null); setError(""); }}>
       <div className="workspace-policy-editor-body">
-        <ProtectedPolicyResourceEditor legend="Agents" description="Choose the Claude experiences members may select." values={protectedPolicyAllowed(baseline.constraints.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} />
+        <ProtectedPolicyResourceEditor legend="Agents" description="Choose the approved agent experiences members may select." values={protectedPolicyAllowed(baseline.constraints.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} />
         <ProtectedPolicyResourceEditor legend="Applications" description="Members remain free to choose from these approved workspace applications." values={protectedPolicyAllowed(baseline.constraints.applications)} labels={applicationNames} selected={editor.applications} onChange={(applications) => setEditor({ ...editor, applications })} />
-        <ProtectedPolicyResourceEditor legend="Workspace types" description="Limit which protected workspace profiles may be assigned." values={protectedPolicyAllowed(baseline.constraints.workspaceProfiles)} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
-        <ProtectedPolicyResourceEditor legend="Model routes" description="Choose the organization-approved model routes available to assignments." values={protectedPolicyAllowed(baseline.constraints.modelAliases)} labels={workspaceModelNames} selected={editor.modelAliases} onChange={(modelAliases) => setEditor({ ...editor, modelAliases })} />
-        <ProtectedPolicyResourceEditor legend="Service levels" description="Choose the service levels members may request." values={protectedPolicyAllowed(baseline.constraints.serviceClasses)} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
-        <ProtectedPolicyResourceEditor legend="Connectors" description="Choose which connectors may be available. Review exact tool permissions in Connectors." values={protectedPolicyAllowed(baseline.constraints.connectors)} labels={protectedPolicyConnectorNames} selected={editor.connectors} onChange={(connectors) => setEditor({ ...editor, connectors })} />
-        <fieldset className="workspace-policy-editor-group workspace-policy-editor-limits"><legend>Thinking and workspace security</legend><p>Set ceilings that every member assignment must remain within.</p><div className="workspace-policy-limit-grid">
+        <ProtectedPolicyResourceEditor legend="Workspace access" description="Limit the workspace access modes available to new member assignments. Existing pinned legacy workspaces remain compatible." values={protectedPolicyAllowed(baseline.constraints.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
+        <ProtectedPolicyResourceEditor legend="Service levels" description="Choose the Lite, Balanced, and Pro service levels members may request." values={protectedPolicyAllowed(baseline.constraints.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value))} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
+        <fieldset className="workspace-policy-editor-group workspace-policy-editor-limits"><legend>Advanced organization security</legend><p>Set organization-wide ceilings for thinking, internet access, and text clipboard transfer.</p><div className="workspace-policy-limit-grid">
           <label><span>Maximum thinking</span><SelectMenu value={editor.maximumReasoningEffort} ariaLabel="Maximum thinking level" options={protectedPolicyReasoningOptions.filter((value) => protectedPolicyReasoningOptions.indexOf(value) <= protectedPolicyReasoningOptions.indexOf(baseline.constraints.maximumReasoningEffort)).map((value) => ({ value, label: protectedPolicyReasoningName(value) }))} onValueChange={(maximumReasoningEffort) => setEditor({ ...editor, maximumReasoningEffort })} /></label>
           <label><span>Internet access ceiling</span><SelectMenu value={editor.maximumEgressMode} ariaLabel="Internet access ceiling" options={[{ value: "restricted", label: "Restricted" }, ...(baseline.constraints.maximumEgressMode === "full-web" ? [{ value: "full-web", label: "Full web" }] : [])]} onValueChange={(maximumEgressMode) => setEditor({ ...editor, maximumEgressMode })} /></label>
           <label><span>Clipboard limit (KB)</span><input type="number" min="1" max={Math.round(baseline.constraints.clipboard.maxBytes / 1024)} value={editor.clipboardMaxKb} onChange={(event) => setEditor({ ...editor, clipboardMaxKb: Number(event.target.value) })} /></label>
@@ -2221,9 +2196,9 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
       <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={savePolicy}>{savingPolicy ? "Saving version" : latest ? "Save as new version" : "Save organization policy"}</button></div>
     </ModalDialog>}
 
-    {baselineOpen && <ModalDialog className="workspace-policy-baseline-modal" title="Office worker baseline" description="This LemmaComputer release defines the maximum workspace configuration. Organization policy can only make it stricter." eyebrow={`Locked product baseline · v${baseline.version}`} labelledBy="workspace-policy-baseline-title" onClose={() => setBaselineOpen(false)}><div className="workspace-policy-baseline-details"><section><strong>Agents</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.agents), protectedPolicyAgentNames).join(", ")}</span></section><section><strong>Applications</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.applications), applicationNames).join(", ")}</span></section><section><strong>Connectors</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.connectors), protectedPolicyConnectorNames).join(", ") || "None"}</span></section><section><strong>Models and thinking</strong><span>{protectedPolicyAllowed(baseline.constraints.modelAliases).length} approved routes · maximum {protectedPolicyReasoningName(baseline.constraints.maximumReasoningEffort)}</span></section><section><strong>Workspace security</strong><span>{baseline.constraints.maximumEgressMode === "restricted" ? "Restricted internet" : "Full web permitted"} · {protectedPolicyClipboardSummary(baseline.constraints.clipboard)}</span></section><section><strong>Release provenance</strong><span>{baseline.release.releaseId} · published {protectedPolicyDate(baseline.release.publishedAt)}</span></section></div><div className="modal-actions"><span /><button className="primary-button" type="button" onClick={() => setBaselineOpen(false)}>Done</button></div></ModalDialog>}
+    {baselineOpen && <ModalDialog className="workspace-policy-baseline-modal" title="Office worker baseline" description="This LemmaComputer release defines the maximum workspace configuration. Organization policy can only make it stricter." eyebrow={`Locked product baseline · v${baseline.version}`} labelledBy="workspace-policy-baseline-title" onClose={() => setBaselineOpen(false)}><div className="workspace-policy-baseline-details"><section><strong>Agents</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.agents), protectedPolicyAgentNames).join(", ")}</span></section><section><strong>Applications</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.applications), applicationNames).join(", ")}</span></section><section><strong>Organization connector ceiling</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.connectors), protectedPolicyConnectorNames).join(", ") || "None"} · enablement and tool permissions are managed in Connectors</span></section><section><strong>Service and thinking</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value)), protectedPolicyServiceClassNames).join(", ")} · maximum {protectedPolicyReasoningName(baseline.constraints.maximumReasoningEffort)} thinking</span></section><section><strong>Advanced organization security</strong><span>{baseline.constraints.maximumEgressMode === "restricted" ? "Restricted internet" : "Full web permitted"} · {protectedPolicyClipboardSummary(baseline.constraints.clipboard)}</span></section><section><strong>Release provenance</strong><span>{baseline.release.releaseId} · published {protectedPolicyDate(baseline.release.publishedAt)}</span></section></div><div className="modal-actions"><span /><button className="primary-button" type="button" onClick={() => setBaselineOpen(false)}>Done</button></div></ModalDialog>}
 
-    {reviewUser && <ModalDialog className="workspace-policy-review-modal" title={reviewUser.displayName} description="Review the immutable policy version currently assigned to this member." eyebrow="Member policy assignment" labelledBy="workspace-policy-review-title" onClose={busyUserId ? () => undefined : () => setReviewUser(null)}>{(() => { const assignment = assignments[reviewUser.userId]; return <><div className="workspace-policy-review-details"><section><strong>Assignment state</strong><span>{assignment?.state === "selected" ? "Assigned" : assignment?.state === "revoked" ? "Access revoked" : "Not assigned"}</span></section>{assignment?.state === "selected" && <><section><strong>Agents</strong><span>{protectedPolicyList(assignment.selection.agentIds, protectedPolicyAgentNames).join(", ")}</span></section><section><strong>Applications</strong><span>{protectedPolicyList(assignment.selection.applicationIds, applicationNames).join(", ")}</span></section><section><strong>Model and service</strong><span>{workspaceModelName(assignment.selection.modelAlias)} · {protectedPolicyServiceClassNames[assignment.selection.serviceClass] ?? assignment.selection.serviceClass} · {protectedPolicyReasoningName(assignment.selection.reasoningEffort)} thinking</span></section><section><strong>Assigned</strong><span>{protectedPolicyDate(assignment.createdAt)}</span></section></>}</div><div className="modal-actions"><button className="danger-button secondary-button" type="button" disabled={busyUserId === reviewUser.userId} onClick={() => revoke(reviewUser)}>{busyUserId === reviewUser.userId ? "Revoking" : "Revoke workspace access"}</button><button className="primary-button" type="button" onClick={() => setReviewUser(null)}>Done</button></div></>; })()}</ModalDialog>}
+    {reviewUser && <ModalDialog className="workspace-policy-review-modal" title={reviewUser.displayName} description="Review the immutable policy version currently assigned to this member." eyebrow="Member policy assignment" labelledBy="workspace-policy-review-title" onClose={busyUserId ? () => undefined : () => setReviewUser(null)}>{(() => { const assignment = assignments[reviewUser.userId]; return <><div className="workspace-policy-review-details"><section><strong>Assignment state</strong><span>{assignment?.state === "selected" ? "Assigned" : assignment?.state === "revoked" ? "Access revoked" : "Not assigned"}</span></section>{assignment?.state === "selected" && <><section><strong>Agents</strong><span>{protectedPolicyList(assignment.selection.agentIds, protectedPolicyAgentNames).join(", ")}</span></section><section><strong>Applications</strong><span>{protectedPolicyList(assignment.selection.applicationIds, applicationNames).join(", ")}</span></section><section><strong>Service and thinking</strong><span>{protectedPolicyServiceClassName(assignment.selection.serviceClass)} · {protectedPolicyReasoningName(assignment.selection.reasoningEffort)} thinking</span></section><section><strong>Assigned</strong><span>{protectedPolicyDate(assignment.createdAt)}</span></section></>}</div><div className="modal-actions"><button className="danger-button secondary-button" type="button" disabled={busyUserId === reviewUser.userId} onClick={() => revoke(reviewUser)}>{busyUserId === reviewUser.userId ? "Revoking" : "Revoke workspace access"}</button><button className="primary-button" type="button" onClick={() => setReviewUser(null)}>Done</button></div></>; })()}</ModalDialog>}
   </section>;
 }
 
@@ -3004,19 +2979,22 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const [requestedServiceClass, setRequestedServiceClass] = useState("balanced");
   const [agentIds, setAgentIds] = useState([]);
   const [securityGroupVersionId, setSecurityGroupVersionId] = useState("");
+  const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
+  const creatingWorkspace = !selectedWorkspace;
 
   useEffect(() => {
     if (!settings) return;
-    setProfileId(settings.profileId);
+    const supportedDefault = creatingWorkspace
+      ? settings.availableProfiles.find((profile) => profile.id !== "kasm-persistent-standard")
+      : null;
+    setProfileId(supportedDefault?.id ?? settings.profileId);
     setApplicationIds(settings.applicationIds);
     setModelAlias(settings.modelAlias);
     setRequestedServiceClass(explicitWorkspaceServiceClass(settings.requestedServiceClass, explicitWorkspaceServiceClassOptions(settings)));
     setAgentIds(settings.agentIds);
     setSecurityGroupVersionId(settings.securityGroup?.id ?? settings.availableSecurityGroups?.find((group) => group.isDefault)?.id ?? "");
-  }, [settings?.profileId, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
+  }, [creatingWorkspace, settings?.profileId, settings?.availableProfiles, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
 
-  const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
-  const creatingWorkspace = !selectedWorkspace;
   const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedWorkspace?.state);
   const dirty = settings && (
     settings.routePreferenceMigrationRequired
@@ -3037,6 +3015,9 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const selectedProfile = settings?.availableProfiles.find((profile) => profile.id === profileId) ?? settings?.profile;
   const disposableOpen = selectedProfile?.executionMode === "disposable-open";
   const availableServiceClasses = explicitWorkspaceServiceClassOptions(settings);
+  const selectableProfiles = settings?.availableProfiles.filter((profile) => profile.id !== "kasm-persistent-standard" || (!creatingWorkspace && profile.id === settings.profileId)) ?? [];
+  const openProfileAvailable = selectableProfiles.some((profile) => profile.executionMode === "disposable-open");
+  const supportedProfileSelected = selectableProfiles.some((profile) => profile.id === profileId);
 
   return (
     <div className="secondary-screen sandbox-screen sandbox-detail-screen">
@@ -3045,7 +3026,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
         <div>
           <p>{ownerName ? `${ownerName} · Workspace configuration` : creatingWorkspace ? "Create workspace" : "Workspace configuration"}</p>
           <h1>{workspaceName(selectedWorkspace ?? { grantId: selectedGrantId })}</h1>
-          <span>{ownerName ? "Manage this member’s policy-bounded workspace configuration. Profile, application, agent, and model changes apply after the workspace restarts." : creatingWorkspace ? "Choose the profile, applications, agents, and model before LemmaComputer starts this workspace." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
+          <span>{ownerName ? "Manage this member’s policy-bounded workspace configuration. Access, application, agent, and service-level changes apply after the workspace restarts." : creatingWorkspace ? "Choose workspace access, applications, agents, and a service level before LemmaComputer starts this workspace." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
         </div>
         <span className={`sandbox-state ${creatingWorkspace ? "not_created" : selectedWorkspace?.state}`}>{creatingWorkspace ? "Not created" : workspaceConfigurationStatus(selectedWorkspace?.state)}</span>
       </header>
@@ -3053,8 +3034,8 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
         <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, requestedServiceClass, agentIds, securityGroupVersionId }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>Choose a restricted organization workspace or an open workspace for non-sensitive work. This does not choose your AI agent.</p></span></div>
-            <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{settings.availableProfiles.map((profile) => {
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>{openProfileAvailable ? "Choose an organization-managed workspace or an open workspace for non-sensitive work. This does not choose your AI agent." : "Your organization currently allows managed workspace access. This does not choose your AI agent."}</p></span></div>
+            <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{selectableProfiles.map((profile) => {
               const selected = profile.id === profileId;
               const open = profile.executionMode === "disposable-open";
               return <label className={`workspace-profile-option${selected ? " selected" : ""}${open ? " open-profile" : ""}`} key={profile.id}>
@@ -3067,6 +3048,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
                 </span>
               </label>;
             })}</fieldset>
+            {!selectableProfiles.length && <p className="sandbox-selection-error" role="alert">No supported workspace access mode is available under the current organization policy.</p>}
             <p className="workspace-profile-note"><Info24Regular aria-hidden="true" />Choose the AI agents you want to run in the separate section below. Claude Desktop is only enabled when you select it there.</p>
             {disposableOpen && <div className="disposable-profile-warning" role="note"><Info24Regular aria-hidden="true" /><span><strong>Use only non-sensitive data</strong><p>Downloaded code and tools are untrusted. Stop keeps this workspace and pauses schedules; restarting restores it and resumes future schedules. Delete permanently removes its files, schedules, logs, and installed tools.</p></span></div>}
           </section>
@@ -3136,9 +3118,9 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
 
           <div className="sandbox-management-footer">
             <div><strong>{creatingWorkspace ? "Ready to create" : "Workspace manifest"}</strong><small>Schema v2 · {selectedProfile?.displayName} · persistent home · gateway-only network</small></div>
-            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !applicationIds.length || !agentIds.length}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
+            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || !applicationIds.length || !agentIds.length}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
           </div>
-          {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its profile, applications, agents, or AI model. Security-group changes apply live.</p>}
+          {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its access mode, applications, agents, or service level. Security-group changes apply live.</p>}
           <details className="sandbox-json"><summary>View workspace manifest JSON</summary><pre>{JSON.stringify(settings.manifest, null, 2)}</pre></details>
         </form>
       )}
@@ -7272,7 +7254,7 @@ export function App() {
       {sandboxCreateOpen && (
         <TextPromptDialog
           title="Create workspace"
-          description="Choose a clear name first. You’ll review the profile, applications, agents, and model before LemmaComputer starts anything."
+          description="Choose a clear name first. You’ll review workspace access, applications, agents, and service level before LemmaComputer starts anything."
           label="Workspace name"
           defaultValue="Project workspace"
           confirmLabel="Continue to configuration"

@@ -94,6 +94,26 @@ test("an authenticated member can create and manage only their own workspace", a
     };
     await route.fulfill({ status: 201, json: createdWorkspace });
   });
+  await page.route("**/api/v1/sandbox-settings**", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        availableProfiles: [payload.availableProfiles[0], {
+          id: "kasm-persistent-standard",
+          displayName: "Qualification workspace (legacy)",
+          description: "Retained only for pinned compatibility.",
+          executionMode: "managed",
+        }],
+      },
+    });
+  });
 
   await page.goto("/");
   await expect(page.getByText("No workspaces yet")).toBeVisible();
@@ -102,6 +122,9 @@ test("an authenticated member can create and manage only their own workspace", a
   await prompt.getByLabel("Workspace name").fill("Demo workspace");
   await prompt.getByRole("button", { name: "Continue to configuration" }).click();
   await expect(page.getByRole("heading", { name: "Demo Workspace" })).toBeVisible();
+  await expect(page.getByText("Your organization currently allows managed workspace access.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Qualification workspace (legacy)", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("open workspace for non-sensitive work", { exact: false })).toHaveCount(0);
   await page.getByRole("button", { name: "Create workspace" }).click();
 
   const card = page.getByRole("article", { name: "Demo Workspace" });

@@ -30,6 +30,22 @@ test("the packaged office-worker baseline verifies against the explicit product 
     allow: ["claude-desktop", "claude-cli"],
     deny: ["codex-cli", "hermes-desktop", "hermes-claw"],
   });
+  assert.deepEqual(verified.payload.document.constraints.workspaceProfiles, {
+    allow: ["claude-desktop-standard-v1", "kasm-persistent-standard"],
+    deny: ["disposable-open-v1"],
+  });
+  assert.deepEqual(verified.payload.document.constraints.serviceClasses, {
+    allow: ["auto", "lite", "balanced", "pro"],
+    deny: [],
+  });
+  assert.deepEqual(verified.payload.document.constraints.modelAliases.allow, [
+    "lemmacomputer-auto",
+    "lemmacomputer-claude",
+    "lemmacomputer-openai",
+    "lemmacomputer-glm",
+    "lemmacomputer-assistant",
+    "lemmacomputer-bedrock",
+  ]);
   assert.deepEqual(verified.payload.document.constraints.applications, {
     allow: ["firefox", "google-chrome"],
     deny: [],

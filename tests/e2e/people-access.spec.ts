@@ -98,7 +98,9 @@ test("organization administrator invites a person and manages member access", as
   await expect(page.getByRole("heading", { name: "Policy controls" })).toBeVisible();
   await expect(page.getByText("Claude Desktop", { exact: true })).toBeVisible();
   await expect(page.getByText("Firefox ESR", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Review tool permissions in Connectors" })).toBeVisible();
+  await expect(page.getByText("Organization connector ceiling", { exact: true })).toBeVisible();
+  await expect(page.getByText("Enablement and tool permissions are managed in Connectors", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Connectors policy" })).toBeVisible();
   await page.screenshot({ path: "test-results/workspace-policy-baseline-reviewed.png", fullPage: true });
 
   await page.getByRole("button", { name: "View baseline" }).click();
@@ -108,6 +110,19 @@ test("organization administrator invites a person and manages member access", as
 
   await page.getByRole("button", { name: "Set organization policy" }).click();
   const policyDialog = page.getByRole("dialog", { name: "Set organization policy" });
+  await expect(policyDialog.getByRole("group", { name: "Workspace access" }).getByText("Standard managed workspace", { exact: true })).toBeVisible();
+  await expect(policyDialog.getByText("Persistent Ubuntu workspace", { exact: true })).toHaveCount(0);
+  await expect(policyDialog.getByRole("group", { name: "Service levels" }).getByRole("checkbox")).toHaveCount(3);
+  await expect(policyDialog.getByText("Auto (Beta)", { exact: true })).toHaveCount(0);
+  await expect(policyDialog.getByRole("group", { name: "Model routes" })).toHaveCount(0);
+  await expect(policyDialog.getByRole("group", { name: "Connectors" })).toHaveCount(0);
+  await expect(policyDialog.getByRole("group", { name: "Advanced organization security" })).toBeVisible();
+  for (const agent of ["Claude Desktop", "Claude CLI"]) {
+    await expect(policyDialog.getByRole("group", { name: "Agents" }).getByText(agent, { exact: true })).toBeVisible();
+  }
+  for (const deniedAgent of ["Codex CLI", "Hermes Desktop", "Hermes Agent"]) {
+    await expect(policyDialog.getByRole("group", { name: "Agents" }).getByText(deniedAgent, { exact: true })).toHaveCount(0);
+  }
   await policyDialog.locator(".workspace-policy-choice").filter({ hasText: "Claude Desktop" }).getByRole("checkbox").uncheck();
   await policyDialog.getByLabel("Change summary").fill("Use Claude CLI for organization workspaces");
   await policyDialog.getByRole("button", { name: "Save organization policy" }).click();

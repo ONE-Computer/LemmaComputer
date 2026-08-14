@@ -65,7 +65,7 @@ test("workspace creation collects configuration before provisioning", async () =
   const createNameStep = app.slice(app.indexOf("const createAdditionalWorkspace"), app.indexOf("const configureMicrosoft365"));
   const saveStep = app.slice(app.indexOf("const saveWorkspaceSettings"), app.indexOf("const selectNav"));
   assert.match(app, /confirmLabel="Continue to configuration"/);
-  assert.match(app, /Choose the profile, applications, agents, and model before LemmaComputer starts this workspace/);
+  assert.match(app, /Choose workspace access, applications, agents, and a service level before LemmaComputer starts this workspace/);
   assert.match(createNameStep, /selectWorkspaceConfiguration\(grantId\)/);
   assert.doesNotMatch(createNameStep, /workspaceApi\.create/);
   assert.ok(saveStep.indexOf("sandboxApi.save(sandboxConfiguration)") < saveStep.indexOf("workspaceApi.create(configuration.grantId)"));
@@ -190,8 +190,9 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
 
 test("workspace options are editable, opt-in, and return to the overview with restart guidance after save", async () => {
   const app = await source("apps/web/src/App.jsx");
-  assert.match(app, /catalogId: "claude-cli"/);
-  assert.match(app, /catalogId: "hermes-desktop"/);
+  for (const catalogId of ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"]) {
+    assert.match(app, new RegExp(`catalogId: "${catalogId}"`));
+  }
   assert.doesNotMatch(app, /name: "Google Chrome"[\s\S]+Coming soon/);
   assert.match(app, /Default model mode/);
   assert.match(app, /choose a different mode for each conversation in Chat/i);
@@ -397,7 +398,13 @@ test("administration keeps identity in People and access while workspace operati
   assert.match(app, /Current organization policy/);
   assert.match(app, /Baseline only/);
   assert.match(app, /Version \$\{latest\.version\} is the latest policy available to assign/);
-  assert.match(app, /Review tool permissions in Connectors/);
+  assert.match(app, /Organization connector ceiling/);
+  assert.match(app, /Open Connectors policy/);
+  assert.doesNotMatch(app, /Auto \(Beta\)/);
+  assert.doesNotMatch(app, /Persistent Ubuntu workspace/);
+  assert.doesNotMatch(app, /legend="Model routes"/);
+  assert.doesNotMatch(app, /legend="Connectors"/);
+  assert.match(app, /<legend>Advanced organization security<\/legend>/);
   assert.match(app, /Save as new version/);
   assert.doesNotMatch(app, /Create organization policy/);
   assert.doesNotMatch(app.slice(app.indexOf("function AdminScreen"), app.indexOf("function CredentialsScreen")), /MemberWorkspaceConsole|ProtectedWorkspacePolicySection|Manage \{workspaceName\(workspace\)\}/);
