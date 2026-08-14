@@ -1,47 +1,22 @@
-# Product policy release artifacts
+# Legacy product policy artifacts
 
-`product-release-trust.json` is the explicit public trust root for protected
-workspace baselines. It contains Ed25519 public keys only. Release signing
-private keys must remain in the release-signing environment and must never be
-written to this repository, tenant configuration, or the product database.
+The files in this directory are retained only to verify and interpret policy
+history written by the retired protected-baseline implementation. They are not
+loaded during Control startup and do not restrict a new or existing
+organization.
 
-Files in `protected-baselines/` are deterministic RFC 8785 payload envelopes
-signed by a product-release key. Installations verify an envelope against the
-checked-in trust root before copying it into tenant-scoped immutable policy
-history. Organization policy can only narrow that protected baseline.
+A new organization has no organization workspace policy. All product-supported
+workspace profiles, agents, applications, and service levels are available by
+default. An owner or administrator with `policy.manage` may create the first
+organization policy, then append later immutable versions. The newest
+organization-owned version applies to every member of that organization; there
+is no separate per-member protected-policy assignment.
 
-The Phase 0.5 office-worker baseline deliberately preserves both supported
-browsers and the complete LibreOffice-based office workspace. It permits only
-the Claude Desktop and Claude CLI agent catalog entries; Hermes and Codex remain
-outside this baseline. The bounded Microsoft 365 office-tool allowlist retains
-its reviewed allow versus approval-required decisions; unlisted tools remain
-outside the product ceiling.
+No product-release signer is required to create or edit an organization policy.
+The historical public key and signed v1 envelope remain checked in so old audit
+records can still be authenticated. They must not be treated as an active
+ceiling or reintroduced into runtime policy resolution.
 
-## Effective-policy consumer contract
-
-Control resolves a member assignment from the exact immutable template and
-organization-policy versions recorded with that assignment. The resulting
-`EffectiveProtectedWorkspacePolicy` is a deny-wins ceiling over the legacy
-workspace policy before settings are returned, saved, or projected into a
-runtime grant. An assigned member cannot select an excluded workspace profile,
-agent, application, model alias, service class, egress mode, connector, or
-connector tool through either the browser or Control API. Members may continue
-to choose any application and agent that remains inside the effective allow
-set.
-
-The effective read model exposes the template/version/hash, every contributing
-source, the allowed values, the member's selected defaults, and a deterministic
-effective hash. Connector-policy work must project real connector enablement
-and reviewed tool decisions into the `connectorPolicies` resolver input; model
-thinking-level work must compare the requested level with
-`allowed.maximumReasoningEffort`. Neither consumer may broaden the resolved
-allow set or silently substitute an unrecorded policy version.
-
-Changing an assignment appends a new tenant-scoped version. Existing workspace
-images may require a restart for application or agent image choices to change;
-the administration UI calls this out for any non-stopped workspace. New starts,
-restarts, settings writes, and refreshed runtime grants resolve the current
-assignment and fail closed when a pinned source is unavailable. Revocation also
-appends a version and blocks workspace settings, starts, and restarts until an
-administrator records a replacement assignment; it never falls back to the
-weaker legacy policy.
+This retirement is intentionally separate from runtime workspace grant
+signing. Control still signs the concrete runtime policy bundle delivered to a
+workspace so the controller and egress services can verify that grant.

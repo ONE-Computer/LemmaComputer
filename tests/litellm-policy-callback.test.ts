@@ -574,6 +574,7 @@ callback = callback_type()
 
 class ProbeAuth:
     metadata = {
+        "lemmacomputer_purpose": "provider-route-test",
         "lemmacomputer_non_billable_exemption": "provider-route-test-v1",
         "lemmacomputer_policy_model_alias": "balanced",
     }
@@ -679,6 +680,7 @@ async def assert_provider_boundary():
     assert routed_disabled_tool["reasoning_effort"] == "none"
     assert routed_disabled_tool["litellm_params"]["reasoning_effort"] == "none"
     authority_calls.clear()
+    module["_INTERNAL_ADMISSION_CONTEXT"].set(None)
 
     probe = {
         "model": "openai/gpt-real",
@@ -702,13 +704,69 @@ async def assert_provider_boundary():
     assert provider_probe["messages"] == probe["messages"]
     assert authority_calls == []
 
+    # The OpenAI Chat -> Responses bridge builds fresh deployment-hook kwargs
+    # and drops the authenticated key projection. The callback-owned probe
+    # binding may cross exactly this internal hop, for the same concrete route.
+    nested_probe = {
+        **provider_probe,
+        "input": [{"role": "user", "content": "probe"}],
+        "litellm_call_id": "probe-responses-call",
+        "litellm_params": {
+            **provider_probe["litellm_params"],
+            "model_info": openai_route,
+            "aresponses": True,
+        },
+    }
+    mismatched_nested_probe = {
+        **nested_probe,
+        "litellm_call_id": "probe-responses-wrong-route",
+        "litellm_params": {
+            **nested_probe["litellm_params"],
+            "model_info": {
+                **openai_route,
+                "lemmacomputer_deployment_id": "deployment-other",
+            },
+        },
+    }
+    try:
+        await callback.async_pre_call_deployment_hook(
+            mismatched_nested_probe, "acompletion"
+        )
+    except Exception:
+        pass
+    else:
+        raise AssertionError("provider probe binding must not cross routes")
+    assert authority_calls == []
+
+    nested_provider_probe = await callback.async_pre_call_deployment_hook(
+        nested_probe, "acompletion"
+    )
+    assert nested_provider_probe["model"] == "openai/gpt-real"
+    assert "user_api_key_dict" not in nested_provider_probe
+    assert authority_calls == []
+
+    # The private binding is single-use. A second nested request has neither a
+    # trusted key exemption nor admitted identity and therefore fails closed.
+    try:
+        await callback.async_pre_call_deployment_hook(
+            {**nested_probe, "litellm_call_id": "probe-responses-replay"},
+            "acompletion",
+        )
+    except Exception:
+        pass
+    else:
+        raise AssertionError("provider probe Responses binding must be single-use")
+    assert authority_calls == []
+
     admitted = {
         "model": "openai/gpt-real",
         "messages": [{"role": "user", "content": "billable request"}],
         "litellm_call_id": "admitted-call",
         "litellm_params": {"model_info": openai_route},
         "metadata": {"lemmacomputer_task_binding": "signed." + "x" * 64},
-        "user_api_key_metadata": {"untrusted": True},
+        "user_api_key_metadata": {
+            "lemmacomputer_non_billable_exemption": "provider-route-test-v1",
+        },
     }
     routed_admitted = await callback.async_pre_call_hook(
         Auth(), None, admitted, "acompletion"

@@ -300,11 +300,11 @@ await screenshot(page, "28-mobile-navigation-390x844.png");
 measurements.push(await measure(page, "28-mobile-navigation-390x844.png", "/?view=connections", viewports.mobile, "navigation-open-keyboard"));
 
 await visit(page, "/?view=home&section=policies", viewports.narrow);
-await page.getByRole("button", { name: "View baseline" }).focus();
+await page.getByRole("button", { name: "Set organization policy" }).focus();
 await page.keyboard.press("Enter");
 await page.getByRole("dialog").waitFor();
-await screenshot(page, "29-policy-baseline-dialog-720x900.png");
-measurements.push(await measure(page, "29-policy-baseline-dialog-720x900.png", "/?view=home&section=policies", viewports.narrow, "baseline-dialog-open"));
+await screenshot(page, "29-organization-policy-dialog-720x900.png");
+measurements.push(await measure(page, "29-organization-policy-dialog-720x900.png", "/?view=home&section=policies", viewports.narrow, "organization-policy-dialog-open"));
 
 await visit(page, "/?view=settings&section=people", viewports.mobile);
 await page.getByRole("button", { name: "Invite person" }).focus();

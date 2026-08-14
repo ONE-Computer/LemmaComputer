@@ -129,10 +129,10 @@ const organizationPolicyRecord = (row: Record<string, unknown>): OrganizationWor
 export class PostgresProtectedWorkspacePolicyStore implements ProtectedWorkspacePolicyStore {
   constructor(
     private readonly pool: pg.Pool,
-    private readonly productTrustRoot: ProductReleaseVerificationKeySet,
+    private readonly productTrustRoot?: ProductReleaseVerificationKeySet,
   ) {}
 
-  static fromConnectionString(connectionString: string, productTrustRoot: ProductReleaseVerificationKeySet) {
+  static fromConnectionString(connectionString: string, productTrustRoot?: ProductReleaseVerificationKeySet) {
     return new PostgresProtectedWorkspacePolicyStore(new pg.Pool({ connectionString, max: 8 }), productTrustRoot);
   }
 
@@ -143,6 +143,7 @@ export class PostgresProtectedWorkspacePolicyStore implements ProtectedWorkspace
     signedEnvelope: unknown;
     now?: Date;
   }): Promise<ProtectedTemplateVersionRecord> {
+    if (!this.productTrustRoot) throw new Error("Legacy protected baseline verification is not configured");
     // The verified product key, not an organization administrator identity,
     // owns this write path. No caller-supplied document is accepted separately
     // from the signed release envelope.
@@ -240,15 +241,17 @@ export class PostgresProtectedWorkspacePolicyStore implements ProtectedWorkspace
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`organization-policy:${input.tenantId}`]);
       const latest = await client.query(
-        "SELECT id,version FROM organization_workspace_policy_versions WHERE tenant_id=$1 ORDER BY version DESC LIMIT 1",
+        `SELECT id,version FROM organization_workspace_policy_versions
+         WHERE tenant_id=$1 AND enforcement_scope='organization'
+         ORDER BY version DESC LIMIT 1`,
         [input.tenantId],
       );
       const id = randomUUID();
       const version = latest.rowCount ? Number(latest.rows[0].version) + 1 : 1;
       const result = await client.query(
         `INSERT INTO organization_workspace_policy_versions (
-           tenant_id,id,version,previous_policy_version_id,document_hash,constraints,revision_note,created_by
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,version,document_hash,constraints`,
+           tenant_id,id,version,previous_policy_version_id,document_hash,constraints,revision_note,created_by,enforcement_scope
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'organization') RETURNING id,version,document_hash,constraints`,
         [input.tenantId, id, version, latest.rows[0]?.id ?? null, documentHash, constraints, revisionNote, input.createdBy],
       );
       await client.query("COMMIT");
@@ -269,7 +272,8 @@ export class PostgresProtectedWorkspacePolicyStore implements ProtectedWorkspace
   async listOrganizationPolicyVersions(tenantId: string): Promise<OrganizationWorkspacePolicyVersionRecord[]> {
     const result = await this.pool.query(
       `SELECT * FROM organization_workspace_policy_versions
-       WHERE tenant_id=$1 ORDER BY version DESC,id DESC`,
+       WHERE tenant_id=$1 AND enforcement_scope='organization'
+       ORDER BY version DESC,id DESC`,
       [tenantId],
     );
     return result.rows.map(organizationPolicyRecord);

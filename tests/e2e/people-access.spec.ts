@@ -14,7 +14,7 @@ const managedWorkspace = (id: string, name: string, state = "ready") => ({
   state,
   health: { status: state === "ready" ? "healthy" : state === "failed" ? "needs_attention" : "transitioning", reasonCode: state === "failed" ? "RUNTIME_UNAVAILABLE" : null },
   profile: { id: "kasm-persistent-standard", executionMode: "managed" },
-  policyAssignment: { authority: "protected_baseline", version: 1, hash: "a".repeat(64) },
+  policyAssignment: { authority: "runtime_policy", version: 1, hash: "a".repeat(64) },
   lastActivityAt: "2026-08-12T01:30:00.000Z",
   lastTransitionAt: "2026-08-12T01:45:00.000Z",
   createdAt: "2026-08-11T01:00:00.000Z",
@@ -93,40 +93,40 @@ test("organization administrator invites a person and manages member access", as
   await page.goto("/?view=home&section=policies");
   await expect(page.getByRole("heading", { name: "Workspace", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Workspace policies" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Current workspace policy" })).toBeVisible();
-  await expect(page.getByText("Baseline only", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No organization policy" })).toBeVisible();
+  await expect(page.getByText("All options available", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Policy controls" })).toBeVisible();
-  await expect(page.getByText("Claude Desktop", { exact: true })).toBeVisible();
+  for (const agent of ["Claude Desktop", "Claude CLI", "Codex CLI", "Hermes Desktop", "Hermes Agent"]) {
+    await expect(page.getByText(agent, { exact: true })).toBeVisible();
+  }
   await expect(page.getByText("Firefox ESR", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Review tool permissions in Connectors" })).toBeVisible();
-  await page.screenshot({ path: "test-results/workspace-policy-baseline-reviewed.png", fullPage: true });
-
-  await page.getByRole("button", { name: "View baseline" }).click();
-  const baselineDialog = page.getByRole("dialog", { name: "Office worker baseline" });
-  await expect(baselineDialog.getByText("0.5-policy-foundation-1", { exact: false })).toBeVisible();
-  await baselineDialog.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByText("Organization connector ceiling", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("All supported workspace options are available by default.", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "test-results/workspace-policy-unrestricted-default.png", fullPage: true });
 
   await page.getByRole("button", { name: "Set organization policy" }).click();
   const policyDialog = page.getByRole("dialog", { name: "Set organization policy" });
+  await expect(policyDialog.getByRole("group", { name: "Workspace access" }).getByText("Standard managed workspace", { exact: true })).toBeVisible();
+  await expect(policyDialog.getByRole("group", { name: "Workspace access" }).getByText("Disposable open workspace", { exact: true })).toBeVisible();
+  await expect(policyDialog.getByRole("group", { name: "Service levels" }).getByRole("checkbox")).toHaveCount(3);
+  await expect(policyDialog.getByText("Auto (Beta)", { exact: true })).toHaveCount(0);
+  await expect(policyDialog.getByRole("group", { name: "Model routes" })).toHaveCount(0);
+  await expect(policyDialog.getByRole("group", { name: "Connectors" })).toHaveCount(0);
+  await expect(policyDialog.getByRole("group", { name: "Advanced organization security" })).toBeVisible();
+  for (const agent of ["Claude Desktop", "Claude CLI", "Codex CLI", "Hermes Desktop", "Hermes Agent"]) {
+    await expect(policyDialog.getByRole("group", { name: "Agents" }).getByText(agent, { exact: true })).toBeVisible();
+  }
   await policyDialog.locator(".workspace-policy-choice").filter({ hasText: "Claude Desktop" }).getByRole("checkbox").uncheck();
   await policyDialog.getByLabel("Change summary").fill("Use Claude CLI for organization workspaces");
   await policyDialog.getByRole("button", { name: "Save organization policy" }).click();
   await expect(page.getByRole("heading", { name: "Current organization policy" })).toBeVisible();
-  await expect(page.getByText("Version 1 is the latest policy available to assign.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Version 1 is active across the organization.", { exact: true })).toBeVisible();
   await expect(page.locator(".workspace-policy-context").getByText("Use Claude CLI for organization workspaces", { exact: true })).toBeVisible();
   await page.locator(".workspace-policy-history summary").click();
   await expect(page.locator(".workspace-policy-history-list")).toContainText("v1 · Current");
   await expect(page.locator(".workspace-policy-history-list")).toContainText("Use Claude CLI for organization workspaces");
 
-  const protectedMember = page.locator(".workspace-policy-member-row").filter({ hasText: "Example Admin" });
-  await protectedMember.getByRole("button", { name: "Assign policy" }).click();
-  await expect(protectedMember).toContainText("Organization policy v1");
-  await expect(protectedMember).toContainText("Restart to apply");
-  await protectedMember.getByRole("button", { name: "Review" }).click();
-  const reviewDialog = page.getByRole("dialog", { name: "Example Admin" });
-  await expect(reviewDialog.getByText("Claude CLI", { exact: true })).toBeVisible();
-  await reviewDialog.getByRole("button", { name: "Revoke workspace access" }).click();
-  await expect(protectedMember).toContainText("Access revoked");
+  await expect(page.getByRole("heading", { name: "Member policy status" })).toHaveCount(0);
 
   await page.goto("/?view=settings&section=people");
 
@@ -192,21 +192,15 @@ test("workspace policy remains usable on a narrow screen", async ({ page }) => {
   await page.goto("/?view=home&section=policies");
 
   await expect(page.locator(".workspace-policy-admin")).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Current (workspace|organization) policy/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /No organization policy|Current organization policy/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Policy controls" })).toBeVisible();
   const policyTabBox = await page.getByRole("button", { name: "Workspace policies" }).boundingBox();
   expect((policyTabBox?.x ?? 0) + (policyTabBox?.width ?? 0)).toBeLessThanOrEqual(390);
   const viewportFits = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
   expect(viewportFits).toBe(true);
 
-  const firstMember = page.locator(".workspace-policy-member-row").first();
-  await expect(firstMember).toBeVisible();
-  await expect(firstMember.locator('[data-label="Applied policy"]')).toBeVisible();
-  const memberBox = await firstMember.boundingBox();
-  expect(memberBox?.width ?? 0).toBeLessThanOrEqual(390);
-  const appliedPolicyBox = await firstMember.locator('[data-label="Applied policy"]').boundingBox();
-  const assignmentStatusBox = await firstMember.locator('[data-label="Assignment status"]').boundingBox();
-  expect(assignmentStatusBox?.y ?? 0).toBeGreaterThan((appliedPolicyBox?.y ?? 0) + (appliedPolicyBox?.height ?? 0));
+  const controlsBox = await page.locator(".workspace-policy-controls").boundingBox();
+  expect(controlsBox?.width ?? 0).toBeLessThanOrEqual(390);
 
   await page.getByRole("button", { name: /Set organization policy|Edit organization policy/ }).click();
   const policyDialog = page.getByRole("dialog", { name: /Set organization policy|Edit organization policy/ });

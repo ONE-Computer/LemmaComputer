@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // @lemmacomputer/contracts exports raw TypeScript, so importing a type from
+    // it pulls src/index.ts into this program, and that file uses node:crypto
+    // and Buffer for signing and envelope helpers. Node types are required to
+    // check it even though nothing here runs on Node. Splitting contracts into
+    // a browser-safe schema entry point would let this be removed.
+    "types": ["node"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

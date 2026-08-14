@@ -38,15 +38,7 @@ test("administrator row actions reflow inside their owning cards", async ({ page
   await expectContained(memberSection.locator(".admin-user-actions button"), memberSection);
 
   await page.goto("/?view=home&section=policies");
-  await expectContained(page.locator(".workspace-policy-member-actions button"), page.locator(".workspace-policy-members"));
-  const memberCells = page.locator(".workspace-policy-member-row").first().locator("[data-label]");
-  const cellBoxes = await memberCells.evaluateAll((elements) => elements.map((element) => {
-    const bounds = element.getBoundingClientRect();
-    return { label: element.getAttribute("data-label"), left: bounds.left, right: bounds.right };
-  }));
-  const applied = cellBoxes.find((cell) => cell.label === "Applied policy");
-  const assignment = cellBoxes.find((cell) => cell.label === "Assignment status");
-  expect(applied?.right).toBeLessThanOrEqual(assignment?.left ?? 0);
+  await expectContained(page.locator(".workspace-policy-primary-action"), page.locator(".workspace-policy-admin"));
   await expectNoDocumentOverflow(page);
 });
 
