@@ -35,7 +35,7 @@ lifecycle audit, and verified purge; a topology check alone is not production
 qualification. The hosted runtime contract also includes Claude Cowork, so its
 representative remote nodes require nested virtualization, `/dev/kvm`, and
 `/dev/vhost-vsock`; a browser-only or non-Cowork workspace smoke is not hosted
-acceptance. See [Remote workspace-node mode](remote-workspace-node.md) for the
+acceptance. See the [remote workspace-node and Cowork workflow](development-workflow.md#remote-workspace-node-and-cowork-qualification) for the
 local split qualification and its explicit hosted evidence gaps.
 
 The executable source of this table is

@@ -21,8 +21,9 @@ the order below: run it, understand how it is built, then go deep on a feature.
    just started.
 3. [Why LemmaComputer runs as many processes](architecture/service-boundaries.md)
    answers the most common question about the design.
-4. [Development workflow](guides/development-workflow.md) is the required setup
-   path once you intend to *change* the product.
+4. [Evaluation, development, and remote workspace workflow](guides/development-workflow.md)
+   is the one setup authority for evaluation, code changes, and local
+   remote-node/Cowork qualification.
 
 ## Architecture
 
@@ -56,13 +57,10 @@ How the system is built and why. Read `overview.md` first.
 
 Task-oriented instructions.
 
-- [Development workflow](guides/development-workflow.md) — the entry point for
-  anyone who will change the product: host support, environment and Compose file
-  ownership, isolated worktrees, local gates, and controlled promotion.
-- [Remote workspace-node mode](guides/remote-workspace-node.md) — the split-node
-  architecture, node-local Docker authority, per-workspace relays, mTLS
-  identities, repeatable worktree qualification, hosted gaps, and Cowork test
-  checklist.
+- [Evaluation, development, and remote workspace workflow](guides/development-workflow.md)
+  — choose a disposable evaluation, isolated task worktree, local split-node
+  qualification, or production-profile path; includes command meanings,
+  node-local Docker authority, relays, mTLS, Cowork, and hosted gaps.
 - [Local deployment and Microsoft integration setup](guides/local-deployment.md)
   — the runbook for the transitional Entra and Microsoft 365 integration path.
 - [Deployment profiles](guides/deployment-profiles.md) — what `customer-managed`,
@@ -72,9 +70,9 @@ Task-oriented instructions.
   rotation, and production concerns.
 - [Database migrations](guides/database-migrations.md) — the ledger, legacy
   baseline, expand/migrate/contract policy, and tests.
-- [Extending LemmaComputer](guides/extending.md) — adding model routes, MCP
-  connectors, tools, agents, applications, sandbox drivers, channels, and schema
-  migrations.
+- [Component extension contracts](guides/extending.md) — subsystem checklists
+  for model routes, MCP connectors, tools, agents, applications, sandbox
+  drivers, channels, and migrations; not a setup guide.
 - [Demo release runbook](guides/demo-release.md) — keeping the demo environment
   pinned, backed up, and separate from development.
 - [Cloud deployment guides](guides/deployment/README.md) — mapping the logical

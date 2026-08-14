@@ -190,7 +190,7 @@ controller and Docker socket remain node-local; remote Control uses the private
 mTLS API. Per-workspace desktop and application relays also require workload
 client certificates on cross-boundary routes. Treat the node socket as
 host-root-equivalent authority. See
-[Remote workspace-node mode](../guides/remote-workspace-node.md) and
+[remote workspace-node architecture](../guides/development-workflow.md#remote-workspace-node-architecture) and
 [Workspace node deployment](../workspace-node.md).
 
 **Extension seam:** implement `SandboxAdapter`, preserve the public sandbox

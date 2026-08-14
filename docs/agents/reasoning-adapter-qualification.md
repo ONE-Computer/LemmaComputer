@@ -54,7 +54,7 @@ The qualification worktree owns a fresh database, generated trust keys, ports, C
 Before a human live run:
 
 1. Run `npm run dev:doctor`, confirm `docker compose ps` is healthy, and check the worktree's `LEMMACOMPUTER_WEB_PORT` rather than assuming the main-stack URL.
-2. Configure one supported authentication path for the isolated stack. The default `capture` email adapter is sufficient for automated tests but cannot deliver a human verification link. For manual email/password signup, configure Postmark as documented in [Development workflow](../guides/development-workflow.md#human-supplied-values), or configure one complete supported social/enterprise identity path. Do not import an account from another stack.
+2. Configure one supported authentication path for the isolated stack. The default `capture` email adapter is sufficient for automated tests but cannot deliver a human verification link. For manual email/password signup, configure Postmark as documented in the [single workflow guide](../guides/development-workflow.md#human-supplied-values), or configure one complete supported social/enterprise identity path. Do not import an account from another stack.
 3. Create and verify the isolated administrator account and organization.
 4. In **AI control plane -> Models & providers**, configure and test the chosen gateway upstream. The runtime never receives that credential and does not connect directly to a named provider.
 5. Publish the explicit `Lite`, `Balanced`, and `Pro` mapping/policy needed by the run, create an isolated workspace with the candidate agent, and keep the source commit fixed while collecting evidence.

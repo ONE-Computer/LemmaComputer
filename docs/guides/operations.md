@@ -191,7 +191,7 @@ production because it isolates Graph scopes and credential rotation.
 
 The connector requests only the fixed scope list in `compose.yaml`. Tenant
 administrators should review those scopes against the enabled tool allowlist.
-See [Configure Microsoft Entra](local-deployment.md#configure-microsoft-entra)
+See [Configure Microsoft Entra](local-deployment.md#configure-the-transitional-workforce-entra-and-microsoft-365-app)
 for the exact local redirect URIs and delegated permission list.
 
 ### Hosted MCP connectors
@@ -496,7 +496,7 @@ boundary. Place the controller, Docker socket, `/dev/kvm`, and
 desktop host, restricted application network, and private HTTPS gateway/Control
 endpoints. Control never receives the socket or either device. Non-Cowork nodes
 may keep KVM disabled.
-Follow [Remote workspace-node mode](remote-workspace-node.md) for the topology,
+Follow the [remote workspace-node and Cowork workflow](development-workflow.md#remote-workspace-node-and-cowork-qualification) for the topology,
 mTLS identities, and repeatable evaluation workflow, and
 [Workspace node deployment](../workspace-node.md) for the normative network,
 storage, purge, and removal contract.

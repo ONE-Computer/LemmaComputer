@@ -11,15 +11,40 @@ LemmaComputer has one product codebase with two supported deployment profiles:
 
 Do not fork a separate self-hosted codebase. Keep deployment-specific behavior behind explicit configuration and interfaces. Every persisted or cached customer-owned record must be tenant-scoped in both profiles. A separate repository requires an ADR proving that shared releases, migrations, and security fixes cannot remain safe.
 
+## Choose the repository setup before acting
+
+Use [Evaluation, development, and remote workspace workflow](docs/guides/development-workflow.md)
+as the single setup authority. Classify the request before initializing an
+environment:
+
+| User outcome | Required setup |
+| --- | --- |
+| Read, explain, diagnose, or review | No stack unless evidence requires one; do not create a branch for read-only work. |
+| Explore the product without changing code | Dedicated disposable evaluation clone using `npm run env:init -- --profile=worktree`; never the primary integration checkout. |
+| Change code or documentation | One task branch in one Git worktree; run `npm run worktree:init` once and `npm run dev:doctor` each session. |
+| Test the remote workspace boundary or Claude Cowork | An initialized task worktree, then `npm run qualify:remote-workspace-node -- up [--cowork]`; never `main` or a manually selected hosted profile. |
+| Exercise customer-managed Microsoft integration | Follow `docs/guides/local-deployment.md`; code changes remain in the worktree profile, while a dedicated operator evaluation may use `customer-managed`. |
+| Qualify hosted production | Use representative hosted infrastructure; local split-node Compose is not production qualification. |
+
+If the user asks only to "set up", "run", or "test" and the missing choice
+would materially change isolation, data ownership, topology, or external
+requirements, ask whether they want disposable evaluation, isolated
+development, local remote-node/Cowork qualification, or a production-profile
+deployment. Do not ask when the request already determines the setup.
+
+Do not invent a hybrid setup. In particular, do not develop from the evaluation
+clone, run a local stack from the primary `main` checkout, copy another
+checkout's `.env`, or use `compose.hosted.yaml` to approximate hosted.
+
 ## Before changing code
 
 1. Treat the user's request as the task contract. If a GitHub issue exists, also read its definition of success and unresolved `blocked by` relationships.
-2. Before preparing a fresh checkout or developer machine, follow `docs/guides/development-workflow.md`. Read `docs/guides/local-deployment.md` only when the task specifically needs the customer-managed Entra or Microsoft 365 integration flow.
+2. Select the setup from the table above and follow the single workflow guide. Read `docs/guides/local-deployment.md` only when the task specifically needs the customer-managed Entra or Microsoft 365 integration flow.
 3. Use one task per branch and one branch per worktree. Do not develop directly on `main`.
 4. Run `npm run worktree:init` once in a new worktree, then `npm run dev:doctor` at the start of each work session.
 5. Keep changes inside the task scope. Record substantial follow-up work separately instead of expanding the task silently.
 
-Branch names should use `codex/<issue>-<short-name>` when an issue exists and `codex/<short-name>` otherwise. Parallel worktrees must never share `.env`, Compose project names, container names, ports, networks, images, volumes, or databases.
+Branch names should use `<issue>-<short-name>` when an issue exists and `<short-name>` otherwise, unless the user or execution environment requires a prefix. Parallel worktrees must never share `.env`, Compose project names, container names, ports, networks, images, volumes, or databases.
 
 Local development never owns a shared stack on `main`. Each task worktree owns one `worktree`-profile stack created from its generated `.env`. Do not switch to `hosted` to test multiple organizations, choose a Compose file by name, copy another checkout's `.env`, or hand-edit `.env.example`.
 
@@ -50,7 +75,10 @@ Read `packages/workspace-store/AGENTS.md` and `docs/guides/database-migrations.m
 
 ## Testing and handoff
 
-The issue definition of success is the test contract. Add the smallest automated tests that prove it and report:
+The issue definition of success is the test contract. Use
+[CONTRIBUTING.md](CONTRIBUTING.md) as the command, tool, and test-suite index;
+do not infer a new test workflow from nearby files. Add the smallest automated
+tests that prove the change and report:
 
 - commands run and their outcomes;
 - schema and migration impact;

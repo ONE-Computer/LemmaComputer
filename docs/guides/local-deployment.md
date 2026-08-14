@@ -6,7 +6,7 @@ starting point.
 
 To simply run LemmaComputer, use the Quick start in the [README](../../README.md).
 To change the product, follow the
-[local development workflow](development-workflow.md) first, keep the stack in
+[evaluation, development, and remote workspace workflow](development-workflow.md) first, keep the stack in
 its task worktree, and retain `LEMMACOMPUTER_INSTALLATION_KIND=worktree`.
 
 This page uses the dedicated evaluation checkout's default URL in a few
@@ -212,7 +212,7 @@ Microsoft 365 values; do not partially configure the group.
 ## Initialize the environment
 
 For development, first complete the [fresh-clone worktree
-setup](development-workflow.md#fresh-clone). `npm run worktree:init` installs the
+setup](development-workflow.md#develop-in-an-isolated-task-worktree). `npm run worktree:init` installs the
 dependencies and creates that worktree's isolated `.env`, so do not run
 `env:init` again. Continue with the required values below.
 
@@ -308,7 +308,7 @@ their values, so remove them manually after the managed-provider cutover.
 | `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID`, `LEMMACOMPUTER_BOOTSTRAP_USER_ID`, `LEMMACOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
 | Public URL and port variables | The deployment is intentionally using origins other than the localhost defaults |
 | `LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED=true` | Claude Cowork is enabled on a customer-managed host that exposes `/dev/kvm` and `/dev/vhost-vsock` and has memory/disk headroom |
-| Remote node, ingress, and application-relay mTLS values | The Docker/KasmVNC runtime is placed on a private remote node; see [Remote workspace-node mode](remote-workspace-node.md) and the normative [workspace node contract](../workspace-node.md) |
+| Remote node, ingress, and application-relay mTLS values | The Docker/KasmVNC runtime is placed on a private remote node; see the [remote workspace-node architecture](development-workflow.md#remote-workspace-node-architecture) and the normative [workspace node contract](../workspace-node.md) |
 
 Leave generated secrets unchanged and stable while their dependent state
 exists. See [Configuration and operations](operations.md) for the complete

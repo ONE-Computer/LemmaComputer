@@ -1,370 +1,429 @@
-# Local development workflow
+# Evaluation, development, and remote workspace workflow
 
-**Who this is for:** a person or coding agent who will *change* the product.
-Follow it in order, and do not create an alternative Compose or `.env` workflow
-for development work.
+This is the single setup and workflow guide for LemmaComputer. Start by choosing
+the outcome you need; do not combine commands from different rows.
 
-To only run and evaluate LemmaComputer, you do not need any of this. Use the
-Quick start in the [README](../../README.md), which creates a single evaluation
-checkout with `npm run env:init -- --profile=worktree` and no git worktree.
+## Choose the workflow first
 
-## Local-development contract
+| Goal | Checkout and profile | First command path | Workspace topology |
+| --- | --- | --- | --- |
+| Read, review, or run unit tests | Any clean checkout | Install dependencies only if required | No stack |
+| Evaluate the product without changing code | Dedicated disposable clone using the `worktree` profile | [`env:init`](#evaluate-a-single-checkout) | Colocated |
+| Change code or documentation | One branch in one Git worktree using the `worktree` profile | [`worktree:init`](#develop-in-an-isolated-task-worktree) | Colocated by default |
+| Exercise remote-node routing or Claude Cowork | Initialized task worktree | [Remote qualification command](#remote-workspace-node-and-cowork-qualification) | Locally split with mTLS |
+| Exercise customer-managed Microsoft integration | Keep `worktree` for code changes; use a dedicated `customer-managed` evaluation deployment for operator qualification | [Microsoft integration runbook](local-deployment.md) | Deployment-specific |
+| Qualify a real hosted release | Representative hosted infrastructure | Deployment and release tooling, not local Compose | Physically separate private nodes |
 
-| Question | Required answer |
-| --- | --- |
-| Does local development create a stack from `main`? | **No.** Keep the primary `main` checkout clean. It is only the integration checkout. |
-| Where does the local stack run? | In the current task's branch and worktree. Each worktree owns its own `.env`, ports, containers, networks, images, volumes, and databases. |
-| Which deployment mode is used? | `LEMMACOMPUTER_INSTALLATION_KIND=worktree`, set automatically by `npm run worktree:init`. Do not change it manually. |
-| Is local testing multi-tenant? | Yes. The `worktree` profile permits multiple organizations and uses the same organization-scoped product schema and authorization boundaries in an isolated development database. |
-| Should local multi-tenant testing use `hosted`? | **No.** `hosted` is a production profile requiring HTTPS, mTLS, a separate platform-operator realm, and a remote-isolated workspace provider. |
-| Which Web port should the agent open? | Read `LEMMACOMPUTER_PUBLIC_WEB_URL` from the generated `.env`. A task worktree gets a deterministic unique host port; do not assume `4174` or `4147`. |
-| Which Compose file is used? | The root `compose.yaml`, only through the repository's `npm run compose:*` commands. |
-| Does the agent invent or copy an `.env`? | **No.** `npm run worktree:init` generates it. The human supplies only external credentials required by the task. |
+If a request says only "set it up", "run it", or "test it" and the choice
+would change data ownership, ports, topology, or required infrastructure, ask
+whether the user wants: a disposable evaluation, an isolated development
+worktree, local remote-node/Cowork qualification, or a production-profile
+deployment. Do not ask when the requested outcome already makes the choice
+clear.
 
-`worktree` is development-only. It is suitable for testing multiple
-organizations and tenant isolation, but it is not evidence that the hosted
-production infrastructure has been qualified.
+The primary `main` checkout is an integration checkout. It does not own a local
+development stack. A dedicated evaluation clone may be checked out at `main`
+because it is disposable and never used to edit or integrate code; do not turn
+the primary integration checkout into that evaluation clone.
 
-## Host requirement
+## Host requirements
 
-Node.js development and non-containerized tests can be performed on macOS, but
-the complete reference deployment currently requires a Linux `amd64`/`x86_64`
-Docker host. The managed desktop image contains Linux x86_64 applications, and
-the local workspace controller relies on Linux Docker-socket and device
-semantics.
+Node.js development and non-containerized tests can run on macOS. The complete
+reference stack and managed desktop require:
 
-On an Intel or Apple Silicon Mac, use the Mac as the editor/client and use a
-Linux x86_64 development host or VM for the full stack and workspace-runtime
-checks. Docker Desktop emulation is not a qualified deployment path. Do not add
-`platform: linux/amd64` overrides or weaken runtime checks merely to make the
-stack start on macOS.
+- Linux `amd64`/`x86_64`;
+- Node.js 22 or later;
+- Docker Engine and Docker Compose v2.30.0 or later; and
+- enough Docker address-pool capacity for the isolated networks.
 
-## Exact setup commands
+Claude Cowork additionally requires usable `/dev/kvm` and
+`/dev/vhost-vsock`. On a Mac, use a Linux x86_64 host or VM for full workspace
+runtime checks. Docker Desktop emulation is not a qualified deployment path.
 
-Install Git, Node.js 22 or later, and npm. Install Docker only when the task
-needs Compose, database qualification, or the full local stack. A full
-deployment also needs Docker Compose v2.30.0 or later on Linux x86_64.
+## Evaluate a single checkout
 
-The agent runs these commands from a fresh machine. Substitute the actual
-repository URL and task name:
+Use this path only for a person who wants to explore one local stack and will
+not change the repository:
 
 ```bash
-git clone <repository-url> onecomputer
-cd onecomputer
+git clone <repository-url> lemmacomputer-eval
+cd lemmacomputer-eval
+npm ci
+npm run env:init -- --profile=worktree
+npm run compose:up
+```
+
+Open the URL in `LEMMACOMPUTER_PUBLIC_WEB_URL`; the dedicated evaluation default
+is `http://localhost:4174`:
+
+```bash
+grep LEMMACOMPUTER_PUBLIC_WEB_URL .env
+```
+
+To launch a managed desktop, build the large workspace image once:
+
+```bash
+npm run image:workspace
+```
+
+`env:init` creates `.env` with mode `0600`, fresh internal credentials, and the
+selected profile. It refuses to overwrite an existing file. It does not create
+unique names for parallel stacks, so run only one evaluation stack per Docker
+host unless each checkout is isolated manually.
+
+Do not use `env:init --force` casually. Rotating those values can invalidate
+sessions, encrypted records, signatures, service trust, and persisted data.
+
+## Develop in an isolated task worktree
+
+Every change gets one branch and one Git worktree. From a clean primary
+checkout:
+
+```bash
 git fetch origin
 mkdir -p ../onecomputer-worktrees
 git worktree add ../onecomputer-worktrees/<task-name> \
-  -b codex/<task-name> origin/main
+  -b <issue>-<short-name> origin/main
 cd ../onecomputer-worktrees/<task-name>
 npm run worktree:init
 npm run dev:doctor
 ```
 
-When an issue exists, prefer `codex/<issue>-<short-name>` for the branch.
-`worktree:init` refuses `main` and performs all first-pass machine setup for
-that worktree:
+When there is no issue, use a short descriptive branch name. Follow an explicit
+user-supplied branch name when provided.
 
-- runs `npm ci` when dependencies are absent;
-- creates `.env` with fresh internal secrets;
-- sets `LEMMACOMPUTER_INSTALLATION_KIND=worktree` and
-  `LEMMACOMPUTER_RUNTIME_ENVIRONMENT=development`;
-- assigns a unique host Web port, Compose/container/network names, image tags,
-  volumes, and databases; and
+Do not run `npm ci` or `env:init` separately in a task worktree.
+`worktree:init`:
+
+- refuses `main`;
+- runs `npm ci` if dependencies are absent;
+- creates `.env` with fresh secrets if it is absent;
+- selects `LEMMACOMPUTER_INSTALLATION_KIND=worktree` and development runtime
+  behavior;
+- derives a stable `oc-*` worktree identity;
+- assigns unique ports, Compose projects, networks, image tags, databases, and
+  volumes; and
 - prints the worktree's Web URL.
 
-The Web container listens on port `4174`, but Compose maps it to the unique host
-port recorded as `LEMMACOMPUTER_WEB_PORT`. The dedicated evaluation-checkout
-default is also host port `4174`; `4147` is not a project default. A task
-worktree normally uses a different port so that multiple worktrees can run at
-the same time.
+Never copy `.env`, database volumes, generated PKI, or runtime environment
+files from another checkout. Each worktree owns its trust and persistence.
 
-Inside a task worktree, do not run `npm run env:init` separately, copy the
-primary checkout's `.env`, or start Docker Compose from `main`. `worktree:init`
-owns that worktree's environment.
-
-If dependency installation fails because an agent sandbox cannot write the npm
-cache or create local IPC endpoints, rerun the same bootstrap with the minimum
-host permission required. Do not treat a sandbox error as an application or
-test failure.
-
-### Human-input checkpoint
-
-At this point the generated `.env` is sufficient for builds, automated tests,
-Compose validation, stack health, and multi-tenant tests that use fixtures. The
-agent does not need a human to fill arbitrary variables.
-
-If the task requires a real interactive sign-in or external integration, the
-agent must stop and request only the applicable values listed in
-[Human-supplied values](#human-supplied-values). It must not request or print
-the generated internal secrets.
-
-### Start the complete worktree stack
-
-After any task-specific human values are present, run:
-
-```bash
-npm run env:check
-npm run compose:config
-npm run image:workspace
-npm run compose:up
-docker compose ps
-```
-
-`image:workspace` is required before launching a managed desktop workspace and
-can take substantial time and disk space. `compose:up` renders the per-service
-environment, builds application services, applies the explicit migration jobs,
-and waits for service health.
-
-Show the exact host port and browser URL assigned to this worktree:
-
-```bash
-rg -n '^LEMMACOMPUTER_(WEB_PORT|PUBLIC_WEB_URL)=' .env
-```
-
-Check the Web health endpoint without printing secrets:
-
-```bash
-LEMMACOMPUTER_LOCAL_WEB_URL="$(sed -n 's/^LEMMACOMPUTER_PUBLIC_WEB_URL=//p' .env)"
-curl -fsS "${LEMMACOMPUTER_LOCAL_WEB_URL}/__lemmacomputer/healthz"
-```
-
-The expected response is `{"status":"ok"}`. Open the URL printed by
-`worktree:init`; it is intentionally not the primary checkout's default port.
-
-Before handing off a change, run:
-
-```bash
-npm run verify:quick
-```
-
-Run `npm run verify:db` as well when persistence, migrations, startup ordering,
-backup compatibility, or tenant scoping changes.
-
-## Local configuration map
-
-The multiple Compose and environment files have separate, deliberate roles:
-
-| Path | Role | Normal developer action |
-| --- | --- | --- |
-| `compose.yaml` | Canonical single-host development and evaluation topology | Use through `npm run compose:*` |
-| `compose.hosted.yaml` | Empty compatibility marker for older hosted commands; it does not select the hosted profile | Do not select it for local development |
-| `compose.oauth-qualification.yaml` | Isolated OAuth compatibility test stack | Used by qualification tooling only |
-| `compose.provider-qualification.yaml` | Isolated provider-management test stack | Used by qualification tooling only |
-| `.env` | Ignored, secret, machine-and-worktree-specific deployment values | Generate; never copy or commit |
-| `.env.example` | Generated reference for the canonical deployment contract | Never hand-edit |
-| `.env.qualification.example` | Generated reference for isolated test stacks | Never use as the local deployment environment |
-| `.runtime-env/` | Ignored, generated least-privilege per-service projections | Let `npm run compose:*` regenerate it |
-
-`scripts/deployment-config.mjs` is the source of truth for operator settings and
-the generated environment examples. In an initialized worktree, use
-`npm run env:check` to detect drift and `npm run env:update` to merge new
-variables without rotating existing secrets. The managed Compose commands
-render `.runtime-env/` automatically.
-
-### How the first `.env` is created
-
-The normal developer path is `npm run worktree:init`. If `.env` is absent, it
-creates one from the canonical contract, generates fresh cryptographic and
-service secrets, and then replaces topology values with worktree-specific
-names and ports. Do not run `env:init` before or after it, and do not copy
-`.env.example` to `.env`: the example contains markers that must be replaced by
-the initializer.
-
-`npm run env:init` is the direct first-pass command for a dedicated local
-evaluation checkout that is not a development worktree:
-
-```bash
-npm ci
-npm run env:init -- --profile=worktree
-```
-
-`--profile` accepts `customer-managed`, `hosted`, or `worktree`, and writes that
-value as `LEMMACOMPUTER_INSTALLATION_KIND`. Omitting it keeps the canonical
-`customer-managed` default, whose strict preflight requires real Microsoft Entra
-values before `compose:up` will render. Use `worktree` for an evaluation
-checkout that should start without a Microsoft tenant.
-
-Both paths write `.env` with mode `0600`. They refuse to overwrite an existing
-file. Do not use `--force` unless invalidating the checkout's existing
-sessions, encrypted records, signatures, and service trust is intentional.
-
-### What is populated automatically
-
-| Value class | Examples | Agent action |
-| --- | --- | --- |
-| Generated internal secrets | Database passwords, Better Auth secret, session and service tokens, signing/encryption keys, VAPID keys | Generated automatically; keep stable and never copy between worktrees |
-| Worktree isolation | Compose project, ports, container/network names, image tags, database/volume names | Assigned automatically by `worktree:init` |
-| Safe local defaults | Loopback bind address, capture email transport, copy-link invitations, local sandbox driver | Keep unless the task explicitly exercises another mode |
-| Model-provider credentials | OpenAI, Anthropic, GLM/Z.ai, or Bedrock credentials | Add after startup in **AI control plane -> Models & providers**; never put them in `.env` |
-
-Do not edit generated values merely to make them easier to share. They are
-part of the worktree's persisted trust and encryption state.
-
-### Human-supplied values
-
-There is no universal set of human-supplied values for local development. The
-required values depend on the external flow being tested:
-
-| Test goal | Human supplies | Notes |
-| --- | --- | --- |
-| Build, unit tests, Compose validation, stack health, fixture-based multi-tenant tests | Nothing | Use the generated `worktree` environment as-is |
-| Manual email/password signup and verification | Set `LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT=postmark`, plus `LEMMACOMPUTER_POSTMARK_SERVER_TOKEN` and `LEMMACOMPUTER_POSTMARK_FROM` | The default `capture` adapter is for automated tests; it does not send human-readable email outside the process. Local invitations may keep `LEMMACOMPUTER_INVITATION_DELIVERY_MODE=copy-link`. |
-| Transitional workforce Entra sign-in, or Microsoft 365 using the same app | The four `LEMMACOMPUTER_ENTRA_*` and bootstrap values below | Follow the exact app registration, callback, and Graph-scope instructions in the [local integration runbook](local-deployment.md#configure-the-transitional-workforce-entra-and-microsoft-365-app) |
-| Separate Microsoft 365 connector app | `LEMMACOMPUTER_MS365_TENANT_ID`, `LEMMACOMPUTER_MS365_CLIENT_ID`, and `LEMMACOMPUTER_MS365_CLIENT_SECRET` | Supply all three or leave all three empty to reuse the Entra app |
-| Google or Microsoft social login | The selected provider's client-ID and client-secret pair | Supply the complete pair only |
-| Production remote workspace node | The complete node, ingress, and application-relay mTLS identities plus private-host, application-network, gateway, and Control endpoint group | Ordinary local development stays colocated; the repository-owned qualification command generates disposable local values automatically |
-
-The four values for the transitional Entra path are:
-
-```text
-LEMMACOMPUTER_ENTRA_TENANT_ID
-LEMMACOMPUTER_ENTRA_CLIENT_ID
-LEMMACOMPUTER_ENTRA_CLIENT_SECRET
-LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS
-```
-
-These are not mandatory for ordinary `worktree` development. Unresolved Entra
-placeholders are expected when the task does not exercise Entra or Microsoft
-365. To list only unresolved initializer markers without printing generated
-secrets:
-
-```bash
-rg -n '=replace-with-' .env
-```
-
-Then validate the file and Compose projection:
-
-```bash
-npm run env:check
-npm run compose:config
-```
-
-`env:check` verifies the environment contract, coupled groups, and selected
-deployment-profile rules. The `worktree` profile intentionally permits Entra
-placeholders for tasks that do not need live authentication, so a passing
-check alone does not prove full sign-in, provider, connector, or workspace
-readiness.
-
-### Repeatable split-node qualification
-
-To exercise the real remote-node routing boundary while retaining the current
-worktree's users, organizations, provider configuration, databases, and Compose
-volumes, first stop every workspace through LemmaComputer and run:
-
-```bash
-npm run qualify:remote-workspace-node -- up
-```
-
-For Claude Cowork, require host KVM/vsock support and enable device projection:
-
-```bash
-npm run qualify:remote-workspace-node -- up --cowork
-```
-
-The command generates a worktree-local two-day PKI under the ignored
-`.runtime-remote-workspace-node/` directory, starts the controller in a separate
-Compose project, switches Control to the real mTLS node API, and adds verified
-mTLS desktop and application routes. It never copies a database. `up` is
-idempotent after setup; inspect or restore the topology with:
-
-```bash
-npm run qualify:remote-workspace-node -- status
-npm run qualify:remote-workspace-node -- down
-```
-
-`config` generates fresh test certificates, validates both Compose projections,
-and removes them again without starting or changing a container:
-
-```bash
-npm run qualify:remote-workspace-node -- config --cowork
-```
-
-Both topology changes refuse to proceed while managed workspace runtime
-containers exist. `down` restores the normal colocated worktree stack and keeps
-the worktree's databases and persistent volumes.
-
-The complete [remote workspace-node guide](remote-workspace-node.md) explains
-the controller, node-local Docker socket, per-workspace relays, mTLS identities,
-exact preparation sequence, manual acceptance checklist, hosted/Cowork gap, and
-troubleshooting. The local qualifier uses separate Compose projects on one
-physical Docker host; it does not claim representative hosted infrastructure
-qualification.
-
-## Scheduling work
-
-The user's request is the task contract. When a GitHub issue exists, its definition of success and native `blocked by` relationships add to that contract. A task with a known unresolved blocker is not runnable; otherwise it may start whenever worktree capacity is available. No artificial wave boundary is required.
-
-One agent owns one task, one branch, and one worktree. Avoid broad shared foundation branches. When two tasks require the same contract, land the contract first and let both consumers update from `main`.
-
-## Additional worktree
-
-From a clean primary checkout:
-
-```bash
-git fetch origin
-git worktree add <path> -b codex/<issue>-<short-name> origin/main
-cd <path>
-npm run worktree:init
-npm run dev:doctor
-```
-
-`worktree:init` refuses `main`, creates fresh local secrets, assigns unique Compose/container/network/image names and ports, and installs or safely reuses dependencies. Request only the external authentication or integration values needed by the task. Model-provider credentials are configured in the product UI, not `.env`. Never copy the demo `.env`.
-
-Use normal Compose commands inside the worktree. Its generated `.env` keeps volumes and databases separate. `npm run compose:down` preserves its volumes unless `-- --volumes` is intentionally supplied.
-
-At the start of each later session, enter the task worktree and run:
+At the start of every later session:
 
 ```bash
 git status --short
 npm run dev:doctor
 ```
 
-After updating the branch from `main`, run `npm run env:check`. If the canonical
-environment gained variables, run `npm run env:update`, review the variable
-names that it reports, and run `npm run dev:doctor` again. These commands do not
-print secret values.
+After bringing in changes from `main`, run `npm run env:check`. If the canonical
+environment gained variables, run `npm run env:update`; it adds missing values
+without rotating existing secrets.
 
-## Local gates
+## What the setup commands do
 
-- `npm run dev:doctor`: environment, dependency, and Docker-context safety.
-- `npm run verify:quick`: doctor, environment parity, Compose parsing, TypeScript builds, and the full non-database test suite.
-- `npm run verify:db`: disposable PostgreSQL migration qualification.
-- `npm run verify:release`: provider and OAuth qualification, quick and DB
-  gates, workspace-image build, isolated Compose health, and a real Hermes
-  workspace readiness smoke; writes a SHA-bound local attestation.
+| Command | Mutates state? | Purpose |
+| --- | --- | --- |
+| `npm run worktree:init` | Yes, once | Installs missing dependencies, creates the worktree-owned `.env`, and assigns isolated names and ports. |
+| `npm run dev:doctor` | No | Checks branch identity, dependencies, `.env`, `oc-*` isolation values, Docker context safety, and bind-mounted file readability. |
+| `npm run env:check` | No | Checks `.env` parity and validates profile, URL, secret, and coupled configuration such as complete mTLS groups. |
+| `npm run env:update` | Yes | Merges newly registered variables into `.env` while preserving existing values and reporting extras. |
+| `npm run compose:config` | Only generated projections | Writes least-privilege `.runtime-env/<service>.env` files, then validates the resolved Compose model without starting containers. |
+| `npm run image:workspace` | Yes, Docker image cache | Builds the large managed desktop image. It is needed for desktop workspaces, not merely to sign in. |
+| `npm run compose:up` | Yes | Renders service environments, builds application images, applies explicit migration jobs, starts services, and waits for health. |
+| `npm run compose:down` | Yes | Stops the worktree stack while preserving volumes by default. Pass `-- --volumes` only when deletion is intentional. |
 
-Run `verify:quick` before handoff or integration. Run `verify:db` whenever persistence, migration, startup ordering, backup compatibility, or tenant scoping changes. Update the task branch from current `main` when needed, resolve conflicts there, and rerun the applicable gates before merging.
+`compose:up` repeats environment rendering, but `env:check` and
+`compose:config` are useful separate diagnostics: they catch contract and
+Compose errors before partially changing the running stack.
 
-## Integration
+## Start and use the development stack
 
-The integration owner reviews the task scope and reported checks, then merges the feature branch into `main`. `main` should remain buildable, but it is not the deployed demo and ordinary integration does not require the full release gate.
+From the initialized task worktree:
 
 ```bash
-git switch main
-git pull --ff-only
-git merge --no-ff <feature-branch>
-git push origin main
+npm run env:check
+npm run compose:config
+npm run compose:up
 ```
 
-There is no blocking pre-push hook. This keeps the workflow visible: the operator runs the required checks and reports their result instead of relying on hidden local enforcement.
-
-## Demo release
-
-Usually, release directly from a clean, already-pushed `main`:
+Build the workspace image before testing managed desktops or packaged desktop
+software:
 
 ```bash
-git switch main
-git pull --ff-only
+npm run image:workspace
+```
+
+Read the worktree-specific URL instead of assuming a port:
+
+```bash
+grep LEMMACOMPUTER_PUBLIC_WEB_URL .env
+```
+
+Create the first account in the Web UI. Configure model-provider deployments
+under **AI control plane -> Models & providers**, then configure Pricing, Model
+routes, Team rollout, and workspace policy. Provider credentials belong in the
+product UI, not `.env`.
+
+### Local configuration ownership
+
+| Path | Owner and role |
+| --- | --- |
+| `compose.yaml` | Canonical ordinary topology; use it through `npm run compose:*`. |
+| `compose.hosted.yaml` | Empty compatibility marker; it does not turn local Compose into hosted infrastructure. |
+| `compose.oauth-qualification.yaml` | Tool-owned isolated OAuth qualification stack. |
+| `compose.provider-qualification.yaml` | Tool-owned isolated provider qualification stack. |
+| `.env` | Ignored, secret, checkout-specific operator configuration. |
+| `.env.example` | Generated reference from `scripts/deployment-config.mjs`; never hand-edit. |
+| `.env.qualification.example` | Generated inputs for qualification tooling, not a deployment environment. |
+| `.runtime-env/` | Ignored least-privilege service projections generated by repository commands. |
+| `.runtime-remote-workspace-node/` | Ignored, disposable PKI and state for local split-node qualification. |
+
+## Human-supplied values
+
+The generated worktree environment is sufficient for builds, automated tests,
+Compose validation, stack health, and fixture-based multi-tenant tests. Ask for
+external values only when the requested flow needs them:
+
+| Test goal | Human supplies |
+| --- | --- |
+| Build, unit tests, Compose health, fixture-based tenant testing | Nothing |
+| Real email delivery | Postmark server token, sender, and the Postmark transport setting |
+| Transitional workforce Entra or Microsoft 365 using the same app | Entra tenant ID, client ID, client secret, and bootstrap owner object IDs |
+| Separate Microsoft 365 connector application | Microsoft 365 tenant ID, client ID, and client secret |
+| Google or Microsoft social login | The selected provider's complete client-ID and client-secret pair |
+| Local remote-node qualification | Nothing; the command generates disposable certificates |
+| Production remote node | Private networking plus complete workload identities and CA-managed certificates |
+
+The worktree profile intentionally permits unresolved Entra placeholders. Use
+the [Microsoft integration runbook](local-deployment.md) only when the task
+actually exercises those flows.
+
+## Remote workspace-node and Cowork qualification
+
+Ordinary evaluation and development are colocated. Use the remote qualifier
+only when the task must exercise the real controller, relay, and mTLS boundary
+or Claude Cowork. It requires an initialized, non-`main` task worktree; a
+disposable evaluation clone is not sufficient.
+
+### Remote workspace-node architecture
+
+Remote mode moves employee-controlled desktops to a private workspace compute
+node while identity, policy, provider credentials, OAuth custody, and product
+databases remain in the control plane. It uses the LemmaComputer
+Docker/KasmVNC adapter—not the commercial Kasm control plane.
+
+| Mode | Current status |
+| --- | --- |
+| Colocated `worktree` | Supported local default |
+| Remote-node worktree qualification | Repeatable local integration test on one physical Docker host |
+| `customer-managed` remote | Configuration contract supported; customer supplies networking, PKI, storage, and operations |
+| `hosted` remote | Required architecture, including Cowork, but not yet production-qualified |
+
+The boundary is provider-neutral. A future E2B or Daytona adapter can implement
+the same controller, signed-policy, isolation, routing, and purge contracts
+without forking the product.
+
+```mermaid
+flowchart LR
+  Browser["Employee browser"]
+
+  subgraph ControlHost["Control-plane host"]
+    Ingress["Workspace ingress"]
+    Control["Control API"]
+    Web["Web"]
+    Gateway["LiteLLM"]
+    ControlDb[("Control and Better Auth databases")]
+    GatewayDb[("LiteLLM database")]
+    AppEndpoint["Private application endpoint"]
+  end
+
+  subgraph Node["Private workspace node"]
+    Controller["Workspace controller - only Docker socket owner"]
+    subgraph WorkspaceBoundary["Per-workspace boundary"]
+      DesktopRelay["Desktop ingress relay"]
+      GatewayRelay["Gateway application relay"]
+      ControlRelay["Control application relay"]
+      Egress["Governed egress proxy"]
+      Sandbox["KasmVNC desktop and agents"]
+    end
+  end
+
+  Browser --> Ingress --> Web --> Control
+  Control --> ControlDb
+  Gateway --> GatewayDb
+  Control -->|"mTLS, token, signed policy"| Controller
+  Controller -->|"node-local Docker API"| WorkspaceBoundary
+  Ingress -->|"mTLS HTTP and WebSocket"| DesktopRelay --> Sandbox
+  Sandbox -->|"fixed gateway alias"| GatewayRelay
+  Sandbox -->|"fixed Control alias"| ControlRelay
+  GatewayRelay -->|"mTLS"| AppEndpoint --> Gateway
+  ControlRelay -->|"mTLS"| AppEndpoint --> Control
+  Sandbox --> Egress -->|"policy-approved TLS"| Internet["Approved public destinations"]
+```
+
+For each running workspace the controller normally creates:
+
+| Runtime | Count | Purpose |
+| --- | ---: | --- |
+| Sandbox | 1 | Desktop, applications, and local agent brokers |
+| Desktop relay | 1 | Authenticated ingress to this sandbox's KasmVNC port |
+| Gateway relay | 0-1 | Fixed local alias to the private LiteLLM endpoint |
+| Control relay | 0-1 | Fixed local alias to the private agent bridge and authorization endpoint |
+| Egress proxy | 0-1 | Signed, policy-governed public destination access |
+
+The relays form one logical workspace network gateway but stay separate
+per-workspace containers. Combining ingress, private application routing, and
+public egress into one shared service would merge credentials, directions, and
+failure domains and could bridge workspaces.
+
+`/var/run/docker.sock` is root-equivalent authority over the workspace node.
+Only the workspace controller mounts the node-local socket:
+
+```yaml
+services:
+  workspace-controller:
+    networks:
+      node-transport:
+        aliases: [workspace-node]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+Control never mounts or proxies that socket. It sends a bounded lifecycle
+request; the controller validates workload identity, bearer token, signed
+policy, workspace identity, and provider labels before using Docker locally.
+The normative node security and purge contract is in
+[Workspace node deployment](../workspace-node.md).
+
+### Remote mTLS identities
+
+| Caller | Listener | Authentication and key custody |
+| --- | --- | --- |
+| Control API | Workspace controller | Node server TLS, Control client certificate with expected CN, and bearer token; each leaf key stays with its workload. |
+| Workspace ingress | Per-workspace desktop relay | Relay server TLS and ingress client certificate with expected CN. |
+| Per-workspace application relays | Private LiteLLM and Control endpoints | Application endpoint TLS and node application-gateway client certificate with expected CN. |
+| Control API | LiteLLM admin proxy | Separate administrator mTLS identity. |
+
+Browser authentication is normal HTTPS plus the user and workspace session,
+not mTLS. Public egress uses ordinary Web PKI TLS after signed destination
+policy enforcement. Production leaf certificates must come from the
+deployment's private CA or workload identity system; the local qualifier's
+two-day authorities are disposable test material.
+
+### Switch an existing worktree to remote mode
+
+First start and configure the ordinary worktree. The qualifier deliberately
+reuses its users, organizations, providers, pricing, routes, policies,
+PostgreSQL volumes, and workspace-home volumes. It does not dump or copy a
+database.
+
+Stop every workspace through LemmaComputer, then validate without changing
+containers:
+
+```bash
+npm run qualify:remote-workspace-node -- config
+```
+
+For Cowork, verify hardware support and include the flag:
+
+```bash
+test -c /dev/kvm
+test -c /dev/vhost-vsock
+npm run qualify:remote-workspace-node -- config --cowork
+```
+
+Start the split topology:
+
+```bash
+npm run qualify:remote-workspace-node -- up
+```
+
+Cowork-enabled remote mode is selected here—not in `compose.hosted.yaml` and
+not by manually switching the local profile:
+
+```bash
+npm run qualify:remote-workspace-node -- up --cowork
+```
+
+The command:
+
+1. refuses `main`, non-worktree profiles, and active workspace runtime containers;
+2. generates two-day test certificates;
+3. creates worktree-scoped transport, application, and desktop-ingress networks;
+4. starts the controller in a separate Compose project with the node-local Docker socket;
+5. disables the colocated controller and points Control at the remote mTLS node API;
+6. adds test-only mTLS application endpoints for Control and LiteLLM; and
+7. retains the existing control stack, databases, users, configuration, and persistent volumes.
+
+Inspect or restore the topology with:
+
+```bash
+npm run qualify:remote-workspace-node -- status
+npm run qualify:remote-workspace-node -- down
+```
+
+`down` removes only qualification-owned containers, networks, PKI, and state,
+then restores the colocated worktree stack. It preserves databases and
+persistent workspace volumes. If an existing qualification was started without
+Cowork, stop its workspaces, run `down`, then run `up --cowork`.
+
+### Remote-node acceptance checklist
+
+- Sign in with an existing worktree account and expected organization.
+- Create and open disposable and managed workspaces.
+- Test an allowed and denied public destination.
+- Complete a governed model request and verify provider credentials are absent from the sandbox.
+- Complete Hermes Desktop and Hermes CLI turns.
+- Open Claude Desktop, verify Cowork virtualization, and complete a Cowork action.
+- Restart and reconnect to the workspace through the product route.
+- Run two workspaces concurrently and verify separate IDs, networks, relays, and home volumes.
+- Stop one workspace and confirm the other remains reachable.
+- Inspect audit events without exposing certificates, tokens, prompts, or provider secrets.
+
+### What local remote qualification does not prove
+
+The two Compose projects still use one physical Docker Engine. Local
+qualification proves configuration, mTLS identities, route projection, Docker
+authority separation at the container boundary, and application behavior. It
+does not prove cloud security groups, cross-host DNS, load balancers,
+certificate issuance/rotation/revocation, managed database restore, autoscaling,
+node draining, cross-node latency, or failure recovery.
+
+Hosted requires representative private-node testing with nested
+virtualization, `/dev/kvm`, `/dev/vhost-vsock`, encrypted workspace storage,
+real workload certificates, network deny rules, monitoring, backup/restore,
+node replacement, and Claude Cowork acceptance. The `hosted` profile validates
+the configuration contract; it is not a local infrastructure emulator.
+
+### Remote-node troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Environment reports an incomplete coupled group | Run `npm run env:update`; do not fill individual certificate fields manually. |
+| Topology switch is refused | Stop every managed workspace first. |
+| `all predefined address pools have been fully subnetted` | Remove only ownership-verified empty worktree networks or configure a non-overlapping Docker default address pool; never prune globally. |
+| Node API reports TLS or identity errors | Check CA, server SAN/name, client certificate CN, bearer token, and clock. |
+| `WORKSPACE_UPSTREAM_UNAVAILABLE` | Inspect ingress and that workspace's desktop relay and certificate projection. |
+| Desktop works but model or agent bridge fails | Inspect that workspace's gateway and Control relays plus application-endpoint mTLS. |
+| Cowork says virtualization is unavailable | Check both devices, nested virtualization, host memory, `--cowork`, and start the workspace after enabling Cowork projection. |
+
+## Verification, integration, and release
+
+[CONTRIBUTING.md](../../CONTRIBUTING.md) is the command and test-suite index.
+Every change runs `npm run verify:quick`; persistence and migration changes also
+run `npm run verify:db`. User-visible Web changes run the smallest relevant
+Playwright suite. Report actual commands and outcomes rather than relying on a
+hidden hook.
+
+The integration owner merges verified work into `main`. `main` remains
+buildable but is not the running demo. A demo release requires a clean pushed
+commit and:
+
+```bash
 npm run verify:release
 npm run release:tag -- --push
 ```
 
-`release:tag` requires the current clean commit to match its pushed branch and a recent exact-SHA release attestation. It creates and optionally pushes `demo-YYYYMMDD-<sha>` without moving `main`.
-
-Use a temporary `release/<name>` branch only when the demo needs a stabilization line while unrelated development continues on `main`. Run the same release commands on that branch, and merge every release fix back into `main`.
-
-Deploy the immutable tag, not `main` or `release/*`. Each release gets a new tag; never delete, move, or reuse an existing demo tag.
-
-## Merge conflict policy
-
-Do not resolve migration conflicts by renumbering or editing a migration already applied anywhere. ULIDs avoid filename collisions; explicit `depends-on` metadata expresses ordering. If two parallel migrations touch the same object, add a small reconciliation issue and dependency, then regenerate or supersede only unreleased work.
+Deploy the immutable `demo-*` tag and image digest, never a moving branch or a
+dirty checkout. Do not resolve migration conflicts by renumbering or editing a
+migration already applied anywhere; use forward reconciliation.

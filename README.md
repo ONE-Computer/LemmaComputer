@@ -67,8 +67,10 @@ Microsoft tenant is required to start. See
 [Deployment profiles](docs/guides/deployment-profiles.md) before running
 `customer-managed` or `hosted`, which validate those values strictly.
 
-Contributors should not use this path. Development happens in an isolated task
-worktree; start from the [development workflow](docs/guides/development-workflow.md).
+Contributors should not use this path. The single
+[evaluation, development, and remote workspace workflow](docs/guides/development-workflow.md)
+explains when to use a disposable evaluation clone, a task worktree, or the
+remote-node/Cowork qualifier.
 
 ## Architecture
 
@@ -188,8 +190,8 @@ containers, created and destroyed with the session. In remote mode they form
 one logical workspace network gateway while remaining separate processes so
 desktop ingress, private application traffic, public egress, and different
 workspaces do not share one credential or network bridge. See
-[Remote workspace-node mode](docs/guides/remote-workspace-node.md) for the
-complete topology and mTLS identities.
+[remote workspace-node architecture](docs/guides/development-workflow.md#remote-workspace-node-architecture)
+for the complete topology and mTLS identities.
 
 The system separates four concerns:
 
@@ -261,57 +263,19 @@ paths and identifies which decisions remain authoritative in Control.
 The technical [Service reference](docs/reference/services.md) describes each process,
 interface, state owner, health contract, and extension seam.
 
-## Run a development stack
+## Choose how to run the repository
 
-The Quick start above is for evaluating a single checkout. Contributors work in
-an isolated task worktree instead, so that parallel tasks never share `.env`,
-ports, Compose project names, container names, networks, images, volumes, or
-databases:
+| Intent | Correct starting point |
+| --- | --- |
+| Explore one disposable local stack | Quick start above |
+| Change code or documentation | Isolated task worktree |
+| Test the remote workspace boundary or Claude Cowork | Initialized task worktree, then the remote qualifier |
+| Exercise a production deployment profile | Profile-specific runbook and representative infrastructure |
 
-```bash
-git worktree add .worktrees/<task-name> -b codex/<task-name> origin/main
-```
-
-```bash
-cd .worktrees/<task-name>
-npm run worktree:init
-npm run dev:doctor
-```
-
-`worktree:init` refuses to run on `main`. It installs dependencies, generates
-fresh isolated secrets, assigns a unique host port, sets
-`LEMMACOMPUTER_INSTALLATION_KIND=worktree`, and prints that worktree's Web URL.
-Do not copy another checkout's `.env`. Then start the stack:
-
-```bash
-npm run env:check
-npm run compose:config
-npm run compose:up
-```
-
-Build the managed workspace image only when launching a desktop workspace or
-changing its packaged software. It is a large, slow build:
-
-```bash
-npm run image:workspace
-```
-
-The [development workflow](docs/guides/development-workflow.md) is the complete
-contributor guide, covering host support, environment ownership, local gates,
-and controlled promotion.
-
-To qualify the same worktree with its Docker/KasmVNC controller placed behind a
-real local mTLS node boundary, stop its workspaces and run:
-
-```bash
-npm run qualify:remote-workspace-node -- up --cowork
-```
-
-This preserves the worktree's users, organizations, provider configuration,
-databases, and persistent volumes. See the
-[remote workspace-node guide](docs/guides/remote-workspace-node.md) for the
-architecture, mTLS matrix, non-mutating validation, manual test checklist,
-status, and teardown commands.
+Do not combine these paths. The
+[evaluation, development, and remote workspace workflow](docs/guides/development-workflow.md)
+is the one authoritative setup guide, including exact commands, command
+meanings, mTLS topology, Cowork selection, state preservation, and teardown.
 
 ### Deployment profiles and Microsoft integrations
 
@@ -334,10 +298,11 @@ readiness checks in setup order.
 
 ## Development
 
-Create and initialize a task worktree using the
-[development workflow](docs/guides/development-workflow.md), then use the focused
-commands below as needed. Do not develop directly in the primary `main`
-checkout.
+Create and initialize a task worktree using the single
+[workflow guide](docs/guides/development-workflow.md). Use
+[CONTRIBUTING.md](CONTRIBUTING.md) to select existing tools, focused test suites,
+qualification commands, and handoff gates. Do not develop directly in the
+primary `main` checkout.
 
 Useful focused processes:
 
@@ -386,7 +351,7 @@ points:
 
 - [Architecture and trust model](docs/architecture/overview.md)
 - [Why LemmaComputer runs as many processes](docs/architecture/service-boundaries.md)
-- [Development workflow](docs/guides/development-workflow.md)
+- [Evaluation, development, and remote workspace workflow](docs/guides/development-workflow.md)
 - [Deployment profiles](docs/guides/deployment-profiles.md)
 - [Service reference](docs/reference/services.md)
 - [Configuration and operations](docs/guides/operations.md)

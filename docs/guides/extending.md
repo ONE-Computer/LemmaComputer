@@ -1,8 +1,14 @@
-# Extending LemmaComputer
+# Component extension contracts
 
-LemmaComputer is intentionally explicit. A connector, model, application, or
-agent is not enabled by discovery alone; it becomes available only after its
-schema, policy identity, credential path, runtime projection, and tests agree.
+This is a subsystem checklist, not a setup or style guide. Use it when adding a
+connector, model, application, agent, sandbox provider, egress rule, external
+channel, OpenVTC behavior, or database migration. The repository setup and test
+command index live in `docs/guides/development-workflow.md` and
+`CONTRIBUTING.md` respectively.
+
+A connector, model, application, or agent is not enabled by discovery alone;
+it becomes available only after its schema, policy identity, credential path,
+runtime projection, and tests agree.
 
 ## Change contracts before transports
 
