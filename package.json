@@ -17,6 +17,7 @@
     "test:platform-operator:e2e": "playwright test --config playwright.platform-operator.config.ts",
     "test:responsive:e2e": "playwright test --config playwright.responsive.config.ts",
     "qualify:mcp-egress": "node scripts/qualify-mcp-egress.mjs",
+    "qualify:microsoft365-contracts": "tsx scripts/qualify-microsoft365-contracts.mts",
     "qualify:oauth": "tsx scripts/qualify-oauth-renewal.mts",
     "qualify:providers": "tsx scripts/qualify-provider-settings.mts",
     "qualify:reasoning-adapter": "tsx scripts/qualify-reasoning-adapter.mts",

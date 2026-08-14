@@ -159,6 +159,19 @@ test("Control permits only a bounded explicit Calendar view", async () => {
   assert.equal((await policy.authorize({ ...request, arguments: { ...request.arguments, endDateTime: "2026-07-22T08:00:00+08:00" } }, "calendar-reversed")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
   assert.equal((await policy.authorize({ ...request, arguments: { ...request.arguments, endDateTime: "2027-01-22T09:00:00+08:00" } }, "calendar-over-broad")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
   assert.equal((await policy.authorize({ ...request, arguments: { ...request.arguments, fetchAllPages: true } }, "calendar-fetch-all")).code, "MCP_ARGUMENTS_OUT_OF_POLICY");
+  for (const field of ["filter", "search", "orderby"] as const) {
+    const rejected = await policy.authorize({
+      ...request,
+      arguments: { ...request.arguments, [field]: " " },
+    }, `calendar-raw-${field}`);
+    assert.equal(rejected.code, "MCP_ARGUMENTS_OUT_OF_POLICY");
+    assert.deepEqual(rejected.problem, {
+      category: "unsupported_option",
+      field,
+      message: `Unsupported field '${field}'. Use the published tool schema and omit raw Graph syntax.`,
+      retryable: false,
+    });
+  }
 });
 
 test("Control auto-allows only an exact assigned bounded Microsoft 365 read", async () => {

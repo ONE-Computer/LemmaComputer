@@ -444,9 +444,11 @@ test("governed Calendar discovery advertises only argument shapes Control allows
   assert.match(schemas, /LIST_CALENDAR_EVENTS_INPUT_SCHEMA/);
   assert.match(schemas, /"additionalProperties": False/);
   assert.doesNotMatch(schemas, /fetchAllPages|includeHeaders|expandExtendedProperties|"expand"/);
+  assert.doesNotMatch(schemas, /"filter"|"search"|"orderby"|"skip"|"select"|"count"/);
   assert.match(schemas, /"required": \["startDateTime", "endDateTime"\]/);
-  assert.match(bridge, /if upstream_name == "get-calendar-view":\n            input_schema = CALENDAR_VIEW_INPUT_SCHEMA/);
-  assert.match(bridge, /elif upstream_name == "list-calendar-events":\n            input_schema = LIST_CALENDAR_EVENTS_INPUT_SCHEMA/);
+  assert.match(bridge, /MS365_READ_INPUT_SCHEMAS = \{/);
+  assert.match(bridge, /"get-calendar-view": CALENDAR_VIEW_INPUT_SCHEMA/);
+  assert.match(bridge, /input_schema = effective_ms365_input_schema\(upstream_name\)/);
 });
 
 test("governed OneDrive deletion carries the resolved filename into approval metadata", async () => {

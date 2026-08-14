@@ -7,6 +7,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
+import { m365ToolCatalog } from "@lemmacomputer/contracts";
 
 test("the workspace MCP bridge notifies Hermes when a connector changes its tool surface", async (context) => {
   let listReads = 0;
@@ -1129,4 +1130,217 @@ test("Microsoft 365 and Linear tools are always connector-prefixed and retain up
     { server_id: "microsoft365-id", name: "list-calendars", arguments: {} },
     { server_id: "linear-id", name: "list_issues", arguments: { limit: 10 } },
   ]);
+});
+
+test("every product-enabled Microsoft 365 tool has one strict effective contract and unknown tools fail closed", async (context) => {
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({
+        tools: [...Object.keys(m365ToolCatalog), "new-unreviewed-graph-tool"].map((name) => ({
+          name,
+          description: "Broad upstream schema",
+          inputSchema: { type: "object", additionalProperties: true },
+          mcp_info: { server_id: "microsoft365-id", server_name: "lemmacomputer_ms365" },
+        })),
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const responses: Array<Record<string, unknown>> = [];
+  createInterface({ input: child.stdout }).on("line", (line) => responses.push(JSON.parse(line)));
+
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const deadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const tools = (responses.find((response) => response.id === 1)?.result as {
+    tools: Array<{ name: string; description: string; inputSchema: { additionalProperties?: boolean }; _meta?: Record<string, unknown> }>;
+  }).tools.filter((tool) => tool.name !== "wait-for-governed-operation");
+  assert.equal(tools.length, Object.keys(m365ToolCatalog).length);
+  assert.deepEqual(
+    tools.map((tool) => tool.name).sort(),
+    Object.keys(m365ToolCatalog).map((name) => `microsoft365__${name}`).sort(),
+  );
+  assert.equal(tools.some((tool) => tool.name.includes("new-unreviewed")), false);
+  for (const tool of tools) {
+    assert.equal(tool.inputSchema.additionalProperties, false, `${tool.name} must be strict`);
+    assert.doesNotMatch(tool.description, /Broad upstream schema/);
+    assert.deepEqual(tool._meta, { lemmacomputer: { contractVersion: 1 } });
+  }
+});
+
+test("calendar today uses one canonical call and raw Graph expressions never reach the provider", async (context) => {
+  const calls: Array<Record<string, unknown>> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [{
+        name: "get-calendar-view",
+        description: "Use filter/search/orderby",
+        inputSchema: {
+          type: "object",
+          properties: { filter: { type: "string" }, search: { type: "string" }, orderby: { type: "string" } },
+          additionalProperties: true,
+        },
+        mcp_info: { server_id: "microsoft365-id", server_name: "lemmacomputer_ms365" },
+      }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      calls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.end(JSON.stringify({ content: [{ type: "text", text: "one event" }], isError: false }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const responses: Array<Record<string, unknown>> = [];
+  createInterface({ input: child.stdout }).on("line", (line) => responses.push(JSON.parse(line)));
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const advertised = (responses.find((response) => response.id === 1)?.result as {
+    tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
+  }).tools.find((tool) => tool.name === "microsoft365__get-calendar-view")!;
+  assert.deepEqual(Object.keys(advertised.inputSchema.properties).sort(), ["endDateTime", "startDateTime", "timezone", "top"]);
+  assert.equal("filter" in advertised.inputSchema.properties, false);
+  assert.equal("search" in advertised.inputSchema.properties, false);
+  assert.equal("orderby" in advertised.inputSchema.properties, false);
+
+  const baseArguments = {
+    startDateTime: "2026-08-14T00:00:00+08:00",
+    endDateTime: "2026-08-15T00:00:00+08:00",
+    timezone: "Asia/Singapore",
+  };
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 2, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: { ...baseArguments, filter: "subject eq 'x'" } },
+  })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 3, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: { ...baseArguments, search: " " } },
+  })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 4, method: "tools/call",
+    params: { name: "microsoft365__get-calendar-view", arguments: baseArguments },
+  })}\n`);
+  const callDeadline = Date.now() + 5_000;
+  while (responses.filter((response) => [2, 3, 4].includes(response.id as number)).length < 3 && Date.now() < callDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  for (const id of [2, 3]) {
+    const result = responses.find((response) => response.id === id)?.result as {
+      isError: boolean; _meta: { lemmacomputer: { failure: { category: string; field: string } } };
+    };
+    assert.equal(result.isError, true);
+    assert.equal(result._meta.lemmacomputer.failure.category, "unsupported_option");
+  }
+  assert.equal((responses.find((response) => response.id === 4)?.result as { isError: boolean }).isError, false);
+  assert.deepEqual(calls, [{ server_id: "microsoft365-id", name: "get-calendar-view", arguments: baseArguments }]);
+});
+
+test("request-local agent identities are validated and cannot leak between concurrent connector calls", async (context) => {
+  const calls: Array<{ arguments: Record<string, unknown>; agentInstanceId?: string }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [{
+        name: "list-calendars",
+        inputSchema: { type: "object" },
+        mcp_info: { server_id: "microsoft365-id", server_name: "lemmacomputer_ms365" },
+      }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      calls.push({
+        arguments: payload.arguments,
+        agentInstanceId: request.headers["x-lemmacomputer-agent-instance-id"] as string | undefined,
+      });
+      await new Promise((resolve) => setTimeout(resolve,
+        request.headers["x-lemmacomputer-agent-instance-id"] === "11111111-1111-4111-8111-111111111111" ? 40 : 5));
+      response.end(JSON.stringify({ content: [{ type: "text", text: "ok" }], isError: false }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const responses: Array<Record<string, unknown>> = [];
+  createInterface({ input: child.stdout }).on("line", (line) => responses.push(JSON.parse(line)));
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  const listDeadline = Date.now() + 5_000;
+  while (!responses.some((response) => response.id === 1) && Date.now() < listDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const first = "11111111-1111-4111-8111-111111111111";
+  const second = "22222222-2222-4222-8222-222222222222";
+  for (const [id, agentInstanceId] of [[2, first], [3, second]] as const) {
+    child.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0", id, method: "tools/call",
+      params: {
+        name: "microsoft365__list-calendars",
+        arguments: {},
+        _meta: { lemmacomputer: { agentInstanceId } },
+      },
+    })}\n`);
+  }
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 4, method: "tools/call",
+    params: {
+      name: "microsoft365__list-calendars",
+      arguments: {},
+      _meta: { lemmacomputer: { agentInstanceId: "NOT-A-UUID" } },
+    },
+  })}\n`);
+  const deadline = Date.now() + 5_000;
+  while (responses.filter((response) => [2, 3, 4].includes(response.id as number)).length < 3 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.deepEqual(calls.map((call) => call.agentInstanceId).sort(), [first, second].sort());
+  assert.equal(calls.length, 2, "malformed identity metadata must fail before the broker");
+  const invalid = responses.find((response) => response.id === 4)?.result as {
+    isError: boolean; _meta: { lemmacomputer: { failure: { category: string; field: string } } };
+  };
+  assert.equal(invalid.isError, true);
+  assert.deepEqual(invalid._meta.lemmacomputer.failure, {
+    category: "authentication_failure",
+    field: "_meta.lemmacomputer.agentInstanceId",
+  });
 });

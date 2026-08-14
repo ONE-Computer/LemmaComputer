@@ -1889,6 +1889,12 @@ export const mcpPolicyDecisionSchema = z.strictObject({
   schemaId: z.string().min(1).max(160).nullable(),
   schemaHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   operationId: z.uuid().nullable(),
+  problem: z.strictObject({
+    category: z.enum(["invalid_argument", "unsupported_option", "authentication_failure", "policy_denial", "provider_rejection", "timeout", "unknown_failure"]),
+    field: z.string().min(1).max(128).nullable(),
+    message: z.string().min(1).max(320),
+    retryable: z.boolean(),
+  }).optional(),
 });
 export type McpPolicyDecision = z.infer<typeof mcpPolicyDecisionSchema>;
 
