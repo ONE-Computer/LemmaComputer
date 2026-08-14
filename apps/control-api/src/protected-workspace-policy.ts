@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import {
   agentCatalogIds,
   m365ToolCatalog,
@@ -22,12 +21,6 @@ import type {
   ProtectedWorkspacePolicyStore,
 } from "@lemmacomputer/workspace-store";
 
-const trustRootUrl = new URL("../../../config/product-policy/product-release-trust.json", import.meta.url);
-const baselineArtifactUrl = new URL(
-  "../../../config/product-policy/protected-baselines/office-worker-claude-v1.json",
-  import.meta.url,
-);
-
 export type ProductPolicyRelease = {
   trustRoot: ProductReleaseVerificationKeySet;
   signedEnvelope: SignedProtectedBaselineTemplate;
@@ -44,12 +37,6 @@ export const parseProductPolicyRelease = (
   const verified = verifyProtectedBaselineTemplate(signedEnvelope, trustRoot, { now });
   return { trustRoot, signedEnvelope, verified };
 };
-
-export const loadProductPolicyRelease = async (now = new Date()): Promise<ProductPolicyRelease> => parseProductPolicyRelease(
-  JSON.parse(await readFile(trustRootUrl, "utf8")) as unknown,
-  JSON.parse(await readFile(baselineArtifactUrl, "utf8")) as unknown,
-  now,
-);
 
 const microsoft365ToolPolicies = Object.fromEntries(Object.entries(m365ToolCatalog).map(([name, tool]) => [name, tool.decision]));
 

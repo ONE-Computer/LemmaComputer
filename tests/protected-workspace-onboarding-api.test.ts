@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { EgressSecurityGroupVersion, IdentityContext, RuntimePolicy } from "@lemmacomputer/contracts";
-import { resolveProtectedBaselinePolicy } from "@lemmacomputer/policy-integrity";
 import {
   MemoryWorkspaceStore,
   mvpPolicyDocument,
   type EffectivePolicy,
   type IdentityPolicyStore,
+  type RoutingStore,
   type SessionPrincipal,
 } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
-import { loadProductPolicyRelease, type ProtectedWorkspacePolicyAdministrationBoundary } from "../apps/control-api/src/protected-workspace-policy.js";
+import type { ProtectedWorkspacePolicyAdministrationBoundary } from "../apps/control-api/src/protected-workspace-policy.js";
 import type { ControllerClient, EgressProxyGrant } from "../apps/control-api/src/service.js";
 
 const proxyToken = "protected-onboarding-proxy-token-at-least-24-characters";
@@ -40,29 +40,7 @@ const authentication = {
   logout: async () => "",
 };
 
-test("a newly assigned protected administrator can reach workspace settings and create from a restricted egress ceiling", async () => {
-  const release = await loadProductPolicyRelease(new Date("2026-08-12T08:00:00.000Z"));
-  const protectedPolicy = resolveProtectedBaselinePolicy({
-    baseline: release.verified,
-    organizationPolicy: null,
-    connectorPolicies: [{
-      connectorId: "microsoft-365",
-      version: 1,
-      documentHash: release.verified.payload.documentHash,
-      enabled: true,
-      toolPolicies: release.verified.payload.document.constraints.connectors.toolPolicies["microsoft-365"],
-    }],
-    selection: {
-      workspaceProfile: "kasm-persistent-standard",
-      agentIds: ["claude-cli"],
-      applicationIds: ["firefox"],
-      modelAlias: "lemmacomputer-claude",
-      serviceClass: "balanced",
-      reasoningEffort: "medium",
-      egressMode: "restricted",
-      connectorIds: ["microsoft-365"],
-    },
-  });
+test("a new organization has no policy ceiling and its administrator can create a workspace", async () => {
   const fullWebFallback: EgressSecurityGroupVersion = {
     schemaVersion: 1,
     id: "egv_protected_acme_default_v1",
@@ -102,10 +80,13 @@ test("a newly assigned protected administrator can reach workspace settings and 
     listEgressSecurityGroups: async () => [fullWebFallback],
   } as unknown as IdentityPolicyStore;
   const protectedWorkspacePolicy = {
-    effectiveMemberPolicy: async (tenantId: string, subjectId: string) => tenantId === identity.tenantId && subjectId === identity.subjectId
-      ? { state: "assigned" as const, policy: protectedPolicy }
-      : { state: "unassigned" as const },
+    currentOrganizationPolicy: async () => null,
   } as unknown as ProtectedWorkspacePolicyAdministrationBoundary;
+  const routingStore = {
+    latestMappingVersion: async () => ({
+      deployments: ["lite", "balanced", "pro"].map((serviceClass) => ({ serviceClass })),
+    }),
+  } as unknown as RoutingStore;
   let createdPolicy: RuntimePolicy | null = null;
   let createdEgressProxy: EgressProxyGrant | undefined;
   const controller = {
@@ -126,6 +107,7 @@ test("a newly assigned protected administrator can reach workspace settings and 
     authentication,
     identityPolicyStore,
     protectedWorkspacePolicy,
+    routingStore,
     agentBridgeSecret: "protected-onboarding-agent-bridge-secret-at-least-32-characters",
     egressGrantSecret: "protected-onboarding-egress-secret-at-least-32-characters",
   });
@@ -143,12 +125,20 @@ test("a newly assigned protected administrator can reach workspace settings and 
 
     const settings = await app.inject({ method: "GET", url: "/v1/sandbox-settings?grantId=personal", headers });
     assert.equal(settings.statusCode, 200);
-    assert.equal(settings.json().manifest.sandbox.egressMode, "restricted");
-    assert.equal(settings.json().securityGroup.defaultAction, "deny");
+    assert.deepEqual(settings.json().availableProfiles.map((profile: { id: string }) => profile.id), [
+      "claude-desktop-standard-v1", "disposable-open-v1",
+    ]);
+    assert.deepEqual(settings.json().availableAgents.map((agent: { id: string }) => agent.id), [
+      "claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw",
+    ]);
+    assert.deepEqual(settings.json().availableApplications.map((application: { id: string }) => application.id), ["firefox", "google-chrome"]);
+    assert.deepEqual(settings.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite", "balanced", "pro"]);
+    assert.equal(settings.json().manifest.sandbox.egressMode, "full-web");
+    assert.equal(settings.json().securityGroup.defaultAction, "allow-public-http-https");
     assert.equal(settings.json().securityGroup.id, fullWebFallback.id);
-    assert.notEqual(settings.json().securityGroup.documentHash, fullWebFallback.documentHash);
+    assert.equal(settings.json().securityGroup.documentHash, fullWebFallback.documentHash);
     assert.equal(settings.json().availableSecurityGroups[0].id, fullWebFallback.id);
-    assert.equal(settings.json().availableSecurityGroups[0].defaultAction, "deny");
+    assert.equal(settings.json().availableSecurityGroups[0].defaultAction, "allow-public-http-https");
 
     const created = await app.inject({
       method: "POST",
@@ -158,16 +148,16 @@ test("a newly assigned protected administrator can reach workspace settings and 
     });
     assert.equal(created.statusCode, 201);
     assert.equal(created.json().state, "ready");
-    assert.equal(createdPolicy?.egressMode, "restricted");
-    assert.equal(createdPolicy?.egress?.defaultAction, "deny");
-    assert.equal(createdEgressProxy?.expectedGrant.egressMode, "restricted");
+    assert.equal(createdPolicy?.egressMode, "full-web");
+    assert.equal(createdPolicy?.egress?.defaultAction, "allow-public-http-https");
+    assert.equal(createdEgressProxy?.expectedGrant.egressMode, "full-web");
     assert.equal(createdEgressProxy?.expectedGrant.securityGroupVersionId, fullWebFallback.id);
 
     const lookupsBeforeCurrent = egressLookups;
     const currentAfterCreate = await app.inject({ method: "GET", url: "/v1/workspaces/current", headers });
     assert.equal(currentAfterCreate.statusCode, 200);
     assert.ok(egressLookups > lookupsBeforeCurrent, "an existing workspace still evaluates its current runtime policy");
-    assert.equal(currentAfterCreate.json().profile.egressMode, "restricted");
+    assert.equal(currentAfterCreate.json().profile.egressMode, "full-web");
   } finally {
     await app.close();
   }

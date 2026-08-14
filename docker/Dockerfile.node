@@ -5,7 +5,6 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages
-COPY config/product-policy ./config/product-policy
 
 RUN npm ci --include=optional \
   && npm run build --workspace web \

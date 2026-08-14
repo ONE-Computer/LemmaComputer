@@ -91,7 +91,7 @@ test("organization policy administration exposes the full catalog and append-onl
     assert.equal(current.statusCode, 200);
     assert.deepEqual(current.json().catalog, organizationWorkspacePolicyCatalog);
     assert.deepEqual(current.json().catalog.constraints.agents.allow, [
-      "claude-cli", "claude-desktop", "codex-cli", "hermes-claw", "hermes-desktop",
+      "claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw",
     ]);
     assert.deepEqual(current.json().catalog.constraints.workspaceProfiles.allow, ["claude-desktop-standard-v1", "disposable-open-v1"]);
     assert.deepEqual(current.json().catalog.constraints.serviceClasses.allow, ["lite", "balanced", "pro"]);

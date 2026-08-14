@@ -8,7 +8,7 @@ import { parseProductPolicyRelease } from "../apps/control-api/src/protected-wor
 const root = new URL("../", import.meta.url);
 const readJson = async (path: string) => JSON.parse(await readFile(new URL(path, root), "utf8")) as unknown;
 
-test("the packaged office-worker baseline verifies against the explicit product release trust root", async () => {
+test("the archived office-worker baseline remains verifiable for historical audit records", async () => {
   const trustRootInput = await readJson("config/product-policy/product-release-trust.json");
   const envelopeInput = await readJson("config/product-policy/protected-baselines/office-worker-claude-v1.json");
   const trustRoot = productReleaseVerificationKeySetSchema.parse(trustRootInput);
@@ -57,12 +57,12 @@ test("the packaged office-worker baseline verifies against the explicit product 
   );
 });
 
-test("the Control runtime image contains the signed product policy release", async () => {
+test("the Control runtime image does not package the retired product policy ceiling", async () => {
   const dockerfile = await readFile(new URL("docker/Dockerfile.node", root), "utf8");
-  assert.match(dockerfile, /^COPY config\/product-policy \.\/config\/product-policy$/m);
+  assert.doesNotMatch(dockerfile, /COPY config\/product-policy/);
 });
 
-test("product policy release loading fails closed for a tampered checked-in envelope", async () => {
+test("archival verification rejects a tampered historical envelope", async () => {
   const trustRoot = await readJson("config/product-policy/product-release-trust.json");
   const envelope = await readJson("config/product-policy/protected-baselines/office-worker-claude-v1.json") as Record<string, unknown>;
   assert.throws(
