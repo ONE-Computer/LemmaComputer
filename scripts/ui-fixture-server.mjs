@@ -555,35 +555,22 @@ const memberWorkspaceInventory = () => adminUsers.map((user) => ({
   })),
 }));
 const protectedWorkspacePolicyOverview = {
-  baseline: {
-    immutable: true,
-    editableByOrganization: false,
-    authority: "lemmacomputer_product_release",
-    templateId: "pbt_office_worker_claude",
-    templateVersionId: "pbtv_office_worker_claude_1",
-    version: 1,
-    supersedesTemplateVersionId: null,
-    documentHash: "c".repeat(64),
-    envelopeDigest: "d".repeat(64),
-    keyId: "prk_phase_0_5_20260812",
-    release: { releaseId: "0.5-policy-foundation-1", sourceCommit: "e".repeat(40), publishedAt: now },
+  catalog: {
     constraints: {
-      workspaceProfiles: { allow: ["claude-desktop-standard-v1", "kasm-persistent-standard"], deny: ["disposable-open-v1"] },
-      agents: { allow: ["claude-desktop", "claude-cli"], deny: ["codex-cli", "hermes-desktop", "hermes-claw"] },
+      workspaceProfiles: { allow: ["claude-desktop-standard-v1", "disposable-open-v1"], deny: [] },
+      agents: { allow: ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"], deny: [] },
       applications: { allow: ["firefox", "google-chrome"], deny: [] },
       modelAliases: { allow: ["lemmacomputer-auto", "lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-glm", "lemmacomputer-assistant", "lemmacomputer-bedrock"], deny: [] },
-      serviceClasses: { allow: ["auto", "lite", "balanced", "pro"], deny: [] },
+      serviceClasses: { allow: ["lite", "balanced", "pro"], deny: [] },
       maximumReasoningEffort: "max",
-      maximumEgressMode: "restricted",
+      maximumEgressMode: "full-web",
       clipboard: { localToWorkspace: true, workspaceToLocal: true, maxBytes: 1048576 },
       connectors: { allow: ["microsoft-365"], deny: [], toolPolicies: { "microsoft-365": { "list-mail-messages": "allow", "send-mail": "approval_required" } } },
       capabilities: { allow: ["ai-assistant", "m365-read", "m365-write-protected"], deny: [] },
     },
-    installedAt: now,
   },
   organizationPolicyVersions: [],
 };
-const protectedAssignments = new Map();
 const fixtureRoleCatalog = {
   version: 2,
   permissions: [
@@ -1892,56 +1879,6 @@ const server = http.createServer((request, response) => {
       response.statusCode = 201;
       response.end(JSON.stringify({ version }));
     });
-    return;
-  }
-  if (request.method === "GET" && /^\/v1\/admin\/protected-workspace-policy\/members\/[^/]+\/assignment-versions$/.test(url.pathname)) {
-    const userId = url.pathname.split("/").at(-2);
-    response.end(JSON.stringify({ versions: protectedAssignments.get(userId) ?? [] }));
-    return;
-  }
-  if (request.method === "POST" && /^\/v1\/admin\/protected-workspace-policy\/members\/[^/]+\/assignment-versions$/.test(url.pathname)) {
-    let body = "";
-    request.on("data", (chunk) => { body += chunk; });
-    request.on("end", () => {
-      const userId = url.pathname.split("/").at(-2);
-      const prior = protectedAssignments.get(userId) ?? [];
-      const version = {
-        id: `fixture-protected-${userId}-${prior.length + 1}`,
-        tenantId: session.tenant.id,
-        subjectId: userId,
-        assignmentVersion: prior.length + 1,
-        previousAssignmentId: prior[0]?.id ?? null,
-        state: "selected",
-        protectedTemplateVersionId: protectedWorkspacePolicyOverview.baseline.templateVersionId,
-        organizationPolicyVersionId: protectedWorkspacePolicyOverview.organizationPolicyVersions[0]?.policyVersionId ?? null,
-        selection: JSON.parse(body).selection,
-        selectionHash: "f".repeat(64),
-        assignedBy: session.user.id,
-        createdAt: new Date().toISOString(),
-      };
-      protectedAssignments.set(userId, [version, ...prior]);
-      response.statusCode = 201;
-      response.end(JSON.stringify({ version, remediation: { required: true, action: "restart_workspace", workspaceIds: ["fixture-example-workspace"] } }));
-    });
-    return;
-  }
-  if (request.method === "DELETE" && /^\/v1\/admin\/protected-workspace-policy\/members\/[^/]+\/assignment-versions$/.test(url.pathname)) {
-    const userId = url.pathname.split("/").at(-2);
-    const prior = protectedAssignments.get(userId) ?? [];
-    if (!prior.length || prior[0].state === "revoked") {
-      response.end(JSON.stringify({ revoked: false, remediation: { required: false, action: "none", workspaceIds: [] } }));
-      return;
-    }
-    const version = {
-      ...prior[0],
-      id: `fixture-protected-${userId}-${prior.length + 1}`,
-      assignmentVersion: prior.length + 1,
-      previousAssignmentId: prior[0].id,
-      state: "revoked",
-      createdAt: new Date().toISOString(),
-    };
-    protectedAssignments.set(userId, [version, ...prior]);
-    response.end(JSON.stringify({ revoked: true, remediation: { required: true, action: "restart_workspace", workspaceIds: ["fixture-example-workspace"] } }));
     return;
   }
   if (key === "GET /v1/admin/invitations") {

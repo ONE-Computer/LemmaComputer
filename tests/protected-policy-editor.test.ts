@@ -5,11 +5,18 @@ import {
   protectedOrganizationConstraintsFromEditor,
   protectedPolicyAssignableProfileIds,
   protectedPolicyAssignableServiceClasses,
+  protectedPolicyEffectiveValues,
 } from "../apps/web/src/protected-policy-editor.js";
 
 const constraint = <T extends string>(allow: T[], deny: T[] = []) => ({ allow, deny });
 
-test("the organization editor hides stale choices while preserving routing and connector policy ownership", () => {
+test("the full supported catalog remains available when no organization policy exists", () => {
+  const catalog = constraint(["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"]);
+  assert.deepEqual(protectedPolicyEffectiveValues(catalog, undefined), catalog.allow);
+  assert.deepEqual(protectedPolicyEffectiveValues(catalog, constraint(["codex-cli"])), ["codex-cli"]);
+});
+
+test("the organization editor uses the supported catalog while preserving routing and connector policy ownership", () => {
   assert.deepEqual([...protectedPolicyAssignableProfileIds], ["claude-desktop-standard-v1", "disposable-open-v1"]);
   assert.deepEqual([...protectedPolicyAssignableServiceClasses], ["lite", "balanced", "pro"]);
 
@@ -19,19 +26,19 @@ test("the organization editor hides stale choices while preserving routing and c
     toolPolicies: { "microsoft-365": { "send-mail": "approval_required" as const } },
   };
   const output = protectedOrganizationConstraintsFromEditor({
-    baseline: {
-      workspaceProfiles: constraint(["claude-desktop-standard-v1", "kasm-persistent-standard"]),
-      agents: constraint(["claude-desktop", "claude-cli"]),
+    catalog: {
+      workspaceProfiles: constraint(["claude-desktop-standard-v1", "disposable-open-v1"]),
+      agents: constraint(["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"]),
       applications: constraint(["firefox", "google-chrome"]),
       modelAliases: constraint(["lemmacomputer-auto", "lemmacomputer-openai"]),
-      serviceClasses: constraint(["auto", "lite", "balanced", "pro"]),
+      serviceClasses: constraint(["lite", "balanced", "pro"]),
       maximumReasoningEffort: "max",
-      maximumEgressMode: "restricted",
+      maximumEgressMode: "full-web",
       clipboard: { localToWorkspace: true, workspaceToLocal: true, maxBytes: 1_048_576 },
       connectors: { ...constraint(["microsoft-365"]), toolPolicies: {} },
       capabilities: constraint(["ai-assistant"]),
     },
-    overlay: { modelAliases, connectors },
+    existingPolicy: { modelAliases, connectors },
     editor: {
       workspaceProfiles: ["claude-desktop-standard-v1"],
       agents: ["claude-cli"],
@@ -49,11 +56,11 @@ test("the organization editor hides stale choices while preserving routing and c
   assert.deepEqual(output.connectors, connectors, "connector enablement and tool policy remain owned by Connectors");
   assert.deepEqual(output.workspaceProfiles, {
     allow: ["claude-desktop-standard-v1"],
-    deny: ["kasm-persistent-standard"],
+    deny: ["disposable-open-v1"],
   });
   assert.deepEqual(output.serviceClasses, {
     allow: ["lite", "balanced", "pro"],
-    deny: ["auto"],
+    deny: [],
   });
   assert.doesNotThrow(() => organizationWorkspacePolicyConstraintsSchema.parse(output));
 });

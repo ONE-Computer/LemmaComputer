@@ -396,10 +396,12 @@ test("administration keeps identity in People and access while workspace operati
   assert.match(app, /Administrators can manage runtime state but cannot open member workspaces or view their content/);
   assert.match(app, /<ProtectedWorkspacePolicySection users=\{policyUsers\}/);
   assert.match(app, /Current organization policy/);
-  assert.match(app, /Baseline only/);
-  assert.match(app, /Version \$\{latest\.version\} is the latest policy available to assign/);
-  assert.match(app, /Organization connector ceiling/);
-  assert.match(app, /Open Connectors policy/);
+  assert.match(app, /No organization policy/);
+  assert.match(app, /All options available/);
+  assert.match(app, /Version \$\{latest\.version\} is active across the organization/);
+  assert.doesNotMatch(app, /Locked baseline|Baseline only|Office worker baseline/);
+  assert.doesNotMatch(app, /Organization connector ceiling|Open Connectors policy/);
+  assert.doesNotMatch(app, /Member policy status|Assign policy|Revoke workspace access/);
   assert.doesNotMatch(app, /Auto \(Beta\)/);
   assert.doesNotMatch(app, /Persistent Ubuntu workspace/);
   assert.doesNotMatch(app, /legend="Model routes"/);
@@ -413,6 +415,7 @@ test("administration keeps identity in People and access while workspace operati
   assert.match(api, /admin\/invitations/);
   assert.match(api, /admin\/memberships/);
   assert.match(api, /protected-workspace-policy\/organization-versions/);
+  assert.doesNotMatch(api, /protected-workspace-policy\/members/);
   assert.match(api, /admin\/users\/.*\/sandbox-settings/);
   assert.match(api, /connectors\/.*\/access-policy/);
 });

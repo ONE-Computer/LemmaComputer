@@ -439,7 +439,7 @@ function WorkspaceAssignment({ label, icon: Icon, children, detail }) {
   );
 }
 
-function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, policyUsers, onConfigureConnections }) {
+function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, policyUsers }) {
   const organizationSection = section === "organization" && canManageAnyWorkspace;
   const policySection = section === "policies" && canManagePolicy;
   return (
@@ -451,7 +451,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
           <span>{organizationSection
             ? "Monitor and manage member workspace runtimes. Workspace contents remain private to each member."
             : policySection
-              ? "Review the locked product baseline, set stricter organization limits, and keep member assignments current."
+              ? "Optionally set organization-wide limits for workspace creation and use."
               : "Create and manage the workspaces available to you."}</span>
         </div>
         {!organizationSection && !policySection && canCreateWorkspace && <button className="primary-button create-workspace-button" type="button" onClick={onCreate}>
@@ -466,7 +466,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
       </nav>}
 
       {organizationSection ? <MemberWorkspaceConsole members={workspaceMembers} loading={adminLoading} error={workspaceError} busyWorkspaceId={workspaceBusyId} onCommand={onWorkspaceCommand} />
-        : policySection ? <ProtectedWorkspacePolicySection users={policyUsers} onConfigureConnections={onConfigureConnections} />
+        : policySection ? <ProtectedWorkspacePolicySection users={policyUsers} />
           : <>
 
       {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong>{apiError}</span></div>}
@@ -1245,7 +1245,7 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
         </div>
         <p className="tool-policy-intro">{mcpPolicy?.connectorId
           ? "Review the provider-supplied definition before choosing what workspace agents may run. New or changed tools stay blocked until this exact definition is saved; a later provider change requires another review."
-          : "Choose what workspace agents can run, what needs an administrator's approval, and what is blocked. The effective result shows when the locked LemmaComputer baseline is more restrictive than your setting."}</p>
+          : "Choose what workspace agents can run, what needs an administrator's approval, and what is blocked. These permissions are managed here in Connectors."}</p>
         {changeSummary && <p className="tool-policy-change-summary"><strong>Review required:</strong> {changeSummary}. Open each provider definition before allowing it.</p>}
         <div className="tool-policy-groups">
           {groupedTools.map((group) => <section key={group.service} className="tool-policy-group">
@@ -1952,9 +1952,7 @@ const protectedPolicyProfileNames = {
   "claude-desktop-standard-v1": "Standard managed workspace",
   "disposable-open-v1": "Disposable open workspace",
 };
-const protectedPolicyConnectorNames = { "microsoft-365": "Microsoft 365" };
 const protectedPolicyServiceClassNames = { lite: "Lite", balanced: "Balanced", pro: "Pro" };
-const protectedPolicyServiceClassName = (value) => value === "auto" ? "Balanced (legacy assignment)" : protectedPolicyServiceClassNames[value] ?? value;
 const protectedPolicyReasoningOptions = ["disabled", "low", "medium", "high", "max"];
 const protectedPolicyReasoningName = (value) => value === "disabled" ? "Off" : `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
 const protectedPolicyDate = (value) => new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -1984,78 +1982,55 @@ function ProtectedPolicyResourceEditor({ legend, description, values, labels, se
     <p>{description}</p>
     <div>{values.map((value) => <label key={value} className="workspace-policy-choice">
       <input type="checkbox" checked={selected.includes(value)} onChange={() => toggle(value)} />
-      <span><strong>{labels[value] ?? value}</strong><small>{selected.includes(value) ? "Available to member assignments" : "Restricted by the organization"}</small></span>
+      <span><strong>{labels[value] ?? value}</strong><small>{selected.includes(value) ? "Available across the organization" : "Restricted by the organization"}</small></span>
     </label>)}</div>
   </fieldset>;
 }
 
-function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
+function ProtectedWorkspacePolicySection({ users }) {
   const [overview, setOverview] = useState(null);
-  const [assignments, setAssignments] = useState({});
-  const [remediations, setRemediations] = useState({});
-  const [busyUserId, setBusyUserId] = useState("");
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [editor, setEditor] = useState(null);
-  const [baselineOpen, setBaselineOpen] = useState(false);
-  const [reviewUser, setReviewUser] = useState(null);
   const [error, setError] = useState("");
-  const userIds = users.map((user) => user.userId).join(",");
   const load = async () => {
     const policy = await adminApi.protectedWorkspacePolicy();
-    const histories = await Promise.all(users.map(async (user) => [user.userId, await adminApi.protectedMemberPolicyVersions(user.userId)]));
     setOverview(policy);
-    setAssignments(Object.fromEntries(histories.map(([userId, history]) => [userId, history.versions?.[0] ?? null])));
     return policy;
   };
   useEffect(() => {
     let active = true;
-    Promise.all([
-      adminApi.protectedWorkspacePolicy(),
-      ...users.map(async (user) => [user.userId, await adminApi.protectedMemberPolicyVersions(user.userId)]),
-    ]).then(([policy, ...histories]) => {
+    adminApi.protectedWorkspacePolicy().then((policy) => {
       if (!active) return;
       setOverview(policy);
-      setAssignments(Object.fromEntries(histories.map(([userId, history]) => [userId, history.versions?.[0] ?? null])));
       setError("");
     }).catch((loadError) => {
       if (active) setError(loadError.message ?? "Workspace policy could not be loaded.");
     });
     return () => { active = false; };
-  }, [userIds]);
+  }, []);
   if (!overview && error) return <section className="workspace-policy-admin"><div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace policy needs attention</strong>{error}</span></div></section>;
   if (!overview) return <section className="workspace-policy-admin"><p className="admin-empty-state" role="status">Loading workspace policy…</p></section>;
 
-  const { baseline } = overview;
+  const { catalog } = overview;
+  const available = catalog.constraints;
   const organizationVersions = overview.organizationPolicyVersions ?? [];
   const latest = organizationVersions[0] ?? null;
-  const overlay = latest?.constraints ?? {};
+  const existingPolicy = latest?.constraints ?? {};
   const effective = {
-    workspaceProfiles: protectedPolicyEffectiveValues(baseline.constraints.workspaceProfiles, overlay.workspaceProfiles),
-    agents: protectedPolicyEffectiveValues(baseline.constraints.agents, overlay.agents),
-    applications: protectedPolicyEffectiveValues(baseline.constraints.applications, overlay.applications),
-    modelAliases: protectedPolicyEffectiveValues(baseline.constraints.modelAliases, overlay.modelAliases),
-    serviceClasses: protectedPolicyEffectiveValues(baseline.constraints.serviceClasses, overlay.serviceClasses),
-    connectors: protectedPolicyEffectiveValues(baseline.constraints.connectors, overlay.connectors),
-    maximumReasoningEffort: overlay.maximumReasoningEffort ?? baseline.constraints.maximumReasoningEffort,
-    maximumEgressMode: overlay.maximumEgressMode ?? baseline.constraints.maximumEgressMode,
+    workspaceProfiles: protectedPolicyEffectiveValues(available.workspaceProfiles, existingPolicy.workspaceProfiles),
+    agents: protectedPolicyEffectiveValues(available.agents, existingPolicy.agents),
+    applications: protectedPolicyEffectiveValues(available.applications, existingPolicy.applications),
+    serviceClasses: protectedPolicyEffectiveValues(available.serviceClasses, existingPolicy.serviceClasses),
+    maximumReasoningEffort: existingPolicy.maximumReasoningEffort ?? available.maximumReasoningEffort,
+    maximumEgressMode: existingPolicy.maximumEgressMode ?? available.maximumEgressMode,
     clipboard: {
-      localToWorkspace: baseline.constraints.clipboard.localToWorkspace && (overlay.clipboard?.localToWorkspace ?? true),
-      workspaceToLocal: baseline.constraints.clipboard.workspaceToLocal && (overlay.clipboard?.workspaceToLocal ?? true),
-      maxBytes: Math.min(baseline.constraints.clipboard.maxBytes, overlay.clipboard?.maxBytes ?? baseline.constraints.clipboard.maxBytes),
+      localToWorkspace: existingPolicy.clipboard?.localToWorkspace ?? available.clipboard.localToWorkspace,
+      workspaceToLocal: existingPolicy.clipboard?.workspaceToLocal ?? available.clipboard.workspaceToLocal,
+      maxBytes: Math.min(available.clipboard.maxBytes, existingPolicy.clipboard?.maxBytes ?? available.clipboard.maxBytes),
     },
   };
   const assignableWorkspaceProfiles = effective.workspaceProfiles.filter((value) => protectedPolicyAssignableProfileIds.has(value));
   const assignableServiceClasses = effective.serviceClasses.filter((value) => protectedPolicyAssignableServiceClasses.has(value));
-  const selection = {
-    workspaceProfile: assignableWorkspaceProfiles.includes("claude-desktop-standard-v1") ? "claude-desktop-standard-v1" : assignableWorkspaceProfiles[0],
-    agentIds: effective.agents,
-    applicationIds: effective.applications,
-    modelAlias: effective.modelAliases.includes("lemmacomputer-auto") ? "lemmacomputer-auto" : effective.modelAliases[0],
-    serviceClass: assignableServiceClasses.includes("balanced") ? "balanced" : assignableServiceClasses[0],
-    reasoningEffort: effective.maximumReasoningEffort,
-    egressMode: effective.maximumEgressMode,
-    connectorIds: effective.connectors,
-  };
   const openEditor = () => setEditor({
     workspaceProfiles: [...assignableWorkspaceProfiles],
     agents: [...effective.agents],
@@ -2072,7 +2047,7 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
     setSavingPolicy(true);
     setError("");
     try {
-      const constraints = protectedOrganizationConstraintsFromEditor({ baseline: baseline.constraints, overlay, editor });
+      const constraints = protectedOrganizationConstraintsFromEditor({ catalog: available, existingPolicy, editor });
       await adminApi.createProtectedOrganizationPolicyVersion(constraints, editor.revisionNote.trim());
       await load();
       setEditor(null);
@@ -2080,33 +2055,6 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
       setError(saveError.message ?? "The organization policy version could not be saved.");
     } finally {
       setSavingPolicy(false);
-    }
-  };
-  const assign = async (user) => {
-    setBusyUserId(user.userId);
-    setError("");
-    try {
-      const result = await adminApi.assignProtectedMemberPolicy(user.userId, selection);
-      setAssignments((current) => ({ ...current, [user.userId]: result.version }));
-      setRemediations((current) => ({ ...current, [user.userId]: result.remediation }));
-    } catch (assignError) {
-      setError(assignError.message ?? "The workspace policy could not be assigned.");
-    } finally {
-      setBusyUserId("");
-    }
-  };
-  const revoke = async (user) => {
-    setBusyUserId(user.userId);
-    setError("");
-    try {
-      const result = await adminApi.revokeProtectedMemberPolicy(user.userId);
-      setRemediations((current) => ({ ...current, [user.userId]: result.remediation }));
-      await load();
-      setReviewUser(null);
-    } catch (revokeError) {
-      setError(revokeError.message ?? "Workspace access could not be revoked.");
-    } finally {
-      setBusyUserId("");
     }
   };
   const editorReady = editor
@@ -2119,10 +2067,10 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
 
   return <section className="workspace-policy-admin" aria-labelledby="protected-workspace-policy-heading">
     <header className="workspace-policy-heading">
-      <div><div className="workspace-policy-title-line"><h2 id="protected-workspace-policy-heading">{latest ? "Current organization policy" : "Current workspace policy"}</h2><span>{latest ? `v${latest.version}` : "Baseline only"}</span></div>
+      <div><div className="workspace-policy-title-line"><h2 id="protected-workspace-policy-heading">{latest ? "Current organization policy" : "No organization policy"}</h2><span>{latest ? `v${latest.version}` : "All options available"}</span></div>
         <p>{latest
-          ? `Version ${latest.version} is the latest policy available to assign. Existing members stay on their assigned version until updated.`
-          : "No additional organization restrictions have been added. The Office worker baseline remains the maximum configuration."}</p></div>
+          ? `Version ${latest.version} is active across the organization.`
+          : "This organization has no policy restrictions. Members may choose from every supported workspace option."}</p></div>
       <button className="primary-button workspace-policy-primary-action" type="button" onClick={openEditor}>{latest ? "Edit organization policy" : <><Add24Regular aria-hidden="true" />Set organization policy</>}</button>
     </header>
     {error && <div className="workspace-policy-error connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The workspace policy was not updated</strong>{error}</span></div>}
@@ -2132,61 +2080,29 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
         <h3 id="workspace-policy-controls-heading">Policy controls</h3>
         <ProtectedPolicyControlGroup icon={Bot24Regular} title="Agents" lines={protectedPolicyList(effective.agents, protectedPolicyAgentNames)} />
         <ProtectedPolicyControlGroup icon={Apps24Regular} title="Applications" lines={protectedPolicyList(effective.applications, applicationNames)} />
-        <ProtectedPolicyControlGroup icon={PlugConnected24Regular} title="Organization connector ceiling" lines={effective.connectors.length ? [...protectedPolicyList(effective.connectors, protectedPolicyConnectorNames).map((connector) => `${connector} may be enabled`), "Enablement and tool permissions are managed in Connectors"] : ["No connectors may be enabled", "Enablement and tool permissions are managed in Connectors"]} action={<button type="button" onClick={onConfigureConnections}>Open Connectors policy</button>} />
         <ProtectedPolicyControlGroup icon={Info24Regular} title="Service and thinking" lines={[`Maximum thinking: ${protectedPolicyReasoningName(effective.maximumReasoningEffort)}`, `Service levels: ${protectedPolicyList(assignableServiceClasses, protectedPolicyServiceClassNames).join(", ")}`]} />
         <ProtectedPolicyControlGroup icon={ShieldCheckmark24Regular} title="Advanced organization security" lines={[protectedPolicyList(assignableWorkspaceProfiles, protectedPolicyProfileNames).join(", "), effective.maximumEgressMode === "restricted" ? "Restricted internet access" : "Full web access permitted", protectedPolicyClipboardSummary(effective.clipboard)]} />
       </section>
       <aside className="workspace-policy-context">
-        <section><div className="workspace-policy-context-title"><ShieldCheckmark24Regular aria-hidden="true" /><strong>Locked baseline</strong></div><h3>Office worker baseline <span>v{baseline.version}</span></h3><p>Published by LemmaComputer release {baseline.release.releaseId}. This is the maximum configuration and cannot be edited or weakened.</p><button type="button" onClick={() => setBaselineOpen(true)}>View baseline</button></section>
-        <section><div className="workspace-policy-context-title"><Clock24Regular aria-hidden="true" /><strong>Policy state</strong></div>{latest ? <><p><strong>Organization policy v{latest.version}</strong></p><p>{latest.revisionNote}</p><p>Saved {protectedPolicyDate(latest.createdAt)} by {versionCreator(latest)}.</p></> : <><p><strong>Product baseline active</strong></p><p>No organization version yet.</p></>}<p>Every organization change is saved as a new immutable version.</p></section>
+        <section><div className="workspace-policy-context-title"><Clock24Regular aria-hidden="true" /><strong>Policy state</strong></div>{latest ? <><p><strong>Organization policy v{latest.version}</strong></p><p>{latest.revisionNote}</p><p>Saved {protectedPolicyDate(latest.createdAt)} by {versionCreator(latest)}.</p></> : <><p><strong>No organization policy</strong></p><p>All supported workspace options are available by default.</p></>}<p>When an administrator saves a policy, it applies organization-wide and every edit creates a new immutable version.</p></section>
       </aside>
     </div>
-
-    <section className="workspace-policy-members" aria-labelledby="workspace-policy-members-heading">
-      <div><h3 id="workspace-policy-members-heading">Member policy status</h3><p>See who has the latest organization policy assignment and whether a workspace action is required.</p></div>
-      <div className="workspace-policy-member-table" role="table" aria-label="Member workspace policy status">
-        <div className="workspace-policy-member-header" role="row"><span role="columnheader">Member</span><span role="columnheader">Applied policy</span><span role="columnheader">Assignment status</span><span role="columnheader">Workspace action</span><span role="columnheader">Action</span></div>
-        {users.length === 0 ? <p className="admin-empty-state">No organization members are available to assign.</p> : users.map((user) => {
-          const assignment = assignments[user.userId];
-          const selected = assignment?.state === "selected";
-          const revoked = assignment?.state === "revoked";
-          const currentOrganizationVersion = selected && latest && assignment.organizationPolicyVersionId === latest.policyVersionId;
-          const currentBaseline = selected && !latest && !assignment.organizationPolicyVersionId;
-          const updateAvailable = selected && !currentOrganizationVersion && !currentBaseline;
-          const remediation = remediations[user.userId];
-          const policyLabel = selected ? assignment.organizationPolicyVersionId
-            ? `Organization policy v${organizationVersions.find((version) => version.policyVersionId === assignment.organizationPolicyVersionId)?.version ?? "previous"}`
-            : `Office worker baseline v${baseline.version}` : revoked ? "Access revoked" : "Not assigned";
-          const assignmentStatus = updateAvailable ? "Update available" : selected ? "Current" : revoked ? "Revoked" : "Not assigned";
-          const workspaceAction = remediation?.required ? "Restart to apply" : remediation ? "No restart required" : "No pending action recorded";
-          return <div className="workspace-policy-member-row" role="row" key={user.userId}>
-            <div className="workspace-policy-member-copy" role="cell" data-label="Member"><strong>{user.displayName}</strong><small>{user.email}</small></div>
-            <span role="cell" data-label="Applied policy">{policyLabel}</span>
-            <span role="cell" data-label="Assignment status" className={`workspace-policy-state ${updateAvailable ? "attention" : selected ? "current" : "muted"}`}>{assignmentStatus}</span>
-            <span role="cell" data-label="Workspace action">{workspaceAction}</span>
-            <div className="workspace-policy-member-actions" role="cell" data-label="Action">{updateAvailable || !selected
-              ? <button type="button" disabled={busyUserId === user.userId || !selection.workspaceProfile || !selection.agentIds.length || !selection.applicationIds.length || !selection.modelAlias || !selection.serviceClass} onClick={() => assign(user)}>{busyUserId === user.userId ? "Updating" : updateAvailable ? "Apply latest" : revoked ? "Restore access" : "Assign policy"}</button>
-              : <button type="button" onClick={() => setReviewUser(user)}>Review</button>}</div>
-          </div>;
-        })}
-      </div>
-    </section>
 
     <details className="workspace-policy-history">
       <summary><span><Clock24Regular aria-hidden="true" /><strong>Version history</strong><small>{organizationVersions.length ? `${organizationVersions.length} immutable organization ${organizationVersions.length === 1 ? "version" : "versions"}` : "No organization policy versions yet."}</small></span><ChevronDown16Regular aria-hidden="true" /></summary>
       {organizationVersions.length > 0 && <div className="workspace-policy-history-list">{organizationVersions.map((version) => <article key={version.policyVersionId}><strong>v{version.version}{version === latest ? " · Current" : ""}</strong><span>{version.revisionNote}</span><small>{versionCreator(version)} · {protectedPolicyDate(version.createdAt)}</small></article>)}</div>}
     </details>
 
-    {editor && <ModalDialog className="workspace-policy-editor-modal" title={latest ? "Edit organization policy" : "Set organization policy"} description="Start from the Office worker baseline and add stricter organization limits. You cannot enable anything blocked by LemmaComputer." eyebrow={latest ? `Current organization version ${latest.version}` : "Baseline only"} labelledBy="workspace-policy-editor-title" onClose={savingPolicy ? () => undefined : () => { setEditor(null); setError(""); }}>
+    {editor && <ModalDialog className="workspace-policy-editor-modal" title={latest ? "Edit organization policy" : "Set organization policy"} description="Choose the workspace options available across this organization. Saving creates a new immutable version that applies to every member." eyebrow={latest ? `Current organization version ${latest.version}` : "No current policy"} labelledBy="workspace-policy-editor-title" onClose={savingPolicy ? () => undefined : () => { setEditor(null); setError(""); }}>
       <div className="workspace-policy-editor-body">
-        <ProtectedPolicyResourceEditor legend="Agents" description="Choose the approved agent experiences members may select." values={protectedPolicyAllowed(baseline.constraints.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} />
-        <ProtectedPolicyResourceEditor legend="Applications" description="Members remain free to choose from these approved workspace applications." values={protectedPolicyAllowed(baseline.constraints.applications)} labels={applicationNames} selected={editor.applications} onChange={(applications) => setEditor({ ...editor, applications })} />
-        <ProtectedPolicyResourceEditor legend="Workspace access" description="Limit the workspace access modes available to new member assignments. Existing pinned legacy workspaces remain compatible." values={protectedPolicyAllowed(baseline.constraints.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
-        <ProtectedPolicyResourceEditor legend="Service levels" description="Choose the Lite, Balanced, and Pro service levels members may request." values={protectedPolicyAllowed(baseline.constraints.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value))} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
+        <ProtectedPolicyResourceEditor legend="Agents" description="Choose the approved agent experiences members may select." values={protectedPolicyAllowed(available.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} />
+        <ProtectedPolicyResourceEditor legend="Applications" description="Members remain free to choose from these approved workspace applications." values={protectedPolicyAllowed(available.applications)} labels={applicationNames} selected={editor.applications} onChange={(applications) => setEditor({ ...editor, applications })} />
+        <ProtectedPolicyResourceEditor legend="Workspace access" description="Choose the workspace access modes members may select." values={protectedPolicyAllowed(available.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
+        <ProtectedPolicyResourceEditor legend="Service levels" description="Choose the Lite, Balanced, and Pro service levels members may request." values={protectedPolicyAllowed(available.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value))} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
         <fieldset className="workspace-policy-editor-group workspace-policy-editor-limits"><legend>Advanced organization security</legend><p>Set organization-wide ceilings for thinking, internet access, and text clipboard transfer.</p><div className="workspace-policy-limit-grid">
-          <label><span>Maximum thinking</span><SelectMenu value={editor.maximumReasoningEffort} ariaLabel="Maximum thinking level" options={protectedPolicyReasoningOptions.filter((value) => protectedPolicyReasoningOptions.indexOf(value) <= protectedPolicyReasoningOptions.indexOf(baseline.constraints.maximumReasoningEffort)).map((value) => ({ value, label: protectedPolicyReasoningName(value) }))} onValueChange={(maximumReasoningEffort) => setEditor({ ...editor, maximumReasoningEffort })} /></label>
-          <label><span>Internet access ceiling</span><SelectMenu value={editor.maximumEgressMode} ariaLabel="Internet access ceiling" options={[{ value: "restricted", label: "Restricted" }, ...(baseline.constraints.maximumEgressMode === "full-web" ? [{ value: "full-web", label: "Full web" }] : [])]} onValueChange={(maximumEgressMode) => setEditor({ ...editor, maximumEgressMode })} /></label>
-          <label><span>Clipboard limit (KB)</span><input type="number" min="1" max={Math.round(baseline.constraints.clipboard.maxBytes / 1024)} value={editor.clipboardMaxKb} onChange={(event) => setEditor({ ...editor, clipboardMaxKb: Number(event.target.value) })} /></label>
+          <label><span>Maximum thinking</span><SelectMenu value={editor.maximumReasoningEffort} ariaLabel="Maximum thinking level" options={protectedPolicyReasoningOptions.filter((value) => protectedPolicyReasoningOptions.indexOf(value) <= protectedPolicyReasoningOptions.indexOf(available.maximumReasoningEffort)).map((value) => ({ value, label: protectedPolicyReasoningName(value) }))} onValueChange={(maximumReasoningEffort) => setEditor({ ...editor, maximumReasoningEffort })} /></label>
+          <label><span>Internet access ceiling</span><SelectMenu value={editor.maximumEgressMode} ariaLabel="Internet access ceiling" options={[{ value: "restricted", label: "Restricted" }, ...(available.maximumEgressMode === "full-web" ? [{ value: "full-web", label: "Full web" }] : [])]} onValueChange={(maximumEgressMode) => setEditor({ ...editor, maximumEgressMode })} /></label>
+          <label><span>Clipboard limit (KB)</span><input type="number" min="1" max={Math.round(available.clipboard.maxBytes / 1024)} value={editor.clipboardMaxKb} onChange={(event) => setEditor({ ...editor, clipboardMaxKb: Number(event.target.value) })} /></label>
           <label className="workspace-policy-switch"><input type="checkbox" checked={editor.clipboardLocalToWorkspace} onChange={(event) => setEditor({ ...editor, clipboardLocalToWorkspace: event.target.checked })} /><span><strong>Copy into workspace</strong><small>Allow local clipboard content to enter the workspace.</small></span></label>
           <label className="workspace-policy-switch"><input type="checkbox" checked={editor.clipboardWorkspaceToLocal} onChange={(event) => setEditor({ ...editor, clipboardWorkspaceToLocal: event.target.checked })} /><span><strong>Copy out of workspace</strong><small>Allow workspace clipboard content to return locally.</small></span></label>
         </div></fieldset>
@@ -2196,9 +2112,6 @@ function ProtectedWorkspacePolicySection({ users, onConfigureConnections }) {
       <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={savePolicy}>{savingPolicy ? "Saving version" : latest ? "Save as new version" : "Save organization policy"}</button></div>
     </ModalDialog>}
 
-    {baselineOpen && <ModalDialog className="workspace-policy-baseline-modal" title="Office worker baseline" description="This LemmaComputer release defines the maximum workspace configuration. Organization policy can only make it stricter." eyebrow={`Locked product baseline · v${baseline.version}`} labelledBy="workspace-policy-baseline-title" onClose={() => setBaselineOpen(false)}><div className="workspace-policy-baseline-details"><section><strong>Agents</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.agents), protectedPolicyAgentNames).join(", ")}</span></section><section><strong>Applications</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.applications), applicationNames).join(", ")}</span></section><section><strong>Organization connector ceiling</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.connectors), protectedPolicyConnectorNames).join(", ") || "None"} · enablement and tool permissions are managed in Connectors</span></section><section><strong>Service and thinking</strong><span>{protectedPolicyList(protectedPolicyAllowed(baseline.constraints.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value)), protectedPolicyServiceClassNames).join(", ")} · maximum {protectedPolicyReasoningName(baseline.constraints.maximumReasoningEffort)} thinking</span></section><section><strong>Advanced organization security</strong><span>{baseline.constraints.maximumEgressMode === "restricted" ? "Restricted internet" : "Full web permitted"} · {protectedPolicyClipboardSummary(baseline.constraints.clipboard)}</span></section><section><strong>Release provenance</strong><span>{baseline.release.releaseId} · published {protectedPolicyDate(baseline.release.publishedAt)}</span></section></div><div className="modal-actions"><span /><button className="primary-button" type="button" onClick={() => setBaselineOpen(false)}>Done</button></div></ModalDialog>}
-
-    {reviewUser && <ModalDialog className="workspace-policy-review-modal" title={reviewUser.displayName} description="Review the immutable policy version currently assigned to this member." eyebrow="Member policy assignment" labelledBy="workspace-policy-review-title" onClose={busyUserId ? () => undefined : () => setReviewUser(null)}>{(() => { const assignment = assignments[reviewUser.userId]; return <><div className="workspace-policy-review-details"><section><strong>Assignment state</strong><span>{assignment?.state === "selected" ? "Assigned" : assignment?.state === "revoked" ? "Access revoked" : "Not assigned"}</span></section>{assignment?.state === "selected" && <><section><strong>Agents</strong><span>{protectedPolicyList(assignment.selection.agentIds, protectedPolicyAgentNames).join(", ")}</span></section><section><strong>Applications</strong><span>{protectedPolicyList(assignment.selection.applicationIds, applicationNames).join(", ")}</span></section><section><strong>Service and thinking</strong><span>{protectedPolicyServiceClassName(assignment.selection.serviceClass)} · {protectedPolicyReasoningName(assignment.selection.reasoningEffort)} thinking</span></section><section><strong>Assigned</strong><span>{protectedPolicyDate(assignment.createdAt)}</span></section></>}</div><div className="modal-actions"><button className="danger-button secondary-button" type="button" disabled={busyUserId === reviewUser.userId} onClick={() => revoke(reviewUser)}>{busyUserId === reviewUser.userId ? "Revoking" : "Revoke workspace access"}</button><button className="primary-button" type="button" onClick={() => setReviewUser(null)}>Done</button></div></>; })()}</ModalDialog>}
   </section>;
 }
 
@@ -6509,11 +6422,6 @@ export function App() {
     setToast("Choose the configuration, then create the workspace.");
   };
 
-  const configureMicrosoft365 = () => {
-    selectNav("Connectors");
-    setConnectionsView("microsoft365-tools");
-  };
-
   const refreshAdminUsers = () => adminApi.users().then((value) => {
     setAdminUsers(value.users);
     setAdminDelegableBuiltInRoles(value.delegableBuiltInRoles ?? []);
@@ -7049,7 +6957,6 @@ export function App() {
             workspaceBusyId={adminWorkspaceBusyId}
             onWorkspaceCommand={commandAdminWorkspace}
             policyUsers={adminUsers}
-            onConfigureConnections={configureMicrosoft365}
           />
         )}
         {activeNav === "Sites" && <SitesScreen

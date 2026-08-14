@@ -3,28 +3,30 @@ export const protectedPolicyAssignableServiceClasses = new Set(["lite", "balance
 
 export const protectedPolicyAllowed = (constraint) => constraint.allow.filter((value) => !constraint.deny.includes(value));
 
-export const protectedPolicyEffectiveValues = (baseline, overlay) => {
-  const ceiling = protectedPolicyAllowed(baseline);
-  const selected = overlay?.allow ? ceiling.filter((value) => overlay.allow.includes(value)) : ceiling;
-  return selected.filter((value) => !overlay?.deny?.includes(value));
+export const protectedPolicyEffectiveValues = (catalog, organizationPolicy) => {
+  const available = protectedPolicyAllowed(catalog);
+  const selected = organizationPolicy?.allow
+    ? available.filter((value) => organizationPolicy.allow.includes(value))
+    : available;
+  return selected.filter((value) => !organizationPolicy?.deny?.includes(value));
 };
 
-const resourceConstraint = (baselineConstraint, selected) => {
-  const ceiling = protectedPolicyAllowed(baselineConstraint);
-  return { allow: selected, deny: ceiling.filter((value) => !selected.includes(value)) };
+const resourceConstraint = (catalogConstraint, selected) => {
+  const available = protectedPolicyAllowed(catalogConstraint);
+  return { allow: selected, deny: available.filter((value) => !selected.includes(value)) };
 };
 
-export const protectedOrganizationConstraintsFromEditor = ({ baseline, overlay, editor }) => ({
-  ...overlay,
-  workspaceProfiles: resourceConstraint(baseline.workspaceProfiles, editor.workspaceProfiles),
-  agents: resourceConstraint(baseline.agents, editor.agents),
-  applications: resourceConstraint(baseline.applications, editor.applications),
-  serviceClasses: resourceConstraint(baseline.serviceClasses, editor.serviceClasses),
+export const protectedOrganizationConstraintsFromEditor = ({ catalog, existingPolicy, editor }) => ({
+  ...existingPolicy,
+  workspaceProfiles: resourceConstraint(catalog.workspaceProfiles, editor.workspaceProfiles),
+  agents: resourceConstraint(catalog.agents, editor.agents),
+  applications: resourceConstraint(catalog.applications, editor.applications),
+  serviceClasses: resourceConstraint(catalog.serviceClasses, editor.serviceClasses),
   maximumReasoningEffort: editor.maximumReasoningEffort,
   maximumEgressMode: editor.maximumEgressMode,
   clipboard: {
     localToWorkspace: editor.clipboardLocalToWorkspace,
     workspaceToLocal: editor.clipboardWorkspaceToLocal,
-    maxBytes: Math.min(baseline.clipboard.maxBytes, Math.max(1, editor.clipboardMaxKb) * 1024),
+    maxBytes: Math.min(catalog.clipboard.maxBytes, Math.max(1, editor.clipboardMaxKb) * 1024),
   },
 });
