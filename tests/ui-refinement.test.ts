@@ -30,7 +30,7 @@ test("Workspace is the contextual personal and organization workspace surface wi
   ]);
   assert.match(app, /<h1>Workspace<\/h1>/);
   assert.match(app, /Organization workspaces/);
-  assert.match(app, /Workspace policies/);
+  assert.match(app, /Workspace guardrails/);
   assert.match(app, /home: "Workspace"/);
   assert.match(app, /label="Workspace"/);
   assert.match(app, /workspace-overview-list/);
@@ -87,8 +87,9 @@ test("workspace setup makes disposable-open an explicit accessible choice with d
   assert.match(app, /Non-sensitive work only/);
   assert.match(app, /Stop keeps this workspace and pauses schedules; restarting restores it and resumes future schedules/);
   assert.match(app, /Delete permanently removes its files, schedules, logs, and installed tools/);
-  assert.match(app, /Group and rule changes apply live without restarting/);
-  assert.match(app, /Public HTTP and HTTPS are allowed by default; matching Deny rules block exceptions/);
+  assert.match(app, /Network access is managed by your organization\. You can review the effective access below/);
+  assert.match(app, /settings\.securityGroup\?\.defaultAction === "allow-public-http-https" \? "Public internet" : "Approved destinations"/);
+  assert.doesNotMatch(app, /Public HTTP and HTTPS are allowed by default; matching Deny rules block exceptions/);
   assert.match(styles, /\.workspace-profile-option:has\(input:focus-visible\)/);
   assert.match(styles, /\.disposable-profile-warning/);
 });
@@ -394,11 +395,11 @@ test("administration keeps identity in People and access while workspace operati
   assert.match(app, /Sign out sessions/);
   assert.match(app, /function MemberWorkspaceConsole/);
   assert.match(app, /Administrators can manage runtime state but cannot open member workspaces or view their content/);
-  assert.match(app, /<ProtectedWorkspacePolicySection users=\{policyUsers\}/);
-  assert.match(app, /Current organization policy/);
-  assert.match(app, /No organization policy/);
-  assert.match(app, /All options available/);
-  assert.match(app, /Version \$\{latest\.version\} is active across the organization/);
+  assert.match(app, /<ProtectedWorkspacePolicySection users=\{policyUsers\} workspaceMembers=\{workspaceMembers\}/);
+  assert.match(app, /Workspace guardrails/);
+  assert.match(app, /Affected workspaces/);
+  assert.match(app, /Applies to all \$\{activeMemberCount\} active/);
+  assert.match(app, /Workspace guardrails v\$\{version\.version\} saved and active across the organization/);
   assert.doesNotMatch(app, /Locked baseline|Baseline only|Office worker baseline/);
   assert.doesNotMatch(app, /Organization connector ceiling|Open Connectors policy/);
   assert.doesNotMatch(app, /Member policy status|Assign policy|Revoke workspace access/);
@@ -406,7 +407,11 @@ test("administration keeps identity in People and access while workspace operati
   assert.doesNotMatch(app, /Persistent Ubuntu workspace/);
   assert.doesNotMatch(app, /legend="Model routes"/);
   assert.doesNotMatch(app, /legend="Connectors"/);
-  assert.match(app, /<legend>Advanced organization security<\/legend>/);
+  assert.match(app, /<legend>AI usage and data transfer<\/legend>/);
+  assert.doesNotMatch(app, /Internet access ceiling/);
+  assert.match(app, /Managed and Internet workspaces inherit matching defaults/);
+  assert.match(app, /Custom security groups are assigned only when a workspace needs an exception/);
+  assert.match(app, /required minLength="3"/);
   assert.match(app, /Save as new version/);
   assert.doesNotMatch(app, /Create organization policy/);
   assert.doesNotMatch(app.slice(app.indexOf("function AdminScreen"), app.indexOf("function CredentialsScreen")), /MemberWorkspaceConsole|ProtectedWorkspacePolicySection|Manage \{workspaceName\(workspace\)\}/);
@@ -594,19 +599,26 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
   assert.doesNotMatch(styles, /\.sidebar-chat-history\s*\{[\s\S]*?max-height: clamp/);
 });
 
-test("Firewall is a security-group library and workspace attachment stays in Workspace", async () => {
+test("Network access is an admin-only security-group library with type defaults and workspace overrides", async () => {
   const [app, styles] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/styles.css"),
   ]);
   const firewallScreen = app.slice(app.indexOf("function FirewallScreen"), app.indexOf("function ActivityScreen"));
+  assert.match(app, /label="Network access"/);
+  assert.match(app, /canManageNetworkAccess && <NavButton/);
+  assert.match(firewallScreen, /<h1>Network access<\/h1>/);
   assert.doesNotMatch(firewallScreen, /Workspace attachments/);
   assert.match(firewallScreen, /Create security group<\/button>/);
   assert.match(firewallScreen, /<h2 id="firewall-security-groups-heading">Security groups<\/h2>/);
-  assert.match(firewallScreen, /Default applies to new workspaces/);
+  assert.match(firewallScreen, /Built-in defaults follow workspace type/);
   assert.doesNotMatch(firewallScreen, /Effective workspace policies/);
   assert.doesNotMatch(firewallScreen, /<table>/);
   assert.match(app, /assignWorkspaceEgressSecurityGroup/);
+  assert.match(app, /clearWorkspaceEgressSecurityGroup/);
+  assert.match(app, /Inherit from/);
+  assert.match(app, /function WorkspaceNetworkAccessDialog/);
+  assert.match(app, /Manage access/);
   assert.match(app, /Security-group changes apply live/);
   assert.match(app, /function FirewallEditorDialog/);
   assert.doesNotMatch(app, /function FirewallAddRuleDialog/);
@@ -615,7 +627,9 @@ test("Firewall is a security-group library and workspace attachment stays in Wor
   assert.match(app, /id="firewall-add-rule-heading">Add rule/);
   assert.match(app, /value: "deny", label: "Deny"/);
   assert.match(firewallScreen, /firewall-default-badge/);
-  assert.match(firewallScreen, /Built-in default/);
+  assert.match(firewallScreen, /Inherited by workspace type/);
+  assert.match(firewallScreen, /Managed default/);
+  assert.match(firewallScreen, /Internet default/);
   assert.match(app, /Default security group behavior/);
   assert.match(firewallScreen, /Manage group/);
   assert.doesNotMatch(firewallScreen, /Add deny rule/);

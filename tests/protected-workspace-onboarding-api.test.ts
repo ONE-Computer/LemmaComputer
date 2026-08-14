@@ -47,14 +47,25 @@ test("a new organization has no policy ceiling and its administrator can create 
     securityGroupId: "esg_protected_acme_default",
     tenantId: identity.tenantId,
     version: 1,
-    name: "Default security group",
-    description: "The built-in network policy attached to new workspaces.",
+    name: "Internet workspace default",
+    description: "The built-in public-web policy inherited by Internet workspaces.",
     defaultAction: "allow-public-http-https",
     rules: [],
     documentHash: "e".repeat(64),
     createdBy: "organization-owner",
     createdAt: "2026-08-12T08:00:00.000Z",
     isDefault: true,
+    defaultFor: "internet",
+    assignmentSource: "workspace-type",
+  };
+  const managedFallback: EgressSecurityGroupVersion = {
+    ...fullWebFallback,
+    id: "egv_protected_acme_managed_default_v1",
+    securityGroupId: "esg_protected_acme_managed_default",
+    name: "Managed workspace default",
+    description: "The built-in deny-by-default policy inherited by Managed workspaces.",
+    defaultAction: "deny",
+    defaultFor: "managed",
   };
   const legacyPolicy: EffectivePolicy = {
     assignmentId: "legacy-assignment",
@@ -73,11 +84,11 @@ test("a new organization has no policy ceiling and its administrator can create 
   const identityPolicyStore = {
     getPrincipal: async (userId: string) => userId === administrator.userId ? administrator : null,
     getEffectivePolicy: async (userId: string) => userId === administrator.userId ? legacyPolicy : null,
-    getWorkspaceEgressSecurityGroup: async () => {
+    getWorkspaceEgressSecurityGroup: async ({ profileId }: { profileId: string }) => {
       egressLookups += 1;
-      return fullWebFallback;
+      return profileId === "disposable-open-v1" ? fullWebFallback : managedFallback;
     },
-    listEgressSecurityGroups: async () => [fullWebFallback],
+    listEgressSecurityGroups: async () => [managedFallback, fullWebFallback],
   } as unknown as IdentityPolicyStore;
   const protectedWorkspacePolicy = {
     currentOrganizationPolicy: async () => null,
@@ -133,12 +144,12 @@ test("a new organization has no policy ceiling and its administrator can create 
     ]);
     assert.deepEqual(settings.json().availableApplications.map((application: { id: string }) => application.id), ["firefox", "google-chrome"]);
     assert.deepEqual(settings.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite", "balanced", "pro"]);
-    assert.equal(settings.json().manifest.sandbox.egressMode, "full-web");
-    assert.equal(settings.json().securityGroup.defaultAction, "allow-public-http-https");
-    assert.equal(settings.json().securityGroup.id, fullWebFallback.id);
-    assert.equal(settings.json().securityGroup.documentHash, fullWebFallback.documentHash);
-    assert.equal(settings.json().availableSecurityGroups[0].id, fullWebFallback.id);
-    assert.equal(settings.json().availableSecurityGroups[0].defaultAction, "allow-public-http-https");
+    assert.equal(settings.json().manifest.sandbox.egressMode, "restricted");
+    assert.equal(settings.json().securityGroup.defaultAction, "deny");
+    assert.equal(settings.json().securityGroup.id, managedFallback.id);
+    assert.equal(settings.json().securityGroup.documentHash, managedFallback.documentHash);
+    assert.equal(settings.json().availableSecurityGroups[0].id, managedFallback.id);
+    assert.equal(settings.json().availableSecurityGroups[0].defaultAction, "deny");
 
     const created = await app.inject({
       method: "POST",
@@ -148,16 +159,16 @@ test("a new organization has no policy ceiling and its administrator can create 
     });
     assert.equal(created.statusCode, 201);
     assert.equal(created.json().state, "ready");
-    assert.equal(createdPolicy?.egressMode, "full-web");
-    assert.equal(createdPolicy?.egress?.defaultAction, "allow-public-http-https");
-    assert.equal(createdEgressProxy?.expectedGrant.egressMode, "full-web");
-    assert.equal(createdEgressProxy?.expectedGrant.securityGroupVersionId, fullWebFallback.id);
+    assert.equal(createdPolicy?.egressMode, "restricted");
+    assert.equal(createdPolicy?.egress?.defaultAction, "deny");
+    assert.equal(createdEgressProxy?.expectedGrant.egressMode, "restricted");
+    assert.equal(createdEgressProxy?.expectedGrant.securityGroupVersionId, managedFallback.id);
 
     const lookupsBeforeCurrent = egressLookups;
     const currentAfterCreate = await app.inject({ method: "GET", url: "/v1/workspaces/current", headers });
     assert.equal(currentAfterCreate.statusCode, 200);
     assert.ok(egressLookups > lookupsBeforeCurrent, "an existing workspace still evaluates its current runtime policy");
-    assert.equal(currentAfterCreate.json().profile.egressMode, "full-web");
+    assert.equal(currentAfterCreate.json().profile.egressMode, "restricted");
   } finally {
     await app.close();
   }

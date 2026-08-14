@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
-import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, recentAuthenticationStepUpWindowMs, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId } from "@lemmacomputer/contracts";
+import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, recentAuthenticationStepUpWindowMs, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId, type SandboxProfileId } from "@lemmacomputer/contracts";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 import {
   canDelegateOrganizationGrants,
@@ -603,9 +603,10 @@ export interface IdentityPolicyStore {
   listEgressSecurityGroups(tenantId: string, createdBy?: string): Promise<EgressSecurityGroupVersion[]>;
   saveEgressSecurityGroup(input: { tenantId: string; updatedBy: string; securityGroupId?: string; name: string; description: string; defaultAction: "deny" | "allow-public-http-https"; rules: EgressSecurityGroupRule[] }): Promise<EgressSecurityGroupVersion>;
   assignEgressSecurityGroup(input: { tenantId: string; targetUserId: string; assignedBy: string; securityGroupVersionId: string }): Promise<EffectivePolicy>;
-  getWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string }): Promise<EgressSecurityGroupVersion | null>;
+  getWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string; profileId: SandboxProfileId }): Promise<EgressSecurityGroupVersion | null>;
   listWorkspaceEgressSecurityGroupAssignments?(input: { tenantId: string; securityGroupId: string }): Promise<Array<{ subjectId: string; grantId: string }>>;
   assignWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string; assignedBy: string; securityGroupVersionId: string }): Promise<EgressSecurityGroupVersion>;
+  clearWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string }): Promise<boolean>;
 }
 
 const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"] as const;
@@ -707,6 +708,11 @@ export const upgradeHistoricMvpPolicyDocument = (document: OwnedJson): OwnedJson
 const mvpPolicyBundleId = (tenantId: string) => `mvp-standard:${tenantId}`;
 const defaultEgressSecurityGroupId = (tenantId: string) => `esg_${createHash("sha256").update(`egress:${tenantId}`).digest("hex").slice(0, 24)}`;
 const defaultEgressSecurityGroupVersionId = (tenantId: string) => `egv_${createHash("sha256").update(`egress:${tenantId}`).digest("hex").slice(0, 24)}_v1`;
+const managedDefaultEgressSecurityGroupId = (tenantId: string) => `esg_${createHash("sha256").update(`egress:managed:${tenantId}`).digest("hex").slice(0, 24)}`;
+const managedDefaultEgressSecurityGroupVersionId = (tenantId: string) => `egv_${createHash("sha256").update(`egress:managed:${tenantId}`).digest("hex").slice(0, 24)}_v1`;
+const defaultEgressSecurityGroupIdForProfile = (tenantId: string, profileId: SandboxProfileId) => (
+  profileId === "disposable-open-v1" ? defaultEgressSecurityGroupId(tenantId) : managedDefaultEgressSecurityGroupId(tenantId)
+);
 const organizationSlugBase = (displayName: string) => displayName
   .normalize("NFKD")
   .toLowerCase()
@@ -716,9 +722,16 @@ const organizationSlugBase = (displayName: string) => displayName
   .replace(/-+$/g, "") || "organization";
 const defaultEgressDocument = () => ({
   schemaVersion: 1,
-  name: "Default security group",
-  description: "The built-in network policy attached to new workspaces.",
+  name: "Internet workspace default",
+  description: "The built-in public-web policy inherited by Internet workspaces.",
   defaultAction: "allow-public-http-https",
+  rules: [],
+}) satisfies OwnedJson;
+const managedDefaultEgressDocument = () => ({
+  schemaVersion: 1,
+  name: "Managed workspace default",
+  description: "The built-in deny-by-default policy inherited by Managed workspaces.",
+  defaultAction: "deny",
   rules: [],
 }) satisfies OwnedJson;
 
@@ -771,21 +784,33 @@ const effectivePolicySelect = `
 
 const mapEgressVersion = (row: Record<string, unknown>): EgressSecurityGroupVersion => {
   const document = row.egress_document as Record<string, unknown>;
-  const isDefault = String(row.security_group_id) === defaultEgressSecurityGroupId(String(row.tenant_id));
+  const tenantId = String(row.tenant_id);
+  const securityGroupId = String(row.security_group_id);
+  const defaultFor = securityGroupId === managedDefaultEgressSecurityGroupId(tenantId)
+    ? "managed" as const
+    : securityGroupId === defaultEgressSecurityGroupId(tenantId)
+      ? "internet" as const
+      : undefined;
+  const isDefault = defaultFor !== undefined;
   return egressSecurityGroupVersionSchema.parse({
     schemaVersion: 1,
     id: String(row.egress_version_id),
-    securityGroupId: String(row.security_group_id),
-    tenantId: String(row.tenant_id),
+    securityGroupId,
+    tenantId,
     version: Number(row.egress_version),
-    name: isDefault ? "Default security group" : document.name,
-    description: isDefault ? "The built-in network policy attached to new workspaces." : document.description,
-    defaultAction: isDefault ? "allow-public-http-https" : document.defaultAction ?? "deny",
+    name: defaultFor === "managed" ? "Managed workspace default" : defaultFor === "internet" ? "Internet workspace default" : document.name,
+    description: defaultFor === "managed"
+      ? "The built-in deny-by-default policy inherited by Managed workspaces."
+      : defaultFor === "internet"
+        ? "The built-in public-web policy inherited by Internet workspaces."
+        : document.description,
+    defaultAction: defaultFor === "managed" ? "deny" : defaultFor === "internet" ? "allow-public-http-https" : document.defaultAction ?? "deny",
     rules: document.rules,
     documentHash: String(row.egress_document_hash),
     createdBy: String(row.egress_created_by),
     createdAt: new Date(String(row.egress_created_at)).toISOString(),
     isDefault,
+    ...(defaultFor ? { defaultFor } : {}),
   });
 };
 
@@ -3828,6 +3853,15 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       const actor = await client.query("SELECT id FROM users WHERE id=$1 AND tenant_id=$2", [input.updatedBy, input.tenantId]);
       if (!actor.rowCount) throw new LemmaComputerError("EGRESS_TENANT_MISMATCH", "Firewall editor is outside the tenant", 403);
       const securityGroupId = input.securityGroupId ?? `esg_${randomUUID().replaceAll("-", "")}`;
+      const builtInDefaultFor = securityGroupId === managedDefaultEgressSecurityGroupId(input.tenantId)
+        ? "managed" as const
+        : securityGroupId === defaultEgressSecurityGroupId(input.tenantId)
+          ? "internet" as const
+          : undefined;
+      const builtInDocument = builtInDefaultFor === "managed" ? managedDefaultEgressDocument() : builtInDefaultFor === "internet" ? defaultEgressDocument() : null;
+      const name = builtInDocument ? String(builtInDocument.name) : input.name;
+      const description = builtInDocument ? String(builtInDocument.description) : input.description;
+      const defaultAction = builtInDocument?.defaultAction ?? input.defaultAction;
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`egress-security-group:${securityGroupId}`]);
       const existingGroup = await client.query(
         "SELECT id FROM egress_security_groups WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
@@ -3838,7 +3872,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
         await client.query(
           `INSERT INTO egress_security_groups (id,tenant_id,name,description,created_by)
            VALUES ($1,$2,$3,$4,$5)`,
-          [securityGroupId, input.tenantId, input.name, input.description, input.updatedBy],
+          [securityGroupId, input.tenantId, name, description, input.updatedBy],
         );
       }
       const latest = await client.query(
@@ -3853,9 +3887,9 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
         securityGroupId,
         tenantId: input.tenantId,
         version,
-        name: input.name,
-        description: input.description,
-        defaultAction: input.defaultAction,
+        name,
+        description,
+        defaultAction,
         rules: input.rules,
         documentHash: "0".repeat(64),
         createdBy: input.updatedBy,
@@ -3864,9 +3898,9 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       const compiled = compileEgressSecurityGroup(provisional);
       const document = {
         schemaVersion: 1,
-        name: input.name,
-        description: input.description,
-        defaultAction: input.defaultAction,
+        name,
+        description,
+        defaultAction,
         rules: compiled.rules,
       } satisfies OwnedJson;
       const documentHash = policyHash(document);
@@ -3891,7 +3925,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       );
       await client.query(
         "UPDATE egress_security_groups SET name=$2,description=$3,updated_at=now() WHERE id=$1",
-        [securityGroupId, input.name, input.description],
+        [securityGroupId, name, description],
       );
       await client.query("COMMIT");
       return egressSecurityGroupVersionSchema.parse({
@@ -3906,7 +3940,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     } finally { client.release(); }
   }
 
-  async getWorkspaceEgressSecurityGroup(input: { tenantId: string; subjectId: string; grantId: string }) {
+  async getWorkspaceEgressSecurityGroup(input: { tenantId: string; subjectId: string; grantId: string; profileId: SandboxProfileId }) {
     const result = await this.pool.query(
       `SELECT esg.tenant_id,esgv.id AS egress_version_id,esgv.security_group_id,
        esgv.version AS egress_version,esgv.document AS egress_document,
@@ -3924,7 +3958,10 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
        WHERE assignment.tenant_id=$1 AND assignment.subject_id=$2 AND assignment.grant_id=$3`,
       [input.tenantId, input.subjectId, input.grantId],
     );
-    if (result.rowCount) return mapEgressVersion(result.rows[0]);
+    if (result.rowCount) return egressSecurityGroupVersionSchema.parse({
+      ...mapEgressVersion(result.rows[0]),
+      assignmentSource: "custom",
+    });
     const fallback = await this.pool.query(
       `SELECT esg.tenant_id,esgv.id AS egress_version_id,esgv.security_group_id,
        esgv.version AS egress_version,esgv.document AS egress_document,
@@ -3935,15 +3972,22 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
        WHERE esgv.security_group_id=$1 AND esg.tenant_id=$2
        ORDER BY esgv.version DESC
        LIMIT 1`,
-      [defaultEgressSecurityGroupId(input.tenantId), input.tenantId],
+      [defaultEgressSecurityGroupIdForProfile(input.tenantId, input.profileId), input.tenantId],
     );
-    return fallback.rowCount ? mapEgressVersion(fallback.rows[0]) : null;
+    return fallback.rowCount ? egressSecurityGroupVersionSchema.parse({
+      ...mapEgressVersion(fallback.rows[0]),
+      assignmentSource: "workspace-type",
+    }) : null;
   }
 
   async listWorkspaceEgressSecurityGroupAssignments(input: { tenantId: string; securityGroupId: string }) {
     const result = await this.pool.query(
       `SELECT workspace.subject_id,workspace.grant_id
        FROM workspaces workspace
+       LEFT JOIN sandbox_settings settings
+         ON settings.tenant_id=workspace.tenant_id
+        AND settings.subject_id=workspace.subject_id
+        AND settings.grant_id=workspace.grant_id
        LEFT JOIN workspace_egress_security_group_assignments assignment
          ON assignment.tenant_id=workspace.tenant_id
         AND assignment.subject_id=workspace.subject_id
@@ -3953,11 +3997,14 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
            assignment.security_group_id=$2
            OR (
              assignment.security_group_id IS NULL
-             AND $2=$3
+             AND (
+               ($2=$3 AND COALESCE(settings.profile_id,'claude-desktop-standard-v1')='disposable-open-v1')
+               OR ($2=$4 AND COALESCE(settings.profile_id,'claude-desktop-standard-v1')<>'disposable-open-v1')
+             )
            )
          )
        ORDER BY workspace.subject_id,workspace.grant_id`,
-      [input.tenantId, input.securityGroupId, defaultEgressSecurityGroupId(input.tenantId)],
+      [input.tenantId, input.securityGroupId, defaultEgressSecurityGroupId(input.tenantId), managedDefaultEgressSecurityGroupId(input.tenantId)],
     );
     return result.rows.map((row) => ({
       subjectId: String(row.subject_id),
@@ -4003,6 +4050,15 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     } finally {
       client.release();
     }
+  }
+
+  async clearWorkspaceEgressSecurityGroup(input: { tenantId: string; subjectId: string; grantId: string }) {
+    const result = await this.pool.query(
+      `DELETE FROM workspace_egress_security_group_assignments
+       WHERE tenant_id=$1 AND subject_id=$2 AND grant_id=$3`,
+      [input.tenantId, input.subjectId, input.grantId],
+    );
+    return Boolean(result.rowCount);
   }
 
   async assignEgressSecurityGroup(input: { tenantId: string; targetUserId: string; assignedBy: string; securityGroupVersionId: string }) {
@@ -4076,6 +4132,19 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       `INSERT INTO egress_security_group_versions (id,security_group_id,version,document,document_hash,created_by)
        VALUES ($1,$2,1,$3::jsonb,$4,$5) ON CONFLICT DO NOTHING`,
       [securityGroupVersionId, securityGroupId, JSON.stringify(egressDocument), policyHash(egressDocument), createdBy],
+    );
+    const managedEgressDocument = managedDefaultEgressDocument();
+    const managedSecurityGroupId = managedDefaultEgressSecurityGroupId(tenantId);
+    const managedSecurityGroupVersionId = managedDefaultEgressSecurityGroupVersionId(tenantId);
+    await client.query(
+      `INSERT INTO egress_security_groups (id,tenant_id,name,description,created_by)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+      [managedSecurityGroupId, tenantId, managedEgressDocument.name, managedEgressDocument.description, createdBy],
+    );
+    await client.query(
+      `INSERT INTO egress_security_group_versions (id,security_group_id,version,document,document_hash,created_by)
+       VALUES ($1,$2,1,$3::jsonb,$4,$5) ON CONFLICT DO NOTHING`,
+      [managedSecurityGroupVersionId, managedSecurityGroupId, JSON.stringify(managedEgressDocument), policyHash(managedEgressDocument), createdBy],
     );
     await client.query(
       `UPDATE policy_assignments pa SET egress_security_group_version_id=$2

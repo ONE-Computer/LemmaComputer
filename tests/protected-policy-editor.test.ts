@@ -45,7 +45,6 @@ test("the organization editor uses the supported catalog while preserving routin
       applications: ["firefox"],
       serviceClasses: ["lite", "balanced", "pro"],
       maximumReasoningEffort: "high",
-      maximumEgressMode: "restricted",
       clipboardLocalToWorkspace: true,
       clipboardWorkspaceToLocal: false,
       clipboardMaxKb: 32,
@@ -62,5 +61,6 @@ test("the organization editor uses the supported catalog while preserving routin
     allow: ["lite", "balanced", "pro"],
     deny: [],
   });
+  assert.equal(output.maximumEgressMode, "restricted", "managed-only guardrails derive restricted egress from workspace type");
   assert.doesNotThrow(() => organizationWorkspacePolicyConstraintsSchema.parse(output));
 });

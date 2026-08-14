@@ -115,6 +115,7 @@ test("organization workspace managers receive a content-free member-first invent
       state: "ready",
       health: { status: "healthy", reasonCode: null },
       profile: { id: "kasm-persistent-standard", executionMode: "managed" },
+      networkAccess: { mode: "restricted", securityGroup: null },
       policyAssignment: { authority: "runtime_policy", version: 7, hash: "a".repeat(64) },
       lastActivityAt: null,
       lastTransitionAt: body.members[0].workspaces[0].lastTransitionAt,
