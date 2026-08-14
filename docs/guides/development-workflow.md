@@ -346,6 +346,32 @@ policy enforcement. Production leaf certificates must come from the
 deployment's private CA or workload identity system; the local qualifier's
 two-day authorities are disposable test material.
 
+### How local mTLS certificates are generated
+
+`npm run env:init` does **not** generate mTLS certificates. It generates the
+ordinary local service secrets and signing keys, but leaves the workspace-node
+and LiteLLM administration certificate fields blank in a worktree `.env`.
+Those fields represent production workload identities and must not be filled
+with a long-lived developer CA by default.
+
+The two local mTLS qualification paths deliberately keep their certificates
+outside the normal `.env`:
+
+| Command | Certificate lifecycle | Storage and stack effect |
+| --- | --- | --- |
+| `npm run qualify:remote-workspace-node -- config [--cowork]` | Uses OpenSSL to create separate two-day node and application-relay CAs and their server/client leaves. | Writes under `.runtime-remote-workspace-node/` only long enough to validate both Compose projects, then deletes it. `.env` and the running stack are unchanged. |
+| `npm run qualify:remote-workspace-node -- up [--cowork]` | Generates the same disposable two-day authorities for the active split-node run. | Keeps base64 certificate values, generated Compose files, and PEM files under `.runtime-remote-workspace-node/` until `down`. It does not modify `.env`. |
+| `npm run qualify:internal-mtls` | Generates separate one-day test CAs for the LiteLLM admin and workspace-controller listeners, plus valid and foreign client leaves. | Uses temporary OS directories, starts real TLS listeners with mock backends, proves rejection behavior, and deletes all material in the same test run. It does not modify Compose or `.env`. |
+
+The remote-node `up` command exercises node, desktop-relay, and private
+application-relay mTLS in the running split stack. It does not also switch that
+worktree's LiteLLM admin listener to mTLS; `qualify:internal-mtls` tests the
+LiteLLM administrator boundary separately. For a hosted deployment, both sets
+of base64 PEM values are supplied by the deployment secret manager from a
+private CA or workload-identity system. The complete LiteLLM production fields
+and validation procedure are in
+[Operations](operations.md#hosted-litellm-administration-transport).
+
 ### Switch an existing worktree to remote mode
 
 First start and configure the ordinary worktree. The qualifier deliberately
