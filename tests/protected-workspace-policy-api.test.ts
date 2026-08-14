@@ -3,12 +3,13 @@ import test from "node:test";
 import type { IdentityContext } from "@lemmacomputer/contracts";
 import {
   MemoryWorkspaceStore,
-  type IdentityPolicyStore,
-  type MemberWorkspacePolicyAssignment,
   type OrganizationWorkspacePolicyVersionRecord,
   type SessionPrincipal,
 } from "@lemmacomputer/workspace-store";
-import type { ProtectedWorkspacePolicyAdministrationBoundary } from "../apps/control-api/src/protected-workspace-policy.js";
+import {
+  organizationWorkspacePolicyCatalog,
+  type ProtectedWorkspacePolicyAdministrationBoundary,
+} from "../apps/control-api/src/protected-workspace-policy.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -45,61 +46,8 @@ const organizationVersion: OrganizationWorkspacePolicyVersionRecord = {
   createdBy: "administrator",
   createdAt: new Date("2026-08-12T06:00:00.000Z"),
 };
-const assignmentVersion: MemberWorkspacePolicyAssignment = {
-  id: "22222222-2222-4222-8222-222222222222",
-  tenantId,
-  subjectId: "member",
-  assignmentVersion: 1,
-  previousAssignmentId: null,
-  state: "selected",
-  protectedTemplateVersionId: "pbtv_office_worker_claude_1",
-  organizationPolicyVersionId: organizationVersion.policyVersionId,
-  selection: {
-    workspaceProfile: "kasm-persistent-standard",
-    agentIds: ["claude-cli"],
-    applicationIds: ["firefox", "google-chrome"],
-    modelAlias: "lemmacomputer-claude",
-    serviceClass: "balanced",
-    reasoningEffort: "medium",
-    egressMode: "restricted",
-    connectorIds: ["microsoft-365"],
-  },
-  selectionHash: "b".repeat(64),
-  assignedBy: "administrator",
-  createdAt: new Date("2026-08-12T06:01:00.000Z"),
-};
-
 const overview = {
-  baseline: {
-    immutable: true as const,
-    editableByOrganization: false as const,
-    authority: "lemmacomputer_product_release" as const,
-    templateId: "pbt_office_worker_claude",
-    templateVersionId: "pbtv_office_worker_claude_1",
-    version: 1,
-    supersedesTemplateVersionId: null,
-    documentHash: "c".repeat(64),
-    envelopeDigest: "d".repeat(64),
-    keyId: "prk_phase_0_5_20260812",
-    release: {
-      releaseId: "0.5-policy-foundation-1",
-      sourceCommit: "e".repeat(40),
-      publishedAt: "2026-08-12T05:00:00.000Z",
-    },
-    constraints: {
-      workspaceProfiles: { allow: ["kasm-persistent-standard" as const], deny: [] },
-      agents: { allow: ["claude-cli" as const], deny: [] },
-      applications: { allow: ["firefox" as const, "google-chrome" as const], deny: [] },
-      modelAliases: { allow: ["lemmacomputer-claude" as const], deny: [] },
-      serviceClasses: { allow: ["balanced" as const], deny: [] },
-      maximumReasoningEffort: "medium" as const,
-      maximumEgressMode: "restricted" as const,
-      clipboard: { localToWorkspace: true, workspaceToLocal: true, maxBytes: 32_768 },
-      connectors: { allow: ["microsoft-365"], deny: [], toolPolicies: { "microsoft-365": { "send-mail": "approval_required" as const } } },
-      capabilities: { allow: ["ai-assistant" as const], deny: [] },
-    },
-    installedAt: "2026-08-12T05:00:01.000Z",
-  },
+  catalog: organizationWorkspacePolicyCatalog,
   organizationPolicyVersions: [organizationVersion],
 };
 
@@ -117,29 +65,8 @@ const appFor = (actor: SessionPrincipal, calls: Array<{ method: string; input: u
       calls.push({ method: "listOrganizationPolicyVersions", input: inputTenantId });
       return [organizationVersion];
     },
-    assignMember: async (input) => {
-      calls.push({ method: "assignMember", input });
-      return assignmentVersion;
-    },
-    listMemberAssignmentVersions: async (inputTenantId, subjectId) => {
-      calls.push({ method: "listMemberAssignmentVersions", input: { tenantId: inputTenantId, subjectId } });
-      return [assignmentVersion];
-    },
-    revokeMember: async (input) => {
-      calls.push({ method: "revokeMember", input });
-      return true;
-    },
+    currentOrganizationPolicy: async (inputTenantId) => inputTenantId === tenantId ? organizationVersion : null,
   };
-  const identityPolicyStore = {
-    listUsers: async (inputTenantId: string) => inputTenantId === tenantId ? [{
-      userId: "member",
-      email: "member@test.invalid",
-      displayName: "Member",
-      status: "active" as const,
-      roles: ["employee" as const],
-      effectivePolicy: null,
-    }] : [],
-  } as unknown as IdentityPolicyStore;
   return createControlServer(
     new MemoryWorkspaceStore(),
     {} as ControllerClient,
@@ -149,23 +76,25 @@ const appFor = (actor: SessionPrincipal, calls: Array<{ method: string; input: u
     {},
     {
       authentication: authentication(actor),
-      identityPolicyStore,
       protectedWorkspacePolicy,
       agentBridgeSecret: "protected-policy-api-agent-bridge-secret-at-least-32-characters",
     },
   );
 };
 
-test("protected policy administration exposes immutable product provenance and append-only versions", async () => {
+test("organization policy administration exposes the full catalog and append-only versions", async () => {
   const calls: Array<{ method: string; input: unknown }> = [];
   const app = appFor(principal("administrator"), calls);
   const headers = { cookie: "lemmacomputer_session=valid", "x-lemmacomputer-proxy-token": proxyToken };
   try {
-    const baseline = await app.inject({ method: "GET", url: "/v1/admin/protected-workspace-policy", headers });
-    assert.equal(baseline.statusCode, 200);
-    assert.deepEqual(baseline.json().baseline, overview.baseline);
-    assert.equal(baseline.json().baseline.immutable, true);
-    assert.equal(baseline.json().baseline.editableByOrganization, false);
+    const current = await app.inject({ method: "GET", url: "/v1/admin/protected-workspace-policy", headers });
+    assert.equal(current.statusCode, 200);
+    assert.deepEqual(current.json().catalog, organizationWorkspacePolicyCatalog);
+    assert.deepEqual(current.json().catalog.constraints.agents.allow, [
+      "claude-cli", "claude-desktop", "codex-cli", "hermes-claw", "hermes-desktop",
+    ]);
+    assert.deepEqual(current.json().catalog.constraints.workspaceProfiles.allow, ["claude-desktop-standard-v1", "disposable-open-v1"]);
+    assert.deepEqual(current.json().catalog.constraints.serviceClasses.allow, ["lite", "balanced", "pro"]);
 
     const createdOverlay = await app.inject({
       method: "POST",
@@ -184,30 +113,13 @@ test("protected policy administration exposes immutable product provenance and a
     assert.equal(overlayHistory.statusCode, 200);
     assert.equal(overlayHistory.json().versions.length, 1);
 
-    const createdAssignment = await app.inject({
+    const retiredMemberAssignment = await app.inject({
       method: "POST",
       url: "/v1/admin/protected-workspace-policy/members/member/assignment-versions",
       headers,
-      payload: { selection: assignmentVersion.selection },
+      payload: {},
     });
-    assert.equal(createdAssignment.statusCode, 201);
-    assert.equal(createdAssignment.json().version.subjectId, "member");
-
-    const assignmentHistory = await app.inject({
-      method: "GET",
-      url: "/v1/admin/protected-workspace-policy/members/member/assignment-versions",
-      headers,
-    });
-    assert.equal(assignmentHistory.statusCode, 200);
-    assert.equal(assignmentHistory.json().versions.length, 1);
-    const revokedAssignment = await app.inject({
-      method: "DELETE",
-      url: "/v1/admin/protected-workspace-policy/members/member/assignment-versions",
-      headers,
-    });
-    assert.equal(revokedAssignment.statusCode, 200);
-    assert.equal(revokedAssignment.json().revoked, true);
-    assert.deepEqual(revokedAssignment.json().remediation, { required: false, action: "none", workspaceIds: [] });
+    assert.equal(retiredMemberAssignment.statusCode, 404);
     assert.deepEqual(calls, [
       { method: "overview", input: tenantId },
       { method: "createOrganizationPolicyVersion", input: {
@@ -217,21 +129,13 @@ test("protected policy administration exposes immutable product provenance and a
         createdBy: "administrator",
       } },
       { method: "listOrganizationPolicyVersions", input: tenantId },
-      { method: "assignMember", input: {
-        tenantId,
-        subjectId: "member",
-        selection: assignmentVersion.selection,
-        assignedBy: "administrator",
-      } },
-      { method: "listMemberAssignmentVersions", input: { tenantId, subjectId: "member" } },
-      { method: "revokeMember", input: { tenantId, subjectId: "member", revokedBy: "administrator" } },
     ]);
   } finally {
     await app.close();
   }
 });
 
-test("member roles and foreign or unknown targets cannot reach protected policy administration", async () => {
+test("member roles cannot reach organization policy administration and malformed constraints fail", async () => {
   const memberCalls: Array<{ method: string; input: unknown }> = [];
   const memberApp = appFor(principal("employee"), memberCalls);
   const adminCalls: Array<{ method: string; input: unknown }> = [];
@@ -241,16 +145,6 @@ test("member roles and foreign or unknown targets cannot reach protected policy 
     const denied = await memberApp.inject({ method: "GET", url: "/v1/admin/protected-workspace-policy", headers });
     assert.equal(denied.statusCode, 403);
     assert.deepEqual(memberCalls, []);
-
-    const missing = await adminApp.inject({
-      method: "POST",
-      url: "/v1/admin/protected-workspace-policy/members/other-tenant-user/assignment-versions",
-      headers,
-      payload: { selection: assignmentVersion.selection },
-    });
-    assert.equal(missing.statusCode, 404);
-    assert.equal(missing.json().error.code, "USER_NOT_FOUND");
-    assert.deepEqual(adminCalls, []);
 
     const malformed = await adminApp.inject({
       method: "POST",

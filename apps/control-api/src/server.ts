@@ -2,13 +2,13 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
 import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, egressSecurityGroupVersionSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type EgressSecurityGroupVersion, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
-import { organizationWorkspacePolicyConstraintsSchema, protectedPolicySelectionSchema, type EffectiveProtectedWorkspacePolicy } from "@lemmacomputer/contracts";
+import { organizationWorkspacePolicyConstraintsSchema, type OrganizationWorkspacePolicyConstraints } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
 import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
-import { PostgresProtectedWorkspacePolicyStore } from "@lemmacomputer/workspace-store";
+import { PostgresProtectedWorkspacePolicyStore, type OrganizationWorkspacePolicyVersionRecord } from "@lemmacomputer/workspace-store";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
@@ -60,7 +60,6 @@ import { PlatformSecurityAlertDispatcher, SignedWebhookPlatformSecurityAlertAdap
 import { ControlPlaneTenantCleanupAdapter, PlatformTenantCleanupDispatcher, type PlatformTenantCleanupDispatcherStatus } from "./platform-tenant-cleanup-dispatcher.js";
 import { createBetterAuthTenantSsoAuthenticationAdministration, TenantSsoAdministrationService } from "./tenant-sso.js";
 import {
-  loadProductPolicyRelease,
   ProtectedWorkspacePolicyAdministrationService,
   type ProtectedWorkspacePolicyAdministrationBoundary,
 } from "./protected-workspace-policy.js";
@@ -218,65 +217,83 @@ const defaultAgentIds = (document: Record<string, unknown>, assigned = assignedA
   return configured.length ? configured : [assigned[0]!];
 };
 
-const intersectAssigned = <T extends string>(configured: unknown, allowed: readonly T[]): T[] => (
-  Array.isArray(configured)
-    ? configured.filter((value): value is T => typeof value === "string" && allowed.includes(value as T))
-    : []
-);
+const constrainAssigned = <T extends string>(
+  configured: unknown,
+  constraint: { allow?: readonly T[]; deny: readonly T[] } | undefined,
+): T[] => {
+  const values = Array.isArray(configured)
+    ? configured.filter((value): value is T => typeof value === "string")
+    : [];
+  if (!constraint) return values;
+  const allowed = constraint.allow ?? values;
+  return values.filter((value) => allowed.includes(value) && !constraint.deny.includes(value));
+};
 
 export const constrainEffectivePolicy = (
   policy: EffectivePolicy,
-  protectedPolicy: EffectiveProtectedWorkspacePolicy,
+  organizationPolicy: OrganizationWorkspacePolicyVersionRecord,
 ): EffectivePolicy => {
   const document = policy.document as Record<string, unknown>;
-  const workspaceProfiles = intersectAssigned(document.workspaceProfiles, protectedPolicy.allowed.workspaceProfileIds);
-  const agents = intersectAssigned(document.agents, protectedPolicy.allowed.agentIds);
-  const applications = intersectAssigned(document.applications, protectedPolicy.allowed.applicationIds);
-  const modelAliases = intersectAssigned(document.modelAliases, protectedPolicy.allowed.modelAliases);
-  const capabilities = intersectAssigned(document.capabilities, protectedPolicy.allowed.capabilityIds);
+  const constraints: OrganizationWorkspacePolicyConstraints = organizationPolicy.constraints;
+  const workspaceProfiles = constrainAssigned(document.workspaceProfiles, constraints.workspaceProfiles);
+  const agents = constrainAssigned(document.agents, constraints.agents);
+  const applications = constrainAssigned(document.applications, constraints.applications);
+  const modelAliases = constrainAssigned(document.modelAliases, constraints.modelAliases);
+  const capabilities = constrainAssigned(document.capabilities, constraints.capabilities);
+  const serviceClasses = constrainAssigned(assignedWorkspaceServiceClasses(document), constraints.serviceClasses);
+  const defaultAgents = defaultAgentIds(document, agents as AgentCatalogId[]).filter((id) => agents.includes(id));
+  const defaultApplications = defaultApplicationIds(document, applications as SandboxApplicationId[]).filter((id) => applications.includes(id));
+  const configuredDefaultServiceClass = explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses as ExplicitWorkspaceServiceClass[]);
   const mcp = structuredClone((document.mcp ?? {}) as Record<string, unknown>);
   const servers = (mcp.servers ?? {}) as Record<string, unknown>;
   const microsoft365 = servers.lemmacomputer_ms365 as Record<string, unknown> | undefined;
-  if (microsoft365) {
-    const ceiling = protectedPolicy.allowed.connectorToolPolicies["microsoft-365"] ?? {};
+  const organizationToolPolicies = constraints.connectors?.toolPolicies["microsoft-365"];
+  if (microsoft365 && organizationToolPolicies) {
     const configuredTools = Array.isArray(microsoft365.tools) ? microsoft365.tools.filter((tool): tool is string => typeof tool === "string") : [];
     const configuredDecisions = (microsoft365.toolPolicies ?? {}) as Record<string, "allow" | "approval_required" | "deny">;
     const rank = { allow: 0, approval_required: 1, deny: 2 } as const;
-    microsoft365.tools = configuredTools.filter((tool) => Object.hasOwn(ceiling, tool));
-    microsoft365.toolPolicies = Object.fromEntries((microsoft365.tools as string[]).map((tool) => {
+    microsoft365.toolPolicies = Object.fromEntries(configuredTools.map((tool) => {
       const configured = configuredDecisions[tool] ?? "deny";
-      const maximum = ceiling[tool] ?? "deny";
+      const maximum = organizationToolPolicies[tool] ?? configured;
       return [tool, rank[configured] >= rank[maximum] ? configured : maximum];
     }));
   }
+  const configuredClipboard = document.clipboard && typeof document.clipboard === "object" && !Array.isArray(document.clipboard)
+    ? document.clipboard as Record<string, unknown>
+    : {};
+  const organizationConnectorIds = constraints.connectors
+    ? constrainAssigned(["microsoft-365"], constraints.connectors)
+    : undefined;
   return {
     ...policy,
-    policyVersionId: protectedPolicy.template.templateVersionId,
-    version: protectedPolicy.template.version,
-    documentHash: protectedPolicy.effectiveHash,
+    policyVersionId: organizationPolicy.policyVersionId,
+    version: organizationPolicy.version,
+    documentHash: organizationPolicy.documentHash,
     document: {
       ...document,
       workspaceProfiles,
-      workspaceProfile: protectedPolicy.selection.workspaceProfile,
+      workspaceProfile: workspaceProfiles.some((profile) => profile === document.workspaceProfile) ? document.workspaceProfile : workspaceProfiles[0],
       agents,
-      defaultAgents: protectedPolicy.selection.agentIds.filter((id) => agents.includes(id)),
+      defaultAgents,
       applications,
-      defaultApplications: protectedPolicy.selection.applicationIds.filter((id) => applications.includes(id)),
+      defaultApplications,
       modelAliases,
       capabilities,
       clipboard: {
-        enabled: protectedPolicy.allowed.clipboard.localToWorkspace || protectedPolicy.allowed.clipboard.workspaceToLocal,
-        ...protectedPolicy.allowed.clipboard,
+        ...configuredClipboard,
+        ...constraints.clipboard,
+        enabled: (constraints.clipboard?.localToWorkspace ?? configuredClipboard.localToWorkspace ?? true)
+          || (constraints.clipboard?.workspaceToLocal ?? configuredClipboard.workspaceToLocal ?? true),
       },
       mcp,
-      serviceClasses: protectedPolicy.allowed.serviceClasses,
-      defaultServiceClass: protectedPolicy.selection.serviceClass,
-      maximumReasoningEffort: protectedPolicy.allowed.maximumReasoningEffort,
-      maximumEgressMode: protectedPolicy.allowed.maximumEgressMode,
-      protectedConnectorIds: protectedPolicy.allowed.connectorIds,
-      protectedPolicySources: protectedPolicy.sources,
-      protectedPolicyHash: protectedPolicy.effectiveHash,
-    } as EffectivePolicy["document"],
+      serviceClasses,
+      defaultServiceClass: configuredDefaultServiceClass,
+      ...(constraints.maximumReasoningEffort ? { maximumReasoningEffort: constraints.maximumReasoningEffort } : {}),
+      ...(constraints.maximumEgressMode ? { maximumEgressMode: constraints.maximumEgressMode } : {}),
+      ...(organizationConnectorIds ? { organizationConnectorIds } : {}),
+      organizationPolicyVersionId: organizationPolicy.policyVersionId,
+      organizationPolicyHash: organizationPolicy.documentHash,
+    } as unknown as EffectivePolicy["document"],
   };
 };
 
@@ -1092,14 +1109,10 @@ export function createControlServer(
     throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
   };
   const effectivePolicyFor = async (value: SessionPrincipal, effective: EffectivePolicy | null) => {
-    const protectedState = await security.protectedWorkspacePolicy?.effectiveMemberPolicy?.(value.tenantId, value.userId) ?? { state: "unassigned" as const };
-    if (protectedState.state === "revoked") {
-      throw new LemmaComputerError("PROTECTED_POLICY_REVOKED", "Protected workspace access has been revoked", 403);
-    }
-    const protectedPolicy = protectedState.state === "assigned" ? protectedState.policy : null;
+    const organizationPolicy = await security.protectedWorkspacePolicy?.currentOrganizationPolicy?.(value.tenantId) ?? null;
     return {
-      effective: effective && protectedPolicy ? constrainEffectivePolicy(effective, protectedPolicy) : effective,
-      protectedPolicy,
+      effective: effective && organizationPolicy ? constrainEffectivePolicy(effective, organizationPolicy) : effective,
+      organizationPolicy,
     };
   };
   const assignedPolicy = async (request: object) => {
@@ -1114,23 +1127,6 @@ export function createControlServer(
     }
     return security.protectedWorkspacePolicy;
   };
-  const requirePolicyTarget = async (tenantId: string, userId: string) => {
-    if (!security.identityPolicyStore) {
-      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy identity storage is unavailable", 503);
-    }
-    const target = (await security.identityPolicyStore.listUsers(tenantId)).find((user) => user.userId === userId);
-    if (!target) throw new LemmaComputerError("USER_NOT_FOUND", "User was not found", 404);
-    return target;
-  };
-  const protectedPolicyRemediationFor = async (tenantId: string, subjectId: string) => {
-    const owner = identityContextSchema.parse({ tenantId, subjectId, audience: "lemmacomputer-control" });
-    const affected = (await store.listCurrent(owner)).filter((workspace) => !["not_created", "stopped", "failed"].includes(workspace.state));
-    return {
-      required: affected.length > 0,
-      action: affected.length ? "restart_workspace" as const : "none" as const,
-      workspaceIds: affected.map((workspace) => workspace.id),
-    };
-  };
   const restrictWorkspaceEgress = (
     value: SessionPrincipal,
     effective: EffectivePolicy | null,
@@ -1140,16 +1136,16 @@ export function createControlServer(
     if (document?.maximumEgressMode !== "restricted" || selected?.defaultAction === "deny") return selected;
     const sourceHash = selected?.documentHash ?? "no-security-group";
     const documentHash = createHash("sha256")
-      .update(`protected-restricted-egress-v1\0${value.tenantId}\0${effective?.documentHash ?? "no-policy"}\0${sourceHash}`)
+      .update(`organization-restricted-egress-v1\0${value.tenantId}\0${effective?.documentHash ?? "no-policy"}\0${sourceHash}`)
       .digest("hex");
     return egressSecurityGroupVersionSchema.parse({
       schemaVersion: 1,
-      id: selected?.id ?? `egv_protected_restricted_${documentHash.slice(0, 24)}`,
-      securityGroupId: selected?.securityGroupId ?? `esg_protected_restricted_${documentHash.slice(0, 24)}`,
+      id: selected?.id ?? `egv_organization_restricted_${documentHash.slice(0, 24)}`,
+      securityGroupId: selected?.securityGroupId ?? `esg_organization_restricted_${documentHash.slice(0, 24)}`,
       tenantId: value.tenantId,
       version: selected?.version ?? effective?.version ?? 1,
-      name: selected?.name ?? "Protected workspace restricted egress",
-      description: selected?.description ?? "Deny-by-default egress enforced by the protected workspace policy.",
+      name: selected?.name ?? "Organization policy restricted egress",
+      description: selected?.description ?? "Deny-by-default egress enforced by the active organization policy.",
       defaultAction: "deny",
       rules: selected?.rules ?? [],
       documentHash,
@@ -1200,15 +1196,15 @@ export function createControlServer(
         requestedServiceClass,
       };
       if (document.maximumEgressMode === "restricted" && policy.egressMode !== "restricted") {
-        throw new LemmaComputerError("EGRESS_MODE_NOT_ASSIGNED", "Full-web egress is denied by the protected policy", 403);
+        throw new LemmaComputerError("EGRESS_MODE_NOT_ASSIGNED", "Full-web egress is denied by the organization policy", 403);
       }
     }
     const projected = connections ? await connections.projectConnectedConnectors(value.identity, policy) : policy;
-    const protectedConnectorIds = effective?.document && Array.isArray((effective.document as Record<string, unknown>).protectedConnectorIds)
-      ? (effective.document as Record<string, unknown>).protectedConnectorIds as string[]
+    const organizationConnectorIds = effective?.document && Array.isArray((effective.document as Record<string, unknown>).organizationConnectorIds)
+      ? (effective.document as Record<string, unknown>).organizationConnectorIds as string[]
       : null;
-    const constrainedProjection = protectedConnectorIds ? (() => {
-      const primaryAllowed = protectedConnectorIds.includes("microsoft-365");
+    const constrainedProjection = organizationConnectorIds ? (() => {
+      const primaryAllowed = organizationConnectorIds.includes("microsoft-365");
       const mcpServers = [projected.mcpServer];
       const activeMcpServers = primaryAllowed
         ? (projected.activeMcpServers ?? []).filter((server) => mcpServers.includes(server))
@@ -2585,6 +2581,7 @@ export function createControlServer(
     }
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
+    const organizationPolicy = await security.protectedWorkspacePolicy?.currentOrganizationPolicy?.(actor.tenantId) ?? null;
     const managesOrganization = allowsPermission(actor, "workspace.manage");
     const members = (await Promise.all(users.map(async (user) => {
       const targetIdentity = identityContextSchema.parse({
@@ -2596,7 +2593,6 @@ export function createControlServer(
         allowsPermission(actor, "workspace.manage", { type: "workspace", resourceId: workspace.id })
       ));
       if (!managesOrganization && authorized.length === 0) return null;
-      const protectedPolicy = await security.protectedWorkspacePolicy?.effectiveMemberPolicy?.(actor.tenantId, user.userId);
       const workspaces = await Promise.all(authorized.map(async (workspace) => {
         const settings = await store.getSandboxSettings?.(targetIdentity, workspace.grantId);
         const lastActivityAt = await store.lastWorkspaceActivityAt(targetIdentity, workspace.id);
@@ -2623,10 +2619,10 @@ export function createControlServer(
             reasonCode: workspace.failureCode,
           },
           profile: configuredProfile ? { id: configuredProfile, executionMode } : null,
-          policyAssignment: protectedPolicy?.state === "assigned" ? {
-            authority: "protected_baseline",
-            version: protectedPolicy.policy.template.version,
-            hash: protectedPolicy.policy.effectiveHash,
+          policyAssignment: organizationPolicy ? {
+            authority: "organization_policy",
+            version: organizationPolicy.version,
+            hash: organizationPolicy.documentHash,
           } : user.effectivePolicy ? {
             authority: "runtime_policy",
             version: user.effectivePolicy.version,
@@ -3282,55 +3278,6 @@ export function createControlServer(
     });
     return reply.code(201).send({ version });
   });
-  app.get<{ Params: { userId: string } }>(
-    "/v1/admin/protected-workspace-policy/members/:userId/assignment-versions",
-    async (request) => {
-      const actor = requirePermission(request, "policy.manage");
-      await requirePolicyTarget(actor.tenantId, request.params.userId);
-      return {
-        versions: await requireProtectedWorkspacePolicy().listMemberAssignmentVersions(
-          actor.tenantId,
-          request.params.userId,
-        ),
-      };
-    },
-  );
-  app.post<{ Params: { userId: string } }>(
-    "/v1/admin/protected-workspace-policy/members/:userId/assignment-versions",
-    async (request, reply) => {
-      const actor = requirePermission(request, "policy.manage");
-      await requirePolicyTarget(actor.tenantId, request.params.userId);
-      const input = z.strictObject({ selection: protectedPolicySelectionSchema }).parse(request.body ?? {});
-      const version = await requireProtectedWorkspacePolicy().assignMember({
-        tenantId: actor.tenantId,
-        subjectId: request.params.userId,
-        selection: input.selection,
-        assignedBy: actor.userId,
-      });
-      return reply.code(201).send({
-        version,
-        remediation: await protectedPolicyRemediationFor(actor.tenantId, request.params.userId),
-      });
-    },
-  );
-  app.delete<{ Params: { userId: string } }>(
-    "/v1/admin/protected-workspace-policy/members/:userId/assignment-versions",
-    async (request) => {
-      const actor = requirePermission(request, "policy.manage");
-      await requirePolicyTarget(actor.tenantId, request.params.userId);
-      const policy = requireProtectedWorkspacePolicy();
-      if (!policy.revokeMember) throw new LemmaComputerError("PROTECTED_POLICY_STORE_NOT_CONFIGURED", "Protected policy revocation is unavailable", 503);
-      const revoked = await policy.revokeMember({
-        tenantId: actor.tenantId,
-        subjectId: request.params.userId,
-        revokedBy: actor.userId,
-      });
-      return {
-        revoked,
-        remediation: await protectedPolicyRemediationFor(actor.tenantId, request.params.userId),
-      };
-    },
-  );
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request) => {
     const actor = requirePermission(request, "policy.manage");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
@@ -3585,7 +3532,7 @@ export function createControlServer(
     if (connectorId === "microsoft-365" && !security.identityPolicyStore) {
       throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     }
-    const [protectedOverview, users] = await Promise.all([
+    const [policyOverview, users] = await Promise.all([
       requireProtectedWorkspacePolicy().overview(actor.tenantId),
       security.identityPolicyStore
         ? security.identityPolicyStore.listUsers(actor.tenantId)
@@ -3594,7 +3541,7 @@ export function createControlServer(
     const currentWorkspaces = await store.listTenantCurrent(actor.tenantId);
     const currentWorkspacesById = new Map(currentWorkspaces.map((workspace) => [workspace.id, workspace]));
     const workspaceOwners = new Set(currentWorkspaces.map((workspace) => workspace.subjectId));
-    const organizationPolicy = protectedOverview.organizationPolicyVersions[0] ?? null;
+    const organizationPolicy = policyOverview.organizationPolicyVersions[0] ?? null;
     const policyAuthority = connectorId === "microsoft-365"
       ? resolveConnectorPolicyApplication(users.map((user) => ({
           userId: user.userId,
@@ -3675,12 +3622,6 @@ export function createControlServer(
       deliveryByMember.set(receipt.ownerSubjectId, current);
     }
     const policy = resolveEffectiveConnectorPolicy({
-      baseline: {
-        templateVersionId: protectedOverview.baseline.templateVersionId,
-        version: protectedOverview.baseline.version,
-        documentHash: protectedOverview.baseline.documentHash,
-        connectors: protectedOverview.baseline.constraints.connectors,
-      },
       organizationPolicy: organizationPolicy ? {
         policyVersionId: organizationPolicy.policyVersionId,
         version: organizationPolicy.version,
@@ -5051,15 +4992,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const agentInstanceStore = PostgresAgentInstanceStore.fromConnectionString(env.DATABASE_URL);
   const toolAuditStore = PostgresToolAuditStore.fromConnectionString(env.DATABASE_URL);
   await toolAuditStore.ensureMonthlyPartitions();
-  const productPolicyRelease = await loadProductPolicyRelease();
-  const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(
-    env.DATABASE_URL,
-    productPolicyRelease.trustRoot,
-  );
-  const protectedWorkspacePolicy = new ProtectedWorkspacePolicyAdministrationService(
-    protectedWorkspacePolicyStore,
-    productPolicyRelease,
-  );
+  const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(env.DATABASE_URL);
+  const protectedWorkspacePolicy = new ProtectedWorkspacePolicyAdministrationService(protectedWorkspacePolicyStore);
   const customerProductAuthentication = new CustomerProductAuthenticationService(
     createBetterAuthSessionReader(customerAuthentication),
     identityPolicyStore,
