@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, type McpToolPolicyDecision } from "@lemmacomputer/contracts";
 
-type PolicySourceKind = "protected_baseline" | "organization_policy" | "connector_policy";
+type PolicySourceKind = "organization_policy" | "connector_policy";
 
 export type ConnectorPolicySource = {
   kind: PolicySourceKind;
@@ -11,7 +11,11 @@ export type ConnectorPolicySource = {
 };
 
 export type EffectiveConnectorPolicyInput = {
-  baseline: {
+  /**
+   * @deprecated Accepted only while older callers are migrated. Product-release
+   * baselines are not an active connector-policy authority and are ignored.
+   */
+  baseline?: {
     templateVersionId: string;
     version: number;
     documentHash: string;
@@ -97,7 +101,7 @@ export type EffectiveConnectorPolicyView = {
     membersCanManage: boolean;
     accessPolicyVersion: number;
     updatedAt: string;
-    reason: "allowed" | "protected_baseline_denied" | "organization_policy_denied" | "connector_disabled";
+    reason: "allowed" | "organization_policy_denied" | "connector_disabled";
     controllingSource: ConnectorPolicySource;
   };
   sources: ConnectorPolicySource[];
@@ -218,13 +222,6 @@ const connectorSource = (input: EffectiveConnectorPolicyInput): ConnectorPolicyS
   };
 };
 
-const baselineSource = (input: EffectiveConnectorPolicyInput): ConnectorPolicySource => ({
-  kind: "protected_baseline",
-  sourceId: input.baseline.templateVersionId,
-  version: input.baseline.version,
-  documentHash: input.baseline.documentHash,
-});
-
 const organizationSource = (input: EffectiveConnectorPolicyInput): ConnectorPolicySource | null => input.organizationPolicy ? ({
   kind: "organization_policy",
   sourceId: input.organizationPolicy.policyVersionId,
@@ -235,30 +232,23 @@ const organizationSource = (input: EffectiveConnectorPolicyInput): ConnectorPoli
 export const resolveEffectiveConnectorPolicy = (
   input: EffectiveConnectorPolicyInput,
 ): EffectiveConnectorPolicyView => {
-  const baseline = baselineSource(input);
   const organization = organizationSource(input);
   const configured = connectorSource(input);
-  const sources = [baseline, ...(organization ? [organization] : []), configured];
-  const baselineAllowed = input.baseline.connectors.allow.includes(input.connector.id)
-    && !input.baseline.connectors.deny.includes(input.connector.id);
+  const sources = [...(organization ? [organization] : []), configured];
   const organizationConnectors = input.organizationPolicy?.connectors;
   const organizationAllowed = !organizationConnectors?.deny.includes(input.connector.id)
     && (!organizationConnectors?.allow || organizationConnectors.allow.includes(input.connector.id));
-  const access = !baselineAllowed
-    ? { effectiveDecision: "deny" as const, reason: "protected_baseline_denied" as const, controllingSource: baseline }
-    : !organizationAllowed
-      ? { effectiveDecision: "deny" as const, reason: "organization_policy_denied" as const, controllingSource: organization! }
-      : !input.connector.enabled
-        ? { effectiveDecision: "deny" as const, reason: "connector_disabled" as const, controllingSource: configured }
-        : { effectiveDecision: "allow" as const, reason: "allowed" as const, controllingSource: configured };
+  const access = !organizationAllowed
+    ? { effectiveDecision: "deny" as const, reason: "organization_policy_denied" as const, controllingSource: organization! }
+    : !input.connector.enabled
+      ? { effectiveDecision: "deny" as const, reason: "connector_disabled" as const, controllingSource: configured }
+      : { effectiveDecision: "allow" as const, reason: "allowed" as const, controllingSource: configured };
 
-  const baselineTools = input.baseline.connectors.toolPolicies[input.connector.id] ?? {};
   const organizationTools = organizationConnectors?.toolPolicies[input.connector.id] ?? {};
   const observedByName = input.observedTools === null
     ? null
     : new Map(input.observedTools.map((tool) => [tool.name, tool]));
   const toolNames = [...new Set([
-    ...Object.keys(baselineTools),
     ...Object.keys(organizationTools),
     ...Object.keys(input.connector.configuredToolPolicies),
     ...Object.keys(input.connector.reviewedToolDefinitionHashes),
@@ -267,10 +257,8 @@ export const resolveEffectiveConnectorPolicy = (
 
   const tools = toolNames.map((name): EffectiveConnectorToolPolicy => {
     const configuredDecision = input.connector.configuredToolPolicies[name] ?? "deny";
-    const baselineDecision = baselineTools[name] ?? "deny";
     const organizationDecision = organizationTools[name];
     const policyDecision = strictestDecision([
-      baselineDecision,
       ...(organizationDecision ? [organizationDecision] : []),
       configuredDecision,
     ]);
@@ -300,7 +288,6 @@ export const resolveEffectiveConnectorPolicy = (
       observedDefinitionHash: observed?.definitionHash ?? null,
       reviewedDefinitionHash,
       sources: [
-        { ...baseline, decision: baselineDecision },
         ...(organization && organizationDecision ? [{ ...organization, decision: organizationDecision }] : []),
         { ...configured, decision: configuredDecision },
       ],
