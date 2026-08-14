@@ -14,11 +14,26 @@ ALTER TABLE organization_workspace_policy_versions
   ADD CONSTRAINT organization_workspace_policy_versions_enforcement_scope_check
   CHECK (enforcement_scope IN ('legacy_signed_baseline', 'organization'));
 
-ALTER TABLE organization_workspace_policy_versions
-  DROP CONSTRAINT organization_workspace_policy_versions_tenant_id_version_key;
-
-ALTER TABLE organization_workspace_policy_versions
-  DROP CONSTRAINT organization_workspace_policy_versions_tenant_id_document_hash_key;
+DO $$
+DECLARE
+  constraint_name text;
+BEGIN
+  FOR constraint_name IN
+    SELECT conname
+    FROM pg_constraint
+    WHERE conrelid = 'organization_workspace_policy_versions'::regclass
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) IN (
+        'UNIQUE (tenant_id, version)',
+        'UNIQUE (tenant_id, document_hash)'
+      )
+  LOOP
+    EXECUTE format(
+      'ALTER TABLE organization_workspace_policy_versions DROP CONSTRAINT %I',
+      constraint_name
+    );
+  END LOOP;
+END $$;
 
 ALTER TABLE organization_workspace_policy_versions
   ADD CONSTRAINT organization_workspace_policy_versions_scope_version_key
