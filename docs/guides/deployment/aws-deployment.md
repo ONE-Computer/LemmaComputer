@@ -52,7 +52,7 @@ flowchart TB
       Ingress["Workspace ingress ECS :4174"]
       Web["Web ECS :4173"]
       Control["Control ECS :4100"]
-      Workers["Controller / scheduler / consent"]
+      Workers["Scheduler / consent"]
       LiteLLM["LiteLLM ECS :4000"]
       AdminProxy["LiteLLM admin mTLS proxy"]
     end
@@ -78,6 +78,8 @@ flowchart TB
 
   subgraph WorkspaceBoundary["Separate workspace compute VPC/account"]
     Kasm["Lemma workspace node API + Docker"]
+    DesktopRelay["Per-workspace desktop relays"]
+    AppRelays["Per-workspace application relays"]
     WorkspaceProxy["Per-workspace egress enforcement"]
     Sandboxes["User workspaces"]
   end
@@ -94,7 +96,11 @@ flowchart TB
   LiteLLM --> GatewayDB
   Control --> AdminProxy --> LiteLLM
   Control --> Workers
-  Workers --> Kasm
+  Control -->|"mTLS + token"| Kasm
+  Ingress -->|"mTLS HTTP/WebSocket"| DesktopRelay --> Sandboxes
+  Sandboxes --> AppRelays
+  AppRelays -->|"mTLS"| Control
+  AppRelays -->|"mTLS"| LiteLLM
   Sandboxes --> WorkspaceProxy --> Firewall
   LiteLLM --> ModelProxy --> Firewall
   LiteLLM --> McpProxy --> Firewall
@@ -189,7 +195,7 @@ shared private route table for every task.
 | Subnet class | Default route | Intended resources |
 | --- | --- | --- |
 | Public ingress | Internet gateway for ALB nodes | Internet-facing ALB only; no ECS task |
-| Isolated application | No internet/NAT default route | Ingress, Web, Control, LiteLLM, admin proxy, scheduler, consent, controller |
+| Isolated application | No internet/NAT default route | Ingress, Web, Control, LiteLLM, admin proxy, scheduler, and consent |
 | Controlled egress | Default route to an AZ-local firewall/GWLB endpoint | Model proxy, remote-MCP proxy, M365 bridge, channel broker, other explicitly approved egress clients |
 | Inspection | Routes that preserve symmetric inspection | AWS Network Firewall endpoints or third-party appliances |
 | Public egress | Internet gateway | NAT gateways or approved firewall egress interfaces |
@@ -221,7 +227,7 @@ LiteLLM and either egress proxy in one task/network namespace.
 
 | Service group | Subnet | Direct internet | Notes |
 | --- | --- | --- | --- |
-| Workspace ingress | Isolated application | No | Only ALB target; private calls to Web, LiteLLM callback, M365 authorization, and workspace relays |
+| Workspace ingress | Isolated application | No | Only ALB target; private calls to Web, LiteLLM callback, M365 authorization, and mTLS workspace relays |
 | Web | Isolated application | No | Static UI and private API proxy only |
 | Control | Isolated application | No | Uses private DB/services; Entra/Kasm outbound must use a dedicated inspected path or proxy |
 | LiteLLM | Isolated application | No | Uses model and MCP proxies; private DB, Control callbacks, and M365 only |
@@ -230,7 +236,7 @@ LiteLLM and either egress proxy in one task/network namespace.
 | M365 bridge | Controlled egress | Through inspection only | Restrict to Microsoft identity and Graph destination policy |
 | Channel broker | Controlled egress | Through inspection only | Separate channel/export policy and credentials |
 | Scheduler/consent | Isolated application | No | Add no internet route unless a reviewed feature requires it |
-| Workspace controller | Separate workspace compute | Governed workspace egress only | Node-local Docker socket; private mTLS API from Control |
+| Workspace controller | Separate workspace compute | Governed workspace egress only | Node-local Docker socket; private mTLS API from Control; creates per-workspace mTLS desktop and application relays |
 
 The local Compose `identity-egress` path means Control currently needs outbound
 Entra discovery/token access. In AWS, do not solve this by placing all of

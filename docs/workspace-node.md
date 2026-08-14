@@ -21,8 +21,8 @@ across workspaces.
 Expose only these private paths:
 
 - Control to node API over mTLS HTTPS;
-- workspace ingress to the node's private TLS desktop relay ports;
-- node application relays to the two configured private HTTPS endpoints for
+- workspace ingress to the node's private mTLS desktop relay ports;
+- node application relays over mTLS to the two configured private endpoints for
   LiteLLM and Control;
 - the governed per-workspace egress proxy to its inspected egress network.
 
@@ -36,11 +36,13 @@ layers as well as in the governed proxy.
 
 Set the workspace-node contract through `.env` and run `npm run env:check
 -- --profile=hosted`. Remote deployments require the node URL and both private
-application URLs to use HTTPS, mTLS certificate material, a private advertised
-desktop host, a private bind address, the restricted application network, and
-workspace-ingress upstream TLS verification. Certificate private keys remain
-with their owning workloads: the node server key reaches only the node and the
-Control client key reaches only Control.
+application URLs to use HTTPS, complete client and server mTLS certificate
+material, a private advertised desktop host, a private bind address, the
+restricted application network, and workspace-ingress upstream TLS
+verification. Certificate private keys remain with their owning workloads:
+the node server key reaches only the node, the Control client key reaches only
+Control, the ingress client key reaches only workspace ingress, and the
+application-gateway client key reaches only the remote node controller.
 
 ## Storage and removal
 
@@ -61,17 +63,17 @@ leave the cleanup operation incomplete.
 
 ## Qualification
 
-Run `npm run qualify:internal-mtls` locally to exercise both current mTLS trust
-boundaries in one shot: Control to the LiteLLM administration listener and
+Run `npm run qualify:internal-mtls` locally to exercise the long-lived service
+mTLS listeners in one shot: Control to the LiteLLM administration listener and
 Control to a remote workspace node. The qualification creates separate
 ephemeral test CAs and Control leaf keys, starts the real TLS listeners with
 mock non-TLS backends, and proves accepted identity plus missing-certificate,
 wrong-identity, wrong-token, cross-CA, and hostname rejection. It does not
 install or reuse a developer CA.
 
-The desktop ingress and node application relays use server-authenticated TLS,
-not client-certificate mTLS, so their certificate verification remains in the
-focused ingress and adapter tests.
+Desktop ingress and node application relay routes also require client
+certificates. Their focused tests prove an actual workspace-ingress handshake,
+node relay identity enforcement, and application-relay client-key projection.
 
 An isolated development worktree can run the same split boundary without
 manually creating Compose overlays or copying a database:
@@ -85,6 +87,9 @@ npm run qualify:remote-workspace-node -- down
 The command creates short-lived worktree-local test authorities and preserves
 the worktree's existing users, organizations, providers, policies, databases,
 and volumes. It is qualification tooling, not production PKI automation.
+See [Remote workspace-node mode](guides/remote-workspace-node.md) for the full
+architecture, mTLS matrix, exact setup sequence, generated Compose topology,
+manual acceptance checklist, hosted gaps, and troubleshooting.
 
 Before promotion, also run `npm run qualify:deployment-profiles`, the focused
 controller/adapter/ingress tests, and `npm run verify:quick`. In a representative

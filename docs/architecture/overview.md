@@ -50,9 +50,12 @@ expired bundle, or missing projection fails closed.
 
 ### Network reachability is capability
 
-Local workspaces are attached to an internal, per-workspace Docker network.
-Control attaches only the gateway, Control API, and relay that a projected
-policy requires. The user environment has no general route to model providers,
+Workspaces are attached to an internal, per-workspace Docker network. In the
+colocated topology the adapter attaches only the governed services a projected
+policy requires. In the remote topology it creates narrow per-workspace desktop
+and application relays: the sandbox sees fixed local aliases, while the relays
+alone can reach mutually authenticated private ingress, LiteLLM, and Control
+endpoints. The user environment has no general route to model providers,
 Microsoft Graph, PostgreSQL, Docker, or the OpenVTC service.
 
 The gateway data plane is subject to the same rule. LiteLLM is attached only to
@@ -106,21 +109,25 @@ flowchart TB
 
   subgraph Experience["Private experience plane"]
     Web["Web static server + /api proxy"]
-    Relay["Kasm relay"]
   end
 
-  subgraph WorkspaceContainer["Workspace container - one per session"]
-    Sandbox["User-controlled sandbox process<br/>runs as kasm-user, uid 1000"]
-    Loopback["Root-owned loopback brokers<br/>hold the scoped credentials"]
-    Sandbox -.->|"127.0.0.1 only; no credential crosses this line"| Loopback
+  subgraph WorkspaceNode["Workspace compute node"]
+    Controller["Workspace controller<br/>node-local Docker authority"]
+    Relay["Per-workspace desktop relay"]
+    AppRelays["Per-workspace private application relays"]
+    Egress["Per-workspace egress proxy<br/>signed grant, default deny"]
+    subgraph WorkspaceContainer["Workspace container - one per session"]
+      Sandbox["User-controlled sandbox process<br/>runs as kasm-user, uid 1000"]
+      Loopback["Root-owned loopback brokers<br/>hold the scoped credentials"]
+      Sandbox -.->|"127.0.0.1 only; no credential crosses this line"| Loopback
+    end
   end
 
   subgraph ControlPlane["Private control plane"]
     Control["Control API"]
     Governance["Routing + usage governance"]
-    Controller["Workspace controller"]
     Channel["Channel broker"]
-    ControlDB[("Control database")]
+    ControlDB[("Product + Better Auth logical databases")]
   end
 
   subgraph ConsentPlane["Isolated consent plane"]
@@ -136,7 +143,6 @@ flowchart TB
   subgraph EgressLayer["Proxied egress - tenant- or user-influenced destinations"]
     ModelEgress["Gateway egress proxy<br/>static model-provider policy"]
     McpEgress["Remote MCP egress proxy<br/>custom and public MCP only"]
-    Egress["Per-workspace egress proxy<br/>signed grant, default deny"]
   end
 
   Browser --> Ingress --> Web --> Control
@@ -146,14 +152,15 @@ flowchart TB
   Control --> ControlDB
   Control --> Governance --> ControlDB
   LiteLLM --> Governance
-  Control --> Controller
+  Control -->|"mTLS + token when remote"| Controller
   Control --> OpenVTC
   Control --> LiteLLM
   Control --> Channel
   Controller -->|"creates and verifies signed policy"| WorkspaceContainer
-  Ingress --> Relay --> Sandbox
-  Loopback --> Control
-  Loopback --> LiteLLM
+  Ingress -->|"mTLS when remote"| Relay --> Sandbox
+  Loopback --> AppRelays
+  AppRelays -->|"mTLS when remote"| Control
+  AppRelays -->|"mTLS when remote"| LiteLLM
   Sandbox --> Egress --> Approved["Approved web destinations"]
   LiteLLM --> GatewayDB
   LiteLLM --> M365 --> Graph["Microsoft Graph"]
@@ -243,7 +250,10 @@ remain bounded transitional adapters and are not this core flow.
 The same Lemma-owned Docker/KasmVNC adapter talks to the node-local Docker
 socket in both placements. In a remote deployment the controller itself moves
 to the private workspace node; Control calls its workspace-bound API over mTLS
-and never receives Docker authority. See [Workspace node deployment](workspace-node.md).
+and never receives Docker authority. Workspace ingress and the node application
+relays also present workload client certificates on their cross-boundary
+routes. See [Remote workspace-node mode](../guides/remote-workspace-node.md) and
+[Workspace node deployment](../workspace-node.md).
 
 ### Model request
 

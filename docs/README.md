@@ -59,6 +59,10 @@ Task-oriented instructions.
 - [Development workflow](guides/development-workflow.md) — the entry point for
   anyone who will change the product: host support, environment and Compose file
   ownership, isolated worktrees, local gates, and controlled promotion.
+- [Remote workspace-node mode](guides/remote-workspace-node.md) — the split-node
+  architecture, node-local Docker authority, per-workspace relays, mTLS
+  identities, repeatable worktree qualification, hosted gaps, and Cowork test
+  checklist.
 - [Local deployment and Microsoft integration setup](guides/local-deployment.md)
   — the runbook for the transitional Entra and Microsoft 365 integration path.
 - [Deployment profiles](guides/deployment-profiles.md) — what `customer-managed`,

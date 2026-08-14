@@ -4,13 +4,27 @@ import https from "node:https";
 
 const certificate = readFileSync("/qualification-pki/application-server.crt");
 const privateKey = readFileSync("/qualification-pki/application-server.key");
+const clientCa = readFileSync("/qualification-pki/application/ca.crt");
+const expectedClientCommonName = "lemmacomputer-workspace-application-gateway";
 const hopByHop = new Set([
   "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
   "te", "trailer", "transfer-encoding", "upgrade",
 ]);
 
 const listen = (port, upstream) => {
-  const server = https.createServer({ cert: certificate, key: privateKey, minVersion: "TLSv1.2" }, (request, response) => {
+  const server = https.createServer({
+    cert: certificate,
+    key: privateKey,
+    ca: clientCa,
+    requestCert: true,
+    rejectUnauthorized: true,
+    minVersion: "TLSv1.2",
+  }, (request, response) => {
+    if (request.socket.getPeerCertificate().subject?.CN !== expectedClientCommonName) {
+      response.writeHead(403, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify({ error: { code: "REMOTE_QUALIFICATION_CLIENT_IDENTITY_REJECTED" } }));
+      return;
+    }
     if (request.url === "/__lemmacomputer/qualification-healthz") {
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify({ status: "ok" }));

@@ -80,10 +80,15 @@ const validHostedEnvironment = () => {
     LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64: pemBase64("PRIVATE KEY"),
     LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64: pemBase64("CERTIFICATE"),
     LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64: pemBase64("PRIVATE KEY"),
+    LEMMACOMPUTER_WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64: pemBase64("PRIVATE KEY"),
     LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST: "workspace.example.test",
     LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST: "10.0.1.10",
     LEMMACOMPUTER_WORKSPACE_NODE_RELAY_NETWORK: "workspace-relay-private",
     LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK: "workspace-app-private",
+    LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CA_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CLIENT_CERT_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64: pemBase64("PRIVATE KEY"),
     LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL: "https://gateway.internal.example.test",
     LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL: "https://control.internal.example.test",
     LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true",
@@ -323,6 +328,22 @@ test("hosted validation fails closed for missing or non-HTTPS LiteLLM mutual TLS
   );
 });
 
+test("hosted remote nodes require mutual TLS on desktop and application relay routes", () => {
+  const missingIngressIdentity = validHostedEnvironment();
+  missingIngressIdentity.LEMMACOMPUTER_WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64 = "";
+  assert.throws(
+    () => validateDeploymentEnvironment(missingIngressIdentity, { profile: "hosted", strict: true }),
+    /WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64/i,
+  );
+
+  const missingApplicationIdentity = validHostedEnvironment();
+  missingApplicationIdentity.LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64 = "";
+  assert.throws(
+    () => validateDeploymentEnvironment(missingApplicationIdentity, { profile: "hosted", strict: true }),
+    /WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64/i,
+  );
+});
+
 test("hosted validation rejects secret reuse and raw Telegram token compatibility mode", () => {
   const reusedSessionSecret = validHostedEnvironment();
   reusedSessionSecret.LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET = reusedSessionSecret.LEMMACOMPUTER_SESSION_SECRET;
@@ -437,6 +458,10 @@ test("service projections preserve credential and TLS key custody", () => {
   assert.ok(!("LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64" in services["control-api"]));
   assert.ok("LITELLM_ADMIN_TLS_CLIENT_KEY_B64" in services["control-api"]);
   assert.ok(!("LITELLM_ADMIN_TLS_CLIENT_KEY_B64" in services["litellm-admin-proxy"]));
+  assert.ok("WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64" in services["workspace-ingress"]);
+  assert.ok(!("WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64" in services["workspace-controller"]));
+  assert.ok("WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64" in services["workspace-controller"]);
+  assert.ok(!("WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64" in services["workspace-ingress"]));
   assert.ok(!("LEMMACOMPUTER_WEB_PROXY_TOKEN" in services["channel-broker"]));
   assert.match(serializeEnvironment(services["channel-broker"]), /^CHANNEL_CREDENTIAL_SECRET=/m);
 });

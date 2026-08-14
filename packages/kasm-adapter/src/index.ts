@@ -235,8 +235,12 @@ type DockerKasmVncConfig = {
   relayNetwork?: string;
   relayTlsCertificate?: string;
   relayTlsKey?: string;
+  relayTlsClientCa?: string;
+  relayTlsClientCommonName?: string;
   applicationNetwork?: string;
   applicationTlsCa?: string;
+  applicationTlsClientCertificate?: string;
+  applicationTlsClientKey?: string;
   timeZone?: string;
   chatAttachmentRetentionDays?: number;
   kvmEnabled?: boolean;
@@ -263,10 +267,22 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
         503,
       );
     }
-    if (this.topology === "remote" && (!config.publicHost || !config.relayBindHost || !config.relayNetwork || !config.relayTlsCertificate || !config.relayTlsKey || !config.applicationNetwork)) {
+    if (this.topology === "remote" && (
+      !config.publicHost
+      || !config.relayBindHost
+      || !config.relayNetwork
+      || !config.relayTlsCertificate
+      || !config.relayTlsKey
+      || !config.relayTlsClientCa
+      || !config.relayTlsClientCommonName
+      || !config.applicationNetwork
+      || !config.applicationTlsCa
+      || !config.applicationTlsClientCertificate
+      || !config.applicationTlsClientKey
+    )) {
       throw new LemmaComputerError(
         "WORKSPACE_NODE_REMOTE_CONFIGURATION_INCOMPLETE",
-        "Remote workspace nodes require a private advertised host, relay bind address, relay ingress network, relay TLS identity, and application network",
+        "Remote workspace nodes require private relay and application networks with complete mutual TLS identities",
         503,
       );
     }
@@ -811,7 +827,14 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
     }
     const name = applicationRelayName(workspaceId, kind);
     const configurationDigest = createHash("sha256")
-      .update(canonicalJson({ version: 2, kind, upstream: target.toString(), ca: this.config.applicationTlsCa ?? "", image: this.config.relayImage }), "utf8")
+      .update(canonicalJson({
+        version: 3,
+        kind,
+        upstream: target.toString(),
+        ca: this.config.applicationTlsCa,
+        clientCertificate: this.config.applicationTlsClientCertificate,
+        image: this.config.relayImage,
+      }), "utf8")
       .digest("hex");
     const existing = await this.inspectByName(name);
     if (existing?.running && existing.configurationDigest === configurationDigest) return;
@@ -823,13 +846,15 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
     const script = [
       'const http=require("node:http"),https=require("node:https");',
       'const upstream=new URL(process.env.UPSTREAM);',
-      'const ca=process.env.UPSTREAM_CA_B64?Buffer.from(process.env.UPSTREAM_CA_B64,"base64").toString("utf8"):undefined;',
+      'const ca=Buffer.from(process.env.UPSTREAM_CA_B64,"base64").toString("utf8");',
+      'const cert=Buffer.from(process.env.UPSTREAM_CLIENT_CERT_B64,"base64").toString("utf8");',
+      'const key=Buffer.from(process.env.UPSTREAM_CLIENT_KEY_B64,"base64").toString("utf8");',
       'const hopByHop=new Set(["connection","keep-alive","proxy-authenticate","proxy-authorization","te","trailer","transfer-encoding","upgrade"]);',
       'const server=http.createServer((req,res)=>{',
       'const base=upstream.pathname.endsWith("/")?upstream.pathname.slice(0,-1):upstream.pathname;',
       'const path=base+(req.url?.startsWith("/")?req.url:`/${req.url??""}`);',
       'const headers=Object.fromEntries(Object.entries(req.headers).filter(([name])=>!hopByHop.has(name.toLowerCase())));',
-      'const out=https.request({hostname:upstream.hostname,port:upstream.port||443,method:req.method,path,headers:{...headers,host:upstream.host,connection:"close"},agent:false,ca,rejectUnauthorized:true,minVersion:"TLSv1.2"},r=>{const responseHeaders=Object.fromEntries(Object.entries(r.headers).filter(([name])=>!hopByHop.has(name.toLowerCase())));res.writeHead(r.statusCode||502,{...responseHeaders,connection:"close"});r.pipe(res)});',
+      'const out=https.request({hostname:upstream.hostname,port:upstream.port||443,method:req.method,path,headers:{...headers,host:upstream.host,connection:"close"},agent:false,ca,cert,key,rejectUnauthorized:true,minVersion:"TLSv1.2"},r=>{const responseHeaders=Object.fromEntries(Object.entries(r.headers).filter(([name])=>!hopByHop.has(name.toLowerCase())));res.writeHead(r.statusCode||502,{...responseHeaders,connection:"close"});r.pipe(res)});',
       'out.on("error",()=>{if(!res.headersSent)res.writeHead(502,{"content-type":"application/json"});res.end(JSON.stringify({error:{code:"REMOTE_APPLICATION_UPSTREAM_UNAVAILABLE"}}))});',
       'req.pipe(out)});',
       'server.listen(Number(process.env.LISTEN_PORT),"0.0.0.0");',
@@ -841,7 +866,9 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       Env: [
         `UPSTREAM=${target.toString()}`,
         `LISTEN_PORT=${port}`,
-        ...(this.config.applicationTlsCa ? [`UPSTREAM_CA_B64=${Buffer.from(this.config.applicationTlsCa, "utf8").toString("base64")}`] : []),
+        `UPSTREAM_CA_B64=${Buffer.from(this.config.applicationTlsCa!, "utf8").toString("base64")}`,
+        `UPSTREAM_CLIENT_CERT_B64=${Buffer.from(this.config.applicationTlsClientCertificate!, "utf8").toString("base64")}`,
+        `UPSTREAM_CLIENT_KEY_B64=${Buffer.from(this.config.applicationTlsClientKey!, "utf8").toString("base64")}`,
       ],
       Labels: {
         "com.lemmacomputer.application-relay": kind,
@@ -1054,13 +1081,22 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
   private async ensureRelay(workspaceId: string, sandboxName: string, sandboxId: string, port: number, workspaceNetwork: string) {
     const relayName = relayNameForWorkspace(workspaceId);
     const configurationDigest = createHash("sha256")
-      .update(canonicalJson({ topology: this.topology, sandboxId, port, relayNetwork: this.config.relayNetwork ?? "", certificate: this.config.relayTlsCertificate ?? "", image: this.config.relayImage }), "utf8")
+      .update(canonicalJson({
+        topology: this.topology,
+        sandboxId,
+        port,
+        relayNetwork: this.config.relayNetwork ?? "",
+        certificate: this.config.relayTlsCertificate ?? "",
+        clientCa: this.config.relayTlsClientCa ?? "",
+        clientCommonName: this.config.relayTlsClientCommonName ?? "",
+        image: this.config.relayImage,
+      }), "utf8")
       .digest("hex");
     const existing = await this.inspectByName(relayName);
     if (existing?.running && existing.configurationDigest === configurationDigest) return;
     if (existing) await this.removeContainer(existing.id);
     const script = this.topology === "remote"
-      ? `const tls=require("node:tls");const cert=Buffer.from(process.env.RELAY_CERT_B64,"base64");const key=Buffer.from(process.env.RELAY_KEY_B64,"base64");tls.createServer({cert,key,minVersion:"TLSv1.2"},c=>{const u=tls.connect({host:${JSON.stringify(sandboxName)},port:6901,rejectUnauthorized:false});const x=()=>{c.destroy();u.destroy()};c.on("error",x);u.on("error",x);c.pipe(u).pipe(c)}).listen(${port},"0.0.0.0")`
+      ? `const tls=require("node:tls");const cert=Buffer.from(process.env.RELAY_CERT_B64,"base64");const key=Buffer.from(process.env.RELAY_KEY_B64,"base64");const ca=Buffer.from(process.env.RELAY_CLIENT_CA_B64,"base64");const expected=process.env.RELAY_CLIENT_COMMON_NAME;tls.createServer({cert,key,ca,requestCert:true,rejectUnauthorized:true,minVersion:"TLSv1.2"},c=>{if(c.getPeerCertificate().subject?.CN!==expected){c.destroy();return}const u=tls.connect({host:${JSON.stringify(sandboxName)},port:6901,rejectUnauthorized:false});const x=()=>{c.destroy();u.destroy()};c.on("error",x);u.on("error",x);c.pipe(u).pipe(c)}).listen(${port},"0.0.0.0")`
       : `const net=require("node:net");net.createServer(c=>{const u=net.connect({host:${JSON.stringify(sandboxName)},port:6901});const x=()=>{c.destroy();u.destroy()};c.on("error",x);u.on("error",x);c.pipe(u).pipe(c)}).listen(${port},"0.0.0.0")`;
     const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(relayName)}`, {
       Image: this.config.relayImage,
@@ -1069,6 +1105,8 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       Env: this.topology === "remote" ? [
         `RELAY_CERT_B64=${Buffer.from(this.config.relayTlsCertificate!, "utf8").toString("base64")}`,
         `RELAY_KEY_B64=${Buffer.from(this.config.relayTlsKey!, "utf8").toString("base64")}`,
+        `RELAY_CLIENT_CA_B64=${Buffer.from(this.config.relayTlsClientCa!, "utf8").toString("base64")}`,
+        `RELAY_CLIENT_COMMON_NAME=${this.config.relayTlsClientCommonName!}`,
       ] : [],
       ExposedPorts: { [`${port}/tcp`]: {} },
       Labels: {

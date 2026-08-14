@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import http, { type Server } from "node:http";
-import net from "node:net";
+import http from "node:http";
+import https from "node:https";
+import net, { type Server } from "node:net";
 import type { Duplex } from "node:stream";
+import type { TLSSocket } from "node:tls";
 import test from "node:test";
 import {
   WorkspaceIngressAuthority,
@@ -9,6 +11,7 @@ import {
   workspaceIngressSessionCookie,
 } from "@lemmacomputer/workspace-ingress-auth";
 import { createWorkspaceIngress } from "../apps/workspace-ingress/src/server.js";
+import { generateMutualTlsAuthority } from "./mtls-fixture.js";
 
 const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
 const secret = "workspace-ingress-server-test-secret-at-least-32-characters";
@@ -146,6 +149,85 @@ test("workspace ingress forwards the web app and exchanges a launch for an isola
     assert.equal(unauthorized.status, 401);
   } finally {
     await Promise.all([close(ingress), close(workspace), close(web)]);
+  }
+});
+
+test("workspace ingress presents its client identity to a remote desktop relay", async () => {
+  const tls = await generateMutualTlsAuthority({
+    name: "workspace-desktop-relay",
+    serverName: "localhost",
+    clientCommonName: "lemmacomputer-workspace-ingress",
+  });
+  let observedClientCommonName: string | undefined;
+  const web = http.createServer((_request, response) => response.end("web"));
+  const workspace = https.createServer({
+    cert: tls.server.certificate,
+    key: tls.server.key,
+    ca: tls.ca,
+    requestCert: true,
+    rejectUnauthorized: true,
+    minVersion: "TLSv1.2",
+  }, (request, response) => {
+    observedClientCommonName = (request.socket as TLSSocket).getPeerCertificate().subject?.CN;
+    response.end("mutually authenticated workspace");
+  });
+  const [webPort, workspacePort] = await Promise.all([listen(web), listen(workspace)]);
+  const authority = new WorkspaceIngressAuthority(secret);
+  const createIngress = (withClientIdentity: boolean) => createWorkspaceIngress({
+    authority,
+    publicUrl: "http://localhost:4174",
+    webUpstream: `http://127.0.0.1:${webPort}`,
+    workspaceTlsCa: tls.ca,
+    ...(withClientIdentity ? {
+      workspaceTlsClientCertificate: tls.client.certificate,
+      workspaceTlsClientKey: tls.client.key,
+    } : {}),
+    authorizeWorkspaceAccess: async () => true,
+    audit: () => undefined,
+  });
+  const ingress = createIngress(true);
+  const ingressWithoutClientIdentity = createIngress(false);
+  const [ingressPort, ingressWithoutClientIdentityPort] = await Promise.all([
+    listen(ingress),
+    listen(ingressWithoutClientIdentity),
+  ]);
+
+  const openSession = async (port: number) => {
+    const launch = authority.issueLaunch({
+      identity: { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" },
+      workspaceId,
+      accessGeneration: 1,
+      target: { protocol: "https", host: "localhost", port: workspacePort },
+    });
+    const exchange = await fetch(
+      `http://127.0.0.1:${port}/workspaces/${workspaceId}/?${workspaceIngressAccessParameter}=${encodeURIComponent(launch.token)}`,
+      { redirect: "manual" },
+    );
+    return exchange.headers.get("set-cookie")!.split(";", 1)[0]!;
+  };
+
+  try {
+    const sessionCookie = await openSession(ingressPort);
+    const proxied = await fetch(`http://127.0.0.1:${ingressPort}/workspaces/${workspaceId}/`, {
+      headers: { cookie: sessionCookie },
+    });
+    assert.equal(proxied.status, 200);
+    assert.equal(await proxied.text(), "mutually authenticated workspace");
+    assert.equal(observedClientCommonName, "lemmacomputer-workspace-ingress");
+
+    const unauthenticatedCookie = await openSession(ingressWithoutClientIdentityPort);
+    const rejected = await fetch(`http://127.0.0.1:${ingressWithoutClientIdentityPort}/workspaces/${workspaceId}/`, {
+      headers: { cookie: unauthenticatedCookie },
+    });
+    assert.equal(rejected.status, 502);
+  } finally {
+    await Promise.all([
+      close(ingressWithoutClientIdentity),
+      close(ingress),
+      close(workspace),
+      close(web),
+      tls.cleanup(),
+    ]);
   }
 });
 

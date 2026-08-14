@@ -316,7 +316,12 @@ test("hosted Cowork virtualization is allowed on a fully isolated remote node", 
       relayNetwork: "workspace-relay-private",
       relayTlsCertificate: "test-certificate",
       relayTlsKey: "test-private-key",
+      relayTlsClientCa: "test-node-ca",
+      relayTlsClientCommonName: "lemmacomputer-workspace-ingress",
       applicationNetwork: "workspace-application-private",
+      applicationTlsCa: "test-application-ca",
+      applicationTlsClientCertificate: "test-application-client-certificate",
+      applicationTlsClientKey: "test-application-client-key",
     }),
   );
 });
@@ -343,7 +348,12 @@ test("remote Docker/KasmVNC nodes fail closed without private TLS relay configur
     relayNetwork: "workspace-relay-private",
     relayTlsCertificate: "test-certificate",
     relayTlsKey: "test-private-key",
+    relayTlsClientCa: "test-node-ca",
+    relayTlsClientCommonName: "lemmacomputer-workspace-ingress",
     applicationNetwork: "workspace-app-private",
+    applicationTlsCa: "test-application-ca",
+    applicationTlsClientCertificate: "test-application-client-certificate",
+    applicationTlsClientKey: "test-application-client-key",
     image: "sha256:pinned-workspace",
     networkPrefix: "lemmacomputer-workspace",
     controlNetwork: "lemmacomputer-control",
@@ -392,8 +402,12 @@ test("remote application relays disable TLS socket reuse and strip hop-by-hop he
       relayNetwork: "workspace-relay-private",
       relayTlsCertificate: "test-certificate",
       relayTlsKey: "test-private-key",
+      relayTlsClientCa: "test-node-ca",
+      relayTlsClientCommonName: "lemmacomputer-workspace-ingress",
       applicationNetwork: "workspace-app-private",
       applicationTlsCa: "test-application-ca",
+      applicationTlsClientCertificate: "test-application-client-certificate",
+      applicationTlsClientKey: "test-application-client-key",
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
       controlNetwork: "unused-on-remote-nodes",
@@ -415,6 +429,10 @@ test("remote application relays disable TLS socket reuse and strip hop-by-hop he
     assert.match(command, /agent:false/);
     assert.match(command, /connection:\"close\"/);
     assert.match(command, /responseHeaders/);
+    assert.match(command, /cert,key/);
+    const environment = (created.body.Env as string[]) ?? [];
+    assert.ok(environment.some((value) => value.startsWith("UPSTREAM_CLIENT_CERT_B64=")));
+    assert.ok(environment.some((value) => value.startsWith("UPSTREAM_CLIENT_KEY_B64=")));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
@@ -455,7 +473,12 @@ test("remote desktop relay publishes from a private ingress network and reaches 
       relayNetwork: "workspace-relay-private",
       relayTlsCertificate: "test-certificate",
       relayTlsKey: "test-private-key",
+      relayTlsClientCa: "test-node-ca",
+      relayTlsClientCommonName: "lemmacomputer-workspace-ingress",
       applicationNetwork: "workspace-app-private",
+      applicationTlsCa: "test-application-ca",
+      applicationTlsClientCertificate: "test-application-client-certificate",
+      applicationTlsClientKey: "test-application-client-key",
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
       controlNetwork: "unused-on-remote-nodes",
@@ -474,8 +497,15 @@ test("remote desktop relay publishes from a private ingress network and reaches 
     );
     const created = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create"))!;
     const host = created.body.HostConfig as Record<string, unknown>;
+    const command = ((created.body.Cmd as string[]) ?? []).join(" ");
+    const environment = (created.body.Env as string[]) ?? [];
     assert.equal(host.NetworkMode, "workspace-relay-private");
     assert.deepEqual(host.PortBindings, { "16920/tcp": [{ HostIp: "10.0.1.10", HostPort: "16920" }] });
+    assert.match(command, /requestCert:true/);
+    assert.match(command, /rejectUnauthorized:true/);
+    assert.match(command, /getPeerCertificate/);
+    assert.ok(environment.some((value) => value.startsWith("RELAY_CLIENT_CA_B64=")));
+    assert.ok(environment.includes("RELAY_CLIENT_COMMON_NAME=lemmacomputer-workspace-ingress"));
     assert.ok(requests.some((item) => (
       item.path === "/networks/lemmacomputer-workspace-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508/connect"
       && item.body.Container === "relay-id"

@@ -83,17 +83,22 @@ flowchart LR
   subgraph ControlPlane["Control plane"]
     Web["Web application"]
     Control["Control API"]
-    Controller["Workspace controller<br/>holds the Docker socket"]
     Consent["OpenVTC consent service"]
     Broker["Channel broker"]
     Scheduler["Scheduler worker"]
-    Store[("Control PostgreSQL")]
+    Store[("Control + Better Auth<br/>logical databases")]
   end
 
-  subgraph WorkspaceContainer["One workspace container per session"]
-    Brokers["AI/MCP broker processes<br/>root-owned, hold the scoped key<br/>listening on 127.0.0.1:4312-4317"]
-    Desktop["Desktop and AI applications<br/>run as kasm-user, uid 1000"]
-    Desktop -.->|"loopback only, never sees a credential"| Brokers
+  subgraph WorkspaceNode["Workspace compute node - colocated or private remote"]
+    Controller["Workspace controller<br/>only process with the node-local Docker socket"]
+    subgraph WorkspaceContainer["Per-workspace network boundary"]
+      Relay["Desktop ingress relay"]
+      AppRelays["Private application relays<br/>gateway and Control"]
+      WorkspaceEgress["Governed egress proxy"]
+      Brokers["AI/MCP broker processes<br/>root-owned, hold the scoped key<br/>listening on 127.0.0.1:4312-4317"]
+      Desktop["Desktop and AI applications<br/>run as kasm-user, uid 1000"]
+      Desktop -.->|"loopback only, never sees a credential"| Brokers
+    end
   end
 
   subgraph DataPlane["Gateway data plane - no direct internet route"]
@@ -106,12 +111,11 @@ flowchart LR
   subgraph EgressLayer["Proxied egress - destinations a tenant or user can influence"]
     ModelEgress["Gateway egress proxy<br/>static provider allowlist"]
     McpEgress["Remote MCP egress proxy<br/>custom and public MCP only"]
-    WorkspaceEgress["Workspace egress sidecar<br/>signed per-workspace domain rules"]
   end
 
   Employee --> Ingress
   Ingress -->|"normal pages"| Web --> Control
-  Ingress -->|"/workspaces/:id<br/>authenticated HTTP and WebSocket"| Relay["Kasm relay sidecar"] --> Desktop
+  Ingress -->|"/workspaces/:id<br/>mTLS HTTP and WebSocket when remote"| Relay --> Desktop
   Ingress -->|"/oauth/mcp/callback"| Gateway
   Ingress -->|"/m365/authorize"| M365
 
@@ -119,13 +123,14 @@ flowchart LR
   Control --> Consent
   Control --> Broker
   Scheduler --> Control
-  Control -->|"signed effective policy"| Controller
+  Control -->|"mTLS + token when remote<br/>signed effective policy"| Controller
   Controller -->|"creates and verifies"| WorkspaceContainer
   Control -->|"hosted mTLS administrator API"| AdminProxy --> Gateway
   Gateway -->|"routing, usage, and MCP policy callback"| Control
 
-  Brokers -->|"scoped virtual key"| Gateway
-  Brokers --> Control
+  Brokers -->|"fixed local aliases"| AppRelays
+  AppRelays -->|"mTLS private routes when remote"| Gateway
+  AppRelays -->|"mTLS private routes when remote"| Control
   Desktop --> WorkspaceEgress --> Approved["Approved web destinations"]
 
   Gateway --> ModelEgress --> Models["Model providers"]
@@ -177,9 +182,14 @@ those variables from its own environment before handing the session to
 `kasm-user`. The employee's desktop and AI applications therefore reach the
 model gateway through `127.0.0.1` without ever holding a credential they could
 read, copy, or exfiltrate. The AI/MCP broker is not a separate service — it is
-the privileged half of the workspace the employee is using. The Kasm relay and
-the egress proxy are separate per-workspace sidecar containers, created and
-destroyed with the session.
+the privileged half of the workspace the employee is using. The desktop relay,
+private application relays, and egress proxy are separate per-workspace sidecar
+containers, created and destroyed with the session. In remote mode they form
+one logical workspace network gateway while remaining separate processes so
+desktop ingress, private application traffic, public egress, and different
+workspaces do not share one credential or network bridge. See
+[Remote workspace-node mode](docs/guides/remote-workspace-node.md) for the
+complete topology and mTLS identities.
 
 The system separates four concerns:
 
@@ -244,9 +254,9 @@ paths and identifies which decisions remain authoritative in Control.
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |
 | `scheduler-worker` | Claims due schedule runs from the Control database and dispatches each one back through Control without decrypting prompts. Shares Control's database and network, so it is a separate process for operational reasons rather than an isolation boundary | Private |
-| `postgres` | LemmaComputer identity, policy, workspace, routing, usage-ledger, budget, operation, and audit state | Private |
+| `postgres` | One PostgreSQL engine containing the `lemmacomputer` product database and separate `lemmacomputer_auth` Better Auth database | Private |
 | `litellm-postgres` | Gateway configuration, virtual keys, and encrypted OAuth state | Private |
-| workspace sidecars | Credential brokers, Kasm relay, and default-deny egress enforcement created per workspace | Dynamic/private |
+| workspace sidecars | Credential brokers, desktop and private-application relays, and default-deny egress enforcement created per workspace | Dynamic/private |
 
 The technical [Service reference](docs/reference/services.md) describes each process,
 interface, state owner, health contract, and extension seam.
@@ -299,8 +309,9 @@ npm run qualify:remote-workspace-node -- up --cowork
 
 This preserves the worktree's users, organizations, provider configuration,
 databases, and persistent volumes. See the
-[split-node qualification workflow](docs/guides/development-workflow.md#repeatable-split-node-qualification)
-for non-mutating validation, status, and teardown commands.
+[remote workspace-node guide](docs/guides/remote-workspace-node.md) for the
+architecture, mTLS matrix, non-mutating validation, manual test checklist,
+status, and teardown commands.
 
 ### Deployment profiles and Microsoft integrations
 

@@ -22,6 +22,8 @@ export type WorkspaceIngressConfig = {
   agentChatRequestTimeoutMs?: number;
   verifyWorkspaceTls?: boolean;
   workspaceTlsCa?: string;
+  workspaceTlsClientCertificate?: string;
+  workspaceTlsClientKey?: string;
   authorizeWorkspaceAccess: (claims: WorkspaceIngressClaims) => Promise<boolean>;
   accessHeartbeatMs?: number;
   audit?: (event: Record<string, unknown>) => void;
@@ -89,7 +91,14 @@ const requestOptions = (
   request: IncomingMessage,
   target: URL,
   path: string,
-  options: { workspace: boolean; websocket?: boolean; verifyWorkspaceTls: boolean; workspaceTlsCa?: string },
+  options: {
+    workspace: boolean;
+    websocket?: boolean;
+    verifyWorkspaceTls: boolean;
+    workspaceTlsCa?: string;
+    workspaceTlsClientCertificate?: string;
+    workspaceTlsClientKey?: string;
+  },
 ): RequestOptions => ({
   protocol: target.protocol,
   hostname: target.hostname,
@@ -100,6 +109,8 @@ const requestOptions = (
   ...(target.protocol === "https:" ? {
     rejectUnauthorized: options.workspace ? options.verifyWorkspaceTls : true,
     ...(options.workspace && options.workspaceTlsCa ? { ca: options.workspaceTlsCa } : {}),
+    ...(options.workspace && options.workspaceTlsClientCertificate ? { cert: options.workspaceTlsClientCertificate } : {}),
+    ...(options.workspace && options.workspaceTlsClientKey ? { key: options.workspaceTlsClientKey } : {}),
   } : {}),
 });
 
@@ -121,11 +132,19 @@ const proxyRequest = (
   workspace: boolean,
   verifyWorkspaceTls: boolean,
   workspaceTlsCa: string | undefined,
+  workspaceTlsClientCertificate: string | undefined,
+  workspaceTlsClientKey: string | undefined,
   audit: (event: Record<string, unknown>) => void,
   failure?: { code: string; message: string },
 ) => {
   const transport = target.protocol === "https:" ? https : http;
-  const upstream = transport.request(requestOptions(request, target, path, { workspace, verifyWorkspaceTls, workspaceTlsCa }), (upstreamResponse) => {
+  const upstream = transport.request(requestOptions(request, target, path, {
+    workspace,
+    verifyWorkspaceTls,
+    workspaceTlsCa,
+    workspaceTlsClientCertificate,
+    workspaceTlsClientKey,
+  }), (upstreamResponse) => {
     const headers = { ...upstreamResponse.headers };
     delete headers.connection;
     delete headers["keep-alive"];
@@ -167,13 +186,22 @@ const proxyUpgrade = (
   workspace: boolean,
   verifyWorkspaceTls: boolean,
   workspaceTlsCa: string | undefined,
+  workspaceTlsClientCertificate: string | undefined,
+  workspaceTlsClientKey: string | undefined,
   audit: (event: Record<string, unknown>) => void,
   claims?: WorkspaceIngressClaims,
   authorizeWorkspaceAccess?: (claims: WorkspaceIngressClaims) => Promise<boolean>,
   heartbeatMs = 1_000,
 ) => {
   const transport = target.protocol === "https:" ? https : http;
-  const upstreamRequest = transport.request(requestOptions(request, target, path, { workspace, websocket: true, verifyWorkspaceTls, workspaceTlsCa }));
+  const upstreamRequest = transport.request(requestOptions(request, target, path, {
+    workspace,
+    websocket: true,
+    verifyWorkspaceTls,
+    workspaceTlsCa,
+    workspaceTlsClientCertificate,
+    workspaceTlsClientKey,
+  }));
   upstreamRequest.setTimeout(timeoutMs, () => upstreamRequest.destroy(new Error("upstream timeout")));
   upstreamRequest.on("upgrade", (upstreamResponse, upstreamSocket, upstreamHead) => {
     const statusLine = `HTTP/${upstreamResponse.httpVersion} ${upstreamResponse.statusCode ?? 101} ${upstreamResponse.statusMessage ?? "Switching Protocols"}\r\n`;
@@ -314,6 +342,8 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
   const agentChatTimeoutMs = config.agentChatRequestTimeoutMs ?? defaultAgentChatRequestTimeoutMs;
   const verifyWorkspaceTls = config.verifyWorkspaceTls ?? true;
   const workspaceTlsCa = config.workspaceTlsCa;
+  const workspaceTlsClientCertificate = config.workspaceTlsClientCertificate;
+  const workspaceTlsClientKey = config.workspaceTlsClientKey;
   const audit = config.audit ?? ((event) => process.stdout.write(`${JSON.stringify(event)}\n`));
   const accessHeartbeatMs = config.accessHeartbeatMs ?? 1_000;
   const authorizeWorkspaceAccess = async (claims: WorkspaceIngressClaims) => {
@@ -353,6 +383,8 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
         false,
         true,
         undefined,
+        undefined,
+        undefined,
         audit,
         { code: "OAUTH_UPSTREAM_UNAVAILABLE", message: "The Microsoft 365 connection service is unavailable" },
       );
@@ -377,6 +409,8 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
         requestTimeout(request, timeoutMs, agentChatTimeoutMs),
         false,
         true,
+        undefined,
+        undefined,
         undefined,
         audit,
       );
@@ -419,14 +453,26 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
       response.end(JSON.stringify({ error: { code: "WORKSPACE_ACCESS_REVOKED", message: "Workspace access is no longer active" } }));
       return;
     }
-    proxyRequest(request, response, upstreamFor(claims), route.upstreamPath, timeoutMs, true, verifyWorkspaceTls, workspaceTlsCa, audit);
+    proxyRequest(
+      request,
+      response,
+      upstreamFor(claims),
+      route.upstreamPath,
+      timeoutMs,
+      true,
+      verifyWorkspaceTls,
+      workspaceTlsCa,
+      workspaceTlsClientCertificate,
+      workspaceTlsClientKey,
+      audit,
+    );
   });
 
   server.on("upgrade", (request, socket, head) => {
     void (async () => {
     const route = workspaceRoute(request);
     if (!route) {
-      proxyUpgrade(request, socket, head, webUpstream, request.url ?? "/", timeoutMs, false, true, undefined, audit);
+      proxyUpgrade(request, socket, head, webUpstream, request.url ?? "/", timeoutMs, false, true, undefined, undefined, undefined, audit);
       return;
     }
     const sessionToken = parseCookies(request.headers.cookie)[workspaceIngressSessionCookie];
@@ -439,7 +485,23 @@ export function createWorkspaceIngress(config: WorkspaceIngressConfig) {
       writeSocketResponse(socket, 403, "Forbidden");
       return;
     }
-    proxyUpgrade(request, socket, head, upstreamFor(claims), route.upstreamPath, timeoutMs, true, verifyWorkspaceTls, workspaceTlsCa, audit, claims, authorizeWorkspaceAccess, accessHeartbeatMs);
+    proxyUpgrade(
+      request,
+      socket,
+      head,
+      upstreamFor(claims),
+      route.upstreamPath,
+      timeoutMs,
+      true,
+      verifyWorkspaceTls,
+      workspaceTlsCa,
+      workspaceTlsClientCertificate,
+      workspaceTlsClientKey,
+      audit,
+      claims,
+      authorizeWorkspaceAccess,
+      accessHeartbeatMs,
+    );
     })().catch(() => writeSocketResponse(socket, 403, "Forbidden"));
   });
 
@@ -461,6 +523,8 @@ const envSchema = z.object({
   WORKSPACE_INGRESS_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
   WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
   WORKSPACE_INGRESS_TLS_CA_B64: z.string().optional(),
+  WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64: z.string().optional(),
+  WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64: z.string().optional(),
 });
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
@@ -478,6 +542,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     litellmOAuthUpstream: env.WORKSPACE_INGRESS_LITELLM_OAUTH_UPSTREAM,
     verifyWorkspaceTls: env.WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS,
     workspaceTlsCa: env.WORKSPACE_INGRESS_TLS_CA_B64 ? Buffer.from(env.WORKSPACE_INGRESS_TLS_CA_B64, "base64").toString("utf8") : undefined,
+    workspaceTlsClientCertificate: env.WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64 ? Buffer.from(env.WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64, "base64").toString("utf8") : undefined,
+    workspaceTlsClientKey: env.WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64 ? Buffer.from(env.WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64, "base64").toString("utf8") : undefined,
     authorizeWorkspaceAccess: createHttpWorkspaceAccessAuthorizer(
       env.WORKSPACE_INGRESS_CONTROL_URL,
       env.WORKSPACE_INGRESS_CONTROL_TOKEN,

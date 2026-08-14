@@ -57,7 +57,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     healthcheck:
@@ -99,6 +100,8 @@ export const renderControlOverride = () => `services:
     environment:
       WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true"
       WORKSPACE_INGRESS_TLS_CA_B64: \${QUALIFICATION_NODE_CA_B64:?set node CA}
+      WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64: \${QUALIFICATION_INGRESS_CLIENT_CERT_B64:?set ingress client certificate}
+      WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64: \${QUALIFICATION_INGRESS_CLIENT_KEY_B64:?set ingress client key}
 
   remote-application-tls:
     image: lemmacomputer/control-runtime:\${LEMMACOMPUTER_IMAGE_TAG:?set image tag}
@@ -106,7 +109,8 @@ export const renderControlOverride = () => `services:
     command: ["node", "/qualification/remote-workspace-node-tls-forwarder.mjs"]
     init: true
     read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=16m]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     volumes:
       - ./scripts/remote-workspace-node-tls-forwarder.mjs:/qualification/remote-workspace-node-tls-forwarder.mjs:ro
       - \${QUALIFICATION_ROOT:?set qualification root}/pki:/qualification-pki:ro
@@ -249,11 +253,19 @@ const prepareState = ({ cowork }) => {
     serverAltName: `DNS:workspace-node,IP:${bridgeAddress}`,
     clientCommonName: "lemmacomputer-control",
   });
+  issueCertificate({
+    directory: nodePki,
+    prefix: "ingress-client",
+    commonName: "lemmacomputer-workspace-ingress",
+    usage: "clientAuth",
+    serial: 1002,
+  });
   generateAuthority({
     directory: applicationPki,
     name: "remote-application",
     serverName: "application-tls",
     serverAltName: "DNS:application-tls",
+    clientCommonName: "lemmacomputer-workspace-application-gateway",
   });
   for (const [source, target] of [
     [resolve(applicationPki, "server.crt"), resolve(pki, "application-server.crt")],
@@ -265,7 +277,11 @@ const prepareState = ({ cowork }) => {
   const nodeServerKey = pem64(resolve(nodePki, "server.key"));
   const nodeClientCert = pem64(resolve(nodePki, "client.crt"));
   const nodeClientKey = pem64(resolve(nodePki, "client.key"));
+  const ingressClientCert = pem64(resolve(nodePki, "ingress-client.crt"));
+  const ingressClientKey = pem64(resolve(nodePki, "ingress-client.key"));
   const applicationCa = pem64(resolve(applicationPki, "ca.crt"));
+  const applicationClientCert = pem64(resolve(applicationPki, "client.crt"));
+  const applicationClientKey = pem64(resolve(applicationPki, "client.key"));
   const controllerEnvironment = replaceEnvironment(readFileSync(".runtime-env/workspace-controller.env", "utf8"), new Map([
     ["CONTROLLER_HOST", "0.0.0.0"],
     ["WORKSPACE_NODE_ID", names.nodeId],
@@ -277,8 +293,11 @@ const prepareState = ({ cowork }) => {
     ["WORKSPACE_NODE_CLIENT_COMMON_NAME", "lemmacomputer-control"],
     ["WORKSPACE_RELAY_BIND_HOST", bridgeAddress],
     ["WORKSPACE_NODE_RELAY_NETWORK", names.relayNetwork],
+    ["WORKSPACE_RELAY_CLIENT_COMMON_NAME", "lemmacomputer-workspace-ingress"],
     ["WORKSPACE_NODE_APPLICATION_NETWORK", names.applicationNetwork],
     ["WORKSPACE_NODE_APPLICATION_TLS_CA_B64", applicationCa],
+    ["WORKSPACE_NODE_APPLICATION_TLS_CLIENT_CERT_B64", applicationClientCert],
+    ["WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64", applicationClientKey],
     ["KASM_PUBLIC_HOST", bridgeAddress],
     ["KASM_LOCAL_KVM_ENABLED", cowork ? "true" : environment.value("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED") || "false"],
   ]));
@@ -293,6 +312,8 @@ const prepareState = ({ cowork }) => {
     `QUALIFICATION_NODE_CA_B64=${nodeCa}`,
     `QUALIFICATION_NODE_CLIENT_CERT_B64=${nodeClientCert}`,
     `QUALIFICATION_NODE_CLIENT_KEY_B64=${nodeClientKey}`,
+    `QUALIFICATION_INGRESS_CLIENT_CERT_B64=${ingressClientCert}`,
+    `QUALIFICATION_INGRESS_CLIENT_KEY_B64=${ingressClientKey}`,
   ].join("\n")}\n`, { mode: 0o600 });
   chmodSync(composeEnv, 0o600);
   const nodeCompose = resolve(root, "node.compose.yaml");
@@ -324,6 +345,59 @@ const bringUp = (state) => {
   run("docker", composeArguments(state, "up", "-d", "--build", "--wait", "--wait-timeout", "300"));
 };
 
+const removeUnusedProjectNetworks = (projectName) => {
+  const listed = spawnSync("docker", [
+    "network", "ls", "--filter", `label=com.docker.compose.project=${projectName}`, "--format", "{{.Name}}",
+  ], { encoding: "utf8" });
+  if (listed.status !== 0) throw new Error(text(listed.stderr) || `Unable to enumerate networks for ${projectName}`);
+  for (const name of text(listed.stdout).split(/\r?\n/).filter(Boolean)) {
+    const inspected = spawnSync("docker", ["network", "inspect", name, "--format", "{{json .Containers}}"], { encoding: "utf8" });
+    if (inspected.status !== 0) continue;
+    const containers = JSON.parse(text(inspected.stdout) || "{}");
+    if (Object.keys(containers).length) continue;
+    const removed = spawnSync("docker", ["network", "rm", name], { encoding: "utf8" });
+    if (removed.status !== 0 && !/not found|no such network/i.test(text(removed.stderr))) {
+      throw new Error(text(removed.stderr) || `Unable to remove unused project network ${name}`);
+    }
+  }
+};
+
+const tearDownRemoteState = (state) => {
+  const failures = [];
+  for (const args of [
+    composeArguments(state, "down", "--remove-orphans"),
+    nodeComposeArguments(state, "down", "--remove-orphans"),
+  ]) {
+    const result = spawnSync("docker", args, { encoding: "utf8" });
+    if (result.status !== 0) failures.push(text(result.stderr) || `docker ${args.join(" ")} failed`);
+  }
+  try {
+    removeUnusedProjectNetworks(state.projectName);
+  } catch (error) {
+    failures.push(error instanceof Error ? error.message : String(error));
+  }
+  for (const network of [state.names.nodeTransportNetwork, state.names.applicationNetwork, state.names.relayNetwork]) {
+    const result = spawnSync("docker", ["network", "rm", network], { encoding: "utf8" });
+    if (result.status !== 0 && !/not found|no such network/i.test(text(result.stderr))) {
+      failures.push(text(result.stderr) || `Unable to remove network ${network}`);
+    }
+  }
+  if (failures.length) throw new Error(`Remote qualification cleanup was incomplete:\n${failures.join("\n")}`);
+  rmSync(state.root, { recursive: true, force: true });
+};
+
+const restoreColocated = (projectName) => {
+  run(process.execPath, ["scripts/render-service-env.mjs"]);
+  const args = ["compose", "--env-file", ".env", "-f", "compose.yaml"];
+  try {
+    run("docker", [...args, "up", "-d", "--build", "--wait", "--wait-timeout", "300"]);
+  } catch (error) {
+    spawnSync("docker", [...args, "down", "--remove-orphans"], { stdio: "inherit" });
+    removeUnusedProjectNetworks(projectName);
+    throw error;
+  }
+};
+
 const up = ({ cowork }) => {
   const existing = loadState();
   const environment = readLocalEnvironment();
@@ -336,7 +410,16 @@ const up = ({ cowork }) => {
     return;
   }
   const state = prepareState({ cowork });
-  bringUp(state);
+  try {
+    bringUp(state);
+  } catch (error) {
+    try {
+      tearDownRemoteState(state);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Remote workspace-node qualification failed and cleanup was incomplete");
+    }
+    throw error;
+  }
   process.stdout.write([
     `Remote workspace-node qualification is ready at ${state.webUrl}.`,
     "The existing worktree databases and Compose volumes were preserved.",
@@ -378,15 +461,8 @@ const down = () => {
     return;
   }
   assertNoActiveRuntimes(state.networkPrefix, "disable remote");
-  run(process.execPath, ["scripts/render-service-env.mjs"]);
-  run("docker", ["compose", "--env-file", ".env", "-f", "compose.yaml", "up", "-d", "--build", "--wait", "--wait-timeout", "300"]);
-  run("docker", composeArguments(state, "rm", "-s", "-f", "remote-application-tls"));
-  run("docker", nodeComposeArguments(state, "down"));
-  for (const network of [state.names.nodeTransportNetwork, state.names.applicationNetwork, state.names.relayNetwork]) {
-    const result = spawnSync("docker", ["network", "rm", network], { encoding: "utf8" });
-    if (result.status !== 0 && !/not found/i.test(text(result.stderr))) throw new Error(text(result.stderr) || `Unable to remove network ${network}`);
-  }
-  rmSync(state.root, { recursive: true, force: true });
+  tearDownRemoteState(state);
+  restoreColocated(state.projectName);
   process.stdout.write("Colocated worktree topology restored; databases and persistent Compose volumes were retained.\n");
 };
 

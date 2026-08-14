@@ -46,10 +46,15 @@ Important configuration:
 - `WORKSPACE_INGRESS_SECRET`
 - launch and session TTLs
 - `WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS`
+- `WORKSPACE_INGRESS_TLS_CA_B64`
+- `WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64`
+- `WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64`
 
 The reference local relay has a self-signed certificate, so Compose disables
-upstream verification. A production relay should use a trusted private CA and
-enable verification.
+upstream verification. A remote relay requires a trusted private CA, upstream
+verification, and a workspace-ingress client certificate; the relay rejects
+clients whose certificate identity does not match its configured ingress
+identity.
 
 **Extension seam:** extend claim fields in
 `packages/workspace-ingress-auth` first, version the token format, update both
@@ -182,8 +187,11 @@ adapter.
 deterministic container, network, volume, relay, and egress-sidecar resources
 labeled with workspace, node, generation, and policy identities. The
 controller and Docker socket remain node-local; remote Control uses the private
-mTLS API. Treat the node socket as host-root-equivalent authority. See
-[Workspace node deployment](workspace-node.md).
+mTLS API. Per-workspace desktop and application relays also require workload
+client certificates on cross-boundary routes. Treat the node socket as
+host-root-equivalent authority. See
+[Remote workspace-node mode](../guides/remote-workspace-node.md) and
+[Workspace node deployment](../workspace-node.md).
 
 **Extension seam:** implement `SandboxAdapter`, preserve the public sandbox
 state and launch contracts, verify signed policy before provisioning, and keep

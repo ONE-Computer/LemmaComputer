@@ -212,7 +212,7 @@ required values depend on the external flow being tested:
 | Transitional workforce Entra sign-in, or Microsoft 365 using the same app | The four `LEMMACOMPUTER_ENTRA_*` and bootstrap values below | Follow the exact app registration, callback, and Graph-scope instructions in the [local integration runbook](local-deployment.md#configure-the-transitional-workforce-entra-and-microsoft-365-app) |
 | Separate Microsoft 365 connector app | `LEMMACOMPUTER_MS365_TENANT_ID`, `LEMMACOMPUTER_MS365_CLIENT_ID`, and `LEMMACOMPUTER_MS365_CLIENT_SECRET` | Supply all three or leave all three empty to reuse the Entra app |
 | Google or Microsoft social login | The selected provider's client-ID and client-secret pair | Supply the complete pair only |
-| Remote workspace node | The complete `LEMMACOMPUTER_WORKSPACE_NODE_*` TLS, private-host, application-network, gateway, and Control endpoint group | Ordinary local development keeps the generated colocated topology |
+| Production remote workspace node | The complete node, ingress, and application-relay mTLS identities plus private-host, application-network, gateway, and Control endpoint group | Ordinary local development stays colocated; the repository-owned qualification command generates disposable local values automatically |
 
 The four values for the transitional Entra path are:
 
@@ -264,7 +264,7 @@ npm run qualify:remote-workspace-node -- up --cowork
 The command generates a worktree-local two-day PKI under the ignored
 `.runtime-remote-workspace-node/` directory, starts the controller in a separate
 Compose project, switches Control to the real mTLS node API, and adds verified
-TLS desktop and application routes. It never copies a database. `up` is
+mTLS desktop and application routes. It never copies a database. `up` is
 idempotent after setup; inspect or restore the topology with:
 
 ```bash
@@ -282,6 +282,13 @@ npm run qualify:remote-workspace-node -- config --cowork
 Both topology changes refuse to proceed while managed workspace runtime
 containers exist. `down` restores the normal colocated worktree stack and keeps
 the worktree's databases and persistent volumes.
+
+The complete [remote workspace-node guide](remote-workspace-node.md) explains
+the controller, node-local Docker socket, per-workspace relays, mTLS identities,
+exact preparation sequence, manual acceptance checklist, hosted/Cowork gap, and
+troubleshooting. The local qualifier uses separate Compose projects on one
+physical Docker host; it does not claim representative hosted infrastructure
+qualification.
 
 ## Scheduling work
 

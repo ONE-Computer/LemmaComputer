@@ -496,7 +496,9 @@ boundary. Place the controller, Docker socket, `/dev/kvm`, and
 desktop host, restricted application network, and private HTTPS gateway/Control
 endpoints. Control never receives the socket or either device. Non-Cowork nodes
 may keep KVM disabled.
-Follow [Workspace node deployment](workspace-node.md) for the full network,
+Follow [Remote workspace-node mode](remote-workspace-node.md) for the topology,
+mTLS identities, and repeatable evaluation workflow, and
+[Workspace node deployment](../workspace-node.md) for the normative network,
 storage, purge, and removal contract.
 
 `LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for
@@ -611,6 +613,15 @@ Compose manages:
 - `lemmacomputer_control-data` for Control PostgreSQL;
 - `lemmacomputer_gateway-data` for LiteLLM PostgreSQL.
 
+Those are two PostgreSQL engines/containers but three logical databases. The
+control engine contains `lemmacomputer` for product authorization, policy,
+workspace, ledger, and audit state and `lemmacomputer_auth` for Better Auth
+users, sessions, authenticators, and company-SSO configuration. The gateway
+engine contains `litellm` for provider deployments, encrypted provider and MCP
+OAuth custody, virtual keys, and gateway configuration. A recoverable backup
+must include all three databases even though Docker shows only two PostgreSQL
+containers and two Compose volumes.
+
 The local sandbox adapter creates separately labeled volumes named
 `lemmacomputer-sandbox-<workspace UUID>`. Compose does not own or delete them.
 
@@ -630,11 +641,12 @@ state remain consistent.
 
 Back up these as one recovery set:
 
-1. Control PostgreSQL;
-2. LiteLLM PostgreSQL;
-3. per-workspace persistent volumes;
-4. the exact secret-manager versions active at backup time;
-5. immutable control and workspace image digests.
+1. the `lemmacomputer` product database;
+2. the `lemmacomputer_auth` Better Auth database;
+3. the `litellm` gateway database;
+4. per-workspace persistent volumes;
+5. the exact secret-manager versions active at backup time;
+6. immutable control and workspace image digests.
 
 Example logical database backups:
 
@@ -643,15 +655,20 @@ docker compose exec -T postgres \
   pg_dump --username lemmacomputer --dbname lemmacomputer --format=custom \
   > lemmacomputer-control.dump
 
+docker compose exec -T postgres \
+  pg_dump --username lemmacomputer --dbname lemmacomputer_auth --format=custom \
+  > lemmacomputer-auth.dump
+
 docker compose exec -T litellm-postgres \
   pg_dump --username litellm --dbname litellm --format=custom \
   > lemmacomputer-gateway.dump
 ```
 
 Protect backups as credentials: they contain identity, governance, operation,
-OAuth, and audit state. Test restore in an isolated environment. Restore
-databases and matching cryptographic material before starting Control or
-LiteLLM.
+OAuth, and audit state. Test restore in an isolated environment. Restore all
+three logical databases and matching cryptographic material before starting
+Control or LiteLLM; restoring product state without `lemmacomputer_auth` can
+leave organizations present while their users and sessions are missing.
 
 ## Rotation
 
@@ -683,7 +700,8 @@ Before network exposure:
 - use managed PostgreSQL with encryption, backup, monitoring, and restricted
   roles;
 - place the Docker/KasmVNC controller and its socket on a private remote workspace node;
-- configure trusted TLS between ingress and workspace relays;
+- configure mTLS between ingress and workspace relays and between node
+  application relays and private Control/LiteLLM endpoints;
 - isolate egress networks with host/cloud firewall policy;
 - give LiteLLM no direct NAT/Internet route; use separate model and remote-MCP
   proxies, and make the remote-MCP client ignore environment proxy bypasses

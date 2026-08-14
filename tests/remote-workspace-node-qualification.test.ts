@@ -35,7 +35,34 @@ test("qualification Compose separates Docker authority and uses variable-backed 
   assert.match(control, /AGENT_BRIDGE_URL: https:\/\/application-tls:4443/);
   assert.match(control, /WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true"/);
   assert.match(control, /QUALIFICATION_NODE_CLIENT_KEY_B64/);
+  assert.match(control, /QUALIFICATION_INGRESS_CLIENT_CERT_B64/);
+  assert.match(control, /QUALIFICATION_INGRESS_CLIENT_KEY_B64/);
   assert.doesNotMatch(control, /BEGIN (?:RSA )?PRIVATE KEY/);
   assert.match(node, /QUALIFICATION_NODE_TRANSPORT_NETWORK/);
   assert.match(control, /QUALIFICATION_APPLICATION_NETWORK/);
+  assert.doesNotMatch(node, /tmpfs:\s*\[/);
+  assert.doesNotMatch(control, /tmpfs:\s*\[/);
+  assert.match(node, /tmpfs:\s*\n\s+- \/tmp:rw,noexec,nosuid,size=64m/);
+  assert.match(control, /tmpfs:\s*\n\s+- \/tmp:rw,noexec,nosuid,size=16m/);
+});
+
+test("qualification application forwarders authenticate node-local relays", async () => {
+  const forwarder = await import("node:fs/promises").then(({ readFile }) => readFile(
+    new URL("../scripts/remote-workspace-node-tls-forwarder.mjs", import.meta.url),
+    "utf8",
+  ));
+  assert.match(forwarder, /requestCert:\s*true/);
+  assert.match(forwarder, /rejectUnauthorized:\s*true/);
+  assert.match(forwarder, /lemmacomputer-workspace-application-gateway/);
+  assert.match(forwarder, /getPeerCertificate/);
+});
+
+test("qualification recovery scopes orphan-network cleanup to its Compose project", async () => {
+  const source = await import("node:fs/promises").then(({ readFile }) => readFile(
+    new URL("../scripts/qualify-remote-workspace-node.mjs", import.meta.url),
+    "utf8",
+  ));
+  assert.match(source, /label=com\.docker\.compose\.project=\$\{projectName\}/);
+  assert.match(source, /Object\.keys\(containers\)\.length/);
+  assert.doesNotMatch(source, /docker[^\n]*system[^\n]*prune|network[^\n]*prune/);
 });

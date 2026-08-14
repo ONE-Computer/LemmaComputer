@@ -32,7 +32,11 @@ authority on an application/control host and requires the Lemma-owned
 Docker/KasmVNC runtime on a private remote workspace node. Every deployment
 must qualify tenant projection, signed-policy projection, governed egress,
 lifecycle audit, and verified purge; a topology check alone is not production
-qualification.
+qualification. The hosted runtime contract also includes Claude Cowork, so its
+representative remote nodes require nested virtualization, `/dev/kvm`, and
+`/dev/vhost-vsock`; a browser-only or non-Cowork workspace smoke is not hosted
+acceptance. See [Remote workspace-node mode](remote-workspace-node.md) for the
+local split qualification and its explicit hosted evidence gaps.
 
 The executable source of this table is
 `packages/deployment-profile/src/index.mjs`. Its adjacent declaration file is the
