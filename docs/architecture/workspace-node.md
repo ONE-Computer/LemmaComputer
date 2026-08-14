@@ -87,7 +87,7 @@ npm run qualify:remote-workspace-node -- down
 The command creates short-lived worktree-local test authorities and preserves
 the worktree's existing users, organizations, providers, policies, databases,
 and volumes. It is qualification tooling, not production PKI automation.
-See the [remote workspace-node and Cowork workflow](guides/development-workflow.md#remote-workspace-node-and-cowork-qualification) for the full
+See the [remote workspace-node and Cowork workflow](../guides/development-workflow.md#remote-workspace-node-and-cowork-qualification) for the full
 architecture, mTLS matrix, exact setup sequence, generated Compose topology,
 manual acceptance checklist, hosted gaps, and troubleshooting.
 

@@ -191,7 +191,7 @@ mTLS API. Per-workspace desktop and application relays also require workload
 client certificates on cross-boundary routes. Treat the node socket as
 host-root-equivalent authority. See
 [remote workspace-node architecture](../guides/development-workflow.md#remote-workspace-node-architecture) and
-[Workspace node deployment](../workspace-node.md).
+[Workspace node deployment](../architecture/workspace-node.md).
 
 **Extension seam:** implement `SandboxAdapter`, preserve the public sandbox
 state and launch contracts, verify signed policy before provisioning, and keep

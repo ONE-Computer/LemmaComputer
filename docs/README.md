@@ -52,6 +52,8 @@ How the system is built and why. Read `overview.md` first.
   running agent is identified and bound to policy.
 - [Organization RBAC](architecture/organization-rbac.md) — roles, permissions,
   and the membership authorization boundary.
+- [Workspace node deployment](architecture/workspace-node.md) — the normative
+  remote-node network, mTLS, storage, purge, and qualification contract.
 
 ## Guides
 
@@ -132,6 +134,13 @@ Feature-level specifications and the authority that owns each decision.
   current universal customer-authentication architecture.
 
 ## Decisions
+
+Architecture Decision Records (ADRs) preserve consequential design choices:
+the context at the time, the chosen option, its tradeoffs, and whether it is
+accepted, amended, or superseded. They explain **why** a durable decision was
+made; the Architecture section above describes **how the current system works**,
+and Guides describe **how to operate it**. ADRs remain in the repository after
+supersession so future maintainers can understand the decision history.
 
 - [ADR 0001 — local release gates](adr/0001-local-release-gates.md): why
   enforcement is local and both profiles share one codebase.

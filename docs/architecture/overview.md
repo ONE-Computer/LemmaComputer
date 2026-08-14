@@ -253,7 +253,7 @@ to the private workspace node; Control calls its workspace-bound API over mTLS
 and never receives Docker authority. Workspace ingress and the node application
 relays also present workload client certificates on their cross-boundary
 routes. See the [remote workspace-node architecture](../guides/development-workflow.md#remote-workspace-node-architecture) and
-[Workspace node deployment](../workspace-node.md).
+[Workspace node deployment](workspace-node.md).
 
 ### Model request
 

@@ -498,7 +498,7 @@ endpoints. Control never receives the socket or either device. Non-Cowork nodes
 may keep KVM disabled.
 Follow the [remote workspace-node and Cowork workflow](development-workflow.md#remote-workspace-node-and-cowork-qualification) for the topology,
 mTLS identities, and repeatable evaluation workflow, and
-[Workspace node deployment](../workspace-node.md) for the normative network,
+[Workspace node deployment](../architecture/workspace-node.md) for the normative network,
 storage, purge, and removal contract.
 
 `LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for

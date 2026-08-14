@@ -329,7 +329,7 @@ Control never mounts or proxies that socket. It sends a bounded lifecycle
 request; the controller validates workload identity, bearer token, signed
 policy, workspace identity, and provider labels before using Docker locally.
 The normative node security and purge contract is in
-[Workspace node deployment](../workspace-node.md).
+[Workspace node deployment](../architecture/workspace-node.md).
 
 ### Remote mTLS identities
 
