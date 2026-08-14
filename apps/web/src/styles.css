@@ -6092,6 +6092,7 @@ textarea:focus-visible,
 .workspace-network-access-editor .select-menu-trigger { width: 100%; }
 .workspace-network-access-help { margin: -6px 0 0; color: #687582; font-size: 12px; line-height: 1.5; }
 .workspace-network-access-empty { margin: -8px 0 0; padding: 12px 14px; border-radius: 6px; background: #f5f6f7; color: #687582; font-size: 12px; }
+.workspace-network-access-create { min-height: 24px; padding: 0; justify-self: start; text-align: left; }
 
 @media (max-width: 1350px) {
   .member-workspace-table-header { display: none; }

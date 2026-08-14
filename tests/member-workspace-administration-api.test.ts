@@ -99,8 +99,27 @@ const appFor = (
 
 test("organization workspace managers receive a content-free member-first inventory", async () => {
   const store = new MemoryWorkspaceStore();
-  const workspace = await store.createOrGet(targetIdentity, "personal", "member-workspace-inventory-0001");
+  const workspace = await store.createOrGet(targetIdentity, "workspace-demo", "member-workspace-inventory-0001");
   await store.update(workspace.id, { state: "ready" });
+  Object.assign(store, {
+    getSandboxSettings: async (identity: typeof targetIdentity, grantId: string) => (
+      identity.tenantId === targetIdentity.tenantId
+        && identity.subjectId === targetIdentity.subjectId
+        && grantId === workspace.grantId
+        ? {
+            tenantId: identity.tenantId,
+            subjectId: identity.subjectId,
+            grantId,
+            profileId: "disposable-open-v1" as const,
+            applicationIds: ["firefox" as const],
+            modelAlias: "lemmacomputer-claude" as const,
+            requestedServiceClass: "balanced" as const,
+            agentIds: ["claude-desktop" as const],
+            updatedAt: new Date("2026-08-14T00:00:00.000Z"),
+          }
+        : null
+    ),
+  });
   const app = appFor(actor(), store);
   try {
     const response = await app.inject({ method: "GET", url: "/v1/admin/member-workspaces", headers });
@@ -111,11 +130,11 @@ test("organization workspace managers receive a content-free member-first invent
     assert.equal(body.members[0].workspaceCount, 1);
     assert.deepEqual(body.members[0].workspaces[0], {
       id: workspace.id,
-      name: "Personal workspace",
+      name: "Workspace Demo",
       state: "ready",
       health: { status: "healthy", reasonCode: null },
-      profile: { id: "kasm-persistent-standard", executionMode: "managed" },
-      networkAccess: { mode: "restricted", securityGroup: null },
+      profile: { id: "disposable-open-v1", executionMode: "disposable-open" },
+      networkAccess: { mode: "full-web", securityGroup: null },
       policyAssignment: { authority: "runtime_policy", version: 7, hash: "a".repeat(64) },
       lastActivityAt: null,
       lastTransitionAt: body.members[0].workspaces[0].lastTransitionAt,
@@ -126,6 +145,16 @@ test("organization workspace managers receive a content-free member-first invent
     for (const forbidden of ["launch", "launchUrl", "providerId", "grantId", "egress", "files", "chats", "secrets"]) {
       assert.equal(JSON.stringify(body).includes(`\"${forbidden}\"`), false, `inventory must not disclose ${forbidden}`);
     }
+    const settings = await app.inject({
+      method: "GET",
+      url: `/v1/admin/users/target-user/workspaces/${workspace.id}/sandbox-settings`,
+      headers,
+    });
+    assert.equal(settings.statusCode, 200, settings.body);
+    assert.equal(settings.headers["cache-control"], "no-store");
+    assert.equal(settings.json().grantId, "workspace-demo");
+    assert.equal(settings.json().profileId, "disposable-open-v1");
+    assert.equal(settings.json().profile.displayName, "Internet workspace");
   } finally {
     await app.close();
   }

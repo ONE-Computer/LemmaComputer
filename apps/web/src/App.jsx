@@ -2287,7 +2287,7 @@ function WorkspaceNetworkAccessDialog({ member, workspace, members, onClose, onS
   useEffect(() => {
     let active = true;
     setLoading(true);
-    adminApi.sandboxSettings(member.userId, workspace.grantId)
+    adminApi.sandboxSettings(member.userId, workspace.id)
       .then((value) => {
         if (!active) return;
         setSettings(value);
@@ -2297,7 +2297,7 @@ function WorkspaceNetworkAccessDialog({ member, workspace, members, onClose, onS
       .catch((requestError) => active && setError(requestError.message))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
-  }, [member.userId, workspace.grantId]);
+  }, [member.userId, workspace.id]);
 
   const internetWorkspace = settings?.profile?.executionMode === "disposable-open";
   const requiredAction = internetWorkspace ? "allow-public-http-https" : "deny";
@@ -2316,8 +2316,8 @@ function WorkspaceNetworkAccessDialog({ member, workspace, members, onClose, onS
     setSaving(true);
     setError("");
     try {
-      if (selection === "inherit") await adminApi.clearUserWorkspaceEgressSecurityGroup(member.userId, workspace.grantId);
-      else await adminApi.assignUserWorkspaceEgressSecurityGroup(member.userId, workspace.grantId, selection);
+      if (selection === "inherit") await adminApi.clearUserWorkspaceEgressSecurityGroup(member.userId, workspace.id);
+      else await adminApi.assignUserWorkspaceEgressSecurityGroup(member.userId, workspace.id, selection);
       await onSaved();
       onClose();
     } catch (requestError) {
@@ -2355,7 +2355,7 @@ function WorkspaceNetworkAccessDialog({ member, workspace, members, onClose, onS
         ? "Internet workspaces can use only public-web block lists. To use approved destinations only, change the workspace type to Restricted."
         : "Restricted workspaces can use only approved-destination groups. Public-web groups require an Internet workspace."}</p>
       {customGroups.length === 0 && <p className="workspace-network-access-empty">No compatible custom groups are available.</p>}
-      {onCreateSecurityGroup && <button className="connection-quiet-button" type="button" disabled={saving} onClick={() => { onClose(); onCreateSecurityGroup(); }}>Create security group</button>}
+      {onCreateSecurityGroup && <button className="connection-quiet-button workspace-network-access-create" type="button" disabled={saving} onClick={() => { onClose(); onCreateSecurityGroup(); }}>Create security group</button>}
       {error && <div className="workspace-policy-modal-error" role="alert">{error}</div>}
       <div className="modal-actions"><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="button" disabled={saving || customGroups.find((group) => group.id === selection)?.needsReview} onClick={save}>{saving ? "Saving access" : "Save network access"}</button></div>
     </div>}

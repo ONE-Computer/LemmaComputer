@@ -216,6 +216,10 @@ test("organization administrator invites a person and manages member access", as
   await internetWorkspace.getByRole("button", { name: "Manage network access" }).click();
   networkDialog = page.getByRole("dialog", { name: "Network access for Sandbox Research" });
   await expect(networkDialog.getByText("Internet workspace", { exact: true })).toBeVisible();
+  const createSecurityGroupLink = networkDialog.getByRole("button", { name: "Create security group" });
+  const summaryBox = await networkDialog.locator(".workspace-network-access-summary").boundingBox();
+  const createLinkBox = await createSecurityGroupLink.boundingBox();
+  expect(createLinkBox?.x).toBeCloseTo(summaryBox?.x ?? 0, 0);
   await networkDialog.screenshot({ path: "test-results/workspace-internet-network-access-reviewed.png" });
   await networkDialog.getByRole("combobox", { name: "Workspace network security group" }).click();
   await page.getByRole("option", { name: /Ban Microsoft/ }).click();
