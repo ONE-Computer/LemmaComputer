@@ -284,8 +284,8 @@ Changes around LiteLLM should preserve all of these boundaries:
 - static provider models, provider secrets in environment variables, raw
   request/response logging, and cross-provider fallback remain disabled.
 
-See [Architecture and trust model](architecture.md), [AI control
-plane](ai-control-plane.md), [Governed model routing](model-routing.md),
-[AI usage and cost ledger](ai-usage-ledger.md), [Team spend
-budgets](team-budgets.md), and [Configuration and
-operations](operations.md) for the authorities on either side of the gateway.
+See [Architecture and trust model](overview.md), [AI control
+plane](../product/ai-control-plane.md), [Governed model routing](../product/model-routing.md),
+[AI usage and cost ledger](../product/ai-usage-ledger.md), [Team spend
+budgets](../product/team-budgets.md), and [Configuration and
+operations](../guides/operations.md) for the authorities on either side of the gateway.

@@ -422,5 +422,5 @@ Record these choices in an ADR before creating production IaC.
 - [IAM security best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
 - [Using Secrets Manager secrets in ECS tasks](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/secrets-envvar-secrets-manager.html)
 
-See [MCP networking, egress, and OAuth callbacks](../mcp-networking.md) for the
+See [MCP networking, egress, and OAuth callbacks](../../architecture/mcp-networking.md) for the
 application-level flow that this AWS design must preserve.

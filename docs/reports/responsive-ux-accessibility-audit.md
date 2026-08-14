@@ -6,7 +6,7 @@ Remediation branch base: `6c5b5e5`
 
 Latest capture generated: 2026-08-13 15:23 UTC
 
-Evidence: [`docs/assets/responsive-ux-audit/`](assets/responsive-ux-audit/)
+Evidence: [`docs/assets/responsive-ux-audit/`](assets/responsive-ux-audit)
 
 Measurements: [`measurements.json`](assets/responsive-ux-audit/measurements.json)
 

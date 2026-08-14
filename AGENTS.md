@@ -14,7 +14,7 @@ Do not fork a separate self-hosted codebase. Keep deployment-specific behavior b
 ## Before changing code
 
 1. Treat the user's request as the task contract. If a GitHub issue exists, also read its definition of success and unresolved `blocked by` relationships.
-2. Before preparing a fresh checkout or developer machine, follow `docs/development-workflow.md`. Read `docs/local-deployment.md` only when the task specifically needs the customer-managed Entra or Microsoft 365 integration flow.
+2. Before preparing a fresh checkout or developer machine, follow `docs/guides/development-workflow.md`. Read `docs/guides/local-deployment.md` only when the task specifically needs the customer-managed Entra or Microsoft 365 integration flow.
 3. Use one task per branch and one branch per worktree. Do not develop directly on `main`.
 4. Run `npm run worktree:init` once in a new worktree, then `npm run dev:doctor` at the start of each work session.
 5. Keep changes inside the task scope. Record substantial follow-up work separately instead of expanding the task silently.
@@ -39,7 +39,7 @@ Local command output is the verification record. Do not claim a check ran when i
 
 ## Database rules
 
-Read `packages/workspace-store/AGENTS.md` and `docs/database-migrations.md` before changing persistence.
+Read `packages/workspace-store/AGENTS.md` and `docs/guides/database-migrations.md` before changing persistence.
 
 - Application startup checks schema compatibility; it never migrates.
 - Only the explicit migration command/job may change schema.

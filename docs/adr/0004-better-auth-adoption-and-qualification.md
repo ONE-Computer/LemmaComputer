@@ -4,7 +4,7 @@
 - Date: 2026-08-09
 - Epic: #1
 - Implementation issue: #51
-- Normative architecture: [Customer authentication architecture](../authentication-architecture.md)
+- Normative architecture: [Customer authentication architecture](../architecture/authentication.md)
 
 ## Context
 

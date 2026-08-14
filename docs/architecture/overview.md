@@ -55,6 +55,26 @@ Control attaches only the gateway, Control API, and relay that a projected
 policy requires. The user environment has no general route to model providers,
 Microsoft Graph, PostgreSQL, Docker, or the OpenVTC service.
 
+The gateway data plane is subject to the same rule. LiteLLM is attached only to
+internal networks and has no route to the internet: model traffic leaves through
+the gateway egress proxy and its static provider allowlist, and custom or public
+MCP traffic leaves through the separate remote-MCP egress proxy. Keeping those
+two policies in separate processes is what prevents an MCP redirect from
+reaching a model provider, Control, or the private Microsoft connector.
+
+Egress is proxied where a tenant or a workspace user can influence the
+destination, and direct where the destination is fixed by pinned code or
+administrator configuration. Four networks carry an internet route:
+`model-egress` reaches the internet only through the two proxies above, while
+`microsoft-egress`, `channel-egress`, and `identity-egress` are used directly by
+the M365 connector, the channel broker, and Control respectively. Those three
+have no destination allowlist; their separation limits which internal peers each
+process can reach and keeps their outbound paths independent, but it does not
+constrain where they may connect. Widening any of them to accept
+tenant-supplied destinations would require putting a policy proxy in front
+first. See [Compose network topology](#compose-network-topology) for the full
+matrix.
+
 When a policy assigns web egress, the controller creates a dedicated proxy
 sidecar. The sidecar:
 
@@ -86,9 +106,13 @@ flowchart TB
 
   subgraph Experience["Private experience plane"]
     Web["Web static server + /api proxy"]
-    Sandbox["User-controlled sandbox process"]
-    Loopback["Root-owned loopback brokers"]
     Relay["Kasm relay"]
+  end
+
+  subgraph WorkspaceContainer["Workspace container - one per session"]
+    Sandbox["User-controlled sandbox process<br/>runs as kasm-user, uid 1000"]
+    Loopback["Root-owned loopback brokers<br/>hold the scoped credentials"]
+    Sandbox -.->|"127.0.0.1 only; no credential crosses this line"| Loopback
   end
 
   subgraph ControlPlane["Private control plane"]
@@ -103,11 +127,16 @@ flowchart TB
     OpenVTC["OpenVTC consent service"]
   end
 
-  subgraph DataPlane["Gateway data plane"]
+  subgraph DataPlane["Gateway data plane - internal networks only"]
     LiteLLM["LiteLLM"]
     M365["Microsoft 365 MCP"]
     GatewayDB[("Gateway database")]
-    Egress["Workspace egress proxy"]
+  end
+
+  subgraph EgressLayer["Proxied egress - tenant- or user-influenced destinations"]
+    ModelEgress["Gateway egress proxy<br/>static model-provider policy"]
+    McpEgress["Remote MCP egress proxy<br/>custom and public MCP only"]
+    Egress["Per-workspace egress proxy<br/>signed grant, default deny"]
   end
 
   Browser --> Ingress --> Web --> Control
@@ -121,14 +150,16 @@ flowchart TB
   Control --> OpenVTC
   Control --> LiteLLM
   Control --> Channel
-  Controller --> Sandbox
+  Controller -->|"creates and verifies signed policy"| WorkspaceContainer
   Ingress --> Relay --> Sandbox
-  Sandbox --> Loopback
   Loopback --> Control
   Loopback --> LiteLLM
-  Sandbox --> Egress
+  Sandbox --> Egress --> Approved["Approved web destinations"]
   LiteLLM --> GatewayDB
-  LiteLLM --> M365
+  LiteLLM --> M365 --> Graph["Microsoft Graph"]
+  LiteLLM --> ModelEgress --> Providers["Model providers"]
+  LiteLLM --> McpEgress --> RemoteMcp["Remote and public MCP servers"]
+  Channel --> ExternalChannels["External channels"]
 ```
 
 The reference deployment publishes one browser-facing product origin on port
@@ -161,7 +192,7 @@ operation. Its static model list is empty: managed provider deployments are
 tenant-scoped database records created through the private API, and governed
 workspace keys expose only the synthetic `lemmacomputer-auto` alias.
 
-See [LiteLLM gateway architecture](litellm-gateway-architecture.md) for the
+See [LiteLLM gateway architecture](litellm-gateway.md) for the
 full provider lifecycle, grant projections, Auto-switching sequence, MCP/OAuth
 flows, state custody, budget defense in depth, and failure matrix.
 

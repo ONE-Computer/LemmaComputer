@@ -1,8 +1,12 @@
 # Local development workflow
 
-This is the required setup path for a person or coding agent who will change
-and test the product locally. Follow it in order. Do not create an alternative
-Compose or `.env` workflow.
+**Who this is for:** a person or coding agent who will *change* the product.
+Follow it in order, and do not create an alternative Compose or `.env` workflow
+for development work.
+
+To only run and evaluate LemmaComputer, you do not need any of this. Use the
+Quick start in the [README](../../README.md), which creates a single evaluation
+checkout with `npm run env:init -- --profile=worktree` and no git worktree.
 
 ## Local-development contract
 
@@ -74,8 +78,9 @@ default is also host port `4174`; `4147` is not a project default. A task
 worktree normally uses a different port so that multiple worktrees can run at
 the same time.
 
-Do not run `npm run env:init` separately, copy the primary checkout's `.env`,
-or start Docker Compose from `main`.
+Inside a task worktree, do not run `npm run env:init` separately, copy the
+primary checkout's `.env`, or start Docker Compose from `main`. `worktree:init`
+owns that worktree's environment.
 
 If dependency installation fails because an agent sandbox cannot write the npm
 cache or create local IPC endpoints, rerun the same bootstrap with the minimum
@@ -165,13 +170,19 @@ names and ports. Do not run `env:init` before or after it, and do not copy
 `.env.example` to `.env`: the example contains markers that must be replaced by
 the initializer.
 
-`npm run env:init` is only the direct first-pass command for a dedicated local
+`npm run env:init` is the direct first-pass command for a dedicated local
 evaluation checkout that is not a development worktree:
 
 ```bash
 npm ci
-npm run env:init
+npm run env:init -- --profile=worktree
 ```
+
+`--profile` accepts `customer-managed`, `hosted`, or `worktree`, and writes that
+value as `LEMMACOMPUTER_INSTALLATION_KIND`. Omitting it keeps the canonical
+`customer-managed` default, whose strict preflight requires real Microsoft Entra
+values before `compose:up` will render. Use `worktree` for an evaluation
+checkout that should start without a Microsoft tenant.
 
 Both paths write `.env` with mode `0600`. They refuse to overwrite an existing
 file. Do not use `--force` unless invalidating the checkout's existing

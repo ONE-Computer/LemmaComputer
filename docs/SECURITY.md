@@ -39,4 +39,4 @@ The root Compose stack is a loopback-bound reference deployment. Operators are
 responsible for TLS, reverse-proxy authentication, secret management, database
 security, backups, network policy, monitoring, and incident response before
 network exposure. Review
-[Production considerations](operations.md#production-considerations).
+[Production considerations](guides/operations.md#production-considerations).

@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const baseUrl = process.env.RESPONSIVE_AUDIT_BASE_URL ?? "http://127.0.0.1:24371";
-const outputDirectory = path.resolve("docs/assets/responsive-ux-audit");
+const outputDirectory = path.resolve("docs/reports/assets/responsive-ux-audit");
 
 const desktopCompact = { width: 1366, height: 650 };
 const viewports = {

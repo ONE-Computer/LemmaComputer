@@ -194,7 +194,7 @@ For a chat-capable agent:
 5. update channel broker selection if external channels may route to it.
 
 If the agent exposes native model or thinking controls, follow the
-[Agent model and reasoning adapter playbook](agent-reasoning-adapter-playbook.md)
+[Agent model and reasoning adapter playbook](../agents/agent-reasoning-adapter-playbook.md)
 before promoting it. Native labels are product intent only: the exact runtime
 adapter, provider route, signed task binding, LiteLLM translation, tool and
 stream transport, and completion evidence must each qualify independently.
