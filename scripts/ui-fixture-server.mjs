@@ -552,7 +552,6 @@ const memberWorkspaceInventory = () => adminUsers.map((user) => ({
   workspaceCount: user.workspaces.length,
   workspaces: user.workspaces.map((item) => ({
     id: item.id,
-    grantId: item.grantId,
     name: item.grantId === "personal"
       ? "Personal workspace"
       : item.grantId.split(/[-_]+/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" "),
@@ -2007,6 +2006,22 @@ const server = http.createServer((request, response) => {
     }));
     return;
   }
+  if (request.method === "GET" && /^\/v1\/admin\/users\/[^/]+\/workspaces\/[^/]+\/sandbox-settings$/.test(url.pathname)) {
+    const pathParts = url.pathname.split("/");
+    const userId = decodeURIComponent(pathParts[4]);
+    const workspaceReference = decodeURIComponent(pathParts[6]);
+    const targetWorkspace = adminUsers.find((user) => user.userId === userId)?.workspaces.find((item) => item.id === workspaceReference || item.grantId === workspaceReference);
+    const targetProfile = targetWorkspace?.profileId === disposableProfile.id ? disposableProfile : profile;
+    response.end(JSON.stringify({
+      ...sandboxSettings,
+      grantId: targetWorkspace?.grantId ?? "personal",
+      profileId: targetWorkspace?.profileId ?? sandboxSettings.profileId,
+      profile: targetWorkspace ? targetProfile : sandboxSettings.profile,
+      securityGroup: targetWorkspace?.egress ?? sandboxSettings.securityGroup ?? inheritedEgressGroup(sandboxSettings.profileId),
+      availableSecurityGroups: egressSecurityGroups,
+    }));
+    return;
+  }
   if (request.method === "PUT" && /^\/v1\/admin\/users\/[^/]+\/sandbox-settings$/.test(url.pathname)) {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -2020,7 +2035,7 @@ const server = http.createServer((request, response) => {
   if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
     const pathParts = url.pathname.split("/");
     const userId = decodeURIComponent(pathParts[4]);
-    const grantId = decodeURIComponent(pathParts[6]);
+    const workspaceReference = decodeURIComponent(pathParts[6]);
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
@@ -2029,7 +2044,7 @@ const server = http.createServer((request, response) => {
       const assigned = { ...group, assignmentSource: "custom" };
       adminUsers = adminUsers.map((user) => user.userId === userId ? {
         ...user,
-        workspaces: user.workspaces.map((item) => item.grantId === grantId ? {
+        workspaces: user.workspaces.map((item) => item.id === workspaceReference || item.grantId === workspaceReference ? {
           ...item,
           egressMode: assigned.defaultAction === "allow-public-http-https" ? "full-web" : "restricted",
           egress: assigned,
@@ -2042,12 +2057,12 @@ const server = http.createServer((request, response) => {
   if (request.method === "DELETE" && /^\/v1\/admin\/users\/[^/]+\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
     const pathParts = url.pathname.split("/");
     const userId = decodeURIComponent(pathParts[4]);
-    const grantId = decodeURIComponent(pathParts[6]);
+    const workspaceReference = decodeURIComponent(pathParts[6]);
     let inherited = inheritedEgressGroup(profile.id);
     adminUsers = adminUsers.map((user) => user.userId === userId ? {
       ...user,
       workspaces: user.workspaces.map((item) => {
-        if (item.grantId !== grantId) return item;
+        if (item.id !== workspaceReference && item.grantId !== workspaceReference) return item;
         inherited = inheritedEgressGroup(item.profileId);
         return {
           ...item,

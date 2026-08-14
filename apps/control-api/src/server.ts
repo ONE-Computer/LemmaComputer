@@ -4241,6 +4241,29 @@ export function createControlServer(
     };
     return { target, principal };
   };
+  const administratorWorkspaceReference = async (
+    actor: SessionPrincipal,
+    userId: string,
+    workspaceReference: string,
+    permission: "workspace.manage" | "policy.manage",
+  ) => {
+    const targetIdentity = identityContextSchema.parse({
+      tenantId: actor.tenantId,
+      subjectId: userId,
+      audience: "lemmacomputer-control",
+    });
+    const organizationAllowed = allowsPermission(actor, permission);
+    const workspace = await store.getOwned(targetIdentity, workspaceReference)
+      ?? await store.getCurrent(targetIdentity, workspaceReference);
+    if (!workspace) {
+      if (!organizationAllowed) throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
+      throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    }
+    if (!organizationAllowed && !allowsPermission(actor, permission, { type: "workspace", resourceId: workspace.id })) {
+      throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
+    }
+    return workspace;
+  };
   const workspaceAdministrationCommandView = (command: Awaited<ReturnType<WorkspaceStore["completeWorkspaceAdministrationCommand"]>>, replayed: boolean) => ({
     id: command.id,
     action: command.action,
@@ -4422,6 +4445,29 @@ export function createControlServer(
       );
     },
   );
+  app.get<{ Params: { userId: string; workspaceId: string } }>(
+    "/v1/admin/users/:userId/workspaces/:workspaceId/sandbox-settings",
+    async (request, reply) => {
+      const actor = principal(request);
+      const workspace = await administratorWorkspaceReference(
+        actor,
+        request.params.userId,
+        request.params.workspaceId,
+        "workspace.manage",
+      );
+      const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+      if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+      const { effective: targetEffective } = await effectivePolicyFor(targetPrincipal, target.effectivePolicy);
+      reply.header("cache-control", "no-store");
+      return sandboxSettingsFor(
+        targetPrincipal,
+        targetEffective,
+        workspace.grantId,
+        allowsPermission(actor, "policy.manage")
+          || allowsPermission(actor, "policy.manage", { type: "workspace", resourceId: workspace.id }),
+      );
+    },
+  );
   app.put<{ Params: { userId: string } }>("/v1/admin/users/:userId/sandbox-settings", async (request) => {
     const actor = principal(request);
     const input = saveSandboxSettingsSchema.parse(request.body ?? {});
@@ -4442,13 +4488,18 @@ export function createControlServer(
     async (request) => {
       const actor = principal(request);
       const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
-      const grantId = z.string().min(1).max(128).parse(request.params.grantId);
-      const targetIdentity = identityContextSchema.parse({ tenantId: actor.tenantId, subjectId: request.params.userId, audience: "lemmacomputer-control" });
-      await requireWorkspaceGrantPermission(request, "policy.manage", targetIdentity, grantId);
+      const workspaceReference = z.string().min(1).max(128).parse(request.params.grantId);
+      const workspace = await administratorWorkspaceReference(
+        actor,
+        request.params.userId,
+        workspaceReference,
+        "policy.manage",
+      );
       if (!security.identityPolicyStore?.assignWorkspaceEgressSecurityGroup) {
         throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
       }
       const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+      const grantId = workspace.grantId;
       const profileId = await workspaceProfileIdFor(targetPrincipal, target.effectivePolicy, grantId);
       const versions = await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId);
       const selectedVersion = versions.find((candidate) => candidate.id === input.securityGroupVersionId);
@@ -4475,13 +4526,18 @@ export function createControlServer(
     "/v1/admin/users/:userId/workspaces/:grantId/egress-security-group",
     async (request) => {
       const actor = principal(request);
-      const grantId = z.string().min(1).max(128).parse(request.params.grantId);
-      const targetIdentity = identityContextSchema.parse({ tenantId: actor.tenantId, subjectId: request.params.userId, audience: "lemmacomputer-control" });
-      await requireWorkspaceGrantPermission(request, "policy.manage", targetIdentity, grantId);
+      const workspaceReference = z.string().min(1).max(128).parse(request.params.grantId);
+      const workspace = await administratorWorkspaceReference(
+        actor,
+        request.params.userId,
+        workspaceReference,
+        "policy.manage",
+      );
       if (!security.identityPolicyStore?.clearWorkspaceEgressSecurityGroup) {
         throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Workspace firewall storage is unavailable", 503);
       }
       const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
+      const grantId = workspace.grantId;
       await security.identityPolicyStore.clearWorkspaceEgressSecurityGroup({
         tenantId: actor.tenantId,
         subjectId: target.userId,

@@ -621,6 +621,7 @@ test("Network access is an admin-only security-group library with type defaults 
   assert.match(app, /Use \$\{settings\.profile\.displayName\} default/);
   assert.match(app, /function WorkspaceNetworkAccessDialog/);
   assert.match(app, /Manage network access/);
+  assert.match(app, /sandboxSettings\(member\.userId, workspace\.id\)/);
   assert.match(app, /Security-group changes apply live/);
   assert.match(app, /function FirewallEditorDialog/);
   assert.doesNotMatch(app, /function FirewallAddRuleDialog/);
@@ -649,6 +650,7 @@ test("Network access is an admin-only security-group library with type defaults 
   assert.match(styles, /\.firewall-security-groups\s*\{/);
   assert.match(styles, /\.firewall-group-toolbar/);
   assert.match(styles, /\.firewall-editor-subdomains input\s*\{[^}]*width: 17px;/);
+  assert.match(styles, /\.workspace-network-access-create\s*\{[^}]*justify-self: start;/);
   assert.match(styles, /\.firewall-security-group-header,[\s\S]*?grid-template-columns:/);
   assert.match(styles, /\.modal-card\.firewall-editor-modal\s*\{\s*width: min\(100%, 880px\)/);
 });
