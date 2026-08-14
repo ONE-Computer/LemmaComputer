@@ -153,6 +153,14 @@ test("member roles cannot reach organization policy administration and malformed
       payload: { constraints: { agents: { allow: ["hermes-claw"], deny: [] }, unknown: true }, revisionNote: "Unsafe expansion" },
     });
     assert.equal(malformed.statusCode, 400);
+    const nonSelectableThinkingLevel = await adminApp.inject({
+      method: "POST",
+      url: "/v1/admin/protected-workspace-policy/organization-versions",
+      headers,
+      payload: { constraints: { maximumReasoningEffort: "max" }, revisionNote: "Do not expose internal levels" },
+    });
+    assert.equal(nonSelectableThinkingLevel.statusCode, 400);
+    assert.equal(nonSelectableThinkingLevel.json().error.code, "WORKSPACE_REASONING_LEVEL_NOT_SELECTABLE");
     assert.deepEqual(adminCalls, []);
   } finally {
     await memberApp.close();

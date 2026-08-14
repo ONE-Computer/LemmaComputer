@@ -127,7 +127,7 @@ test("organization administrator invites a person and manages member access", as
 
   await page.getByRole("button", { name: "Set guardrails" }).click();
   const policyDialog = page.getByRole("dialog", { name: "Set workspace guardrails" });
-  await expect(policyDialog.getByRole("group", { name: "Workspace types" }).getByText("Managed workspace", { exact: true })).toBeVisible();
+  await expect(policyDialog.getByRole("group", { name: "Workspace types" }).getByText("Restricted workspace", { exact: true })).toBeVisible();
   await expect(policyDialog.getByRole("group", { name: "Workspace types" }).getByText("Internet workspace", { exact: true })).toBeVisible();
   await expect(policyDialog.getByRole("group", { name: "Service levels" }).getByRole("checkbox")).toHaveCount(3);
   await expect(policyDialog.getByText("Auto (Beta)", { exact: true })).toHaveCount(0);
@@ -135,6 +135,11 @@ test("organization administrator invites a person and manages member access", as
   await expect(policyDialog.getByRole("group", { name: "Connectors" })).toHaveCount(0);
   await expect(policyDialog.getByRole("group", { name: "AI usage and data transfer" })).toBeVisible();
   await expect(policyDialog.getByLabel("Internet access ceiling")).toHaveCount(0);
+  await policyDialog.getByRole("combobox", { name: "Maximum thinking level" }).click();
+  for (const level of ["Low", "Medium", "High"]) await expect(page.getByRole("option", { name: level, exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Max", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("option", { name: "Off", exact: true })).toHaveCount(0);
+  await page.getByRole("option", { name: "High", exact: true }).click();
   for (const agent of ["Claude Desktop", "Claude CLI", "Codex CLI", "Hermes Desktop", "Hermes Agent"]) {
     await expect(policyDialog.getByRole("group", { name: "Agents" }).getByText(agent, { exact: true })).toBeVisible();
   }
@@ -154,21 +159,58 @@ test("organization administrator invites a person and manages member access", as
 
   await page.goto("/?view=home&section=organization");
   const organizationWorkspace = page.getByRole("row", { name: "Personal workspace for Example User" });
-  await expect(organizationWorkspace.getByText("Approved destinations", { exact: true })).toBeVisible();
-  await expect(organizationWorkspace.getByText("Inherited from type", { exact: true })).toBeVisible();
-  await organizationWorkspace.getByRole("button", { name: "Manage access" }).click();
+  await expect(organizationWorkspace.getByText("Approved destinations only", { exact: true })).toBeVisible();
+  await expect(organizationWorkspace.getByText("Inherited from workspace type", { exact: true })).toBeVisible();
+  await organizationWorkspace.getByRole("button", { name: "Manage network access" }).click();
   let networkDialog = page.getByRole("dialog", { name: "Network access for Personal workspace" });
-  await expect(networkDialog.getByText("Managed workspace", { exact: true })).toBeVisible();
+  await expect(networkDialog.getByText("Restricted workspace", { exact: true })).toBeVisible();
   await networkDialog.getByRole("combobox", { name: "Workspace network security group" }).click();
-  await page.getByRole("option", { name: "Approved agent updates" }).click();
+  await page.getByRole("option", { name: /Approved agent updates/ }).click();
   await networkDialog.getByRole("button", { name: "Save network access" }).click();
   await expect(page.getByText("Workspace network access updated.")).toBeVisible();
-  await organizationWorkspace.getByRole("button", { name: "Manage access" }).click();
+  await organizationWorkspace.getByRole("button", { name: "Manage network access" }).click();
   networkDialog = page.getByRole("dialog", { name: "Network access for Personal workspace" });
   await networkDialog.getByRole("combobox", { name: "Workspace network security group" }).click();
-  await page.getByRole("option", { name: "Inherit from Managed workspace" }).click();
+  await page.getByRole("option", { name: "Use Restricted workspace default" }).click();
   await page.screenshot({ path: "test-results/workspace-network-access-reset.png", fullPage: true });
   await networkDialog.getByRole("button", { name: "Save network access" }).click();
+
+  await page.locator("aside").getByRole("button", { name: "Network access", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Network access", exact: true })).toBeVisible();
+  await expect(page.getByText("Restricted workspace default", { exact: true })).toBeVisible();
+  await expect(page.getByText("Internet workspace default", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Create security group" }).click();
+  const securityGroupDialog = page.getByRole("dialog", { name: "Create security group" });
+  await securityGroupDialog.getByLabel("Name").fill("Ban Microsoft");
+  await securityGroupDialog.getByLabel("Description").fill("Block Microsoft services for selected Internet workspaces");
+  await securityGroupDialog.getByRole("combobox", { name: "Network access model" }).click();
+  await page.getByRole("option", { name: "Public web with blocked destinations" }).click();
+  await securityGroupDialog.getByRole("textbox", { name: "Destination" }).fill("microsoft.com");
+  await securityGroupDialog.getByLabel("Purpose").fill("Block Microsoft services");
+  await securityGroupDialog.getByRole("button", { name: "Block destination" }).click();
+  await expect(securityGroupDialog.getByText("Web traffic · HTTP and HTTPS", { exact: false })).toBeVisible();
+  await securityGroupDialog.evaluate((dialog) => dialog.scrollTo({ top: 0 }));
+  await page.screenshot({ path: "test-results/firewall-security-group-editor-reviewed.png" });
+  await securityGroupDialog.locator(".firewall-editor-rule-list").screenshot({ path: "test-results/firewall-security-group-rule-reviewed.png" });
+  await securityGroupDialog.getByRole("button", { name: "Create security group" }).click();
+  const microsoftGroup = page.locator(".firewall-security-group-list article").filter({ hasText: "Ban Microsoft" });
+  await expect(microsoftGroup).toContainText("Public web with blocked destinations");
+  await expect(microsoftGroup).toContainText("1 blocked");
+
+  await page.goto("/?view=home&section=organization");
+  const internetWorkspace = page.getByRole("row", { name: "Sandbox Research for Example User" });
+  await internetWorkspace.getByRole("button", { name: "Manage network access" }).click();
+  networkDialog = page.getByRole("dialog", { name: "Network access for Sandbox Research" });
+  await expect(networkDialog.getByText("Internet workspace", { exact: true })).toBeVisible();
+  await networkDialog.getByRole("combobox", { name: "Workspace network security group" }).click();
+  await page.getByRole("option", { name: /Ban Microsoft/ }).click();
+  await networkDialog.getByRole("button", { name: "Save network access" }).click();
+  await expect(page.getByText("Workspace network access updated.")).toBeVisible();
+
+  await page.locator("aside").getByRole("button", { name: "Network access", exact: true }).click();
+  const attachedMicrosoftGroup = page.locator(".firewall-security-group-list article").filter({ hasText: "Ban Microsoft" });
+  await expect(attachedMicrosoftGroup).toContainText("1 workspace attached");
+  await page.screenshot({ path: "test-results/network-access-reviewed.png", fullPage: true });
 
   await page.goto("/?view=settings&section=people");
 
@@ -895,8 +937,8 @@ test("workspace manager operates multiple runtimes with confirmation and bounded
   await expect(page.getByText("No workspace has been created yet.")).toBeVisible();
   const personal = page.getByRole("row", { name: "Personal workspace for Alex Morgan" });
   await expect(personal.getByText("Healthy")).toBeVisible();
-  await expect(personal.getByText("Approved destinations")).toBeVisible();
-  await expect(personal.getByText("Inherited from type")).toBeVisible();
+  await expect(personal.getByText("Approved destinations only")).toBeVisible();
+  await expect(personal.getByText("Inherited from workspace type")).toBeVisible();
   await expect(personal.getByText("v1 current")).toBeVisible();
   await expect(personal.getByRole("button", { name: /open|view|files|chat/i })).toHaveCount(0);
 

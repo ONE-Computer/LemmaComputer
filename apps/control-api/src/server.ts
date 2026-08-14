@@ -94,7 +94,7 @@ const sandboxProfiles = [
   sandboxProfileSchema.parse({
     id: "claude-desktop-standard-v1",
     version: 1,
-    displayName: "Managed workspace",
+    displayName: "Restricted workspace",
     description: "A restricted workspace for any selected AI agent, routed through organization-approved models, tools, and destinations.",
     executionMode: "managed",
     egressMode: "restricted",
@@ -1179,7 +1179,7 @@ export function createControlServer(
       "EGRESS_SECURITY_GROUP_INCOMPATIBLE",
       profileId === "disposable-open-v1"
         ? "Internet workspaces require a public-web security group"
-        : "Managed workspaces require a deny-by-default security group",
+        : "Restricted workspaces require an approved-destinations security group",
       409,
     );
   };
@@ -3326,6 +3326,13 @@ export function createControlServer(
       constraints: organizationWorkspacePolicyConstraintsSchema,
       revisionNote: z.string().trim().min(3).max(240),
     }).parse(request.body ?? {});
+    if (input.constraints.maximumReasoningEffort && !["low", "medium", "high"].includes(input.constraints.maximumReasoningEffort)) {
+      throw new LemmaComputerError(
+        "WORKSPACE_REASONING_LEVEL_NOT_SELECTABLE",
+        "Maximum thinking must be Low, Medium, or High",
+        400,
+      );
+    }
     const version = await requireProtectedWorkspacePolicy().createOrganizationPolicyVersion({
       tenantId: actor.tenantId,
       constraints: input.constraints,
@@ -3386,11 +3393,29 @@ export function createControlServer(
     const currentGroup = input.securityGroupId
       ? currentVersions.find((candidate) => candidate.securityGroupId === input.securityGroupId)
       : undefined;
+    if (currentGroup?.defaultFor) {
+      throw new LemmaComputerError(
+        "EGRESS_SYSTEM_DEFAULT_IMMUTABLE",
+        "Workspace type defaults are fixed; create a custom security group for destination exceptions",
+        409,
+      );
+    }
     const nextDefaultAction = currentGroup?.defaultFor === "managed"
       ? "deny" as const
       : currentGroup?.defaultFor === "internet"
         ? "allow-public-http-https" as const
         : input.defaultAction;
+    const effectiveRuleAction = nextDefaultAction === "allow-public-http-https" ? "deny" : "allow";
+    const ineffectiveRule = input.rules.find((rule) => rule.action !== effectiveRuleAction);
+    if (ineffectiveRule) {
+      throw new LemmaComputerError(
+        "EGRESS_RULE_HAS_NO_EFFECT",
+        nextDefaultAction === "allow-public-http-https"
+          ? "Public-web security groups accept blocked destinations only"
+          : "Approved-destinations security groups accept approved destinations only",
+        400,
+      );
+    }
     if (input.securityGroupId) {
       const currentAssignments = await security.identityPolicyStore.listWorkspaceEgressSecurityGroupAssignments?.({
         tenantId: actor.tenantId,

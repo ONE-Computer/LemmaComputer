@@ -847,6 +847,50 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     assert.equal(savedFirewall.statusCode, 201);
     assert.equal(savedFirewall.json().version, 2);
 
+    const ineffectivePublicWebAllow = await app.inject({
+      method: "POST",
+      url: "/v1/admin/egress-security-groups",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: {
+        name: "Public web exception",
+        description: "Invalid allow rule under public web.",
+        defaultAction: "allow-public-http-https",
+        rules: [{ id: "ineffective-allow", action: "allow", protocol: "https", host: "example.com", includeSubdomains: true, port: 443, purpose: "This rule would not affect public web" }],
+      },
+    });
+    assert.equal(ineffectivePublicWebAllow.statusCode, 400);
+    assert.equal(ineffectivePublicWebAllow.json().error.code, "EGRESS_RULE_HAS_NO_EFFECT");
+
+    const ineffectiveRestrictedDeny = await app.inject({
+      method: "POST",
+      url: "/v1/admin/egress-security-groups",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: {
+        name: "Approved services",
+        description: "Invalid deny rule under approved destinations only.",
+        defaultAction: "deny",
+        rules: [{ id: "ineffective-deny", action: "deny", protocol: "https", host: "example.com", includeSubdomains: true, port: 443, purpose: "This rule would not affect a deny-by-default group" }],
+      },
+    });
+    assert.equal(ineffectiveRestrictedDeny.statusCode, 400);
+    assert.equal(ineffectiveRestrictedDeny.json().error.code, "EGRESS_RULE_HAS_NO_EFFECT");
+
+    internetFirewallVersion.defaultFor = "internet";
+    const changedSystemDefault = await app.inject({
+      method: "POST",
+      url: "/v1/admin/egress-security-groups",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: {
+        securityGroupId: internetFirewallVersion.securityGroupId,
+        name: internetFirewallVersion.name,
+        description: internetFirewallVersion.description,
+        defaultAction: internetFirewallVersion.defaultAction,
+        rules: [],
+      },
+    });
+    assert.equal(changedSystemDefault.statusCode, 409);
+    assert.equal(changedSystemDefault.json().error.code, "EGRESS_SYSTEM_DEFAULT_IMMUTABLE");
+
     const attachedFirewall = await app.inject({
       method: "POST",
       url: "/v1/admin/workspaces/personal/egress-security-group",

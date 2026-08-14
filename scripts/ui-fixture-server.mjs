@@ -110,7 +110,7 @@ const productWorkspace = {
 const profile = {
   id: "claude-desktop-standard-v1",
   version: 1,
-  displayName: "Managed workspace",
+  displayName: "Restricted workspace",
   description: "A restricted workspace for any selected AI agent, routed through organization-approved models, tools, and destinations.",
   executionMode: "managed",
   egressMode: "restricted",
@@ -442,8 +442,8 @@ let egressSecurityGroups = [{
   securityGroupId: "esg_fixture_managed_default",
   tenantId: session.tenant.id,
   version: 1,
-  name: "Managed workspace default",
-  description: "The built-in deny-by-default policy inherited by Managed workspaces.",
+  name: "Restricted workspace default",
+  description: "The fixed approved-destinations baseline inherited by Restricted workspaces.",
   defaultAction: "deny",
   rules: [],
   documentHash: digest,
@@ -478,7 +478,6 @@ let egressSecurityGroups = [{
   rules: [
     { id: "claude-downloads", action: "allow", protocol: "https", host: "downloads.claude.ai", includeSubdomains: false, port: 443, purpose: "Download approved Claude Desktop updates" },
     { id: "anthropic-api", action: "allow", protocol: "https", host: "api.anthropic.com", includeSubdomains: false, port: 443, purpose: "Connect approved Anthropic services" },
-    { id: "blocked-downloads", action: "deny", protocol: "https", host: "untrusted-downloads.example", includeSubdomains: true, port: 443, purpose: "Block untrusted downloads in open workspaces" },
   ],
   documentHash: digest,
   createdBy: session.user.id,
@@ -553,6 +552,7 @@ const memberWorkspaceInventory = () => adminUsers.map((user) => ({
   workspaceCount: user.workspaces.length,
   workspaces: user.workspaces.map((item) => ({
     id: item.id,
+    grantId: item.grantId,
     name: item.grantId === "personal"
       ? "Personal workspace"
       : item.grantId.split(/[-_]+/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" "),
@@ -1993,10 +1993,16 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "GET" && /^\/v1\/admin\/users\/[^/]+\/sandbox-settings$/.test(url.pathname)) {
+    const userId = decodeURIComponent(url.pathname.split("/")[4]);
+    const grantId = url.searchParams.get("grantId") ?? "personal";
+    const targetWorkspace = adminUsers.find((user) => user.userId === userId)?.workspaces.find((item) => item.grantId === grantId);
+    const targetProfile = targetWorkspace?.profileId === disposableProfile.id ? disposableProfile : profile;
     response.end(JSON.stringify({
       ...sandboxSettings,
-      grantId: url.searchParams.get("grantId") ?? "personal",
-      securityGroup: sandboxSettings.securityGroup ?? inheritedEgressGroup(sandboxSettings.profileId),
+      grantId,
+      profileId: targetWorkspace?.profileId ?? sandboxSettings.profileId,
+      profile: targetWorkspace ? targetProfile : sandboxSettings.profile,
+      securityGroup: targetWorkspace?.egress ?? sandboxSettings.securityGroup ?? inheritedEgressGroup(sandboxSettings.profileId),
       availableSecurityGroups: egressSecurityGroups,
     }));
     return;
@@ -2012,20 +2018,45 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
+    const pathParts = url.pathname.split("/");
+    const userId = decodeURIComponent(pathParts[4]);
+    const grantId = decodeURIComponent(pathParts[6]);
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
       const input = JSON.parse(body);
       const group = egressSecurityGroups.find((candidate) => candidate.id === input.securityGroupVersionId);
       const assigned = { ...group, assignmentSource: "custom" };
-      sandboxSettings = { ...sandboxSettings, securityGroup: assigned };
+      adminUsers = adminUsers.map((user) => user.userId === userId ? {
+        ...user,
+        workspaces: user.workspaces.map((item) => item.grantId === grantId ? {
+          ...item,
+          egressMode: assigned.defaultAction === "allow-public-http-https" ? "full-web" : "restricted",
+          egress: assigned,
+        } : item),
+      } : user);
       response.end(JSON.stringify(assigned));
     });
     return;
   }
   if (request.method === "DELETE" && /^\/v1\/admin\/users\/[^/]+\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
-    sandboxSettings = { ...sandboxSettings, securityGroup: undefined };
-    response.end(JSON.stringify(inheritedEgressGroup(sandboxSettings.profileId)));
+    const pathParts = url.pathname.split("/");
+    const userId = decodeURIComponent(pathParts[4]);
+    const grantId = decodeURIComponent(pathParts[6]);
+    let inherited = inheritedEgressGroup(profile.id);
+    adminUsers = adminUsers.map((user) => user.userId === userId ? {
+      ...user,
+      workspaces: user.workspaces.map((item) => {
+        if (item.grantId !== grantId) return item;
+        inherited = inheritedEgressGroup(item.profileId);
+        return {
+          ...item,
+          egressMode: item.profileId === disposableProfile.id ? "full-web" : "restricted",
+          egress: inherited,
+        };
+      }),
+    } : user);
+    response.end(JSON.stringify(inherited));
     return;
   }
   if (key === "GET /v1/admin/egress-security-groups") {
@@ -2046,6 +2077,8 @@ const server = http.createServer((request, response) => {
         securityGroupId,
         version: (prior?.version ?? 0) + 1,
         createdAt: new Date().toISOString(),
+        isDefault: false,
+        defaultFor: undefined,
       };
       egressSecurityGroups = [saved, ...egressSecurityGroups.filter((group) => group.securityGroupId !== securityGroupId)];
       if (sandboxSettings.securityGroup?.securityGroupId === securityGroupId) {
