@@ -336,6 +336,69 @@ test("remote Docker/KasmVNC nodes fail closed without private TLS relay configur
   );
 });
 
+test("remote application relays disable TLS socket reuse and strip hop-by-hop headers", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-application-relay-"));
+  const socketPath = join(directory, "docker.sock");
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const path = request.url?.slice("/v1.47".length) ?? "";
+    requests.push({ method: request.method ?? "", path, body });
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path.startsWith("/containers/")) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+    if (request.method === "POST" && path.startsWith("/containers/create")) {
+      response.statusCode = 201;
+      response.end(JSON.stringify({ Id: "application-relay-id" }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new DockerKasmVncAdapter({
+      socketPath,
+      topology: "remote",
+      nodeId: "workspace-node-test",
+      publicHost: "workspace.internal.example.test",
+      relayBindHost: "10.0.1.10",
+      relayNetwork: "workspace-relay-private",
+      relayTlsCertificate: "test-certificate",
+      relayTlsKey: "test-private-key",
+      applicationNetwork: "workspace-app-private",
+      applicationTlsCa: "test-application-ca",
+      image: "sha256:pinned-workspace",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "unused-on-remote-nodes",
+      gatewayContainer: "unused-on-remote-nodes",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "hosted",
+    });
+    await (adapter as unknown as { ensureRemoteApplicationRelay: (...args: unknown[]) => Promise<void> })
+      .ensureRemoteApplicationRelay(
+        "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+        "control",
+        "https://application.internal.example.test:4443",
+        4100,
+        "workspace-network",
+      );
+    const created = requests.find((item) => item.method === "POST" && item.path.startsWith("/containers/create"))!;
+    const command = ((created.body.Cmd as string[]) ?? []).join(" ");
+    assert.match(command, /hopByHop/);
+    assert.match(command, /agent:false/);
+    assert.match(command, /connection:\"close\"/);
+    assert.match(command, /responseHeaders/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("remote desktop relay publishes from a private ingress network and reaches only its workspace upstream", async () => {
   const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-remote-relay-"));
   const socketPath = join(directory, "docker.sock");

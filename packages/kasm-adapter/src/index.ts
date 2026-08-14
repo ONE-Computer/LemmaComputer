@@ -811,7 +811,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
     }
     const name = applicationRelayName(workspaceId, kind);
     const configurationDigest = createHash("sha256")
-      .update(canonicalJson({ kind, upstream: target.toString(), ca: this.config.applicationTlsCa ?? "", image: this.config.relayImage }), "utf8")
+      .update(canonicalJson({ version: 2, kind, upstream: target.toString(), ca: this.config.applicationTlsCa ?? "", image: this.config.relayImage }), "utf8")
       .digest("hex");
     const existing = await this.inspectByName(name);
     if (existing?.running && existing.configurationDigest === configurationDigest) return;
@@ -824,10 +824,12 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       'const http=require("node:http"),https=require("node:https");',
       'const upstream=new URL(process.env.UPSTREAM);',
       'const ca=process.env.UPSTREAM_CA_B64?Buffer.from(process.env.UPSTREAM_CA_B64,"base64").toString("utf8"):undefined;',
+      'const hopByHop=new Set(["connection","keep-alive","proxy-authenticate","proxy-authorization","te","trailer","transfer-encoding","upgrade"]);',
       'const server=http.createServer((req,res)=>{',
       'const base=upstream.pathname.endsWith("/")?upstream.pathname.slice(0,-1):upstream.pathname;',
       'const path=base+(req.url?.startsWith("/")?req.url:`/${req.url??""}`);',
-      'const out=https.request({hostname:upstream.hostname,port:upstream.port||443,method:req.method,path,headers:{...req.headers,host:upstream.host},ca,rejectUnauthorized:true,minVersion:"TLSv1.2"},r=>{res.writeHead(r.statusCode||502,r.headers);r.pipe(res)});',
+      'const headers=Object.fromEntries(Object.entries(req.headers).filter(([name])=>!hopByHop.has(name.toLowerCase())));',
+      'const out=https.request({hostname:upstream.hostname,port:upstream.port||443,method:req.method,path,headers:{...headers,host:upstream.host,connection:"close"},agent:false,ca,rejectUnauthorized:true,minVersion:"TLSv1.2"},r=>{const responseHeaders=Object.fromEntries(Object.entries(r.headers).filter(([name])=>!hopByHop.has(name.toLowerCase())));res.writeHead(r.statusCode||502,{...responseHeaders,connection:"close"});r.pipe(res)});',
       'out.on("error",()=>{if(!res.headersSent)res.writeHead(502,{"content-type":"application/json"});res.end(JSON.stringify({error:{code:"REMOTE_APPLICATION_UPSTREAM_UNAVAILABLE"}}))});',
       'req.pipe(out)});',
       'server.listen(Number(process.env.LISTEN_PORT),"0.0.0.0");',
