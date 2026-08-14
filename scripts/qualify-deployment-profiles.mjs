@@ -73,6 +73,7 @@ const environmentFor = (profile) => {
     LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL: "https://gateway.internal.profile-smoke.example.test",
     LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL: "https://control.internal.profile-smoke.example.test",
     LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true",
+    LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED: "true",
     LEMMACOMPUTER_LITELLM_ADMIN_URL: "https://litellm-admin-listener:8443",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64: "cHJvZmlsZS1zbW9rZQ==",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64: "cHJvZmlsZS1zbW9rZQ==",

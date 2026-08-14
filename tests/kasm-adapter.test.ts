@@ -277,7 +277,7 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
   }
 });
 
-test("local Cowork virtualization is rejected on hosted multi-tenant nodes", () => {
+test("hosted Cowork virtualization is rejected on a colocated node", () => {
   assert.throws(
     () => new DockerKasmVncAdapter({
       image: "sha256:pinned-workspace",
@@ -296,6 +296,28 @@ test("local Cowork virtualization is rejected on hosted multi-tenant nodes", () 
       );
       return true;
     },
+  );
+});
+
+test("hosted Cowork virtualization is allowed on a fully isolated remote node", () => {
+  assert.doesNotThrow(
+    () => new DockerKasmVncAdapter({
+      topology: "remote",
+      image: "sha256:pinned-workspace",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      controlContainer: "lemmacomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "hosted",
+      kvmEnabled: true,
+      publicHost: "workspace-node.internal",
+      relayBindHost: "10.0.1.10",
+      relayNetwork: "workspace-relay-private",
+      relayTlsCertificate: "test-certificate",
+      relayTlsKey: "test-private-key",
+      applicationNetwork: "workspace-application-private",
+    }),
   );
 });
 

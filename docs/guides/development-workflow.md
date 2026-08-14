@@ -245,6 +245,37 @@ placeholders for tasks that do not need live authentication, so a passing
 check alone does not prove full sign-in, provider, connector, or workspace
 readiness.
 
+### Repeatable split-node qualification
+
+To exercise the real remote-node routing boundary while retaining the current
+worktree's users, organizations, provider configuration, databases, and Compose
+volumes, first stop every workspace through LemmaComputer and run:
+
+```bash
+npm run qualify:remote-workspace-node -- up
+```
+
+For Claude Cowork, require host KVM/vsock support and enable device projection:
+
+```bash
+npm run qualify:remote-workspace-node -- up --cowork
+```
+
+The command generates a worktree-local two-day PKI under the ignored
+`.runtime-remote-workspace-node/` directory, starts the controller in a separate
+Compose project, switches Control to the real mTLS node API, and adds verified
+TLS desktop and application routes. It never copies a database. `up` is
+idempotent after setup; inspect or restore the topology with:
+
+```bash
+npm run qualify:remote-workspace-node -- status
+npm run qualify:remote-workspace-node -- down
+```
+
+Both topology changes refuse to proceed while managed workspace runtime
+containers exist. `down` restores the normal colocated worktree stack and keeps
+the worktree's databases and persistent volumes.
+
 ## Scheduling work
 
 The user's request is the task contract. When a GitHub issue exists, its definition of success and native `blocked by` relationships add to that contract. A task with a known unresolved blocker is not runnable; otherwise it may start whenever worktree capacity is available. No artificial wave boundary is required.

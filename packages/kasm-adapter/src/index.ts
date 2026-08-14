@@ -254,15 +254,15 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
   private readonly nodeId: string;
   private readonly topology: "colocated" | "remote";
   constructor(private readonly config: DockerKasmVncConfig) {
-    if (config.kvmEnabled && config.installationKind === "hosted") {
+    this.nodeId = config.nodeId ?? "workspace-node";
+    this.topology = config.topology ?? "colocated";
+    if (config.kvmEnabled && config.installationKind === "hosted" && this.topology !== "remote") {
       throw new LemmaComputerError(
         "COWORK_HOST_ISOLATION_REQUIRED",
-        "Local Cowork virtualization is not permitted on hosted multi-tenant nodes",
+        "Hosted Cowork virtualization requires a remote-isolated workspace node",
         503,
       );
     }
-    this.nodeId = config.nodeId ?? "workspace-node";
-    this.topology = config.topology ?? "colocated";
     if (this.topology === "remote" && (!config.publicHost || !config.relayBindHost || !config.relayNetwork || !config.relayTlsCertificate || !config.relayTlsKey || !config.applicationNetwork)) {
       throw new LemmaComputerError(
         "WORKSPACE_NODE_REMOTE_CONFIGURATION_INCOMPLETE",

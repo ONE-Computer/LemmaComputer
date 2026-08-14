@@ -87,6 +87,7 @@ const validHostedEnvironment = () => {
     LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL: "https://gateway.internal.example.test",
     LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL: "https://control.internal.example.test",
     LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true",
+    LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED: "true",
     LEMMACOMPUTER_LITELLM_ADMIN_URL: "https://litellm-admin-listener:8443",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64: pemBase64("CERTIFICATE"),
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64: pemBase64("CERTIFICATE"),
@@ -184,6 +185,21 @@ test("a complete hosted configuration passes the shared profile validation", () 
     profile: "hosted",
     strict: true,
   }));
+});
+
+test("hosted Cowork projects KVM only with the required remote node topology", () => {
+  const values = validHostedEnvironment();
+  const services = projectServiceEnvironment(values);
+  assert.equal(services["workspace-controller"].WORKSPACE_NODE_TOPOLOGY, "remote");
+  assert.equal(services["workspace-controller"].KASM_LOCAL_KVM_ENABLED, "true");
+
+  assert.throws(
+    () => validateDeploymentEnvironment({
+      ...values,
+      LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY: "colocated",
+    }, { profile: "hosted", strict: true }),
+    /local-operator-controlled workspace execution is not allowed/i,
+  );
 });
 
 test("remote workspace grants use only the configured private HTTPS relay upstreams", () => {

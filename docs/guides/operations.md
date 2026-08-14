@@ -472,12 +472,13 @@ with:
 LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED=true
 ```
 
-The local driver accepts this setting for customer-managed installations and
-isolated development worktrees. Hosted multi-tenant installations fail closed
-with `COWORK_HOST_ISOLATION_REQUIRED`. The adapter
-maps only `/dev/kvm` and `/dev/vhost-vsock` into workspaces that include Claude
-Desktop; it does not make the container privileged or restore dropped
-capabilities. Cowork containers use the pinned Moby `seccomp/v0.2.1` default
+The driver accepts this setting for customer-managed installations, isolated
+development worktrees, and hosted installations whose workspace-node topology
+is `remote`. A hosted installation that tries to expose KVM from a colocated
+application/control host fails closed with `COWORK_HOST_ISOLATION_REQUIRED`.
+The adapter maps only `/dev/kvm` and `/dev/vhost-vsock` into workspaces that
+include Claude Desktop; it does not make the container privileged or restore
+dropped capabilities. Cowork containers use the pinned Moby `seccomp/v0.2.1` default
 allowlist with one additional rule permitting only `socket(AF_VSOCK)`, which
 Claude's local execution VM requires. The base profile SHA-256 is
 `536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74`.
@@ -489,10 +490,12 @@ AF_VSOCK socket creation before launching the desktop, so host and image group
 IDs do not need to match. Changing this setting recreates the workspace
 container on its next launch while preserving its workspace volume.
 
-Hosted nodes keep KVM disabled. For a remote node, place the controller and its
-Docker socket together in the private workspace compute boundary and configure
-the mTLS node API, private desktop host, restricted application network, and
-private HTTPS gateway/Control endpoints. Control never receives the socket.
+Hosted Cowork nodes enable KVM only inside the remote workspace compute
+boundary. Place the controller, Docker socket, `/dev/kvm`, and
+`/dev/vhost-vsock` together there and configure the mTLS node API, private
+desktop host, restricted application network, and private HTTPS gateway/Control
+endpoints. Control never receives the socket or either device. Non-Cowork nodes
+may keep KVM disabled.
 Follow [Workspace node deployment](workspace-node.md) for the full network,
 storage, purge, and removal contract.
 

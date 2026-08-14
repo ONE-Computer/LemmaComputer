@@ -73,9 +73,24 @@ The desktop ingress and node application relays use server-authenticated TLS,
 not client-certificate mTLS, so their certificate verification remains in the
 focused ingress and adapter tests.
 
+An isolated development worktree can run the same split boundary without
+manually creating Compose overlays or copying a database:
+
+```bash
+npm run qualify:remote-workspace-node -- up --cowork
+npm run qualify:remote-workspace-node -- status
+npm run qualify:remote-workspace-node -- down
+```
+
+The command creates short-lived worktree-local test authorities and preserves
+the worktree's existing users, organizations, providers, policies, databases,
+and volumes. It is qualification tooling, not production PKI automation.
+
 Before promotion, also run `npm run qualify:deployment-profiles`, the focused
 controller/adapter/ingress tests, and `npm run verify:quick`. In a representative
 private node, prove workspace start/open, governed model and tool traffic,
 desktop reconnect through the TLS relay, egress allow/deny behavior, restart
 persistence, cross-workspace substitution denial, verified purge, and secret-
-free lifecycle audit events. KVM remains disabled on hosted multi-tenant nodes.
+free lifecycle audit events. Hosted Claude Cowork additionally requires a
+remote node with nested virtualization, `/dev/kvm`, and `/dev/vhost-vsock`;
+the colocated hosted topology remains fail-closed.
