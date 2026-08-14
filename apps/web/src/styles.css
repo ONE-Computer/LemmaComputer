@@ -6082,7 +6082,7 @@ textarea:focus-visible,
 .admin-empty-state { margin: 0; padding: 24px; color: #68727d; }
 .workspace-network-access-modal .modal-card { width: min(620px, calc(100vw - 32px)); }
 .workspace-network-access-editor { display: grid; gap: 20px; }
-.workspace-network-access-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; border: 1px solid #d9dee5; border-radius: 9px; background: #f8fafc; }
+.workspace-network-access-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; border: 1px solid #d9dee5; border-radius: 9px; background: #f8fafc; }
 .workspace-network-access-summary > span { display: grid; gap: 4px; padding: 16px 18px; }
 .workspace-network-access-summary > span + span { border-left: 1px solid #d9dee5; }
 .workspace-network-access-summary strong { color: #1d2c3f; font-size: 14px; }
@@ -6091,6 +6091,7 @@ textarea:focus-visible,
 .workspace-network-access-editor .select-menu,
 .workspace-network-access-editor .select-menu-trigger { width: 100%; }
 .workspace-network-access-help { margin: -6px 0 0; color: #687582; font-size: 12px; line-height: 1.5; }
+.workspace-network-access-empty { margin: -8px 0 0; padding: 12px 14px; border-radius: 6px; background: #f5f6f7; color: #687582; font-size: 12px; }
 
 @media (max-width: 1350px) {
   .member-workspace-table-header { display: none; }
@@ -6431,6 +6432,7 @@ textarea:focus-visible,
 .firewall-security-group-attachments,
 .firewall-security-group-baseline { display: grid; gap: 4px; min-width: 0; }
 .firewall-security-group-copy button { width: fit-content; border: 0; padding: 0; background: transparent; color: #164a9a; cursor: pointer; font: inherit; font-weight: 680; text-align: left; }
+.firewall-security-group-copy > strong { color: #27394d; font-size: 13px; font-weight: 680; }
 .firewall-security-group-copy button:hover { color: #092e68; text-decoration: underline; }
 .firewall-security-group-copy small,
 .firewall-security-group-attachments small { overflow: hidden; color: #68727d; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -6438,6 +6440,7 @@ textarea:focus-visible,
 .firewall-security-group-baseline strong { color: #27394d; font-size: 13px; font-weight: 650; }
 .firewall-security-group-baseline small { color: #68727d; font-size: 12px; }
 .firewall-default-badge { width: fit-content; margin-top: 3px; padding: 3px 7px; border-radius: 999px; background: #eaf1fb; color: #2453a6; font-size: 11px; font-weight: 700; }
+.firewall-review-badge { width: fit-content; margin-top: 3px; padding: 3px 7px; border-radius: 999px; background: #fff3d9; color: #855f12; font-size: 11px; font-weight: 700; }
 .firewall-group-toolbar { padding: 14px 24px; border-bottom: 1px solid #e2e2df; background: #fbfbfa; }
 .firewall-group-toolbar .firewall-search { display: block; max-width: 620px; }
 .firewall-group-toolbar .firewall-search input { width: 100%; min-height: 40px; padding: 0 12px; border: 1px solid #b0b8c2; border-radius: 5px; background: #fff; color: #172334; font: inherit; font-size: 13px; }
@@ -6518,6 +6521,7 @@ textarea:focus-visible,
 .firewall-editor-rule-builder label { display: grid; gap: 7px; }
 .firewall-editor-fields label > span,
 .firewall-editor-rule-builder label > span { color: #526170; font-size: 12px; font-weight: 650; }
+.firewall-editor-fields label > small { color: #68727d; font-size: 11px; font-weight: 500; line-height: 1.4; }
 .firewall-editor-rule-builder .select-menu,
 .modal-field .select-menu { width: 100%; }
 .firewall-editor-fields input,
@@ -6527,6 +6531,12 @@ textarea:focus-visible,
 .firewall-editor { margin-top: 22px; }
 .firewall-editor-fields { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(260px, 1.3fr); gap: 16px; }
 .firewall-editor-default-action { grid-column: 1 / -1; max-width: 360px; }
+.firewall-access-model-summary { display: grid; gap: 4px; margin-top: 16px; padding: 14px 16px; border: 1px solid #cfdae7; border-radius: 7px; background: #f5f9fd; }
+.firewall-access-model-summary strong { color: #1d3f66; font-size: 13px; }
+.firewall-access-model-summary span { color: #526170; font-size: 12px; line-height: 1.45; }
+.firewall-rule-review-warning { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 13px 15px; border: 1px solid #e9c56f; border-radius: 7px; background: #fff9e9; color: #6e5218; font-size: 12px; line-height: 1.45; }
+.firewall-rule-review-warning svg { flex: 0 0 auto; margin-top: 1px; }
+.firewall-rule-review-warning span { display: grid; gap: 2px; }
 .firewall-editor-rule-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-top: 24px; }
 .firewall-editor-rule-heading h3,
 .firewall-editor-rule-heading p { margin: 0; }
@@ -6536,6 +6546,7 @@ textarea:focus-visible,
 .firewall-editor-rule-list { margin-top: 10px; overflow: hidden; border: 1px solid #e2e2df; border-radius: 7px; }
 .firewall-editor-rule-list > p { margin: 0; padding: 18px; color: #68727d; font-size: 13px; }
 .firewall-editor-rule-list article { display: grid; grid-template-columns: minmax(200px, 1fr) auto auto; align-items: center; gap: 20px; min-height: 68px; padding: 10px 16px; border-bottom: 1px solid #e2e2df; }
+.firewall-editor-rule-list article.needs-review { background: #fff9e9; }
 .firewall-editor-rule-list article:last-child { border-bottom: 0; }
 .firewall-editor-rule-list article > div { display: grid; gap: 4px; }
 .firewall-editor-rule-list small { color: #68727d; font-size: 12px; }
@@ -6544,13 +6555,20 @@ textarea:focus-visible,
 .firewall-rule-effect.allow { color: #237a39; }
 .firewall-rule-effect.deny { color: #9b2c2c; }
 .firewall-editor-rule-list button { border: 0; background: transparent; color: #9b2c2c; cursor: pointer; font: inherit; font-size: 13px; }
-.firewall-editor-rule-builder { display: grid; grid-template-columns: 104px minmax(190px, 1.4fr) 110px 86px minmax(160px, auto); align-items: end; gap: 12px; margin-top: 20px; padding: 18px; border-radius: 7px; background: #f7f8f8; }
+.firewall-editor-rule-builder { display: grid; grid-template-columns: minmax(0, 1fr); align-items: end; gap: 12px; margin-top: 20px; padding: 18px; border-radius: 7px; background: #f7f8f8; }
 .firewall-editor-rule-builder-title { display: grid; grid-column: 1 / -1; gap: 3px; margin-bottom: 2px; }
 .firewall-editor-rule-builder-title strong { color: #172334; font-size: 15px; }
 .firewall-editor-rule-builder-title span { color: #68727d; font-size: 12px; }
-.firewall-editor-rule-builder .firewall-editor-purpose { grid-column: 1 / 5; }
 .firewall-editor-subdomains { display: flex !important; align-items: center; min-height: 42px; }
 .firewall-editor-subdomains input { min-height: 0; }
+.firewall-editor-advanced { padding: 10px 0 0; border-top: 1px solid #dde2e6; color: #526170; }
+.firewall-editor-advanced summary { width: fit-content; cursor: pointer; color: #2453a6; font-size: 12px; font-weight: 650; }
+.firewall-editor-advanced > p { margin: 8px 0; color: #68727d; font-size: 11px; line-height: 1.45; }
+.firewall-editor-advanced > label { display: flex; grid-template-columns: auto 1fr; align-items: center; width: fit-content; }
+.firewall-editor-advanced > label input { min-height: 0; }
+.firewall-editor-advanced > div { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(100px, .35fr); gap: 12px; margin-top: 12px; }
+.firewall-rule-builder-error { margin: 0; color: #9b2c2c; font-size: 12px; }
+.firewall-editor-rule-builder > button { justify-self: end; }
 .firewall-editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin-top: 22px; padding-top: 20px; border-top: 1px solid #e2e2df; }
 .firewall-editor-actions > span { display: flex; align-items: center; gap: 9px; color: #526170; font-size: 13px; }
 .firewall-editor-actions > span svg { flex: 0 0 auto; color: #0b4a8f; }
@@ -6673,7 +6691,8 @@ textarea:focus-visible,
 @container firewall-groups (max-width: 1050px) {
   .firewall-security-group-list article { grid-template-columns: minmax(240px, 1fr) auto auto; }
   .firewall-security-group-version { grid-column: 2; }
-  .firewall-security-group-list .secondary-button { grid-column: 3; }
+  .firewall-security-group-list .secondary-button,
+  .firewall-security-group-list .firewall-system-group { grid-column: 3; }
 }
 
 @container firewall-groups (max-width: 620px) {
@@ -7258,6 +7277,9 @@ textarea:focus-visible,
 .companion-chat-skill-list button small { color: #717b87; font-weight: 400; }
 
 @media (max-width: 720px) {
+  .workspace-network-access-summary { grid-template-columns: 1fr; }
+  .workspace-network-access-summary > span + span { border-top: 1px solid #d9dee5; border-left: 0; }
+  .firewall-editor-advanced > div { grid-template-columns: 1fr; }
   .site-row { grid-template-columns: 1fr; gap: 16px; padding: 18px 2px; }
   .site-row-actions { justify-content: flex-start; }
 }

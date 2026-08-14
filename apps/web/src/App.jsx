@@ -439,7 +439,7 @@ function WorkspaceAssignment({ label, icon: Icon, children, detail }) {
   );
 }
 
-function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, canManageNetworkAccess, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, onWorkspaceNetworkChanged, policyUsers, onGuardrailsSaved }) {
+function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, canManageNetworkAccess, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, onWorkspaceNetworkChanged, onCreateSecurityGroup, policyUsers, onGuardrailsSaved }) {
   const organizationSection = section === "organization" && canManageAnyWorkspace;
   const policySection = section === "policies" && canManagePolicy;
   return (
@@ -465,7 +465,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
         {canManagePolicy && <button type="button" className={policySection ? "active" : ""} aria-current={policySection ? "page" : undefined} onClick={() => onSectionChange("policies")}>Workspace guardrails</button>}
       </nav>}
 
-      {organizationSection ? <MemberWorkspaceConsole members={workspaceMembers} loading={adminLoading} error={workspaceError} busyWorkspaceId={workspaceBusyId} onCommand={onWorkspaceCommand} canManageNetworkAccess={canManageNetworkAccess} onNetworkChanged={onWorkspaceNetworkChanged} />
+      {organizationSection ? <MemberWorkspaceConsole members={workspaceMembers} loading={adminLoading} error={workspaceError} busyWorkspaceId={workspaceBusyId} onCommand={onWorkspaceCommand} canManageNetworkAccess={canManageNetworkAccess} onNetworkChanged={onWorkspaceNetworkChanged} onCreateSecurityGroup={onCreateSecurityGroup} />
         : policySection ? <ProtectedWorkspacePolicySection users={policyUsers} workspaceMembers={workspaceMembers} onReviewWorkspaces={canManageAnyWorkspace ? () => onSectionChange("organization") : undefined} onSaved={onGuardrailsSaved} />
           : <>
 
@@ -496,7 +496,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
                   <span className={`workspace-card-icon${busy ? " busy" : ""}`}><Laptop24Regular aria-hidden="true" /></span>
                   <div className="workspace-card-title">
                     <h2 id={titleId}>{workspaceName(workspace)}</h2>
-                    <p>{workspace.profile?.executionMode === "disposable-open" ? "Internet workspace · non-sensitive work" : workspace.grantId === "personal" ? "Personal managed workspace" : "Managed workspace"}</p>
+                    <p>{workspace.profile?.executionMode === "disposable-open" ? "Internet workspace · non-sensitive work" : workspace.grantId === "personal" ? "Personal restricted workspace" : "Restricted workspace"}</p>
                   </div>
                   <span className={`workspace-state state-${workspace.state}`}>{workspaceStatus(workspace.state)}</span>
                 </header>
@@ -1292,11 +1292,49 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
   );
 }
 
-function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecurityGroupId, createNew = false }) {
+const firewallAccessModelLabel = (defaultAction) => defaultAction === "allow-public-http-https"
+  ? "Public web with blocked destinations"
+  : "Approved destinations only";
+const firewallAccessModelSummary = (defaultAction) => defaultAction === "allow-public-http-https"
+  ? "Public HTTP and HTTPS are allowed except for the destinations blocked below. Private and reserved destinations remain blocked."
+  : "Everything is blocked except for the destinations approved below.";
+const firewallRuleActionFor = (defaultAction) => defaultAction === "allow-public-http-https" ? "deny" : "allow";
+const firewallRuleNeedsReview = (rule, defaultAction) => rule.action !== firewallRuleActionFor(defaultAction);
+const firewallGroupNeedsReview = (group) => group.rules.some((rule) => firewallRuleNeedsReview(rule, group.defaultAction));
+const firewallRuleRows = (rules) => {
+  const consumed = new Set();
+  return rules.flatMap((item, index) => {
+    if (consumed.has(index)) return [];
+    const pairedProtocol = item.protocol === "https" && item.port === 443
+      ? { protocol: "http", port: 80 }
+      : item.protocol === "http" && item.port === 80
+        ? { protocol: "https", port: 443 }
+        : null;
+    const pairIndex = pairedProtocol ? rules.findIndex((candidate, candidateIndex) => candidateIndex !== index
+      && !consumed.has(candidateIndex)
+      && candidate.action === item.action
+      && candidate.host === item.host
+      && candidate.includeSubdomains === item.includeSubdomains
+      && candidate.purpose === item.purpose
+      && candidate.protocol === pairedProtocol.protocol
+      && candidate.port === pairedProtocol.port) : -1;
+    const indices = pairIndex >= 0 ? [index, pairIndex] : [index];
+    indices.forEach((ruleIndex) => consumed.add(ruleIndex));
+    return [{
+      ...item,
+      indices,
+      traffic: pairIndex >= 0 ? "Web traffic · HTTP and HTTPS" : `${item.protocol.toUpperCase()} · ${item.port}`,
+    }];
+  });
+};
+
+function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecurityGroupId, createNew = false, attachmentCount = 0 }) {
   const latest = versions.filter((item, index, all) => all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index);
-  const selected = createNew ? undefined : latest.find((item) => item.securityGroupId === initialSecurityGroupId) ?? latest[0];
+  const selected = createNew ? undefined : latest.find((item) => item.securityGroupId === initialSecurityGroupId);
   const [draft, setDraft] = useState(null);
-  const [rule, setRule] = useState({ action: "allow", host: "", protocol: "https", port: 443, includeSubdomains: false, purpose: "" });
+  const [rule, setRule] = useState({ host: "", protocol: "https", port: 443, includeSubdomains: true, purpose: "", advanced: false });
+  const [ruleError, setRuleError] = useState("");
+  const [confirmLiveChange, setConfirmLiveChange] = useState(false);
 
   useEffect(() => {
     if (!selected) {
@@ -1315,9 +1353,34 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
 
   const addRule = () => {
     if (!draft || !rule.host.trim() || !rule.purpose.trim()) return;
-    const id = `${rule.action}-${rule.protocol}-${rule.host.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${rule.port}`.slice(0, 64);
-    setDraft({ ...draft, rules: [...draft.rules, { ...rule, id, host: rule.host.trim(), purpose: rule.purpose.trim(), port: Number(rule.port) }] });
-    setRule({ action: rule.action, host: "", protocol: "https", port: 443, includeSubdomains: false, purpose: "" });
+    const action = firewallRuleActionFor(draft.defaultAction);
+    const host = rule.host.trim();
+    const purpose = rule.purpose.trim();
+    const traffic = rule.advanced
+      ? [{ protocol: rule.protocol, port: Number(rule.port) }]
+      : [{ protocol: "http", port: 80 }, { protocol: "https", port: 443 }];
+    const duplicate = traffic.some(({ protocol, port }) => draft.rules.some((candidate) => candidate.action === action
+      && candidate.protocol === protocol
+      && candidate.port === port
+      && candidate.host.toLowerCase() === host.toLowerCase()
+      && candidate.includeSubdomains === rule.includeSubdomains));
+    if (duplicate) {
+      setRuleError("This destination and traffic scope already exists in the group.");
+      return;
+    }
+    const hostSlug = host.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const additions = traffic.map(({ protocol, port }) => ({
+      id: `${action}-${protocol}-${hostSlug}-${port}`.slice(0, 64),
+      action,
+      host,
+      protocol,
+      port,
+      includeSubdomains: rule.includeSubdomains,
+      purpose,
+    }));
+    setDraft({ ...draft, rules: [...draft.rules, ...additions] });
+    setRule({ host: "", protocol: "https", port: 443, includeSubdomains: true, purpose: "", advanced: false });
+    setRuleError("");
   };
 
   const save = async () => {
@@ -1327,52 +1390,73 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
     if (saved) onClose();
   };
 
+  const expectedRuleAction = draft ? firewallRuleActionFor(draft.defaultAction) : "allow";
+  const reviewedRules = draft?.rules.filter((item) => firewallRuleNeedsReview(item, draft.defaultAction)) ?? [];
+  const displayRules = firewallRuleRows(draft?.rules ?? []);
+  const ruleActionLabel = expectedRuleAction === "allow" ? "approved" : "blocked";
+  const addRuleLabel = expectedRuleAction === "allow" ? "Add approved destination" : "Block destination";
+  const accessModelLocked = Boolean(draft?.defaultFor) || Boolean(draft?.rules.length) || attachmentCount > 0;
+  const accessModelHelp = draft?.defaultFor
+    ? "This access model is fixed by workspace type."
+    : attachmentCount > 0
+      ? "Detach this group from every workspace and remove its destinations before changing the access model."
+      : draft?.rules.length
+        ? "Remove the existing destinations before changing the access model."
+        : "Choose the outcome this group should enforce.";
+  const rulePortValid = !rule.advanced || (Number.isInteger(Number(rule.port)) && Number(rule.port) >= 1 && Number(rule.port) <= 65535);
+  const requestSave = () => {
+    if (draft?.securityGroupId && attachmentCount > 0) setConfirmLiveChange(true);
+    else void save();
+  };
+
   return (
     <ModalDialog
       className="firewall-editor-modal"
       title={draft?.securityGroupId ? `Manage ${draft.name}` : "Create security group"}
-      description={draft?.defaultFor ? `This built-in group is inherited by ${draft.defaultFor === "managed" ? "Managed" : "Internet"} workspaces. Its baseline behavior is fixed; destination rules remain editable.` : "A security group is a reusable collection of Allow and Deny rules. Saved changes apply live to every workspace using the group."}
+      description={draft?.defaultFor ? `This system default is inherited by ${draft.defaultFor === "managed" ? "Restricted" : "Internet"} workspaces and cannot be changed.` : attachmentCount > 0 ? `This group is attached to ${attachmentCount} ${attachmentCount === 1 ? "workspace" : "workspaces"}. Saved changes apply live to all of them.` : "Create a reusable destination policy, then assign it to compatible workspaces that need an exception."}
       eyebrow="Egress firewall"
       labelledBy="firewall-editor-title"
       onClose={saving ? () => undefined : onClose}
     >
       {draft && <div className="firewall-editor">
         <div className="firewall-editor-fields">
-          <label><span>Name</span><input name="security-group-name" placeholder="Approved agent updates" value={draft.name} disabled={saving || Boolean(draft.defaultFor)} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-          <label><span>Description</span><input name="security-group-description" placeholder="What this group controls" value={draft.description} disabled={saving || Boolean(draft.defaultFor)} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
-          <label className="firewall-editor-default-action"><span>Default behavior</span><SelectMenu value={draft.defaultAction} disabled={saving || Boolean(draft.defaultFor)} onValueChange={(value) => setDraft({ ...draft, defaultAction: value })} ariaLabel="Default security group behavior" options={[{ value: "deny", label: "Deny unmatched destinations" }, { value: "allow-public-http-https", label: "Allow public HTTP and HTTPS" }]} /></label>
+          <label><span>Name</span><input name="security-group-name" placeholder={expectedRuleAction === "allow" ? "Approved engineering services" : "Block Microsoft services"} value={draft.name} disabled={saving || Boolean(draft.defaultFor)} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+          <label><span>Description</span><input name="security-group-description" placeholder="What this group is for" value={draft.description} disabled={saving || Boolean(draft.defaultFor)} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+          <label className="firewall-editor-default-action"><span>Access model</span><SelectMenu value={draft.defaultAction} disabled={saving || accessModelLocked} onValueChange={(value) => { setDraft({ ...draft, defaultAction: value }); setRuleError(""); }} ariaLabel="Network access model" options={[{ value: "deny", label: "Approved destinations only" }, { value: "allow-public-http-https", label: "Public web with blocked destinations" }]} /><small>{accessModelHelp}</small></label>
         </div>
+        <div className="firewall-access-model-summary" role="note"><strong>{firewallAccessModelLabel(draft.defaultAction)}</strong><span>{firewallAccessModelSummary(draft.defaultAction)}</span></div>
+        {reviewedRules.length > 0 && <div className="firewall-rule-review-warning" role="alert"><Info24Regular aria-hidden="true" /><span><strong>{reviewedRules.length} existing {reviewedRules.length === 1 ? "rule has" : "rules have"} no effect in this access model.</strong> Remove the highlighted {reviewedRules.length === 1 ? "rule" : "rules"} before saving this group.</span></div>}
         <div className="firewall-editor-rule-heading">
-          <div><h3>Rules</h3><p>Rules are evaluated for every workspace using this group. A matching Deny rule takes precedence.</p></div>
-          <span>{draft.rules.length}</span>
+          <div><h3>{expectedRuleAction === "allow" ? "Approved destinations" : "Blocked destinations"}</h3><p>{expectedRuleAction === "allow" ? "Only the destinations listed here can be reached." : "Public web remains available except for the destinations listed here."}</p></div>
+          <span>{displayRules.length}</span>
         </div>
         <div className="firewall-editor-rule-list" aria-label="Firewall rules in this group">
-          {draft.rules.length === 0 ? <p>No rules yet. Add an Allow or Deny rule below.</p> : draft.rules.map((item, index) => (
-            <article key={`${item.id}-${index}`}>
+          {draft.rules.length === 0 ? <p>{expectedRuleAction === "allow" ? "No destinations are approved yet. This group currently blocks all outbound web access." : "No destinations are blocked yet. This group currently allows public web access."}</p> : displayRules.map((item) => (
+            <article className={firewallRuleNeedsReview(item, draft.defaultAction) ? "needs-review" : ""} key={`${item.id}-${item.indices.join("-")}`}>
               <div><strong>{item.host}</strong><small>{item.purpose}</small></div>
-              <code><span className={`firewall-rule-effect ${item.action}`}>{item.action}</span> · {item.protocol.toUpperCase()} · {item.port} · {item.includeSubdomains ? "Subdomains" : "Exact domain"}</code>
-              <button type="button" disabled={saving} aria-label={`Remove ${item.host}`} onClick={() => setDraft({ ...draft, rules: draft.rules.filter((_, ruleIndex) => ruleIndex !== index) })}>Remove</button>
+              <code><span className={`firewall-rule-effect ${item.action}`}>{firewallRuleNeedsReview(item, draft.defaultAction) ? "Needs review" : ruleActionLabel}</span> · {item.traffic} · {item.includeSubdomains ? "Domain and subdomains" : "Exact domain"}</code>
+              <button type="button" disabled={saving || Boolean(draft.defaultFor)} aria-label={`Remove ${item.host}`} onClick={() => setDraft({ ...draft, rules: draft.rules.filter((_, ruleIndex) => !item.indices.includes(ruleIndex)) })}>Remove</button>
             </article>
           ))}
         </div>
-        <div className="firewall-editor-rule-builder" role="group" aria-labelledby="firewall-add-rule-heading">
-          <div className="firewall-editor-rule-builder-title"><strong id="firewall-add-rule-heading">Add rule</strong><span>Choose whether this destination should be allowed or denied.</span></div>
-          <label><span>Action</span><SelectMenu value={rule.action} disabled={saving} onValueChange={(value) => setRule({ ...rule, action: value })} ariaLabel="Rule action" options={[{ value: "allow", label: "Allow" }, { value: "deny", label: "Deny" }]} /></label>
+        {!draft.defaultFor && <div className="firewall-editor-rule-builder" role="group" aria-labelledby="firewall-add-rule-heading">
+          <div className="firewall-editor-rule-builder-title"><strong id="firewall-add-rule-heading">{addRuleLabel}</strong><span>{expectedRuleAction === "allow" ? "Add a destination this workspace needs to reach." : "Add a destination that should be unavailable from this workspace."}</span></div>
           <label><span>Destination</span><input name="firewall-rule-destination" placeholder="updates.example.com" value={rule.host} disabled={saving} onChange={(event) => setRule({ ...rule, host: event.target.value })} /></label>
-          <label><span>Protocol</span><SelectMenu value={rule.protocol} disabled={saving} onValueChange={(value) => setRule({ ...rule, protocol: value, port: value === "https" ? 443 : 80 })} ariaLabel="Protocol" options={[{ value: "https", label: "HTTPS" }, { value: "http", label: "HTTP" }]} /></label>
-          <label><span>Port</span><input name="firewall-rule-port" type="number" min="1" max="65535" value={rule.port} disabled={saving} onChange={(event) => setRule({ ...rule, port: event.target.value })} /></label>
-          <label className="firewall-editor-subdomains"><input name="firewall-rule-subdomains" type="checkbox" checked={rule.includeSubdomains} disabled={saving} onChange={(event) => setRule({ ...rule, includeSubdomains: event.target.checked })} /><span>Include subdomains</span></label>
-          <label className="firewall-editor-purpose"><span>Purpose</span><input name="firewall-rule-purpose" placeholder={`Why this access is ${rule.action === "deny" ? "denied" : "needed"}`} value={rule.purpose} disabled={saving} onChange={(event) => setRule({ ...rule, purpose: event.target.value })} /></label>
-          <button className="secondary-button" type="button" disabled={saving || !rule.host.trim() || !rule.purpose.trim()} onClick={addRule}>Add rule</button>
-        </div>
+          <label className="firewall-editor-subdomains"><input name="firewall-rule-subdomains" type="checkbox" checked={rule.includeSubdomains} disabled={saving} onChange={(event) => setRule({ ...rule, includeSubdomains: event.target.checked })} /><span>This domain and its subdomains</span></label>
+          <label className="firewall-editor-purpose"><span>Purpose</span><input name="firewall-rule-purpose" placeholder={expectedRuleAction === "deny" ? "Why this destination is blocked" : "Why this destination is needed"} value={rule.purpose} disabled={saving} onChange={(event) => setRule({ ...rule, purpose: event.target.value })} /></label>
+          <details className="firewall-editor-advanced"><summary>Advanced traffic settings</summary><p>Standard rules cover HTTP and HTTPS. Choose one protocol and port only when the destination requires it.</p><label><input type="checkbox" checked={rule.advanced} onChange={(event) => setRule({ ...rule, advanced: event.target.checked })} /><span>Use one protocol and port</span></label>{rule.advanced && <div><label><span>Protocol</span><SelectMenu value={rule.protocol} disabled={saving} onValueChange={(value) => setRule({ ...rule, protocol: value, port: value === "https" ? 443 : 80 })} ariaLabel="Protocol" options={[{ value: "https", label: "HTTPS" }, { value: "http", label: "HTTP" }]} /></label><label><span>Port</span><input name="firewall-rule-port" type="number" min="1" max="65535" value={rule.port} disabled={saving} onChange={(event) => setRule({ ...rule, port: event.target.value })} /></label></div>}</details>
+          {ruleError && <p className="firewall-rule-builder-error" role="alert">{ruleError}</p>}
+          <button className="secondary-button" type="button" disabled={saving || !rule.host.trim() || !rule.purpose.trim() || !rulePortValid} onClick={addRule}>{addRuleLabel}</button>
+        </div>}
         <div className="firewall-editor-actions">
-          <span><ShieldCheckmark24Regular aria-hidden="true" />HTTPS paths are not inspected. Redirects are checked as new connections.</span>
+          <span><ShieldCheckmark24Regular aria-hidden="true" />Rules apply to destinations, not URL paths. Redirects are checked as new connections.</span>
           <div>
             <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button>
-            <button className="primary-button compact-button" type="button" disabled={saving || !draft.name || !draft.description} onClick={save}>{saving ? "Saving changes" : draft.securityGroupId ? "Save changes" : "Create security group"}</button>
+            {!draft.defaultFor && <button className="primary-button compact-button" type="button" disabled={saving || !draft.name || !draft.description || reviewedRules.length > 0} onClick={requestSave}>{saving ? "Saving changes" : draft.securityGroupId ? "Save changes" : "Create security group"}</button>}
           </div>
         </div>
       </div>}
+      {confirmLiveChange && <ConfirmDialog title={`Update ${attachmentCount} ${attachmentCount === 1 ? "workspace" : "workspaces"}?`} description="This security-group revision will apply live to every attached workspace without restarting it." confirmLabel="Apply live changes" onConfirm={() => { setConfirmLiveChange(false); void save(); }} onCancel={() => setConfirmLiveChange(false)} />}
     </ModalDialog>
   );
 }
@@ -1951,12 +2035,15 @@ const protectedPolicyAgentNames = {
   "hermes-claw": "Hermes Agent",
 };
 const protectedPolicyProfileNames = {
-  "claude-desktop-standard-v1": "Managed workspace",
+  "claude-desktop-standard-v1": "Restricted workspace",
   "disposable-open-v1": "Internet workspace",
 };
 const protectedPolicyServiceClassNames = { lite: "Lite", balanced: "Balanced", pro: "Pro" };
-const protectedPolicyReasoningOptions = ["disabled", "low", "medium", "high", "max"];
-const protectedPolicyReasoningName = (value) => value === "disabled" ? "Off" : `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
+const protectedPolicyReasoningOptions = ["low", "medium", "high"];
+const protectedPolicyReasoningRank = { disabled: 0, low: 1, medium: 2, high: 3, max: 3 };
+const protectedPolicyReasoningName = (value) => value === "disabled"
+  ? "Disabled by legacy guardrail"
+  : value === "max" ? "High" : `${value?.[0]?.toUpperCase() ?? ""}${value?.slice(1) ?? ""}`;
 const protectedPolicyDate = (value) => new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 const protectedPolicyList = (values, labels) => values.map((value) => labels[value] ?? value);
 const protectedPolicyClipboardSummary = (clipboard) => {
@@ -1994,6 +2081,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [editor, setEditor] = useState(null);
   const [error, setError] = useState("");
+  const [impactConfirmation, setImpactConfirmation] = useState(false);
   const load = async () => {
     const policy = await adminApi.protectedWorkspacePolicy();
     setOverview(policy);
@@ -2037,7 +2125,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
     agents: [...effective.agents],
     applications: [...effective.applications],
     serviceClasses: [...assignableServiceClasses],
-    maximumReasoningEffort: effective.maximumReasoningEffort,
+    maximumReasoningEffort: effective.maximumReasoningEffort === "max" ? "high" : protectedPolicyReasoningOptions.includes(effective.maximumReasoningEffort) ? effective.maximumReasoningEffort : "",
     clipboardLocalToWorkspace: effective.clipboard.localToWorkspace,
     clipboardWorkspaceToLocal: effective.clipboard.workspaceToLocal,
     clipboardMaxKb: Math.max(1, Math.round(effective.clipboard.maxBytes / 1024)),
@@ -2063,21 +2151,41 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
     && editor.agents.length > 0
     && editor.applications.length > 0
     && editor.serviceClasses.length > 0
+    && protectedPolicyReasoningOptions.includes(editor.maximumReasoningEffort)
     && editor.revisionNote.trim().length >= 3;
   const versionCreator = (version) => users.find((user) => user.userId === version.createdBy)?.displayName ?? "Organization administrator";
   const activeMemberCount = workspaceMembers.filter((member) => member.membershipStatus === "active").length
     || users.filter((user) => user.membershipStatus === "active").length;
   const affectedWorkspaces = workspaceMembers.flatMap((member) => member.workspaces.map((workspace) => ({ member, workspace })));
-  const workspaceType = (workspace) => protectedPolicyProfileNames[workspace.profile?.id] ?? "Managed workspace";
-  const networkAccess = (workspace) => workspace.networkAccess?.mode === "full-web" ? "Public internet" : workspace.networkAccess?.mode === "restricted" ? "Approved destinations" : "Review workspace";
+  const workspaceType = (workspace) => protectedPolicyProfileNames[workspace.profile?.id] ?? "Restricted workspace";
+  const networkAccess = (workspace) => {
+    const scope = workspace.networkAccess?.mode === "full-web" ? "Public web" : workspace.networkAccess?.mode === "restricted" ? "Approved destinations only" : "Review workspace";
+    const source = workspace.networkAccess?.securityGroup?.assignmentSource === "custom" ? workspace.networkAccess.securityGroup.name : "Inherited";
+    return `${scope} · ${source}`;
+  };
+  const internetWorkspaces = affectedWorkspaces.filter(({ workspace }) => workspace.profile?.id === "disposable-open-v1" || workspace.profile?.executionMode === "disposable-open");
+  const removesInternetWorkspaceType = assignableWorkspaceProfiles.includes("disposable-open-v1") && !editor?.workspaceProfiles.includes("disposable-open-v1");
+  const requestSavePolicy = () => {
+    if (removesInternetWorkspaceType && internetWorkspaces.length > 0) setImpactConfirmation(true);
+    else void savePolicy();
+  };
+  const workspaceNeedsAttention = (workspace) => {
+    const internet = workspace.profile?.id === "disposable-open-v1" || workspace.profile?.executionMode === "disposable-open";
+    return internet
+      ? !assignableWorkspaceProfiles.includes("disposable-open-v1")
+      : !assignableWorkspaceProfiles.includes("claude-desktop-standard-v1");
+  };
+  const needsAttentionCount = affectedWorkspaces.filter(({ workspace }) => workspaceNeedsAttention(workspace)).length;
   const editorBlocker = !editor ? "" : editor.workspaceProfiles.length === 0
     ? "Select at least one workspace type."
     : editor.agents.length === 0
       ? "Select at least one agent."
       : editor.applications.length === 0
         ? "Select at least one application."
-        : editor.serviceClasses.length === 0
-          ? "Select at least one service level."
+          : editor.serviceClasses.length === 0
+            ? "Select at least one service level."
+            : !protectedPolicyReasoningOptions.includes(editor.maximumReasoningEffort)
+              ? "Choose Low, Medium, or High as the maximum thinking level."
           : editor.revisionNote.trim().length < 3
             ? "Add a change summary of at least 3 characters."
             : "";
@@ -2093,16 +2201,15 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
     <div className="workspace-policy-impact-summary" aria-label="Guardrail impact">
       <strong>{affectedWorkspaces.length} {affectedWorkspaces.length === 1 ? "workspace" : "workspaces"}</strong>
       <span>{activeMemberCount} active {activeMemberCount === 1 ? "member" : "members"}</span>
-      <span>{latest ? `Guardrails v${latest.version} active` : "Product defaults active"}</span>
+      <span>{needsAttentionCount > 0 ? `${needsAttentionCount} need attention` : latest ? `Guardrails v${latest.version} active` : "Product defaults active"}</span>
     </div>
 
     <div className="workspace-policy-overview">
       <section className="workspace-policy-controls" aria-labelledby="workspace-policy-controls-heading">
         <h3 id="workspace-policy-controls-heading">Effective guardrails</h3>
-        <ProtectedPolicyControlGroup icon={Apps24Regular} title="Workspace types" lines={[protectedPolicyList(assignableWorkspaceProfiles, protectedPolicyProfileNames).join(", "), `Service levels: ${protectedPolicyList(assignableServiceClasses, protectedPolicyServiceClassNames).join(", ")}`]} />
+        <ProtectedPolicyControlGroup icon={Apps24Regular} title="Workspace types" lines={[protectedPolicyList(assignableWorkspaceProfiles, protectedPolicyProfileNames).join(", "), `Service levels: ${protectedPolicyList(assignableServiceClasses, protectedPolicyServiceClassNames).join(", ")}`, "Network access follows workspace type"]} />
         <ProtectedPolicyControlGroup icon={Bot24Regular} title="Agents and applications" lines={[`Agents: ${protectedPolicyList(effective.agents, protectedPolicyAgentNames).join(", ")}`, `Applications: ${protectedPolicyList(effective.applications, applicationNames).join(", ")}`]} />
         <ProtectedPolicyControlGroup icon={Info24Regular} title="AI usage" lines={[`Maximum thinking: ${protectedPolicyReasoningName(effective.maximumReasoningEffort)}`]} />
-        <ProtectedPolicyControlGroup icon={ShieldCheckmark24Regular} title="Network access" lines={["Managed and Internet workspaces inherit matching defaults", "Custom security groups are assigned only when a workspace needs an exception"]} />
         <ProtectedPolicyControlGroup icon={Document24Regular} title="Data transfer" lines={[protectedPolicyClipboardSummary(effective.clipboard)]} />
       </section>
       <aside className="workspace-policy-context">
@@ -2117,7 +2224,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
         <div className="workspace-policy-member-header" role="row"><span role="columnheader">Owner</span><span role="columnheader">Workspace</span><span role="columnheader">Type</span><span role="columnheader">Network access</span><span role="columnheader">Guardrails</span></div>
         {affectedWorkspaces.slice(0, 5).map(({ member, workspace }) => <div className="workspace-policy-member-row" role="row" key={workspace.id}>
           <div className="workspace-policy-member-copy" role="cell"><strong>{member.displayName}</strong><small>{member.email}</small></div>
-          <strong role="cell" data-label="Workspace">{workspace.name}</strong><span role="cell" data-label="Type">{workspaceType(workspace)}</span><span role="cell" data-label="Network access">{networkAccess(workspace)}</span><span className="workspace-policy-state current" role="cell" data-label="Guardrails">{latest ? `v${latest.version} current` : "Defaults current"}</span>
+          <strong role="cell" data-label="Workspace">{workspace.name}</strong><span role="cell" data-label="Type">{workspaceType(workspace)}</span><span role="cell" data-label="Network access">{networkAccess(workspace)}</span><span className={`workspace-policy-state ${workspaceNeedsAttention(workspace) ? "attention" : "current"}`} role="cell" data-label="Guardrails">{workspaceNeedsAttention(workspace) ? "Needs attention" : latest ? `v${latest.version} current` : "Defaults current"}</span>
         </div>)}
       </div>}
     </section>
@@ -2129,12 +2236,12 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
 
     {editor && <ModalDialog className="workspace-policy-editor-modal" title={latest ? "Edit workspace guardrails" : "Set workspace guardrails"} description="Choose the workspace options available across this organization. Saving creates a new immutable version for every member and workspace." eyebrow={latest ? `Current guardrails v${latest.version}` : "Product defaults active"} labelledBy="workspace-policy-editor-title" onClose={savingPolicy ? () => undefined : () => { setEditor(null); setError(""); }}>
       <div className="workspace-policy-editor-body">
-        <ProtectedPolicyResourceEditor legend="Workspace types" description="Choose the environment and data-handling mode members may use. Network security groups are managed separately per workspace." values={protectedPolicyAllowed(available.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
+        <ProtectedPolicyResourceEditor legend="Workspace types" description="Choose which workspace types members may use. Restricted workspaces reach only approved destinations; Internet workspaces reach the public web except blocked destinations. Per-workspace exceptions are managed in Network access." values={protectedPolicyAllowed(available.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
         <ProtectedPolicyResourceEditor legend="Agents" description="Choose the approved agent experiences members may select." values={protectedPolicyAllowed(available.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} />
         <ProtectedPolicyResourceEditor legend="Applications" description="Members remain free to choose from these approved workspace applications." values={protectedPolicyAllowed(available.applications)} labels={applicationNames} selected={editor.applications} onChange={(applications) => setEditor({ ...editor, applications })} />
         <ProtectedPolicyResourceEditor legend="Service levels" description="Choose the Lite, Balanced, and Pro service levels members may request." values={protectedPolicyAllowed(available.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value))} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
         <fieldset className="workspace-policy-editor-group workspace-policy-editor-limits"><legend>AI usage and data transfer</legend><p>Set organization-wide ceilings for thinking and text clipboard transfer.</p><div className="workspace-policy-limit-grid">
-          <label><span>Maximum thinking</span><SelectMenu value={editor.maximumReasoningEffort} ariaLabel="Maximum thinking level" options={protectedPolicyReasoningOptions.filter((value) => protectedPolicyReasoningOptions.indexOf(value) <= protectedPolicyReasoningOptions.indexOf(available.maximumReasoningEffort)).map((value) => ({ value, label: protectedPolicyReasoningName(value) }))} onValueChange={(maximumReasoningEffort) => setEditor({ ...editor, maximumReasoningEffort })} /></label>
+          <label><span>Maximum thinking</span><SelectMenu value={editor.maximumReasoningEffort} ariaLabel="Maximum thinking level" options={[...(editor.maximumReasoningEffort ? [] : [{ value: "", label: "Choose a thinking level", disabled: true }]), ...protectedPolicyReasoningOptions.filter((value) => protectedPolicyReasoningRank[value] <= protectedPolicyReasoningRank[available.maximumReasoningEffort]).map((value) => ({ value, label: protectedPolicyReasoningName(value) }))]} onValueChange={(maximumReasoningEffort) => setEditor({ ...editor, maximumReasoningEffort })} /></label>
           <label><span>Clipboard limit (KB)</span><input type="number" min="1" max={Math.round(available.clipboard.maxBytes / 1024)} value={editor.clipboardMaxKb} onChange={(event) => setEditor({ ...editor, clipboardMaxKb: Number(event.target.value) })} /></label>
           <label className="workspace-policy-switch"><input type="checkbox" checked={editor.clipboardLocalToWorkspace} onChange={(event) => setEditor({ ...editor, clipboardLocalToWorkspace: event.target.checked })} /><span><strong>Copy into workspace</strong><small>Allow local clipboard content to enter the workspace.</small></span></label>
           <label className="workspace-policy-switch"><input type="checkbox" checked={editor.clipboardWorkspaceToLocal} onChange={(event) => setEditor({ ...editor, clipboardWorkspaceToLocal: event.target.checked })} /><span><strong>Copy out of workspace</strong><small>Allow workspace clipboard content to return locally.</small></span></label>
@@ -2143,8 +2250,9 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
       </div>
       {error && <div className="workspace-policy-modal-error" role="alert">{error}</div>}
       {editorBlocker && <p className="workspace-policy-save-guidance" role="status">{editorBlocker}</p>}
-      <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={savePolicy}>{savingPolicy ? "Saving guardrails" : latest ? "Save as new version" : "Save guardrails"}</button></div>
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={requestSavePolicy}>{savingPolicy ? "Saving guardrails" : latest ? "Save as new version" : "Save guardrails"}</button></div>
     </ModalDialog>}
+    {impactConfirmation && <ConfirmDialog title={`Restrict ${internetWorkspaces.length} Internet ${internetWorkspaces.length === 1 ? "workspace" : "workspaces"}?`} description="Public-web access will be restricted immediately. The workspace type will not change automatically; affected workspaces will be marked Needs attention until an administrator resolves them." confirmLabel="Save and restrict access" danger onConfirm={() => { setImpactConfirmation(false); void savePolicy(); }} onCancel={() => setImpactConfirmation(false)} />}
 
   </section>;
 }
@@ -2159,7 +2267,7 @@ const workspaceAdminDate = (value) => value
   ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
   : "No agent activity yet";
 
-function WorkspaceNetworkAccessDialog({ member, workspace, onClose, onSaved }) {
+function WorkspaceNetworkAccessDialog({ member, workspace, members, onClose, onSaved, onCreateSecurityGroup }) {
   const [settings, setSettings] = useState(null);
   const [selection, setSelection] = useState("inherit");
   const [loading, setLoading] = useState(true);
@@ -2184,10 +2292,12 @@ function WorkspaceNetworkAccessDialog({ member, workspace, onClose, onSaved }) {
   const internetWorkspace = settings?.profile?.executionMode === "disposable-open";
   const requiredAction = internetWorkspace ? "allow-public-http-https" : "deny";
   const inherited = settings?.availableSecurityGroups?.find((group) => group.defaultFor === (internetWorkspace ? "internet" : "managed"));
+  const groupAttachmentCount = (group) => members.flatMap((item) => item.workspaces).filter((item) => item.networkAccess?.securityGroup?.id === group.id).length;
   const customGroups = settings?.availableSecurityGroups
     ?.filter((group, index, all) => !group.defaultFor
       && group.defaultAction === requiredAction
-      && all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index) ?? [];
+      && all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index)
+    .map((group) => ({ ...group, needsReview: firewallGroupNeedsReview(group), attachmentCount: groupAttachmentCount(group) })) ?? [];
   const selectedGroup = selection === "inherit"
     ? inherited ?? settings?.securityGroup
     : customGroups.find((group) => group.id === selection);
@@ -2210,37 +2320,40 @@ function WorkspaceNetworkAccessDialog({ member, workspace, onClose, onSaved }) {
   return <ModalDialog
     className="workspace-network-access-modal"
     title={`Network access for ${workspace.name}`}
-    description={`Choose whether ${member.displayName}’s workspace inherits its type default or uses a compatible custom security group.`}
+    description={`Review the effective network access for ${member.displayName}’s workspace, then keep its type default or assign a compatible exception.`}
     eyebrow="Organization workspace"
     labelledBy="workspace-network-access-title"
     onClose={saving ? () => undefined : onClose}
   >
     {loading ? <p className="sandbox-loading" role="status">Loading network access…</p> : settings && <div className="workspace-network-access-editor">
       <div className="workspace-network-access-summary">
-        <span><strong>{settings.profile.displayName}</strong><small>{internetWorkspace ? "Public internet baseline" : "Approved destinations baseline"}</small></span>
-        <span><strong>{selectedGroup?.name ?? "Workspace type default"}</strong><small>{selection === "inherit" ? "Inherited from workspace type" : "Custom workspace override"}</small></span>
+        <span><strong>Workspace type</strong><small>{settings.profile.displayName}</small></span>
+        <span><strong>Effective access</strong><small>{firewallAccessModelLabel(selectedGroup?.defaultAction ?? requiredAction)}</small></span>
+        <span><strong>Configuration source</strong><small>{selection === "inherit" ? `Inherited from ${settings.profile.displayName}` : `Custom · ${selectedGroup?.name ?? "Review selection"}`}</small></span>
       </div>
-      <label><span>Security group</span><SelectMenu
+      <label><span>Network configuration</span><SelectMenu
         value={selection}
         disabled={saving}
         onValueChange={setSelection}
         ariaLabel="Workspace network security group"
         options={[
-          { value: "inherit", label: `Inherit from ${settings.profile.displayName}` },
-          ...customGroups.map((group) => ({ value: group.id, label: group.name })),
+          { value: "inherit", label: `Use ${settings.profile.displayName} default` },
+          ...customGroups.map((group) => ({ value: group.id, label: `${group.name} · ${firewallRuleRows(group.rules.filter((item) => item.action === firewallRuleActionFor(group.defaultAction))).length} ${group.defaultAction === "deny" ? "approved" : "blocked"}${group.attachmentCount > 0 ? ` · ${group.attachmentCount} attached` : ""}${group.needsReview ? " · Needs review" : ""}`, disabled: group.needsReview })),
         ]}
       /></label>
       <p className="workspace-network-access-help">{internetWorkspace
-        ? "Only public-web groups are compatible with an Internet workspace. Private and reserved destinations remain blocked."
-        : "Only deny-by-default groups are compatible with a Managed workspace."}</p>
+        ? "Internet workspaces can use only public-web block lists. To use approved destinations only, change the workspace type to Restricted."
+        : "Restricted workspaces can use only approved-destination groups. Public-web groups require an Internet workspace."}</p>
+      {customGroups.length === 0 && <p className="workspace-network-access-empty">No compatible custom groups are available.</p>}
+      {onCreateSecurityGroup && <button className="connection-quiet-button" type="button" disabled={saving} onClick={() => { onClose(); onCreateSecurityGroup(); }}>Create security group</button>}
       {error && <div className="workspace-policy-modal-error" role="alert">{error}</div>}
-      <div className="modal-actions"><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="button" disabled={saving} onClick={save}>{saving ? "Saving access" : "Save network access"}</button></div>
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="button" disabled={saving || customGroups.find((group) => group.id === selection)?.needsReview} onClick={save}>{saving ? "Saving access" : "Save network access"}</button></div>
     </div>}
     {!loading && !settings && error && <div className="workspace-policy-modal-error" role="alert">{error}</div>}
   </ModalDialog>;
 }
 
-function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCommand, canManageNetworkAccess, onNetworkChanged }) {
+function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCommand, canManageNetworkAccess, onNetworkChanged, onCreateSecurityGroup }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [networkEditor, setNetworkEditor] = useState(null);
@@ -2282,11 +2395,11 @@ function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCo
           <div className="member-workspace-name" role="cell" data-label="Workspace"><strong>{workspace.name}</strong></div>
           <div role="cell" data-label="Status"><span className={`workspace-state state-${workspace.state}`}>{workspaceStatus(workspace.state)}</span></div>
           <div className={`member-workspace-health ${workspace.health.status}`} role="cell" data-label="Health">{workspace.health.status === "healthy" && <CheckmarkCircle24Regular aria-hidden="true" />}<span>{workspaceHealthLabel[workspace.health.status] ?? "Unknown"}</span></div>
-          <div className="member-workspace-profile" role="cell" data-label="Network access"><strong>{workspace.networkAccess?.mode === "full-web" ? "Public internet" : "Approved destinations"}</strong><small>{workspace.networkAccess?.securityGroup?.assignmentSource === "custom" ? "Custom settings" : "Inherited from type"}</small></div>
-          <div role="cell" data-label="Guardrails">{workspace.policyAssignment ? `v${workspace.policyAssignment.version} current` : "Defaults current"}</div>
+          <div className="member-workspace-profile" role="cell" data-label="Network access"><strong>{workspace.networkAccess?.mode === "full-web" ? "Public web" : "Approved destinations only"}</strong><small>{workspace.networkAccess?.securityGroup?.assignmentSource === "custom" ? `Custom · ${workspace.networkAccess.securityGroup.name}` : "Inherited from workspace type"}</small></div>
+          <div role="cell" data-label="Guardrails">{workspace.profile?.executionMode === "disposable-open" && workspace.networkAccess?.mode !== "full-web" ? <span className="workspace-policy-state attention">Needs attention</span> : workspace.policyAssignment ? `v${workspace.policyAssignment.version} current` : "Defaults current"}</div>
           <div className="member-workspace-activity" role="cell" data-label="Last agent activity">{workspaceAdminDate(workspace.lastActivityAt)}</div>
           <div className="member-workspace-actions" role="cell" data-label="Actions">
-            {canManageNetworkAccess && <button className="secondary-button" type="button" disabled={busy} onClick={() => setNetworkEditor({ member, workspace })}>Manage access</button>}
+            {canManageNetworkAccess && <button className="secondary-button" type="button" disabled={busy} onClick={() => setNetworkEditor({ member, workspace })}>Manage network access</button>}
             {!running && <button className="primary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "start")}>Start</button>}
             {running && <><div><button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "restart")}>Restart</button><button className="secondary-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "stop")}>Stop</button></div><button className="connection-quiet-button danger-button" type="button" disabled={busy} onClick={() => onCommand(member, workspace, "terminate_runtime")}>Terminate runtime</button></>}
             {busy && <small role="status">Updating…</small>}
@@ -2294,7 +2407,7 @@ function MemberWorkspaceConsole({ members, loading, error, busyWorkspaceId, onCo
         </section>;
       }))}</div>}
     </div>}
-    {networkEditor && <WorkspaceNetworkAccessDialog member={networkEditor.member} workspace={networkEditor.workspace} onClose={() => setNetworkEditor(null)} onSaved={onNetworkChanged} />}
+    {networkEditor && <WorkspaceNetworkAccessDialog member={networkEditor.member} workspace={networkEditor.workspace} members={members} onClose={() => setNetworkEditor(null)} onSaved={onNetworkChanged} onCreateSecurityGroup={onCreateSecurityGroup} />}
   </section>;
 }
 
@@ -2677,7 +2790,7 @@ function SettingsScreen({ view, organizationDisplayName, isOrganizationOwner, ca
   );
 }
 
-function FirewallScreen({ loading, versions, saving, onSave }) {
+function FirewallScreen({ loading, versions, saving, onSave, members }) {
   const latestVersions = versions.filter((item, index, all) => (
     all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index
   ));
@@ -2690,6 +2803,10 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
       .toLowerCase()
       .includes(normalizedSearch)
   ));
+  const attachedWorkspaces = members.flatMap((member) => member.workspaces);
+  const attachmentCountFor = (group) => group?.id
+    ? attachedWorkspaces.filter((workspace) => workspace.networkAccess?.securityGroup?.id === group.id).length
+    : 0;
 
   return (
     <div className="secondary-screen firewall-screen">
@@ -2697,7 +2814,7 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
         <div>
           <p>Organization security</p>
           <h1>Network access</h1>
-          <span>Managed and Internet workspaces inherit their matching built-in defaults. Create reusable security groups here only when a workspace needs an exception.</span>
+          <span>Restricted and Internet workspaces inherit fixed system defaults. Create reusable security groups only when a workspace needs a destination exception.</span>
         </div>
         <div className="firewall-page-actions">
           <button className="primary-button" type="button" onClick={() => setEditor({ securityGroupId: null, createNew: true })}><Add24Regular aria-hidden="true" />Create security group</button>
@@ -2709,7 +2826,7 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
           <div>
             <p>Rule collections</p>
             <h2 id="firewall-security-groups-heading">Security groups</h2>
-            <span>Built-in defaults follow workspace type. Custom groups are attached to individual workspaces, and rule changes apply live.</span>
+            <span>System defaults follow workspace type. Custom groups are assigned per workspace, and changes show their live impact before saving.</span>
           </div>
           <strong>{latestVersions.length} {latestVersions.length === 1 ? "group" : "groups"}</strong>
         </div>
@@ -2720,35 +2837,36 @@ function FirewallScreen({ loading, versions, saving, onSave }) {
           {loading ? <p className="firewall-security-group-empty">Loading security groups…</p> : groups.length === 0 ? (
             <div className="firewall-security-group-empty">
               <strong>{normalizedSearch ? "No security groups match" : "No security groups yet"}</strong>
-              <span>{normalizedSearch ? "Try a different search." : "Create a group and add Allow or Deny rules."}</span>
+              <span>{normalizedSearch ? "Try a different search." : "Create a group for approved destinations or a public-web block list."}</span>
             </div>
           ) : groups.map((group) => {
-            const allowCount = group.rules.filter((rule) => rule.action === "allow").length;
-            const denyCount = group.rules.filter((rule) => rule.action === "deny").length;
+            const needsReview = !group.defaultFor && firewallGroupNeedsReview(group);
+            const attachmentCount = attachmentCountFor(group);
+            const effectiveCount = firewallRuleRows(group.rules.filter((rule) => rule.action === firewallRuleActionFor(group.defaultAction))).length;
             return (
               <article key={group.securityGroupId}>
                 <div className="firewall-security-group-copy">
-                  <button type="button" onClick={() => setEditor({ securityGroupId: group.securityGroupId, createNew: false })}>{group.name}</button>
-                  <small>{group.description}</small>
-                  {group.defaultFor && <span className="firewall-default-badge">{group.defaultFor === "managed" ? "Managed default" : "Internet default"}</span>}
+                  {group.defaultFor ? <strong>{group.defaultFor === "managed" ? "Restricted workspace default" : "Internet workspace default"}</strong> : <button type="button" onClick={() => setEditor({ securityGroupId: group.securityGroupId, createNew: false })}>{group.name}</button>}
+                  <small>{group.defaultFor === "managed" ? "Only organization-approved destinations are reachable." : group.defaultFor === "internet" ? "Public web is available; private and reserved destinations remain blocked." : group.description}</small>
+                  {group.defaultFor && <span className="firewall-default-badge">System default</span>}
+                  {needsReview && <span className="firewall-review-badge">Needs review</span>}
                 </div>
-                <div className="firewall-security-group-rules" aria-label={`${allowCount} Allow and ${denyCount} Deny rules`}>
-                  <span className="allow"><strong>{allowCount}</strong> Allow</span>
-                  <span className="deny"><strong>{denyCount}</strong> Deny</span>
+                <div className="firewall-security-group-rules" aria-label={`${effectiveCount} effective destination rules`}>
+                  <span className={group.defaultAction === "deny" ? "allow" : "deny"}><strong>{effectiveCount}</strong> {group.defaultAction === "deny" ? "approved" : "blocked"}</span>
                 </div>
                 <div className="firewall-security-group-baseline">
-                  <strong>{group.defaultAction === "allow-public-http-https" ? "Allow public web" : "Deny unmatched"}</strong>
-                  <small>{group.defaultFor ? "Inherited by workspace type" : "Deny rules take precedence"}</small>
+                  <strong>{firewallAccessModelLabel(group.defaultAction)}</strong>
+                  <small>{group.defaultFor ? "Inherited by workspace type" : attachmentCount > 0 ? `${attachmentCount} ${attachmentCount === 1 ? "workspace" : "workspaces"} attached` : "Not assigned"}</small>
                 </div>
                 <span className="firewall-security-group-version">Revision {group.version}</span>
-                <button className="secondary-button" type="button" onClick={() => setEditor({ securityGroupId: group.securityGroupId, createNew: false })}>Manage group</button>
+                {group.defaultFor ? <span className="firewall-system-group">Fixed by workspace type</span> : <button className="secondary-button" type="button" onClick={() => setEditor({ securityGroupId: group.securityGroupId, createNew: false })}>Manage group</button>}
               </article>
             );
           })}
         </div>
       </section>
 
-      {editor && <FirewallEditorDialog versions={versions} saving={saving} onSave={onSave} initialSecurityGroupId={editor.securityGroupId} createNew={editor.createNew} onClose={() => setEditor(null)} />}
+      {editor && <FirewallEditorDialog versions={versions} saving={saving} onSave={onSave} initialSecurityGroupId={editor.securityGroupId} createNew={editor.createNew} attachmentCount={attachmentCountFor(latestVersions.find((group) => group.securityGroupId === editor.securityGroupId) ?? {})} onClose={() => setEditor(null)} />}
     </div>
   );
 }
@@ -2951,7 +3069,7 @@ const agentChoices = [
 
 const workspaceName = (workspace) => workspace?.grantId === "personal"
   ? "Acme Workspace"
-  : workspace?.grantId?.replace(/^(sandbox|workspace)-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Managed workspace";
+  : workspace?.grantId?.replace(/^(sandbox|workspace)-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Restricted workspace";
 
 const workspacePreferenceKey = "lemmacomputer.active-workspace-id";
 const chatAgentPreferenceKey = (workspaceId) => `lemmacomputer.active-chat-agent:${workspaceId}`;
@@ -3010,6 +3128,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const [requestedServiceClass, setRequestedServiceClass] = useState("balanced");
   const [agentIds, setAgentIds] = useState([]);
   const [securityGroupVersionId, setSecurityGroupVersionId] = useState("");
+  const [pendingProfileId, setPendingProfileId] = useState("");
   const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
   const creatingWorkspace = !selectedWorkspace;
 
@@ -3054,12 +3173,24 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const compatibleSecurityGroups = settings?.availableSecurityGroups
     ?.filter((group, index, all) => !group.defaultFor
       && group.defaultAction === requiredNetworkAction
-      && all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index) ?? [];
+      && all.findIndex((candidate) => candidate.securityGroupId === group.securityGroupId) === index)
+    .map((group) => ({ ...group, needsReview: firewallGroupNeedsReview(group) })) ?? [];
   const selectedSecurityGroup = securityGroupVersionId === "inherit"
     ? inheritedSecurityGroup ?? settings?.securityGroup
     : compatibleSecurityGroups.find((group) => group.id === securityGroupVersionId);
 
-  return (
+  const requestProfileChange = (profile) => {
+    const expectedAction = profile.executionMode === "disposable-open" ? "allow-public-http-https" : "deny";
+    const assignedGroup = settings?.availableSecurityGroups?.find((group) => group.id === securityGroupVersionId);
+    if (assignedGroup && assignedGroup.defaultAction !== expectedAction) {
+      setPendingProfileId(profile.id);
+      return;
+    }
+    setProfileId(profile.id);
+  };
+  const pendingProfile = selectableProfiles.find((profile) => profile.id === pendingProfileId);
+
+  return <>
     <div className="secondary-screen sandbox-screen sandbox-detail-screen">
       <button className="text-button sandbox-back-button" type="button" onClick={onBack}><ArrowLeft24Regular aria-hidden="true" />{backLabel}</button>
       <header className="sandbox-detail-heading">
@@ -3074,20 +3205,15 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
         <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>{openProfileAvailable ? "Choose a managed workspace for organization work or an Internet workspace for non-sensitive work. This does not choose your AI agent." : "Your organization currently allows managed workspace access. This does not choose your AI agent."}</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>{openProfileAvailable ? "Choose a Restricted workspace for organization work or an Internet workspace for non-sensitive work. This does not choose your AI agent." : "Your organization currently allows Restricted workspace access. This does not choose your AI agent."}</p></span></div>
             <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{selectableProfiles.map((profile) => {
               const selected = profile.id === profileId;
               const open = profile.executionMode === "disposable-open";
               return <label className={`workspace-profile-option${selected ? " selected" : ""}${open ? " open-profile" : ""}`} key={profile.id}>
-                <input type="radio" name="workspace-profile" value={profile.id} checked={selected} onChange={() => {
-                  setProfileId(profile.id);
-                  const expectedAction = open ? "allow-public-http-https" : "deny";
-                  const selectedGroup = settings.availableSecurityGroups?.find((group) => group.id === securityGroupVersionId);
-                  if (selectedGroup && selectedGroup.defaultAction !== expectedAction) setSecurityGroupVersionId("inherit");
-                }} />
+                <input type="radio" name="workspace-profile" value={profile.id} checked={selected} onChange={() => requestProfileChange(profile)} />
                 <span className="profile-radio" aria-hidden="true" />
                 <span className="workspace-profile-copy">
-                  <span className="workspace-profile-title"><strong>{profile.displayName}</strong><em>{open ? "Non-sensitive work only" : "Organization managed"}</em></span>
+                  <span className="workspace-profile-title"><strong>{profile.displayName}</strong><em>{open ? "Non-sensitive work only" : "Organization restricted"}</em></span>
                   <small>{profile.description}</small>
                   <span className="workspace-profile-capabilities">{open ? "Local shell, editable files, skills, packages, browser, public web, and cron" : "Policy-approved tools and destinations only"}</span>
                 </span>
@@ -3139,8 +3265,8 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Network access</h2><p>{canManageFirewall ? "Assign the network security group for this workspace. Changes apply live without restarting." : "Network access is managed by your organization. You can review the effective access below."}</p></span></div>
             <div className="sandbox-security-card">
               <div>
-                <strong>{canManageFirewall ? "Security group" : "Access scope"}</strong>
-                <span>{canManageFirewall ? selectedSecurityGroup?.name ?? "Workspace type default" : settings.securityGroup?.defaultAction === "allow-public-http-https" ? "Public internet" : "Approved destinations"}</span>
+                <strong>{canManageFirewall ? "Network configuration" : "Access scope"}</strong>
+                <span>{canManageFirewall ? securityGroupVersionId === "inherit" ? firewallAccessModelLabel(requiredNetworkAction) : selectedSecurityGroup?.name ?? "Review selection" : firewallAccessModelLabel(settings.securityGroup?.defaultAction)}</span>
                 <small>{canManageFirewall
                   ? securityGroupVersionId === "inherit"
                     ? `Inherited from ${selectedProfile?.displayName ?? "workspace type"}`
@@ -3155,8 +3281,8 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
                   onValueChange={setSecurityGroupVersionId}
                   ariaLabel="Security group"
                   options={[
-                    { value: "inherit", label: `Inherit from ${selectedProfile?.displayName ?? "workspace type"}` },
-                    ...compatibleSecurityGroups.map((group) => ({ value: group.id, label: group.name })),
+                    { value: "inherit", label: `Use ${selectedProfile?.displayName ?? "workspace type"} default` },
+                    ...compatibleSecurityGroups.map((group) => ({ value: group.id, label: `${group.name}${group.needsReview ? " · Needs review" : ""}`, disabled: group.needsReview })),
                   ]}
                 />
               </label> : null}
@@ -3165,14 +3291,15 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
 
           <div className="sandbox-management-footer">
             <div><strong>{creatingWorkspace ? "Ready to create" : "Workspace manifest"}</strong><small>Schema v2 · {selectedProfile?.displayName} · persistent home · gateway-only network</small></div>
-            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || !applicationIds.length || !agentIds.length}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
+            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || !applicationIds.length || !agentIds.length || selectedSecurityGroup?.needsReview}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
           </div>
           {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its access mode, applications, agents, or service level. Security-group changes apply live.</p>}
           <details className="sandbox-json"><summary>View workspace manifest JSON</summary><pre>{JSON.stringify(settings.manifest, null, 2)}</pre></details>
         </form>
       )}
     </div>
-  );
+    {pendingProfile && <ConfirmDialog title={`Change to ${pendingProfile.displayName}?`} description="The current custom security group is not compatible with this workspace type. Continuing will return network access to the new workspace type default." confirmLabel="Change workspace type" onConfirm={() => { setProfileId(pendingProfile.id); setSecurityGroupVersionId("inherit"); setPendingProfileId(""); }} onCancel={() => setPendingProfileId("")} />}
+  </>;
 }
 
 const connectionReason = {
@@ -7080,6 +7207,7 @@ export function App() {
             workspaceBusyId={adminWorkspaceBusyId}
             onWorkspaceCommand={commandAdminWorkspace}
             onWorkspaceNetworkChanged={async () => { await refreshAdminWorkspaceMembers(); setToast("Workspace network access updated."); }}
+            onCreateSecurityGroup={() => selectNav("Network access")}
             policyUsers={adminUsers}
             onGuardrailsSaved={(version) => setToast(`Workspace guardrails v${version.version} saved and active across the organization.`)}
           />
@@ -7180,7 +7308,7 @@ export function App() {
             onReviewWorkspacePolicies={() => selectWorkspaceSection("policies")}
           />
         )}
-        {activeNav === "Network access" && canManageNetworkAccess && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} />}
+        {activeNav === "Network access" && canManageNetworkAccess && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} members={adminWorkspaceMembers} />}
         {activeNav === "AI usage" && <PersonalAiOverview workspaces={homeWorkspaces} />}
         {activeNav === "AI control plane" && canOpenAiControlPlane && (
           <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView} tabs={availableAiControlPlaneTabs}>

@@ -122,7 +122,7 @@ test("an authenticated member can create and manage only their own workspace", a
   await prompt.getByLabel("Workspace name").fill("Demo workspace");
   await prompt.getByRole("button", { name: "Continue to configuration" }).click();
   await expect(page.getByRole("heading", { name: "Demo Workspace" })).toBeVisible();
-  await expect(page.getByText("Your organization currently allows managed workspace access.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Your organization currently allows Restricted workspace access.", { exact: false })).toBeVisible();
   await expect(page.getByText("Qualification workspace (legacy)", { exact: true })).toHaveCount(0);
   await expect(page.getByText("open workspace for non-sensitive work", { exact: false })).toHaveCount(0);
   await page.getByRole("button", { name: "Create workspace" }).click();

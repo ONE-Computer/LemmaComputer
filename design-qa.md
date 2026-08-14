@@ -1,40 +1,68 @@
-# Workspace guardrails design QA
+# Design QA: workspace guardrails and network access
 
-## Evidence
+## Comparison target
 
-- Source visual: `/home/mike/.codex/generated_images/019fffd3-5f0b-78f3-9986-ab9d7c450417/exec-26a262a7-8778-4b43-9b6d-f3ab25120c60.png`
-- Desktop implementation: `test-results/workspace-guardrails-v1.png`
-- Admin network-access dialog: `test-results/workspace-network-access-reset.png`
-- Mobile implementation: `test-results/workspace-policy-mobile-reviewed.png`
-- Side-by-side comparison: `design-qa-comparison.png`
-- Source and desktop implementation viewport: 1487 x 1058 CSS pixels at 1x density
-- Mobile viewport: 390 x 844 CSS pixels at 1x density; full-page capture is 390 x 2602 pixels
+- Source visual truth: `/home/mike/.codex/generated_images/019fffd3-5f0b-78f3-9986-ab9d7c450417/exec-26a262a7-8778-4b43-9b6d-f3ab25120c60.png`
+- Guardrails implementation: `/home/mike/Documents/onecomputer/.worktrees/network-access-product-model/test-results/workspace-guardrails-v1.png`
+- Security-group editor: `/home/mike/Documents/onecomputer/.worktrees/network-access-product-model/test-results/firewall-security-group-editor-reviewed.png`
+- Focused rule row: `/home/mike/Documents/onecomputer/.worktrees/network-access-product-model/test-results/firewall-security-group-rule-reviewed.png`
+- Network-access inventory: `/home/mike/Documents/onecomputer/.worktrees/network-access-product-model/test-results/network-access-reviewed.png`
+- Viewport: 1487 x 1058 CSS pixels, desktop, light theme, `deviceScaleFactor: 1`.
+- Source and full implementation captures: 1487 x 1058 pixels. No density normalization was required.
+- Focused rule capture: 827 x 71 pixels.
+- State: organization administrator, guardrails v1 saved, one public-web block-list group created and attached to one Internet workspace.
+
+## Findings
+
+No actionable P0, P1, or P2 visual issues remain.
+
+Accepted product deviations from the selected concept:
+
+- The existing Workspace page heading remains above the tab set. This preserves the shared LemmaComputer shell instead of introducing a one-off page structure.
+- Network access is not an editable guardrail row. The later approved product model makes workspace type the network baseline and keeps per-workspace exceptions in the administrator-only Network access surface.
+- The product labels are `Restricted workspace` and `Internet workspace`, and the sidebar label is `Network access` instead of `Firewall`.
+- Fixture counts and names differ from the concept data, but the impact-summary, state-panel, control-group, and affected-workspace hierarchy match the selected direction.
 
 ## Required fidelity surfaces
 
-- The existing LemmaComputer navigation shell, typography, icons, spacing tokens, controls, and responsive patterns remain authoritative.
-- The approved visual is used conceptually: a named and versioned Workspace guardrails view, visible scope and impact, effective guardrail groups, state and change summary, affected workspaces, and history.
-- Product terminology is intentionally adapted to the implemented model: Managed workspace and Internet workspace, type-based network defaults, and compatible custom security groups as per-workspace exceptions.
-- The additional Workspace page heading and organization-administration context are retained because they are established product navigation, not part of the selected concept's information model.
+- Fonts and typography: passed. Inter is retained throughout; headings, labels, table text, metadata, and status copy preserve the existing optical hierarchy and remain readable without unexpected wrapping.
+- Spacing and layout rhythm: passed. The 1487 px desktop layout retains the generous content width, clear section boundaries, right-side state panel, affected-workspace table, centered modal, and consistent row density.
+- Colors and visual tokens: passed. Existing navy actions, blue links, quiet neutral borders, pale semantic badges, green current state, amber review state, and red blocked state remain consistent with the product system.
+- Image quality and asset fidelity: passed. These screens contain only product UI and the existing icon library; no source image asset was replaced with CSS art, placeholder art, or a handcrafted SVG.
+- Copy and content: passed. Guardrail ownership, effective network source, immutable versions, fixed type defaults, attachment impact, and outcome-based destination rules are explicit. Internal profile IDs and execution-mode names are not shown.
 
-## Comparison pass 1
+## Full-view comparison evidence
 
-Compared the complete source and implementation together in `design-qa-comparison.png`, then inspected the focused admin dialog and mobile full-page capture.
+- The source and implementation were opened together at the same 1487 x 1058 pixel size.
+- Both use the persistent left navigation, top workspace tabs, guardrail title/version/action, impact summary, effective controls, right-side state context, affected-workspace inventory, and history beneath the primary content.
+- The Network access inventory was separately reviewed at the same viewport. System defaults are visibly fixed, custom groups show an outcome and attachment count, and the primary action remains prominent without overpowering the inventory.
 
-- Typography: Inter hierarchy, weights, line heights, wrapping, and density remain consistent with the product shell. No cramped or truncated labels at desktop or mobile widths.
-- Spacing and layout: the implementation preserves the concept's primary action, tab hierarchy, impact summary, two-column desktop body, affected-workspace table, and history placement. The mobile layout collapses into a readable single column with card-based workspace rows.
-- Colors and surfaces: restrained neutral dividers, brand blue actions, semantic success state, and modal elevation match existing tokens. No decorative or generic placeholder surfaces were introduced.
-- Copy and content: workspace types and network behavior are explicit. Guardrails describe organization-wide constraints; network access communicates inherited type defaults and administrator-managed exceptions.
-- Icons: existing Fluent icons are used consistently for navigation, guardrail groups, state, and dialog controls.
-- States and interactions: Edit guardrails, affected-workspace navigation, Manage access, compatible custom-group assignment, and reset to the workspace-type default were exercised in Playwright. The dialog is keyboard-addressable and exposes labelled controls.
-- Accessibility and responsiveness: semantic headings, tables, dialog labels, focus handling, mobile reflow, and practical tap targets were covered by the responsive browser tests. No horizontal overflow, clipping, overlap, or unusable control was observed.
-- Image quality: the page uses vector product icons and text; there is no target photography or raster product imagery to reproduce.
+## Focused region comparison evidence
 
-Findings resolved during the pass:
+- The focused 827 x 71 rule-row capture was inspected because the action, traffic coverage, scope, purpose, and removal affordance are too small to judge reliably in the full modal capture.
+- The row communicates one blocked destination and groups standard HTTP and HTTPS traffic into one human-readable rule while retaining an explicit removal action.
 
-- P2 content: replaced the stale affected-workspace explanation that implied every workspace was configured independently with the actual inheritance-and-exception model.
-- P2 test resilience: made the Workspace guardrails heading check exact so it could not collide with the Set workspace guardrails dialog title.
+## Interaction and accessibility evidence
 
-## Final result
+- Playwright verified that ordinary members cannot discover guardrail or network administration.
+- The administrator set guardrails, confirmed the thinking selector exposes only Low, Medium, and High, assigned and reset a Restricted-workspace exception, created a public-web block list, added a standard HTTP+HTTPS destination, assigned it to a compatible Internet workspace, and observed the live attachment count.
+- The same guardrail flow passed at the covered narrow viewport.
+- Full repository browser result: 104 passed.
 
-**Passed.** No unresolved P0, P1, or P2 fidelity, behavior, accessibility, or responsive findings remain.
+## Comparison history
+
+### Pass 1
+
+- P2: the access-model helper said both destinations and workspace assignments had to be removed even for a new, unattached group.
+- Fix: the helper now distinguishes a group with destinations from an attached group and gives only the relevant prerequisite.
+
+### Pass 2
+
+- Re-captured the guardrails page, editor top state, focused rule row, and final network inventory at 1487 x 1058.
+- The prior P2 copy issue is resolved. No actionable P0, P1, or P2 findings remain.
+
+## Follow-up polish
+
+- None required for this scope.
+
+final result: passed
