@@ -3,14 +3,14 @@ export type DeploymentProfileId = ProductionDeploymentProfileId | "worktree";
 export type SignInProviderId = "development-fixture" | "better-auth-customer" | "workforce-entra" | "external-id" | "enterprise-entra";
 export type TransitionalCustomerAdapterId = "workforce-entra" | "external-id" | "enterprise-entra";
 export type CustomerAuthenticationMethod = "email-password" | "passkey" | "google-oauth" | "microsoft-oauth" | "saml" | "oidc";
-export type WorkspaceDriverId = "kasm-local" | "kasm";
+export type WorkspaceNodeTopologyId = "colocated" | "remote";
 export type WorkspaceExecutionBoundary = "local-operator-controlled" | "remote-isolated";
 export type WorkspaceProviderQualification = "development-only" | "operator-approved" | "platform-qualified";
 export type WorkspaceProviderRequiredControl = "tenant-context" | "signed-policy" | "governed-egress" | "lifecycle-audit" | "verified-purge";
 export type HostedCapability = "externalIdentity" | "telemetry" | "billing" | "backgroundJobs" | "lemmaManagedControlPlane";
 
-export interface WorkspaceDriverTopology {
-  readonly id: WorkspaceDriverId;
+export interface WorkspaceNodeTopology {
+  readonly id: WorkspaceNodeTopologyId;
   readonly executionBoundary: WorkspaceExecutionBoundary;
 }
 
@@ -51,7 +51,7 @@ export interface DeploymentProfileCapabilities {
 export const productionDeploymentProfileIds: readonly ProductionDeploymentProfileId[];
 export const deploymentProfileIds: readonly DeploymentProfileId[];
 export const customerAuthenticationMethods: readonly CustomerAuthenticationMethod[];
-export const workspaceDriverTopologies: Readonly<Record<WorkspaceDriverId, WorkspaceDriverTopology>>;
+export const workspaceNodeTopologies: Readonly<Record<WorkspaceNodeTopologyId, WorkspaceNodeTopology>>;
 export const deploymentProfileCapabilityMatrix: Readonly<{
   schemaVersion: 3;
   profiles: Readonly<Record<DeploymentProfileId, DeploymentProfileCapabilities>>;
@@ -62,6 +62,6 @@ export function resolveDeploymentProfile(value: unknown, options?: { readonly al
 export function assertSignInProviderAllowed(profileId: DeploymentProfileId, providerId: SignInProviderId): DeploymentProfileCapabilities;
 export function assertCustomerAuthenticationMethodAllowed(profileId: DeploymentProfileId, method: CustomerAuthenticationMethod): DeploymentProfileCapabilities;
 export function assertWorkspaceProviderBoundaryAllowed(profileId: DeploymentProfileId, executionBoundary: WorkspaceExecutionBoundary): DeploymentProfileCapabilities;
-export function assertWorkspaceDriverTopologyAllowed(profileId: DeploymentProfileId, driverId: WorkspaceDriverId): DeploymentProfileCapabilities;
+export function assertWorkspaceNodeTopologyAllowed(profileId: DeploymentProfileId, topologyId: WorkspaceNodeTopologyId): DeploymentProfileCapabilities;
 export function assertOrganizationCountAllowed(profileId: DeploymentProfileId, organizationCount: number): DeploymentProfileCapabilities;
 export function assertHostedCapability(profileId: DeploymentProfileId, capability: HostedCapability): DeploymentProfileCapabilities;

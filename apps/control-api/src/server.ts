@@ -342,6 +342,10 @@ const envSchema = z.object({
   WEB_PROXY_TOKEN: z.string().min(24),
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
+  CONTROLLER_TLS_CA_B64: optionalEnvString(),
+  CONTROLLER_TLS_CLIENT_CERT_B64: optionalEnvString(),
+  CONTROLLER_TLS_CLIENT_KEY_B64: optionalEnvString(),
+  CONTROLLER_TLS_SERVER_NAME: optionalEnvString(),
   DATABASE_URL: z.string().min(1),
   AUTH_DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRETS: z.string().min(1),
@@ -5208,7 +5212,24 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         stepUpAuthenticationContext: env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
       })
     : undefined;
-  const controller = new HttpControllerClient(env.CONTROLLER_URL, env.CONTROLLER_INTERNAL_TOKEN);
+  const controllerTlsValues = [
+    env.CONTROLLER_TLS_CA_B64,
+    env.CONTROLLER_TLS_CLIENT_CERT_B64,
+    env.CONTROLLER_TLS_CLIENT_KEY_B64,
+    env.CONTROLLER_TLS_SERVER_NAME,
+  ];
+  if (env.CONTROLLER_URL.startsWith("https:") && !controllerTlsValues.every(Boolean)) {
+    throw new Error("HTTPS workspace-node connections require complete mutual TLS client configuration");
+  }
+  const controllerTransport = env.CONTROLLER_URL.startsWith("https:")
+    ? createMutualTlsFetch({
+        ca: Buffer.from(env.CONTROLLER_TLS_CA_B64!, "base64").toString("utf8"),
+        clientCertificate: Buffer.from(env.CONTROLLER_TLS_CLIENT_CERT_B64!, "base64").toString("utf8"),
+        clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
+        serverName: env.CONTROLLER_TLS_SERVER_NAME!,
+      })
+    : fetch;
+  const controller = new HttpControllerClient(env.CONTROLLER_URL, env.CONTROLLER_INTERNAL_TOKEN, controllerTransport);
   const platformSecurityAlertDispatcher = platformOperatorStore
     && env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL
     && env.PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET

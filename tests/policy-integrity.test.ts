@@ -58,6 +58,7 @@ const fixture = () => {
   const bundle = signer.issue({
     identity,
     workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+    accessGeneration: 1,
     policy,
     routes: {
       modelGateway: "http://litellm:4000",
@@ -74,6 +75,7 @@ test("a canonical Ed25519 bundle verifies exact workspace, policy, agents, route
   const verified = verifySignedPolicyBundle(bundle, keys, {
     identity,
     workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+    accessGeneration: 1,
     policy,
     now,
   });

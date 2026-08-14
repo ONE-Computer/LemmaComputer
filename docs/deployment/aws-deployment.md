@@ -17,12 +17,11 @@ This design supports both LemmaComputer deployment profiles:
 Run the stateless product services as separate Amazon ECS services on AWS
 Fargate, use an Application Load Balancer as the single HTTP ingress, place
 state in two private Aurora PostgreSQL trust domains, and run user workspaces
-on a remote Kasm deployment in a separate workspace compute boundary.
+on Lemma-owned remote Docker/KasmVNC nodes in a separate workspace compute boundary.
 
-Do not run the production `kasm-local` controller with the Docker socket inside
-the control-plane ECS service. The socket is host-root-equivalent authority.
-Use `LEMMACOMPUTER_SANDBOX_DRIVER=kasm`, the Kasm Developer API adapter, and
-dedicated Kasm agents for the managed workspace image.
+Do not mount the Docker socket in a control-plane ECS service. The socket is
+host-root-equivalent authority. Run the workspace controller beside Docker on
+private workspace compute, and let Control reach only its mTLS API.
 
 AWS WAF, a network firewall, and security groups solve different problems:
 
@@ -78,7 +77,7 @@ flowchart TB
   end
 
   subgraph WorkspaceBoundary["Separate workspace compute VPC/account"]
-    Kasm["Kasm control + dedicated agents"]
+    Kasm["Lemma workspace node API + Docker"]
     WorkspaceProxy["Per-workspace egress enforcement"]
     Sandboxes["User workspaces"]
   end
@@ -231,7 +230,7 @@ LiteLLM and either egress proxy in one task/network namespace.
 | M365 bridge | Controlled egress | Through inspection only | Restrict to Microsoft identity and Graph destination policy |
 | Channel broker | Controlled egress | Through inspection only | Separate channel/export policy and credentials |
 | Scheduler/consent | Isolated application | No | Add no internet route unless a reviewed feature requires it |
-| Workspace controller | Isolated application | No general route | Private Kasm Developer API access; no Docker socket |
+| Workspace controller | Separate workspace compute | Governed workspace egress only | Node-local Docker socket; private mTLS API from Control |
 
 The local Compose `identity-egress` path means Control currently needs outbound
 Entra discovery/token access. In AWS, do not solve this by placing all of
@@ -310,7 +309,7 @@ Create a distinct ECS task role and execution role for each service family:
 - the **task role** contains only AWS API permissions used by the application.
 
 Do not share one powerful task role across Control, LiteLLM, proxies, channel
-broker, migrations, and Kasm controller. Scope `iam:PassRole` to named role
+broker, migrations, and workspace node. Scope `iam:PassRole` to named role
 ARNs and the intended ECS service. Use AWS IAM Access Analyzer and CloudTrail
 to review access and role assumption.
 
@@ -376,7 +375,7 @@ changes, and disabled/degraded logging.
 3. **Create data/secret foundations:** two DB trust domains, KMS, Secrets
    Manager, backup/restore, task roles, and log groups.
 4. **Deploy private services first:** databases, Control, LiteLLM, admin proxy,
-   egress proxies, workers, and remote Kasm integration. Prove no-direct-egress
+   egress proxies, workers, and remote workspace-node integration. Prove no-direct-egress
    invariants before adding public ingress.
 5. **Add the single ingress:** ACM, ALB, WAF, workspace ingress, canonical DNS,
    and exact OAuth registrations.

@@ -54,7 +54,7 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(qualifier, /workspaceStore\.remove\(identity, workspaceId\)/);
   assert.match(qualifier, /status\?\.state !== "ready"/);
   assert.match(qualifier, /method: "DELETE"/);
-  assert.match(qualifier, /\/internal\/v1\/workspaces\/\$\{workspaceId\}\/storage/);
+  assert.match(qualifier, /\/internal\/v2\/workspaces\/\$\{workspaceId\}\/storage\?accessGeneration=1/);
 });
 
 test("OAuth release qualification explicitly reviews discovered connector tools", async () => {

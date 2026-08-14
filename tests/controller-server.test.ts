@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { Socket } from "node:net";
+import { TLSSocket } from "node:tls";
 import test from "node:test";
 import type { SandboxAdapter } from "@lemmacomputer/kasm-adapter";
-import { createControllerServer } from "../apps/workspace-controller/src/server.js";
+import { LemmaComputerError } from "@lemmacomputer/contracts";
+import { createControllerServer, MutualTlsNodeRequestAuthenticator } from "../apps/workspace-controller/src/server.js";
 import { policyFixture } from "./policy-fixture.js";
 
 const token = "controller-test-token-0000001";
@@ -31,13 +34,25 @@ const adapter: SandboxAdapter = {
     lastAgentBridge = agentBridge;
     return { providerId: `provider-${workspaceId}`, state: "ready", failureCode: null };
   },
-  async updateEgressPolicy(providerId, input) {
+  async updateEgressPolicy(requestedWorkspaceId, providerId, input) {
+    if (requestedWorkspaceId !== workspaceId) throw new LemmaComputerError("WORKSPACE_SANDBOX_BINDING_MISMATCH", "Sandbox is not bound to this workspace", 409);
     lastEgressUpdate = { providerId, versionId: input.policy.egress!.id };
   },
-  async status(providerId) { return { providerId, workspaceId, state: "ready", failureCode: null }; },
-  async open() { return { launchUrl: "https://127.0.0.1:16920/", expiresAt: new Date(Date.now() + 60_000).toISOString() }; },
-  async destroy() {},
-  async purgeWorkspace(workspaceId, accessGeneration) { purgedWorkspace = { workspaceId, accessGeneration }; },
+  async status(requestedWorkspaceId, providerId) {
+    if (requestedWorkspaceId !== workspaceId) throw new LemmaComputerError("WORKSPACE_SANDBOX_BINDING_MISMATCH", "Sandbox is not bound to this workspace", 409);
+    return { providerId, workspaceId, state: "ready", failureCode: null };
+  },
+  async open(requestedWorkspaceId) {
+    if (requestedWorkspaceId !== workspaceId) throw new LemmaComputerError("WORKSPACE_SANDBOX_BINDING_MISMATCH", "Sandbox is not bound to this workspace", 409);
+    return { launchUrl: "https://127.0.0.1:16920/", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  },
+  async destroy(requestedWorkspaceId) {
+    if (requestedWorkspaceId !== workspaceId) throw new LemmaComputerError("WORKSPACE_SANDBOX_BINDING_MISMATCH", "Sandbox is not bound to this workspace", 409);
+  },
+  async purgeWorkspace(requestedWorkspaceId, accessGeneration) {
+    purgedWorkspace = { workspaceId: requestedWorkspaceId, accessGeneration };
+    return { nodeId: "node-test", workspaceId: requestedWorkspaceId, maximumPurgedGeneration: accessGeneration, completedAt: new Date().toISOString(), verified: true };
+  },
 };
 
 test("controller applies a newly signed egress revision without replacing the sandbox", async () => {
@@ -70,7 +85,7 @@ test("controller applies a newly signed egress revision without replacing the sa
   const app = createControllerServer(adapter, token, signedEgressPolicy.keys);
   const response = await app.inject({
     method: "PUT",
-    url: "/internal/v1/sandboxes/provider-existing/egress-policy",
+    url: `/internal/v2/workspaces/${workspaceId}/sandboxes/provider-existing/egress-policy`,
     headers: { "x-controller-token": token },
     payload: {
       workspaceId,
@@ -100,21 +115,37 @@ test("controller applies a newly signed egress revision without replacing the sa
 
 test("private controller hides routes without its internal token", async () => {
   const app = createControllerServer(adapter, token, signedPolicy.keys);
-  const response = await app.inject({ method: "GET", url: "/internal/v1/sandboxes/guessed" });
+  const response = await app.inject({ method: "GET", url: `/internal/v2/workspaces/${workspaceId}/sandboxes/guessed` });
   assert.equal(response.statusCode, 404);
   await app.close();
 });
 
-test("bodyless open and destroy commands work with internal authentication", async () => {
-  const app = createControllerServer(adapter, token, signedPolicy.keys);
-  const open = await app.inject({ method: "POST", url: "/internal/v1/sandboxes/provider-1/open", headers: { "x-controller-token": token } });
+test("remote node authentication requires the trusted client certificate identity and token", () => {
+  const socket = new TLSSocket(new Socket());
+  Object.defineProperty(socket, "authorized", { value: true });
+  Object.defineProperty(socket, "getPeerCertificate", { value: () => ({ subject: { CN: "lemmacomputer-control" } }) });
+  const request = { raw: { socket }, headers: { "x-controller-token": token } };
+  const authenticator = new MutualTlsNodeRequestAuthenticator(token, "lemmacomputer-control");
+  assert.equal(authenticator.authenticate(request as never), true);
+  assert.equal(new MutualTlsNodeRequestAuthenticator(token, "foreign-client").authenticate(request as never), false);
+  assert.equal(authenticator.authenticate({ ...request, headers: { "x-controller-token": "wrong-token" } } as never), false);
+});
+
+test("bodyless lifecycle commands emit secret-free node audit events", async () => {
+  const audits: Array<Record<string, unknown>> = [];
+  const app = createControllerServer(adapter, token, signedPolicy.keys, { nodeId: "node-test", audit: (event) => audits.push(event) });
+  const open = await app.inject({ method: "POST", url: `/internal/v2/workspaces/${workspaceId}/sandboxes/provider-1/open`, headers: { "x-controller-token": token } });
   assert.equal(open.statusCode, 200);
   assert.equal(open.json().launchUrl, "https://127.0.0.1:16920/");
-  const destroy = await app.inject({ method: "DELETE", url: "/internal/v1/sandboxes/provider-1", headers: { "x-controller-token": token } });
+  const destroy = await app.inject({ method: "DELETE", url: `/internal/v2/workspaces/${workspaceId}/sandboxes/provider-1`, headers: { "x-controller-token": token } });
   assert.equal(destroy.statusCode, 204);
-  const purge = await app.inject({ method: "DELETE", url: "/internal/v1/workspaces/workspace-1/storage?accessGeneration=7", headers: { "x-controller-token": token } });
-  assert.equal(purge.statusCode, 204);
-  assert.deepEqual(purgedWorkspace, { workspaceId: "workspace-1", accessGeneration: 7 });
+  const purge = await app.inject({ method: "DELETE", url: `/internal/v2/workspaces/${workspaceId}/storage?accessGeneration=7`, headers: { "x-controller-token": token } });
+  assert.equal(purge.statusCode, 200);
+  assert.equal(purge.json().verified, true);
+  assert.deepEqual(purgedWorkspace, { workspaceId, accessGeneration: 7 });
+  assert.deepEqual(audits.map((event) => event.action), ["open", "destroy", "purge"]);
+  assert.ok(audits.every((event) => event.nodeId === "node-test" && event.workspaceId === workspaceId));
+  assert.ok(!JSON.stringify(audits).includes(token));
   await app.close();
 });
 
@@ -122,7 +153,7 @@ test("controller passes a validated scoped gateway grant to the sandbox adapter"
   const app = createControllerServer(adapter, token, signedPolicy.keys);
   const response = await app.inject({
     method: "POST",
-    url: "/internal/v1/sandboxes",
+    url: `/internal/v2/workspaces/${workspaceId}/sandbox`,
     headers: { "x-controller-token": token },
     payload: {
       workspaceId,
@@ -173,7 +204,7 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
   };
   const unsigned = await app.inject({
     method: "POST",
-    url: "/internal/v1/sandboxes",
+    url: `/internal/v2/workspaces/${workspaceId}/sandbox`,
     headers: { "x-controller-token": token },
     payload: base,
   });
@@ -182,7 +213,7 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
 
   const mutated = await app.inject({
     method: "POST",
-    url: "/internal/v1/sandboxes",
+    url: `/internal/v2/workspaces/${workspaceId}/sandbox`,
     headers: { "x-controller-token": token },
     payload: {
       ...base,
@@ -197,7 +228,7 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
 
   const substituted = await app.inject({
     method: "POST",
-    url: "/internal/v1/sandboxes",
+    url: `/internal/v2/workspaces/${workspaceId}/sandbox`,
     headers: { "x-controller-token": token },
     payload: {
       ...base,
@@ -207,21 +238,40 @@ test("controller rejects unsigned, mutated, and route-substituted policy authori
   });
   assert.equal(substituted.statusCode, 403);
   assert.equal(substituted.json().error.code, "POLICY_BINDING_MISMATCH");
+
+  const generationSubstituted = await app.inject({
+    method: "POST",
+    url: `/internal/v2/workspaces/${workspaceId}/sandbox`,
+    headers: { "x-controller-token": token },
+    payload: { ...base, accessGeneration: 2, policyBundle: signedPolicy.bundle },
+  });
+  assert.equal(generationSubstituted.statusCode, 403);
+  assert.equal(generationSubstituted.json().error.code, "POLICY_BINDING_MISMATCH");
   await app.close();
 });
 
 test("controller destroys a sandbox only through its exact workspace binding", async () => {
   const app = createControllerServer(adapter, token, signedPolicy.keys);
+  const foreignWorkspaceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  for (const [method, suffix] of [["GET", ""], ["POST", "/open"]] as const) {
+    const deniedLifecycle = await app.inject({
+      method,
+      url: `/internal/v2/workspaces/${foreignWorkspaceId}/sandboxes/provider-existing${suffix}`,
+      headers: { "x-controller-token": token },
+    });
+    assert.equal(deniedLifecycle.statusCode, 409);
+    assert.equal(deniedLifecycle.json().error.code, "WORKSPACE_SANDBOX_BINDING_MISMATCH");
+  }
   const denied = await app.inject({
     method: "DELETE",
-    url: `/internal/v1/workspaces/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/sandboxes/provider-existing`,
+    url: `/internal/v2/workspaces/${foreignWorkspaceId}/sandboxes/provider-existing`,
     headers: { "x-controller-token": token },
   });
   assert.equal(denied.statusCode, 409);
   assert.equal(denied.json().error.code, "WORKSPACE_SANDBOX_BINDING_MISMATCH");
   const allowed = await app.inject({
     method: "DELETE",
-    url: `/internal/v1/workspaces/${workspaceId}/sandboxes/provider-existing`,
+    url: `/internal/v2/workspaces/${workspaceId}/sandboxes/provider-existing`,
     headers: { "x-controller-token": token },
   });
   assert.equal(allowed.statusCode, 204);

@@ -1,9 +1,14 @@
 import { spawnSync } from "node:child_process";
+import type { RuntimePolicy } from "@lemmacomputer/contracts";
 import { deriveEgressProxySecret, issueEgressProxyGrant } from "@lemmacomputer/egress-policy";
+import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
 
 const controllerUrl = process.env.CONTROLLER_URL ?? "http://127.0.0.1:14101";
 const controllerToken = process.env.CONTROLLER_INTERNAL_TOKEN;
 if (!controllerToken) throw new Error("CONTROLLER_INTERNAL_TOKEN is required");
+const signingKeyId = process.env.POLICY_SIGNING_KEY_ID;
+const signingPrivateKey = process.env.POLICY_SIGNING_PRIVATE_KEY_B64;
+if (!signingKeyId || !signingPrivateKey) throw new Error("POLICY_SIGNING_KEY_ID and POLICY_SIGNING_PRIVATE_KEY_B64 are required");
 
 const workspaceId = "22222222-2222-4222-8222-222222222222";
 const sandboxName = `lemmacomputer-sandbox-${workspaceId}`;
@@ -11,9 +16,11 @@ const expectedGrant = {
   tenantId: "qualification",
   subjectId: "firewall-test",
   workspaceId,
+  accessGeneration: 1,
   agentId: "agent-firewall-test",
   securityGroupVersionId: "egv_qualification_updates_v1",
   policyHash: "d".repeat(64),
+  egressMode: "restricted" as const,
 };
 const verificationSecret = deriveEgressProxySecret("qualification-root-secret-at-least-thirty-two-characters", workspaceId);
 const token = issueEgressProxyGrant(verificationSecret, expectedGrant, new Date(), 3600);
@@ -21,7 +28,7 @@ const token = issueEgressProxyGrant(verificationSecret, expectedGrant, new Date(
 // broker, but the broker still validates that injected bridge credentials have
 // the current v2 shape before it starts.
 const qualificationAgentBridgeToken = `ocab2_${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1_000) + 3_600 })).toString("base64url")}.${"q".repeat(43)}`;
-const policy = {
+const policy: RuntimePolicy = {
   schemaVersion: 1,
   policyVersionId: "qualification-policy-v1",
   policyVersion: 1,
@@ -30,7 +37,12 @@ const policy = {
   agentId: expectedGrant.agentId,
   agentProfile: "claude-desktop-managed-v1",
   networkProfile: "controlled-egress-v1",
+  executionMode: "managed",
+  egressMode: "restricted",
+  requestedServiceClass: "balanced",
   egress: {
+    schemaVersion: 2,
+    mode: "restricted",
     id: expectedGrant.securityGroupVersionId,
     securityGroupId: "esg_qualification_updates",
     version: 1,
@@ -54,6 +66,14 @@ const policy = {
   allowedTools: ["list-mail-folders"],
   toolPolicies: { "list-mail-folders": "allow" },
 };
+const signer = new PolicyBundleSigner({ keyId: signingKeyId, privateKeyPkcs8Base64: signingPrivateKey });
+const policyBundle = signer.issue({
+  identity: { tenantId: expectedGrant.tenantId, subjectId: expectedGrant.subjectId, audience: "lemmacomputer-control" },
+  workspaceId,
+  accessGeneration: 1,
+  policy,
+  routes: { modelGateway: "http://litellm:4000", mcpControl: "http://lemmacomputer-control:4100" },
+});
 
 const controller = async (path: string, init?: RequestInit) => {
   const response = await fetch(`${controllerUrl}${path}`, {
@@ -76,16 +96,19 @@ const docker = (...args: string[]) => {
 
 let providerId: string | undefined;
 try {
-  const created = await controller("/internal/v1/sandboxes", {
+  const created = await controller(`/internal/v2/workspaces/${workspaceId}/sandbox`, {
     method: "POST",
     body: JSON.stringify({
       workspaceId,
+      accessGeneration: 1,
       correlationId: "v2-002-runtime-qualification",
       policy,
+      policyBundle,
       gateway: {
         baseUrl: "http://litellm:4000",
         credential: "qualification-workspace-key-at-least-24-characters",
         modelAlias: "lemmacomputer-claude",
+        transportModelAlias: "claude-sonnet-4-6",
         expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       },
       agentBridge: {
@@ -102,7 +125,7 @@ try {
   });
   providerId = String(created?.providerId);
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const status = await controller(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`);
+    const status = await controller(`/internal/v2/workspaces/${workspaceId}/sandboxes/${encodeURIComponent(providerId)}`);
     if (status?.state === "ready") break;
     if (status?.state === "failed") throw new Error(`Qualification sandbox failed: ${JSON.stringify(status)}`);
     await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -162,11 +185,11 @@ try {
 } finally {
   if (process.env.KEEP_QUALIFICATION_WORKSPACE !== "true") {
     if (providerId) {
-      await controller(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`, { method: "DELETE" }).catch(() => undefined);
+      await controller(`/internal/v2/workspaces/${workspaceId}/sandboxes/${encodeURIComponent(providerId)}`, { method: "DELETE" }).catch(() => undefined);
     } else {
       docker("rm", "-f", sandboxName, `${sandboxName}-egress`, `${sandboxName}-relay`);
     }
-    await controller(`/internal/v1/workspaces/${workspaceId}/storage`, { method: "DELETE" }).catch(() => undefined);
+    await controller(`/internal/v2/workspaces/${workspaceId}/storage?accessGeneration=1`, { method: "DELETE" }).catch(() => undefined);
     docker("network", "rm", `lemmacomputer-workspace-${workspaceId}`);
   }
 }

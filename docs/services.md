@@ -178,15 +178,12 @@ It verifies the Ed25519 policy bundle and checks that gateway, agent, chat,
 application, and egress grants match the verified projection before invoking an
 adapter.
 
-Two adapters implement the `SandboxAdapter` boundary:
-
-- `kasm-local` uses the Docker Engine API for a self-contained deployment;
-- `kasm` uses the Kasm Developer API for an external Kasm installation.
-
-The local adapter creates deterministic container, network, volume, relay, and
-egress-sidecar resources labeled with workspace and policy identities. The
-controller requires the Docker socket only in this mode. Treat that socket as
-host-root-equivalent authority.
+`DockerKasmVncAdapter` implements the boundary in both placements. It creates
+deterministic container, network, volume, relay, and egress-sidecar resources
+labeled with workspace, node, generation, and policy identities. The
+controller and Docker socket remain node-local; remote Control uses the private
+mTLS API. Treat the node socket as host-root-equivalent authority. See
+[Workspace node deployment](workspace-node.md).
 
 **Extension seam:** implement `SandboxAdapter`, preserve the public sandbox
 state and launch contracts, verify signed policy before provisioning, and keep
@@ -472,7 +469,7 @@ historical records without an explicit compatibility design.
 | `@lemmacomputer/policy-integrity` | Canonical policy signing and verification |
 | `@lemmacomputer/litellm-adapter` | Gateway grants, OAuth orchestration, readiness, and governed execution |
 | `@lemmacomputer/model-router` | Deterministic service-class selection, candidate filtering, session affinity, and signed decision bindings |
-| `@lemmacomputer/kasm-adapter` | Local Docker and Kasm Developer API sandbox adapters |
+| `@lemmacomputer/kasm-adapter` | Lemma-owned Docker/KasmVNC workspace runtime for colocated and remote nodes |
 | `@lemmacomputer/egress-policy` | Host normalization, grant signing, policy compilation, and decisions |
 | `@lemmacomputer/workspace-ingress-auth` | Launch/session claim issuance and verification |
 

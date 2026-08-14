@@ -113,7 +113,7 @@ paths and identifies which decisions remain authoritative in Control.
 | `web` | Static React application and authenticated reverse proxy to Control | Private |
 | `control-api` | Identity, policy, lifecycle orchestration, grants, governance, audit, and connection APIs | Private |
 | `db-migrate` | One-shot, checksummed Control-database migration job that must complete before Control starts | Private/job |
-| `workspace-controller` | Provisions Kasm workspaces through local Docker or the Kasm Developer API | Private |
+| `workspace-controller` | Runs the Lemma-owned Docker/KasmVNC workspace-node API in colocated or private remote topology | Private; mTLS when remote |
 | `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, and MCP dispatch | Private |
 | `litellm-admin-proxy` | Dedicated Control-to-LiteLLM administration transport; requires mTLS in hosted deployments | Private |
 | `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | Private; callbacks use workspace ingress |

@@ -849,6 +849,7 @@ export const policyBundlePayloadSchema = z.strictObject({
   tenantId: z.string().min(1).max(128),
   subjectId: z.string().min(1).max(128),
   workspaceId: z.uuid(),
+  accessGeneration: z.number().int().positive(),
   policy: runtimePolicySchema,
   routes: z.strictObject({
     modelGateway: z.url(),

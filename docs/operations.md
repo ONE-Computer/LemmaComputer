@@ -449,10 +449,10 @@ Loss or blind replacement can invalidate signed bundles, enrolled approvers,
 sessions, OAuth custody, stored channel credentials, or running workspaces.
 Back these values up through an approved secret manager.
 
-### Sandbox driver
+### Workspace node runtime
 
-`LEMMACOMPUTER_SANDBOX_DRIVER=kasm-local` uses the host Docker Engine. Build the workspace
-image first:
+`LEMMACOMPUTER_WORKSPACE_RUNTIME=docker-kasmvnc` uses the workspace node's
+Docker Engine in both placements. Build the workspace image first:
 
 ```bash
 npm run image:workspace
@@ -461,8 +461,8 @@ npm run image:workspace
 `LEMMACOMPUTER_WORKSPACE_IMAGE` may be a local tag for development. Production
 deployments should use an immutable digest.
 
-Claude Cowork local execution requires hardware virtualization. On every Docker
-or Kasm Agent host, verify that `/dev/kvm` and `/dev/vhost-vsock` are character
+Claude Cowork local execution requires hardware virtualization. On every eligible
+customer-managed Docker host, verify that `/dev/kvm` and `/dev/vhost-vsock` are character
 devices and that the host has at least 8 GB of RAM and approximately 25 GB of
 free disk space. The local driver gives Cowork workspaces an 8 GiB memory limit;
 allow additional host memory for Docker and the LemmaComputer services. Opt in
@@ -489,46 +489,12 @@ AF_VSOCK socket creation before launching the desktop, so host and image group
 IDs do not need to match. Changing this setting recreates the workspace
 container on its next launch while preserving its workspace volume.
 
-For an external Kasm installation, configure the LemmaComputer Workspace image's
-Docker Run Config Override in Kasm:
-
-```json
-{
-  "user": "root",
-  "devices": [
-    "/dev/kvm:/dev/kvm:rwm",
-    "/dev/vhost-vsock:/dev/vhost-vsock:rwm"
-  ],
-  "memory": 8589934592,
-  "environment": {"LEMMACOMPUTER_COWORK_ENABLED": "true"}
-}
-```
-
-The local adapter sends the scoped profile to Docker directly. External Kasm
-operators must configure an equivalent custom seccomp profile on eligible
-agents that adds only AF_VSOCK to the default allowlist; do not disable seccomp
-for the Workspace. The image startup preflight rejects a session when the
-required socket is still blocked.
-
-Every Kasm Agent eligible to run this Workspace must expose both devices.
-Mapping KVM and vhost-vsock gives the workspace access to host virtualization
-interfaces, so keep the override limited to the Claude Desktop Workspace image.
-Use dedicated, single-tenant Kasm Agents and enforce that placement in the Kasm
-scheduler; do not place this override on a shared multi-tenant agent.
-
-For an external Kasm installation, set:
-
-```text
-LEMMACOMPUTER_SANDBOX_DRIVER=kasm
-LEMMACOMPUTER_KASM_BASE_URL=https://kasm.example.com
-LEMMACOMPUTER_KASM_API_KEY=...
-LEMMACOMPUTER_KASM_API_SECRET=...
-LEMMACOMPUTER_KASM_USER_ID=...
-LEMMACOMPUTER_KASM_IMAGE_ID=...
-```
-
-Remove the Docker socket mount from the controller when using the remote
-adapter.
+Hosted nodes keep KVM disabled. For a remote node, place the controller and its
+Docker socket together in the private workspace compute boundary and configure
+the mTLS node API, private desktop host, restricted application network, and
+private HTTPS gateway/Control endpoints. Control never receives the socket.
+Follow [Workspace node deployment](workspace-node.md) for the full network,
+storage, purge, and removal contract.
 
 `LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for
 the managed runtime readiness marker. The default is 60 seconds and the
@@ -710,7 +676,7 @@ Before network exposure:
 - use an external secret manager rather than environment files;
 - use managed PostgreSQL with encryption, backup, monitoring, and restricted
   roles;
-- use the remote Kasm adapter and remove the Docker socket;
+- place the Docker/KasmVNC controller and its socket on a private remote workspace node;
 - configure trusted TLS between ingress and workspace relays;
 - isolate egress networks with host/cloud firewall policy;
 - give LiteLLM no direct NAT/Internet route; use separate model and remote-MCP

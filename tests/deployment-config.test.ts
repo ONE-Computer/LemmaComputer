@@ -72,12 +72,20 @@ const validHostedEnvironment = () => {
     LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: "c1",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL: "https://security-alerts.example.test/lemma",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: "security-alert-webhook-secret-at-least-32-characters",
-    LEMMACOMPUTER_SANDBOX_DRIVER: "kasm",
-    LEMMACOMPUTER_KASM_BASE_URL: "https://workspace.example.test",
-    LEMMACOMPUTER_KASM_API_KEY: "test-kasm-api-key",
-    LEMMACOMPUTER_KASM_API_SECRET: "test-kasm-api-secret",
-    LEMMACOMPUTER_KASM_USER_ID: "test-kasm-user",
-    LEMMACOMPUTER_KASM_IMAGE_ID: "test-kasm-image",
+    LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY: "remote",
+    LEMMACOMPUTER_WORKSPACE_NODE_URL: "https://workspace.example.test",
+    LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE: "mtls",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64: pemBase64("PRIVATE KEY"),
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64: pemBase64("CERTIFICATE"),
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64: pemBase64("PRIVATE KEY"),
+    LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST: "workspace.example.test",
+    LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST: "10.0.1.10",
+    LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK: "workspace-app-private",
+    LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL: "https://gateway.internal.example.test",
+    LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL: "https://control.internal.example.test",
+    LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true",
     LEMMACOMPUTER_LITELLM_ADMIN_URL: "https://litellm-admin-listener:8443",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64: pemBase64("CERTIFICATE"),
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64: pemBase64("CERTIFICATE"),
@@ -175,6 +183,19 @@ test("a complete hosted configuration passes the shared profile validation", () 
     profile: "hosted",
     strict: true,
   }));
+});
+
+test("remote workspace grants use only the configured private HTTPS relay upstreams", () => {
+  const values = validHostedEnvironment();
+  const services = projectServiceEnvironment(values);
+  assert.equal(services["control-api"].LITELLM_WORKSPACE_URL, values.LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL);
+  assert.equal(services["control-api"].AGENT_BRIDGE_URL, values.LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL);
+
+  const insecure = { ...values, LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL: "http://gateway.internal.example.test" };
+  assert.throws(
+    () => validateDeploymentEnvironment(insecure, { profile: "hosted", strict: true }),
+    /WORKSPACE_NODE_GATEWAY_URL must use https/i,
+  );
 });
 
 test("a complete customer-managed configuration passes the shared profile validation", () => {
@@ -333,7 +354,7 @@ test("hosted validation requires an isolated platform-operator workforce realm",
 
 test("profile validation rejects workspace and hosted-control contradictions", () => {
   const localHosted = validHostedEnvironment();
-  localHosted.LEMMACOMPUTER_SANDBOX_DRIVER = "kasm-local";
+  localHosted.LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY = "colocated";
   assert.throws(
     () => validateDeploymentEnvironment(localHosted, { profile: "hosted", strict: true }),
     /local-operator-controlled workspace execution is not allowed/i,

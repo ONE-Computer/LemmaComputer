@@ -347,11 +347,10 @@ class FakeController implements ControllerClient {
     this.lastChatRuntimes = input.chatRuntimes;
     return { providerId: `sandbox-${input.workspaceId}`, state: "ready", failureCode: null };
   }
-  async status(providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
-  async open(_providerId: string): Promise<Launch> { return { launchUrl: "https://kasm.example", expiresAt: new Date().toISOString() }; }
-  async destroy() {}
+  async status(_workspaceId: string, providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
+  async open(_workspaceId: string, _providerId: string): Promise<Launch> { return { launchUrl: "https://kasm.example", expiresAt: new Date().toISOString() }; }
   async destroyWorkspace() {}
-  async purgeWorkspace() {}
+  async purgeWorkspace(workspaceId: string, accessGeneration: number) { return { nodeId: "test-node", workspaceId, maximumPurgedGeneration: accessGeneration, completedAt: new Date().toISOString(), verified: true as const }; }
 }
 
 test("agent chat grants are deterministic, workspace-and-runtime-bound, and only issued for selected runtimes", () => {

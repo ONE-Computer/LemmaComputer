@@ -27,13 +27,12 @@ LemmaComputer account, membership, active organization, permission, and resource
 scope decide product access. The transitional adapters remain only during the
 bounded replacement sequence in [ADR 0004](adr/0004-better-auth-adoption-and-qualification.md).
 
-The workspace row is intentionally provider-neutral. `hosted` forbids local
-Docker-socket or equivalent application-host control-plane authority; it does
-not require Kasm. A remote Kasm cluster, E2B BYOC installation, or future
-provider must independently qualify against the same controls before production
-use: tenant-context projection, signed-policy projection, governed egress,
-lifecycle audit, and verified purge. The profile topology check alone is not
-provider qualification.
+The workspace row separates runtime from placement. `hosted` forbids Docker
+authority on an application/control host and requires the Lemma-owned
+Docker/KasmVNC runtime on a private remote workspace node. Every deployment
+must qualify tenant projection, signed-policy projection, governed egress,
+lifecycle audit, and verified purge; a topology check alone is not production
+qualification.
 
 The executable source of this table is
 `packages/deployment-profile/src/index.mjs`. Its adjacent declaration file is the
@@ -68,10 +67,10 @@ deployments must leave `LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` and all
 
 Tenant-configured company SSO is registered through the authenticated
 organization administration flow and cannot assign product roles from provider
-claims. A customer-managed deployment may use `kasm-local` or a remote provider
-approved by the customer operator. The current implemented remote driver is
-`kasm`. No generated service projection contains a required
-LemmaComputer-hosted identity or control-plane URL.
+claims. A customer-managed deployment may place the Lemma-owned
+`docker-kasmvnc` node locally or remotely. Hosted requires the same runtime on a
+private remote node. No commercial Kasm control-plane credential or generated
+LemmaComputer-hosted identity is part of this contract.
 
 The checked-in network-deny smoke disables Node DNS, HTTP, HTTPS, TCP, TLS, and
 Fetch APIs before running the customer-managed preflight:
@@ -92,9 +91,9 @@ External ID tenant/client group for its transitional adapter even though Better
 Auth is the primary customer identity plane. Run
 `npm run qualify:external-id -- --file=/absolute/path/to/hosted.env` before its
 manual invitation and MFA smoke. That adapter qualification does not replace
-the Better Auth customer-journey gates. The current configuration contract
-recognizes remote `kasm`; topology recognition is not a claim that the adapter
-has completed production qualification.
+the Better Auth customer-journey gates. The configuration contract recognizes
+`colocated` and `remote` workspace-node topology; recognition is not a claim
+that a particular infrastructure deployment has completed qualification.
 
 `npm run worktree:init` writes the `worktree` selection for isolated local
 development. A production consumer must call `resolveDeploymentProfile` with

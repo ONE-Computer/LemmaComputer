@@ -158,6 +158,7 @@ export class PolicyBundleSigner {
   issue(input: {
     identity: IdentityContext;
     workspaceId: string;
+    accessGeneration: number;
     policy: RuntimePolicy;
     routes: PolicyBundlePayload["routes"];
     now?: Date;
@@ -186,6 +187,7 @@ export class PolicyBundleSigner {
       tenantId: input.identity.tenantId,
       subjectId: input.identity.subjectId,
       workspaceId: input.workspaceId,
+      accessGeneration: input.accessGeneration,
       policy: input.policy,
       routes: input.routes,
       agentResources: selectedAgents.map((agent) => {
@@ -221,6 +223,7 @@ export function verifySignedPolicyBundle(
   expected: {
     identity?: IdentityContext;
     workspaceId?: string;
+    accessGeneration?: number;
     policy?: RuntimePolicy;
     minimumPolicyVersion?: number;
     now?: Date;
@@ -275,6 +278,7 @@ export function verifySignedPolicyBundle(
       || payload.subjectId !== expected.identity.subjectId
     )
     || expected.workspaceId && payload.workspaceId !== expected.workspaceId
+    || expected.accessGeneration !== undefined && payload.accessGeneration !== expected.accessGeneration
     || expected.policy && !exactJsonEqual(payload.policy, runtimePolicySchema.parse(expected.policy))
   ) {
     throw new PolicyVerificationError("POLICY_BINDING_MISMATCH", "The signed policy does not match its enforcement boundary");

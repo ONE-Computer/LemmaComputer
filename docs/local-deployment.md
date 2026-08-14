@@ -306,7 +306,7 @@ their values, so remove them manually after the managed-provider cutover.
 | `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID`, `LEMMACOMPUTER_BOOTSTRAP_USER_ID`, `LEMMACOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
 | Public URL and port variables | The deployment is intentionally using origins other than the localhost defaults |
 | `LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED=true` | Claude Cowork is enabled on a customer-managed host that exposes `/dev/kvm` and `/dev/vhost-vsock` and has memory/disk headroom |
-| `LEMMACOMPUTER_KASM_*` variables | `LEMMACOMPUTER_SANDBOX_DRIVER=kasm` uses an external Kasm installation |
+| `LEMMACOMPUTER_WORKSPACE_NODE_*` remote values | The Docker/KasmVNC runtime is placed on a private remote node; see [Workspace node deployment](workspace-node.md) |
 
 Leave generated secrets unchanged and stable while their dependent state
 exists. See [Configuration and operations](operations.md) for the complete

@@ -6,7 +6,7 @@ import {
   assertHostedCapability,
   assertOrganizationCountAllowed,
   assertSignInProviderAllowed,
-  assertWorkspaceDriverTopologyAllowed,
+  assertWorkspaceNodeTopologyAllowed,
   assertWorkspaceProviderBoundaryAllowed,
   deploymentProfileCapabilityMatrix,
   deploymentProfileIds,
@@ -84,11 +84,11 @@ test("hosted requires a qualified remote provider boundary without selecting a v
   assert.doesNotThrow(() => assertSignInProviderAllowed("hosted", "external-id"));
   assert.doesNotThrow(() => assertSignInProviderAllowed("hosted", "enterprise-entra"));
   assert.doesNotThrow(() => assertHostedCapability("hosted", "backgroundJobs"));
-  assert.throws(() => assertWorkspaceDriverTopologyAllowed("hosted", "kasm-local"), /local-operator-controlled.*not allowed/i);
-  assert.doesNotThrow(() => assertWorkspaceDriverTopologyAllowed("hosted", "kasm"));
+  assert.throws(() => assertWorkspaceNodeTopologyAllowed("hosted", "colocated"), /local-operator-controlled.*not allowed/i);
+  assert.doesNotThrow(() => assertWorkspaceNodeTopologyAllowed("hosted", "remote"));
   assert.doesNotThrow(() => assertWorkspaceProviderBoundaryAllowed("hosted", "remote-isolated"));
-  assert.doesNotThrow(() => assertWorkspaceDriverTopologyAllowed("worktree", "kasm-local"));
-  assert.doesNotThrow(() => assertWorkspaceDriverTopologyAllowed("worktree", "kasm"));
+  assert.doesNotThrow(() => assertWorkspaceNodeTopologyAllowed("worktree", "colocated"));
+  assert.doesNotThrow(() => assertWorkspaceNodeTopologyAllowed("worktree", "remote"));
 
   const hostedPolicy = resolveDeploymentProfile("hosted").workspaceProviderPolicy;
   assert.deepEqual(hostedPolicy.allowedExecutionBoundaries, ["remote-isolated"]);
@@ -105,10 +105,12 @@ test("hosted requires a qualified remote provider boundary without selecting a v
 test("both production profiles render the same service topology from the same image contract", () => {
   const base = initializedEnvironment();
   const sharedImage = "release-same-commit";
+  const sharedWorkspaceImage = "lemmacomputer/workspace@sha256:same-runtime-image";
   const customerManaged = {
     ...base,
     LEMMACOMPUTER_INSTALLATION_KIND: "customer-managed",
     LEMMACOMPUTER_IMAGE_TAG: sharedImage,
+    LEMMACOMPUTER_WORKSPACE_IMAGE: sharedWorkspaceImage,
     LEMMACOMPUTER_ENTRA_TENANT_ID: "customer-directory",
     LEMMACOMPUTER_ENTRA_CLIENT_ID: "customer-client",
     LEMMACOMPUTER_ENTRA_CLIENT_SECRET: "customer-secret",
@@ -123,6 +125,7 @@ test("both production profiles render the same service topology from the same im
     LEMMACOMPUTER_POSTMARK_FROM: "login@example.test",
     LEMMACOMPUTER_INVITATION_DELIVERY_MODE: "email",
     LEMMACOMPUTER_IMAGE_TAG: sharedImage,
+    LEMMACOMPUTER_WORKSPACE_IMAGE: sharedWorkspaceImage,
     LEMMACOMPUTER_PUBLIC_WEB_URL: "https://hosted.example.test",
     LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID: "hosted-external-directory",
     LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN: "hosted-test",
@@ -135,12 +138,20 @@ test("both production profiles render the same service topology from the same im
     LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: "c1",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL: "https://security-alerts.example.test/lemma",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: "security-alert-webhook-secret-at-least-32-characters",
-    LEMMACOMPUTER_SANDBOX_DRIVER: "kasm",
-    LEMMACOMPUTER_KASM_BASE_URL: "https://workspace.example.test",
-    LEMMACOMPUTER_KASM_API_KEY: "kasm-key",
-    LEMMACOMPUTER_KASM_API_SECRET: "kasm-secret",
-    LEMMACOMPUTER_KASM_USER_ID: "kasm-user",
-    LEMMACOMPUTER_KASM_IMAGE_ID: "kasm-image",
+    LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY: "remote",
+    LEMMACOMPUTER_WORKSPACE_NODE_URL: "https://workspace.example.test",
+    LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE: "mtls",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64: "dGVzdA==",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64: "dGVzdA==",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64: "dGVzdA==",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64: "dGVzdA==",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64: "dGVzdA==",
+    LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST: "workspace.example.test",
+    LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST: "10.0.1.10",
+    LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK: "workspace-app-private",
+    LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL: "https://gateway.internal.example.test",
+    LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL: "https://control.internal.example.test",
+    LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true",
     LEMMACOMPUTER_LITELLM_ADMIN_URL: "https://litellm-admin-listener:8443",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64: "dGVzdA==",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64: "dGVzdA==",
@@ -157,6 +168,8 @@ test("both production profiles render the same service topology from the same im
     Object.keys(projectServiceEnvironment(hosted)).sort(),
   );
   assert.equal(customerManaged.LEMMACOMPUTER_IMAGE_TAG, hosted.LEMMACOMPUTER_IMAGE_TAG);
+  assert.equal(projectServiceEnvironment(customerManaged)["workspace-controller"].KASM_LOCAL_IMAGE, sharedWorkspaceImage);
+  assert.equal(projectServiceEnvironment(hosted)["workspace-controller"].KASM_LOCAL_IMAGE, sharedWorkspaceImage);
 });
 
 test("customer-managed service projection has no LemmaComputer-hosted control-plane dependency", () => {

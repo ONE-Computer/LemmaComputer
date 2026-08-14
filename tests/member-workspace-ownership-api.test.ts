@@ -52,10 +52,10 @@ const authentication = (actor: SessionPrincipal) => ({
 const controller: ControllerClient = {
   create: async ({ workspaceId }) => ({ providerId: `sandbox-${workspaceId}`, state: "ready", failureCode: null }),
   updateEgressPolicy: async () => undefined,
-  status: async (providerId) => ({ providerId, state: "ready", failureCode: null }),
+  status: async (_workspaceId, providerId) => ({ providerId, state: "ready", failureCode: null }),
   open: async () => ({ launchUrl: "http://gateway/workspace", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
-  destroy: async () => undefined,
-  purgeWorkspace: async () => undefined,
+  destroyWorkspace: async () => undefined,
+  purgeWorkspace: async (workspaceId, accessGeneration) => ({ nodeId: "test-node", workspaceId, maximumPurgedGeneration: accessGeneration, completedAt: new Date().toISOString(), verified: true }),
 };
 
 const appFor = (actor: SessionPrincipal, store: MemoryWorkspaceStore) => createControlServer(

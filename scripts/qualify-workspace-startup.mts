@@ -94,6 +94,7 @@ try {
   const policyBundle = signer.issue({
     identity,
     workspaceId,
+    accessGeneration: 1,
     policy,
     routes: { modelGateway, mcpControl },
   });
@@ -103,7 +104,7 @@ try {
   const agentBridge = { baseUrl: mcpControl, token: agentBridgeToken };
   const gatewayGrant = await gateway.ensureGrant({ workspaceId, accessGeneration: 1, identity, agentId, policy });
   gatewayGranted = true;
-  const created = await controller("/internal/v1/sandboxes", {
+  const created = await controller(`/internal/v2/workspaces/${workspaceId}/sandbox`, {
     method: "POST",
     body: JSON.stringify({
       workspaceId,
@@ -130,7 +131,7 @@ try {
     throw new Error(`Workspace did not become ready: ${JSON.stringify({ providerId, state: created?.state })}`);
   }
   await workspaceStore.update(workspaceId, { state: "ready", providerId });
-  const status = await controller(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`);
+  const status = await controller(`/internal/v2/workspaces/${workspaceId}/sandboxes/${encodeURIComponent(providerId)}`);
   if (status?.state !== "ready") throw new Error(`Workspace readiness was not durable: ${JSON.stringify(status)}`);
   const hermesResponse = await fetch(`http://lemmacomputer-sandbox-${workspaceId}:8642/health`, {
     headers: { authorization: `Bearer ${chatRuntimeKey}` },
@@ -153,14 +154,14 @@ try {
 } finally {
   const cleanupErrors: unknown[] = [];
   if (providerId) {
-    await controller(`/internal/v1/sandboxes/${encodeURIComponent(providerId)}`, { method: "DELETE" })
+    await controller(`/internal/v2/workspaces/${workspaceId}/sandboxes/${encodeURIComponent(providerId)}`, { method: "DELETE" })
       .catch((error) => cleanupErrors.push(error));
   }
   if (gatewayGranted && workspaceId && agentId) {
     await gateway.revoke(workspaceId, agentId).catch((error) => cleanupErrors.push(error));
   }
   if (workspaceId && (!qualificationError || !keepFailedWorkspace)) {
-    await controller(`/internal/v1/workspaces/${workspaceId}/storage`, { method: "DELETE" })
+    await controller(`/internal/v2/workspaces/${workspaceId}/storage?accessGeneration=1`, { method: "DELETE" })
       .catch((error) => cleanupErrors.push(error));
   } else if (workspaceId) {
     process.stderr.write(`Retained failed qualification storage for ${workspaceId}\n`);

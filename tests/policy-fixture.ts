@@ -6,6 +6,7 @@ export const policyFixture = (
   policy: RuntimePolicy,
   workspaceId: string,
   identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" },
+  accessGeneration = 1,
 ) => {
   const { privateKey } = generateKeyPairSync("ed25519");
   const signer = new PolicyBundleSigner({
@@ -19,6 +20,7 @@ export const policyFixture = (
   const bundle = signer.issue({
     identity,
     workspaceId,
+    accessGeneration,
     policy,
     routes: {
       modelGateway: "http://litellm:4000",

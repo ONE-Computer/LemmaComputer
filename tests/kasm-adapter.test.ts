@@ -6,9 +6,8 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   buildKasmClipboardLaunch,
-  DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS,
-  KasmLocalAdapter,
-  mapKasmState,
+  DEFAULT_DOCKER_WORKSPACE_STARTUP_TIMEOUT_MS,
+  DockerKasmVncAdapter,
 } from "@lemmacomputer/kasm-adapter";
 import { policyFixture } from "./policy-fixture.js";
 
@@ -51,15 +50,8 @@ test("Kasm launch forces the native clipboard contract instead of browser-local 
   assert.equal(disabled.clipboard.reasonCode, "CLIPBOARD_POLICY_DISABLED");
 });
 
-test("Kasm operational states map to the canonical sandbox contract", () => {
-  assert.equal(mapKasmState("running"), "ready");
-  assert.equal(mapKasmState("starting"), "provisioning");
-  assert.equal(mapKasmState("stopped"), "stopped");
-  assert.equal(mapKasmState("error"), "failed");
-});
-
 test("local Kasm gives workspace initialization a production-safe startup window", () => {
-  assert.equal(DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS, 60_000);
+  assert.equal(DEFAULT_DOCKER_WORKSPACE_STARTUP_TIMEOUT_MS, 60_000);
 });
 
 test("local Kasm observes readiness at the timeout boundary", async () => {
@@ -86,7 +78,7 @@ test("local Kasm observes readiness at the timeout boundary", async () => {
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   try {
-    const adapter = new KasmLocalAdapter({
+    const adapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
@@ -131,7 +123,7 @@ test("local Kasm allows a running workspace to recover from transient unhealthy 
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   try {
-    const adapter = new KasmLocalAdapter({
+    const adapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
@@ -179,7 +171,7 @@ test("local Kasm reconciliation restores governed endpoints after Compose replac
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   try {
-    const adapter = new KasmLocalAdapter({
+    const adapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
@@ -219,6 +211,7 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
       response.end(JSON.stringify({
         Config: {
           Labels: {
+            "com.lemmacomputer.workspace-id": "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
             "com.lemmacomputer.workspace-network": workspaceNetwork,
             "com.lemmacomputer.gateway-attached": "true",
             "com.lemmacomputer.control-attached": "true",
@@ -258,7 +251,7 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   try {
-    const adapter = new KasmLocalAdapter({
+    const adapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
@@ -268,7 +261,7 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
       relayImage: "sha256:pinned-relay",
       installationKind: "customer-managed",
     });
-    await assert.doesNotReject(adapter.destroy("sandbox-id"));
+    await assert.doesNotReject(adapter.destroy("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", "sandbox-id"));
     assert.equal(networkRemoved, true);
     assert.equal(
       requests.some((item) => (
@@ -286,7 +279,7 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
 
 test("local Cowork virtualization is rejected on hosted multi-tenant nodes", () => {
   assert.throws(
-    () => new KasmLocalAdapter({
+    () => new DockerKasmVncAdapter({
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
       controlNetwork: "lemmacomputer-control",
@@ -303,6 +296,42 @@ test("local Cowork virtualization is rejected on hosted multi-tenant nodes", () 
       );
       return true;
     },
+  );
+});
+
+test("remote Docker/KasmVNC nodes fail closed without private TLS relay configuration", async () => {
+  assert.throws(
+    () => new DockerKasmVncAdapter({
+      topology: "remote",
+      image: "sha256:pinned-workspace",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "hosted",
+    }),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "WORKSPACE_NODE_REMOTE_CONFIGURATION_INCOMPLETE",
+  );
+
+  const adapter = new DockerKasmVncAdapter({
+    topology: "remote",
+    nodeId: "workspace-node-test",
+    publicHost: "workspace.internal.example.test",
+    relayBindHost: "10.0.1.10",
+    relayTlsCertificate: "test-certificate",
+    relayTlsKey: "test-private-key",
+    applicationNetwork: "workspace-app-private",
+    image: "sha256:pinned-workspace",
+    networkPrefix: "lemmacomputer-workspace",
+    controlNetwork: "lemmacomputer-control",
+    gatewayContainer: "unused-on-remote-nodes",
+    relayImage: "sha256:pinned-relay",
+    installationKind: "hosted",
+  });
+  await assert.rejects(
+    (adapter as unknown as { ensureRemoteApplicationRelay: (...args: unknown[]) => Promise<void> })
+      .ensureRemoteApplicationRelay("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", "gateway", "http://litellm:4000", 4000, "workspace-network"),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "WORKSPACE_NODE_REMOTE_UPSTREAM_INSECURE",
   );
 });
 
@@ -380,6 +409,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     if (request.method === "POST" && path === "/volumes/create") {
       workspaceVolumeRecord = { Name: String(body.Name), Labels: body.Labels as Record<string, unknown> };
     }
+    if (request.method === "DELETE" && path.startsWith("/volumes/")) {
+      workspaceVolumeRecord = undefined;
+    }
     response.end(JSON.stringify({ ok: true }));
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
@@ -427,7 +459,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
   };
   const signedPolicy = policyFixture(policy, "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
   try {
-    const adapter = new KasmLocalAdapter({
+    const adapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
@@ -443,9 +475,18 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       portStart: 16920,
       portEnd: 16920,
     });
-    const createInput: Parameters<KasmLocalAdapter["create"]>[0] = {
+    const createInput: Parameters<DockerKasmVncAdapter["create"]>[0] = {
       workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
       accessGeneration: 1,
+      authority: {
+        tenantId: "acme",
+        subjectId: "alex",
+        workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+        accessGeneration: 1,
+        correlationId: "correlation-kasm-adapter",
+        policyDigest: policy.policyHash,
+        policyKeyId: signedPolicy.bundle.keyId,
+      },
       policy,
       policyBundle: signedPolicy.bundle,
       policyVerificationKeys: signedPolicy.keys,
@@ -592,8 +633,17 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       },
     };
     const updatedSignedPolicy = policyFixture(updatedPolicy, "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
-    await adapter.updateEgressPolicy("sandbox-id", {
+    await adapter.updateEgressPolicy("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", "sandbox-id", {
       workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+      authority: {
+        tenantId: "acme",
+        subjectId: "alex",
+        workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+        accessGeneration: 1,
+        correlationId: "correlation-egress-update",
+        policyDigest: updatedPolicy.policyHash,
+        policyKeyId: updatedSignedPolicy.bundle.keyId,
+      },
       policy: updatedPolicy,
       policyBundle: updatedSignedPolicy.bundle,
       policyVerificationKeys: updatedSignedPolicy.keys,
@@ -619,10 +669,10 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.equal(requests.some((item) => item.method === "DELETE" && item.path === "/containers/sandbox-id?force=true&v=true"), false);
     // Simulate Compose replacing Control and dropping its dynamic endpoint.
     controlConnected = false;
-    await adapter.status("sandbox-id");
+    await adapter.status("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", "sandbox-id");
     assert.equal(requests.filter((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "lemmacomputer-litellm").length, 1);
     assert.equal(requests.filter((item) => item.path === `/networks/${workspaceNetwork}/connect` && item.body.Container === "lemmacomputer-control-api").length, 2);
-    const launch = await adapter.open("sandbox-id");
+    const launch = await adapter.open("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", "sandbox-id");
     assert.deepEqual(launch.ingressTarget, {
       protocol: "https",
       host: "lemma-ws-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay",
@@ -632,7 +682,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const relayCreate = requests.find((item) => item.method === "POST" && item.path.includes("/containers/create?name=lemma-ws-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-relay"));
     assert.ok(relayCreate);
     assert.ok(new URLSearchParams(relayCreate.path.split("?")[1]).get("name")!.length <= 63);
-    const standardAdapter = new KasmLocalAdapter({
+    const standardAdapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
@@ -655,7 +705,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.deepEqual(standardHost.SecurityOpt, ["no-new-privileges"]);
     assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("LEMMACOMPUTER_COWORK_ENABLED=false"));
 
-    await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
+    await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", 1);
     assert.ok(requests.some((item) => item.method === "DELETE" && item.path === `/volumes/${workspaceVolume}?force=true`));
   } finally {
     server.closeAllConnections();
@@ -669,26 +719,30 @@ test("a paused stale purge can delete only its generation-specific volume", asyn
   const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
   const socketPath = join(directory, "docker.sock");
   const deleted: string[] = [];
+  let volumeExists = true;
   const server = createServer(async (request, response) => {
     for await (const _chunk of request) { /* drain */ }
     const path = request.url?.slice("/v1.47".length) ?? "";
     response.setHeader("content-type", "application/json");
     if (request.method === "GET" && path.startsWith("/volumes?filters=")) {
-      response.end(JSON.stringify({ Volumes: [{
+      response.end(JSON.stringify({ Volumes: volumeExists ? [{
         Name: "lemmacomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-g2",
         Labels: {
           "com.lemmacomputer.workspace-id": "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
           "com.lemmacomputer.storage-generation": "2",
         },
-      }] }));
+      }] : [] }));
       return;
     }
-    if (request.method === "DELETE") deleted.push(path);
+    if (request.method === "DELETE") {
+      deleted.push(path);
+      volumeExists = false;
+    }
     response.end(JSON.stringify({ ok: true }));
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   try {
-    const adapter = new KasmLocalAdapter({
+    const adapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
@@ -733,7 +787,7 @@ test("local Kasm retries container creation when Docker drops the workspace netw
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   try {
-    const adapter = new KasmLocalAdapter({
+    const adapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",
@@ -781,7 +835,7 @@ test("local Kasm surfaces allowlisted exit-78 diagnostics before cleanup", async
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   try {
-    const adapter = new KasmLocalAdapter({
+    const adapter = new DockerKasmVncAdapter({
       socketPath,
       image: "sha256:pinned-workspace",
       networkPrefix: "lemmacomputer-workspace",

@@ -1,5 +1,5 @@
 import {
-  assertWorkspaceDriverTopologyAllowed,
+  assertWorkspaceNodeTopologyAllowed,
   resolveDeploymentProfile,
 } from "../packages/deployment-profile/src/index.mjs";
 
@@ -163,20 +163,31 @@ const sections = [
     variable("LEMMACOMPUTER_MS365_TRUST_PROXY_HOPS", "0", "Trusted proxy hops for Microsoft 365 MCP.", { kind: "integer" }),
     variable("LEMMACOMPUTER_MS365_LOG_LEVEL", "info", "Microsoft 365 MCP log level."),
   ]),
-  section("Workspace driver", "The canonical LEMMACOMPUTER_* names replace legacy SANDBOX_DRIVER and KASM_* inputs. env:update migrates existing values without rotation.", [
-    variable("LEMMACOMPUTER_SANDBOX_DRIVER", "kasm-local", "Workspace driver: kasm-local or kasm.", { kind: "enum", values: ["kasm-local", "kasm"] }),
+  section("Workspace runtime and node topology", "One Lemma-owned Docker/KasmVNC runtime runs on a colocated or private remote workspace node. Runtime selection never grants Docker authority to Control.", [
+    variable("LEMMACOMPUTER_WORKSPACE_RUNTIME", "docker-kasmvnc", "Workspace runtime implementation.", { kind: "enum", values: ["docker-kasmvnc"] }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY", "colocated", "Workspace-node placement: colocated or remote.", { kind: "enum", values: ["colocated", "remote"] }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_URL", "http://workspace-controller:4101", "Private Control-to-workspace-node URL.", { kind: "url" }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_ID", "workspace-node-1", "Stable audit identifier for the configured workspace node."),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE", "token", "Node request authentication: token for colocated development or mutual TLS for remote nodes.", { kind: "enum", values: ["token", "mtls"] }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64", "", "Base64 PEM CA for the remote node and private desktop relay.", { secret: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64", "", "Base64 PEM workspace-node server certificate.", { secret: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64", "", "Base64 PEM workspace-node server private key.", { secret: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64", "", "Base64 PEM Control workload client certificate.", { secret: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64", "", "Base64 PEM Control workload client private key.", { secret: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_NAME", "workspace-node", "Expected TLS server name for Control's node client."),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_CLIENT_COMMON_NAME", "lemmacomputer-control", "Required Control client-certificate common name."),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST", "127.0.0.1", "Private relay DNS name or address returned only to workspace ingress."),
+    variable("LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST", "127.0.0.1", "Private node interface used for desktop relay port bindings."),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK", "", "Pre-created restricted node network used only by fixed Control and gateway relays.", { optional: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CA_B64", "", "Optional base64 PEM CA for private Control and gateway relay upstreams.", { secret: true, optional: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL", "", "Private HTTPS gateway endpoint reachable only from the remote node application network.", { kind: "url", optional: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL", "", "Private HTTPS Control endpoint reachable only from the remote node application network.", { kind: "url", optional: true }),
     variable("LEMMACOMPUTER_WORKSPACE_IMAGE", "lemmacomputer/workspace:dev", "Workspace container image."),
     variable("LEMMACOMPUTER_TIME_ZONE", "Etc/UTC", "Trusted IANA timezone for workspace and relative calendar times.", { initialize: "time-zone" }),
     variable("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX", "lemmacomputer-workspace", "Local Kasm workspace network-name prefix."),
     variable("LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK", "lemmacomputer-egress", "Local Kasm egress network name."),
     variable("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED", "false", "Expose KVM devices only to supported local desktop workspaces.", { kind: "boolean" }),
     variable("LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS", "60000", "Local workspace startup timeout in milliseconds.", { kind: "integer" }),
-    variable("LEMMACOMPUTER_KASM_PUBLIC_HOST", "127.0.0.1", "Host address advertised by the local Kasm adapter."),
-    variable("LEMMACOMPUTER_KASM_BASE_URL", "", "Kasm Developer API base URL when LEMMACOMPUTER_SANDBOX_DRIVER=kasm.", { optional: true }),
-    variable("LEMMACOMPUTER_KASM_API_KEY", "", "Kasm Developer API key.", { secret: true }),
-    variable("LEMMACOMPUTER_KASM_API_SECRET", "", "Kasm Developer API secret.", { secret: true }),
-    variable("LEMMACOMPUTER_KASM_USER_ID", "", "Kasm user ID."),
-    variable("LEMMACOMPUTER_KASM_IMAGE_ID", "", "Kasm image ID."),
   ]),
 ];
 
@@ -226,17 +237,10 @@ export const environmentAliases = new Map([
   ["LEMMACOMPUTER_ENTRA_CLIENT_ID", "LEMMACOMPUTER_MS365_CLIENT_ID"],
   ["LEMMACOMPUTER_ENTRA_CLIENT_SECRET", "LEMMACOMPUTER_MS365_CLIENT_SECRET"],
   ["KASM_LOCAL_NETWORK_PREFIX", "KASM_LOCAL_NETWORK"],
-  ["LEMMACOMPUTER_SANDBOX_DRIVER", "SANDBOX_DRIVER"],
   ["LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX", "KASM_LOCAL_NETWORK_PREFIX"],
   ["LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK", "KASM_LOCAL_EGRESS_NETWORK"],
   ["LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED", "KASM_LOCAL_KVM_ENABLED"],
   ["LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS", "KASM_LOCAL_STARTUP_TIMEOUT_MS"],
-  ["LEMMACOMPUTER_KASM_PUBLIC_HOST", "KASM_PUBLIC_HOST"],
-  ["LEMMACOMPUTER_KASM_BASE_URL", "KASM_BASE_URL"],
-  ["LEMMACOMPUTER_KASM_API_KEY", "KASM_API_KEY"],
-  ["LEMMACOMPUTER_KASM_API_SECRET", "KASM_API_SECRET"],
-  ["LEMMACOMPUTER_KASM_USER_ID", "KASM_USER_ID"],
-  ["LEMMACOMPUTER_KASM_IMAGE_ID", "KASM_IMAGE_ID"],
 ]);
 
 export const coupledEnvironmentGroups = Object.freeze([
@@ -253,6 +257,13 @@ export const coupledEnvironmentGroups = Object.freeze([
     "LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64",
     "LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64",
     "LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64",
+  ],
+  [
+    "LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64",
+    "LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64",
+    "LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64",
+    "LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64",
+    "LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64",
   ],
 ]);
 
@@ -388,17 +399,37 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
     }
   }
 
-  if (values.LEMMACOMPUTER_SANDBOX_DRIVER === "kasm") {
-    const remoteKasm = ["LEMMACOMPUTER_KASM_BASE_URL", "LEMMACOMPUTER_KASM_API_KEY", "LEMMACOMPUTER_KASM_API_SECRET", "LEMMACOMPUTER_KASM_USER_ID", "LEMMACOMPUTER_KASM_IMAGE_ID"];
-    for (const key of remoteKasm) if (!hasValue(values[key])) errors.push(`${key} is required when LEMMACOMPUTER_SANDBOX_DRIVER=kasm`);
-    if (hasValue(values.LEMMACOMPUTER_KASM_BASE_URL) && !isUrl(values.LEMMACOMPUTER_KASM_BASE_URL)) errors.push("LEMMACOMPUTER_KASM_BASE_URL must be an absolute URL when LEMMACOMPUTER_SANDBOX_DRIVER=kasm");
-  }
-
   if (profileCapabilities) {
     try {
-      assertWorkspaceDriverTopologyAllowed(profileCapabilities.id, values.LEMMACOMPUTER_SANDBOX_DRIVER);
+      assertWorkspaceNodeTopologyAllowed(profileCapabilities.id, values.LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (values.LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY === "remote") {
+    if (!values.LEMMACOMPUTER_WORKSPACE_NODE_URL.startsWith("https:")) {
+      errors.push("LEMMACOMPUTER_WORKSPACE_NODE_URL must use https for remote nodes");
+    }
+    if (values.LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE !== "mtls") {
+      errors.push("LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE must be mtls for remote nodes");
+    }
+    for (const key of [
+      "LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64",
+      "LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64",
+      "LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64",
+      "LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64",
+      "LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64",
+      "LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST",
+      "LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST",
+      "LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK",
+      "LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL",
+      "LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL",
+    ]) if (!hasValue(values[key])) errors.push(`${key} is required for remote workspace nodes`);
+    for (const key of ["LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL", "LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL"]) {
+      if (hasValue(values[key]) && !values[key].startsWith("https:")) errors.push(`${key} must use https for remote workspace nodes`);
+    }
+    if (values.LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS !== "true") {
+      errors.push("LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS must be true for remote workspace relays");
     }
   }
 
@@ -502,6 +533,7 @@ export function worktreeEnvironmentOverrides({ slug, id, portOffset }) {
     ["LEMMACOMPUTER_APP_VERSION", `dev-${id}`],
     ["LEMMACOMPUTER_MS365_IMAGE_TAG", `dev-${id}`],
     ["LEMMACOMPUTER_WORKSPACE_IMAGE", `lemmacomputer/workspace:dev-${id}`],
+    ["LEMMACOMPUTER_WORKSPACE_NODE_ID", `${slug}-node`],
     ["LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX", `${slug}-workspace`],
     ["LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK", `${slug}-egress`],
     ["LEMMACOMPUTER_WEB_PORT", String(4174 + portOffset)],
@@ -555,8 +587,11 @@ export function projectServiceEnvironment(input = {}) {
   const ms365Tenant = v("LEMMACOMPUTER_MS365_TENANT_ID") || v("LEMMACOMPUTER_ENTRA_TENANT_ID");
   const ms365Secret = v("LEMMACOMPUTER_MS365_CLIENT_SECRET") || v("LEMMACOMPUTER_ENTRA_CLIENT_SECRET");
   const controlUrl = `http://control-api:${runtimeDefaults.controlPort}`;
-  const controllerUrl = `http://workspace-controller:${runtimeDefaults.controllerPort}`;
+  const controllerUrl = v("LEMMACOMPUTER_WORKSPACE_NODE_URL");
   const litellmUrl = `http://${runtimeDefaults.litellmHost}:4000`;
+  const remoteNode = v("LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY") === "remote";
+  const workspaceGatewayUrl = remoteNode ? v("LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL") : litellmUrl;
+  const workspaceControlUrl = remoteNode ? v("LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL") : controlUrl;
   const ms365Url = `http://${runtimeDefaults.ms365Host}:3000`;
   const consentUrl = `http://${runtimeDefaults.consentHost}:8788`;
   const publicWebOrigin = new URL(v("LEMMACOMPUTER_PUBLIC_WEB_URL")).origin;
@@ -654,7 +689,17 @@ export function projectServiceEnvironment(input = {}) {
       CONTROLLER_HOST: runtimeDefaults.controllerHost,
       CONTROLLER_PORT: runtimeDefaults.controllerPort,
       CONTROLLER_INTERNAL_TOKEN: v("LEMMACOMPUTER_CONTROLLER_TOKEN"),
-      SANDBOX_DRIVER: v("LEMMACOMPUTER_SANDBOX_DRIVER"),
+      WORKSPACE_RUNTIME: v("LEMMACOMPUTER_WORKSPACE_RUNTIME"),
+      WORKSPACE_NODE_ID: v("LEMMACOMPUTER_WORKSPACE_NODE_ID"),
+      WORKSPACE_NODE_TOPOLOGY: v("LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY"),
+      WORKSPACE_NODE_AUTH_MODE: v("LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE"),
+      WORKSPACE_NODE_TLS_CA_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64"),
+      WORKSPACE_NODE_TLS_SERVER_CERT_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64"),
+      WORKSPACE_NODE_TLS_SERVER_KEY_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64"),
+      WORKSPACE_NODE_CLIENT_COMMON_NAME: v("LEMMACOMPUTER_WORKSPACE_NODE_CLIENT_COMMON_NAME"),
+      WORKSPACE_RELAY_BIND_HOST: v("LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST"),
+      WORKSPACE_NODE_APPLICATION_NETWORK: v("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK"),
+      WORKSPACE_NODE_APPLICATION_TLS_CA_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CA_B64"),
       LEMMACOMPUTER_INSTALLATION_KIND: v("LEMMACOMPUTER_INSTALLATION_KIND"),
       DOCKER_SOCKET_PATH: "/var/run/docker.sock",
       KASM_LOCAL_NETWORK_PREFIX: v("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX"),
@@ -665,16 +710,11 @@ export function projectServiceEnvironment(input = {}) {
       KASM_LOCAL_RELAY_IMAGE: "node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2",
       KASM_LOCAL_EGRESS_PROXY_IMAGE: `lemmacomputer/control-runtime:${v("LEMMACOMPUTER_IMAGE_TAG")}`,
       KASM_LOCAL_EGRESS_NETWORK: v("LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK"),
-      KASM_PUBLIC_HOST: v("LEMMACOMPUTER_KASM_PUBLIC_HOST"),
+      KASM_PUBLIC_HOST: v("LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST"),
       KASM_LOCAL_KVM_ENABLED: v("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED"),
       KASM_LOCAL_STARTUP_TIMEOUT_MS: v("LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS"),
       KASM_LOCAL_TIME_ZONE: v("LEMMACOMPUTER_TIME_ZONE"),
       CHAT_ATTACHMENT_RETENTION_DAYS: v("LEMMACOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS"),
-      KASM_BASE_URL: v("LEMMACOMPUTER_KASM_BASE_URL"),
-      KASM_API_KEY: v("LEMMACOMPUTER_KASM_API_KEY"),
-      KASM_API_SECRET: v("LEMMACOMPUTER_KASM_API_SECRET"),
-      KASM_USER_ID: v("LEMMACOMPUTER_KASM_USER_ID"),
-      KASM_IMAGE_ID: v("LEMMACOMPUTER_KASM_IMAGE_ID"),
       POLICY_VERIFICATION_KEYS_B64: v("LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64"),
     },
     "db-migrate": {
@@ -693,6 +733,10 @@ export function projectServiceEnvironment(input = {}) {
       WEB_PROXY_TOKEN: v("LEMMACOMPUTER_WEB_PROXY_TOKEN"),
       CONTROLLER_URL: controllerUrl,
       CONTROLLER_INTERNAL_TOKEN: v("LEMMACOMPUTER_CONTROLLER_TOKEN"),
+      CONTROLLER_TLS_CA_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64"),
+      CONTROLLER_TLS_CLIENT_CERT_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64"),
+      CONTROLLER_TLS_CLIENT_KEY_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64"),
+      CONTROLLER_TLS_SERVER_NAME: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_NAME"),
       MCP_EGRESS_PROXY_TOKEN: v("LEMMACOMPUTER_MCP_EGRESS_PROXY_TOKEN"),
       HOSTED_MCP_EGRESS_ORIGINS: v("LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS"),
       DATABASE_URL: controlDatabaseUrl(v),
@@ -716,13 +760,13 @@ export function projectServiceEnvironment(input = {}) {
       LITELLM_ADMIN_TLS_CLIENT_CERT_B64: v("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64"),
       LITELLM_ADMIN_TLS_CLIENT_KEY_B64: v("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64"),
       LITELLM_ADMIN_TLS_SERVER_NAME: v("LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME"),
-      LITELLM_WORKSPACE_URL: litellmUrl,
+      LITELLM_WORKSPACE_URL: workspaceGatewayUrl,
       LITELLM_PUBLIC_URL: litellmPublicUrl,
       LITELLM_MASTER_KEY: v("LEMMACOMPUTER_LITELLM_MASTER_KEY"),
       LITELLM_CREDENTIAL_SECRET: v("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"),
       PUBLIC_WEB_URL: v("LEMMACOMPUTER_PUBLIC_WEB_URL"),
       M365_AUTHORIZATION_ORIGIN: m365AuthorizationOrigin,
-      AGENT_BRIDGE_URL: controlUrl,
+      AGENT_BRIDGE_URL: workspaceControlUrl,
       AGENT_BRIDGE_SECRET: v("LEMMACOMPUTER_AGENT_BRIDGE_SECRET"),
       AGENT_BRIDGE_GRANT_TTL_SECONDS: v("LEMMACOMPUTER_AGENT_BRIDGE_GRANT_TTL_SECONDS"),
       FIXTURE_APPROVAL_SECRET: v("LEMMACOMPUTER_FIXTURE_APPROVAL_SECRET"),
@@ -823,6 +867,7 @@ export function projectServiceEnvironment(input = {}) {
       WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS: v("LEMMACOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS"),
       WORKSPACE_INGRESS_SESSION_TTL_SECONDS: v("LEMMACOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS"),
       WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: v("LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS"),
+      WORKSPACE_INGRESS_TLS_CA_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64"),
     },
   };
 }

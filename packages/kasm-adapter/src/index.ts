@@ -23,13 +23,33 @@ const coworkSeccompProfile = readFileSync(
 
 export interface SandboxAdapter {
   reconcile?(): Promise<void>;
+  auditContext?(workspaceId: string, providerId: string): Promise<VerifiedWorkspaceAuthority | undefined>;
   create(input: SandboxCreateInput): Promise<Sandbox>;
-  updateEgressPolicy(providerId: string, input: SandboxEgressPolicyUpdateInput): Promise<void>;
-  status(providerId: string): Promise<Sandbox>;
-  open(providerId: string): Promise<SandboxLaunch>;
-  destroy(providerId: string): Promise<void>;
-  purgeWorkspace(workspaceId: string, accessGeneration?: number): Promise<void>;
+  updateEgressPolicy(workspaceId: string, providerId: string, input: SandboxEgressPolicyUpdateInput): Promise<void>;
+  status(workspaceId: string, providerId: string): Promise<Sandbox>;
+  open(workspaceId: string, providerId: string): Promise<SandboxLaunch>;
+  destroy(workspaceId: string, providerId: string): Promise<void>;
+  purgeWorkspace(workspaceId: string, accessGeneration: number): Promise<WorkspacePurgeReceipt>;
 }
+
+export type WorkspacePurgeReceipt = {
+  nodeId: string;
+  workspaceId: string;
+  maximumPurgedGeneration: number;
+  completedAt: string;
+  verified: true;
+  authority?: VerifiedWorkspaceAuthority;
+};
+
+export type VerifiedWorkspaceAuthority = {
+  tenantId: string;
+  subjectId: string;
+  workspaceId: string;
+  accessGeneration: number;
+  correlationId: string;
+  policyDigest: string;
+  policyKeyId: string;
+};
 
 export type SandboxLaunch = Launch & {
   ingressTarget?: {
@@ -42,6 +62,7 @@ export type SandboxLaunch = Launch & {
 export type SandboxCreateInput = {
   workspaceId: string;
   accessGeneration: number;
+  authority: VerifiedWorkspaceAuthority;
   policy: RuntimePolicy;
   policyBundle?: SignedPolicyBundle;
   policyVerificationKeys?: PolicyVerificationKeySet;
@@ -95,17 +116,8 @@ export type SandboxCreateInput = {
 
 export type SandboxEgressPolicyUpdateInput = Pick<
   SandboxCreateInput,
-  "workspaceId" | "policy" | "policyBundle" | "policyVerificationKeys" | "egressProxy"
+  "workspaceId" | "authority" | "policy" | "policyBundle" | "policyVerificationKeys" | "egressProxy"
 >;
-
-type KasmConfig = {
-  baseUrl: string;
-  apiKey: string;
-  apiSecret: string;
-  userId: string;
-  imageId: string;
-  requestTimeoutMs?: number;
-};
 
 type JsonObject = Record<string, unknown>;
 
@@ -132,6 +144,7 @@ export const localKasmVncOptions = [
 // `lemmacomputer-sandbox-<uuid>-relay` container name is 64 characters, so it
 // cannot be used as a routable hostname even though Docker accepts the name.
 const relayNameForWorkspace = (workspaceId: string) => `lemma-ws-${workspaceId}-relay`;
+const applicationRelayName = (workspaceId: string, kind: "gateway" | "control") => `lemma-ws-${workspaceId}-${kind}`;
 
 const agentEnvironment = (
   grant: NonNullable<SandboxCreateInput["agentGrants"]>[number],
@@ -205,89 +218,10 @@ export function buildKasmClipboardLaunch(launchUrl: string, policy: ClipboardPol
   };
 }
 
-export class KasmDeveloperApiAdapter implements SandboxAdapter {
-  private readonly baseUrl: string;
-  private readonly timeoutMs: number;
-
-  constructor(private readonly config: KasmConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/$/, "");
-    this.timeoutMs = config.requestTimeoutMs ?? 20_000;
-  }
-
-  private async call(path: string, body: JsonObject): Promise<JsonObject> {
-    const response = await fetch(`${this.baseUrl}/api/public/${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "accept": "application/json" },
-      body: JSON.stringify({ api_key: this.config.apiKey, api_key_secret: this.config.apiSecret, ...body }),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    if (!response.ok) {
-      throw new LemmaComputerError("KASM_UPSTREAM_ERROR", `Kasm ${path} returned ${response.status}`, 502, response.status >= 500);
-    }
-    return asObject(await response.json());
-  }
-
-  async create(_input: SandboxCreateInput): Promise<Sandbox> {
-    const response = await this.call("request_kasm", { user_id: this.config.userId, image_id: this.config.imageId });
-    const kasm = asObject(response.kasm ?? response);
-    const providerId = textValue(kasm, "kasm_id");
-    if (!providerId) throw new LemmaComputerError("KASM_INVALID_RESPONSE", "Kasm did not return a session identifier", 502, true);
-    return { providerId, state: mapKasmState(textValue(kasm, "operational_status", "status")), failureCode: null };
-  }
-
-  async updateEgressPolicy(_providerId: string, _input: SandboxEgressPolicyUpdateInput) {
-    throw new LemmaComputerError("EGRESS_LIVE_UPDATE_UNSUPPORTED", "This Kasm provider cannot update its egress proxy while running", 409, true);
-  }
-
-  async status(providerId: string): Promise<Sandbox> {
-    const response = await this.call("get_kasm_status", { kasm_id: providerId, user_id: this.config.userId });
-    const kasm = asObject(response.kasm ?? response);
-    const state = mapKasmState(textValue(kasm, "operational_status", "status"));
-    return { providerId, state, failureCode: state === "failed" ? "KASM_SESSION_FAILED" : null };
-  }
-
-  async open(providerId: string): Promise<SandboxLaunch> {
-    const response = await this.call("get_kasm_status", { kasm_id: providerId, user_id: this.config.userId });
-    const kasm = asObject(response.kasm ?? response);
-    if (mapKasmState(textValue(kasm, "operational_status", "status")) !== "ready") {
-      throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not ready to open", 409, true);
-    }
-    const kasmUrl = textValue(kasm, "kasm_url", "url") ?? textValue(response, "kasm_url", "url");
-    const sessionToken = textValue(kasm, "session_token") ?? textValue(response, "session_token");
-    if (!kasmUrl) throw new LemmaComputerError("KASM_INVALID_RESPONSE", "Kasm did not return a launch URL", 502, true);
-    const launch = new URL(kasmUrl, this.baseUrl);
-    if (sessionToken && !launch.searchParams.has("token")) launch.searchParams.set("token", sessionToken);
-    return buildKasmClipboardLaunch(launch.toString(), defaultClipboardPolicy);
-  }
-
-  async destroy(providerId: string) {
-    await this.call("destroy_kasm", { kasm_id: providerId, user_id: this.config.userId });
-  }
-
-  async purgeWorkspace(_workspaceId: string, _accessGeneration?: number) {
-    // Kasm's Developer API owns persistent-profile retention and deletion.
-    // Local Docker storage is explicitly managed by KasmLocalAdapter below.
-  }
-}
-
-export function mapKasmState(value?: string): Sandbox["state"] {
-  switch (value?.toLowerCase()) {
-    case "running":
-    case "ready":
-      return "ready";
-    case "stopped":
-    case "deleted":
-      return "stopped";
-    case "error":
-    case "failed":
-      return "failed";
-    default:
-      return "provisioning";
-  }
-}
-
-type KasmLocalConfig = {
+type DockerKasmVncConfig = {
   socketPath?: string;
+  nodeId?: string;
+  topology?: "colocated" | "remote";
   image: string;
   networkPrefix: string;
   controlNetwork: string;
@@ -297,6 +231,11 @@ type KasmLocalConfig = {
   egressProxyImage?: string;
   egressNetwork?: string;
   publicHost?: string;
+  relayBindHost?: string;
+  relayTlsCertificate?: string;
+  relayTlsKey?: string;
+  applicationNetwork?: string;
+  applicationTlsCa?: string;
   timeZone?: string;
   chatAttachmentRetentionDays?: number;
   kvmEnabled?: boolean;
@@ -307,15 +246,26 @@ type KasmLocalConfig = {
   startupPollMs?: number;
 };
 
-export const DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS = 60_000;
+export const DEFAULT_DOCKER_WORKSPACE_STARTUP_TIMEOUT_MS = 60_000;
 
-export class KasmLocalAdapter implements SandboxAdapter {
+export class DockerKasmVncAdapter implements SandboxAdapter {
   private readonly socketPath: string;
-  constructor(private readonly config: KasmLocalConfig) {
+  private readonly nodeId: string;
+  private readonly topology: "colocated" | "remote";
+  constructor(private readonly config: DockerKasmVncConfig) {
     if (config.kvmEnabled && config.installationKind === "hosted") {
       throw new LemmaComputerError(
         "COWORK_HOST_ISOLATION_REQUIRED",
         "Local Cowork virtualization is not permitted on hosted multi-tenant nodes",
+        503,
+      );
+    }
+    this.nodeId = config.nodeId ?? "workspace-node";
+    this.topology = config.topology ?? "colocated";
+    if (this.topology === "remote" && (!config.publicHost || !config.relayBindHost || !config.relayTlsCertificate || !config.relayTlsKey || !config.applicationNetwork)) {
+      throw new LemmaComputerError(
+        "WORKSPACE_NODE_REMOTE_CONFIGURATION_INCOMPLETE",
+        "Remote workspace nodes require a private advertised host, relay bind address, relay TLS identity, and application network",
         503,
       );
     }
@@ -330,10 +280,10 @@ export class KasmLocalAdapter implements SandboxAdapter {
       const workspaceNetwork = labels["com.lemmacomputer.workspace-network"];
       const running = container.State === "running";
       if (!running || typeof workspaceNetwork !== "string" || !this.isWorkspaceNetwork(workspaceNetwork)) continue;
-      if (labels["com.lemmacomputer.gateway-attached"] === "true") {
+      if (this.topology === "colocated" && labels["com.lemmacomputer.gateway-attached"] === "true") {
         await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
       }
-      if (labels["com.lemmacomputer.control-attached"] === "true" && this.config.controlContainer) {
+      if (this.topology === "colocated" && labels["com.lemmacomputer.control-attached"] === "true" && this.config.controlContainer) {
         await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control", "control-api"]);
       }
     }
@@ -341,6 +291,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
 
   async create(input: SandboxCreateInput): Promise<Sandbox> {
     input = { ...input, policy: runtimePolicySchema.parse(input.policy) };
+    if (
+      input.authority.workspaceId !== input.workspaceId
+      || input.authority.accessGeneration !== input.accessGeneration
+      || input.authority.policyDigest !== input.policy.policyHash
+      || input.authority.policyKeyId !== input.policyBundle?.keyId
+    ) {
+      throw new LemmaComputerError("POLICY_BINDING_MISMATCH", "Verified workspace authority does not match the runtime request", 403);
+    }
     const clipboard = clipboardPolicyFor(input.policy);
     if (!input.policyBundle || !input.policyVerificationKeys) {
       throw new LemmaComputerError("POLICY_SIGNATURE_REQUIRED", "A verified signed policy is required to provision the workspace", 503);
@@ -349,6 +307,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
     if (input.policy.egress && (!input.egressProxy || !this.config.egressProxyImage)) {
       throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
     }
+    const runtimeInput = this.runtimeProjection(input);
     const workspaceNetwork = this.workspaceNetwork(input.workspaceId);
     const workspaceVolume = await this.resolveWorkspaceVolume(input.workspaceId, input.accessGeneration);
     const name = `lemmacomputer-sandbox-${input.workspaceId}`;
@@ -364,15 +323,19 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const coworkEnabled = this.config.kvmEnabled === true && enabledAgents.includes("claude-desktop");
     const prepareRuntime = async () => {
       await this.ensureNetwork(workspaceNetwork, true, input.workspaceId);
-      await this.ensureVolume(workspaceVolume, input.workspaceId, input.accessGeneration);
-      await this.ensureNetwork(this.config.controlNetwork, false);
+      await this.ensureVolume(workspaceVolume, input.authority);
+      if (this.topology === "colocated") await this.ensureNetwork(this.config.controlNetwork, false);
       if (input.policy.egress && input.egressProxy && this.config.egressProxyImage) {
         await this.ensureNetwork(this.config.egressNetwork ?? "lemmacomputer-egress", false);
-        await this.ensureEgressProxy(input, workspaceNetwork);
+        await this.ensureEgressProxy(runtimeInput, workspaceNetwork);
       }
-      if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
-      if ((input.agentBridge || input.chatRuntimes?.length) && this.config.controlContainer) {
-        await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control", "control-api"]);
+      if (this.topology === "colocated") {
+        if (input.gateway) await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
+        if ((input.agentBridge || input.chatRuntimes?.length) && this.config.controlContainer) {
+          await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control", "control-api"]);
+        }
+      } else {
+        await this.ensureRemoteApplicationRelays(input, workspaceNetwork);
       }
     };
     const existing = await this.inspectByName(name);
@@ -381,7 +344,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       await this.ensureRelay(input.workspaceId, name, existing.id, existing.port ?? await this.allocatePort(), workspaceNetwork);
       return { providerId: existing.id, workspaceId: input.workspaceId, state: "ready", failureCode: null };
     }
-    if (existing) await this.destroy(existing.id);
+    if (existing) await this.destroy(input.workspaceId, existing.id);
     // destroy() also removes the per-workspace network. Runtime preparation
     // must therefore happen after stale sandbox cleanup, not before it.
     await prepareRuntime();
@@ -389,7 +352,13 @@ export class KasmLocalAdapter implements SandboxAdapter {
     const created = await this.createContainer(`/containers/create?name=${encodeURIComponent(name)}`, {
       Image: this.config.image,
       Labels: {
-        "com.lemmacomputer.sandbox.provider": "kasm-local",
+        "com.lemmacomputer.sandbox.provider": "docker-kasmvnc",
+        "com.lemmacomputer.workspace-runtime": "docker-kasmvnc",
+        "com.lemmacomputer.workspace-node-id": this.nodeId,
+        "com.lemmacomputer.workspace-node-topology": this.topology,
+        "com.lemmacomputer.tenant-id": input.authority.tenantId,
+        "com.lemmacomputer.subject-id": input.authority.subjectId,
+        "com.lemmacomputer.correlation-id": input.authority.correlationId,
         "com.lemmacomputer.workspace-id": input.workspaceId,
         "com.lemmacomputer.access-generation": String(input.accessGeneration),
         "com.lemmacomputer.workspace-network": workspaceNetwork,
@@ -447,12 +416,12 @@ export class KasmLocalAdapter implements SandboxAdapter {
         ...(this.config.image.includes("@sha256:") ? [`LEMMACOMPUTER_WORKSPACE_IMAGE_DIGEST=${this.config.image.slice(this.config.image.indexOf("@") + 1)}`] : []),
         `LEMMACOMPUTER_SIGNED_POLICY_B64=${Buffer.from(canonicalJson(input.policyBundle), "utf8").toString("base64url")}`,
         `LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64=${Buffer.from(canonicalJson(input.policyVerificationKeys), "utf8").toString("base64url")}`,
-        ...(input.chatRuntimes?.flatMap(chatRuntimeEnvironment) ?? []),
-        ...(!input.agentGrants && input.gateway ? [
-          `LEMMACOMPUTER_GATEWAY_UPSTREAM=${input.gateway.baseUrl}`,
-          `LEMMACOMPUTER_GATEWAY_CREDENTIAL=${input.gateway.credential}`,
-          `LEMMACOMPUTER_MODEL_ALIAS=${input.gateway.modelAlias}`,
-          `LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS=${input.gateway.transportModelAlias}`,
+        ...(runtimeInput.chatRuntimes?.flatMap(chatRuntimeEnvironment) ?? []),
+        ...(!runtimeInput.agentGrants && runtimeInput.gateway ? [
+          `LEMMACOMPUTER_GATEWAY_UPSTREAM=${runtimeInput.gateway.baseUrl}`,
+          `LEMMACOMPUTER_GATEWAY_CREDENTIAL=${runtimeInput.gateway.credential}`,
+          `LEMMACOMPUTER_MODEL_ALIAS=${runtimeInput.gateway.modelAlias}`,
+          `LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS=${runtimeInput.gateway.transportModelAlias}`,
           `LEMMACOMPUTER_REQUESTED_SERVICE_CLASS=${input.policy.requestedServiceClass}`,
           `LEMMACOMPUTER_AGENT_ID=${input.policy.agentId}`,
           `LEMMACOMPUTER_POLICY_VERSION=${input.policy.policyVersion}`,
@@ -461,20 +430,20 @@ export class KasmLocalAdapter implements SandboxAdapter {
           `LEMMACOMPUTER_ALLOWED_TOOLS=${input.policy.allowedTools.join(",")}`,
           `LEMMACOMPUTER_TOOL_POLICIES=${JSON.stringify(input.policy.toolPolicies)}`,
         ] : []),
-        ...(!input.agentGrants && input.agentBridge ? [
-          `LEMMACOMPUTER_CONTROL_UPSTREAM=${input.agentBridge.baseUrl}`,
-          `LEMMACOMPUTER_AGENT_BRIDGE_TOKEN=${input.agentBridge.token}`,
+        ...(!runtimeInput.agentGrants && runtimeInput.agentBridge ? [
+          `LEMMACOMPUTER_CONTROL_UPSTREAM=${runtimeInput.agentBridge.baseUrl}`,
+          `LEMMACOMPUTER_AGENT_BRIDGE_TOKEN=${runtimeInput.agentBridge.token}`,
         ] : []),
-        ...(input.agentGrants?.flatMap((grant) => agentEnvironment(grant, input.policy)) ?? []),
-        ...(input.agentGrants?.length ? [
+        ...(runtimeInput.agentGrants?.flatMap((grant) => agentEnvironment(grant, input.policy)) ?? []),
+        ...(runtimeInput.agentGrants?.length ? [
           `LEMMACOMPUTER_POLICY_VERSION=${input.policy.policyVersion}`,
           `LEMMACOMPUTER_POLICY_HASH=${input.policy.policyHash}`,
         ] : []),
-        ...(input.policy.egress && input.egressProxy ? [
-          `HTTP_PROXY=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
-          `HTTPS_PROXY=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
-          `http_proxy=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
-          `https_proxy=http://lemmacomputer:${encodeURIComponent(input.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
+        ...(runtimeInput.policy.egress && runtimeInput.egressProxy ? [
+          `HTTP_PROXY=http://lemmacomputer:${encodeURIComponent(runtimeInput.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
+          `HTTPS_PROXY=http://lemmacomputer:${encodeURIComponent(runtimeInput.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
+          `http_proxy=http://lemmacomputer:${encodeURIComponent(runtimeInput.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
+          `https_proxy=http://lemmacomputer:${encodeURIComponent(runtimeInput.egressProxy.token)}@lemmacomputer-egress-proxy:3128`,
           "NO_PROXY=localhost,127.0.0.1,litellm,lemmacomputer-control,control-api",
           "no_proxy=localhost,127.0.0.1,litellm,lemmacomputer-control,control-api",
         ] : []),
@@ -516,35 +485,38 @@ export class KasmLocalAdapter implements SandboxAdapter {
       await this.ensureRelay(input.workspaceId, name, providerId, port, workspaceNetwork);
       return { providerId, workspaceId: input.workspaceId, state: "ready", failureCode: null };
     } catch (error) {
-      await this.destroy(providerId).catch(() => undefined);
+      await this.destroy(input.workspaceId, providerId).catch(() => undefined);
       throw error;
     }
   }
 
-  async updateEgressPolicy(providerId: string, input: SandboxEgressPolicyUpdateInput) {
+  async updateEgressPolicy(workspaceId: string, providerId: string, input: SandboxEgressPolicyUpdateInput) {
     input = { ...input, policy: runtimePolicySchema.parse(input.policy) };
     if (!input.policyBundle || !input.policyVerificationKeys || !input.policy.egress || !input.egressProxy) {
       throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "A signed egress policy and proxy grant are required", 503);
     }
-    const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+    const inspected = await this.inspectBound(workspaceId, providerId);
     const state = asObject(inspected.State);
     const labels = asObject(asObject(inspected.Config).Labels);
-    const workspaceId = labels["com.lemmacomputer.workspace-id"];
+    const boundWorkspaceId = labels["com.lemmacomputer.workspace-id"];
     const workspaceNetwork = labels["com.lemmacomputer.workspace-network"];
     if (
       state.Running !== true
-      || workspaceId !== input.workspaceId
+      || boundWorkspaceId !== input.workspaceId
+      || input.authority.workspaceId !== workspaceId
+      || input.authority.policyDigest !== input.policy.policyHash
+      || input.authority.policyKeyId !== input.policyBundle.keyId
       || typeof workspaceNetwork !== "string"
       || !this.isWorkspaceNetwork(workspaceNetwork)
     ) {
       throw new LemmaComputerError("WORKSPACE_NOT_READY", "The running workspace could not accept the firewall update", 409, true);
     }
-    await this.ensureEgressProxy(input, workspaceNetwork, true);
+    await this.ensureEgressProxy(this.runtimeProjection(input), workspaceNetwork, true);
   }
 
-  async status(providerId: string): Promise<Sandbox> {
+  async status(workspaceId: string, providerId: string): Promise<Sandbox> {
     try {
-      const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+      const inspected = await this.inspectBound(workspaceId, providerId);
       const state = asObject(inspected.State);
       // Docker reports Running=true while an unless-stopped container is in a
       // restart loop. That state cannot serve Kasm and must not be exposed as
@@ -607,7 +579,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       }
       const controlAttached = labels["com.lemmacomputer.control-attached"] === "true"
         || environment.some((entry) => typeof entry === "string" && entry.startsWith("LEMMACOMPUTER_AGENT_BRIDGE_TOKEN="));
-      if (running && typeof workspaceNetwork === "string" && this.isWorkspaceNetwork(workspaceNetwork)) {
+      if (this.topology === "colocated" && running && typeof workspaceNetwork === "string" && this.isWorkspaceNetwork(workspaceNetwork)) {
         await this.connectContainer(workspaceNetwork, this.config.gatewayContainer, ["litellm"]);
         if (controlAttached && this.config.controlContainer) {
           await this.connectContainer(workspaceNetwork, this.config.controlContainer, ["lemmacomputer-control", "control-api"]);
@@ -631,8 +603,8 @@ export class KasmLocalAdapter implements SandboxAdapter {
     }
   }
 
-  async open(providerId: string): Promise<SandboxLaunch> {
-    const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+  async open(workspaceId: string, providerId: string): Promise<SandboxLaunch> {
+    const inspected = await this.inspectBound(workspaceId, providerId);
     const state = asObject(inspected.State);
     const health = textValue(asObject(state.Health), "Status");
     if (state.Running !== true || state.Restarting === true || state.Paused === true || (health && health !== "healthy")) {
@@ -640,14 +612,14 @@ export class KasmLocalAdapter implements SandboxAdapter {
     }
     const labels = asObject(asObject(inspected.Config).Labels);
     const sandboxName = textValue(inspected, "Name")?.replace(/^\//, "");
-    const workspaceId = labels["com.lemmacomputer.workspace-id"];
+    const boundWorkspaceId = labels["com.lemmacomputer.workspace-id"];
     const port = Number(labels["com.lemmacomputer.desktop-port"]);
     if (!Number.isInteger(port) || port <= 0) throw new LemmaComputerError("KASM_INVALID_STATE", "The Kasm desktop has no assigned session port", 502);
     if (
       typeof sandboxName !== "string"
       || !/^lemmacomputer-sandbox-[0-9a-f-]{36}$/i.test(sandboxName)
-      || typeof workspaceId !== "string"
-      || !/^[0-9a-f-]{36}$/i.test(workspaceId)
+      || typeof boundWorkspaceId !== "string"
+      || !/^[0-9a-f-]{36}$/i.test(boundWorkspaceId)
     ) throw new LemmaComputerError("KASM_INVALID_STATE", "The Kasm desktop has no routable workspace identity", 502);
     const defaultPolicy = defaultClipboardPolicy;
     const policy = {
@@ -666,20 +638,20 @@ export class KasmLocalAdapter implements SandboxAdapter {
       ...buildKasmClipboardLaunch(`https://${this.config.publicHost ?? "127.0.0.1"}:${port}/`, policy),
       ingressTarget: {
         protocol: "https",
-        host: relayNameForWorkspace(workspaceId),
+        host: this.topology === "remote" ? this.config.publicHost! : relayNameForWorkspace(boundWorkspaceId),
         port,
       },
     };
   }
 
-  async destroy(providerId: string) {
+  async destroy(expectedWorkspaceId: string, providerId: string) {
     let name: string | undefined;
     let workspaceId: string | undefined;
     let workspaceNetwork: string | undefined;
     let gatewayAttached = false;
     let controlAttached = false;
     try {
-      const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+      const inspected = await this.inspectBound(expectedWorkspaceId, providerId);
       name = textValue(inspected, "Name")?.replace(/^\//, "");
       const containerConfig = asObject(inspected.Config);
       const labels = asObject(containerConfig.Labels);
@@ -694,29 +666,209 @@ export class KasmLocalAdapter implements SandboxAdapter {
     } catch (error) {
       if (!(error instanceof LemmaComputerError && error.statusCode === 404)) throw error;
     }
-    if (workspaceId) await this.removeContainer(relayNameForWorkspace(workspaceId));
+    if (workspaceId) {
+      await this.removeContainer(relayNameForWorkspace(workspaceId));
+      await this.removeContainer(applicationRelayName(workspaceId, "gateway"));
+      await this.removeContainer(applicationRelayName(workspaceId, "control"));
+    }
     // Remove the pre-fix relay name during rolling upgrades. Docker accepts
     // this 64-character container name but cannot publish it through DNS.
     if (name) await this.removeContainer(`${name}-relay`);
     if (name) await this.removeContainer(`${name}-egress`);
     await this.removeContainer(providerId);
     if (workspaceNetwork && this.isWorkspaceNetwork(workspaceNetwork)) {
-      if (gatewayAttached) await this.disconnectContainer(workspaceNetwork, this.config.gatewayContainer);
-      if (controlAttached && this.config.controlContainer) await this.disconnectContainer(workspaceNetwork, this.config.controlContainer);
+      if (this.topology === "colocated" && gatewayAttached) await this.disconnectContainer(workspaceNetwork, this.config.gatewayContainer);
+      if (this.topology === "colocated" && controlAttached && this.config.controlContainer) await this.disconnectContainer(workspaceNetwork, this.config.controlContainer);
       await this.removeNetwork(workspaceNetwork);
     }
   }
 
-  async purgeWorkspace(workspaceId: string, accessGeneration?: number) {
+  async purgeWorkspace(workspaceId: string, accessGeneration: number): Promise<WorkspacePurgeReceipt> {
     const volumes = await this.workspaceVolumes(workspaceId);
     const targets = volumes.filter((volume) => {
-      if (accessGeneration === undefined) return true;
       const generation = Number(asObject(volume.Labels)["com.lemmacomputer.storage-generation"] ?? 0);
       return !Number.isInteger(generation) || generation <= accessGeneration;
     });
     for (const volume of targets) {
       const name = typeof volume.Name === "string" ? volume.Name : undefined;
       if (name) await this.removeVolume(name);
+    }
+    const remainingEligible = (await this.workspaceVolumes(workspaceId)).filter((volume) => {
+      const generation = Number(asObject(volume.Labels)["com.lemmacomputer.storage-generation"] ?? 0);
+      return !Number.isInteger(generation) || generation <= accessGeneration;
+    });
+    if (remainingEligible.length) {
+      throw new LemmaComputerError("WORKSPACE_PURGE_VERIFICATION_FAILED", "Workspace storage remained after purge", 503, true);
+    }
+    const authority = this.authorityFromLabels(asObject(targets.at(-1)?.Labels));
+    return {
+      nodeId: this.nodeId,
+      workspaceId,
+      maximumPurgedGeneration: accessGeneration,
+      completedAt: new Date().toISOString(),
+      verified: true,
+      ...(authority ? { authority } : {}),
+    };
+  }
+
+  async auditContext(workspaceId: string, providerId: string) {
+    const inspected = await this.inspectBound(workspaceId, providerId);
+    return this.authorityFromLabels(asObject(asObject(inspected.Config).Labels));
+  }
+
+  private async inspectBound(workspaceId: string, providerId: string) {
+    const inspected = await this.request("GET", `/containers/${encodeURIComponent(providerId)}/json`);
+    const labels = asObject(asObject(inspected.Config).Labels);
+    if (labels["com.lemmacomputer.workspace-id"] !== workspaceId) {
+      throw new LemmaComputerError("WORKSPACE_SANDBOX_BINDING_MISMATCH", "Sandbox is not bound to this workspace", 409);
+    }
+    return inspected;
+  }
+
+  private authorityFromLabels(labels: JsonObject): VerifiedWorkspaceAuthority | undefined {
+    const accessGeneration = Number(labels["com.lemmacomputer.access-generation"] ?? labels["com.lemmacomputer.storage-generation"]);
+    const authority = {
+      tenantId: labels["com.lemmacomputer.tenant-id"],
+      subjectId: labels["com.lemmacomputer.subject-id"],
+      workspaceId: labels["com.lemmacomputer.workspace-id"],
+      correlationId: labels["com.lemmacomputer.correlation-id"],
+      policyDigest: labels["com.lemmacomputer.policy-hash"],
+      policyKeyId: labels["com.lemmacomputer.policy-signing-key-id"],
+    };
+    if (!Number.isInteger(accessGeneration) || accessGeneration < 1 || Object.values(authority).some((value) => typeof value !== "string" || !value)) return undefined;
+    return { ...(authority as Omit<VerifiedWorkspaceAuthority, "accessGeneration">), accessGeneration };
+  }
+
+  private runtimeProjection<T extends SandboxCreateInput | SandboxEgressPolicyUpdateInput>(input: T): T {
+    if (this.topology === "colocated") return input;
+    const localUrl = (kind: "gateway" | "control", upstream: string) => {
+      const source = new URL(upstream);
+      const target = new URL(`http://lemmacomputer-${kind}:${kind === "gateway" ? 4000 : 4100}`);
+      target.pathname = source.pathname;
+      target.search = source.search;
+      return target.toString().replace(/\/$/, source.pathname === "/" && !source.search ? "" : "/");
+    };
+    const projected = {
+      ...input,
+      ...(input.egressProxy ? {
+        egressProxy: {
+          ...input.egressProxy,
+          ...(input.egressProxy.accessAuthorization ? {
+            accessAuthorization: {
+              ...input.egressProxy.accessAuthorization,
+              url: localUrl("control", input.egressProxy.accessAuthorization.url),
+            },
+          } : {}),
+        },
+      } : {}),
+      ...("gateway" in input && input.gateway ? {
+        gateway: { ...input.gateway, baseUrl: localUrl("gateway", input.gateway.baseUrl) },
+      } : {}),
+      ...("agentBridge" in input && input.agentBridge ? {
+        agentBridge: { ...input.agentBridge, baseUrl: localUrl("control", input.agentBridge.baseUrl) },
+      } : {}),
+      ...("agentGrants" in input && input.agentGrants ? {
+        agentGrants: input.agentGrants.map((grant) => ({
+          ...grant,
+          gateway: { ...grant.gateway, baseUrl: localUrl("gateway", grant.gateway.baseUrl) },
+          agentBridge: { ...grant.agentBridge, baseUrl: localUrl("control", grant.agentBridge.baseUrl) },
+        })),
+      } : {}),
+    };
+    return projected as T;
+  }
+
+  private async ensureRemoteApplicationRelays(input: SandboxCreateInput, workspaceNetwork: string) {
+    const gatewayRoutes = [input.gateway?.baseUrl, ...(input.agentGrants?.map((grant) => grant.gateway.baseUrl) ?? [])]
+      .filter((value): value is string => Boolean(value));
+    const controlRoutes = [
+      input.agentBridge?.baseUrl,
+      ...(input.agentGrants?.map((grant) => grant.agentBridge.baseUrl) ?? []),
+      input.egressProxy?.accessAuthorization?.url,
+    ].filter((value): value is string => Boolean(value));
+    const unique = (routes: string[], kind: string) => {
+      const values = [...new Set(routes)];
+      if (values.length > 1) throw new LemmaComputerError("POLICY_BINDING_MISMATCH", `Remote ${kind} grants do not share one signed upstream`, 403);
+      return values[0];
+    };
+    const gateway = unique(gatewayRoutes, "gateway");
+    const control = unique(controlRoutes, "control");
+    if (gateway) await this.ensureRemoteApplicationRelay(input.workspaceId, "gateway", gateway, 4000, workspaceNetwork);
+    if (control) await this.ensureRemoteApplicationRelay(input.workspaceId, "control", control, 4100, workspaceNetwork);
+  }
+
+  private async ensureRemoteApplicationRelay(
+    workspaceId: string,
+    kind: "gateway" | "control",
+    upstream: string,
+    port: number,
+    workspaceNetwork: string,
+  ) {
+    const target = new URL(upstream);
+    if (target.protocol !== "https:") {
+      throw new LemmaComputerError("WORKSPACE_NODE_REMOTE_UPSTREAM_INSECURE", "Remote workspace application upstreams must use HTTPS", 503);
+    }
+    const name = applicationRelayName(workspaceId, kind);
+    const configurationDigest = createHash("sha256")
+      .update(canonicalJson({ kind, upstream: target.toString(), ca: this.config.applicationTlsCa ?? "", image: this.config.relayImage }), "utf8")
+      .digest("hex");
+    const existing = await this.inspectByName(name);
+    if (existing?.running && existing.configurationDigest === configurationDigest) return;
+    if (existing) await this.removeContainer(existing.id);
+    const applicationNetwork = this.config.applicationNetwork!;
+    if (!await this.request("GET", `/networks/${encodeURIComponent(applicationNetwork)}`).catch(() => null)) {
+      throw new LemmaComputerError("WORKSPACE_NODE_APPLICATION_NETWORK_MISSING", "The restricted remote application network is unavailable", 503, true);
+    }
+    const script = [
+      'const http=require("node:http"),https=require("node:https");',
+      'const upstream=new URL(process.env.UPSTREAM);',
+      'const ca=process.env.UPSTREAM_CA_B64?Buffer.from(process.env.UPSTREAM_CA_B64,"base64").toString("utf8"):undefined;',
+      'const server=http.createServer((req,res)=>{',
+      'const base=upstream.pathname.endsWith("/")?upstream.pathname.slice(0,-1):upstream.pathname;',
+      'const path=base+(req.url?.startsWith("/")?req.url:`/${req.url??""}`);',
+      'const out=https.request({hostname:upstream.hostname,port:upstream.port||443,method:req.method,path,headers:{...req.headers,host:upstream.host},ca,rejectUnauthorized:true,minVersion:"TLSv1.2"},r=>{res.writeHead(r.statusCode||502,r.headers);r.pipe(res)});',
+      'out.on("error",()=>{if(!res.headersSent)res.writeHead(502,{"content-type":"application/json"});res.end(JSON.stringify({error:{code:"REMOTE_APPLICATION_UPSTREAM_UNAVAILABLE"}}))});',
+      'req.pipe(out)});',
+      'server.listen(Number(process.env.LISTEN_PORT),"0.0.0.0");',
+    ].join("");
+    const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(name)}`, {
+      Image: this.config.relayImage,
+      Entrypoint: ["node"],
+      Cmd: ["-e", script],
+      Env: [
+        `UPSTREAM=${target.toString()}`,
+        `LISTEN_PORT=${port}`,
+        ...(this.config.applicationTlsCa ? [`UPSTREAM_CA_B64=${Buffer.from(this.config.applicationTlsCa, "utf8").toString("base64")}`] : []),
+      ],
+      Labels: {
+        "com.lemmacomputer.application-relay": kind,
+        "com.lemmacomputer.sandbox.relay": "docker-kasmvnc",
+        "com.lemmacomputer.workspace-id": workspaceId,
+        "com.lemmacomputer.workspace-network": workspaceNetwork,
+        "com.lemmacomputer.workspace-node-id": this.nodeId,
+        "com.lemmacomputer.relay-configuration-digest": configurationDigest,
+      },
+      NetworkingConfig: { EndpointsConfig: { [workspaceNetwork]: { Aliases: [`lemmacomputer-${kind}`] } } },
+      HostConfig: {
+        NetworkMode: workspaceNetwork,
+        RestartPolicy: { Name: "unless-stopped" },
+        ReadonlyRootfs: true,
+        CapDrop: ["ALL"],
+        SecurityOpt: ["no-new-privileges"],
+        PidsLimit: 128,
+        Memory: 134_217_728,
+        NanoCpus: 250_000_000,
+        Tmpfs: { "/tmp": "rw,noexec,nosuid,size=8m" },
+      },
+    });
+    const relayId = textValue(created, "Id");
+    if (!relayId) throw new LemmaComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return an application relay identifier", 502);
+    try {
+      await this.connectContainer(applicationNetwork, relayId);
+      await this.request("POST", `/containers/${relayId}/start`);
+    } catch (error) {
+      await this.removeContainer(relayId).catch(() => undefined);
+      throw error;
     }
   }
 
@@ -780,15 +932,20 @@ export class KasmLocalAdapter implements SandboxAdapter {
     }
   }
 
-  private async ensureVolume(name: string, workspaceId: string, storageGeneration: number) {
+  private async ensureVolume(name: string, authority: VerifiedWorkspaceAuthority) {
     if (await this.volumeExists(name)) return;
     await this.request("POST", "/volumes/create", {
       Name: name,
       Driver: "local",
       Labels: {
         "com.lemmacomputer.runtime": "workspace-home",
-        "com.lemmacomputer.workspace-id": workspaceId,
-        "com.lemmacomputer.storage-generation": String(storageGeneration),
+        "com.lemmacomputer.tenant-id": authority.tenantId,
+        "com.lemmacomputer.subject-id": authority.subjectId,
+        "com.lemmacomputer.workspace-id": authority.workspaceId,
+        "com.lemmacomputer.storage-generation": String(authority.accessGeneration),
+        "com.lemmacomputer.correlation-id": authority.correlationId,
+        "com.lemmacomputer.policy-hash": authority.policyDigest,
+        "com.lemmacomputer.policy-signing-key-id": authority.policyKeyId,
       },
     });
   }
@@ -870,6 +1027,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
         port: typeof rawPort === "string" ? Number(rawPort) : undefined,
         coworkEnabled: labels["com.lemmacomputer.cowork-enabled"] === "true",
         accessGeneration: Number(labels["com.lemmacomputer.access-generation"] ?? 0),
+        configurationDigest: textValue(labels, "com.lemmacomputer.relay-configuration-digest"),
       };
     } catch (error) {
       if (error instanceof LemmaComputerError && error.statusCode === 404) return null;
@@ -892,31 +1050,50 @@ export class KasmLocalAdapter implements SandboxAdapter {
 
   private async ensureRelay(workspaceId: string, sandboxName: string, sandboxId: string, port: number, workspaceNetwork: string) {
     const relayName = relayNameForWorkspace(workspaceId);
+    const configurationDigest = createHash("sha256")
+      .update(canonicalJson({ topology: this.topology, sandboxId, port, certificate: this.config.relayTlsCertificate ?? "", image: this.config.relayImage }), "utf8")
+      .digest("hex");
     const existing = await this.inspectByName(relayName);
-    if (existing?.running) return;
+    if (existing?.running && existing.configurationDigest === configurationDigest) return;
     if (existing) await this.removeContainer(existing.id);
-    const script = `const net=require("node:net");net.createServer(c=>{const u=net.connect({host:${JSON.stringify(sandboxName)},port:6901});const x=()=>{c.destroy();u.destroy()};c.on("error",x);u.on("error",x);c.pipe(u).pipe(c)}).listen(${port},"0.0.0.0")`;
+    const script = this.topology === "remote"
+      ? `const tls=require("node:tls");const cert=Buffer.from(process.env.RELAY_CERT_B64,"base64");const key=Buffer.from(process.env.RELAY_KEY_B64,"base64");tls.createServer({cert,key,minVersion:"TLSv1.2"},c=>{const u=tls.connect({host:${JSON.stringify(sandboxName)},port:6901,rejectUnauthorized:false});const x=()=>{c.destroy();u.destroy()};c.on("error",x);u.on("error",x);c.pipe(u).pipe(c)}).listen(${port},"0.0.0.0")`
+      : `const net=require("node:net");net.createServer(c=>{const u=net.connect({host:${JSON.stringify(sandboxName)},port:6901});const x=()=>{c.destroy();u.destroy()};c.on("error",x);u.on("error",x);c.pipe(u).pipe(c)}).listen(${port},"0.0.0.0")`;
     const created = await this.request("POST", `/containers/create?name=${encodeURIComponent(relayName)}`, {
       Image: this.config.relayImage,
       Entrypoint: ["node"],
       Cmd: ["-e", script],
+      Env: this.topology === "remote" ? [
+        `RELAY_CERT_B64=${Buffer.from(this.config.relayTlsCertificate!, "utf8").toString("base64")}`,
+        `RELAY_KEY_B64=${Buffer.from(this.config.relayTlsKey!, "utf8").toString("base64")}`,
+      ] : [],
       ExposedPorts: { [`${port}/tcp`]: {} },
       Labels: {
-        "com.lemmacomputer.sandbox.relay": "kasm-local",
+        "com.lemmacomputer.sandbox.relay": "docker-kasmvnc",
         "com.lemmacomputer.sandbox-id": sandboxId,
+        "com.lemmacomputer.workspace-id": workspaceId,
+        "com.lemmacomputer.workspace-network": workspaceNetwork,
+        "com.lemmacomputer.workspace-node-id": this.nodeId,
         "com.lemmacomputer.desktop-port": String(port),
+        "com.lemmacomputer.relay-configuration-digest": configurationDigest,
       },
       HostConfig: {
-        NetworkMode: this.config.controlNetwork,
+        NetworkMode: this.topology === "remote" ? workspaceNetwork : this.config.controlNetwork,
         RestartPolicy: { Name: "unless-stopped" },
-        PortBindings: { [`${port}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: String(port) }] },
+        PortBindings: { [`${port}/tcp`]: [{ HostIp: this.topology === "remote" ? this.config.relayBindHost! : "127.0.0.1", HostPort: String(port) }] },
+        ReadonlyRootfs: true,
+        CapDrop: ["ALL"],
         SecurityOpt: ["no-new-privileges"],
+        PidsLimit: 128,
+        Memory: 134_217_728,
+        NanoCpus: 250_000_000,
+        Tmpfs: { "/tmp": "rw,noexec,nosuid,size=8m" },
       },
     });
     const relayId = textValue(created, "Id");
     if (!relayId) throw new LemmaComputerError("DOCKER_INVALID_RESPONSE", "Docker did not return a relay identifier", 502);
     await this.request("POST", `/containers/${relayId}/start`);
-    await this.connectContainer(workspaceNetwork, relayId);
+    if (this.topology === "colocated") await this.connectContainer(workspaceNetwork, relayId);
   }
 
   private async ensureEgressProxy(input: SandboxEgressPolicyUpdateInput, workspaceNetwork: string, replace = false) {
@@ -943,6 +1120,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
       Labels: {
         "com.lemmacomputer.egress-proxy": "v2",
         "com.lemmacomputer.workspace-id": input.workspaceId,
+        "com.lemmacomputer.workspace-network": workspaceNetwork,
         "com.lemmacomputer.access-generation": String(input.egressProxy.expectedGrant.accessGeneration),
         "com.lemmacomputer.egress-security-group-version-id": input.policy.egress.id,
         "com.lemmacomputer.egress-policy-hash": input.policy.egress.documentHash,
@@ -1009,7 +1187,7 @@ export class KasmLocalAdapter implements SandboxAdapter {
   }
 
   private async waitForStartup(providerId: string) {
-    const timeoutMs = this.config.startupTimeoutMs ?? DEFAULT_LOCAL_WORKSPACE_STARTUP_TIMEOUT_MS;
+    const timeoutMs = this.config.startupTimeoutMs ?? DEFAULT_DOCKER_WORKSPACE_STARTUP_TIMEOUT_MS;
     const pollMs = this.config.startupPollMs ?? 250;
     const deadline = Date.now() + timeoutMs;
     while (true) {

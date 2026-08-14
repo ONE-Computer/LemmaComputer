@@ -217,10 +217,13 @@ test("admin lifecycle commands are idempotent, attributed, and terminate only th
       return { providerId: `sandbox-${workspaceId}-${calls.creates}`, state: "ready", failureCode: null };
     },
     updateEgressPolicy: async () => undefined,
-    status: async (providerId) => ({ providerId, state: "ready", failureCode: null }),
+    status: async (_workspaceId, providerId) => ({ providerId, state: "ready", failureCode: null }),
     open: async () => ({ launchUrl: "https://workspace.test", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
-    destroy: async () => { calls.destroys += 1; },
-    purgeWorkspace: async () => { calls.purges += 1; },
+    destroyWorkspace: async () => { calls.destroys += 1; },
+    purgeWorkspace: async (workspaceId, accessGeneration) => {
+      calls.purges += 1;
+      return { nodeId: "test-node", workspaceId, maximumPurgedGeneration: accessGeneration, completedAt: new Date().toISOString(), verified: true };
+    },
   };
   const ended: Record<string, unknown>[] = [];
   const app = appFor(actor(), store, controller, {

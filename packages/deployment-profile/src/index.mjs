@@ -23,13 +23,13 @@ export const customerAuthenticationMethods = Object.freeze([
   "oidc",
 ]);
 
-export const workspaceDriverTopologies = Object.freeze({
-  "kasm-local": Object.freeze({
-    id: "kasm-local",
+export const workspaceNodeTopologies = Object.freeze({
+  colocated: Object.freeze({
+    id: "colocated",
     executionBoundary: "local-operator-controlled",
   }),
-  kasm: Object.freeze({
-    id: "kasm",
+  remote: Object.freeze({
+    id: "remote",
     executionBoundary: "remote-isolated",
   }),
 });
@@ -193,10 +193,10 @@ export function assertWorkspaceProviderBoundaryAllowed(profileId, executionBound
  * must separately prove every control and the minimum qualification level in
  * the resolved profile's workspaceProviderPolicy.
  */
-export function assertWorkspaceDriverTopologyAllowed(profileId, driverId) {
-  const topology = workspaceDriverTopologies[driverId];
+export function assertWorkspaceNodeTopologyAllowed(profileId, topologyId) {
+  const topology = workspaceNodeTopologies[topologyId];
   if (!topology) {
-    throw new Error(`${driverId} is not a registered workspace driver`);
+    throw new Error(`${topologyId} is not a registered workspace-node topology`);
   }
   return assertWorkspaceProviderBoundaryAllowed(profileId, topology.executionBoundary);
 }

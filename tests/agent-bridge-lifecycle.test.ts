@@ -37,11 +37,10 @@ class Controller implements ControllerClient {
   async create(input: Parameters<ControllerClient["create"]>[0]): Promise<Sandbox> {
     return { providerId: `sandbox-${input.workspaceId}`, state: "ready", failureCode: null };
   }
-  async status(providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
+  async status(_workspaceId: string, providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
   async open(): Promise<Launch> { return { launchUrl: "https://kasm.example.test", expiresAt: new Date(Date.now() + 60_000).toISOString() }; }
-  async destroy() {}
   async destroyWorkspace() {}
-  async purgeWorkspace() {}
+  async purgeWorkspace(workspaceId: string, accessGeneration: number) { return { nodeId: "test-node", workspaceId, maximumPurgedGeneration: accessGeneration, completedAt: new Date().toISOString(), verified: true as const }; }
 }
 
 const protectedOperation = (token: string) => ({

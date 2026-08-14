@@ -209,9 +209,10 @@ remain bounded transitional adapters and are not this core flow.
 6. The workspace entrypoint verifies policy again, writes managed application
    configuration, starts only selected applications/agents, and reports ready.
 
-For the local driver, the controller talks to the Docker socket. For a
-production Kasm deployment, it uses the Kasm Developer API adapter and does not
-need host Docker authority.
+The same Lemma-owned Docker/KasmVNC adapter talks to the node-local Docker
+socket in both placements. In a remote deployment the controller itself moves
+to the private workspace node; Control calls its workspace-bound API over mTLS
+and never receives Docker authority. See [Workspace node deployment](workspace-node.md).
 
 ### Model request
 

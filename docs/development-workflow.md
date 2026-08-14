@@ -201,7 +201,7 @@ required values depend on the external flow being tested:
 | Transitional workforce Entra sign-in, or Microsoft 365 using the same app | The four `LEMMACOMPUTER_ENTRA_*` and bootstrap values below | Follow the exact app registration, callback, and Graph-scope instructions in the [local integration runbook](local-deployment.md#configure-the-transitional-workforce-entra-and-microsoft-365-app) |
 | Separate Microsoft 365 connector app | `LEMMACOMPUTER_MS365_TENANT_ID`, `LEMMACOMPUTER_MS365_CLIENT_ID`, and `LEMMACOMPUTER_MS365_CLIENT_SECRET` | Supply all three or leave all three empty to reuse the Entra app |
 | Google or Microsoft social login | The selected provider's client-ID and client-secret pair | Supply the complete pair only |
-| Remote Kasm | The complete `LEMMACOMPUTER_KASM_*` group | Ordinary local development keeps the generated `kasm-local` driver |
+| Remote workspace node | The complete `LEMMACOMPUTER_WORKSPACE_NODE_*` TLS, private-host, application-network, gateway, and Control endpoint group | Ordinary local development keeps the generated colocated topology |
 
 The four values for the transitional Entra path are:
 

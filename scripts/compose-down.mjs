@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 export const runtimeContainerFilters = [
-  "label=com.lemmacomputer.sandbox.provider=kasm-local",
-  "label=com.lemmacomputer.sandbox.relay=kasm-local",
+  "label=com.lemmacomputer.sandbox.provider=docker-kasmvnc",
+  "label=com.lemmacomputer.sandbox.relay=docker-kasmvnc",
   "label=com.lemmacomputer.egress-proxy=v2",
 ];
 
@@ -28,10 +28,8 @@ export function runComposeDown({
   networkPrefix = localEnvironment().networkPrefix ?? "lemmacomputer-workspace",
 } = {}) {
   const runtimeContainers = new Set();
-  const workspaceIds = new Set();
-  const sandboxNames = new Set();
   const scoped = projectName !== "lemmacomputer";
-  for (const [filterIndex, filter] of runtimeContainerFilters.entries()) {
+  for (const filter of runtimeContainerFilters) {
     const result = run("docker", ["ps", "-a", "--filter", filter, "--format", "{{.Names}}"], { encoding: "utf8" });
     if (result.error) {
       stderr.write(`Unable to inspect Docker runtime containers: ${result.error.message}\n`);
@@ -56,17 +54,9 @@ export function runComposeDown({
         stderr.write(`Runtime container ${name} returned invalid labels\n`);
         return 1;
       }
-      const belongs = filterIndex === 0
-        ? String(labels["com.lemmacomputer.workspace-network"] ?? "").startsWith(`${networkPrefix}-`)
-        : filterIndex === 1
-          ? sandboxNames.has(String(labels["com.lemmacomputer.sandbox-id"] ?? ""))
-          : workspaceIds.has(String(labels["com.lemmacomputer.workspace-id"] ?? ""));
+      const belongs = String(labels["com.lemmacomputer.workspace-network"] ?? "").startsWith(`${networkPrefix}-`);
       if (belongs) {
         runtimeContainers.add(name);
-        if (filterIndex === 0) {
-          sandboxNames.add(name);
-          workspaceIds.add(String(labels["com.lemmacomputer.workspace-id"] ?? ""));
-        }
       }
     }
   }

@@ -27,11 +27,13 @@ class FakeController implements ControllerClient {
     this.lastEgressProxy = input.egressProxy;
     return { providerId: `sandbox-${input.workspaceId}`, state: "ready", failureCode: null };
   }
-  async status(providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
-  async open(_providerId: string): Promise<Launch> { return { launchUrl: "https://kasm.example/session", expiresAt: new Date(Date.now() + 60_000).toISOString() }; }
-  async destroy(_providerId: string) { this.destroys += 1; }
+  async status(_workspaceId: string, providerId: string): Promise<Sandbox> { return { providerId, state: "ready", failureCode: null }; }
+  async open(_workspaceId: string, _providerId: string): Promise<Launch> { return { launchUrl: "https://kasm.example/session", expiresAt: new Date(Date.now() + 60_000).toISOString() }; }
   async destroyWorkspace(_workspaceId: string, _providerId: string) { this.destroys += 1; }
-  async purgeWorkspace(_workspaceId: string) { this.purges += 1; }
+  async purgeWorkspace(workspaceId: string, accessGeneration: number) {
+    this.purges += 1;
+    return { nodeId: "test-node", workspaceId, maximumPurgedGeneration: accessGeneration, completedAt: new Date().toISOString(), verified: true as const };
+  }
 }
 
 class FakeGateway implements GatewayClient {

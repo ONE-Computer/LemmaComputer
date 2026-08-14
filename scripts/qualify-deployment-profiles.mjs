@@ -17,6 +17,7 @@ for (const profile of profiles) {
 }
 
 const sharedImageTag = "profile-smoke-same-commit";
+const sharedWorkspaceImage = "lemmacomputer/workspace@sha256:profile-smoke-same-image";
 const baseEnvironment = () => Object.fromEntries(parseEnvironment(initializeEnvironment(
   renderEnvironmentTemplate(),
   "Etc/UTC",
@@ -27,6 +28,7 @@ const environmentFor = (profile) => {
     ...baseEnvironment(),
     LEMMACOMPUTER_INSTALLATION_KIND: profile,
     LEMMACOMPUTER_IMAGE_TAG: sharedImageTag,
+    LEMMACOMPUTER_WORKSPACE_IMAGE: sharedWorkspaceImage,
   };
   if (profile === "customer-managed") {
     return {
@@ -38,6 +40,12 @@ const environmentFor = (profile) => {
   }
   return {
     ...values,
+    LEMMACOMPUTER_RUNTIME_ENVIRONMENT: "production",
+    LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS: "192.0.2.10/32",
+    LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT: "postmark",
+    LEMMACOMPUTER_POSTMARK_SERVER_TOKEN: "profile-smoke-postmark-token",
+    LEMMACOMPUTER_POSTMARK_FROM: "login@profile-smoke.example.test",
+    LEMMACOMPUTER_INVITATION_DELIVERY_MODE: "email",
     LEMMACOMPUTER_PUBLIC_WEB_URL: "https://profile-smoke.example.test",
     LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID: "profile-smoke-external-directory",
     LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN: "profile-smoke",
@@ -50,12 +58,20 @@ const environmentFor = (profile) => {
     LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: "c1",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL: "https://security-alerts.profile-smoke.example.test/lemma",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: "profile-smoke-security-alert-webhook-secret-0001",
-    LEMMACOMPUTER_SANDBOX_DRIVER: "kasm",
-    LEMMACOMPUTER_KASM_BASE_URL: "https://workspace.profile-smoke.example.test",
-    LEMMACOMPUTER_KASM_API_KEY: "profile-smoke-kasm-key",
-    LEMMACOMPUTER_KASM_API_SECRET: "profile-smoke-kasm-secret",
-    LEMMACOMPUTER_KASM_USER_ID: "profile-smoke-kasm-user",
-    LEMMACOMPUTER_KASM_IMAGE_ID: "profile-smoke-kasm-image",
+    LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY: "remote",
+    LEMMACOMPUTER_WORKSPACE_NODE_URL: "https://workspace.profile-smoke.example.test",
+    LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE: "mtls",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64: "cHJvZmlsZS1zbW9rZQ==",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64: "cHJvZmlsZS1zbW9rZQ==",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64: "cHJvZmlsZS1zbW9rZQ==",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64: "cHJvZmlsZS1zbW9rZQ==",
+    LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64: "cHJvZmlsZS1zbW9rZQ==",
+    LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST: "workspace.profile-smoke.example.test",
+    LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST: "10.0.1.10",
+    LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK: "workspace-app-private",
+    LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL: "https://gateway.internal.profile-smoke.example.test",
+    LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL: "https://control.internal.profile-smoke.example.test",
+    LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true",
     LEMMACOMPUTER_LITELLM_ADMIN_URL: "https://litellm-admin-listener:8443",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64: "cHJvZmlsZS1zbW9rZQ==",
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64: "cHJvZmlsZS1zbW9rZQ==",
@@ -71,6 +87,7 @@ const qualified = profiles.map((profile) => {
   const services = projectServiceEnvironment(values);
   assert.ok(Object.keys(services).length > 0);
   assert.equal(values.LEMMACOMPUTER_IMAGE_TAG, sharedImageTag);
+  assert.equal(services["workspace-controller"].KASM_LOCAL_IMAGE, sharedWorkspaceImage);
   if (profile === "customer-managed") {
     assert.doesNotMatch(JSON.stringify(services), /https:\/\/[^\"/]*lemmacomputer/i);
   }

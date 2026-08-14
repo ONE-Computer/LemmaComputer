@@ -225,9 +225,10 @@ calling an adapter. A new adapter must additionally:
 - make destroy retry-safe;
 - avoid returning provider credentials in launch data or errors.
 
-Add a `LEMMACOMPUTER_SANDBOX_DRIVER` discriminator and validate all driver-specific
-configuration at startup. A production provider should not require the Docker
-socket mounted by the local reference driver.
+Add a runtime discriminator only for a genuinely different runtime contract;
+placement belongs in `LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY`. Validate all
+runtime-specific configuration at startup and keep Docker authority on the
+workspace node.
 
 ## Add an egress rule type
 
