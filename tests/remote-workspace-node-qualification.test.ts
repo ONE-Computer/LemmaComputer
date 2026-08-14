@@ -36,4 +36,6 @@ test("qualification Compose separates Docker authority and uses variable-backed 
   assert.match(control, /WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true"/);
   assert.match(control, /QUALIFICATION_NODE_CLIENT_KEY_B64/);
   assert.doesNotMatch(control, /BEGIN (?:RSA )?PRIVATE KEY/);
+  assert.match(node, /QUALIFICATION_NODE_TRANSPORT_NETWORK/);
+  assert.match(control, /QUALIFICATION_APPLICATION_NETWORK/);
 });

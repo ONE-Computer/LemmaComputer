@@ -290,6 +290,18 @@ The [development workflow](docs/guides/development-workflow.md) is the complete
 contributor guide, covering host support, environment ownership, local gates,
 and controlled promotion.
 
+To qualify the same worktree with its Docker/KasmVNC controller placed behind a
+real local mTLS node boundary, stop its workspaces and run:
+
+```bash
+npm run qualify:remote-workspace-node -- up --cowork
+```
+
+This preserves the worktree's users, organizations, provider configuration,
+databases, and persistent volumes. See the
+[split-node qualification workflow](docs/guides/development-workflow.md#repeatable-split-node-qualification)
+for non-mutating validation, status, and teardown commands.
+
 ### Deployment profiles and Microsoft integrations
 
 The reference deployment requires Linux on `amd64`, Docker Engine with Docker

@@ -315,23 +315,28 @@ const loadState = () => {
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
 };
 
-const up = ({ cowork }) => {
-  const existing = loadState();
-  const environment = readLocalEnvironment();
-  const networkPrefix = environment.value("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX");
-  if (!existing) assertNoActiveRuntimes(networkPrefix, "enable remote");
-  if (existing) {
-    process.stdout.write(`Remote workspace-node qualification is already configured at ${existing.webUrl}.\n`);
-    status();
-    return;
-  }
-  const state = prepareState({ cowork });
+const bringUp = (state) => {
   ensureNetwork(state.names.nodeTransportNetwork, true);
   ensureNetwork(state.names.applicationNetwork, true);
   ensureNetwork(state.names.relayNetwork, false);
   run("docker", ["compose", "--env-file", ".env", "-f", "compose.yaml", "build", "control-api"]);
   run("docker", nodeComposeArguments(state, "up", "-d", "--wait", "--wait-timeout", "300"));
   run("docker", composeArguments(state, "up", "-d", "--build", "--wait", "--wait-timeout", "300"));
+};
+
+const up = ({ cowork }) => {
+  const existing = loadState();
+  const environment = readLocalEnvironment();
+  const networkPrefix = environment.value("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX");
+  if (!existing) assertNoActiveRuntimes(networkPrefix, "enable remote");
+  if (existing) {
+    if (cowork && !existing.cowork) throw new Error("The existing qualification was created without Cowork; stop all workspaces, run down, then run up --cowork");
+    bringUp(existing);
+    process.stdout.write(`Remote workspace-node qualification was reapplied at ${existing.webUrl}.\n`);
+    return;
+  }
+  const state = prepareState({ cowork });
+  bringUp(state);
   process.stdout.write([
     `Remote workspace-node qualification is ready at ${state.webUrl}.`,
     "The existing worktree databases and Compose volumes were preserved.",
@@ -339,6 +344,20 @@ const up = ({ cowork }) => {
     "Run the same command with status to inspect it, or down after stopping every workspace.",
     "",
   ].join("\n"));
+};
+
+const config = ({ cowork }) => {
+  if (loadState()) throw new Error("Run status for the active qualification, or down before rendering a fresh configuration");
+  const environment = readLocalEnvironment();
+  assertNoActiveRuntimes(environment.value("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX"), "render a different remote");
+  const state = prepareState({ cowork });
+  try {
+    run("docker", nodeComposeArguments(state, "config", "--quiet"));
+    run("docker", composeArguments(state, "config", "--quiet"));
+    process.stdout.write("Remote workspace-node qualification Compose configuration is valid.\n");
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
 };
 
 const status = () => {
@@ -374,7 +393,8 @@ const down = () => {
 export function runRemoteWorkspaceNodeQualification(args = process.argv.slice(2)) {
   const command = args.find((argument) => !argument.startsWith("--")) ?? "up";
   const cowork = args.includes("--cowork");
-  if (!new Set(["up", "status", "down"]).has(command)) throw new Error("Usage: npm run qualify:remote-workspace-node -- [up|status|down] [--cowork]");
+  if (!new Set(["config", "up", "status", "down"]).has(command)) throw new Error("Usage: npm run qualify:remote-workspace-node -- [config|up|status|down] [--cowork]");
+  if (command === "config") return config({ cowork });
   if (command === "up") return up({ cowork });
   if (command === "status") return status();
   return down();

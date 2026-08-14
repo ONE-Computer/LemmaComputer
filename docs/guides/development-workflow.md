@@ -272,6 +272,13 @@ npm run qualify:remote-workspace-node -- status
 npm run qualify:remote-workspace-node -- down
 ```
 
+`config` generates fresh test certificates, validates both Compose projections,
+and removes them again without starting or changing a container:
+
+```bash
+npm run qualify:remote-workspace-node -- config --cowork
+```
+
 Both topology changes refuse to proceed while managed workspace runtime
 containers exist. `down` restores the normal colocated worktree stack and keeps
 the worktree's databases and persistent volumes.
