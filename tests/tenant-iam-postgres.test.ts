@@ -79,6 +79,56 @@ test("tenant IAM persists versioned roles, unions assignments, audits changes, a
       expiresAt: new Date(Date.now() + 60_000),
     });
 
+    const temporarySecurityGroup = await store.saveEgressSecurityGroup({
+      tenantId: organizationId,
+      updatedBy: ownerId,
+      name: "Temporary external access",
+      description: "A removable group used to verify archive-backed deletion.",
+      defaultAction: "deny",
+      rules: [{
+        id: "approved-package-host",
+        action: "allow",
+        protocol: "https",
+        host: "packages.example.com",
+        includeSubdomains: false,
+        port: 443,
+        purpose: "Fetch approved packages",
+      }],
+    });
+    await store.assignWorkspaceEgressSecurityGroup({
+      tenantId: organizationId,
+      subjectId: memberId,
+      grantId: "iam-owned",
+      assignedBy: ownerId,
+      securityGroupVersionId: temporarySecurityGroup.id,
+    });
+    await assert.rejects(() => store.archiveEgressSecurityGroup({
+      tenantId: organizationId,
+      securityGroupId: temporarySecurityGroup.securityGroupId,
+      archivedBy: ownerId,
+    }), { code: "EGRESS_SECURITY_GROUP_IN_USE" });
+    await store.clearWorkspaceEgressSecurityGroup({ tenantId: organizationId, subjectId: memberId, grantId: "iam-owned" });
+    assert.equal(await store.archiveEgressSecurityGroup({
+      tenantId: organizationId,
+      securityGroupId: temporarySecurityGroup.securityGroupId,
+      archivedBy: ownerId,
+    }), true);
+    assert.equal((await store.listEgressSecurityGroups(organizationId)).some((group) => group.securityGroupId === temporarySecurityGroup.securityGroupId), false);
+    const replacementSecurityGroup = await store.saveEgressSecurityGroup({
+      tenantId: organizationId,
+      updatedBy: ownerId,
+      name: temporarySecurityGroup.name,
+      description: "A replacement may reuse the deleted group name.",
+      defaultAction: "deny",
+      rules: [],
+    });
+    assert.notEqual(replacementSecurityGroup.securityGroupId, temporarySecurityGroup.securityGroupId);
+    const archivedHistory = await pool.query(
+      "SELECT count(*) AS count FROM egress_security_group_versions WHERE security_group_id=$1",
+      [temporarySecurityGroup.securityGroupId],
+    );
+    assert.equal(Number(archivedHistory.rows[0]?.count), 1, "deleting a group retains its immutable revision history");
+
     const reviewer = await store.createOrganizationRole({
       organizationId,
       name: "Workspace reviewer",

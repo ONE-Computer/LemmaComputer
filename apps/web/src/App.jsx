@@ -1328,13 +1328,14 @@ const firewallRuleRows = (rules) => {
   });
 };
 
-function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecurityGroupId, createNew = false, attachmentCount = 0 }) {
+function FirewallEditorDialog({ versions, saving, onSave, onDelete, onClose, initialSecurityGroupId, createNew = false, attachmentCount = 0 }) {
   const latest = versions.filter((item, index, all) => all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index);
   const selected = createNew ? undefined : latest.find((item) => item.securityGroupId === initialSecurityGroupId);
   const [draft, setDraft] = useState(null);
   const [rule, setRule] = useState({ host: "", protocol: "https", port: 443, includeSubdomains: true, purpose: "", advanced: false });
   const [ruleError, setRuleError] = useState("");
   const [confirmLiveChange, setConfirmLiveChange] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (!selected) {
@@ -1388,6 +1389,12 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
     const { defaultFor: _defaultFor, ...document } = draft;
     const saved = await onSave(document);
     if (saved) onClose();
+  };
+  const deleteGroup = async () => {
+    if (!draft?.securityGroupId || !onDelete) return;
+    const deleted = await onDelete(draft.securityGroupId, draft.name);
+    if (deleted) onClose();
+    else setConfirmDelete(false);
   };
 
   const expectedRuleAction = draft ? firewallRuleActionFor(draft.defaultAction) : "allow";
@@ -1444,19 +1451,22 @@ function FirewallEditorDialog({ versions, saving, onSave, onClose, initialSecuri
           <label><span>Destination</span><input name="firewall-rule-destination" placeholder="updates.example.com" value={rule.host} disabled={saving} onChange={(event) => setRule({ ...rule, host: event.target.value })} /></label>
           <label className="firewall-editor-subdomains"><input name="firewall-rule-subdomains" type="checkbox" checked={rule.includeSubdomains} disabled={saving} onChange={(event) => setRule({ ...rule, includeSubdomains: event.target.checked })} /><span>This domain and its subdomains</span></label>
           <label className="firewall-editor-purpose"><span>Purpose</span><input name="firewall-rule-purpose" placeholder={expectedRuleAction === "deny" ? "Why this destination is blocked" : "Why this destination is needed"} value={rule.purpose} disabled={saving} onChange={(event) => setRule({ ...rule, purpose: event.target.value })} /></label>
-          <details className="firewall-editor-advanced"><summary>Advanced traffic settings</summary><p>Standard rules cover HTTP and HTTPS. Choose one protocol and port only when the destination requires it.</p><label><input type="checkbox" checked={rule.advanced} onChange={(event) => setRule({ ...rule, advanced: event.target.checked })} /><span>Use one protocol and port</span></label>{rule.advanced && <div><label><span>Protocol</span><SelectMenu value={rule.protocol} disabled={saving} onValueChange={(value) => setRule({ ...rule, protocol: value, port: value === "https" ? 443 : 80 })} ariaLabel="Protocol" options={[{ value: "https", label: "HTTPS" }, { value: "http", label: "HTTP" }]} /></label><label><span>Port</span><input name="firewall-rule-port" type="number" min="1" max="65535" value={rule.port} disabled={saving} onChange={(event) => setRule({ ...rule, port: event.target.value })} /></label></div>}</details>
+          <details className="firewall-editor-advanced"><summary>Advanced traffic settings</summary><p>Choose whether this destination rule covers normal web traffic or one specific connection.</p><label className="firewall-editor-traffic-scope"><span>Traffic covered</span><SelectMenu value={rule.advanced ? "specific" : "standard"} disabled={saving} onValueChange={(value) => setRule({ ...rule, advanced: value === "specific" })} ariaLabel="Traffic covered by this destination rule" options={[{ value: "standard", label: "Standard web traffic (HTTP 80 and HTTPS 443)" }, { value: "specific", label: "Specific protocol and port" }]} /><small>Standard web traffic creates both an HTTP port 80 rule and an HTTPS port 443 rule.</small></label>{rule.advanced && <div><label><span>Protocol</span><SelectMenu value={rule.protocol} disabled={saving} onValueChange={(value) => setRule({ ...rule, protocol: value, port: value === "https" ? 443 : 80 })} ariaLabel="Protocol" options={[{ value: "https", label: "HTTPS" }, { value: "http", label: "HTTP" }]} /></label><label><span>Port</span><input name="firewall-rule-port" type="number" min="1" max="65535" value={rule.port} disabled={saving} onChange={(event) => setRule({ ...rule, port: event.target.value })} /></label></div>}</details>
           {ruleError && <p className="firewall-rule-builder-error" role="alert">{ruleError}</p>}
           <button className="secondary-button" type="button" disabled={saving || !rule.host.trim() || !rule.purpose.trim() || !rulePortValid} onClick={addRule}>{addRuleLabel}</button>
         </div>}
         <div className="firewall-editor-actions">
           <span><ShieldCheckmark24Regular aria-hidden="true" />Rules apply to destinations, not URL paths. Redirects are checked as new connections.</span>
           <div>
+            {draft.securityGroupId && !draft.defaultFor && <button className="secondary-button danger-button" type="button" disabled={saving || attachmentCount > 0} title={attachmentCount > 0 ? "Detach this group from every workspace before deleting it" : undefined} onClick={() => setConfirmDelete(true)}><Delete24Regular aria-hidden="true" />Delete group</button>}
             <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button>
             {!draft.defaultFor && <button className="primary-button compact-button" type="button" disabled={saving || !draft.name || !draft.description || reviewedRules.length > 0} onClick={requestSave}>{saving ? "Saving changes" : draft.securityGroupId ? "Save changes" : "Create security group"}</button>}
           </div>
         </div>
+        {draft.securityGroupId && !draft.defaultFor && attachmentCount > 0 && <p className="firewall-delete-help">Detach this group from {attachmentCount} {attachmentCount === 1 ? "workspace" : "workspaces"} before deleting it.</p>}
       </div>}
       {confirmLiveChange && <ConfirmDialog title={`Update ${attachmentCount} ${attachmentCount === 1 ? "workspace" : "workspaces"}?`} description="This security-group revision will apply live to every attached workspace without restarting it." confirmLabel="Apply live changes" onConfirm={() => { setConfirmLiveChange(false); void save(); }} onCancel={() => setConfirmLiveChange(false)} />}
+      {confirmDelete && <ConfirmDialog title={`Delete ${draft?.name}?`} description="This group will disappear from Network access. Its immutable revision history is retained. This cannot be undone." confirmLabel="Delete security group" danger busy={saving} onConfirm={() => void deleteGroup()} onCancel={() => setConfirmDelete(false)} />}
     </ModalDialog>
   );
 }
@@ -2790,7 +2800,7 @@ function SettingsScreen({ view, organizationDisplayName, isOrganizationOwner, ca
   );
 }
 
-function FirewallScreen({ loading, versions, saving, onSave, members }) {
+function FirewallScreen({ loading, versions, saving, onSave, onDelete, members }) {
   const latestVersions = versions.filter((item, index, all) => (
     all.findIndex((candidate) => candidate.securityGroupId === item.securityGroupId) === index
   ));
@@ -2834,6 +2844,7 @@ function FirewallScreen({ loading, versions, saving, onSave, members }) {
           <label className="firewall-search"><span className="sr-only">Search security groups</span><input id="firewall-security-group-search" name="firewall-security-group-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search security groups, destinations, or purposes" /></label>
         </div>
         <div className="firewall-security-group-list">
+          {!loading && groups.length > 0 && <div className="firewall-security-group-header" aria-hidden="true"><span>Security group</span><span>Destinations</span><span>Access model</span><span>Revision</span><span>Actions</span></div>}
           {loading ? <p className="firewall-security-group-empty">Loading security groups…</p> : groups.length === 0 ? (
             <div className="firewall-security-group-empty">
               <strong>{normalizedSearch ? "No security groups match" : "No security groups yet"}</strong>
@@ -2866,7 +2877,7 @@ function FirewallScreen({ loading, versions, saving, onSave, members }) {
         </div>
       </section>
 
-      {editor && <FirewallEditorDialog versions={versions} saving={saving} onSave={onSave} initialSecurityGroupId={editor.securityGroupId} createNew={editor.createNew} attachmentCount={attachmentCountFor(latestVersions.find((group) => group.securityGroupId === editor.securityGroupId) ?? {})} onClose={() => setEditor(null)} />}
+      {editor && <FirewallEditorDialog versions={versions} saving={saving} onSave={onSave} onDelete={onDelete} initialSecurityGroupId={editor.securityGroupId} createNew={editor.createNew} attachmentCount={attachmentCountFor(latestVersions.find((group) => group.securityGroupId === editor.securityGroupId) ?? {})} onClose={() => setEditor(null)} />}
     </div>
   );
 }
@@ -7026,6 +7037,20 @@ export function App() {
     } catch (error) { showApiError(error); }
     finally { setEgressSaving(false); }
   };
+  const deleteEgressSecurityGroup = async (securityGroupId, name) => {
+    setEgressSaving(true);
+    try {
+      await adminApi.deleteEgressSecurityGroup(securityGroupId);
+      await refreshEgressGroups();
+      setToast(`${name} deleted.`);
+      return true;
+    } catch (error) {
+      showApiError(error);
+      return false;
+    } finally {
+      setEgressSaving(false);
+    }
+  };
   const changeMcpPolicy = (name, decision) => setMcpPolicy((current) => ({
     ...current,
     tools: current.tools.map((tool) => tool.name === name ? { ...tool, decision } : tool),
@@ -7308,7 +7333,7 @@ export function App() {
             onReviewWorkspacePolicies={() => selectWorkspaceSection("policies")}
           />
         )}
-        {activeNav === "Network access" && canManageNetworkAccess && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} members={adminWorkspaceMembers} />}
+        {activeNav === "Network access" && canManageNetworkAccess && <FirewallScreen loading={adminLoading} versions={egressVersions} saving={egressSaving} onSave={saveEgressSecurityGroup} onDelete={deleteEgressSecurityGroup} members={adminWorkspaceMembers} />}
         {activeNav === "AI usage" && <PersonalAiOverview workspaces={homeWorkspaces} />}
         {activeNav === "AI control plane" && canOpenAiControlPlane && (
           <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView} tabs={availableAiControlPlaneTabs}>

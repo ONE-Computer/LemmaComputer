@@ -474,6 +474,14 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     defaultAction: "allow-public-http-https",
     rules: [],
   };
+  const deletableFirewallVersion: EgressSecurityGroupVersion = {
+    ...internetFirewallVersion,
+    id: "egv_acme_temporary_blocklist_v1",
+    securityGroupId: "esg_acme_temporary_blocklist",
+    name: "Temporary block list",
+    description: "A custom group with no workspace attachments.",
+  };
+  let archivedSecurityGroupId = "";
   effectivePolicy.egressSecurityGroup = firewallVersion;
   effectivePolicy.document = {
     schemaVersion: 1,
@@ -622,7 +630,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       document.mcp.servers.lemmacomputer_ms365.toolPolicies = tools;
       return { id: "version-2", version: 2, documentHash: "b".repeat(64) };
     },
-    listEgressSecurityGroups: async () => [firewallVersion, internetFirewallVersion],
+    listEgressSecurityGroups: async () => [firewallVersion, internetFirewallVersion, ...(archivedSecurityGroupId ? [] : [deletableFirewallVersion])],
     saveEgressSecurityGroup: async (input: { name: string; description: string; rules: EgressSecurityGroupVersion["rules"] }) => {
       firewallVersion = { ...firewallVersion, version: 2, id: "egv_acme_updates_v2", name: input.name, description: input.description, rules: input.rules, documentHash: "f".repeat(64) };
       return firewallVersion;
@@ -635,6 +643,12 @@ test("only an administrator can assign and revoke the tenant policy through Cont
       if (securityGroupVersionId === internetFirewallVersion.id) return internetFirewallVersion;
       firewallVersion = { ...firewallVersion, id: securityGroupVersionId };
       return firewallVersion;
+    },
+    listWorkspaceEgressSecurityGroupAssignments: async () => [],
+    archiveEgressSecurityGroup: async ({ securityGroupId }: { securityGroupId: string }) => {
+      if (securityGroupId !== deletableFirewallVersion.securityGroupId || archivedSecurityGroupId) return false;
+      archivedSecurityGroupId = securityGroupId;
+      return true;
     },
   } as unknown as IdentityPolicyStore;
   const revokedKeys: string[] = [];
@@ -680,6 +694,21 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     assert.equal(openFirewall.executionMode, "disposable-open");
     assert.equal(openFirewall.egress.mode, "full-web");
     assert.equal(openFirewall.egress.defaultAction, "allow-public-http-https");
+
+    const policyDocument = effectivePolicy.document as { workspaceProfiles: string[] };
+    policyDocument.workspaceProfiles = ["claude-desktop-standard-v1"];
+    const grandfatheredOpenSettings = await app.inject({
+      method: "GET",
+      url: `/v1/admin/users/alpha/sandbox-settings?grantId=${openWorkspace.grantId}`,
+      headers,
+    });
+    assert.equal(grandfatheredOpenSettings.statusCode, 200, grandfatheredOpenSettings.body);
+    assert.equal(grandfatheredOpenSettings.headers["cache-control"], "no-store");
+    assert.equal(grandfatheredOpenSettings.json().profileId, "disposable-open-v1");
+    assert.equal(grandfatheredOpenSettings.json().profile.id, "disposable-open-v1");
+    assert.deepEqual(grandfatheredOpenSettings.json().availableProfiles.map((profile: { id: string }) => profile.id), ["claude-desktop-standard-v1"]);
+    assert.equal(grandfatheredOpenSettings.json().securityGroup.defaultAction, "allow-public-http-https");
+    policyDocument.workspaceProfiles = ["claude-desktop-standard-v1", "disposable-open-v1"];
 
     const memberships = await app.inject({ method: "GET", url: "/v1/admin/memberships", headers });
     assert.equal(memberships.statusCode, 200);
@@ -832,6 +861,12 @@ test("only an administrator can assign and revoke the tenant policy through Cont
     const firewalls = await app.inject({ method: "GET", url: "/v1/admin/egress-security-groups", headers });
     assert.equal(firewalls.statusCode, 200);
     assert.equal(firewalls.json().securityGroups[0].rules[0].host, "downloads.claude.ai");
+
+    const deletedFirewall = await app.inject({ method: "DELETE", url: `/v1/admin/egress-security-groups/${deletableFirewallVersion.securityGroupId}`, headers });
+    assert.equal(deletedFirewall.statusCode, 204);
+    assert.equal(archivedSecurityGroupId, deletableFirewallVersion.securityGroupId);
+    const deletedFirewallAgain = await app.inject({ method: "DELETE", url: `/v1/admin/egress-security-groups/${deletableFirewallVersion.securityGroupId}`, headers });
+    assert.equal(deletedFirewallAgain.statusCode, 404);
 
     const savedFirewall = await app.inject({
       method: "POST",

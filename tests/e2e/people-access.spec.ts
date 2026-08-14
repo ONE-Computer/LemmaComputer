@@ -187,6 +187,13 @@ test("organization administrator invites a person and manages member access", as
   await page.getByRole("option", { name: "Public web with blocked destinations" }).click();
   await securityGroupDialog.getByRole("textbox", { name: "Destination" }).fill("microsoft.com");
   await securityGroupDialog.getByLabel("Purpose").fill("Block Microsoft services");
+  const subdomainCheckbox = securityGroupDialog.getByRole("checkbox", { name: "This domain and its subdomains" });
+  await expect(subdomainCheckbox).toBeChecked();
+  expect((await subdomainCheckbox.boundingBox())?.width).toBeLessThanOrEqual(20);
+  await securityGroupDialog.getByText("Advanced traffic settings", { exact: true }).click();
+  await expect(securityGroupDialog.getByRole("combobox", { name: "Traffic covered by this destination rule" })).toContainText("Standard web traffic (HTTP 80 and HTTPS 443)");
+  await expect(securityGroupDialog.getByText("Standard web traffic creates both an HTTP port 80 rule and an HTTPS port 443 rule.", { exact: true })).toBeVisible();
+  await securityGroupDialog.screenshot({ path: "test-results/firewall-traffic-scope-reviewed.png" });
   await securityGroupDialog.getByRole("button", { name: "Block destination" }).click();
   await expect(securityGroupDialog.getByText("Web traffic · HTTP and HTTPS", { exact: false })).toBeVisible();
   await securityGroupDialog.evaluate((dialog) => dialog.scrollTo({ top: 0 }));
@@ -196,12 +203,20 @@ test("organization administrator invites a person and manages member access", as
   const microsoftGroup = page.locator(".firewall-security-group-list article").filter({ hasText: "Ban Microsoft" });
   await expect(microsoftGroup).toContainText("Public web with blocked destinations");
   await expect(microsoftGroup).toContainText("1 blocked");
+  const groupHeaderCells = page.locator(".firewall-security-group-header > span");
+  const groupRowCells = microsoftGroup.locator(":scope > *");
+  for (let index = 0; index < 5; index += 1) {
+    const headerBox = await groupHeaderCells.nth(index).boundingBox();
+    const rowBox = await groupRowCells.nth(index).boundingBox();
+    expect(rowBox?.x).toBeCloseTo(headerBox?.x ?? 0, 0);
+  }
 
   await page.goto("/?view=home&section=organization");
   const internetWorkspace = page.getByRole("row", { name: "Sandbox Research for Example User" });
   await internetWorkspace.getByRole("button", { name: "Manage network access" }).click();
   networkDialog = page.getByRole("dialog", { name: "Network access for Sandbox Research" });
   await expect(networkDialog.getByText("Internet workspace", { exact: true })).toBeVisible();
+  await networkDialog.screenshot({ path: "test-results/workspace-internet-network-access-reviewed.png" });
   await networkDialog.getByRole("combobox", { name: "Workspace network security group" }).click();
   await page.getByRole("option", { name: /Ban Microsoft/ }).click();
   await networkDialog.getByRole("button", { name: "Save network access" }).click();
@@ -211,6 +226,27 @@ test("organization administrator invites a person and manages member access", as
   const attachedMicrosoftGroup = page.locator(".firewall-security-group-list article").filter({ hasText: "Ban Microsoft" });
   await expect(attachedMicrosoftGroup).toContainText("1 workspace attached");
   await page.screenshot({ path: "test-results/network-access-reviewed.png", fullPage: true });
+  await attachedMicrosoftGroup.getByRole("button", { name: "Manage group" }).click();
+  let managedGroupDialog = page.getByRole("dialog", { name: "Manage Ban Microsoft" });
+  await expect(managedGroupDialog.getByRole("button", { name: "Delete group" })).toBeDisabled();
+  await expect(managedGroupDialog.getByText("Detach this group from 1 workspace before deleting it.", { exact: true })).toBeVisible();
+  await managedGroupDialog.getByRole("button", { name: "Cancel" }).click();
+
+  await page.goto("/?view=home&section=organization");
+  await internetWorkspace.getByRole("button", { name: "Manage network access" }).click();
+  networkDialog = page.getByRole("dialog", { name: "Network access for Sandbox Research" });
+  await networkDialog.getByRole("combobox", { name: "Workspace network security group" }).click();
+  await page.getByRole("option", { name: "Use Internet workspace default" }).click();
+  await networkDialog.getByRole("button", { name: "Save network access" }).click();
+  await page.locator("aside").getByRole("button", { name: "Network access", exact: true }).click();
+  const detachedMicrosoftGroup = page.locator(".firewall-security-group-list article").filter({ hasText: "Ban Microsoft" });
+  await detachedMicrosoftGroup.getByRole("button", { name: "Manage group" }).click();
+  managedGroupDialog = page.getByRole("dialog", { name: "Manage Ban Microsoft" });
+  await managedGroupDialog.getByRole("button", { name: "Delete group" }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete Ban Microsoft?" });
+  await deleteDialog.getByRole("button", { name: "Delete security group" }).click();
+  await expect(page.getByText("Ban Microsoft deleted.", { exact: true })).toBeVisible();
+  await expect(detachedMicrosoftGroup).toHaveCount(0);
 
   await page.goto("/?view=settings&section=people");
 
