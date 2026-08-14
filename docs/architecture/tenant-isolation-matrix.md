@@ -1,6 +1,6 @@
 # Tenant and authentication isolation matrix
 
-This matrix is the reviewed contract for authentication and product-authorization data. Its machine-readable companion is [`config/tenant-isolation-manifest.json`](../config/tenant-isolation-manifest.json). The manifest names every persisted authentication and control-plane table created by the complete migration streams.
+This matrix is the reviewed contract for authentication and product-authorization data. Its machine-readable companion is [`config/tenant-isolation-manifest.json`](../../config/tenant-isolation-manifest.json). The manifest names every persisted authentication and control-plane table created by the complete migration streams.
 
 ## Authority boundary
 

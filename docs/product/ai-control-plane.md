@@ -120,7 +120,7 @@ token proxy and appears as a number only when an administrator has configured a
 supported estimated serving grid; it is not a provider-specific footprint or
 an assurance-ready inventory.
 
-See [LiteLLM gateway architecture](litellm-gateway-architecture.md), [Governed
+See [LiteLLM gateway architecture](../architecture/litellm-gateway.md), [Governed
 model routing](model-routing.md), [AI usage and cost
 ledger](ai-usage-ledger.md), [AI spend observability](ai-spend-observability.md),
 [Team budgets](team-budgets.md), and [AI token operational-emissions

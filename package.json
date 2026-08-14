@@ -14,6 +14,7 @@
     "test:customer-auth:e2e": "playwright test --config playwright.customer-auth.config.ts",
     "test:activity:e2e": "playwright test tests/e2e/activity-panel.spec.ts",
     "test:activity:e2e:update": "playwright test tests/e2e/activity-panel.spec.ts --update-snapshots",
+    "test:platform-operator:e2e": "playwright test --config playwright.platform-operator.config.ts",
     "test:responsive:e2e": "playwright test --config playwright.responsive.config.ts",
     "qualify:mcp-egress": "node scripts/qualify-mcp-egress.mjs",
     "qualify:oauth": "tsx scripts/qualify-oauth-renewal.mts",

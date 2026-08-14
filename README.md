@@ -27,35 +27,159 @@ The same tenant-scoped codebase supports `customer-managed` single-tenant and
 LemmaComputer-operated `hosted` deployments. Deployment profiles change
 configuration and infrastructure, not the product schema or security model.
 
+## Quick start
+
+To evaluate LemmaComputer on a Linux `amd64` host with Docker Compose v2.30.0
+or later and Node.js 22 or later:
+
+```bash
+npm ci
+npm run env:init -- --profile=worktree
+npm run compose:up
+```
+
+`compose:up` builds the application services, applies the migration jobs, and
+waits for every service to report healthy. Then open **http://localhost:4174**,
+which is the evaluation default. The authoritative value is
+`LEMMACOMPUTER_PUBLIC_WEB_URL` in the generated `.env`, and a task worktree
+deliberately uses a different port:
+
+```bash
+grep LEMMACOMPUTER_PUBLIC_WEB_URL .env
+```
+
+Create the first account through the sign-in page, then open **AI control plane
+→ Models & providers** to add a model-provider key. Provider credentials are
+entered in the product UI and are deliberately not read from `.env`. Configure
+Pricing, publish a Model routes mapping, and set up a Team rollout before
+governed Auto, Lite, Balanced, or Pro requests will run.
+
+Launching a managed desktop workspace additionally requires the workspace image,
+which is a large, slow build and is not needed to start the stack or sign in:
+
+```bash
+npm run image:workspace
+```
+
+The `worktree` profile is for evaluation and development. It binds browser-facing
+ports to loopback and permits unresolved Microsoft Entra placeholders, so no
+Microsoft tenant is required to start. See
+[Deployment profiles](docs/guides/deployment-profiles.md) before running
+`customer-managed` or `hosted`, which validate those values strictly.
+
+Contributors should not use this path. Development happens in an isolated task
+worktree; start from the [development workflow](docs/guides/development-workflow.md).
+
 ## Architecture
 
 ```mermaid
 flowchart LR
-  Employee["Employee browser"] --> Ingress["Workspace ingress"]
-  Ingress --> Web["Web application"]
-  Web --> Control["Control API"]
+  Employee["Employee browser"]
 
-  Control --> Store[("Control PostgreSQL")]
-  Control --> Controller["Workspace controller"]
-  Controller --> Sandbox["Kasm sandbox"]
-  Control --> Consent["OpenVTC consent service"]
-  Control -->|"hosted mTLS administrator API"| AdminProxy["LiteLLM admin proxy"]
-  AdminProxy --> Gateway["LiteLLM gateway"]
+  subgraph Edge["Public edge - the only published port"]
+    Ingress["Workspace ingress"]
+  end
+
+  subgraph ControlPlane["Control plane"]
+    Web["Web application"]
+    Control["Control API"]
+    Controller["Workspace controller<br/>holds the Docker socket"]
+    Consent["OpenVTC consent service"]
+    Broker["Channel broker"]
+    Scheduler["Scheduler worker"]
+    Store[("Control PostgreSQL")]
+  end
+
+  subgraph WorkspaceContainer["One workspace container per session"]
+    Brokers["AI/MCP broker processes<br/>root-owned, hold the scoped key<br/>listening on 127.0.0.1:4312-4317"]
+    Desktop["Desktop and AI applications<br/>run as kasm-user, uid 1000"]
+    Desktop -.->|"loopback only, never sees a credential"| Brokers
+  end
+
+  subgraph DataPlane["Gateway data plane - no direct internet route"]
+    Gateway["LiteLLM gateway"]
+    AdminProxy["LiteLLM admin proxy"]
+    M365["Microsoft 365 MCP"]
+    GatewayStore[("Gateway PostgreSQL")]
+  end
+
+  subgraph EgressLayer["Proxied egress - destinations a tenant or user can influence"]
+    ModelEgress["Gateway egress proxy<br/>static provider allowlist"]
+    McpEgress["Remote MCP egress proxy<br/>custom and public MCP only"]
+    WorkspaceEgress["Workspace egress sidecar<br/>signed per-workspace domain rules"]
+  end
+
+  Employee --> Ingress
+  Ingress -->|"normal pages"| Web --> Control
+  Ingress -->|"/workspaces/:id<br/>authenticated HTTP and WebSocket"| Relay["Kasm relay sidecar"] --> Desktop
+  Ingress -->|"/oauth/mcp/callback"| Gateway
+  Ingress -->|"/m365/authorize"| M365
+
+  Control --> Store
+  Control --> Consent
+  Control --> Broker
+  Scheduler --> Control
+  Control -->|"signed effective policy"| Controller
+  Controller -->|"creates and verifies"| WorkspaceContainer
+  Control -->|"hosted mTLS administrator API"| AdminProxy --> Gateway
   Gateway -->|"routing, usage, and MCP policy callback"| Control
-  Control --> Broker["Channel broker"]
-  Scheduler["Scheduler worker"] --> Control
 
-  Sandbox --> Loopback["Root-owned AI/MCP broker"]
-  Loopback -->|"scoped virtual key"| Gateway
-  Sandbox --> Control
-  Sandbox --> Egress["Per-workspace egress proxy"]
-  Gateway --> Models["Model providers"]
-  Gateway --> M365["Microsoft 365 MCP"]
+  Brokers -->|"scoped virtual key"| Gateway
+  Brokers --> Control
+  Desktop --> WorkspaceEgress --> Approved["Approved web destinations"]
+
+  Gateway --> ModelEgress --> Models["Model providers"]
+  Gateway --> McpEgress --> RemoteMcp["Remote and public MCP servers"]
+  Gateway --> GatewayStore
   M365 --> Graph["Microsoft Graph"]
   Broker --> Channels["External channels"]
-
-  Gateway --> GatewayStore[("Gateway PostgreSQL")]
 ```
+
+Workspace ingress owns the single published port and is an authorization-aware
+session gateway, not a plain reverse proxy. It serves ordinary pages from the
+Web application, and exposes exactly two public OAuth routes —
+`/oauth/mcp/callback` to private LiteLLM and `/m365/authorize` to the private
+Microsoft connector — so neither service publishes a host port of its own. For
+`/workspaces/:id` it validates a short-lived, HMAC-signed launch link, exchanges
+it for an `HttpOnly` path-scoped session cookie, strips the token from the URL,
+re-checks access with Control on every request, and keeps re-checking on a
+heartbeat for the life of a WebSocket session, so revoking access severs a live
+desktop rather than waiting for it to close.
+
+The boxes above are conceptual groupings for reading the diagram, not a
+deployment topology. They do not correspond to Compose networks, subnets, or
+VPCs — several components inside one box sit on different networks, and Control
+alone is attached to six. The authoritative mapping is the
+[Compose network topology](docs/architecture/overview.md#compose-network-topology)
+table.
+
+Egress is proxied where the destination set can be influenced by a tenant or a
+workspace user, and direct where it is fixed by an administrator. LiteLLM is
+attached only to internal networks and has no internet route at all, because
+provider deployments and remote MCP servers are tenant-configurable: model
+traffic leaves through the gateway egress proxy under a static allowlist, and
+custom or public MCP traffic leaves through the separate remote MCP egress
+proxy. Keeping those two policies in separate processes is what stops an MCP
+redirect from reaching a model provider or a private service. Workspace web
+egress is proxied for the same reason — the destination comes from policy the
+user is subject to.
+
+The Microsoft 365 connector, the channel broker, and Control's identity lookups
+each egress directly on their own dedicated network, with no destination
+allowlist. Their targets are fixed by pinned code or administrator configuration
+rather than by a tenant, so the network separation exists to keep their outbound
+paths off each other's rather than to constrain where they may go.
+
+The workspace container is one process boundary with two privilege zones inside
+it. The broker processes start as root, receive the scoped gateway key and
+agent-bridge token, and listen only on loopback; the entrypoint then clears
+those variables from its own environment before handing the session to
+`kasm-user`. The employee's desktop and AI applications therefore reach the
+model gateway through `127.0.0.1` without ever holding a credential they could
+read, copy, or exfiltrate. The AI/MCP broker is not a separate service — it is
+the privileged half of the workspace the employee is using. The Kasm relay and
+the egress proxy are separate per-workspace sidecar containers, created and
+destroyed with the session.
 
 The system separates four concerns:
 
@@ -95,13 +219,13 @@ role from provider claims. An invitation fixes the organization and role before
 the recipient authenticates. Microsoft 365 connector consent is a later,
 independent grant and does not affect sign-in or membership.
 
-See [Customer authentication architecture](docs/authentication-architecture.md)
-for the normative trust boundary and [Deployment profiles](docs/deployment-profiles.md)
+See [Customer authentication architecture](docs/architecture/authentication.md)
+for the normative trust boundary and [Deployment profiles](docs/guides/deployment-profiles.md)
 for profile-specific custody and supported methods.
 
-See [Architecture](docs/architecture.md) for trust boundaries, runtime flows,
+See [Architecture](docs/architecture/overview.md) for trust boundaries, runtime flows,
 network isolation, policy integrity, and the approval protocol. The dedicated
-[LiteLLM gateway architecture](docs/litellm-gateway-architecture.md) separates
+[LiteLLM gateway architecture](docs/architecture/litellm-gateway.md) separates
 the provider, governed Auto, MCP/OAuth, scoped-grant, budget, and telemetry
 paths and identifies which decisions remain authoritative in Control.
 
@@ -110,7 +234,7 @@ paths and identifies which decisions remain authoritative in Control.
 | Service | Responsibility | Exposure |
 | --- | --- | --- |
 | `workspace-ingress` | Serves the product origin and exchanges short-lived workspace launch links for scoped sessions | Loopback on the configured Web port |
-| `web` | Static React application and authenticated reverse proxy to Control | Private |
+| `web` | Serves the static React application and forwards `/api` to Control with a service token; Control performs all user authorization | Private |
 | `control-api` | Identity, policy, lifecycle orchestration, grants, governance, audit, and connection APIs | Private |
 | `db-migrate` | One-shot, checksummed Control-database migration job that must complete before Control starts | Private/job |
 | `workspace-controller` | Provisions Kasm workspaces through local Docker or the Kasm Developer API | Private |
@@ -119,62 +243,76 @@ paths and identifies which decisions remain authoritative in Control.
 | `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | Private; callbacks use workspace ingress |
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |
-| `scheduler-worker` | Claims due schedules and dispatches them through Control without decrypting prompts | Private |
+| `scheduler-worker` | Claims due schedule runs from the Control database and dispatches each one back through Control without decrypting prompts. Shares Control's database and network, so it is a separate process for operational reasons rather than an isolation boundary | Private |
 | `postgres` | LemmaComputer identity, policy, workspace, routing, usage-ledger, budget, operation, and audit state | Private |
 | `litellm-postgres` | Gateway configuration, virtual keys, and encrypted OAuth state | Private |
 | workspace sidecars | Credential brokers, Kasm relay, and default-deny egress enforcement created per workspace | Dynamic/private |
 
-The technical [Service reference](docs/services.md) describes each process,
+The technical [Service reference](docs/reference/services.md) describes each process,
 interface, state owner, health contract, and extension seam.
 
-## Run the full stack locally
+## Run a development stack
 
-For a fresh clone, contributor machine, or coding agent, begin with the
-[development workflow](docs/development-workflow.md). It separates ordinary
-source development from production deployment: no development stack runs from
-`main`; every task gets an isolated `worktree`-profile stack that still permits
-multiple organizations. The guide contains the exact commands and separates
-generated `.env` values from task-specific human credentials.
-
-The reference deployment requires Linux on `amd64`, Docker Engine with Docker
-Compose v2.30.0 or later, and Node.js 22 or later. Its current strict
-customer-managed preflight still requires a Microsoft Entra application for the
-transitional workforce adapter, even when customers primarily use Better Auth;
-that compatibility requirement is not product authorization. Microsoft social
-login, organization-managed company SSO, and Microsoft 365 connector consent
-remain separate configurations. Model-provider credentials are added after
-startup through the write-only administrator UI, not `.env`. The reference
-stack binds browser-facing ports to loopback and is intended for development or
-evaluation.
+The Quick start above is for evaluating a single checkout. Contributors work in
+an isolated task worktree instead, so that parallel tasks never share `.env`,
+ports, Compose project names, container names, networks, images, volumes, or
+databases:
 
 ```bash
-# From the initialized task worktree, edit .env with the required deployment
-# and authentication values. worktree:init has already installed dependencies
-# and generated isolated local secrets.
+git worktree add .worktrees/<task-name> -b codex/<task-name> origin/main
+```
+
+```bash
+cd .worktrees/<task-name>
+npm run worktree:init
+npm run dev:doctor
+```
+
+`worktree:init` refuses to run on `main`. It installs dependencies, generates
+fresh isolated secrets, assigns a unique host port, sets
+`LEMMACOMPUTER_INSTALLATION_KIND=worktree`, and prints that worktree's Web URL.
+Do not copy another checkout's `.env`. Then start the stack:
+
+```bash
 npm run env:check
-npm run image:workspace
 npm run compose:config
 npm run compose:up
 ```
 
-After the stack is healthy, sign in as an administrator and open **AI control
-plane → Models & providers** to add and test each write-only model-provider
-key. Then configure Pricing, publish a Model routes mapping, and set up a Team
-rollout before expecting governed Auto, Lite, Balanced, or Pro requests to run.
-Do not put provider keys in `.env`.
+Build the managed workspace image only when launching a desktop workspace or
+changing its packaged software. It is a large, slow build:
 
-When enabling a Microsoft integration, register only the exact redirect URI
-shown by the corresponding setup flow. Company SSO, Microsoft social login, and
-Microsoft 365 connector consent are separate registrations and grants. The
-[local deployment runbook](docs/local-deployment.md) lists the required
-environment values, optional provider settings, commands, and readiness checks
-in setup order. For development, open the worktree URL printed by
-`npm run worktree:init` after the stack is healthy.
+```bash
+npm run image:workspace
+```
+
+The [development workflow](docs/guides/development-workflow.md) is the complete
+contributor guide, covering host support, environment ownership, local gates,
+and controlled promotion.
+
+### Deployment profiles and Microsoft integrations
+
+The reference deployment requires Linux on `amd64`, Docker Engine with Docker
+Compose v2.30.0 or later, and Node.js 22 or later. It binds browser-facing ports
+to loopback and is intended for development or evaluation, not as a production
+security perimeter.
+
+The `worktree` profile permits unresolved Microsoft Entra placeholders. The
+strict `customer-managed` preflight still requires a Microsoft Entra application
+for the transitional workforce adapter, even when customers primarily use Better
+Auth; that compatibility requirement is not product authorization. Microsoft
+social login, organization-managed company SSO, and Microsoft 365 connector
+consent remain separate configurations and separate grants — when enabling one,
+register only the exact redirect URI shown by its setup flow.
+
+The [local deployment and Microsoft integration runbook](docs/guides/local-deployment.md)
+lists the required environment values, optional provider settings, commands, and
+readiness checks in setup order.
 
 ## Development
 
 Create and initialize a task worktree using the
-[development workflow](docs/development-workflow.md), then use the focused
+[development workflow](docs/guides/development-workflow.md), then use the focused
 commands below as needed. Do not develop directly in the primary `main`
 checkout.
 
@@ -186,23 +324,49 @@ npm run dev:controller
 npm run dev:web
 ```
 
-The monorepo uses npm workspaces. Shared schemas and security invariants live in
-`packages/`; runnable processes live in `apps/`; provider and gateway policy
-configuration lives in `config/` and `integrations/`.
+### Repository layout
+
+The monorepo uses npm workspaces.
+
+| Path | Contents |
+| --- | --- |
+| `apps/` | Runnable processes, one per container |
+| `packages/` | Shared schemas, contracts, and security invariants |
+| `config/`, `integrations/` | Provider and gateway policy configuration |
+| `docker/` | Dockerfiles and the managed workspace image contents |
+| `infra/` | Database and infrastructure initialization |
+| `scripts/` | Environment, Compose, migration, and release tooling |
+| `tests/` | Node test suites and Playwright end-to-end specs |
+| `docs/` | Documentation, grouped — see [docs/README.md](docs/README.md) |
+
+Four Compose files sit at the repository root, and only the first is used for
+ordinary work:
+
+| File | Role |
+| --- | --- |
+| `compose.yaml` | The canonical topology. Use it through `npm run compose:*` |
+| `compose.hosted.yaml` | Deliberately empty marker. A test asserts it selects no deployment policy, because the profile must come only from `LEMMACOMPUTER_INSTALLATION_KIND` |
+| `compose.oauth-qualification.yaml` | Isolated OAuth test stack, invoked by `npm run qualify:oauth` |
+| `compose.provider-qualification.yaml` | Isolated provider test stack, invoked by `npm run qualify:providers` |
+
+The qualification files stay at the root because Compose resolves their build
+contexts and bind mounts relative to the file's own directory.
+
+The four `playwright.*.config.ts` files each drive a different suite:
+`test:e2e`, `test:customer-auth:e2e`, `test:platform-operator:e2e`, and
+`test:responsive:e2e`.
 
 ## Documentation
 
-- [Architecture and trust model](docs/architecture.md)
-- [Customer authentication architecture](docs/authentication-architecture.md)
-- [Deployment profiles](docs/deployment-profiles.md)
-- [LiteLLM gateway architecture](docs/litellm-gateway-architecture.md)
-- [AI control plane](docs/ai-control-plane.md)
-- [Service reference](docs/services.md)
-- [Governed model routing](docs/model-routing.md)
-- [Local deployment and optional Microsoft setup](docs/local-deployment.md)
-- [Transitional hosted Microsoft Entra External ID adapter](docs/hosted-external-id.md)
-- [Extending LemmaComputer](docs/extending.md)
-- [Configuration and operations](docs/operations.md)
+[docs/README.md](docs/README.md) is the grouped index. The most common starting
+points:
+
+- [Architecture and trust model](docs/architecture/overview.md)
+- [Why LemmaComputer runs as many processes](docs/architecture/service-boundaries.md)
+- [Development workflow](docs/guides/development-workflow.md)
+- [Deployment profiles](docs/guides/deployment-profiles.md)
+- [Service reference](docs/reference/services.md)
+- [Configuration and operations](docs/guides/operations.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](docs/SECURITY.md)
 

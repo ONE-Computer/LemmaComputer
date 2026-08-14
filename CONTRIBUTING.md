@@ -7,7 +7,7 @@ they affect.
 
 ## Development setup
 
-Start with the canonical [development workflow](docs/development-workflow.md).
+Start with the canonical [development workflow](docs/guides/development-workflow.md).
 It covers a fresh clone, the required task worktree, agent bootstrap, host
 support, environment ownership, and verification gates. Do not develop directly
 in the primary `main` checkout.
@@ -20,7 +20,7 @@ npm run verify:quick
 ```
 
 For a complete local product instance, follow the ordered
-[local deployment runbook](docs/local-deployment.md). `npm run worktree:init`
+[local deployment runbook](docs/guides/local-deployment.md). `npm run worktree:init`
 already creates the worktree's `.env`; do not replace it with another
 checkout's environment.
 
@@ -59,7 +59,7 @@ and workspace home data out of commits.
 - Update technical documentation when a service contract or extension path
   changes.
 
-See [Extending LemmaComputer](docs/extending.md) for component-specific
+See [Extending LemmaComputer](docs/guides/extending.md) for component-specific
 checklists.
 
 ## Tests
