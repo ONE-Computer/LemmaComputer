@@ -61,9 +61,21 @@ leave the cleanup operation incomplete.
 
 ## Qualification
 
-Before promotion, run `npm run qualify:deployment-profiles`, the focused
+Run `npm run qualify:internal-mtls` locally to exercise both current mTLS trust
+boundaries in one shot: Control to the LiteLLM administration listener and
+Control to a remote workspace node. The qualification creates separate
+ephemeral test CAs and Control leaf keys, starts the real TLS listeners with
+mock non-TLS backends, and proves accepted identity plus missing-certificate,
+wrong-identity, wrong-token, cross-CA, and hostname rejection. It does not
+install or reuse a developer CA.
+
+The desktop ingress and node application relays use server-authenticated TLS,
+not client-certificate mTLS, so their certificate verification remains in the
+focused ingress and adapter tests.
+
+Before promotion, also run `npm run qualify:deployment-profiles`, the focused
 controller/adapter/ingress tests, and `npm run verify:quick`. In a representative
-private node, also prove workspace start/open, governed model and tool traffic,
+private node, prove workspace start/open, governed model and tool traffic,
 desktop reconnect through the TLS relay, egress allow/deny behavior, restart
 persistence, cross-workspace substitution denial, verified purge, and secret-
 free lifecycle audit events. KVM remains disabled on hosted multi-tenant nodes.

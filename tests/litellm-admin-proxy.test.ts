@@ -1,44 +1,14 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { createLiteLlmAdminProxy } from "../apps/litellm-admin-proxy/server.mjs";
 import { createMutualTlsFetch } from "@lemmacomputer/litellm-adapter";
-
-type CertificateMaterial = {
-  directory: string;
-  ca: string;
-  serverCertificate: string;
-  serverKey: string;
-  controlCertificate: string;
-  controlKey: string;
-};
+import { generateMutualTlsAuthority } from "./mtls-fixture.js";
 
 const listen = (server: ReturnType<typeof createHttpServer>) => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const close = (server: { close(callback: (error?: Error) => void): unknown }) => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-
-const generateCertificates = async (): Promise<CertificateMaterial> => {
-  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-litellm-admin-tls-"));
-  const openssl = (args: string[]) => execFileSync("openssl", args, { cwd: directory, stdio: "pipe" });
-  openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-subj", "/CN=lemmacomputer-test-ca", "-days", "1"]);
-  openssl(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr", "-subj", "/CN=litellm-admin"]);
-  openssl(["x509", "-req", "-in", "server.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "server.crt", "-days", "1"]);
-  openssl(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", "control.key", "-out", "control.csr", "-subj", "/CN=lemmacomputer-control"]);
-  openssl(["x509", "-req", "-in", "control.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "control.crt", "-days", "1"]);
-  return {
-    directory,
-    ca: await readFile(join(directory, "ca.crt"), "utf8"),
-    serverCertificate: await readFile(join(directory, "server.crt"), "utf8"),
-    serverKey: await readFile(join(directory, "server.key"), "utf8"),
-    controlCertificate: await readFile(join(directory, "control.crt"), "utf8"),
-    controlKey: await readFile(join(directory, "control.key"), "utf8"),
-  };
-};
 
 const request = (port: number, options: { certificate?: string; key?: string }) => new Promise<{ status: number; body: string }>((resolve, reject) => {
   const client = httpsRequest({
@@ -60,7 +30,11 @@ const request = (port: number, options: { certificate?: string; key?: string }) 
 });
 
 test("the LiteLLM administration proxy requires a Control client certificate and rejects another workload identity", async () => {
-  const certificates = await generateCertificates();
+  const certificates = await generateMutualTlsAuthority({
+    name: "litellm-admin",
+    serverName: "litellm-admin",
+    clientCommonName: "lemmacomputer-control",
+  });
   const received: Array<{ url: string; authorization: string }> = [];
   const upstream = createHttpServer(async (request, response) => {
     for await (const _chunk of request) {
@@ -79,8 +53,8 @@ test("the LiteLLM administration proxy requires a Control client certificate and
   const upstreamPort = (upstream.address() as AddressInfo).port;
   const proxy = createLiteLlmAdminProxy({
     upstreamUrl: `http://127.0.0.1:${upstreamPort}`,
-    certificate: certificates.serverCertificate,
-    privateKey: certificates.serverKey,
+    certificate: certificates.server.certificate,
+    privateKey: certificates.server.key,
     clientCa: certificates.ca,
     expectedClientCommonName: "lemmacomputer-control",
   });
@@ -89,15 +63,15 @@ test("the LiteLLM administration proxy requires a Control client certificate and
 
   try {
     await assert.rejects(request(proxyPort, {}));
-    const wrongIdentity = await request(proxyPort, { certificate: certificates.serverCertificate, key: certificates.serverKey });
+    const wrongIdentity = await request(proxyPort, { certificate: certificates.wrongClient.certificate, key: certificates.wrongClient.key });
     assert.equal(wrongIdentity.status, 403);
 
-    const accepted = await request(proxyPort, { certificate: certificates.controlCertificate, key: certificates.controlKey });
+    const accepted = await request(proxyPort, { certificate: certificates.client.certificate, key: certificates.client.key });
     assert.equal(accepted.status, 200);
     const controlFetch = createMutualTlsFetch({
       ca: certificates.ca,
-      clientCertificate: certificates.controlCertificate,
-      clientKey: certificates.controlKey,
+      clientCertificate: certificates.client.certificate,
+      clientKey: certificates.client.key,
       serverName: "litellm-admin",
     });
     const throughAdapterTransport = await controlFetch(`https://127.0.0.1:${proxyPort}/key/delete`, {
@@ -113,6 +87,6 @@ test("the LiteLLM administration proxy requires a Control client certificate and
   } finally {
     await close(proxy);
     await close(upstream);
-    await rm(certificates.directory, { recursive: true, force: true });
+    await certificates.cleanup();
   }
 });

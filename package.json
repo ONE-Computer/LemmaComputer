@@ -21,6 +21,7 @@
     "qualify:providers": "tsx scripts/qualify-provider-settings.mts",
     "qualify:reasoning-adapter": "tsx scripts/qualify-reasoning-adapter.mts",
     "qualify:workspace-startup": "tsx scripts/qualify-workspace-startup.mts",
+    "qualify:internal-mtls": "tsx --test tests/internal-mtls-boundaries.test.ts tests/litellm-admin-proxy.test.ts",
     "benchmark:workspace": "node scripts/benchmark-workspace.mjs",
     "benchmark:kasm-browser": "node scripts/collect-kasm-browser-runtime.mjs",
     "fixtures:office-regression": "python3 scripts/generate-office-regression-corpus.py --output tests/fixtures/office-regression",

@@ -565,7 +565,7 @@ Expected health endpoints:
 | workspace ingress | `${LEMMACOMPUTER_PUBLIC_WEB_URL}/__lemmacomputer/healthz` |
 | Web, private | `http://web:4173/healthz` |
 | Control, private | `http://control-api:4100/healthz` |
-| controller, private | `http://workspace-controller:4101/healthz` |
+| controller, private | listener on `workspace-controller:4101` (HTTP when colocated; mTLS HTTPS when remote) |
 | channel broker, private | `http://channel-broker:4102/healthz` |
 | scheduler worker, private | `http://scheduler-worker:4103/healthz` |
 | OpenVTC, private | `http://openvtc-consent:8788/healthz` |
@@ -573,6 +573,9 @@ Expected health endpoints:
 
 Health confirms process readiness, not a successful provider request,
 Microsoft consent, active policy assignment, or a built workspace image.
+The controller container probe checks TCP listener liveness because a hosted
+node must not receive Control's client certificate merely to call `/healthz`.
+Use `npm run qualify:internal-mtls` to verify the authenticated HTTPS boundary.
 
 Common failures:
 
