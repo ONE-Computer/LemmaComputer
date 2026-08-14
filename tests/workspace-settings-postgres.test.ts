@@ -23,13 +23,15 @@ test("PostgreSQL workspace settings persist governed Auto and reject unknown mod
     const saved = await store.saveSandboxSettings(identity, {
       grantId,
       profileId: "disposable-open-v1",
-      applicationIds: ["google-chrome"],
+      applicationIds: ["firefox", "google-chrome"],
       modelAlias: "lemmacomputer-auto",
       requestedServiceClass: "auto",
       agentIds: ["claude-desktop", "claude-cli"],
     });
     assert.equal(saved.modelAlias, "lemmacomputer-auto");
-    assert.equal((await store.getSandboxSettings(identity, grantId))?.modelAlias, "lemmacomputer-auto");
+    const persisted = await store.getSandboxSettings(identity, grantId);
+    assert.equal(persisted?.modelAlias, "lemmacomputer-auto");
+    assert.deepEqual(persisted?.applicationIds, ["firefox", "google-chrome"]);
     await assert.rejects(
       pool.query(
         `UPDATE sandbox_settings SET model_alias='lemmacomputer-unknown' WHERE tenant_id=$1 AND subject_id=$2 AND grant_id=$3`,
