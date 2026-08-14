@@ -1,45 +1,56 @@
 **Comparison target**
 
-- Source visual truth: `/home/mike/.codex/generated_images/019ffb28-5583-78f0-bb63-b74242156b00/exec-9066c4f4-f8b5-40a8-acc8-3da2d4ec7d4d.png`.
-- Implementation screenshot: `/tmp/lemmacomputer-density-qa/workspace-1366x650.png`.
-- Additional implementation evidence: `/tmp/lemmacomputer-density-qa/signin-1366x650.png` and `/tmp/lemmacomputer-density-qa/signup-1366x650.png`.
-- Full-view comparison: `/tmp/lemmacomputer-density-qa/workspace-comparison-final.png`.
-- Focused comparisons: `/tmp/lemmacomputer-density-qa/workspace-comparison-header.png` and `/tmp/lemmacomputer-density-qa/workspace-comparison-cards.png`.
-- Viewport and state: Workspace overview, light theme, authenticated administrator, 1366 x 650 CSS px.
-- Dimensions and normalization: source 1818 x 865 px, normalized to 1366 x 650 px; implementation 1366 x 650 px at device scale factor 1. Dynamic workspace names and assignments differ between the generated target and fixture, so copy was compared by hierarchy and wrapping rather than literal fixture values.
+- Source defect evidence:
+  - Account flyout: `/home/mike/.codex/attachments/ceb9dabc-39da-4a2a-af03-b91bb8dfebf4/codex-clipboard-e1d1bd04-e4cd-49e3-9467-c07e51c69146.png` (2004 x 2208 px).
+  - People and access: `/home/mike/.codex/attachments/f17e7fd0-92eb-4ca7-97a3-8ab2bc4e25ae/codex-clipboard-ae5e4715-1fd7-461a-b818-415bce06e1f6.png` (4712 x 1878 px).
+  - Credentials: `/home/mike/.codex/attachments/5bb2c63b-140f-4f7e-8b4a-2a63d4390ac9/codex-clipboard-f0424e14-2f79-4ea4-8c04-312f31b0dfcb.png` (5038 x 1934 px).
+- Browser-rendered implementation:
+  - `/tmp/lemmacomputer-density-followup/account-menu-1470x730.png`.
+  - `/tmp/lemmacomputer-density-followup/people-1470x730.png`.
+  - `/tmp/lemmacomputer-density-followup/credentials-1470x730.png`.
+- Full-view comparison evidence:
+  - `/tmp/lemmacomputer-density-followup/account-menu-comparison.png`.
+  - `/tmp/lemmacomputer-density-followup/people-comparison.png`.
+  - `/tmp/lemmacomputer-density-followup/credentials-comparison.png`.
+- Focused alignment evidence: `/tmp/lemmacomputer-density-followup/secondary-alignment-comparison.png`.
+- Implementation viewport: 1470 x 730 CSS px, device scale factor 1, light theme, authenticated organization administrator.
+- Normalization: the supplied screenshots are defect captures from different display crops rather than one pixel-fidelity mock. Each source was aspect-fit and padded to 1470 x 730 before being paired with the corresponding implementation. Exact geometry was therefore judged from the two implementation routes captured at the same viewport; source comparisons were used to confirm that the reported defects were removed.
 
 **Findings**
 
-- No actionable P0, P1, or P2 visual differences remain after the second comparison.
-- Fonts and typography: both use the existing LemmaComputer Inter treatment. The implementation now caps desktop H1 at 32px, uses 13.5px navigation labels, and preserves readable 12–14px supporting text without visible truncation.
-- Spacing and layout rhythm: the 196px sidebar, 36px navigation rows, 24px top offset, tighter tabs, 36px Workspace CTA, and compact card padding reproduce the selected laptop-density direction. Two full cards are visible at 1366 x 650.
-- Colors and visual tokens: the implementation retains the target's warm neutral shell, navy primary actions, pale blue icon surfaces, low-contrast dividers, and semantic status colors. Existing product tokens are reused.
-- Image quality and assets: neither source nor implementation uses raster content imagery on this screen. The implementation retains the product's Fluent icon set and wordmark; no placeholder or custom drawn assets were introduced.
-- Copy and content: normal authentication now uses “Sign in,” “Create account,” and “Continue with SSO,” removes the redundant product explanation, and keeps invitation-specific security context intact.
-- Accessibility and behavior: visible focus, responsive scroll ownership, mobile overflow, compact-laptop action reachability, Workspace tabs, authentication methods, and sign-up navigation were exercised by Playwright. The Workspace capture recorded no browser console errors.
+- No actionable P0, P1, or P2 visual differences remain after the shell correction.
+- Fonts and typography: the existing Inter hierarchy and compact 13–14px shell labels are preserved. The 316px account flyout keeps “My AI usage” and “AI control plane” on one line and leaves the profile name and email readable without the source capture's aggressive truncation.
+- Spacing and layout rhythm: the sidebar is now 216px—slightly wider while retaining 36px navigation rows. The flyout extends 100px beyond the sidebar over the main canvas. Credentials and People and access both begin at x=254px at 1470 x 730, including the “Back to Settings” control, heading, divider, and card column.
+- Colors and visual tokens: the warm shell, navy actions, pale blue surfaces, neutral borders, and account-card elevation remain unchanged. The higher stacking order is functional rather than decorative.
+- Image quality and assets: these screens use the existing LemmaComputer wordmark and Fluent icons; no raster imagery, generated assets, placeholder graphics, custom SVGs, or CSS drawings were introduced.
+- Copy and content: navigation, profile, Settings, Credentials, and People and access copy is unchanged. The improvement comes from available width and shared alignment rather than rewriting labels to fit.
+- Interaction and accessibility: the account trigger still exposes `aria-expanded` and `aria-controls`; the flyout remains keyboard focusable, fits the viewport with owned vertical scrolling, and stays within the mobile drawer at the mobile breakpoint. Browser checks found no console errors or document overflow in the revised desktop states.
 
 **Accepted differences**
 
-- The selected visual shows Settings and AI control as persistent navigation items. The product currently keeps those destinations in the account menu by an existing navigation contract; this change intentionally adjusts density without changing information architecture.
-- Fixture workspace names, statuses, and available actions differ from the generated design's illustrative data. The component layout and density are equivalent.
+- The source captures use different viewport sizes and organization fixture data, so literal pixel scale and content values are not comparable. The implementation was evaluated against the requested shell behavior and against itself at one controlled viewport.
+- Home and Workspace retain a centered wide overview frame. The new left-anchored 1440px frame is specific to secondary pages, where cross-route alignment matters most.
 
 **Comparison history**
 
-1. Initial comparison found one P2 density drift: the implementation header, tabs, and card list began about 20px lower than the selected target, reducing above-the-fold content.
-2. Fixed by reducing the desktop top offset from 32px to 24px, capping H1 at 32px, and tightening page-heading, tab, and list spacing.
-3. Post-fix evidence in `workspace-comparison-final.png`, `workspace-comparison-header.png`, and `workspace-comparison-cards.png` shows the selected vertical rhythm and two-card laptop composition without overlap or overflow.
+1. The source account capture showed a P1 usability defect: the menu inherited the 196px sidebar width, wrapping action labels and truncating identity text.
+2. The source Settings captures showed a P2 consistency defect: People and access used a 1240px centered route cap while Credentials used 1040px, shifting their back controls and headings to different x-coordinates.
+3. Fixed the shell by widening the sidebar to 216px, giving the account flyout an independent 316px width and z-index 60, and allowing it to overflow over the main canvas.
+4. Fixed secondary-page alignment with one left-anchored 1440px frame and removed route-local width caps from Credentials, provider settings, and People and access.
+5. Post-fix screenshots and `secondary-alignment-comparison.png` show one stable left anchor, readable flyout labels, no clipping, and no horizontal overflow.
 
 **Implementation Checklist**
 
-- [x] Compact shared desktop density primitives.
-- [x] Compact sidebar and Workspace overview.
-- [x] Simplify and resize sign-in, sign-up, and SSO discovery.
-- [x] Preserve mobile target sizes and existing product navigation behavior.
-- [x] Pass focused responsive and authentication Playwright checks.
-- [x] Pass the complete 102-test Playwright suite and `npm run verify:quick` (693 passed, 32 skipped).
+- [x] Slightly widen the compact desktop sidebar.
+- [x] Let the account flyout escape the sidebar width and stack above page content.
+- [x] Constrain the flyout to the viewport and retain the mobile drawer behavior.
+- [x] Standardize secondary-page width and left alignment.
+- [x] Remove conflicting route-local page caps.
+- [x] Verify account interaction, Settings route alignment, overflow, and browser console output at 1470 x 730.
+- [x] Pass the full browser suite (103/103) and the repository quick gate (726 tests: 694 passed, 32 skipped).
 
 **Follow-up Polish**
 
-- P3: consider a future information-architecture review if Settings or AI control should become persistent navigation; this is intentionally outside the density-only change.
+- No P3 follow-up is required for this increment.
 
 final result: passed

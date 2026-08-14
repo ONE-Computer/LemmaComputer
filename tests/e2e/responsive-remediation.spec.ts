@@ -89,8 +89,8 @@ test("desktop density keeps primary work visible on a 14-inch laptop", async ({ 
 
   const sidebar = page.locator(".sidebar");
   const sidebarBox = await sidebar.boundingBox();
-  expect(sidebarBox?.width).toBeGreaterThanOrEqual(190);
-  expect(sidebarBox?.width).toBeLessThanOrEqual(196);
+  expect(sidebarBox?.width).toBeGreaterThanOrEqual(210);
+  expect(sidebarBox?.width).toBeLessThanOrEqual(216);
 
   const navRows = await page.locator(".nav-button").evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
   expect(navRows.length).toBeGreaterThanOrEqual(7);
@@ -108,4 +108,39 @@ test("desktop density keeps primary work visible on a 14-inch laptop", async ({ 
   const secondCardBox = await cards.nth(1).boundingBox();
   expect(secondCardBox?.y).toBeLessThan(650);
   await expectNoDocumentOverflow(page);
+});
+
+test("account menu floats beyond the sidebar and settings subsections share one content anchor", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  await page.route("**/api/v1/admin/sso", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ connections: [] }),
+  }));
+  await page.setViewportSize({ width: 1470, height: 730 });
+  await page.goto("/?view=home");
+
+  const sidebar = page.locator(".sidebar");
+  await page.locator(".sidebar-profile").click();
+  const accountMenu = page.getByRole("group", { name: "Account menu" });
+  await expect(accountMenu).toBeVisible();
+  const [sidebarBox, menuBox] = await Promise.all([sidebar.boundingBox(), accountMenu.boundingBox()]);
+  expect(menuBox?.width).toBeGreaterThanOrEqual(300);
+  expect((menuBox?.x ?? 0) + (menuBox?.width ?? 0)).toBeGreaterThan((sidebarBox?.x ?? 0) + (sidebarBox?.width ?? 0) + 80);
+  await expect(accountMenu.getByRole("button", { name: "My AI usage" }).locator("span")).toHaveCSS("white-space", "nowrap");
+  expect(await accountMenu.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+
+  await page.goto("/?view=settings&section=credentials");
+  const credentialsBackX = (await page.getByRole("button", { name: "Back to Settings" }).boundingBox())?.x;
+  await page.goto("/?view=settings&section=people");
+  const peopleBackX = (await page.getByRole("button", { name: "Back to Settings" }).boundingBox())?.x;
+  expect(credentialsBackX).toBeDefined();
+  expect(peopleBackX).toBeDefined();
+  expect(Math.abs((credentialsBackX ?? 0) - (peopleBackX ?? 0))).toBeLessThanOrEqual(1);
+  expect(peopleBackX ?? Infinity).toBeLessThanOrEqual(260);
+  await expectNoDocumentOverflow(page);
+  expect(consoleErrors).toEqual([]);
 });
