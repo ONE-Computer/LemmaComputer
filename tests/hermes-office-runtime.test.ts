@@ -53,9 +53,11 @@ test("the pinned Hermes runtime forwards each AI usage binding without shared st
 });
 
 test("the pinned Hermes browser runtime binds a verified identity only to the request-local agent run", async () => {
-  const [dockerfile, patch, chatAdapter] = await Promise.all([
+  const [dockerfile, patch, activityPatch, identityHelper, chatAdapter] = await Promise.all([
     source("docker/Dockerfile.workspace"),
     source("docker/workspace/hermes-agent-instance.patch"),
+    source("docker/workspace/hermes-agent-activity.patch"),
+    source("docker/workspace/lemmacomputer_hermes_mcp_identity.py"),
     source("docker/workspace/lemmacomputer-agent-chat.py"),
   ]);
   assert.match(
@@ -73,8 +75,99 @@ test("the pinned Hermes browser runtime binds a verified identity only to the re
   assert.match(additions, /agent_instance_id=agent_instance_id or ""/);
   assert.match(additions, /agent_instance_id=agent_instance_id/);
   assert.match(additions, /extra_headers\[self\._AGENT_INSTANCE_ID_HEADER\] = agent_instance_id/);
+  assert.match(additions, /agent_instance_meta = capture_agent_instance_meta\(\)/);
+  assert.match(additions, /session\.call_tool\([\s\S]*meta=agent_instance_meta/);
+  assert.doesNotMatch(identityHelper, /os\.environ(?:\[|\.get)/);
+  assert.match(identityHelper, /get_session_env/);
+  assert.match(identityHelper, /parsed\.version != 4 or str\(parsed\) != raw/);
+  assert.match(identityHelper, /\{"lemmacomputer": \{"agentInstanceId": raw\}\}/);
+  assert.match(activityPatch, /tool_activity_event\(event_type, kwargs\.get\("is_error"\)\)/);
+  assert.match(dockerfile, /patch --batch --forward --fuzz=0 -d \/opt\/lemmacomputer\/hermes-agent -p1 < \/tmp\/hermes-agent-activity\.patch/);
   assert.match(chatAdapter, /"x-lemmacomputer-agent-instance-id": agent_instance_id/);
   assert.match(additions, /os\.environ\.get\("LEMMACOMPUTER_AGENT_INSTANCE_ID"/);
+});
+
+test("Hermes MCP metadata stays turn-local and malformed identities fail closed", async () => {
+  const helperPath = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "../docker/workspace/lemmacomputer_hermes_mcp_identity.py",
+  );
+  const program = String.raw`
+import asyncio
+import contextvars
+import importlib.util
+import json
+import sys
+
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("identity", sys.argv[1])
+identity = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(identity)
+current = contextvars.ContextVar("current", default="")
+
+def read_session_value(name, default=""):
+    assert name == "LEMMACOMPUTER_AGENT_INSTANCE_ID"
+    return current.get() or default
+
+async def capture(value):
+    token = current.set(value)
+    try:
+        await asyncio.sleep(0)
+        return identity.capture_agent_instance_meta(read_session_value)
+    finally:
+        current.reset(token)
+
+async def main():
+    first = "11111111-1111-4111-8111-111111111111"
+    second = "22222222-2222-4222-8222-222222222222"
+    concurrent = await asyncio.gather(capture(first), capture(second))
+    missing = await capture("")
+    malformed = None
+    try:
+        await capture("11111111-1111-1111-8111-111111111111")
+    except ValueError as error:
+        malformed = str(error)
+    print(json.dumps({"concurrent": concurrent, "missing": missing, "malformed": malformed}))
+
+asyncio.run(main())
+`;
+  const { stdout } = await execFileAsync("python3", ["-c", program, helperPath]);
+  const result = JSON.parse(stdout);
+  assert.deepEqual(result.concurrent, [
+    { lemmacomputer: { agentInstanceId: "11111111-1111-4111-8111-111111111111" } },
+    { lemmacomputer: { agentInstanceId: "22222222-2222-4222-8222-222222222222" } },
+  ]);
+  assert.equal(result.missing, null);
+  assert.equal(result.malformed, "invalid agent instance identity");
+});
+
+test("Hermes Activity reports returned MCP errors as failed", async () => {
+  const helperPath = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "../docker/workspace/lemmacomputer_hermes_mcp_identity.py",
+  );
+  const program = String.raw`
+import importlib.util
+import json
+import sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("identity", sys.argv[1])
+identity = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(identity)
+print(json.dumps({
+    "started": identity.tool_activity_event("tool.started"),
+    "completed": identity.tool_activity_event("tool.completed", False),
+    "failed_result": identity.tool_activity_event("tool.completed", True),
+    "explicit_failed": identity.tool_activity_event("tool.failed", False),
+}))
+`;
+  const { stdout } = await execFileAsync("python3", ["-c", program, helperPath]);
+  assert.deepEqual(JSON.parse(stdout), {
+    started: "tool.started",
+    completed: "tool.completed",
+    failed_result: "tool.failed",
+    explicit_failed: "tool.failed",
+  });
 });
 
 test("the Hermes API cannot report ready before the required connector MCP is registered", async () => {
