@@ -262,7 +262,7 @@ test("connector checks explain invalid input instead of appearing permanently bu
 test("custom connectors use their own initial and support bounded icon uploads", async () => {
   const [app, api, styles] = await Promise.all([
     source("apps/web/src/App.jsx"),
-    source("apps/web/src/workspace-api.js"),
+    source("apps/web/src/workspace-api.ts"),
     source("apps/web/src/styles.css"),
   ]);
   assert.match(app, /connector\?\.name\?\.trim\(\)\.match\(\/\[\\p\{L\}\\p\{N\}\]\//);
@@ -384,7 +384,7 @@ test("built-in connectors use locally served branded icons", async () => {
 
 test("administration keeps identity in People and access while workspace operations remain contextual", async () => {
   const app = await readFile(new URL("../apps/web/src/App.jsx", import.meta.url), "utf8");
-  const api = await readFile(new URL("../apps/web/src/workspace-api.js", import.meta.url), "utf8");
+  const api = await readFile(new URL("../apps/web/src/workspace-api.ts", import.meta.url), "utf8");
   assert.match(app, /Invite person/);
   assert.match(app, /Create invitation/);
   assert.match(app, /Remove access/);
@@ -535,7 +535,7 @@ test("Chat automatically recovers when a selected agent becomes healthy after th
 test("Chat keeps the selected conversation across a page refresh", async () => {
   const [app, workspaceApi] = await Promise.all([
     source("apps/web/src/App.jsx"),
-    source("apps/web/src/workspace-api.js"),
+    source("apps/web/src/workspace-api.ts"),
   ]);
   assert.match(app, /const chatSessionFromLocation/);
   assert.match(app, /useState\(chatSessionFromLocation\)/);
@@ -557,7 +557,7 @@ test("Chat keeps the selected conversation across a page refresh", async () => {
 test("Chat selects a workspace before an agent, preserves both choices, and pages its history", async () => {
   const [app, api, styles] = await Promise.all([
     source("apps/web/src/App.jsx"),
-    source("apps/web/src/workspace-api.js"),
+    source("apps/web/src/workspace-api.ts"),
     source("apps/web/src/styles.css"),
   ]);
   const chatScreen = app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App"));
@@ -576,7 +576,7 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
   assert.match(app, /lemmacomputer\.active-workspace-id/);
   assert.match(app, /lemmacomputer\.active-chat-agent:/);
   assert.match(app, /sidebar-chat-load-more/);
-  assert.match(api, /sessions: \(workspaceId, catalogId, \{ cursor, limit = 20 \} = \{\}\)/);
+  assert.match(api, /sessions: \(workspaceId: string, catalogId: string, \{ cursor, limit = 20 \}[^)]*\= \{\}\)/);
   assert.match(api, /query\.set\("cursor", cursor\)/);
   assert.match(styles, /\.sidebar-chat-history\s*\{[\s\S]*?flex: 1;/);
   assert.match(styles, /\.sidebar-chat-history\s*\{[\s\S]*?flex-direction: column;/);
@@ -641,7 +641,7 @@ test("Select controls use the shared accessible menu instead of browser-native d
 test("Connectors refreshes safely on navigation, history, detail return, and OAuth return", async () => {
   const [app, api] = await Promise.all([
     source("apps/web/src/App.jsx"),
-    source("apps/web/src/workspace-api.js"),
+    source("apps/web/src/workspace-api.ts"),
   ]);
   const refreshEffect = app.slice(app.indexOf('if (!session || activeNav !== "Connectors")'), app.indexOf('if (!session || activeNav !== "Settings"'));
   const popState = app.slice(app.indexOf("const onPopState"), app.indexOf('window.addEventListener("popstate"'));
@@ -659,8 +659,8 @@ test("Connectors refreshes safely on navigation, history, detail return, and OAu
   assert.match(popState, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
   assert.match(selectNav, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
   assert.match(oauthReturn, /setConnectionCatalogRefresh\(\(current\) => current \+ 1\)/);
-  assert.match(api, /catalog: \(options = \{\}\) => request\("\/api\/v1\/connections", \{ cache: "no-store", \.\.\.options \}\)/);
-  assert.match(api, /status: \(connectorId, options = \{\}\) => request\(`\/api\/v1\/connections\/\$\{encodeURIComponent\(connectorId\)\}`/);
+  assert.match(api, /catalog: \(options: RequestInit = \{\}\) => request\("\/api\/v1\/connections", \{ cache: "no-store", \.\.\.options \}\)/);
+  assert.match(api, /status: \(connectorId: string, options: RequestInit = \{\}\) => request\(`\/api\/v1\/connections\/\$\{encodeURIComponent\(connectorId\)\}`/);
   assert.match(connections, /const activation = activationFor\(connector\);/);
   assert.match(connections, /const canConnect = activation\.action === "connect";/);
   assert.match(connections, /activationActionLabel\(activation\)/);
