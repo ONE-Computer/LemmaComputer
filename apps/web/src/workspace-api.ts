@@ -366,7 +366,7 @@ export const adminApi = {
   revokeUserSessions: (userId: string) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/sessions/revoke`, mutation()),
   assignPolicy: (userId: string) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/policy`, mutation()),
   revokePolicy: (userId: string) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/policy`, mutation("DELETE")),
-  sandboxSettings: (userId: string, grantId = "personal") => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/sandbox-settings?${new URLSearchParams({ grantId })}`),
+  sandboxSettings: (userId: string, grantId = "personal") => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/sandbox-settings?${new URLSearchParams({ grantId })}`, { cache: "no-store" }),
   saveSandboxSettings: (userId: string, configuration: unknown) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/sandbox-settings`, {
     method: "PUT",
     headers: jsonHeaders,
@@ -377,6 +377,7 @@ export const adminApi = {
   saveMcpPolicy: (tools: unknown) => request("/api/v1/admin/mcp-policy", { method: "PUT", headers: jsonHeaders, body: JSON.stringify({ tools }) }),
   egressSecurityGroups: () => request("/api/v1/admin/egress-security-groups"),
   saveEgressSecurityGroup: (document: unknown) => request("/api/v1/admin/egress-security-groups", mutation("POST", document)),
+  deleteEgressSecurityGroup: (securityGroupId: string) => request(`/api/v1/admin/egress-security-groups/${encodeURIComponent(securityGroupId)}`, mutation("DELETE")),
   assignWorkspaceEgressSecurityGroup: (grantId: string, securityGroupVersionId: string) => request(`/api/v1/admin/workspaces/${encodeURIComponent(grantId)}/egress-security-group`, mutation("POST", { securityGroupVersionId })),
   clearWorkspaceEgressSecurityGroup: (grantId: string) => request(`/api/v1/admin/workspaces/${encodeURIComponent(grantId)}/egress-security-group`, mutation("DELETE")),
   assignUserWorkspaceEgressSecurityGroup: (userId: string, grantId: string, securityGroupVersionId: string) => request(`/api/v1/admin/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(grantId)}/egress-security-group`, mutation("POST", { securityGroupVersionId })),

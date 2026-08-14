@@ -9,6 +9,7 @@ import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
 import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { PostgresProtectedWorkspacePolicyStore, type OrganizationWorkspacePolicyVersionRecord } from "@lemmacomputer/workspace-store";
+import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
 import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, type SpendObservabilityStore } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
@@ -1170,6 +1171,22 @@ export function createControlServer(
       profileId,
     }) ?? null,
   );
+  const runtimeEgressForSecurityGroup = (group: EgressSecurityGroupVersion) => {
+    const compiled = compileEgressSecurityGroup(group);
+    const base = {
+      schemaVersion: 2 as const,
+      id: group.id,
+      securityGroupId: group.securityGroupId,
+      version: group.version,
+      name: group.name,
+      description: group.description,
+      rules: compiled.rules,
+      documentHash: group.documentHash,
+    };
+    return group.defaultAction === "allow-public-http-https"
+      ? { ...base, mode: "full-web" as const, defaultAction: "allow-public-http-https" as const }
+      : { ...base, mode: "restricted" as const, defaultAction: "deny" as const };
+  };
   const requiredEgressDefaultActionForProfile = (profileId: SandboxProfileId) => (
     profileId === "disposable-open-v1" ? "allow-public-http-https" as const : "deny" as const
   );
@@ -3463,6 +3480,36 @@ export function createControlServer(
       },
     });
   });
+  app.delete<{ Params: { securityGroupId: string } }>("/v1/admin/egress-security-groups/:securityGroupId", async (request, reply) => {
+    const actor = requirePermission(request, "policy.manage");
+    if (!security.identityPolicyStore?.archiveEgressSecurityGroup) {
+      throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Network security group storage is unavailable", 503);
+    }
+    const securityGroupId = z.string().min(1).max(128).parse(request.params.securityGroupId);
+    const currentVersions = await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId);
+    const currentGroup = currentVersions.find((candidate) => candidate.securityGroupId === securityGroupId);
+    if (!currentGroup) {
+      return reply.code(404).send({ error: { code: "EGRESS_SECURITY_GROUP_NOT_FOUND", message: "Network security group not found", correlationId: request.id, retryable: false } });
+    }
+    if (currentGroup.defaultFor) {
+      throw new LemmaComputerError("EGRESS_SYSTEM_DEFAULT_IMMUTABLE", "Workspace type defaults cannot be deleted", 409);
+    }
+    const assignments = await security.identityPolicyStore.listWorkspaceEgressSecurityGroupAssignments?.({
+      tenantId: actor.tenantId,
+      securityGroupId,
+    }) ?? [];
+    if (assignments.length) {
+      throw new LemmaComputerError("EGRESS_SECURITY_GROUP_IN_USE", "Detach this security group from every workspace before deleting it", 409);
+    }
+    const archived = await security.identityPolicyStore.archiveEgressSecurityGroup({
+      tenantId: actor.tenantId,
+      securityGroupId,
+      archivedBy: actor.userId,
+    });
+    return archived
+      ? reply.code(204).send()
+      : reply.code(404).send({ error: { code: "EGRESS_SECURITY_GROUP_NOT_FOUND", message: "Network security group not found", correlationId: request.id, retryable: false } });
+  });
   app.post<{ Params: { grantId: string } }>("/v1/admin/workspaces/:grantId/egress-security-group", async (request) => {
     const actor = principal(request);
     const input = assignEgressSecurityGroupSchema.parse(request.body ?? {});
@@ -4048,7 +4095,9 @@ export function createControlServer(
     if (!availableProfiles.length || !availableModels.length || !availableAgents.length || !assignedServiceClasses.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, agent, or model tier", 500);
     if (!availableApplications.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
-    const profileId = saved && availableProfiles.some((profile) => profile.id === saved.profileId) ? saved.profileId : availableProfiles[0]!.id;
+    const savedProfile = saved ? sandboxProfiles.find((profile) => profile.id === saved.profileId) : undefined;
+    const selectedProfile = savedProfile ?? availableProfiles[0]!;
+    const profileId = selectedProfile.id;
     const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
     const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
     const requestedServiceClass = explicitWorkspaceServiceClass(
@@ -4060,7 +4109,8 @@ export function createControlServer(
     const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
     const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
     const workspaceEgress = await workspaceEgressFor(actor, effective, grantId, profileId);
-    const runtime = effective
+    const profileCurrentlyAllowed = availableProfiles.some((profile) => profile.id === profileId);
+    const runtime = effective && profileCurrentlyAllowed
       ? runtimePolicyFor(
           effective,
           modelAlias,
@@ -4069,9 +4119,9 @@ export function createControlServer(
           selectedApplicationIds,
           workspaceEgress,
           governedRoutingAvailable ? ["lemmacomputer-auto"] : [],
-        )
+      )
       : undefined;
-    const egress = runtime?.egress;
+    const egress = runtime?.egress ?? (workspaceEgress ? runtimeEgressForSecurityGroup(workspaceEgress) : undefined);
     const availableSecurityGroups = includeAdministratorOptions && security.identityPolicyStore?.listEgressSecurityGroups
       ? (await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId))
           .map((securityGroup) => restrictWorkspaceEgress(actor, effective, securityGroup)!)
@@ -4079,8 +4129,8 @@ export function createControlServer(
     const configuration = sandboxConfigurationSchema.parse({
       schemaVersion: 1,
       profileId,
-      executionMode: availableProfiles.find((profile) => profile.id === profileId)!.executionMode,
-      egressMode: runtime?.egressMode ?? availableProfiles.find((profile) => profile.id === profileId)!.egressMode,
+      executionMode: selectedProfile.executionMode,
+      egressMode: runtime?.egressMode ?? selectedProfile.egressMode,
       applicationIds: selectedApplicationIds,
       agentIds: selectedAgentIds,
       modelAlias,
@@ -4098,7 +4148,7 @@ export function createControlServer(
       modelAlias,
       requestedServiceClass,
       routePreferenceMigrationRequired: governedRoutingAvailable && saved?.modelAlias !== "lemmacomputer-auto",
-      profile: availableProfiles.find((profile) => profile.id === profileId),
+      profile: selectedProfile,
       availableProfiles,
       availableApplications,
       availableModels,
@@ -4355,7 +4405,7 @@ export function createControlServer(
   );
   app.get<{ Params: { userId: string }; Querystring: { grantId?: string } }>(
     "/v1/admin/users/:userId/sandbox-settings",
-    async (request) => {
+    async (request, reply) => {
       const actor = principal(request);
       const grantId = z.string().min(1).max(128).parse(request.query.grantId ?? "personal");
       const targetIdentity = identityContextSchema.parse({ tenantId: actor.tenantId, subjectId: request.params.userId, audience: "lemmacomputer-control" });
@@ -4363,6 +4413,7 @@ export function createControlServer(
       const { target, principal: targetPrincipal } = await administratorTarget(actor, request.params.userId);
       if (!target.effectivePolicy) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
       const { effective: targetEffective } = await effectivePolicyFor(targetPrincipal, target.effectivePolicy);
+      reply.header("cache-control", "no-store");
       return sandboxSettingsFor(
         targetPrincipal,
         targetEffective,

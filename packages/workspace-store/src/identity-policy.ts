@@ -611,6 +611,7 @@ export interface IdentityPolicyStore {
   updateMvpToolPolicy(input: { tenantId: string; updatedBy: string; tools: Record<string, McpToolPolicyDecision> }): Promise<{ id: string; version: number; documentHash: string }>;
   listEgressSecurityGroups(tenantId: string, createdBy?: string): Promise<EgressSecurityGroupVersion[]>;
   saveEgressSecurityGroup(input: { tenantId: string; updatedBy: string; securityGroupId?: string; name: string; description: string; defaultAction: "deny" | "allow-public-http-https"; rules: EgressSecurityGroupRule[] }): Promise<EgressSecurityGroupVersion>;
+  archiveEgressSecurityGroup?(input: { tenantId: string; securityGroupId: string; archivedBy: string }): Promise<boolean>;
   assignEgressSecurityGroup(input: { tenantId: string; targetUserId: string; assignedBy: string; securityGroupVersionId: string }): Promise<EffectivePolicy>;
   getWorkspaceEgressSecurityGroup?(input: { tenantId: string; subjectId: string; grantId: string; profileId: SandboxProfileId }): Promise<EgressSecurityGroupVersion | null>;
   listWorkspaceEgressSecurityGroupAssignments?(input: { tenantId: string; securityGroupId: string }): Promise<Array<{ subjectId: string; grantId: string }>>;
@@ -3848,7 +3849,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
        esgv.created_at AS egress_created_at
        FROM egress_security_group_versions esgv
        JOIN egress_security_groups esg ON esg.id=esgv.security_group_id
-       WHERE esg.tenant_id=$1
+       WHERE esg.tenant_id=$1 AND esg.archived_at IS NULL
        ORDER BY esg.name,esgv.version DESC`,
       [tenantId],
     );
@@ -3873,7 +3874,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       const defaultAction = builtInDocument?.defaultAction ?? input.defaultAction;
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`egress-security-group:${securityGroupId}`]);
       const existingGroup = await client.query(
-        "SELECT id FROM egress_security_groups WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+        "SELECT id FROM egress_security_groups WHERE id=$1 AND tenant_id=$2 AND archived_at IS NULL FOR UPDATE",
         [securityGroupId, input.tenantId],
       );
       if (input.securityGroupId && !existingGroup.rowCount) throw new LemmaComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group not found", 404);
@@ -3933,7 +3934,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
         [id, securityGroupId, version, JSON.stringify(document), documentHash, input.updatedBy],
       );
       await client.query(
-        "UPDATE egress_security_groups SET name=$2,description=$3,updated_at=now() WHERE id=$1",
+        "UPDATE egress_security_groups SET name=$2,description=$3,updated_at=now() WHERE id=$1 AND archived_at IS NULL",
         [securityGroupId, name, description],
       );
       await client.query("COMMIT");
@@ -3947,6 +3948,51 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       await client.query("ROLLBACK");
       throw error;
     } finally { client.release(); }
+  }
+
+  async archiveEgressSecurityGroup(input: { tenantId: string; securityGroupId: string; archivedBy: string }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`egress-security-group:${input.securityGroupId}`]);
+      const actor = await client.query("SELECT id FROM users WHERE id=$1 AND tenant_id=$2", [input.archivedBy, input.tenantId]);
+      if (!actor.rowCount) throw new LemmaComputerError("EGRESS_TENANT_MISMATCH", "Network access administration is outside the tenant", 403);
+      const group = await client.query(
+        "SELECT id FROM egress_security_groups WHERE id=$1 AND tenant_id=$2 AND archived_at IS NULL FOR UPDATE",
+        [input.securityGroupId, input.tenantId],
+      );
+      if (!group.rowCount) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      if ([managedDefaultEgressSecurityGroupId(input.tenantId), defaultEgressSecurityGroupId(input.tenantId)].includes(input.securityGroupId)) {
+        throw new LemmaComputerError("EGRESS_SYSTEM_DEFAULT_IMMUTABLE", "Workspace type defaults cannot be deleted", 409);
+      }
+      const attachments = await client.query(
+        `SELECT
+           (SELECT count(*) FROM workspace_egress_security_group_assignments WHERE tenant_id=$1 AND security_group_id=$2)
+           +
+           (SELECT count(*) FROM policy_assignments assignment
+             JOIN egress_security_group_versions version ON version.id=assignment.egress_security_group_version_id
+             WHERE assignment.tenant_id=$1 AND assignment.revoked_at IS NULL AND version.security_group_id=$2)
+           AS count`,
+        [input.tenantId, input.securityGroupId],
+      );
+      if (Number(attachments.rows[0]?.count ?? 0) > 0) {
+        throw new LemmaComputerError("EGRESS_SECURITY_GROUP_IN_USE", "Detach this security group from every workspace before deleting it", 409);
+      }
+      await client.query(
+        "UPDATE egress_security_groups SET name=name || ' [deleted ' || id || ']',archived_at=now(),archived_by=$3,updated_at=now() WHERE id=$1 AND tenant_id=$2",
+        [input.securityGroupId, input.tenantId, input.archivedBy],
+      );
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async getWorkspaceEgressSecurityGroup(input: { tenantId: string; subjectId: string; grantId: string; profileId: SandboxProfileId }) {
@@ -3964,7 +4010,8 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
          ORDER BY candidate.version DESC
          LIMIT 1
        ) esgv ON true
-       WHERE assignment.tenant_id=$1 AND assignment.subject_id=$2 AND assignment.grant_id=$3`,
+       WHERE assignment.tenant_id=$1 AND assignment.subject_id=$2 AND assignment.grant_id=$3
+         AND esg.archived_at IS NULL`,
       [input.tenantId, input.subjectId, input.grantId],
     );
     if (result.rowCount) return egressSecurityGroupVersionSchema.parse({
@@ -3978,7 +4025,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
        esgv.created_at AS egress_created_at
        FROM egress_security_group_versions esgv
        JOIN egress_security_groups esg ON esg.id=esgv.security_group_id
-       WHERE esgv.security_group_id=$1 AND esg.tenant_id=$2
+       WHERE esgv.security_group_id=$1 AND esg.tenant_id=$2 AND esg.archived_at IS NULL
        ORDER BY esgv.version DESC
        LIMIT 1`,
       [defaultEgressSecurityGroupIdForProfile(input.tenantId, input.profileId), input.tenantId],
@@ -4037,7 +4084,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
          esgv.created_at AS egress_created_at
          FROM egress_security_group_versions esgv
          JOIN egress_security_groups esg ON esg.id=esgv.security_group_id
-         WHERE esgv.id=$1 AND esg.tenant_id=$2`,
+         WHERE esgv.id=$1 AND esg.tenant_id=$2 AND esg.archived_at IS NULL`,
         [input.securityGroupVersionId, input.tenantId],
       );
       if (!version.rowCount) throw new LemmaComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Security group version not found", 404);
@@ -4080,7 +4127,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       const groupVersion = await client.query(
         `SELECT esgv.id FROM egress_security_group_versions esgv
          JOIN egress_security_groups esg ON esg.id=esgv.security_group_id
-         WHERE esgv.id=$1 AND esg.tenant_id=$2`,
+         WHERE esgv.id=$1 AND esg.tenant_id=$2 AND esg.archived_at IS NULL`,
         [input.securityGroupVersionId, input.tenantId],
       );
       if (!groupVersion.rowCount) throw new LemmaComputerError("EGRESS_SECURITY_GROUP_NOT_FOUND", "Network security group version not found", 404);

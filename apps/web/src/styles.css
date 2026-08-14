@@ -6425,7 +6425,10 @@ textarea:focus-visible,
 .firewall-security-groups-heading h2 { margin: 0; color: #172334; font-size: 22px; letter-spacing: -.025em; }
 .firewall-security-groups-heading div > span { display: block; margin-top: 7px; color: #68727d; font-size: 13px; line-height: 1.45; }
 .firewall-security-groups-heading > strong { color: #68727d; font-size: 13px; font-weight: 500; white-space: nowrap; }
-.firewall-security-group-list article { display: grid; grid-template-columns: minmax(280px, 1.4fr) minmax(170px, .6fr) minmax(130px, .45fr) auto auto; align-items: center; gap: 18px; min-height: 72px; padding: 12px 18px; border-bottom: 1px solid #e5e5e2; }
+.firewall-security-group-header,
+.firewall-security-group-list article { display: grid; grid-template-columns: minmax(280px, 1.4fr) minmax(120px, .45fr) minmax(250px, .8fr) 90px minmax(155px, .55fr); align-items: center; gap: 18px; padding-inline: 18px; }
+.firewall-security-group-header { min-height: 36px; border-bottom: 1px solid #e5e5e2; background: #f8f8f7; color: #68727d; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.firewall-security-group-list article { min-height: 72px; padding-block: 12px; border-bottom: 1px solid #e5e5e2; }
 .firewall-security-group-list article:last-child { border-bottom: 0; }
 .firewall-security-group-list article:hover { background: #f8fbff; }
 .firewall-security-group-copy,
@@ -6559,13 +6562,13 @@ textarea:focus-visible,
 .firewall-editor-rule-builder-title { display: grid; grid-column: 1 / -1; gap: 3px; margin-bottom: 2px; }
 .firewall-editor-rule-builder-title strong { color: #172334; font-size: 15px; }
 .firewall-editor-rule-builder-title span { color: #68727d; font-size: 12px; }
-.firewall-editor-subdomains { display: flex !important; align-items: center; min-height: 42px; }
-.firewall-editor-subdomains input { min-height: 0; }
+.firewall-editor-subdomains { display: flex !important; align-items: center; gap: 9px; min-height: 42px; }
+.firewall-editor-subdomains input { flex: 0 0 auto; width: 17px; height: 17px; min-height: 0; padding: 0; accent-color: #2453a6; }
 .firewall-editor-advanced { padding: 10px 0 0; border-top: 1px solid #dde2e6; color: #526170; }
 .firewall-editor-advanced summary { width: fit-content; cursor: pointer; color: #2453a6; font-size: 12px; font-weight: 650; }
 .firewall-editor-advanced > p { margin: 8px 0; color: #68727d; font-size: 11px; line-height: 1.45; }
-.firewall-editor-advanced > label { display: flex; grid-template-columns: auto 1fr; align-items: center; width: fit-content; }
-.firewall-editor-advanced > label input { min-height: 0; }
+.firewall-editor-traffic-scope { max-width: 520px; margin-top: 10px; }
+.firewall-editor-traffic-scope > small { color: #68727d; font-size: 11px; line-height: 1.45; }
 .firewall-editor-advanced > div { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(100px, .35fr); gap: 12px; margin-top: 12px; }
 .firewall-rule-builder-error { margin: 0; color: #9b2c2c; font-size: 12px; }
 .firewall-editor-rule-builder > button { justify-self: end; }
@@ -6573,6 +6576,8 @@ textarea:focus-visible,
 .firewall-editor-actions > span { display: flex; align-items: center; gap: 9px; color: #526170; font-size: 13px; }
 .firewall-editor-actions > span svg { flex: 0 0 auto; color: #0b4a8f; }
 .firewall-editor-actions > div { display: flex; flex: 0 0 auto; gap: 12px; }
+.firewall-editor-actions .danger-button { margin-right: 4px; }
+.firewall-delete-help { margin: 10px 0 0; color: #8b5f14; font-size: 12px; text-align: right; }
 .firewall-attachment-note { margin-top: 18px; }
 
 .tool-policy-card {
@@ -6639,9 +6644,14 @@ textarea:focus-visible,
 
 @media (max-width: 1180px) {
   .firewall-page-heading { align-items: stretch; flex-direction: column; gap: 20px; }
-  .firewall-security-group-list article { grid-template-columns: minmax(240px, 1fr) auto auto; }
-  .firewall-security-group-version { grid-column: 2; }
-  .firewall-security-group-list .secondary-button { grid-column: 3; }
+  .firewall-security-group-header { display: none; }
+  .firewall-security-group-list article { grid-template-columns: minmax(240px, 1fr) minmax(210px, .8fr) auto; }
+  .firewall-security-group-copy { grid-row: 1 / span 2; }
+  .firewall-security-group-rules { grid-column: 2; grid-row: 1; }
+  .firewall-security-group-baseline { grid-column: 2; grid-row: 2; }
+  .firewall-security-group-version { grid-column: 3; grid-row: 1; }
+  .firewall-security-group-list .secondary-button,
+  .firewall-security-group-list .firewall-system-group { grid-column: 3; grid-row: 2; }
   .firewall-toolbar { flex-wrap: wrap; }
   .firewall-search { flex-basis: 100%; }
 }
@@ -6689,17 +6699,25 @@ textarea:focus-visible,
 }
 
 @container firewall-groups (max-width: 1050px) {
-  .firewall-security-group-list article { grid-template-columns: minmax(240px, 1fr) auto auto; }
-  .firewall-security-group-version { grid-column: 2; }
+  .firewall-security-group-header { display: none; }
+  .firewall-security-group-list article { grid-template-columns: minmax(240px, 1fr) minmax(210px, .8fr) auto; }
+  .firewall-security-group-copy { grid-row: 1 / span 2; }
+  .firewall-security-group-rules { grid-column: 2; grid-row: 1; }
+  .firewall-security-group-baseline { grid-column: 2; grid-row: 2; }
+  .firewall-security-group-version { grid-column: 3; grid-row: 1; }
   .firewall-security-group-list .secondary-button,
-  .firewall-security-group-list .firewall-system-group { grid-column: 3; }
+  .firewall-security-group-list .firewall-system-group { grid-column: 3; grid-row: 2; }
 }
 
 @container firewall-groups (max-width: 620px) {
   .firewall-security-groups-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
   .firewall-security-group-list article { grid-template-columns: 1fr; gap: 14px; }
+  .firewall-security-group-copy,
+  .firewall-security-group-rules,
+  .firewall-security-group-baseline,
   .firewall-security-group-version,
-  .firewall-security-group-list .secondary-button { grid-column: auto; }
+  .firewall-security-group-list .secondary-button,
+  .firewall-security-group-list .firewall-system-group { grid-column: auto; grid-row: auto; }
   .firewall-security-group-list .secondary-button { width: 100%; }
 }
 
@@ -6803,8 +6821,12 @@ textarea:focus-visible,
   .firewall-page-actions { flex-wrap: wrap; }
   .firewall-security-groups-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
   .firewall-security-group-list article { grid-template-columns: 1fr; gap: 14px; }
+  .firewall-security-group-copy,
+  .firewall-security-group-rules,
+  .firewall-security-group-baseline,
   .firewall-security-group-version,
-  .firewall-security-group-list .secondary-button { grid-column: auto; }
+  .firewall-security-group-list .secondary-button,
+  .firewall-security-group-list .firewall-system-group { grid-column: auto; grid-row: auto; }
   .firewall-security-group-list .secondary-button { width: 100%; }
   .firewall-toolbar { flex-wrap: wrap; }
   .firewall-search { flex-basis: 100%; }

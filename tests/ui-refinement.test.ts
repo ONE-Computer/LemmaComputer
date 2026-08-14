@@ -628,6 +628,10 @@ test("Network access is an admin-only security-group library with type defaults 
   assert.match(app, /Saved changes apply live to all of them/);
   assert.match(app, /Add approved destination/);
   assert.match(app, /Block destination/);
+  assert.match(app, /Standard web traffic \(HTTP 80 and HTTPS 443\)/);
+  assert.match(app, /Specific protocol and port/);
+  assert.doesNotMatch(app, /Use one protocol and port/);
+  assert.match(app, /Delete security group/);
   assert.doesNotMatch(app, /ariaLabel="Rule action"/);
   assert.match(firewallScreen, /firewall-default-badge/);
   assert.match(firewallScreen, /Inherited by workspace type/);
@@ -637,12 +641,15 @@ test("Network access is an admin-only security-group library with type defaults 
   assert.match(firewallScreen, /Fixed by workspace type/);
   assert.match(app, /Needs review/);
   assert.match(firewallScreen, /Manage group/);
+  assert.match(firewallScreen, /firewall-security-group-header/);
   assert.doesNotMatch(firewallScreen, /Add deny rule/);
   assert.doesNotMatch(firewallScreen, /onClick=\{\(\) => setEditor\(\{ securityGroupId: latestVersions\[0\]/);
   assert.match(app, /<ModalDialog/);
   assert.doesNotMatch(firewallScreen, /drawer/);
   assert.match(styles, /\.firewall-security-groups\s*\{/);
   assert.match(styles, /\.firewall-group-toolbar/);
+  assert.match(styles, /\.firewall-editor-subdomains input\s*\{[^}]*width: 17px;/);
+  assert.match(styles, /\.firewall-security-group-header,[\s\S]*?grid-template-columns:/);
   assert.match(styles, /\.modal-card\.firewall-editor-modal\s*\{\s*width: min\(100%, 880px\)/);
 });
 

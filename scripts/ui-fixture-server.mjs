@@ -2089,6 +2089,30 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
+  if (request.method === "DELETE" && /^\/v1\/admin\/egress-security-groups\/[^/]+$/.test(url.pathname)) {
+    const securityGroupId = decodeURIComponent(url.pathname.split("/").at(-1));
+    const group = egressSecurityGroups.find((candidate) => candidate.securityGroupId === securityGroupId);
+    if (!group) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: { code: "EGRESS_SECURITY_GROUP_NOT_FOUND", message: "Network security group not found" } }));
+      return;
+    }
+    if (group.defaultFor) {
+      response.statusCode = 409;
+      response.end(JSON.stringify({ error: { code: "EGRESS_SYSTEM_DEFAULT_IMMUTABLE", message: "Workspace type defaults cannot be deleted" } }));
+      return;
+    }
+    const attached = adminUsers.some((user) => user.workspaces.some((item) => item.egress?.securityGroupId === securityGroupId));
+    if (attached) {
+      response.statusCode = 409;
+      response.end(JSON.stringify({ error: { code: "EGRESS_SECURITY_GROUP_IN_USE", message: "Detach this security group from every workspace before deleting it" } }));
+      return;
+    }
+    egressSecurityGroups = egressSecurityGroups.filter((candidate) => candidate.securityGroupId !== securityGroupId);
+    response.statusCode = 204;
+    response.end();
+    return;
+  }
   if (request.method === "POST" && /^\/v1\/admin\/workspaces\/[^/]+\/egress-security-group$/.test(url.pathname)) {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
