@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, egressSecurityGroupVersionSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type EgressSecurityGroupVersion, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
 import { organizationWorkspacePolicyConstraintsSchema, protectedPolicySelectionSchema, type EffectiveProtectedWorkspacePolicy } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
@@ -1131,12 +1131,41 @@ export function createControlServer(
       workspaceIds: affected.map((workspace) => workspace.id),
     };
   };
-  const workspaceEgressFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string) => (
+  const restrictWorkspaceEgress = (
+    value: SessionPrincipal,
+    effective: EffectivePolicy | null,
+    selected: EgressSecurityGroupVersion | null,
+  ): EgressSecurityGroupVersion | null => {
+    const document = effective?.document as Record<string, unknown> | undefined;
+    if (document?.maximumEgressMode !== "restricted" || selected?.defaultAction === "deny") return selected;
+    const sourceHash = selected?.documentHash ?? "no-security-group";
+    const documentHash = createHash("sha256")
+      .update(`protected-restricted-egress-v1\0${value.tenantId}\0${effective?.documentHash ?? "no-policy"}\0${sourceHash}`)
+      .digest("hex");
+    return egressSecurityGroupVersionSchema.parse({
+      schemaVersion: 1,
+      id: selected?.id ?? `egv_protected_restricted_${documentHash.slice(0, 24)}`,
+      securityGroupId: selected?.securityGroupId ?? `esg_protected_restricted_${documentHash.slice(0, 24)}`,
+      tenantId: value.tenantId,
+      version: selected?.version ?? effective?.version ?? 1,
+      name: selected?.name ?? "Protected workspace restricted egress",
+      description: selected?.description ?? "Deny-by-default egress enforced by the protected workspace policy.",
+      defaultAction: "deny",
+      rules: selected?.rules ?? [],
+      documentHash,
+      createdBy: selected?.createdBy ?? effective?.assignedBy ?? value.userId,
+      createdAt: selected?.createdAt ?? effective?.assignedAt ?? new Date(0).toISOString(),
+      ...(selected?.isDefault === undefined ? {} : { isDefault: selected.isDefault }),
+    });
+  };
+  const workspaceEgressFor = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId: string) => restrictWorkspaceEgress(
+    value,
+    effective,
     await security.identityPolicyStore?.getWorkspaceEgressSecurityGroup?.({
       tenantId: value.tenantId,
       subjectId: value.userId,
       grantId,
-    }) ?? effective?.egressSecurityGroup ?? null
+    }) ?? effective?.egressSecurityGroup ?? null,
   );
   const governedRoutingAvailableFor = async (tenantId: string) => {
     const routeMapping = await security.routingStore?.latestMappingVersion(tenantId);
@@ -3962,7 +3991,8 @@ export function createControlServer(
       : undefined;
     const egress = runtime?.egress;
     const availableSecurityGroups = includeAdministratorOptions && security.identityPolicyStore?.listEgressSecurityGroups
-      ? await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId)
+      ? (await security.identityPolicyStore.listEgressSecurityGroups(actor.tenantId, actor.userId))
+          .map((securityGroup) => restrictWorkspaceEgress(actor, effective, securityGroup)!)
       : undefined;
     const configuration = sandboxConfigurationSchema.parse({
       schemaVersion: 1,
@@ -4378,8 +4408,12 @@ export function createControlServer(
     return reply.code(200).header("cache-control", "no-store").send({ accepted: true, operation });
   });
   app.get("/v1/workspaces/current", async (request, reply) => {
-    const { policy } = await requirePolicy(request);
-    const current = await service.current(identity(request), policy, "personal");
+    const owner = identity(request);
+    const existing = await store.getCurrent(owner, "personal");
+    if (!existing) return reply.code(404).send({ error: { code: "WORKSPACE_NOT_FOUND", message: "Workspace not found", correlationId: request.id, retryable: false } });
+    const { principal: actor, effective } = await assignedPolicy(request);
+    const { policy } = await policyForGrant(actor, effective, existing.grantId);
+    const current = await service.current(owner, policy, existing.grantId);
     if (current) requirePermission(request, "workspace.use", { type: "workspace", resourceId: current.id });
     return current ? reply.send(current) : reply.code(404).send({ error: { code: "WORKSPACE_NOT_FOUND", message: "Workspace not found", correlationId: request.id, retryable: false } });
   });
