@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -20,8 +20,8 @@ import {
   parseEnvironment,
 } from "../scripts/environment-template.mjs";
 
-const lemmacomputerReferences = (contents: string) => new Set(
-  [...contents.matchAll(/\$\{(LEMMACOMPUTER_[A-Z0-9_]+)/g)].map(([, key]) => key),
+const environmentReferences = (contents: string) => new Set(
+  [...contents.matchAll(/\$\{((?:LEMMACOMPUTER|QUALIFICATION)_[A-Z0-9_]+)/g)].map(([, key]) => key),
 );
 
 const assignmentKeys = (contents: string) => (
@@ -137,6 +137,11 @@ test("the checked-in environment example is rendered from the canonical deployme
     assert.ok(Object.hasOwn(entry, "default"));
     assert.equal(typeof entry.description, "string");
     assert.ok(entry.description.length > 0);
+    assert.match(entry.description, /[.!?]$/, `${entry.key} needs a complete purpose sentence`);
+    if (entry.requiredWhen !== undefined) {
+      assert.equal(typeof entry.requiredWhen, "string");
+      assert.match(entry.requiredWhen, /[.!?]$/, `${entry.key} needs a complete conditional-requirement sentence`);
+    }
     assert.equal(typeof entry.section, "string");
     assert.ok(entry.section.length > 0);
     return entry.key;
@@ -147,6 +152,12 @@ test("the checked-in environment example is rendered from the canonical deployme
   const checkedIn = await readFile(new URL("../.env.example", import.meta.url), "utf8");
   assert.equal(rendered, checkedIn, ".env.example must be generated from the contract without manual drift");
   assert.deepEqual(assignmentKeys(rendered), keys, "the template must list every registered operator variable once");
+  assert.match(rendered, /Scope: every operator-owned input accepted in a deployment \.env is listed/);
+  assert.match(rendered, /Service-local and per-workspace variables are derived/);
+  assert.match(rendered, /Qualification-only inputs are documented in \.env\.qualification\.example/);
+  assert.match(rendered, /Accepted values: customer-managed, hosted, worktree\./);
+  assert.match(rendered, /Sensitive: keep this value out of source control and logs/);
+  assert.match(rendered, /Required when: The hosted profile is selected\./);
 
   const installationKind = environmentContract.find(({ key }) => key === "LEMMACOMPUTER_INSTALLATION_KIND");
   assert.equal(installationKind?.key, "LEMMACOMPUTER_INSTALLATION_KIND");
@@ -157,9 +168,17 @@ test("the checked-in environment example is rendered from the canonical deployme
 });
 
 test("every production Compose operator reference and worktree override is registered", async () => {
-  const compose = await readFile(new URL("../compose.yaml", import.meta.url), "utf8");
+  const root = new URL("..", import.meta.url);
+  const composeFiles = (await readdir(root))
+    .filter((name) => /^compose(?:\.[^.]+)?\.ya?ml$/.test(name))
+    .filter((name) => !name.includes("qualification"));
   const keys = registeredKeys();
-  const unregisteredComposeReferences = [...lemmacomputerReferences(compose)].filter((key) => !keys.has(key));
+  const references = new Set<string>();
+  for (const name of composeFiles) {
+    const compose = await readFile(new URL(`../${name}`, import.meta.url), "utf8");
+    for (const key of environmentReferences(compose)) references.add(key);
+  }
+  const unregisteredComposeReferences = [...references].filter((key) => !keys.has(key));
   assert.deepEqual(unregisteredComposeReferences, [], "Compose must not introduce an unregistered operator variable");
 
   const overrides = worktreeEnvironmentOverrides({
@@ -174,15 +193,21 @@ test("every production Compose operator reference and worktree override is regis
   assert.deepEqual([...overrides.keys()].filter((key) => !keys.has(key)), [], "worktree initialization must not create unregistered configuration");
 });
 
-test("qualification Compose inputs are registered separately from deployment inputs", async () => {
-  const [oauthCompose, providerCompose, qualificationExample] = await Promise.all([
+test("qualification inputs are registered separately from deployment inputs", async () => {
+  const [oauthCompose, providerCompose, remoteQualifier, qualificationExample] = await Promise.all([
     readFile(new URL("../compose.oauth-qualification.yaml", import.meta.url), "utf8"),
     readFile(new URL("../compose.provider-qualification.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/qualify-remote-workspace-node.mjs", import.meta.url), "utf8"),
     readFile(new URL("../.env.qualification.example", import.meta.url), "utf8"),
   ]);
-  const references = [...lemmacomputerReferences(oauthCompose), ...lemmacomputerReferences(providerCompose)];
+  const references = [
+    ...environmentReferences(oauthCompose),
+    ...environmentReferences(providerCompose),
+    ...environmentReferences(remoteQualifier),
+  ];
   assert.deepEqual(references.filter((key) => !allEnvironmentVariableNameSet.has(key)), []);
   assert.equal(qualificationExample, renderQualificationEnvironmentTemplate());
+  assert.match(qualificationExample, /reference inventory, not a file that operators must populate/);
 });
 
 test("a complete hosted configuration passes the shared profile validation", () => {
@@ -225,6 +250,16 @@ test("a complete customer-managed configuration passes the shared profile valida
     profile: "customer-managed",
     strict: true,
   }));
+});
+
+test("optional OAuth applications require complete credential pairs", () => {
+  assert.throws(
+    () => validateDeploymentEnvironment({
+      ...validCustomerManagedEnvironment(),
+      LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID: "github-client-without-secret",
+    }, { profile: "customer-managed", strict: true }),
+    /GitHub MCP OAuth client ID and secret must be configured together/i,
+  );
 });
 
 test("strict profile validation rejects implicit and mixed profile selection", () => {

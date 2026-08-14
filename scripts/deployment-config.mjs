@@ -37,32 +37,32 @@ const sections = [
   ]),
   section("Public endpoints", "Use externally reachable HTTPS URLs in production. The reference stack binds loopback ports by default.", [
     variable("LEMMACOMPUTER_WEB_PORT", "4174", "Published LemmaComputer Web and workspace-ingress port.", { kind: "integer" }),
-    variable("LEMMACOMPUTER_PUBLIC_WEB_URL", "http://localhost:4174", "Public Web and workspace ingress base URL.", { kind: "url" }),
+    variable("LEMMACOMPUTER_PUBLIC_WEB_URL", "http://localhost:4174", "Public Web and workspace ingress base URL.", { kind: "url", requiredWhen: "The hosted profile is selected; it must use HTTPS." }),
   ]),
   section("LiteLLM administration mutual TLS", "Hosted deployments must set an HTTPS admin URL and inject every certificate value from the deployment secret manager.", [
-    variable("LEMMACOMPUTER_LITELLM_ADMIN_URL", "http://litellm-admin-listener:8443", "Control-to-LiteLLM administration listener URL.", { kind: "url" }),
-    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64", "", "Base64 PEM certificate authority for the private admin listener.", { secret: true }),
-    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64", "", "Base64 PEM server certificate for the private admin listener.", { secret: true }),
-    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64", "", "Base64 PEM server private key for the private admin listener.", { secret: true }),
-    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64", "", "Base64 PEM Control client certificate for the private admin listener.", { secret: true }),
-    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64", "", "Base64 PEM Control client private key for the private admin listener.", { secret: true }),
+    variable("LEMMACOMPUTER_LITELLM_ADMIN_URL", "http://litellm-admin-listener:8443", "Control-to-LiteLLM administration listener URL.", { kind: "url", requiredWhen: "The hosted profile is selected; it must use HTTPS." }),
+    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64", "", "Base64 PEM certificate authority for the private admin listener.", { secret: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64", "", "Base64 PEM server certificate for the private admin listener.", { secret: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64", "", "Base64 PEM server private key for the private admin listener.", { secret: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64", "", "Base64 PEM Control client certificate for the private admin listener.", { secret: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64", "", "Base64 PEM Control client private key for the private admin listener.", { secret: true, requiredWhen: "The hosted profile is selected." }),
     variable("LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME", "litellm-admin-listener", "Expected TLS server name for Control's private admin client."),
     variable("LEMMACOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME", "lemmacomputer-control", "Required Control client certificate common name at the private admin listener."),
   ]),
   section("Custom MCP egress", "Hosted custom MCP destinations are approved by the deployment and network owner, not by a tenant-local administrator.", [
-    variable("LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS", "", "Comma-separated exact HTTPS origins for hosted custom MCP and OAuth flows, including endpoint, metadata, authorization, token, and dynamic-client-registration origins. Customer-managed installations can leave this empty."),
+    variable("LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS", "", "Comma-separated exact HTTPS origins for hosted custom MCP and OAuth flows, including endpoint, metadata, authorization, token, and dynamic-client-registration origins. Customer-managed installations must leave this empty.", { requiredWhen: "A hosted deployment permits custom MCP or OAuth destinations." }),
   ]),
   section("Runtime limits and security switches", "These are deployment controls, not Compose defaults. Keep the secure hosted Telegram setting explicit.", [
     variable("LEMMACOMPUTER_RUNTIME_ENVIRONMENT", "development", "Runtime safety mode: development or production.", { kind: "enum", values: ["development", "production"] }),
-    variable("LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS", "", "Comma-separated reverse-proxy IP addresses or CIDRs trusted by customer authentication. Hosted deployments must set this explicitly."),
+    variable("LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS", "", "Comma-separated reverse-proxy IP addresses or CIDRs trusted by customer authentication.", { requiredWhen: "The hosted profile is selected." }),
     variable("LEMMACOMPUTER_WORKSPACE_INGRESS_LAUNCH_TTL_SECONDS", "300", "Signed workspace-launch token lifetime in seconds.", { kind: "integer" }),
     variable("LEMMACOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS", "28800", "Workspace ingress session lifetime in seconds.", { kind: "integer" }),
-    variable("LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS", "false", "Whether workspace ingress verifies TLS for its configured internal upstreams.", { kind: "boolean" }),
+    variable("LEMMACOMPUTER_WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS", "false", "Whether workspace ingress verifies TLS for its configured internal upstreams.", { kind: "boolean", requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote; set it to true." }),
     variable("LEMMACOMPUTER_AGENT_BRIDGE_GRANT_TTL_SECONDS", "900", "Agent bridge grant lifetime in seconds.", { kind: "integer" }),
     variable("LEMMACOMPUTER_GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS", "900", "Gateway grant renewal interval in seconds.", { kind: "integer" }),
     variable("LEMMACOMPUTER_CHANNEL_POLL_INTERVAL_MS", "1000", "Channel broker polling interval in milliseconds.", { kind: "integer" }),
     variable("LEMMACOMPUTER_TELEGRAM_COMPOSITION_WINDOW_MS", "1500", "Telegram composition batching window in milliseconds.", { kind: "integer" }),
-    variable("LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE", "", "Set reject for hosted deployments. Empty keeps the safe runtime default for the selected profile.", { kind: "enum", values: ["", "legacy", "reject"] }),
+    variable("LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE", "", "Controls whether administrators may submit raw Telegram bot tokens; empty uses the profile default.", { kind: "enum", values: ["", "legacy", "reject"], requiredWhen: "The hosted profile is selected; set it to reject." }),
     variable("LEMMACOMPUTER_TELEGRAM_INTAKE_GRANT_TTL_SECONDS", "300", "Telegram broker token-intake grant lifetime in seconds.", { kind: "integer" }),
     variable("LEMMACOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS", "90", "Attachment retention period in days.", { kind: "integer" }),
     variable("LEMMACOMPUTER_SCHEDULER_POLL_INTERVAL_MS", "5000", "Scheduler worker polling interval in milliseconds.", { kind: "integer" }),
@@ -115,41 +115,41 @@ const sections = [
     variable("LEMMACOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64", generated, "Base64 DER Telegram token-envelope public key.", { generated: "telegram-envelope-public" }),
   ]),
   section("Customer authentication and transactional email", "Email/password is universal. Social providers are optional pairs; production email uses Postmark.", [
-    variable("LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT", "capture", "Authentication email transport: capture for non-production tests or postmark for real delivery.", { kind: "enum", values: ["capture", "postmark"] }),
-    variable("LEMMACOMPUTER_INVITATION_DELIVERY_MODE", "copy-link", "Organization invitation delivery: email, or explicit copy-link for local/customer-managed operation.", { kind: "enum", values: ["email", "copy-link"] }),
-    variable("LEMMACOMPUTER_POSTMARK_SERVER_TOKEN", "", "Postmark server token for authentication and invitation email.", { secret: true }),
-    variable("LEMMACOMPUTER_POSTMARK_FROM", "", "Verified Postmark sender address."),
+    variable("LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT", "capture", "Authentication email transport: capture for non-production tests or postmark for real delivery.", { kind: "enum", values: ["capture", "postmark"], requiredWhen: "LEMMACOMPUTER_RUNTIME_ENVIRONMENT=production; set it to postmark." }),
+    variable("LEMMACOMPUTER_INVITATION_DELIVERY_MODE", "copy-link", "Organization invitation delivery: email, or explicit copy-link for local/customer-managed operation.", { kind: "enum", values: ["email", "copy-link"], requiredWhen: "The hosted profile is selected; set it to email." }),
+    variable("LEMMACOMPUTER_POSTMARK_SERVER_TOKEN", "", "Postmark server token for authentication and invitation email.", { secret: true, requiredWhen: "LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT=postmark." }),
+    variable("LEMMACOMPUTER_POSTMARK_FROM", "", "Verified Postmark sender address used for authentication and invitation email.", { requiredWhen: "LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT=postmark." }),
     variable("LEMMACOMPUTER_POSTMARK_MESSAGE_STREAM", "outbound", "Postmark transactional message stream ID."),
-    variable("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID", "", "Optional Google OAuth client ID."),
-    variable("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET", "", "Optional Google OAuth client secret.", { secret: true }),
-    variable("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID", "", "Optional Microsoft OAuth client ID."),
-    variable("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET", "", "Optional Microsoft OAuth client secret.", { secret: true }),
+    variable("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID", "", "Google OAuth client ID for optional customer sign-in.", { requiredWhen: "Google customer sign-in is enabled; configure it with the matching secret." }),
+    variable("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET", "", "Google OAuth client secret for optional customer sign-in.", { secret: true, requiredWhen: "Google customer sign-in is enabled; configure it with the matching client ID." }),
+    variable("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID", "", "Microsoft OAuth client ID for optional customer sign-in.", { requiredWhen: "Microsoft customer sign-in is enabled; configure it with the matching secret." }),
+    variable("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET", "", "Microsoft OAuth client secret for optional customer sign-in.", { secret: true, requiredWhen: "Microsoft customer sign-in is enabled; configure it with the matching client ID." }),
     variable("LEMMACOMPUTER_MICROSOFT_AUTH_TENANT_ID", "common", "Microsoft customer-login tenant selector; common permits personal and organizational accounts."),
-    variable("LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS", "", "Comma-separated exact HTTPS IdP origins allowed for tenant OIDC discovery; wildcards are rejected."),
+    variable("LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS", "", "Comma-separated exact HTTPS IdP origins allowed for tenant OIDC discovery; wildcards are rejected.", { requiredWhen: "Tenant-managed OIDC SSO discovery is enabled." }),
   ]),
   section("Identity, Microsoft 365, and bootstrap", "Replace the Entra placeholders before enabling sign-in. Leave the dedicated Microsoft 365 app values empty to reuse the Web sign-in app.", [
-    variable("LEMMACOMPUTER_ENTRA_TENANT_ID", "replace-with-entra-directory-tenant-id", "Microsoft Entra directory tenant ID."),
-    variable("LEMMACOMPUTER_ENTRA_CLIENT_ID", "replace-with-entra-application-client-id", "Microsoft Entra Web application client ID."),
-    variable("LEMMACOMPUTER_ENTRA_CLIENT_SECRET", "replace-with-entra-application-client-secret", "Microsoft Entra Web application client secret.", { secret: true }),
-    variable("LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID", "", "Hosted Microsoft Entra External ID directory tenant ID.", { optional: true }),
-    variable("LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN", "", "Hosted External ID ciamlogin.com tenant subdomain.", { optional: true }),
-    variable("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID", "", "Hosted External ID Web application client ID.", { optional: true }),
-    variable("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET", "", "Hosted External ID Web application client secret.", { optional: true, secret: true }),
-    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID", "", "Hosted workforce Entra tenant for the separate platform-operator application.", { optional: true }),
-    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID", "", "Hosted workforce Entra client ID dedicated to platform operators.", { optional: true }),
-    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET", "", "Hosted workforce Entra client secret dedicated to platform operators.", { optional: true, secret: true }),
-    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET", "", "Hosted platform-operator cookie and OIDC-state encryption secret, distinct from customer sessions.", { optional: true, secret: true }),
-    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT", "", "Hosted workforce Entra authentication context required for platform-operator step-up.", { optional: true }),
-    variable("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL", "", "Hosted HTTPS destination for signed break-glass security alerts.", { optional: true }),
-    variable("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET", "", "Shared HMAC secret for signed break-glass security alerts.", { optional: true, secret: true }),
+    variable("LEMMACOMPUTER_ENTRA_TENANT_ID", "replace-with-entra-directory-tenant-id", "Microsoft Entra directory tenant ID for workforce sign-in and the default Microsoft 365 connector app.", { requiredWhen: "The customer-managed profile is selected; worktree evaluation may keep the placeholder." }),
+    variable("LEMMACOMPUTER_ENTRA_CLIENT_ID", "replace-with-entra-application-client-id", "Microsoft Entra Web application client ID for workforce sign-in and the default Microsoft 365 connector app.", { requiredWhen: "The customer-managed profile is selected; worktree evaluation may keep the placeholder." }),
+    variable("LEMMACOMPUTER_ENTRA_CLIENT_SECRET", "replace-with-entra-application-client-secret", "Microsoft Entra Web application client secret for workforce sign-in and the default Microsoft 365 connector app.", { secret: true, requiredWhen: "The customer-managed profile is selected; worktree evaluation may keep the placeholder." }),
+    variable("LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID", "", "Hosted Microsoft Entra External ID directory tenant ID for customer authentication.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN", "", "Hosted External ID ciamlogin.com tenant subdomain for customer authentication.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID", "", "Hosted External ID Web application client ID for customer authentication.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET", "", "Hosted External ID Web application client secret for customer authentication.", { optional: true, secret: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID", "", "Hosted workforce Entra tenant for the separate platform-operator application.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID", "", "Hosted workforce Entra client ID dedicated to platform operators.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET", "", "Hosted workforce Entra client secret dedicated to platform operators.", { optional: true, secret: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET", "", "Hosted platform-operator cookie and OIDC-state encryption secret, distinct from customer sessions.", { optional: true, secret: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT", "", "Hosted workforce Entra authentication context required for platform-operator step-up.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL", "", "Hosted HTTPS destination for signed break-glass security alerts.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET", "", "Shared HMAC secret for signed break-glass security alerts.", { optional: true, secret: true, requiredWhen: "The hosted profile is selected." }),
     variable("LEMMACOMPUTER_PLATFORM_SUPPORT_APPROVAL_REQUIRED", "true", "Require approval for every tenant-support elevation in addition to always-sensitive scopes.", { kind: "boolean" }),
     variable("LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS", "replace-with-entra-object-id", "Comma-separated immutable Entra object IDs allowed to perform the one-time owner bootstrap."),
     variable("LEMMACOMPUTER_ADMINISTRATOR_EMAILS", "", "Deprecated compatibility input. Email addresses never grant organization roles."),
     variable("LEMMACOMPUTER_MS365_TENANT_ID", "", "Dedicated Microsoft 365 MCP Entra tenant ID, or blank to reuse the Web sign-in app."),
     variable("LEMMACOMPUTER_MS365_CLIENT_ID", "", "Dedicated Microsoft 365 MCP Entra client ID, or blank to reuse the Web sign-in app."),
     variable("LEMMACOMPUTER_MS365_CLIENT_SECRET", "", "Dedicated Microsoft 365 MCP Entra client secret, or blank to reuse the Web sign-in app.", { secret: true }),
-    variable("LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID", "", "GitHub MCP OAuth app client ID."),
-    variable("LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET", "", "GitHub MCP OAuth app client secret.", { secret: true }),
+    variable("LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID", "", "GitHub MCP OAuth app client ID.", { requiredWhen: "The GitHub MCP connector is enabled; configure it with the matching secret." }),
+    variable("LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET", "", "GitHub MCP OAuth app client secret.", { secret: true, requiredWhen: "The GitHub MCP connector is enabled; configure it with the matching client ID." }),
     variable("LEMMACOMPUTER_BOOTSTRAP_TENANT_ID", "example", "Initial owned tenant identifier."),
     variable("LEMMACOMPUTER_BOOTSTRAP_USER_ID", "bootstrap-admin", "Initial owned administrator identifier."),
     variable("LEMMACOMPUTER_TENANT_DISPLAY_NAME", "Example Organization", "Initial tenant display name."),
@@ -166,33 +166,33 @@ const sections = [
   section("Workspace runtime and node topology", "One Lemma-owned Docker/KasmVNC runtime runs on a colocated or private remote workspace node. Runtime selection never grants Docker authority to Control.", [
     variable("LEMMACOMPUTER_WORKSPACE_RUNTIME", "docker-kasmvnc", "Workspace runtime implementation.", { kind: "enum", values: ["docker-kasmvnc"] }),
     variable("LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY", "colocated", "Workspace-node placement: colocated or remote.", { kind: "enum", values: ["colocated", "remote"] }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_URL", "http://workspace-controller:4101", "Private Control-to-workspace-node URL.", { kind: "url" }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_URL", "http://workspace-controller:4101", "Private Control-to-workspace-node URL.", { kind: "url", requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote; it must use HTTPS." }),
     variable("LEMMACOMPUTER_WORKSPACE_NODE_ID", "workspace-node-1", "Stable audit identifier for the configured workspace node."),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE", "token", "Node request authentication: token for colocated development or mutual TLS for remote nodes.", { kind: "enum", values: ["token", "mtls"] }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64", "", "Base64 PEM CA for the remote node and private desktop relay.", { secret: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64", "", "Base64 PEM workspace-node server certificate.", { secret: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64", "", "Base64 PEM workspace-node server private key.", { secret: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64", "", "Base64 PEM Control workload client certificate.", { secret: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64", "", "Base64 PEM Control workload client private key.", { secret: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_AUTH_MODE", "token", "Node request authentication: token for colocated development or mutual TLS for remote nodes.", { kind: "enum", values: ["token", "mtls"], requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote; set it to mtls." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64", "", "Base64 PEM CA for the remote node and private desktop relay.", { secret: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_CERT_B64", "", "Base64 PEM workspace-node server certificate.", { secret: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_KEY_B64", "", "Base64 PEM workspace-node server private key.", { secret: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64", "", "Base64 PEM Control workload client certificate.", { secret: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64", "", "Base64 PEM Control workload client private key.", { secret: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
     variable("LEMMACOMPUTER_WORKSPACE_NODE_TLS_SERVER_NAME", "workspace-node", "Expected TLS server name for Control's node client."),
     variable("LEMMACOMPUTER_WORKSPACE_NODE_CLIENT_COMMON_NAME", "lemmacomputer-control", "Required Control client-certificate common name."),
-    variable("LEMMACOMPUTER_WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64", "", "Base64 PEM workspace-ingress client certificate for private desktop relays.", { secret: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64", "", "Base64 PEM workspace-ingress client private key for private desktop relays.", { secret: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_INGRESS_TLS_CLIENT_CERT_B64", "", "Base64 PEM workspace-ingress client certificate for private desktop relays.", { secret: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64", "", "Base64 PEM workspace-ingress client private key for private desktop relays.", { secret: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
     variable("LEMMACOMPUTER_WORKSPACE_INGRESS_TLS_CLIENT_COMMON_NAME", "lemmacomputer-workspace-ingress", "Required workspace-ingress client-certificate common name."),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST", "127.0.0.1", "Private relay DNS name or address returned only to workspace ingress."),
-    variable("LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST", "127.0.0.1", "Private node interface used for desktop relay port bindings."),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_RELAY_NETWORK", "", "Pre-created private node network used by TLS desktop relays for ingress port publication.", { optional: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK", "", "Pre-created restricted node network used only by fixed Control and gateway relays.", { optional: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CA_B64", "", "Base64 PEM CA for private Control and gateway relay upstreams.", { secret: true, optional: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CLIENT_CERT_B64", "", "Base64 PEM workspace-node application-gateway client certificate.", { secret: true, optional: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64", "", "Base64 PEM workspace-node application-gateway client private key.", { secret: true, optional: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL", "", "Private HTTPS gateway endpoint reachable only from the remote node application network.", { kind: "url", optional: true }),
-    variable("LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL", "", "Private HTTPS Control endpoint reachable only from the remote node application network.", { kind: "url", optional: true }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST", "127.0.0.1", "Private relay DNS name or address returned only to workspace ingress.", { requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_RELAY_BIND_HOST", "127.0.0.1", "Private node interface used for desktop relay port bindings.", { requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_RELAY_NETWORK", "", "Pre-created private node network used by TLS desktop relays for ingress port publication.", { optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_NETWORK", "", "Pre-created restricted node network used only by fixed Control and gateway relays.", { optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CA_B64", "", "Base64 PEM CA for private Control and gateway relay upstreams.", { secret: true, optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CLIENT_CERT_B64", "", "Base64 PEM workspace-node application-gateway client certificate.", { secret: true, optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64", "", "Base64 PEM workspace-node application-gateway client private key.", { secret: true, optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL", "", "Private HTTPS gateway endpoint reachable only from the remote node application network.", { kind: "url", optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
+    variable("LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL", "", "Private HTTPS Control endpoint reachable only from the remote node application network.", { kind: "url", optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
     variable("LEMMACOMPUTER_WORKSPACE_IMAGE", "lemmacomputer/workspace:dev", "Workspace container image."),
     variable("LEMMACOMPUTER_TIME_ZONE", "Etc/UTC", "Trusted IANA timezone for workspace and relative calendar times.", { initialize: "time-zone" }),
     variable("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX", "lemmacomputer-workspace", "Local Kasm workspace network-name prefix."),
     variable("LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK", "lemmacomputer-egress", "Local Kasm egress network name."),
-    variable("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED", "false", "Expose KVM devices only to supported local desktop workspaces.", { kind: "boolean" }),
+    variable("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED", "false", "Expose KVM devices only to supported local desktop workspaces.", { kind: "boolean", requiredWhen: "Claude Cowork must run; the workspace node must provide /dev/kvm and /dev/vhost-vsock." }),
     variable("LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS", "60000", "Local workspace startup timeout in milliseconds.", { kind: "integer" }),
   ]),
 ];
@@ -291,6 +291,20 @@ export const coupledEnvironmentGroups = Object.freeze([
 
 const comments = (text) => text.split("\n").flatMap((line) => `# ${line}`);
 
+const variableGuidance = (item, { qualification = false } = {}) => {
+  const guidance = [];
+  if (item.requiredWhen) guidance.push(`Required when: ${item.requiredWhen}`);
+  if (item.kind === "enum") guidance.push(`Accepted values: ${item.values.map((value) => value || "(empty)").join(", ")}.`);
+  if (item.kind === "boolean") guidance.push("Accepted values: true or false.");
+  if (item.kind === "integer") guidance.push("Accepted value: a non-negative integer.");
+  if (item.kind === "url") guidance.push("Accepted value: an absolute URL.");
+  if (item.secret) guidance.push(qualification
+    ? "Sensitive: generated for an isolated qualification run; do not persist or log it."
+    : "Sensitive: keep this value out of source control and logs; use a secret manager in production.");
+  if (item.generated) guidance.push("Local initialization: npm run env:init replaces this placeholder and keeps the generated value stable in .env.");
+  return guidance.flatMap(comments);
+};
+
 export function renderEnvironmentTemplate() {
   const lines = [
     "# LemmaComputer deployment environment",
@@ -298,10 +312,18 @@ export function renderEnvironmentTemplate() {
     "# Generated from scripts/deployment-config.mjs. Do not edit this file by hand.",
     "# Run `npm run env:init` to create .env with fresh local secrets, then",
     "# replace deployment-specific placeholders. Never commit .env.",
+    "#",
+    "# Scope: every operator-owned input accepted in a deployment .env is listed",
+    "# exactly once below. Service-local and per-workspace variables are derived",
+    "# into .runtime-env/ files or runtime container specifications.",
+    "# Qualification-only inputs are documented in .env.qualification.example.",
+    "# Model-provider API keys and tenant MCP OAuth tokens are configured in the",
+    "# product UI and encrypted stores; they are intentionally not deployment env vars.",
+    "# Run `npm run env:check` to validate the selected profile and conditional fields.",
   ];
   for (const { name, description, variables } of environmentSections) {
     lines.push("", `# ${name}`, ...comments(description));
-    for (const item of variables) lines.push(...comments(item.description), `${item.key}=${item.default}`);
+    for (const item of variables) lines.push(...comments(item.description), ...variableGuidance(item), `${item.key}=${item.default}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -312,10 +334,11 @@ export function renderQualificationEnvironmentTemplate() {
     "#",
     "# Generated from scripts/deployment-config.mjs. The qualification commands",
     "# generate these values at run time; do not copy them into a deployment .env.",
+    "# This file is a reference inventory, not a file that operators must populate.",
   ];
   for (const { name, description, variables } of qualificationSections) {
     lines.push("", `# ${name}`, ...comments(description));
-    for (const item of variables) lines.push(...comments(item.description), `${item.key}=${item.default}`);
+    for (const item of variables) lines.push(...comments(item.description), ...variableGuidance(item, { qualification: true }), `${item.key}=${item.default}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -405,9 +428,10 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
   for (const [name, keys] of Object.entries({
     Google: ["LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID", "LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET"],
     Microsoft: ["LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID", "LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET"],
+    "GitHub MCP": ["LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID", "LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET"],
   })) {
     const present = keys.filter((key) => hasValue(values[key]));
-    if (present.length === 1) errors.push(`${name} customer authentication client ID and secret must be configured together`);
+    if (present.length === 1) errors.push(`${name} OAuth client ID and secret must be configured together`);
   }
   if (values.LEMMACOMPUTER_RUNTIME_ENVIRONMENT === "production" && values.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT === "capture") {
     errors.push("Production customer authentication requires a real transactional email transport");
