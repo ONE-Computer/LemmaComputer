@@ -82,3 +82,30 @@ test("Workspace focus and Chat composer remain visible at responsive breakpoints
   await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(900);
   await expectNoDocumentOverflow(page);
 });
+
+test("desktop density keeps primary work visible on a 14-inch laptop", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 650 });
+  await page.goto("/?view=home");
+
+  const sidebar = page.locator(".sidebar");
+  const sidebarBox = await sidebar.boundingBox();
+  expect(sidebarBox?.width).toBeGreaterThanOrEqual(190);
+  expect(sidebarBox?.width).toBeLessThanOrEqual(196);
+
+  const navRows = await page.locator(".nav-button").evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
+  expect(navRows.length).toBeGreaterThanOrEqual(7);
+  expect(Math.max(...navRows)).toBeLessThanOrEqual(36);
+
+  const headingSize = await page.getByRole("heading", { name: "Workspace", exact: true }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+  expect(headingSize).toBeLessThanOrEqual(36);
+
+  const createButton = page.getByRole("button", { name: "Create workspace" });
+  const createButtonBox = await createButton.boundingBox();
+  expect(createButtonBox?.height).toBeLessThanOrEqual(36);
+
+  const cards = page.locator(".workspace-overview-card");
+  expect(await cards.count()).toBeGreaterThanOrEqual(2);
+  const secondCardBox = await cards.nth(1).boundingBox();
+  expect(secondCardBox?.y).toBeLessThan(650);
+  await expectNoDocumentOverflow(page);
+});

@@ -133,8 +133,8 @@ test("organization administrator invites a person and manages member access", as
   const sectionActions = ["Edit organization name", "Invite person", "Initiate organization closure", "Add connection", "Create custom role"];
   for (const name of sectionActions) {
     const box = await page.getByRole("button", { name, exact: true }).boundingBox();
-    expect(box?.width).toBeCloseTo(260, 0);
-    expect(box?.height).toBeCloseTo(56, 0);
+    expect(box?.width).toBeCloseTo(220, 0);
+    expect(box?.height).toBeCloseTo(38, 0);
   }
   const ownerSessionAction = page.locator(".admin-user-list article").first().getByRole("button", { name: "Sign out sessions" });
   const ownerSessionBox = await ownerSessionAction.boundingBox();
@@ -144,11 +144,11 @@ test("organization administrator invites a person and manages member access", as
   const memberRow = page.locator(".admin-user-list article").filter({ hasText: "admin@example.test" });
   const memberRowBox = await memberRow.boundingBox();
   const memberActionsBox = await memberRow.locator(".admin-user-actions").boundingBox();
-  expect((memberActionsBox?.y ?? 0) - (memberRowBox?.y ?? 0)).toBeGreaterThanOrEqual(16);
+  expect((memberActionsBox?.y ?? 0) - (memberRowBox?.y ?? 0)).toBeGreaterThanOrEqual(12);
   expect(
     ((memberRowBox?.y ?? 0) + (memberRowBox?.height ?? 0))
       - ((memberActionsBox?.y ?? 0) + (memberActionsBox?.height ?? 0)),
-  ).toBeGreaterThanOrEqual(16);
+  ).toBeGreaterThanOrEqual(12);
 
   await page.getByRole("button", { name: "Invite person" }).click();
   const inviteDialog = page.getByRole("dialog", { name: "Invite a person" });

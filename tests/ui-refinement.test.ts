@@ -300,9 +300,9 @@ test("desktop pages share the wider workspace content cap", async () => {
   assert.doesNotMatch(styles, /\.connections-screen\s*\{\s*max-width: 1000px/);
 });
 
-test("desktop navigation has a wider persistent sidebar without widening the mobile drawer", async () => {
+test("desktop navigation uses the compact density sidebar without narrowing the mobile drawer", async () => {
   const styles = await source("apps/web/src/styles.css");
-  assert.match(styles, /--desktop-sidebar-width: 336px/);
+  assert.match(styles, /--desktop-sidebar-width: 196px/);
   assert.match(styles, /\.sidebar\s*\{[\s\S]*?width: var\(--desktop-sidebar-width\)/);
   assert.match(styles, /\.main-content\s*\{[\s\S]*?margin-left: var\(--desktop-sidebar-width\)/);
   assert.match(styles, /@media \(max-width: 880px\) \{\s*\.sidebar\s*\{\s*width: 292px/);
@@ -310,7 +310,7 @@ test("desktop navigation has a wider persistent sidebar without widening the mob
 
 test("desktop pages begin at one shared top-bar offset without compact-page padding", async () => {
   const styles = await source("apps/web/src/styles.css");
-  assert.match(styles, /\.topbar\s*\{\s*display: flex;\s*min-height: 48px/);
+  assert.match(styles, /\.topbar\s*\{\s*display: flex;\s*min-height: 24px/);
   assert.match(styles, /\.home-screen,\s*\.secondary-screen\s*\{[\s\S]*?margin: 0 auto/);
   assert.doesNotMatch(styles, /\.page-heading\.compact\s*\{\s*padding-top:/);
   assert.match(styles, /@media \(max-width: 880px\) \{[\s\S]*?\.home-screen,\s*\.secondary-screen\s*\{\s*margin-top: 32px/);
@@ -410,9 +410,9 @@ test("People and access uses consistent section and row action sizing", async ()
   for (const label of ["Edit organization name", "Invite person", "Add connection", "Create custom role", "Initiate organization closure"]) assert.match(app, new RegExp(`>${label}<`));
   assert.match(app, /className="secondary-button admin-row-action"/);
   assert.match(app, />Sign out sessions</);
-  assert.match(styles, /\.admin-section-action\s*\{[^}]*width:\s*260px;[^}]*min-height:\s*56px;/s);
+  assert.match(styles, /\.admin-section-action\s*\{[^}]*width:\s*220px;[^}]*min-height:\s*var\(--desktop-control-height\);/s);
   assert.match(styles, /\.admin-user-actions \.admin-row-action\s*\{[^}]*min-width:\s*180px;[^}]*min-height:\s*40px;/s);
-  assert.match(styles, /\.admin-user-list article\s*\{[^}]*padding:\s*16px 0;/s);
+  assert.match(styles, /\.admin-user-list article\s*\{[^}]*padding:\s*12px 0;/s);
   assert.match(styles, /@media \(max-width:\s*700px\)[\s\S]*\.admin-section-action\s*\{[^}]*width:\s*100%;/);
 });
 
