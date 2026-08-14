@@ -129,6 +129,12 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && UV_PROJECT_ENVIRONMENT=/opt/lemmacomputer/hermes-venv \
       uv sync --project /opt/lemmacomputer/hermes-agent --frozen --no-dev --no-editable \
       --python "/opt/lemmacomputer/python/cpython-${HERMES_PYTHON_VERSION}-linux-x86_64-gnu/bin/python" \
+    && HERMES_IDENTITY_SITE_PACKAGES="$(/opt/lemmacomputer/hermes-venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
+    && install -o root -g root -m 0644 \
+      /tmp/lemmacomputer_hermes_mcp_identity.py \
+      "${HERMES_IDENTITY_SITE_PACKAGES}/lemmacomputer_hermes_mcp_identity.py" \
+    && (cd /home/kasm-user \
+      && /opt/lemmacomputer/hermes-venv/bin/python -c 'import lemmacomputer_hermes_mcp_identity') \
     && uv pip install \
       --python /opt/lemmacomputer/hermes-venv/bin/python \
       --no-deps \

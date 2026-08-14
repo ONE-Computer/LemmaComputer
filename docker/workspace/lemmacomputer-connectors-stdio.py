@@ -1068,8 +1068,16 @@ def operation_result(operation: dict, identifier: str) -> dict:
             "The requested change did not complete. Do not describe this result as rejected, denied, or not approved.",
             identifier,
             state,
+            category="provider_rejection",
+            retryable=False,
         )
-    return error_result(f"The governed action was {state}. No further tool execution occurred.", identifier, state)
+    return error_result(
+        f"The governed action was {state}. No further tool execution occurred.",
+        identifier,
+        state,
+        category="policy_denial" if state in {"denied", "expired"} else "unknown_failure",
+        retryable=state not in {"denied", "expired"},
+    )
 
 
 def validate_contract_arguments(selected: dict, arguments: dict) -> dict | None:
@@ -1080,10 +1088,16 @@ def validate_contract_arguments(selected: dict, arguments: dict) -> dict | None:
     unsupported = sorted(key for key in arguments if key not in properties)
     if unsupported:
         field = unsupported[0]
+        safe_field = bounded_failure_field(field)
         return error_result(
-            f"Unsupported field '{field}'. Use only the fields in the published Microsoft 365 tool contract; raw Graph filter, search, order, path, and header syntax is not accepted.",
+            (
+                f"Unsupported field '{safe_field}'. Use only the fields in the published Microsoft 365 tool contract; raw Graph filter, search, order, path, and header syntax is not accepted."
+                if safe_field
+                else "An unsupported field was omitted. Use only the fields in the published Microsoft 365 tool contract; raw Graph filter, search, order, path, and header syntax is not accepted."
+            ),
             category="unsupported_option",
-            field=field,
+            field=safe_field,
+            retryable=False,
         )
     return None
 
@@ -1096,11 +1110,20 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
     if name == WAIT_TOOL_NAME:
         identifier = arguments.get("operationId")
         if not isinstance(identifier, str) or not identifier:
-            return error_result("A governed operationId is required.")
+            return error_result(
+                "A governed operationId is required.",
+                category="invalid_argument",
+                field="operationId",
+                retryable=False,
+            )
         return operation_result(wait_for_operation(identifier, agent_instance_id), identifier)
     server_id = (selected or {}).get("mcp_info", {}).get("server_id")
     if not isinstance(server_id, str):
-        return error_result("That tool is not assigned to this workspace.")
+        return error_result(
+            "That tool is not assigned to this workspace.",
+            category="policy_denial",
+            retryable=False,
+        )
     upstream_name = (selected or {}).get("_lemmacomputer_upstream_name", name)
     if upstream_name in WRITE_TOOLS:
         # Connector execution flags are never accepted from the model. The
@@ -1116,11 +1139,24 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
     if upstream_name == "upload-file-content":
         try:
             arguments["driveItemId"] = normalize_upload_drive_item_id(arguments.get("driveItemId"))
-            local_upload = prepare_upload_body(arguments)
         except ValueError as error:
             return error_result(
                 f"The OneDrive upload was not submitted: {error}. "
-                "Use an opaque item ID, root:/file.txt:, or root:/folder/file.txt: as driveItemId."
+                "Use an opaque item ID, root:/file.txt:, or root:/folder/file.txt: as driveItemId.",
+                category="invalid_argument",
+                field="driveItemId",
+                retryable=False,
+            )
+        try:
+            local_upload = prepare_upload_body(arguments)
+        except ValueError as error:
+            detail = str(error)
+            field = "localFilePath" if "localFilePath" in detail else "body" if "body" in detail else None
+            return error_result(
+                f"The OneDrive upload was not submitted: {detail}.",
+                category="invalid_argument",
+                field=field,
+                retryable=False,
             )
         if local_upload:
             try:
@@ -1132,7 +1168,11 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
                 operation = response.get("operation") if isinstance(response.get("operation"), dict) else {}
                 identifier = operation.get("id")
                 if not isinstance(identifier, str):
-                    return error_result("LemmaComputer did not create a governed resumable upload.")
+                    return error_result(
+                        "LemmaComputer did not create a governed resumable upload.",
+                        category="unknown_failure",
+                        retryable=True,
+                    )
                 LOCAL_UPLOADS[identifier] = {
                     "driveId": arguments["driveId"],
                     "driveItemId": arguments["driveItemId"],
@@ -1146,13 +1186,21 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
                     "_meta": {"lemmacomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
                 }
             except (OSError, ValueError, urllib.error.URLError):
-                return error_result("The governed resumable upload service is unavailable.")
+                return error_result(
+                    "The governed resumable upload service is unavailable.",
+                    category="unknown_failure",
+                    retryable=True,
+                )
     if upstream_name == "delete-onedrive-file":
         if (not isinstance(arguments.get("resourceName"), str)
                 or not arguments["resourceName"].strip()
                 or not isinstance(arguments.get("If-Match"), str)
                 or not arguments["If-Match"].strip()):
-            return error_result(DELETE_ONEDRIVE_MISSING_METADATA)
+            return error_result(
+                DELETE_ONEDRIVE_MISSING_METADATA,
+                category="invalid_argument",
+                retryable=False,
+            )
         arguments["If-Match"] = normalize_graph_etag(arguments["If-Match"])
         try:
             response = request_json("/lemmacomputer/deletions", {
@@ -1164,7 +1212,11 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
             operation = response.get("operation") if isinstance(response.get("operation"), dict) else {}
             identifier = operation.get("id")
             if not isinstance(identifier, str):
-                return error_result("LemmaComputer did not create a governed OneDrive deletion.")
+                return error_result(
+                    "LemmaComputer did not create a governed OneDrive deletion.",
+                    category="unknown_failure",
+                    retryable=True,
+                )
             if operation.get("state") == "succeeded":
                 return operation_result(operation, identifier)
             return {
@@ -1173,7 +1225,11 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
                 "_meta": {"lemmacomputer": {"operationId": identifier, "state": operation.get("state", "approval_required"), "approval": "openvtc-task-consent"}},
             }
         except (OSError, ValueError, KeyError, urllib.error.URLError):
-            return error_result("The governed OneDrive deletion service is unavailable.")
+            return error_result(
+                "The governed OneDrive deletion service is unavailable.",
+                category="unknown_failure",
+                retryable=True,
+            )
     try:
         response = request_json("/mcp-rest/tools/call", {
             "server_id": server_id,
@@ -1184,11 +1240,14 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
             return error_result(
                 "The connected service returned an invalid tool result.",
                 category="unknown_failure",
+                retryable=True,
             )
         if response.get("isError") is True:
+            failure = upstream_m365_failure(response)
             return error_result(
-                "Microsoft 365 rejected the request. Check the published tool fields and resolved resource IDs before retrying.",
-                category="provider_rejection",
+                failure["message"],
+                category=failure["category"],
+                retryable=failure["retryable"],
             )
         return omit_nulls(response)
     except urllib.error.HTTPError as error:
@@ -1204,6 +1263,7 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
                     problem["message"],
                     category=problem["category"],
                     field=problem.get("field"),
+                    retryable=problem["retryable"],
                 )
             code = nested_error(payload)
             message = (
@@ -1211,17 +1271,28 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
                 if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", code)
                 else f"LemmaComputer rejected the tool call (HTTP {error.code})."
             )
-            category = "authentication_failure" if error.code == 401 else "policy_denial" if error.code == 403 else "provider_rejection"
-            return error_result(message, category=category)
+            if error.code == 401:
+                category, retryable = "authentication_failure", False
+            elif error.code == 403:
+                category, retryable = "policy_denial", False
+            elif error.code in {408, 425, 429}:
+                category, retryable = "provider_rejection", True
+            elif error.code >= 500:
+                category, retryable = "unknown_failure", True
+            else:
+                category, retryable = "provider_rejection", False
+            return error_result(message, category=category, retryable=retryable)
     except TimeoutError:
         return error_result(
             "Microsoft 365 did not respond before the bounded connector timeout.",
             category="timeout",
+            retryable=True,
         )
     except urllib.error.URLError:
         return error_result(
             "The Microsoft 365 connector is temporarily unavailable.",
-            category="provider_rejection",
+            category="unknown_failure",
+            retryable=True,
         )
 
     return {
@@ -1248,15 +1319,17 @@ def nested_problem(value: object) -> dict | None:
         category = value.get("category")
         message = value.get("message")
         field = value.get("field")
+        retryable = value.get("retryable")
         if (
             category in {
                 "invalid_argument", "unsupported_option", "authentication_failure", "policy_denial",
                 "provider_rejection", "timeout", "unknown_failure",
             }
-            and isinstance(message, str)
-            and (field is None or isinstance(field, str))
+            and isinstance(message, str) and 1 <= len(message) <= 320
+            and (field is None or isinstance(field, str) and 1 <= len(field) <= 128)
+            and isinstance(retryable, bool)
         ):
-            return {"category": category, "message": message, "field": field}
+            return {"category": category, "message": message, "field": field, "retryable": retryable}
         for child in value.values():
             found = nested_problem(child)
             if found:
@@ -1269,15 +1342,97 @@ def nested_problem(value: object) -> dict | None:
     return None
 
 
+def upstream_m365_failure(response: dict) -> dict:
+    """Classify only pinned Softeria error wrappers without exposing Graph text."""
+
+    error_message = None
+    for item in response.get("content", []):
+        if not isinstance(item, dict) or item.get("type") != "text" or not isinstance(item.get("text"), str):
+            continue
+        try:
+            payload = json.loads(item["text"])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+            error_message = payload["error"]
+            break
+    if error_message is None:
+        return {
+            "category": "unknown_failure",
+            "message": "Microsoft 365 could not complete the request. Retry once; if it fails again, reconnect the Microsoft 365 account or verify the resolved resource IDs.",
+            "retryable": True,
+        }
+    wrapped = re.match(r"^Error in tool [A-Za-z0-9_-]+: (.+)$", error_message, re.DOTALL)
+    if wrapped:
+        error_message = wrapped.group(1)
+    if error_message == "No access token available" or error_message.startswith("Failed to acquire token for account "):
+        return {
+            "category": "authentication_failure",
+            "message": "The Microsoft 365 sign-in is no longer usable. Reconnect the Microsoft 365 account, then retry the request.",
+            "retryable": False,
+        }
+    matched = re.match(r"^Microsoft Graph API (?:scope )?error: ([1-5][0-9]{2})(?:\s|$)", error_message)
+    if matched:
+        status = int(matched.group(1))
+        if status in {401, 403}:
+            return {
+                "category": "authentication_failure",
+                "message": "Microsoft 365 authentication or consent is no longer sufficient. Reconnect the account and review its granted permissions.",
+                "retryable": False,
+            }
+        if status == 408:
+            return {
+                "category": "timeout",
+                "message": "Microsoft 365 did not respond before the bounded request timeout. Retry once.",
+                "retryable": True,
+            }
+        if status in {425, 429} or status >= 500:
+            return {
+                "category": "provider_rejection",
+                "message": "Microsoft 365 is temporarily unable to complete the request. Retry once after a short delay.",
+                "retryable": True,
+            }
+        return {
+            "category": "provider_rejection",
+            "message": "Microsoft 365 rejected the request. Check the published tool fields and resolved resource IDs before retrying.",
+            "retryable": False,
+        }
+    return {
+        "category": "unknown_failure",
+        "message": "Microsoft 365 could not complete the request. Retry once; if it fails again, reconnect the Microsoft 365 account or verify the resolved resource IDs.",
+        "retryable": True,
+    }
+
+
+def bounded_failure_field(value: object) -> str | None:
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", value):
+        return value
+    return None
+
+
+def bounded_failure_message(message: str) -> str:
+    if 1 <= len(message) <= 320:
+        return message
+    return "The connector request failed. Review the published tool contract and retry only when the error is marked retryable."
+
+
 def error_result(
     message: str,
     identifier: str | None = None,
     state: str | None = None,
     category: str = "unknown_failure",
     field: str | None = None,
+    retryable: bool | None = None,
 ) -> dict:
+    if retryable is None:
+        retryable = category in {"timeout", "unknown_failure"}
     result = {"content": [{"type": "text", "text": message}], "isError": True}
-    metadata = {"failure": {"category": category, "field": field}}
+    metadata = {"failure": {
+        "category": category,
+        "field": bounded_failure_field(field),
+        "message": bounded_failure_message(message),
+        "retryable": retryable,
+    }}
     if identifier:
         metadata.update({"operationId": identifier, "state": state})
     result["_meta"] = {"lemmacomputer": metadata}

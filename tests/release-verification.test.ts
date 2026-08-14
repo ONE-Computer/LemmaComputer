@@ -11,7 +11,7 @@ test("release attestation requires an isolated built Hermes workspace readiness 
     readFile("docker/Dockerfile.workspace", "utf8"),
   ]);
 
-  assert.equal(releaseAttestationSchemaVersion, 3);
+  assert.equal(releaseAttestationSchemaVersion, 4);
   assert.deepEqual(requiredReleaseGates.slice(-2), [
     "workspace-image-build",
     "hermes-workspace-readiness-smoke",
@@ -75,4 +75,16 @@ test("release verification executes the pinned remote MCP egress qualification",
   assert.match(packageDocument, /"qualify:mcp-egress": "node scripts\/qualify-mcp-egress\.mjs"/);
   assert.match(qualifier, /"--network", "none"/);
   assert.match(qualifier, /tests\/litellm-remote-mcp-egress\.py/);
+});
+
+test("release verification executes the Microsoft 365 tool-contract drift qualification", async () => {
+  const [verifyRelease, packageDocument, qualifier] = await Promise.all([
+    readFile("scripts/verify-release.mjs", "utf8"),
+    readFile("package.json", "utf8"),
+    readFile("scripts/qualify-microsoft365-contracts.mts", "utf8"),
+  ]);
+  assert.ok(requiredReleaseGates.includes("microsoft365-tool-contract-drift-qualification-v1"));
+  assert.match(verifyRelease, /run\("npm", \["run", "qualify:microsoft365-contracts"\]\)/);
+  assert.match(packageDocument, /"qualify:microsoft365-contracts": "tsx scripts\/qualify-microsoft365-contracts\.mts"/);
+  assert.match(qualifier, /Qualified \$\{names\.length\} Microsoft 365 tool contracts/);
 });

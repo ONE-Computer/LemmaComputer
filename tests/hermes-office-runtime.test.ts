@@ -83,6 +83,17 @@ test("the pinned Hermes browser runtime binds a verified identity only to the re
   assert.match(identityHelper, /\{"lemmacomputer": \{"agentInstanceId": raw\}\}/);
   assert.match(activityPatch, /tool_activity_event\(event_type, kwargs\.get\("is_error"\)\)/);
   assert.match(dockerfile, /patch --batch --forward --fuzz=0 -d \/opt\/lemmacomputer\/hermes-agent -p1 < \/tmp\/hermes-agent-activity\.patch/);
+  assert.match(dockerfile, /HERMES_IDENTITY_SITE_PACKAGES=.*sysconfig\.get_paths\(\)\["purelib"\]/);
+  assert.match(
+    dockerfile,
+    /\$\{HERMES_IDENTITY_SITE_PACKAGES\}\/lemmacomputer_hermes_mcp_identity\.py/,
+    "the no-editable Hermes runtime must install the product helper into its virtualenv",
+  );
+  assert.match(
+    dockerfile,
+    /cd \/home\/kasm-user[\s\S]+python -c 'import lemmacomputer_hermes_mcp_identity'/,
+    "the image build must prove the helper imports away from the Hermes source tree",
+  );
   assert.match(chatAdapter, /"x-lemmacomputer-agent-instance-id": agent_instance_id/);
   assert.match(additions, /os\.environ\.get\("LEMMACOMPUTER_AGENT_INSTANCE_ID"/);
 });

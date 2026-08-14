@@ -48,6 +48,14 @@ are `invalid_argument`, `unsupported_option`, `authentication_failure`,
 Argument values, provider payloads, credentials, and personal Microsoft 365
 content are never included in this diagnostic metadata.
 
+For the pinned Softeria adapter, the bridge recognizes only its reviewed
+`Microsoft Graph API error: <status>` and missing-token prefixes. It converts
+those into the bounded categories above without returning Graph's error body.
+Authentication and consent failures are terminal until reconnection; timeouts,
+throttling, and provider 5xx responses are retryable; semantic Graph 4xx
+responses are non-retryable. Any unrecognized MCP error remains a safe
+`unknown_failure` and may be retried once.
+
 The request-local agent process identity is carried in reserved MCP metadata at
 `params._meta.lemmacomputer.agentInstanceId`. The bridge accepts only a
 canonical lowercase UUIDv4, captures it before dispatching the concurrent tool
