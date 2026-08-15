@@ -4161,7 +4161,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                     <div className="connector-catalog-action">
                       {connector.canAdministerConnector && connector.source === "custom" && !connected && <button className="connector-manage-link" type="button" onClick={() => onViewChange(`connector-${connector.id}`)}>Manage</button>}
                       {connected ? (
-                        <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage<ChevronRight16Regular aria-hidden="true" /></button>
+                        <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage</button>
                       ) : canConnect ? (
                         <button className="secondary-button" type="button" onClick={() => onConnect(connector.id)} disabled={loading || busy || organizationDisabled || connectionLocked}>{busy ? "Opening" : expired ? "Reconnect" : "Connect"}</button>
                       ) : (
