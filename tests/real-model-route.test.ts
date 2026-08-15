@@ -349,6 +349,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(entrypoint, /chmod 0700 \/opt\/google\/chrome\/google-chrome/);
   assert.match(entrypoint, /chmod 0700 \/usr\/share\/code\/code/);
   assert.match(entrypoint, /chmod 0700 \/opt\/Obsidian\/obsidian/);
+  assert.match(entrypoint, /\/home\/kasm-user\/Desktop\/Codex-Desktop\.desktop/);
   assert.match(entrypoint, /unshare --user --map-root-user true/);
   const chromeLauncher = await source("docker/workspace/google-chrome.desktop");
   assert.doesNotMatch(chromeLauncher, /--no-sandbox/);

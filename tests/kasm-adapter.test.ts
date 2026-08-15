@@ -806,20 +806,37 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.match(securityOptions[2]!, /^seccomp=\{/);
     const seccomp = JSON.parse(securityOptions[2]!.slice("seccomp=".length)) as {
       defaultAction: string;
-      syscalls: Array<{ names: string[]; action: string; args?: Array<{ value: number; valueTwo?: number; op: string }> }>;
+      syscalls: Array<{
+        names: string[];
+        action: string;
+        args?: Array<{ value: number; valueTwo?: number; op: string }>;
+        includes?: { caps?: string[] };
+      }>;
     };
     assert.equal(seccomp.defaultAction, "SCMP_ACT_ERRNO");
     assert.deepEqual(
-      seccomp.syscalls.slice(0, 2).map((rule) => ({ names: rule.names, action: rule.action, args: rule.args })),
+      seccomp.syscalls.slice(0, 3).map((rule) => ({ names: rule.names, action: rule.action, args: rule.args })),
       [{
         names: ["clone"],
         action: "SCMP_ACT_ALLOW",
         args: [{ index: 0, value: 268_435_456, valueTwo: 268_435_456, op: "SCMP_CMP_MASKED_EQ" }],
       }, {
+        names: ["clone"],
+        action: "SCMP_ACT_ALLOW",
+        args: [{ index: 0, value: 536_870_912, valueTwo: 2_114_060_288, op: "SCMP_CMP_MASKED_EQ" }],
+      }, {
         names: ["unshare"],
         action: "SCMP_ACT_ALLOW",
         args: [{ index: 0, value: 268_435_456, valueTwo: 268_435_456, op: "SCMP_CMP_MASKED_EQ" }],
       }],
+    );
+    assert.equal(
+      seccomp.syscalls.some((rule) => (
+        rule.names.includes("clone3")
+        && rule.action === "SCMP_ACT_ALLOW"
+        && !rule.includes?.caps?.includes("CAP_SYS_ADMIN")
+      )),
+      false,
     );
     assert.deepEqual(
       seccomp.syscalls

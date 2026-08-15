@@ -41,11 +41,15 @@ sandbox enabled. A workspace that selects any of those applications receives
 the fixed `lemmacomputer-workspace-electron` AppArmor profile. The profile
 retains Docker's default confinement shape and adds only the AppArmor `userns`
 permission needed by Chromium when `no-new-privileges` is active. Its seccomp
-profile retains the pinned Moby default and adds two argument-filtered rules:
-`clone` and `unshare` are allowed only when the `CLONE_NEWUSER` bit is present.
-`clone3` retains Moby's `ENOSYS` fallback, unrelated namespace calls remain
-denied, and Cowork's `AF_VSOCK` exception is absent unless Cowork is also
-selected. The runtime must not use `--no-sandbox`, `apparmor=unconfined`,
+profile retains the pinned Moby default and adds three argument-filtered rules:
+`clone` and `unshare` are allowed when the `CLONE_NEWUSER` bit is present, and
+one additional `clone` rule permits exactly `CLONE_NEWPID` among the namespace
+flags. Chromium needs that PID-only transition after it has entered the
+unprivileged user namespace. The kernel still requires the caller to hold the
+relevant capability in its current user namespace. `clone3` retains Moby's
+`ENOSYS` fallback, unrelated namespace combinations remain denied, and
+Cowork's `AF_VSOCK` exception is absent unless Cowork is also selected. The
+runtime must not use `--no-sandbox`, `apparmor=unconfined`,
 `seccomp=unconfined`, a privileged container, added capabilities, or the host
 PID/user namespace to make these applications start.
 

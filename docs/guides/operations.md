@@ -490,7 +490,9 @@ user namespace. It is not `unconfined`; `no-new-privileges`, capability drops,
 PID/memory limits, internal workspace networks, and governed egress remain
 active. The associated seccomp profile retains the pinned Moby default and
 adds only argument-filtered `clone` and `unshare` rules whose flags contain
-`CLONE_NEWUSER`; other namespace calls remain denied. Cowork's `AF_VSOCK`
+`CLONE_NEWUSER`, plus the exact PID-namespace-only `clone` transition Chromium
+performs after entering that user namespace. Other namespace combinations
+remain denied. Cowork's `AF_VSOCK`
 exception is included only when Cowork is selected too. The image verifies
 both the enforced AppArmor label and actual user-namespace creation as
 `kasm-user` before reporting ready.

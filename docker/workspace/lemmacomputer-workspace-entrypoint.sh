@@ -518,6 +518,7 @@ install -d -o 1000 -g 1000 -m 0755 /home/kasm-user/.config/autostart /home/kasm-
 rm -f /home/kasm-user/.config/autostart/claude-desktop.desktop \
   /home/kasm-user/Desktop/Claude-Desktop.desktop \
   /home/kasm-user/Desktop/Claude-CLI.desktop \
+  /home/kasm-user/Desktop/Codex-Desktop.desktop \
   /home/kasm-user/Desktop/Codex-CLI.desktop \
   /home/kasm-user/Desktop/LemmaComputer-Agent.desktop \
   /home/kasm-user/Desktop/Hermes-Claw.desktop \

@@ -43,6 +43,18 @@ const electronUserNamespaceSeccompRules: SeccompRule[] = [
     excludes: { arches: ["s390", "s390x"] },
   },
   {
+    names: ["clone"],
+    action: "SCMP_ACT_ALLOW",
+    args: [{
+      index: 0,
+      value: 0x20000000,
+      valueTwo: 0x7e020000,
+      op: "SCMP_CMP_MASKED_EQ",
+    }],
+    excludes: { arches: ["s390", "s390x"] },
+    comment: "Chromium creates its PID namespace after entering an unprivileged user namespace",
+  },
+  {
     names: ["unshare"],
     action: "SCMP_ACT_ALLOW",
     args: [{
