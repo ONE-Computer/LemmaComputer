@@ -3458,16 +3458,27 @@ export function createControlServer(
       );
     }
     const currentWorkspaces = await store.listTenantCurrent(actor.tenantId);
+    const restartableStates = new Set<WorkspaceState>(["ready", "open", "provisioning", "restarting"]);
+    const restartWorkspaceIds = new Set(
+      currentWorkspaces.filter((workspace) => restartableStates.has(workspace.state)).map((workspace) => workspace.id),
+    );
     const transitionResults = await Promise.allSettled(currentWorkspaces.map(async (workspace) => {
       const owner = identityContextSchema.parse({
         tenantId: actor.tenantId,
         subjectId: workspace.subjectId,
         audience: "lemmacomputer-control",
       });
-      return service.suspendForPolicyChange(owner, workspace.id);
+      return service.suspendForPolicyChange(owner, workspace.id, {
+        restartPending: restartWorkspaceIds.has(workspace.id),
+      });
     }));
     const transitionFailures = transitionResults.filter((result) => result.status === "rejected");
     if (transitionFailures.length) {
+      await Promise.allSettled(currentWorkspaces.map((workspace, index) => (
+        restartWorkspaceIds.has(workspace.id) && transitionResults[index]?.status === "fulfilled"
+          ? store.update(workspace.id, { state: "stopped", providerId: null, failureCode: null })
+          : Promise.resolve()
+      )));
       throw new LemmaComputerError(
         "WORKSPACE_POLICY_TRANSITION_FAILED",
         "The new guardrails were not activated because one or more workspace runtimes could not be stopped and revoked safely.",
@@ -3483,28 +3494,65 @@ export function createControlServer(
     });
     let reconciled = 0;
     let actionRequired = 0;
+    let restarted = 0;
+    let restartFailed = 0;
     if (security.identityPolicyStore) {
       const users = await security.identityPolicyStore.listUsers(actor.tenantId);
       const usersById = new Map(users.map((user) => [user.userId, user]));
       const reconciliation = await Promise.all(currentWorkspaces.map(async (workspace) => {
         const user = usersById.get(workspace.subjectId);
-        if (!user?.effectivePolicy) return "action_required" as const;
+        if (!user?.effectivePolicy) {
+          if (restartWorkspaceIds.has(workspace.id)) {
+            await store.update(workspace.id, { state: "stopped", providerId: null, failureCode: null });
+          }
+          return "action_required" as const;
+        }
         const owner = await security.identityPolicyStore!.getPrincipal(user.userId);
-        if (!owner || owner.tenantId !== actor.tenantId) return "action_required" as const;
+        if (!owner || owner.tenantId !== actor.tenantId) {
+          if (restartWorkspaceIds.has(workspace.id)) {
+            await store.update(workspace.id, { state: "stopped", providerId: null, failureCode: null });
+          }
+          return "action_required" as const;
+        }
         const effective = constrainEffectivePolicy(user.effectivePolicy, version);
         try {
-          await policyForGrant(owner, effective, workspace.grantId);
-          return "reconciled" as const;
+          const { policy } = await policyForGrant(owner, effective, workspace.grantId);
+          if (!restartWorkspaceIds.has(workspace.id)) return "reconciled" as const;
+          try {
+            await service.create(
+              owner.identity,
+              policy,
+              workspace.grantId,
+              `guardrail:${version.policyVersionId}:${workspace.id}`,
+              `${request.id}:guardrail-restart:${workspace.id}`,
+            );
+            return "restarted" as const;
+          } catch (error) {
+            request.log.warn({ err: error, workspaceId: workspace.id }, "workspace did not restart after guardrail publication");
+            return "restart_failed" as const;
+          }
         } catch {
           // The version is already immutable and current. A settings write or
           // selection conflict must remain visible as per-workspace action,
           // rather than turning a successful policy commit into an ambiguous
           // request failure.
+          if (restartWorkspaceIds.has(workspace.id)) {
+            await store.update(workspace.id, { state: "stopped", providerId: null, failureCode: null });
+          }
           return "action_required" as const;
         }
       }));
-      reconciled = reconciliation.filter((result) => result === "reconciled").length;
+      reconciled = reconciliation.filter((result) => result === "reconciled" || result === "restarted" || result === "restart_failed").length;
       actionRequired = reconciliation.filter((result) => result === "action_required").length;
+      restarted = reconciliation.filter((result) => result === "restarted").length;
+      restartFailed = reconciliation.filter((result) => result === "restart_failed").length;
+    } else {
+      actionRequired = currentWorkspaces.length;
+      await Promise.all(currentWorkspaces.map((workspace) => (
+        restartWorkspaceIds.has(workspace.id)
+          ? store.update(workspace.id, { state: "stopped", providerId: null, failureCode: null })
+          : Promise.resolve()
+      )));
     }
     return reply.code(201).send({
       version,
@@ -3513,6 +3561,8 @@ export function createControlServer(
         alreadyStopped: transitionResults.filter((result) => result.status === "fulfilled" && !result.value.stopped).length,
         reconciled,
         actionRequired,
+        restarted,
+        restartFailed,
       },
     });
   });

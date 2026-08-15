@@ -104,7 +104,11 @@ class MemoryScheduleStore implements ScheduleStore {
   async claimDueScheduleRuns(now: Date, limit: number, leaseMs: number) {
     const claimed: ClaimedScheduleRun[] = [];
     for (const run of this.runs.values()) {
-      if (claimed.length >= limit || run.state !== "claimed") continue;
+      if (
+        claimed.length >= limit
+        || run.state !== "claimed"
+        || (run.leaseExpiresAt && run.leaseExpiresAt >= now)
+      ) continue;
       const leaseToken = crypto.randomUUID();
       const updated = { ...run, leaseToken, leaseExpiresAt: new Date(now.getTime() + leaseMs) };
       this.runs.set(run.id, updated);
@@ -145,6 +149,27 @@ class MemoryScheduleStore implements ScheduleStore {
       leaseToken: null,
       leaseExpiresAt: null,
       updatedAt: input.completedAt,
+    };
+    this.runs.set(run.id, updated);
+    return updated;
+  }
+
+  async deferScheduleRun(
+    runId: string,
+    input: { retryAt: Date; failureCode: string; failureSummary: string },
+  ) {
+    const run = this.runs.get(runId);
+    if (!run || run.state !== "running") return null;
+    const updated: ScheduleRunRecord = {
+      ...run,
+      state: "claimed",
+      leaseToken: null,
+      leaseExpiresAt: input.retryAt,
+      failureCode: input.failureCode,
+      failureSummary: input.failureSummary,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: new Date(),
     };
     this.runs.set(run.id, updated);
     return updated;
@@ -321,6 +346,76 @@ test("a claimed run with revoked authority is skipped before contacting the agen
   assert.equal(completed.state, "skipped");
   assert.equal(completed.failureCode, "POLICY_NOT_ASSIGNED");
   assert.equal(agentCalls, 0);
+});
+
+test("a scheduled run waits once for a workspace guardrail transition instead of being skipped", async () => {
+  const store = new MemoryScheduleStore();
+  let accessAttempts = 0;
+  const agent: AgentChatClient = {
+    ...successfulAgent,
+    async *streamTurn(_access, sessionId) {
+      yield {
+        version: 1,
+        sequence: 0,
+        sessionId,
+        turnId: "turn-after-policy-transition",
+        type: "turn-start",
+        messageId: "message-after-policy-transition",
+        createdAt: new Date().toISOString(),
+      };
+      yield {
+        version: 1,
+        sequence: 1,
+        sessionId,
+        turnId: "turn-after-policy-transition",
+        type: "turn-finish",
+        state: "completed",
+        completedAt: new Date().toISOString(),
+      };
+    },
+  };
+  const service = new ScheduleService(
+    store,
+    new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
+    agent,
+    async () => {},
+    async () => {
+      accessAttempts += 1;
+      if (accessAttempts === 1) {
+        throw new LemmaComputerError(
+          "WORKSPACE_POLICY_TRANSITION_IN_PROGRESS",
+          "The workspace is applying updated guardrails.",
+          409,
+          true,
+        );
+      }
+      return access;
+    },
+  );
+  const schedule = await service.create(identity, {
+    title: "Transition-safe schedule",
+    workspaceId,
+    agentCatalogId: "codex-cli",
+    prompt: "Run after the guardrail update.",
+    cronExpression: "0 9 * * *",
+    timeZone: "UTC",
+    state: "enabled",
+  });
+  await store.queueScheduleRun(identity, schedule.id, new Date());
+  const [firstClaim] = await store.claimDueScheduleRuns(new Date(), 1, 120_000);
+  assert.ok(firstClaim?.run.leaseToken);
+
+  const deferred = await service.executeClaimed(firstClaim.run.id, firstClaim.run.leaseToken!);
+  assert.equal(deferred.state, "claimed");
+  assert.equal(deferred.failureCode, "WORKSPACE_POLICY_TRANSITION_IN_PROGRESS");
+  assert.equal((await store.claimDueScheduleRuns(new Date(), 1, 120_000)).length, 0);
+
+  const [retry] = await store.claimDueScheduleRuns(new Date(Date.now() + 31_000), 1, 120_000);
+  assert.ok(retry?.run.leaseToken);
+  const completed = await service.executeClaimed(retry.run.id, retry.run.leaseToken!);
+  assert.equal(completed.state, "succeeded");
+  assert.equal(completed.failureCode, null);
+  assert.equal(accessAttempts, 2);
 });
 
 test("the worker sends only leased run identifiers to Control", async () => {

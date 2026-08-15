@@ -2066,6 +2066,17 @@ const protectedPolicyReasoningName = (value) => value === "disabled"
   ? "Disabled by legacy guardrail"
   : value === "max" ? "High" : `${value?.[0]?.toUpperCase() ?? ""}${value?.slice(1) ?? ""}`;
 const protectedPolicyDate = (value) => new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+const guardrailSaveToast = ({ version, enforcement }) => {
+  const restarted = enforcement?.restarted ?? 0;
+  const needsAttention = (enforcement?.actionRequired ?? 0) + (enforcement?.restartFailed ?? 0);
+  const restartSummary = restarted > 0
+    ? `${restarted} previously active ${restarted === 1 ? "workspace was" : "workspaces were"} restarted under the new policy.`
+    : "Stopped workspaces receive it on their next start.";
+  const attentionSummary = needsAttention > 0
+    ? ` ${needsAttention} ${needsAttention === 1 ? "workspace needs" : "workspaces need"} attention.`
+    : "";
+  return `Workspace guardrails v${version.version} saved. ${restartSummary}${attentionSummary}`;
+};
 const protectedPolicyList = (values, labels) => values.map((value) => labels[value] ?? value);
 const protectedPolicyClipboardSummary = (clipboard) => {
   const direction = clipboard.localToWorkspace && clipboard.workspaceToLocal
@@ -2245,7 +2256,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
         <ProtectedPolicyControlGroup icon={Document24Regular} title="Data transfer" lines={[protectedPolicyClipboardSummary(effective.clipboard)]} />
       </section>
       <aside className="workspace-policy-context">
-        <section><div className="workspace-policy-context-title"><CheckmarkCircle24Regular aria-hidden="true" /><strong>Guardrail state</strong></div><p><strong>{latest ? `Desired · v${latest.version}` : "Desired · Product defaults"}</strong></p><p>{latest ? "Running workspaces are stopped and their access is revoked before a new version becomes active. Stopped workspaces receive it on their next start." : "All supported workspace options are available until an administrator saves guardrails."}</p></section>
+        <section><div className="workspace-policy-context-title"><CheckmarkCircle24Regular aria-hidden="true" /><strong>Guardrail state</strong></div><p><strong>{latest ? `Desired · v${latest.version}` : "Desired · Product defaults"}</strong></p><p>{latest ? "Running workspaces have their old access revoked, then compatible workspaces restart automatically under this version. Stopped workspaces receive it on their next start." : "All supported workspace options are available until an administrator saves guardrails."}</p></section>
         {latest && <section><div className="workspace-policy-context-title"><Document24Regular aria-hidden="true" /><strong>Change summary</strong></div><p>{latest.revisionNote}</p><p>Saved {protectedPolicyDate(latest.createdAt)} by {versionCreator(latest)}.</p></section>}
       </aside>
     </div>
@@ -2284,7 +2295,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
       {editorBlocker && <p className="workspace-policy-save-guidance" role="status">{editorBlocker}</p>}
       <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={requestSavePolicy}>{savingPolicy ? "Saving guardrails" : latest ? "Save as new version" : "Save guardrails"}</button></div>
     </ModalDialog>}
-    {impactConfirmation === "runtime" && <ConfirmDialog title={`Stop ${workspacesRequiringSuspension.length} affected ${workspacesRequiringSuspension.length === 1 ? "workspace" : "workspaces"} and apply guardrails?`} description="LemmaComputer will revoke any current access and safely stop these workspaces before activating this version. Compatible agent and application selections are retained; any unresolved selection is marked Needs attention." confirmLabel="Stop affected workspaces and save" danger onConfirm={() => { setImpactConfirmation(null); void savePolicy(); }} onCancel={() => setImpactConfirmation(null)} />}
+    {impactConfirmation === "runtime" && <ConfirmDialog title={`Apply guardrails to ${workspacesRequiringSuspension.length} active ${workspacesRequiringSuspension.length === 1 ? "workspace" : "workspaces"}?`} description="LemmaComputer will end current sessions and revoke old access before activating this version. Compatible workspaces restart automatically under the new guardrails; incompatible or failed workspaces remain stopped and are marked Needs attention." confirmLabel="Apply and restart compatible workspaces" danger onConfirm={() => { setImpactConfirmation(null); void savePolicy(); }} onCancel={() => setImpactConfirmation(null)} />}
     {impactConfirmation === "internet" && <ConfirmDialog title={`Restrict ${internetWorkspaces.length} Internet ${internetWorkspaces.length === 1 ? "workspace" : "workspaces"}?`} description="Public-web access will be restricted immediately. The workspace type will not change automatically; affected workspaces will be marked Needs attention until an administrator resolves them." confirmLabel="Save and restrict access" danger onConfirm={() => { setImpactConfirmation(null); void savePolicy(); }} onCancel={() => setImpactConfirmation(null)} />}
 
   </section>;
@@ -7287,11 +7298,7 @@ export function App() {
             policyUsers={adminUsers}
             onGuardrailsSaved={async ({ version, enforcement }) => {
               await refreshAdminWorkspaceMembers();
-              setToast(
-                enforcement?.stopped > 0
-                  ? `Workspace guardrails v${version.version} saved. ${enforcement.stopped} running ${enforcement.stopped === 1 ? "workspace was" : "workspaces were"} stopped and must be started again.`
-                  : `Workspace guardrails v${version.version} saved. Stopped workspaces receive it on their next start.`,
-              );
+              setToast(guardrailSaveToast({ version, enforcement }));
             }}
           />
         )}

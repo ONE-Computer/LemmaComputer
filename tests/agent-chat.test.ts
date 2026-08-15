@@ -369,8 +369,9 @@ test("agent chat grants are deterministic, workspace-and-runtime-bound, and only
 test("workspace provisioning projects dedicated chat runtime grants and stopped workspaces cannot authorize chat", async () => {
   const controller = new FakeController();
   const authority = new AgentChatAuthority("test-agent-chat-root-secret-at-least-32-characters");
+  const store = new MemoryWorkspaceStore();
   const service = new WorkspaceService(
-    new MemoryWorkspaceStore(),
+    store,
     controller,
     undefined,
     undefined,
@@ -386,6 +387,11 @@ test("workspace provisioning projects dedicated chat runtime grants and stopped 
   await assert.rejects(
     service.agentChatAccess(identity, hermesPolicy, workspace.id, "hermes-claw"),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "WORKSPACE_NOT_READY"),
+  );
+  await store.update(workspace.id, { state: "stopped", failureCode: "WORKSPACE_POLICY_RESTART_PENDING" });
+  await assert.rejects(
+    service.agentChatAccess(identity, hermesPolicy, workspace.id, "hermes-claw"),
+    (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "WORKSPACE_POLICY_TRANSITION_IN_PROGRESS"),
   );
 });
 

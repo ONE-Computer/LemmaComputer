@@ -561,7 +561,9 @@ Publishing organization guardrails forcibly moves every existing tenant
 workspace to a safe boundary before the new immutable version becomes current.
 Treat this as a disruptive security operation, even when the proposed change
 looks additive: running, provisioning, restarting, and failed workspaces are
-stopped, their current access is revoked, and users must start them again.
+stopped and their current access is revoked. Previously active compatible
+workspaces are then recreated automatically under the new version. Existing
+sessions still end and users must reopen the workspace UI.
 
 Before saving:
 
@@ -576,10 +578,11 @@ Before saving:
 4. Enter a change summary that explains the security or operational reason for
    the immutable version.
 
-When an affected workspace is not already stopped, the UI presents **Stop
-affected workspaces and save**. Cancelling that dialog makes no change. On
+When an affected workspace is not already stopped, the UI presents **Apply and
+restart compatible workspaces**. Cancelling that dialog makes no change. On
 confirmation, Control revokes access and destroys the affected runtimes before
-creating the version. A successful response reports four counts:
+creating the version, then recreates eligible workspaces. A successful response
+reports six counts:
 
 - `stopped`: runtimes stopped during this publication;
 - `alreadyStopped`: workspaces that required revocation but no provider
@@ -587,11 +590,17 @@ creating the version. A successful response reports four counts:
 - `reconciled`: saved configurations reduced safely to the newly allowed
   choices; and
 - `actionRequired`: configurations that need an explicit replacement choice.
+- `restarted`: previously active compatible workspaces recreated under the new
+  version; and
+- `restartFailed`: compatible workspaces whose replacement provider failed to
+  become ready.
 
 After publication, verify the administration inventory rather than relying on
 the success toast alone:
 
-- stopped workspaces should show **applies on next start**;
+- previously stopped workspaces should show **applies on next start**;
+- previously active compatible workspaces should return to **Ready** with the
+  new policy version and digest;
 - an incompatible selection should show **Needs attention** and remain visible;
 - **Review configuration** should lead to a complete allowed selection; and
 - a restarted workspace should receive the new policy version and digest.
@@ -602,7 +611,14 @@ cannot be one transaction across nodes. Do not restore access manually or
 reuse an old launch URL. Inspect the workspace/controller failure, wait for any
 `stopping` operation to settle, verify provider destruction and gateway health,
 then retry the same proposed version. Already-stopped workspaces follow the
-idempotent revocation path on retry.
+idempotent revocation path on retry. Workspaces safely stopped by the failed
+attempt are not automatically resumed because no new policy version became
+current.
+
+Scheduled runs that collide with the short transition are deferred for 30
+seconds and retried once. If recovery still has not completed, the run is
+recorded as failed with `WORKSPACE_POLICY_TRANSITION_TIMEOUT`; investigate the
+workspace failure rather than manually replaying an unknown partial execution.
 
 If a workspace reports `WORKSPACE_POLICY_SELECTION_REQUIRED`, choose at least
 one allowed application and agent plus an allowed workspace type and service

@@ -6,7 +6,7 @@ data transfer. A new organization version is a security-policy transition, not
 just a settings update. LemmaComputer must not leave an already-running
 workspace authorized by an older version after the new version becomes current.
 
-This document defines the publication, suspension, reconciliation, and recovery
+This document defines the publication, suspension, reconciliation, recovery, and resumption
 contract shared by the `customer-managed` and `hosted` deployment profiles.
 
 ## Authorities and invariants
@@ -39,7 +39,9 @@ ordered transition:
    A `ready`, `open`, `provisioning`, `restarting`, or `failed` workspace is
    compare-and-set to `stopping`, its access generation is advanced, its access
    grants are revoked, its provider runtime is destroyed, its gateway grants
-   are revoked, and it finishes as `stopped` with no provider identifier.
+   are revoked, and it finishes as `stopped` with no provider identifier. A
+   workspace that was `ready`, `open`, `provisioning`, or `restarting` retains
+   a bounded internal restart-pending marker while publication completes.
 4. If any suspension fails, return the retryable
    `WORKSPACE_POLICY_TRANSITION_FAILED` error and do not create the new policy
    version.
@@ -48,8 +50,16 @@ ordered transition:
 6. Reconcile each workspace's saved selection against the new effective policy.
    Preserve still-allowed choices and remove choices that are no longer
    assigned. Persist the reduced selection only when it remains complete.
-7. Return an enforcement summary containing `stopped`, `alreadyStopped`,
-   `reconciled`, and `actionRequired` counts.
+7. Recreate every previously active workspace whose reconciled selection is
+   complete. Creation uses the already-rotated access generation and derives a
+   fresh signed runtime projection from the new immutable version. A workspace
+   that was merely stopped before publication remains stopped.
+8. Clear the restart-pending marker for incompatible workspaces. They remain
+   stopped and visible as `action_required`. A provider failure during automatic
+   recreation remains visible as a failed workspace and does not roll back the
+   already-current security policy.
+9. Return an enforcement summary containing `stopped`, `alreadyStopped`,
+   `reconciled`, `actionRequired`, `restarted`, and `restartFailed` counts.
 
 The operation is fail-closed at policy publication, but it is not a distributed
 transaction across workspace providers. If one provider cleanup fails after
@@ -57,6 +67,13 @@ other workspaces were stopped, the new version is not created and the already-
 stopped workspaces remain safely stopped. Retrying is expected: stopped
 workspaces take the idempotent revocation path, while unresolved cleanup is
 attempted again.
+
+Automatic resumption begins only after the new version is immutable and
+current. It is intentionally recreation rather than an in-place policy patch:
+the old provider runtime has already been destroyed, old ingress and gateway
+authority has been revoked, and the replacement receives only the new policy
+bundle. An `open` workspace resumes as `ready`; Control does not mint or expose
+a browser launch URL on behalf of an absent user.
 
 ## Selection reconciliation
 
@@ -84,6 +101,20 @@ An `action_required` workspace stays in inventory with a **Review
 configuration** action. It cannot start until an administrator or authorized
 member chooses a complete compatible configuration.
 
+## Scheduled work during the transition
+
+Agent access distinguishes a temporary lifecycle transition from an ordinarily
+stopped workspace. A scheduled run that reaches a workspace while it is
+`provisioning`, `restarting`, `stopping`, or restart-pending is returned to the
+claimed queue with a 30-second not-before lease. This preserves the same run
+identifier and prompt ciphertext and prevents the collision from appearing as
+a successful skip.
+
+The deferral is bounded to one retry. If the workspace is still transitioning,
+the run ends as `failed` with `WORKSPACE_POLICY_TRANSITION_TIMEOUT`; it is not
+silently skipped or retried indefinitely. An ordinarily stopped or incompatible
+workspace retains the existing fail-closed `WORKSPACE_NOT_READY` behavior.
+
 ## Runtime defence in depth
 
 Publication-time suspension is the primary mechanism. Runtime reads also check
@@ -107,8 +138,8 @@ rows, interrupted publications, and drift discovered after publication.
 
 The administration UI warns before publication whenever any workspace is not
 `not_created` or `stopped`. Confirmation explicitly states that current access
-will be revoked and affected workspaces will be stopped. Cancelling the warning
-does not publish a version or mutate workspaces. The warning count is an
+will be revoked, current sessions will end, and compatible workspaces will
+restart automatically. Cancelling the warning does not publish a version or mutate workspaces. The warning count is an
 advisory browser snapshot; Control re-enumerates the authoritative tenant
 inventory when it receives the save request.
 
@@ -120,6 +151,8 @@ inventory when it receives the save request.
 - Provider destruction is required before a new version becomes current.
 - Runtime launch always derives a fresh policy projection from the current
   effective version; it does not reuse the old runtime bundle.
+- Automatic resumption never restores a workspace that was already stopped,
+  failed, or incompatible when publication began.
 - Reconciliation never expands a saved selection beyond the new policy.
 - A successful immutable policy write is not rolled back because one selection
   later needs human action; that state is explicit and recoverable.

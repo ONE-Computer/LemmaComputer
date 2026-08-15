@@ -55,10 +55,20 @@ test("PostgreSQL schedule claims are exclusive and workspace deletion cascades",
     const claim = ownedClaims[0]!;
     assert.ok(claim.run.leaseToken);
     assert.ok(await first.beginScheduleRun(claim.run.id, claim.run.leaseToken!, new Date()));
-    assert.equal((await first.finishScheduleRun(claim.run.id, {
+    const retryAt = new Date(Date.now() + 30_000);
+    assert.equal((await first.deferScheduleRun(claim.run.id, {
+      retryAt,
+      failureCode: "WORKSPACE_POLICY_TRANSITION_IN_PROGRESS",
+      failureSummary: "Waiting for updated guardrails",
+    }))?.state, "claimed");
+    assert.equal((await second.claimDueScheduleRuns(new Date(), 10, 120_000)).length, 0);
+    const [retried] = await second.claimDueScheduleRuns(new Date(retryAt.getTime() + 1), 10, 120_000);
+    assert.ok(retried?.run.leaseToken);
+    assert.ok(await second.beginScheduleRun(retried.run.id, retried.run.leaseToken!, new Date(retryAt.getTime() + 2)));
+    assert.equal((await second.finishScheduleRun(retried.run.id, {
       state: "succeeded",
       sessionId: "session-postgres-test",
-      completedAt: new Date(),
+      completedAt: new Date(retryAt.getTime() + 3),
     }))?.state, "succeeded");
 
     assert.equal(await workspaceStore.remove(identity, workspace.id), true);

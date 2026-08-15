@@ -77,6 +77,11 @@ export interface ScheduleStore {
   queueScheduleRun(identity: IdentityContext, scheduleId: string, scheduledFor: Date): Promise<ScheduleRunRecord | null>;
   claimDueScheduleRuns(now: Date, limit: number, leaseMs: number): Promise<ClaimedScheduleRun[]>;
   beginScheduleRun(runId: string, leaseToken: string, now: Date): Promise<ClaimedScheduleRun | null>;
+  deferScheduleRun(runId: string, input: {
+    retryAt: Date;
+    failureCode: string;
+    failureSummary: string;
+  }): Promise<ScheduleRunRecord | null>;
   finishScheduleRun(runId: string, input: {
     state: Extract<ScheduleRunState, "succeeded" | "failed" | "skipped">;
     sessionId?: string;
@@ -373,6 +378,18 @@ export class PostgresScheduleStore implements ScheduleStore {
        RETURNING *`,
       [runId, input.state, input.sessionId ?? null, input.failureCode ?? null,
         input.failureSummary ?? null, input.completedAt],
+    );
+    return result.rowCount ? mapRun(result.rows[0]) : null;
+  }
+
+  async deferScheduleRun(runId: string, input: Parameters<ScheduleStore["deferScheduleRun"]>[1]) {
+    const result = await this.pool.query(
+      `UPDATE schedule_runs SET
+         state='claimed',lease_token=NULL,lease_expires_at=$2,
+         failure_code=$3,failure_summary=$4,started_at=NULL,completed_at=NULL,updated_at=now()
+       WHERE id=$1 AND state='running'
+       RETURNING *`,
+      [runId, input.retryAt, input.failureCode, input.failureSummary],
     );
     return result.rowCount ? mapRun(result.rows[0]) : null;
   }

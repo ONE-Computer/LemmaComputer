@@ -2366,7 +2366,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState) {
     const record = this.records.get(workspaceId);
     if (!record || !allowed.includes(record.state)) return null;
-    const claimed = { ...record, state: next, operationToken: randomUUID(), updatedAt: new Date() };
+    const claimed = { ...record, state: next, failureCode: null, operationToken: randomUUID(), updatedAt: new Date() };
     this.records.set(workspaceId, claimed);
     return claimed;
   }

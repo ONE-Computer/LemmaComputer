@@ -1923,7 +1923,7 @@ const server = http.createServer((request, response) => {
       response.statusCode = 201;
       response.end(JSON.stringify({
         version,
-        enforcement: { stopped, alreadyStopped: 0, reconciled: stopped, actionRequired: 0 },
+        enforcement: { stopped, alreadyStopped: 0, reconciled: stopped, actionRequired: 0, restarted: stopped, restartFailed: 0 },
       }));
     });
     return;

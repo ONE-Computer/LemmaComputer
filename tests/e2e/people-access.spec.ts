@@ -153,13 +153,13 @@ test("organization administrator invites a person and manages member access", as
   await policyDialog.locator(".workspace-policy-choice").filter({ hasText: "Claude Desktop" }).getByRole("checkbox").uncheck();
   await policyDialog.getByLabel("Change summary").fill("Use Claude CLI for organization workspaces");
   await policyDialog.getByRole("button", { name: "Save guardrails" }).click();
-  const guardrailImpact = page.getByRole("dialog", { name: /Stop \d+ affected workspaces and apply guardrails/ });
+  const guardrailImpact = page.getByRole("dialog", { name: /Apply guardrails to \d+ active workspaces?/ });
   await expect(guardrailImpact).toBeVisible();
-  await guardrailImpact.getByRole("button", { name: "Stop affected workspaces and save" }).click();
+  await guardrailImpact.getByRole("button", { name: "Apply and restart compatible workspaces" }).click();
   await expect(page.getByRole("heading", { name: "Workspace guardrails", exact: true })).toBeVisible();
   await expect(page.getByText("v1", { exact: true })).toBeVisible();
   await expect(page.getByText("Desired · v1", { exact: true })).toBeVisible();
-  await expect(page.getByText(/running workspaces were stopped and must be started again/)).toBeVisible();
+  await expect(page.getByText(/previously active workspaces were restarted under the new policy/)).toBeVisible();
   await expect(page.locator(".workspace-policy-context").getByText("Use Claude CLI for organization workspaces", { exact: true })).toBeVisible();
   await page.screenshot({ path: "test-results/workspace-guardrails-v1.png" });
   await page.locator(".workspace-policy-history summary").click();
@@ -346,7 +346,7 @@ test("workspace guardrails remain usable on a narrow screen", async ({ page }) =
   await page.screenshot({ path: "test-results/workspace-policy-mobile-reviewed.png", fullPage: true });
 });
 
-test("workspace guardrails warn before reconciling a failed runtime and give the destructive action comfortable spacing", async ({ page }) => {
+test("workspace guardrails warn before replacing an affected runtime and give the destructive action comfortable spacing", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.route("**/api/v1/admin/member-workspaces", async (route) => {
     const response = await route.fetch();
@@ -365,10 +365,10 @@ test("workspace guardrails warn before reconciling a failed runtime and give the
   await editor.getByLabel("Change summary").fill("Reconcile failed workspace runtime");
   await editor.getByRole("button", { name: /Save guardrails|Save as new version/ }).click();
 
-  const warning = page.getByRole("dialog", { name: /Stop \d+ affected workspaces? and apply guardrails\?/ });
+  const warning = page.getByRole("dialog", { name: /Apply guardrails to \d+ active workspaces?\?/ });
   await expect(warning).toBeVisible();
   const cancel = warning.getByRole("button", { name: "Cancel" });
-  const confirm = warning.getByRole("button", { name: "Stop affected workspaces and save" });
+  const confirm = warning.getByRole("button", { name: "Apply and restart compatible workspaces" });
   const [cancelBox, confirmBox, confirmSpacing] = await Promise.all([
     cancel.boundingBox(),
     confirm.boundingBox(),

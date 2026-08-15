@@ -124,6 +124,9 @@ const unavailableCodes = new Set([
   "POLICY_NOT_ASSIGNED",
 ]);
 
+const workspaceTransitionCode = "WORKSPACE_POLICY_TRANSITION_IN_PROGRESS";
+const workspaceTransitionRetryMs = 30_000;
+
 export class ScheduleService {
   constructor(
     private readonly store: ScheduleStore,
@@ -321,6 +324,25 @@ export class ScheduleService {
         500,
         true,
       );
+      if (known.code === workspaceTransitionCode && run.failureCode !== workspaceTransitionCode) {
+        const deferred = await this.store.deferScheduleRun(run.id, {
+          retryAt: new Date(Date.now() + workspaceTransitionRetryMs),
+          failureCode: workspaceTransitionCode,
+          failureSummary: known.message.slice(0, 500),
+        });
+        if (!deferred) throw error;
+        return runView(deferred);
+      }
+      if (known.code === workspaceTransitionCode) {
+        const completed = await this.store.finishScheduleRun(run.id, {
+          state: "failed",
+          failureCode: "WORKSPACE_POLICY_TRANSITION_TIMEOUT",
+          failureSummary: "The workspace did not finish applying updated guardrails before the deferred run was retried.",
+          completedAt: new Date(),
+        });
+        if (!completed) throw error;
+        return runView(completed);
+      }
       const skipped = unavailableCodes.has(known.code);
       const completed = await this.store.finishScheduleRun(run.id, {
         state: skipped ? "skipped" : "failed",

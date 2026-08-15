@@ -352,7 +352,11 @@ export class WorkspaceService {
     return toView(record, gateway, policy, integrity, compatibility);
   }
 
-  async suspendForPolicyChange(identity: IdentityContext, workspaceId: string) {
+  async suspendForPolicyChange(
+    identity: IdentityContext,
+    workspaceId: string,
+    options: { restartPending?: boolean } = {},
+  ) {
     const record = await this.owned(identity, workspaceId);
     if (["not_created", "stopped"].includes(record.state)) {
       await this.gateway?.revokeWorkspace(record.id, record.accessGeneration);
@@ -376,7 +380,7 @@ export class WorkspaceService {
       const stopped = await this.store.finish(claimed.id, claimed.operationToken!, {
         state: "stopped",
         providerId: null,
-        failureCode: null,
+        failureCode: options.restartPending ? "WORKSPACE_POLICY_RESTART_PENDING" : null,
       });
       return { stopped: true, workspace: stopped };
     } catch (error) {
@@ -715,6 +719,7 @@ export class WorkspaceService {
     }
     return {
       state: record.state,
+      failureCode: record.failureCode,
       accesses: this.agentChatAuthority.list(identity, record.id, policy),
     };
   }
@@ -725,10 +730,21 @@ export class WorkspaceService {
     workspaceId: string,
     catalogId: ChatAgentCatalogId,
   ): Promise<AgentChatAccess> {
-    const { state, accesses } = await this.agentChatAgents(identity, policy, workspaceId);
+    const { state, failureCode, accesses } = await this.agentChatAgents(identity, policy, workspaceId);
     const access = accesses.find((candidate) => candidate.catalogId === catalogId);
     if (!access) throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
     if (!["ready", "open"].includes(state)) {
+      if (
+        ["provisioning", "restarting", "stopping"].includes(state)
+        || failureCode === "WORKSPACE_POLICY_RESTART_PENDING"
+      ) {
+        throw new LemmaComputerError(
+          "WORKSPACE_POLICY_TRANSITION_IN_PROGRESS",
+          "The workspace is applying updated guardrails. Try again shortly.",
+          409,
+          true,
+        );
+      }
       throw new LemmaComputerError("WORKSPACE_NOT_READY", "Start this sandbox to use Chat", 409, true);
     }
     return access;
