@@ -72,6 +72,46 @@ Contributors should not use this path. The single
 explains when to use a disposable evaluation clone, a task worktree, or the
 remote-node/Cowork qualifier.
 
+## Contributor development
+
+Create each task in its own Git worktree. The first initialization intentionally
+creates fresh secrets, databases, and a stable `lemmacomputer-*` Docker
+namespace:
+
+```bash
+npm run worktree:init
+npm run dev:doctor
+npm run env:check
+npm run compose:up
+```
+
+After that worktree contains users, provider configuration, pricing, sessions,
+or workspaces, resume the same data-bearing stack with:
+
+```bash
+npm run dev:doctor
+npm run env:check
+npm run compose:up
+```
+
+`dev:doctor` validates ownership and configuration; it does not start services
+or attach volumes. `compose:up` recreates the worktree's containers and
+reattaches its existing database volumes. `npm run compose:down` stops the
+stack while preserving volumes. Never use
+`npm run compose:down -- --volumes` unless the stack is intentionally
+disposable.
+
+For remote-node/mTLS development, replace `npm run compose:up` with:
+
+```bash
+npm run qualify:remote-workspace-node -- up
+```
+
+Moving existing data to a different worktree or renaming a Docker namespace is
+not a normal restart. Follow the
+[stateful local-stack handover](docs/guides/development-workflow.md#stateful-local-stack-handover)
+procedure instead.
+
 ## Architecture
 
 ```mermaid

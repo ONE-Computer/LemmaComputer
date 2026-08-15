@@ -48,6 +48,39 @@ Branch names should use `<issue>-<short-name>` when an issue exists and `<short-
 
 Local development never owns a shared stack on `main`. Each task worktree owns one `worktree`-profile stack created from its generated `.env`. Do not switch to `hosted` to test multiple organizations, choose a Compose file by name, copy another checkout's `.env`, or hand-edit `.env.example`.
 
+## Local stack lifecycle
+
+For the first start of a new task worktree, where fresh databases are intended,
+run:
+
+```bash
+npm run worktree:init
+npm run dev:doctor
+npm run env:check
+npm run compose:up
+```
+
+Once the worktree contains users, providers, pricing, sessions, workspaces, or
+other state, resume that same stack with:
+
+```bash
+npm run dev:doctor
+npm run env:check
+npm run compose:up
+```
+
+`dev:doctor` is read-only and does not attach volumes. `compose:up` reuses the
+Compose project name in `.env` and reattaches that worktree's existing database
+volumes. For remote-node/mTLS work, use
+`npm run qualify:remote-workspace-node -- up [--cowork]` instead of ordinary
+`compose:up`; it retains the worktree databases and persistent volumes.
+
+`npm run compose:down` preserves volumes. Never pass `-- --volumes` for a
+data-bearing stack. Moving state to another worktree or renaming its Docker
+namespace requires the exclusive
+[stateful local-stack handover](docs/guides/development-workflow.md#stateful-local-stack-handover);
+never attach the same writable volumes to concurrent worktrees.
+
 ## Integration and demo releases
 
 `main` is the integration branch. The running demo is a separate deployment pinned to an immutable `demo-*` tag, so ordinary changes to `main` do not change the demo.
