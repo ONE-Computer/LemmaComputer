@@ -153,9 +153,9 @@ test("organization administrator invites a person and manages member access", as
   await policyDialog.locator(".workspace-policy-choice").filter({ hasText: "Claude Desktop" }).getByRole("checkbox").uncheck();
   await policyDialog.getByLabel("Change summary").fill("Use Claude CLI for organization workspaces");
   await policyDialog.getByRole("button", { name: "Save guardrails" }).click();
-  const guardrailImpact = page.getByRole("dialog", { name: /Stop \d+ running workspaces and apply guardrails/ });
+  const guardrailImpact = page.getByRole("dialog", { name: /Stop \d+ affected workspaces and apply guardrails/ });
   await expect(guardrailImpact).toBeVisible();
-  await guardrailImpact.getByRole("button", { name: "Stop workspaces and save" }).click();
+  await guardrailImpact.getByRole("button", { name: "Stop affected workspaces and save" }).click();
   await expect(page.getByRole("heading", { name: "Workspace guardrails", exact: true })).toBeVisible();
   await expect(page.getByText("v1", { exact: true })).toBeVisible();
   await expect(page.getByText("Desired · v1", { exact: true })).toBeVisible();
@@ -344,6 +344,46 @@ test("workspace guardrails remain usable on a narrow screen", async ({ page }) =
   expect(dialogBox?.width ?? 0).toBeLessThanOrEqual(390);
   await policyDialog.getByRole("button", { name: "Close dialog" }).click();
   await page.screenshot({ path: "test-results/workspace-policy-mobile-reviewed.png", fullPage: true });
+});
+
+test("workspace guardrails warn before reconciling a failed runtime and give the destructive action comfortable spacing", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.route("**/api/v1/admin/member-workspaces", async (route) => {
+    const response = await route.fetch();
+    const inventory = await response.json();
+    const workspace = inventory.members[0]?.workspaces[0];
+    if (workspace) {
+      workspace.state = "failed";
+      workspace.health = { status: "needs_attention", reasonCode: "WORKSPACE_RUNTIME_UNAVAILABLE" };
+    }
+    await route.fulfill({ response, json: inventory });
+  });
+
+  await page.goto("/?view=home&section=policies");
+  await page.getByRole("button", { name: /Set guardrails|Edit guardrails/ }).click();
+  const editor = page.getByRole("dialog", { name: /Set workspace guardrails|Edit workspace guardrails/ });
+  await editor.getByLabel("Change summary").fill("Reconcile failed workspace runtime");
+  await editor.getByRole("button", { name: /Save guardrails|Save as new version/ }).click();
+
+  const warning = page.getByRole("dialog", { name: /Stop \d+ affected workspaces? and apply guardrails\?/ });
+  await expect(warning).toBeVisible();
+  const cancel = warning.getByRole("button", { name: "Cancel" });
+  const confirm = warning.getByRole("button", { name: "Stop affected workspaces and save" });
+  const [cancelBox, confirmBox, confirmSpacing] = await Promise.all([
+    cancel.boundingBox(),
+    confirm.boundingBox(),
+    confirm.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { paddingLeft: parseFloat(style.paddingLeft), paddingRight: parseFloat(style.paddingRight) };
+    }),
+  ]);
+  expect(confirmBox?.width ?? 0).toBeGreaterThanOrEqual(248);
+  expect((confirmBox?.x ?? 0) - ((cancelBox?.x ?? 0) + (cancelBox?.width ?? 0))).toBeGreaterThanOrEqual(16);
+  expect(confirmSpacing.paddingLeft).toBeGreaterThanOrEqual(24);
+  expect(confirmSpacing.paddingRight).toBeGreaterThanOrEqual(24);
+  await page.screenshot({ path: "test-results/workspace-guardrail-impact-warning.png", fullPage: true });
+  await cancel.click();
+  await expect(warning).toHaveCount(0);
 });
 
 test("settings subsections keep their location across refresh", async ({ page }) => {

@@ -2185,10 +2185,10 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
     return `${scope} · ${source}`;
   };
   const internetWorkspaces = affectedWorkspaces.filter(({ workspace }) => workspace.profile?.id === "disposable-open-v1" || workspace.profile?.executionMode === "disposable-open");
-  const runningWorkspaces = affectedWorkspaces.filter(({ workspace }) => ["provisioning", "ready", "open", "restarting"].includes(workspace.state));
+  const workspacesRequiringSuspension = affectedWorkspaces.filter(({ workspace }) => !["not_created", "stopped"].includes(workspace.state));
   const removesInternetWorkspaceType = assignableWorkspaceProfiles.includes("disposable-open-v1") && !editor?.workspaceProfiles.includes("disposable-open-v1");
   const requestSavePolicy = () => {
-    if (runningWorkspaces.length > 0) setImpactConfirmation("runtime");
+    if (workspacesRequiringSuspension.length > 0) setImpactConfirmation("runtime");
     else if (removesInternetWorkspaceType && internetWorkspaces.length > 0) setImpactConfirmation("internet");
     else void savePolicy();
   };
@@ -2284,7 +2284,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
       {editorBlocker && <p className="workspace-policy-save-guidance" role="status">{editorBlocker}</p>}
       <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={requestSavePolicy}>{savingPolicy ? "Saving guardrails" : latest ? "Save as new version" : "Save guardrails"}</button></div>
     </ModalDialog>}
-    {impactConfirmation === "runtime" && <ConfirmDialog title={`Stop ${runningWorkspaces.length} running ${runningWorkspaces.length === 1 ? "workspace" : "workspaces"} and apply guardrails?`} description="LemmaComputer will revoke their current access and stop them before activating this version. Compatible agent and application selections are retained; any unresolved selection is marked Needs attention." confirmLabel="Stop workspaces and save" danger onConfirm={() => { setImpactConfirmation(null); void savePolicy(); }} onCancel={() => setImpactConfirmation(null)} />}
+    {impactConfirmation === "runtime" && <ConfirmDialog title={`Stop ${workspacesRequiringSuspension.length} affected ${workspacesRequiringSuspension.length === 1 ? "workspace" : "workspaces"} and apply guardrails?`} description="LemmaComputer will revoke any current access and safely stop these workspaces before activating this version. Compatible agent and application selections are retained; any unresolved selection is marked Needs attention." confirmLabel="Stop affected workspaces and save" danger onConfirm={() => { setImpactConfirmation(null); void savePolicy(); }} onCancel={() => setImpactConfirmation(null)} />}
     {impactConfirmation === "internet" && <ConfirmDialog title={`Restrict ${internetWorkspaces.length} Internet ${internetWorkspaces.length === 1 ? "workspace" : "workspaces"}?`} description="Public-web access will be restricted immediately. The workspace type will not change automatically; affected workspaces will be marked Needs attention until an administrator resolves them." confirmLabel="Save and restrict access" danger onConfirm={() => { setImpactConfirmation(null); void savePolicy(); }} onCancel={() => setImpactConfirmation(null)} />}
 
   </section>;

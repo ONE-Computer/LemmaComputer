@@ -277,7 +277,7 @@ export function ConfirmDialog({ title, description, confirmLabel, danger = false
         <Info24Regular aria-hidden="true" />
         <span>This change only applies after LemmaComputer confirms it.</span>
       </div>
-      <div className="modal-actions">
+      <div className="modal-actions confirm-dialog-actions">
         <button className="secondary-button" type="button" disabled={busy} onClick={onCancel}>Cancel</button>
         <button className={danger ? "primary-button destructive-button" : "primary-button"} type="button" disabled={busy} onClick={onConfirm}>
           {busy ? "Applying change" : confirmLabel}

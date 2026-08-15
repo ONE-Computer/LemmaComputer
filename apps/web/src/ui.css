@@ -119,6 +119,21 @@
   min-width: 0;
 }
 
+.confirm-dialog-actions {
+  gap: var(--space-4);
+  margin-top: 28px;
+}
+
+.confirm-dialog-actions > button {
+  width: auto;
+  min-width: 190px;
+  padding-inline: 24px;
+}
+
+.confirm-dialog-actions > .destructive-button {
+  min-width: 248px;
+}
+
 .modal-field {
   display: grid;
   gap: 8px;
