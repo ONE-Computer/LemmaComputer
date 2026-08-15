@@ -65,5 +65,6 @@ test("qualification recovery scopes orphan-network cleanup to its Compose projec
   ));
   assert.match(source, /label=com\.docker\.compose\.project=\$\{projectName\}/);
   assert.match(source, /Object\.keys\(containers\)\.length/);
+  assert.match(source, /"rm", "-s", "-f", "workspace-controller"/);
   assert.doesNotMatch(source, /docker[^\n]*system[^\n]*prune|network[^\n]*prune/);
 });

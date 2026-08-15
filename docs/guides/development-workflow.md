@@ -543,7 +543,8 @@ The command:
 2. generates two-day test certificates;
 3. creates worktree-scoped transport, application, and desktop-ingress networks;
 4. starts the controller in a separate Compose project with the node-local Docker socket;
-5. disables the colocated controller and points Control at the remote mTLS node API;
+5. stops and removes any already-running colocated controller, disables that
+   service for the split stack, and points Control at the remote mTLS node API;
 6. adds test-only mTLS application endpoints for Control and LiteLLM; and
 7. retains the existing control stack, databases, users, configuration, and persistent volumes.
 

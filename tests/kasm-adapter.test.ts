@@ -278,6 +278,82 @@ test("local Kasm destroy tolerates a governed endpoint disappearing during disco
   }
 });
 
+test("remote Kasm destroy removes stale colocated endpoints after the sandbox is already gone", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-docker-api-"));
+  const socketPath = join(directory, "docker.sock");
+  const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const workspaceNetwork = `lemmacomputer-workspace-${workspaceId}`;
+  const connected = new Set(["lemmacomputer-litellm", "lemmacomputer-control-api"]);
+  let networkRemoved = false;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const path = request.url?.replace(/^\/v1\.47/, "") ?? "";
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path === "/containers/missing-sandbox/json") {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+    if (request.method === "GET" && path === `/networks/${workspaceNetwork}`) {
+      response.end(JSON.stringify({
+        Containers: Object.fromEntries([...connected].map((name, index) => [`container-${index}`, { Name: name }])),
+      }));
+      return;
+    }
+    if (request.method === "POST" && path === `/networks/${workspaceNetwork}/disconnect`) {
+      connected.delete(String(body.Container));
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (request.method === "DELETE" && path === `/networks/${workspaceNetwork}`) {
+      assert.deepEqual([...connected], []);
+      networkRemoved = true;
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (request.method === "DELETE" && path.startsWith("/containers/")) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new DockerKasmVncAdapter({
+      socketPath,
+      topology: "remote",
+      nodeId: "workspace-node-test",
+      publicHost: "workspace.internal.example.test",
+      relayBindHost: "10.0.1.10",
+      relayNetwork: "workspace-relay-private",
+      relayTlsCertificate: "test-certificate",
+      relayTlsKey: "test-private-key",
+      relayTlsClientCa: "test-node-ca",
+      relayTlsClientCommonName: "lemmacomputer-workspace-ingress",
+      applicationNetwork: "workspace-app-private",
+      applicationTlsCa: "test-application-ca",
+      applicationTlsClientCertificate: "test-application-client-certificate",
+      applicationTlsClientKey: "test-application-client-key",
+      image: "sha256:pinned-workspace",
+      networkPrefix: "lemmacomputer-workspace",
+      controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "lemmacomputer-litellm",
+      controlContainer: "lemmacomputer-control-api",
+      relayImage: "sha256:pinned-relay",
+      installationKind: "hosted",
+    });
+    await assert.doesNotReject(adapter.destroy(workspaceId, "missing-sandbox"));
+    assert.equal(networkRemoved, true);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("hosted Cowork virtualization is rejected on a colocated node", () => {
   assert.throws(
     () => new DockerKasmVncAdapter({

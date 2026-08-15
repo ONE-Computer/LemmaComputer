@@ -757,10 +757,12 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
 
   async destroy(expectedWorkspaceId: string, providerId: string) {
     let name: string | undefined;
-    let workspaceId: string | undefined;
-    let workspaceNetwork: string | undefined;
-    let gatewayAttached = false;
-    let controlAttached = false;
+    // Workspace identity is sufficient to make teardown idempotent after a
+    // partial destroy. In particular, the sandbox container may already be
+    // gone while its deterministic network still contains endpoints from a
+    // previous colocated-node topology.
+    let workspaceId: string | undefined = expectedWorkspaceId;
+    let workspaceNetwork: string | undefined = this.workspaceNetwork(expectedWorkspaceId);
     try {
       const inspected = await this.inspectBound(expectedWorkspaceId, providerId);
       name = textValue(inspected, "Name")?.replace(/^\//, "");
@@ -769,11 +771,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       workspaceId = typeof labels["com.lemmacomputer.workspace-id"] === "string"
         ? String(labels["com.lemmacomputer.workspace-id"])
         : undefined;
-      const environment = Array.isArray(containerConfig.Env) ? containerConfig.Env : [];
       workspaceNetwork = typeof labels["com.lemmacomputer.workspace-network"] === "string" ? String(labels["com.lemmacomputer.workspace-network"]) : undefined;
-      gatewayAttached = labels["com.lemmacomputer.gateway-attached"] === "true";
-      controlAttached = labels["com.lemmacomputer.control-attached"] === "true"
-        || environment.some((entry) => typeof entry === "string" && entry.startsWith("LEMMACOMPUTER_AGENT_BRIDGE_TOKEN="));
     } catch (error) {
       if (!(error instanceof LemmaComputerError && error.statusCode === 404)) throw error;
     }
@@ -788,8 +786,13 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
     if (name) await this.removeContainer(`${name}-egress`);
     await this.removeContainer(providerId);
     if (workspaceNetwork && this.isWorkspaceNetwork(workspaceNetwork)) {
-      if (this.topology === "colocated" && gatewayAttached) await this.disconnectContainer(workspaceNetwork, this.config.gatewayContainer);
-      if (this.topology === "colocated" && controlAttached && this.config.controlContainer) await this.disconnectContainer(workspaceNetwork, this.config.controlContainer);
+      // These are the only shared service containers the adapter is allowed
+      // to attach to a workspace network. Always detach them before removing
+      // the network, even when the current node is remote: a workspace can be
+      // destroyed after a colocated-to-remote topology migration, and the
+      // old sandbox labels may already be unavailable on a retry.
+      await this.disconnectContainer(workspaceNetwork, this.config.gatewayContainer);
+      if (this.config.controlContainer) await this.disconnectContainer(workspaceNetwork, this.config.controlContainer);
       await this.removeNetwork(workspaceNetwork);
     }
   }

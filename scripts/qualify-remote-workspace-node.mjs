@@ -218,6 +218,14 @@ const nodeComposeArguments = (state, ...args) => [
   "compose", "--env-file", state.composeEnv, "-f", state.nodeCompose, ...args,
 ];
 
+const removeColocatedController = () => {
+  // A Compose profile prevents a new colocated controller from starting, but
+  // it does not stop a container that an earlier colocated `up` left running.
+  // That stale reconciler has the Docker socket and can attach shared Control
+  // services to remote workspace networks, defeating the split-node topology.
+  run("docker", ["compose", "--env-file", ".env", "-f", "compose.yaml", "rm", "-s", "-f", "workspace-controller"]);
+};
+
 const readLocalEnvironment = () => {
   if (!existsSync(".env")) throw new Error(".env is missing; run npm run worktree:init first");
   const contents = readFileSync(".env", "utf8");
@@ -344,6 +352,7 @@ const bringUp = (state) => {
   ensureNetwork(state.names.applicationNetwork, true);
   ensureNetwork(state.names.relayNetwork, false);
   run("docker", ["compose", "--env-file", ".env", "-f", "compose.yaml", "build", "control-api"]);
+  removeColocatedController();
   run("docker", nodeComposeArguments(state, "up", "-d", "--wait", "--wait-timeout", "300"));
   run("docker", composeArguments(state, "up", "-d", "--build", "--wait", "--wait-timeout", "300"));
 };
